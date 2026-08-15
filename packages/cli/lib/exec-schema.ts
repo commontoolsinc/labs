@@ -4,7 +4,7 @@ import { schemaToTypeString } from "@commonfabric/runner";
 import { cliCommand } from "./cli-name.ts";
 // A value import back to callable.ts, whose own import of this module is
 // type-only and therefore erased — so this creates no runtime cycle.
-import { undeclaredVerbFieldError } from "./callable.ts";
+import { eventSchemaJudgesRootFields } from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 
 export interface ExecCommandSpec {
@@ -251,23 +251,6 @@ const HELP_TAKES_NO_ARGUMENTS =
   "declares no help field for it to fill";
 
 /**
- * Whether the payload door would let `key` through against this event schema.
- *
- * Asked of `undeclaredVerbFieldError` rather than re-derived, so the two doors
- * cannot answer differently. Two schemas pass a field it never declared: one
- * carrying no `properties` map at all, which names no fields and so judges
- * none, and one carrying `additionalProperties`, which says extra fields are
- * welcome. Re-deriving either test here would be a second opinion about the
- * same schema, which is the drift this change exists to remove.
- *
- * The value handed over is a string, because only the KEY is in question and
- * a string bottoms out the walk immediately.
- */
-function payloadDoorAccepts(key: string, schema: JSONSchema): boolean {
-  return undeclaredVerbFieldError({ [key]: "" }, schema) === undefined;
-}
-
-/**
  * The refusal a flag naming no declared field earns.
  *
  * The same five elements `undeclaredVerbFieldError` gives the payload door:
@@ -391,14 +374,19 @@ function parseObjectInput(
       negated = descriptor !== undefined;
     }
     if (!descriptor) {
-      if (!payloadDoorAccepts(rawFlag, schema)) {
+      // The question is whether the SCHEMA judges its fields, not whether
+      // this particular name is declared. Asking the second lets a declared
+      // field typed in its schema spelling — `--fooBar` where the flag is
+      // `--foo-bar` — read as undeclared-against-an-open-schema and be
+      // accepted as a silent alias, when what the caller needs is the near
+      // miss naming the spelling that works.
+      if (eventSchemaJudgesRootFields(schema)) {
         throw new Error(undeclaredFlagError(rawFlag, descriptors));
       }
-      // The schema does not judge this field, so neither does this door. It
-      // says nothing about the value either, which is why the flag is taken
-      // as the string the caller typed: there is no declared type to read it
-      // as, and inventing one would be this door deciding something the
-      // schema deliberately left open.
+      // A schema judging nothing says nothing about the value either, so the
+      // flag is taken as the string the caller typed: there is no declared
+      // type to read it as, and inventing one would be this door deciding
+      // something the schema deliberately left open.
       descriptor = { key: rawFlag, flagName: rawFlag, schema: true };
     }
 

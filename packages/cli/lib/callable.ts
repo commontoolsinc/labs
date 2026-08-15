@@ -613,6 +613,35 @@ function firstUndeclaredEventField(
 }
 
 /**
+ * Whether this event schema judges the fields a payload names at its root.
+ *
+ * It does when it names fields somewhere — directly or through a conjunction —
+ * and does not also say extra ones are welcome. A schema naming none judges
+ * none, so every field passes; one carrying `additionalProperties` has said
+ * undeclared fields are fine.
+ *
+ * Exported for the flag door, which needs the same answer about the same
+ * schema and must not derive it a second way. It asks whether the SCHEMA
+ * judges, not whether a given NAME is declared — those differ, and conflating
+ * them makes a declared field spelled the wrong way look undeclared-and-open
+ * rather than misspelled, which is the difference between a near miss and a
+ * silent alias.
+ */
+export function eventSchemaJudgesRootFields(
+  schema: JSONSchema | undefined,
+): boolean {
+  if (!isSchemaObject(schema)) return false;
+  const scopeRoot = cfcSchemaChildRoot(schema, schema);
+  const target = localRefTarget(schema, scopeRoot);
+  if (!isSchemaObject(target)) return false;
+  if (target.anyOf !== undefined || target.oneOf !== undefined) return false;
+  const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
+  if (!schemaIsObjectShaped(target, targetRoot)) return false;
+  const declared = declaredFieldsAt(target, targetRoot);
+  return declared.sources.length > 0 && !declared.honorsUndeclared;
+}
+
+/**
  * Refuse a payload carrying a field the verb does not declare, naming the
  * field, the position it sat at, the vocabulary that position takes, and the
  * declared name it is one edit from.

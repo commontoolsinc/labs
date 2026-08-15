@@ -585,6 +585,27 @@ describe("parseExecArgs edge cases", () => {
     ).toEqual({ titel: "x" });
   });
 
+  it("refuses a declared field typed in its schema spelling, not aliases it", () => {
+    // The permissive path turns on whether the SCHEMA judges its fields, not
+    // on whether a NAME is declared. Asking the second would read `--fooBar`
+    // as an undeclared field against an open schema and accept it — a silent
+    // alias for `--foo-bar` that no help page teaches and that arrives
+    // untyped, because the synthesized descriptor carries no schema.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { fooBar: { type: "number" } },
+    });
+
+    expect(() => parseExecArgs(spec, ["invoke", "--fooBar", "5"]))
+      .toThrow(/"--fooBar" at <event> is not a field this verb declares\./);
+    expect(() => parseExecArgs(spec, ["invoke", "--fooBar", "5"]))
+      .toThrow(/Did you mean "--foo-bar"\?/);
+
+    // And the spelling it names parses to the DECLARED type, not a string.
+    expect(parseExecArgs(spec, ["invoke", "--foo-bar", "5"]).input)
+      .toEqual({ fooBar: 5 });
+  });
+
   it("handles each non-object input mode and its errors", () => {
     const booleanSpec = makeSpec("tool", { type: "boolean" });
     const stringSpec = makeSpec("tool", { type: "string" });
