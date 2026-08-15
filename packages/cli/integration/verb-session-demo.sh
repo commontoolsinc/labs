@@ -58,11 +58,13 @@ SPACE="${SPACE:-$(mktemp -u demoXXXXXXXX)}"
 
 B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; Y=$'\033[33m'; N=$'\033[0m'
 R=$'\033[31m'
-# Every act makes a claim: one not marked BROKEN says the command works, one
-# marked BROKEN says a named defect is still there. Both are counted, so a
-# transcript that got either wrong cannot exit 0 and read as a clean session.
+# Every act makes a claim: an unmarked one says the command works, a BROKEN one
+# says a named defect is still there, a REFUSED one says the surface turns this
+# down. All three are counted, so a transcript that got any of them wrong cannot
+# exit 0 and read as a clean session.
 UNEXPECTED=0
 CLOSED=0
+UNREFUSED=0
 # stderr is read back rather than shown as it arrives, so a failure can be
 # printed under the act it belongs to. mktemp rather than a name built from the
 # pid: this runs in a shared directory, and a predictable path is one an
@@ -134,6 +136,29 @@ broken() {
       "$R" "$N"
     printf '%s     its own signature%s\n' "$R" "$N"
     CLOSED=$((CLOSED + 1))
+  fi
+}
+
+# Same, for a command that is SUPPOSED to fail: a refusal is a capability, so
+# the error is the act's payoff and a nonzero exit is the success condition.
+# The inverse of `run`, and checked the same way — an act claiming a refusal
+# that the surface no longer makes is as wrong as an act claiming a success it
+# does not get, and reports itself rather than printing a result under a line
+# that says it was turned down.
+refused() {
+  local why=$1
+  shift
+  printf '\n%s   $ %s%s\n' "$C" "$(shown "$@")" "$N"
+  printf '%s     REFUSED — %s%s\n' "$D" "$why" "$N"
+  "$@" >/dev/null 2>"$ERR"
+  local rc=$?
+  grep -v '^invocation:\|^session:\|^TIP:\|^(Use --quiet\|^NEXT STEPS:\|^  *→' \
+    "$ERR" | grep -v '^$' | sed 's/^/       /'
+  if [ "$rc" = "0" ]; then
+    printf '%s     NOT REFUSED — this act says the surface turns this down,%s\n' \
+      "$R" "$N"
+    printf '%s     and it was accepted%s\n' "$R" "$N"
+    UNREFUSED=$((UNREFUSED + 1))
   fi
 }
 
@@ -215,7 +240,25 @@ run cf piece call -s "$SPACE" --piece "$KID" archive -- invoke
 say "What it changed is a read away, on the one field the caller never sets."
 run cf piece get -s "$SPACE" --piece "$KID" status
 
-act "10 · Relate two items — PENDING"
+act "10 · Ask for something that is not there"
+say "Every act so far named something the pattern declares. Getting it wrong is"
+say "the other half of a surface knowing its own vocabulary."
+# The payload carries `title` as well as the typo, so what is being refused is
+# the undeclared field and nothing else. A payload of the typo alone is refused
+# for missing a required property instead — the same exit code for a different
+# reason, and an act that cannot tell those apart would read the same before and
+# after this capability arrived.
+refused "a field the verb does not declare" \
+  cf piece call -s "$SPACE" --piece board addItem \
+  '{"title":"Ship it","titel":"typo"}'
+refused "a keyword the projection reader does not recognize" \
+  cf piece get -s "$SPACE" --piece "$EPIC" children \
+  --schema '{"type":"array","items":{"type":"object","propertes":{"title":true}}}'
+say "One shape of answer from both ends: what was wrong, the position it sat at,"
+say "what that position accepts, and the nearest thing you probably meant. The"
+say "call was turned down before an invocation was spent."
+
+act "11 · Relate two items — PENDING"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
 pending "cf piece call -s $SPACE --piece <cookies> blockOn -- --on <csrf-address>" \
   "an address cannot yet be a verb argument (references-as-arguments.md)" \
@@ -228,11 +271,11 @@ pending "cf piece call -s $SPACE --piece <cookies> blockOn -- --on <csrf-address
   }
 }'
 
-act "11 · One item, two paths, one address — PENDING"
+act "12 · One item, two paths, one address — PENDING"
 say "This is what addresses are for: the same item under a parent AND as a blocker,"
 say "and a caller can tell it is one item rather than two copies."
 pending "cf piece get -s $SPACE --piece board items --select title,children@,blockedOn@" \
-  "needs the edge from act 10" \
+  "needs the edge from act 11" \
   'the same of:fid1:… appears under one item'"'"'s children and another'"'"'s blockedOn'
 
 printf '\n%s━━ %s %s\n' "$B" "What just happened" "$N"
@@ -243,7 +286,7 @@ say "One name was typed: 'board'. Everything under it was addressed by the id a"
 say "call handed back — which is the composition the verb surface exists for,"
 say "and the reason those lines are as long as they are."
 say ""
-say "Acts 10 and 11 are the graph half, sequenced as references-as-arguments."
+say "Acts 11 and 12 are the graph half, sequenced as references-as-arguments."
 say "verb-session-gaps.sh asserts both, and fails the day either one starts"
 say "working — so this demo cannot quietly go stale."
 
@@ -254,6 +297,13 @@ if [ "$UNEXPECTED" != "0" ]; then
   say "One of them did not hold, so this transcript does not describe cf."
 fi
 
+if [ "$UNREFUSED" != "0" ]; then
+  printf '\n%s━━ %d act(s) marked REFUSED were accepted%s\n' \
+    "$R" "$UNREFUSED" "$N"
+  say "A refusal this demo shows as a capability is no longer being made. Either"
+  say "it was withdrawn, or the payload it was written against became valid."
+fi
+
 if [ "$CLOSED" != "0" ]; then
   printf '\n%s━━ %d act(s) marked BROKEN no longer match their signature%s\n' \
     "$R" "$CLOSED" "$N"
@@ -262,4 +312,4 @@ if [ "$CLOSED" != "0" ]; then
   say "the same evidence so that neither can go stale alone."
 fi
 
-[ "$UNEXPECTED" = "0" ] && [ "$CLOSED" = "0" ]
+[ "$UNEXPECTED" = "0" ] && [ "$CLOSED" = "0" ] && [ "$UNREFUSED" = "0" ]
