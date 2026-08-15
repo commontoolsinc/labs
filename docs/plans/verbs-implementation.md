@@ -132,9 +132,10 @@ property of what a target holds when a reader looks, not of a reference. What
 that leaves is provenance, whether an address can say it names a spot rather
 than a canonical cell, which is a different question and gates nothing either.
 
-**2. An unrecognized projection key is refused.** *(M)* **In review as #5817**,
-which is the thing to read before picking any of this up. Two denylists are
-consulted and every key in neither is accepted and carried onward. The design is
+**2. An unrecognized projection key is refused.** *(M)* **On main as #5817.**
+The design is the thing to read before picking any of this up. The failure it
+removes: two denylists were consulted and every key in neither was accepted and
+carried onward. The design is
 [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md),
 which carries the tiers, the measured blast radius, and the reasoning; read it
 before picking this up. What follows is what a driver needs to sequence the
@@ -346,19 +347,19 @@ the piece — the root pattern's own verb, reachable today by `pieces.add` from
 inside the runtime and by a model through the dialog builtin, and by no other
 caller.
 
-**12. `cf` refuses an undeclared field on a call.** *(S)* **In review as
-#5835.** A payload carrying a field the verb does not declare is accepted,
-the field is dropped on the way in, and the caller is told the call settled —
-the silent-strip failure, which is what a caller writing JSON by hand or by
+**12. `cf` refuses an undeclared field on a call.** *(S)* **On main as
+#5835.** The failure it removes: a payload carrying a field the verb does not
+declare was accepted, the field dropped on the way in, and the caller told the
+call settled — the silent-strip failure, which is what a caller writing JSON by hand or by
 model hits and a TypeScript author never does.
 
 *This is item 2's shape, one surface over.* There a projection key in neither
 denylist is accepted and ignored; here an event field the schema does not
-declare is accepted and ignored. Both are the CLI declining to refuse what it
+declare is accepted and ignored. Both were the CLI declining to refuse what it
 cannot honor, and both are fixed by the CLI refusing it — not by a schema
-forbidding it, which is the distinction #5589 turns on. Worth building the two
-with the same vocabulary for what a refusal says, since a caller meets both
-through the same command.
+forbidding it, which is the distinction #5589 turns on. They share one
+vocabulary for what a refusal says, since a caller meets both through the same
+command, and #5850 carried it to the flag door as well.
 
 *The check has a home already.* `verbInputSchemaError`
 (`packages/cli/lib/callable.ts`) validates a payload against the verb's declared
