@@ -210,6 +210,16 @@ come up.
   ordinary English for writing something at length. `spell` is additionally an
   identifier here — the retired name for a pattern, still read by the state
   inspector — so prose that borrows the word costs a search as well.
+- **`visits`**, `finds`, or naming the place a thing arrived — not `meets` — for
+  coming across something during a walk or on a channel. A walk visits every node
+  it descends through; a format carrying no marker finds data it never emits; and
+  a cycle *here* arrived from a channel, which is usually better with no verb of
+  encountering in it at all. This is the sense the word can least afford, because
+  two others are already at work in these files and both stay: `meet` a
+  requirement — `meets the schema`, `must meet the threshold` — is ordinary and
+  exact, and `meet` is the lattice operation the Contextual Flow Control code is
+  built on, a technical term with test files named after it, where a stray prose
+  use costs a search.
 
 ## Code Design & Principles
 
