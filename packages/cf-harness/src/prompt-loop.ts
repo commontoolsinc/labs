@@ -1,10 +1,4 @@
-import {
-  type BuiltinToolInputMap,
-  CfHarnessEngine,
-  type CreateHarnessEngineOptions,
-} from "./engine.ts";
-import { isHarnessModelProviderId } from "./config.ts";
-import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
+import type { LLMNativeModelToolId } from "@commonfabric/llm/types";
 import {
   type CfcEnforcementMode,
   type CfcSandboxExitCodeObservation,
@@ -12,38 +6,30 @@ import {
   type CfcStreamObservation,
   evaluateHarnessWriteFileAuthorization,
 } from "@commonfabric/runner/cfc";
-import type { LLMNativeModelToolId } from "@commonfabric/llm/types";
-import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
-import {
-  createObservationDenied as makeObservationDenied,
-  createOpaqueHandle,
-  type ObservationDenied,
-} from "./contracts/observation.ts";
-import type { HarnessImageAttachment } from "./contracts/image.ts";
-import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
-import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
+
+import { isHarnessModelProviderId } from "./config.ts";
+import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
+import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
 import {
   createHarnessCfcPolicySnapshot,
   type HarnessParentToolAllowance,
   type HarnessPromptSlotBindingSource,
 } from "./contracts/cfc-policy-snapshot.ts";
-import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
-import type {
-  HarnessToolCall,
-  HarnessToolTranscriptMessage,
-  HarnessTranscriptEvent,
-  HarnessTranscriptMessage,
-} from "./contracts/transcript.ts";
-import type { ToolOutputId, ToolResultRef } from "./contracts/tool-result.ts";
-import type {
-  BuiltinToolId,
-  HarnessToolDescriptor,
-} from "./contracts/tool-descriptor.ts";
-import type { HarnessToolInputSummary } from "./contracts/policy.ts";
+import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+import type { HarnessFetch } from "./contracts/http-fetch.ts";
+import type { HarnessImageAttachment } from "./contracts/image.ts";
+import {
+  createObservationDenied as makeObservationDenied,
+  createOpaqueHandle,
+  type ObservationDenied,
+} from "./contracts/observation.ts";
 import {
   createHarnessPolicyTrace,
   type HarnessPolicyDecisionReasonCode,
 } from "./contracts/policy-trace.ts";
+import type { HarnessToolInputSummary } from "./contracts/policy.ts";
+import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import {
   createHarnessRunReport,
   type HarnessModelAttempt,
@@ -72,12 +58,26 @@ import {
   WEB_FETCH_SUBAGENT_PROFILE,
   WEB_SEARCH_SUBAGENT_PROFILE,
 } from "./contracts/subagent.ts";
+import type {
+  BuiltinToolId,
+  HarnessToolDescriptor,
+} from "./contracts/tool-descriptor.ts";
+import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
+import type { ToolOutputId, ToolResultRef } from "./contracts/tool-result.ts";
+import type {
+  HarnessToolCall,
+  HarnessToolTranscriptMessage,
+  HarnessTranscriptEvent,
+  HarnessTranscriptMessage,
+} from "./contracts/transcript.ts";
+import { HarnessControlError } from "./control-errors.ts";
+import type { HarnessFailureRecord } from "./diagnostics.ts";
 import {
-  parseSubagentReturnJson,
-  parseSubagentReturnSchema,
-  validateAndSanitizeSubagentReturn,
-} from "./subagent-return.ts";
-import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+  type BuiltinToolInputMap,
+  CfHarnessEngine,
+  type CreateHarnessEngineOptions,
+} from "./engine.ts";
+import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,
@@ -85,36 +85,37 @@ import {
   swapLinksForTokens,
   swapTokensForRefs,
 } from "./handle-table.ts";
-import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
-import {
-  cwdMarkerForOutput,
-  extractFinalWorkingDirectory,
-} from "./tools/shell-cwd.ts";
-import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
-import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
-import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
-import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
-import { scrubBareFabricIdentifiers } from "./tools/run-pattern.ts";
-import {
-  toModelFacingWebFetchOutput,
-  type WebFetchToolOutput,
-} from "./tools/web-fetch.ts";
-import {
-  isRunSkillScriptToolSuccessOutput,
-  type RunSkillScriptToolOutput,
-} from "./tools/run-skill-script.ts";
-import { loadHarnessSkillContext } from "./skills/registry.ts";
-import type { HarnessFailureRecord } from "./diagnostics.ts";
-import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
-import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import type {
   HarnessModelAttemptDiagnostic,
   HarnessModelClient,
   HarnessModelUsage,
 } from "./model/client.ts";
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
-import { HarnessControlError } from "./control-errors.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
+import { loadHarnessSkillContext } from "./skills/registry.ts";
+import {
+  parseSubagentReturnJson,
+  parseSubagentReturnSchema,
+  validateAndSanitizeSubagentReturn,
+} from "./subagent-return.ts";
+import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
+import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
+import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
+import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
+import { scrubBareFabricIdentifiers } from "./tools/run-pattern.ts";
+import {
+  isRunSkillScriptToolSuccessOutput,
+  type RunSkillScriptToolOutput,
+} from "./tools/run-skill-script.ts";
+import {
+  cwdMarkerForOutput,
+  extractFinalWorkingDirectory,
+} from "./tools/shell-cwd.ts";
+import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
+import {
+  toModelFacingWebFetchOutput,
+  type WebFetchToolOutput,
+} from "./tools/web-fetch.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const BASH_CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";

@@ -1,5 +1,3 @@
-import { isDeno } from "@commonfabric/utils/env";
-import { ProgramResolver, Source } from "./interface.ts";
 import {
   dirname,
   isAbsolute,
@@ -8,6 +6,10 @@ import {
   relative,
   SEPARATOR,
 } from "@std/path";
+
+import { isDeno } from "@commonfabric/utils/env";
+
+import { ProgramResolver, Source } from "./interface.ts";
 
 function isOutsideRoot(relativePath: string): boolean {
   return relativePath === ".." || relativePath.startsWith(`..${SEPARATOR}`) ||

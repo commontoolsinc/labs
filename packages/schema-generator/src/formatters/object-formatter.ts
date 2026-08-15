@@ -1,10 +1,20 @@
-import ts from "typescript";
 import {
   FABRIC_SPECIAL_OBJECT_BRAND,
   type MutableJSONSchema,
   type MutableJSONSchemaObj,
 } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
+import {
+  attachDocTags,
+  extractDocFromSymbolAndDecls,
+  getDeclDocs,
+  symbolHasDeprecatedTag,
+} from "../doc-utils.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
+import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   cloneSchemaDefinition,
   getNativeTypeSchema,
@@ -20,16 +30,7 @@ import {
   isDefaultNodeWithUndefined,
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
-import type { SchemaGenerator } from "../schema-generator.ts";
 import { attachUiContract, getUiContractHint } from "../ui-contract.ts";
-import {
-  attachDocTags,
-  extractDocFromSymbolAndDecls,
-  getDeclDocs,
-  symbolHasDeprecatedTag,
-} from "../doc-utils.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
 
 const logger = getLogger("schema-generator.object", {
   enabled: true,

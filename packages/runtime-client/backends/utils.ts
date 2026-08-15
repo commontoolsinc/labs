@@ -3,18 +3,19 @@ import {
   JSONSchema,
   KeepAsCell,
   parseLink,
+  Runtime,
   SigilLink,
 } from "@commonfabric/runner";
 import {
+  type CfcCellLinkRefPayload,
   cfcLabelViewForCell,
   redactCaveatSourcesForDisplay,
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
-import { CellRef, PageRef } from "../protocol/types.ts";
-import { Runtime } from "@commonfabric/runner";
 import { isSigilLink, linkRefFrom } from "@commonfabric/runner/shared";
-import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
+
 import { isCellRef } from "../protocol/mod.ts";
+import { CellRef, PageRef } from "../protocol/types.ts";
 
 export function mapCellRefsToSigilLinks(value: unknown): any {
   if (

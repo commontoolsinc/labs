@@ -1,6 +1,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { isRetryableAstralLaunchError, launchWithRetry } from "../browser.ts";
+
 import type { Browser as AstralBrowser, LaunchOptions } from "@astral/astral";
+
+import { isRetryableAstralLaunchError, launchWithRetry } from "../browser.ts";
 
 Deno.test("isRetryableAstralLaunchError matches ETXTBSY browser-launch failures", () => {
   assertEquals(

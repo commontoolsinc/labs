@@ -1,4 +1,7 @@
-import { Program, ProgramResolver, Source } from "../interface.ts";
+import * as path from "@std/path";
+
+import { getLogger } from "@commonfabric/utils/logger";
+import { yieldToEventLoop } from "@commonfabric/utils/sleep";
 import type {
   CompilerHost,
   CompilerOptions,
@@ -12,13 +15,10 @@ import type {
   StringLiteralLike,
 } from "typescript";
 import ts from "typescript";
-import * as path from "@std/path";
-import { getLogger } from "@commonfabric/utils/logger";
-import { yieldToEventLoop } from "@commonfabric/utils/sleep";
-import { getCompilerOptions, TARGET } from "./options.ts";
-import { parseSourceMap } from "../source-map.ts";
+
+import { Program, ProgramResolver, Source } from "../interface.ts";
 import type { SourceMap } from "../interface.ts";
-import { resolveProgram } from "./resolver.ts";
+import { parseSourceMap } from "../source-map.ts";
 import {
   Checker,
   type DiagnosticMessageTransformer,
@@ -26,6 +26,8 @@ import {
   TransformerDiagnosticInfo,
   TransformerError,
 } from "./diagnostics/mod.ts";
+import { getCompilerOptions, TARGET } from "./options.ts";
+import { resolveProgram } from "./resolver.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";

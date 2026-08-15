@@ -1,11 +1,13 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import { Identity } from "../src/identity.ts";
-import { isNativeEd25519Supported } from "../src/ed25519/utils.ts";
-import { NobleEd25519Verifier } from "../src/ed25519/noble.ts";
-import type { InsecureCryptoKeyPair } from "../src/interface.ts";
+
 import { decode } from "@commonfabric/utils/encoding";
 import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
+
+import { NobleEd25519Verifier } from "../src/ed25519/noble.ts";
+import { isNativeEd25519Supported } from "../src/ed25519/utils.ts";
+import { Identity } from "../src/identity.ts";
+import type { InsecureCryptoKeyPair } from "../src/interface.ts";
 
 Deno.test("Identity generates mnemonics", async () => {
   const [identity, mnemonic] = await Identity.generateMnemonic();

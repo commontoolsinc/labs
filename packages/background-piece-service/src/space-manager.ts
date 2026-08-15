@@ -1,12 +1,12 @@
+import { type Cancel, Cell, useCancelGroup } from "@commonfabric/runner";
 import { sleep } from "@commonfabric/utils/sleep";
-import { Cell } from "@commonfabric/runner";
-import { type Cancel, useCancelGroup } from "@commonfabric/runner";
+
+import { type BGPieceEntry } from "./schema.ts";
 import {
   WorkerController,
   WorkerControllerErrorEvent,
   type WorkerOptions,
 } from "./worker-controller.ts";
-import { type BGPieceEntry } from "./schema.ts";
 
 export interface PieceSchedulerOptions extends WorkerOptions {
   pollingIntervalMs?: number;

@@ -1,4 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
+
+import type { Identity } from "@commonfabric/identity";
 import {
   type EnvReader,
   experimentalOptionsFromEnv,
@@ -6,12 +8,12 @@ import {
   runtimePresets,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { BackgroundPieceService } from "./service.ts";
-import { getIdentity } from "./utils.ts";
+import { SpanStatusCode } from "@opentelemetry/api";
+
 import { env, type EnvVars } from "./env.ts";
 import { getTracer, initOpenTelemetry, shutdownOpenTelemetry } from "./otel.ts";
-import { SpanStatusCode } from "@opentelemetry/api";
-import type { Identity } from "@commonfabric/identity";
+import { BackgroundPieceService } from "./service.ts";
+import { getIdentity } from "./utils.ts";
 
 // 10 minute timeout
 export const DEFAULT_WORKER_TIMEOUT_MS = 10 * 60000;

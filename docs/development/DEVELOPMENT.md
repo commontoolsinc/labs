@@ -46,6 +46,18 @@ about one aspect of the runtime, are indexed in
   the way a reader expects. Where sorting and the grouping above disagree, the
   grouping wins: sort within the standard-library, external, and internal
   blocks, not across them.
+- A bare `import "x";` is there for its side effect, so where it sits is part of
+  what it does. A polyfill, or a setup module that installs globals, running
+  after the code relying on it has already run is a different program, and
+  nothing type-checks that. So grouping, collation and sorting all yield to this
+  one: leave a bare import where it is, and move no other import across it. A
+  bare import of a module the file also imports by name is a separate matter,
+  and which way it goes turns on the kind of that named import. Against a value
+  import the bare one adds nothing, since the value import evaluates the module,
+  side effects included: drop it, and put what it was there for in a comment on
+  the surviving statement. Against nothing but an `import type`, it stays — a
+  type-only import is erased and evaluates nothing, so the bare import is the
+  only thing producing the effect.
 - Import a given module in exactly one or two statements. Two shapes are
   allowed:
   - One unified statement, marking any type-only names inline:
@@ -58,10 +70,7 @@ about one aspect of the runtime, are indexed in
   module, or two `import type`s from it. Those represent one dependency as
   though it were two, and the second is easy to miss when the first is being
   edited or removed, so merge their specifier lists. A bare `import "x";` counts
-  toward the total, and adds nothing to a file that already imports `x` by name:
-  the named import evaluates the module, side effects included, so the bare form
-  documents an effect it is not needed to produce. Put that in a comment on the
-  surviving statement.
+  toward the total.
 - Within a package that defines the `@/` import alias, address the aliased tree
   as `@/...` rather than by a `../` path that climbs out of the current
   directory to reach it. The alias exists so that a module's address does not

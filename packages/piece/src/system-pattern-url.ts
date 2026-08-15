@@ -1,5 +1,4 @@
-import type { MemorySpace } from "@commonfabric/runner";
-import type { Runtime } from "@commonfabric/runner";
+import type { MemorySpace, Runtime } from "@commonfabric/runner";
 import {
   resolveSystemPatternSource,
   systemPatternSource,

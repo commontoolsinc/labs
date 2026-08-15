@@ -27,6 +27,10 @@
  * prevent, one tool over.
  */
 import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { getPatternIdentityRef } from "@commonfabric/runner";
+import type { Cell } from "@commonfabric/runner";
+
 import {
   openFileBackedRuntime,
   readVintageManifest,
@@ -34,9 +38,6 @@ import {
   vintageRoot,
   writeVintageManifest,
 } from "../packages/piece/test/state-continuity-harness.ts";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { getPatternIdentityRef } from "@commonfabric/runner";
-import type { Cell } from "@commonfabric/runner";
 import {
   patternKeyFromMain,
   PINNED,

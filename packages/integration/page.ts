@@ -1,3 +1,6 @@
+import { ensureDirSync } from "@std/fs";
+import * as path from "@std/path";
+
 import {
   ConsoleEvent,
   DialogEvent,
@@ -12,6 +15,9 @@ import {
   WaitForOptions,
   WaitForSelectorOptions,
 } from "@astral/astral";
+import { sleep } from "@commonfabric/utils/sleep";
+import { Mutable } from "@commonfabric/utils/types";
+
 import type {
   ElementHandle,
   InteractionObserver,
@@ -24,10 +30,6 @@ import {
   queryPierce,
   waitForPierceSelector,
 } from "./astral-adapter.ts";
-import { sleep } from "@commonfabric/utils/sleep";
-import { Mutable } from "@commonfabric/utils/types";
-import * as path from "@std/path";
-import { ensureDirSync } from "@std/fs";
 import { ConsoleMethod } from "./console.ts";
 
 export interface NavigationOptions {
