@@ -386,10 +386,18 @@ export async function runSchedulerAction(
   // recomputes converge). Everywhere else (`serverRunInstancesFor`
   // undefined or empty) this is exactly the old single
   // wave-identity run.
-  const pieceRootId = (action as Partial<TelemetryAnnotations>)
-    .schedulerObservationIdentity?.pieceRootId;
-  const demandedInstances = pieceRootId !== undefined
-    ? state.runtime.serverRunInstancesFor(pieceRootId)
+  // The demand roots: the action's own piece root plus its ancestor
+  // chain (Phase 7 — a nested piece's instances resolve through the
+  // outer piece the client watches; see
+  // SchedulerObservationIdentity.demandRootIds).
+  const observationIdentity = (action as Partial<TelemetryAnnotations>)
+    .schedulerObservationIdentity;
+  const demandRootIds = observationIdentity?.demandRootIds ??
+    (observationIdentity?.pieceRootId !== undefined
+      ? [observationIdentity.pieceRootId]
+      : undefined);
+  const demandedInstances = demandRootIds !== undefined
+    ? state.runtime.serverRunInstancesFor(demandRootIds)
     : undefined;
   const runs: readonly (ServerRunInstance | undefined)[] =
     demandedInstances !== undefined && demandedInstances.length > 0

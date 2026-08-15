@@ -654,6 +654,11 @@ export class Scheduler {
       ...(identity.pieceRootId !== undefined
         ? { pieceRootId: identity.pieceRootId }
         : {}),
+      // Phase 7: the ancestor chain the run supply resolves a nested
+      // piece's demanded instances through (scheduler/types.ts).
+      ...(identity.demandRootIds !== undefined
+        ? { demandRootIds: identity.demandRootIds }
+        : {}),
     };
   }
 

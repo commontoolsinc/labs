@@ -13,6 +13,7 @@ import {
   experimentalOptionsFromEnv,
   Runtime,
 } from "@commonfabric/runner";
+import { serverExecutionEnabledFromEnv } from "./server-execution-flag.ts";
 import { ExecutorHost } from "@commonfabric/runner/executor/host";
 import { LoopbackStorageManager } from "@commonfabric/runner/executor/loopback-storage";
 import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
@@ -128,10 +129,14 @@ export function startServerExecutionHost(options: {
   envGet?: EnvReader;
 }): ExecutorHost | undefined {
   const envGet = options.envGet ?? Deno.env.get;
-  const experimental = experimentalOptionsFromEnv(envGet);
-  if (experimental.serverExecution !== true) {
+  // The process's ONE flag resolution (server-execution-flag.ts): the
+  // explicit env value, else the first-party default — the same answer
+  // the memory route used for its service-principal grant.
+  if (!serverExecutionEnabledFromEnv(envGet)) {
     return undefined;
   }
+  // The other experimental flags still reach the serving runtimes from env.
+  const experimental = experimentalOptionsFromEnv(envGet);
   console.log(
     `Server-execution v2: serving loop ON (service ${options.identity.did()})`,
   );

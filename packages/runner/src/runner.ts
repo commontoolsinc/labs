@@ -890,6 +890,13 @@ type RunnerRunOptions = {
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
+  // The piece root that INSTANTIATED this piece (a nested pattern node's
+  // parent, a result-as-pattern child's producing piece). Its actions'
+  // demand roots (`SchedulerObservationIdentity.demandRootIds`) become the
+  // parent's chain plus this root, so the serving loop's per-(action ×
+  // instance) run supply resolves a nested piece's demanded instances
+  // through the OUTER piece a client watches (server-execution v2 Phase 7).
+  parentPieceRootId?: string;
 };
 
 // Placeholder standing in for an argument slot whose stored raw value is a
@@ -2409,6 +2416,8 @@ export class Runner {
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
+      // See RunnerRunOptions.parentPieceRootId.
+      parentPieceRootId?: string;
     } = {},
   ): Cancel {
     const {
@@ -2489,8 +2498,13 @@ export class Runner {
         ? options.schedulerRehydration ?? this.schedulerRehydrationOptions(
           resultCell,
           options.awaitSyncBeforeInitialRun,
+          options.parentPieceRootId,
         )
-        : this.schedulerRehydrationOptions(resultCell);
+        : this.schedulerRehydrationOptions(
+          resultCell,
+          undefined,
+          options.parentPieceRootId,
+        );
       initialSchedulerRehydrationAvailable = false;
       try {
         for (const node of pattern.nodes) {
@@ -3277,6 +3291,7 @@ export class Runner {
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
       schedulePatternUpdate: options.schedulePatternUpdate,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
+      parentPieceRootId: options.parentPieceRootId,
     });
   }
 
@@ -3902,8 +3917,41 @@ export class Runner {
     }
   }
 
-  private schedulerObservationIdentity(resultCell: Cell<any>) {
+  /**
+   * The demand-root CHAIN of a piece root (server-execution v2 Phase 7):
+   * the roots of every ancestor piece that instantiated it, ending in
+   * itself. Recorded when a piece starts under a known parent
+   * (`RunnerRunOptions.parentPieceRootId`); a root started with no
+   * parent (a top-level piece, or a resume whose parent is unknown) keeps
+   * whatever chain an earlier parent-driven start recorded, else stands
+   * alone. Only ever grows per root — a nested piece re-started
+   * standalone (a client navigating to it) must not lose the outer
+   * demand it is also served under.
+   */
+  private demandRootChains = new Map<string, readonly string[]>();
+
+  private demandRootChainFor(
+    id: string,
+    parentPieceRootId?: string,
+  ): readonly string[] {
+    const known = this.demandRootChains.get(id);
+    if (parentPieceRootId === undefined || parentPieceRootId === id) {
+      return known ?? [id];
+    }
+    const parentChain = this.demandRootChains.get(parentPieceRootId) ??
+      [parentPieceRootId];
+    const merged = new Set<string>([...(known ?? []), ...parentChain, id]);
+    const chain = [...merged];
+    this.demandRootChains.set(id, chain);
+    return chain;
+  }
+
+  private schedulerObservationIdentity(
+    resultCell: Cell<any>,
+    parentPieceRootId?: string,
+  ) {
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    const demandRootIds = this.demandRootChainFor(id, parentPieceRootId);
     return {
       pieceId: `${resolveScopeKey(scope, this.runtime.scopeKeyIdentity)}:${id}`,
       ownerSpace: space,
@@ -3911,15 +3959,22 @@ export class Runner {
       // run supply (server-execution v2 stage P2-F): the scheduler
       // resolves this piece's demanded instances through it.
       pieceRootId: id,
+      // Phase 7: plus the ancestor roots that instantiated it — a nested
+      // piece is demanded through the outer piece the client watches.
+      ...(demandRootIds.length > 1 ? { demandRootIds } : {}),
     };
   }
 
   private schedulerRehydrationOptions(
     resultCell: Cell<any>,
     awaitSync?: boolean,
+    parentPieceRootId?: string,
   ): SchedulerRehydrationSubscriptionOptions {
     const { space } = resultCell.getAsNormalizedFullLink();
-    const observationIdentity = this.schedulerObservationIdentity(resultCell);
+    const observationIdentity = this.schedulerObservationIdentity(
+      resultCell,
+      parentPieceRootId,
+    );
     // Actions always re-run on resume. When resuming from a synced state,
     // hold the initial run until the space is synced so re-derivations read
     // confirmed-loaded inputs.
@@ -5529,6 +5584,12 @@ export class Runner {
           resultPattern,
           undefined,
           receiptCell,
+          {
+            // Phase 7: a result-as-pattern child's demand roots include
+            // the producing piece's chain (see RunnerRunOptions).
+            parentPieceRootId: patternResultCell.getAsNormalizedFullLink()
+              .id,
+          },
         );
         installedCancel = run.installedCancel;
         cancelDeferredStart = run.cancelDeferredStart;
@@ -7226,6 +7287,10 @@ export class Runner {
         awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
           schedulerRehydration,
         ),
+        // Phase 7: the child's demand roots include this parent's chain
+        // (the run supply resolves the nested piece's instances through
+        // the outer root a client watches).
+        parentPieceRootId: parentResultCell.getAsNormalizedFullLink().id,
       },
     );
 

@@ -97,8 +97,8 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     const bobKey = resolveScopeKey("user", bob);
     runtime.installSealDestination(passThroughDestination(), {
       runStamper: recordingStamper,
-      runInstanceResolver: (pieceRootId) =>
-        pieceRootId === rootId
+      runInstanceResolver: (pieceRootIds) =>
+        pieceRootIds.includes(rootId)
           ? [
             { scopeKeyIdentity: alice, actionScopeKey: aliceKey },
             { scopeKeyIdentity: bob, actionScopeKey: bobKey },
@@ -176,6 +176,78 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     );
     expect(derivationStamps.length).toBe(1);
     expect(derivationStamps[0].scopeKeyIdentity).toBeUndefined();
+  });
+
+  it("resolves a NESTED piece's instances through the OUTER root a client demands (Phase 7 demand-root chain): the child's actions run per demanded instance instead of falling to the service identity", async () => {
+    // The lunch-gate wall's last mechanism: a sub-pattern instantiated by
+    // function call gets its OWN result doc as `pieceRootId`, but a client
+    // demands the OUTER piece root — so pre-Phase-7 the child's scoped
+    // derivations ran with NO demanded identity, keyed under the serving
+    // session's (the SERVICE identity's) instances, unread by anyone. The
+    // chain (`demandRootIds`) resolves the child through its parent.
+    const aliceKey = resolveScopeKey("user", alice);
+    const bobKey = resolveScopeKey("user", bob);
+    const parentSource = [
+      "import { computed, pattern } from 'commonfabric';",
+      "const child = pattern<{ n: number }, { doubled: number }>(",
+      "  ({ n }) => ({ doubled: computed(() => n * 2) }),",
+      ");",
+      "export default pattern<{ n: number }, { out: number }>(({ n }) => {",
+      "  const c = child({ n });",
+      "  return { out: c.doubled };",
+      "});",
+      "",
+    ].join("\n");
+    const tx = runtime.edit();
+    const parentPattern = await runtime.patternManager.compilePattern(
+      programOf(parentSource),
+      { space, tx },
+    );
+    const parentCell = runtime.getCell<{ out?: number }>(
+      space,
+      "p2f-nested-parent",
+      undefined,
+      tx,
+    );
+    const parentRootId = parentCell.getAsNormalizedFullLink().id;
+    // The registry knows ONLY the outer root (what a browser watches):
+    // any resolution through the child's own root alone finds nothing.
+    runtime.installSealDestination(passThroughDestination(), {
+      runStamper: recordingStamper,
+      runInstanceResolver: (pieceRootIds) =>
+        pieceRootIds.includes(parentRootId)
+          ? [
+            { scopeKeyIdentity: alice, actionScopeKey: aliceKey },
+            { scopeKeyIdentity: bob, actionScopeKey: bobKey },
+          ]
+          : [],
+    });
+    const running = runtime.runner.run(
+      tx,
+      parentPattern,
+      { n: 21 },
+      parentCell,
+    );
+    expect((await tx.commit()).error).toBeUndefined();
+    await running.pull();
+    await runtime.idle();
+
+    // The child's `computed` ran ONCE PER demanded instance of the OUTER
+    // root, each run stamped with that instance's identity — never the
+    // wave-level (service) fallback.
+    const childRuns = stamped.filter((info) =>
+      info.kind === "derivation" && info.actionId.includes("__cfLift") ||
+      (info.kind === "derivation" && info.actionId.includes("computed"))
+    );
+    const identities = childRuns.map((info) =>
+      info.scopeKeyIdentity?.principal
+    );
+    expect(identities).toContain(alice.principal);
+    expect(identities).toContain(bob.principal);
+    expect(
+      childRuns.every((info) => info.scopeKeyIdentity !== undefined),
+    ).toBe(true);
+    runtime.runner.stop(parentCell);
   });
 
   it("hands the emitting run's identity to the dispatched handler run (LT6: events run as the session they originated from)", async () => {

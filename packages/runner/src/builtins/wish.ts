@@ -1888,6 +1888,24 @@ export function wish(
     }
     return slot;
   };
+  // Server-execution v2 (Phase 7; builtins.md §3, §5): a wish's sidecar
+  // surfaces — the profile create/picker patterns and the suggestion
+  // pattern — are compile-INSTANTIATE steps (fetch a system pattern, run
+  // it into a deterministic result cell). Under the flag those belong to
+  // the SpaceServer: the served wish run for the demanding identity
+  // fetches, instantiates and commits the sidecar (bookkeeping stamps,
+  // serving-loop.md §3d), and the client's SPECULATIVE wish run only
+  // REFERENCES the same cell — cause-derived, so both sides name one
+  // doc — and renders whatever the server materialized (speculation.md
+  // §2: compile-instantiate children stay unspeculated; the client reads
+  // through). Pre-fix a flag-ON client also fetched + instantiated the
+  // sidecar through its own bookkeeping-stamped (authored) commits,
+  // racing the server's derived commits on the SAME docs — the
+  // lunch-gate churn (a stale-basis rejection loop on the readers of
+  // those cells, ~13 wish re-runs/s, no settle). OFF arm and the serving
+  // runtime: unchanged.
+  const sidecarIsServed = runtime.experimental.serverExecution === true &&
+    !runtime.servingPosture;
 
   addCancel(() => {
     cancelled = true;
@@ -1998,7 +2016,10 @@ export function wish(
     }
 
     const cachedSuggestionPattern = suggestionPatternCache.cached();
-    if (!cachedSuggestionPattern) {
+    if (sidecarIsServed) {
+      // The SpaceServer instantiates the suggestion sidecar for this
+      // demander; this speculative run references its cell only.
+    } else if (!cachedSuggestionPattern) {
       // Once fetch completes, run the pattern without a tx (it creates its own)
       void suggestionPatternCache.fetch(
         runtime,
@@ -2153,7 +2174,11 @@ export function wish(
     };
 
     const cachedProfileCreatePattern = profileCreatePatternCache.cached();
-    if (!cachedProfileCreatePattern) {
+    if (sidecarIsServed) {
+      // The SpaceServer fetches/instantiates the create surface for this
+      // demander and flips its ready cell; this speculative run only
+      // references the served cells (read above for the re-run trigger).
+    } else if (!cachedProfileCreatePattern) {
       void profileCreatePatternCache.fetch(runtime, () => {
         // The pattern arrived: re-arm EVERY demander's create surface —
         // the fetch is node-shared (memoized), so the ready signal must
@@ -2287,7 +2312,10 @@ export function wish(
     };
 
     const cachedProfilePickerPattern = profilePickerPatternCache.cached();
-    if (!cachedProfilePickerPattern) {
+    if (sidecarIsServed) {
+      // The SpaceServer instantiates the picker for this demander; this
+      // speculative run references its cell only.
+    } else if (!cachedProfilePickerPattern) {
       void profilePickerPatternCache.fetch(
         runtime,
         undefined,

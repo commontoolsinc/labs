@@ -717,7 +717,8 @@ export class SpaceServer implements TransactionSealDestination {
     // registry through the seam above.
     runtime.installSealDestination(this, {
       runStamper: (tx, info) => this.#stampRun(tx, info),
-      runInstanceResolver: (pieceRootId) => this.#runInstancesFor(pieceRootId),
+      runInstanceResolver: (pieceRootIds) =>
+        this.#runInstancesFor(pieceRootIds),
     });
 
     // Stage B's renew cadence, finally driven (serving-loop.md §2).
@@ -1121,19 +1122,27 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /** The per-(action × instance) run supply's resolver (stage P2-F),
-   * installed beside the stamper: the demanded instances of a piece
-   * root, from the demand registry — entries whose demand key names the
-   * root directly plus entries whose structure load RESOLVED to it
+   * installed beside the stamper: the demanded instances of an action's
+   * DEMAND ROOTS — its piece root plus the ancestor piece roots that
+   * instantiated it (Phase 7; `SchedulerObservationIdentity.
+   * demandRootIds`: a nested pattern node or result-as-pattern child is
+   * demanded through the OUTER piece a client watches, and pre-Phase-7
+   * its scoped derivations fell to the service identity's instances) —
+   * from the demand registry: entries whose demand key names one of the
+   * roots directly plus entries whose structure load RESOLVED to one
    * (`#pieceRootByDemandKey`), deduped per instance key. Space-scope
    * demands carry no identity and contribute nothing (the wave-level
    * fallback run). */
   #runInstancesFor(
-    pieceRootId: string,
+    pieceRootIds: readonly string[],
   ): Array<{ scopeKeyIdentity: ScopeKeyIdentity; actionScopeKey: ScopeKey }> {
     const instances = new Map<string, ScopeKeyIdentity>();
+    const roots = new Set(pieceRootIds);
     for (const [key, identity] of this.#demandedIdentities) {
-      const matches = key.endsWith(`\0${pieceRootId}`) ||
-        this.#pieceRootByDemandKey.get(key) === pieceRootId;
+      const keyRoot = key.slice(key.indexOf("\0") + 1);
+      const resolvedRoot = this.#pieceRootByDemandKey.get(key);
+      const matches = roots.has(keyRoot) ||
+        (resolvedRoot !== undefined && roots.has(resolvedRoot));
       if (!matches) continue;
       const instanceKey = key.slice(0, key.indexOf("\0"));
       if (!instances.has(instanceKey)) instances.set(instanceKey, identity);
@@ -2070,10 +2079,6 @@ export class SpaceServer implements TransactionSealDestination {
         return `${scope}\0${root.id}`;
       }
     };
-    // Retire demand for roots no client watches anymore: the sink is
-    // the demand, so cancelling it returns the value to pull-based
-    // laziness (the materialized structure stays registered — structure
-    // is not a start/stop policy, serving-loop.md §1).
     const currentKeys = new Set(roots.map(keyOf));
     for (const [key, cancel] of this.#demandSinks) {
       if (currentKeys.has(key)) continue;

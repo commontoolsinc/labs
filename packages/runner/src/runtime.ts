@@ -804,10 +804,11 @@ export class Runtime {
     | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
     | undefined;
   // The per-(action × instance) run-supply resolver (installed WITH the
-  // destination, stage P2-F): piece root doc id → the demanded
-  // instances the SpaceServer's registry holds for it.
+  // destination, stage P2-F): an action's demand roots (its piece root
+  // plus the ancestor roots that instantiated it — Phase 7) → the
+  // demanded instances the SpaceServer's registry holds for any of them.
   #serverRunInstanceResolver:
-    | ((pieceRootId: string) => readonly ServerRunInstance[])
+    | ((pieceRootIds: readonly string[]) => readonly ServerRunInstance[])
     | undefined;
   // The client speculation overlay (server-execution v2 Phase 2,
   // speculation.md): the DEFAULT seal destination of every runtime under
@@ -1942,7 +1943,7 @@ export class Runtime {
        * identity). Absent (or returning nothing) the run keeps the
        * wave-level fallback — the Phase-1 cardinality-1 posture. */
       runInstanceResolver?: (
-        pieceRootId: string,
+        pieceRootIds: readonly string[],
       ) => readonly ServerRunInstance[];
     } = {},
   ): void {
@@ -1987,18 +1988,21 @@ export class Runtime {
   }
 
   /**
-   * The demanded instances a scheduler action's piece root currently has
-   * (the per-(action × instance) run SUPPLY, stage P2-F). Undefined
-   * everywhere except a serving runtime whose SpaceServer installed a
-   * resolver — the OFF arm and client speculation pay one undefined
-   * check. The scheduler runs the action once per returned instance
-   * (instances live in keys/basis/stamps, never as extra graph nodes —
-   * C11b); an empty return keeps the single wave-identity run.
+   * The demanded instances a scheduler action's DEMAND ROOTS currently
+   * have (the per-(action × instance) run SUPPLY, stage P2-F): its own
+   * piece root plus every ancestor piece root that instantiated it
+   * (`SchedulerObservationIdentity.demandRootIds`, Phase 7 — a nested
+   * piece is demanded through the outer piece the client watches).
+   * Undefined everywhere except a serving runtime whose SpaceServer
+   * installed a resolver — the OFF arm and client speculation pay one
+   * undefined check. The scheduler runs the action once per returned
+   * instance (instances live in keys/basis/stamps, never as extra graph
+   * nodes — C11b); an empty return keeps the single wave-identity run.
    */
   serverRunInstancesFor(
-    pieceRootId: string,
+    pieceRootIds: readonly string[],
   ): readonly ServerRunInstance[] | undefined {
-    return this.#serverRunInstanceResolver?.(pieceRootId);
+    return this.#serverRunInstanceResolver?.(pieceRootIds);
   }
 
   /**

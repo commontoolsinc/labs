@@ -4,8 +4,33 @@ import * as FS from "@std/fs";
 import env from "@/env.ts";
 import { memoryEngineStoreUrl } from "./memory-store-url.ts";
 import { identity } from "@/lib/identity.ts";
+import {
+  memoryServiceDidsFor,
+  serverExecutionEnabledFromEnv,
+} from "@/lib/server-execution-flag.ts";
 
 const memoryAudience = identity.did();
+
+// Server-execution v2 (Phase 7): under the flag this process's own identity
+// is a memory service principal — the serving loop's loopback sessions read
+// foreign co-hosted spaces as it (see memoryServiceDidsFor). OFF the flag
+// the operator-configured list is used verbatim.
+const serverExecutionOn = serverExecutionEnabledFromEnv(Deno.env.get);
+const memoryServiceDids = memoryServiceDidsFor({
+  configured: env.MEMORY_SERVICE_DIDS
+    .split(",")
+    .map((did) => did.trim())
+    .filter((did) => did.length > 0),
+  processIdentityDid: identity.did(),
+  serverExecution: serverExecutionOn,
+});
+if (serverExecutionOn) {
+  console.log(
+    `Memory: server-execution v2 ON — process identity ${identity.did()} ` +
+      "is a memory service principal (loopback serving reads; " +
+      "docs/specs/server-side-execution/protocol.md §2b)",
+  );
+}
 
 // Session.open verification is shared with the standalone server. Toolshed
 // requires the signed invocation to carry its audience DID and the challenge
@@ -34,10 +59,7 @@ export const memoryServer = new MemoryServer.Server({
   },
   acl: {
     mode: env.MEMORY_ACL_MODE,
-    serviceDids: env.MEMORY_SERVICE_DIDS
-      .split(",")
-      .map((did) => did.trim())
-      .filter((did) => did.length > 0),
+    serviceDids: memoryServiceDids,
   },
 });
 export const memory = {

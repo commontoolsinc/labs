@@ -1290,10 +1290,29 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 // These ambient flags and the memory protocol flags below are catalogued, with
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
-let serverExecutionEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
 let ownWriteEchoEnabled = true;
+
+export {
+  SERVER_EXECUTION_DEFAULT_ENABLED,
+} from "./v2/server-execution-default.ts";
+
+// The ambient flag's inputs, resolved by getServerExecutionConfig():
+// - the live ENABLER count (below), which forces the flag on — every
+//   explicitly-enabled Runtime and the ExecutorHost claim one;
+// - else an explicit OVERRIDE (`setServerExecutionConfig`: the direct test
+//   seam, and the Runtime constructor's sanctioned explicit-false arm);
+// - else the AMBIENT BASELINE, which is OFF: a BARE construction — no
+//   preset, no explicit flag, nothing else in the process enabling it —
+//   resolves the OFF arm, because a bare construction has no serving host
+//   (the unit-test shape: single-process, the derive-and-commit model by
+//   construction). The FIRST-PARTY default is a different thing: every
+//   deployed-topology entry point resolves an unset flag to
+//   `SERVER_EXECUTION_DEFAULT_ENABLED` (v2/server-execution-default.ts) and
+//   constructs its runtimes explicitly, so in a deployed process the
+//   ambient state follows that default through the enabler count.
+let serverExecutionOverride: boolean | undefined = undefined;
 
 /**
  * Ambient runtime flag for server-execution v2
@@ -1304,17 +1323,25 @@ let ownWriteEchoEnabled = true;
  * Not a handshake capability: admission
  * enforcement is server-local, so nothing about it is negotiated per
  * connection.
+ *
+ * `enabled` undefined clears the explicit override (back to the ambient
+ * baseline); a boolean sets it. A live enabler (below) wins over an
+ * override either way.
  */
 export function setServerExecutionConfig(enabled?: boolean): void {
-  serverExecutionEnabled = enabled ?? false;
+  serverExecutionOverride = enabled;
 }
 
 export function getServerExecutionConfig(): boolean {
-  return serverExecutionEnabled;
+  if (serverExecutionEnablers > 0) return true;
+  return serverExecutionOverride ?? false;
 }
 
+/** HARD reset of the test seam: override cleared, enabler count zero — the
+ * flag reads the ambient baseline (OFF) again. Never called by product
+ * code. */
 export function resetServerExecutionConfig(): void {
-  serverExecutionEnabled = false;
+  serverExecutionOverride = undefined;
   serverExecutionEnablers = 0;
 }
 
@@ -1325,7 +1352,7 @@ export function resetServerExecutionConfig(): void {
 // count cannot see the others, and an unconditional reset from one owner
 // un-claims `derived` for every other owner's in-flight commit. The
 // direct set/reset functions above remain the test seam (reset is a HARD
-// reset: flag off, count zero).
+// reset: override cleared, count zero).
 let serverExecutionEnablers = 0;
 
 /** Live enabler count — consulted by the one sanctioned explicit-disable
@@ -1337,21 +1364,18 @@ export function serverExecutionEnablerCount(): number {
 
 /**
  * Claim the ambient server-execution flag, reference-counted. Returns
- * the matching release; the flag resets only when the LAST live enabler
- * releases. The release is idempotent per handle, so exception-safe
- * callers can release from both a rollback and a finally.
+ * the matching release; the flag falls back to the override/baseline
+ * resolution only when the LAST live enabler releases. The release is
+ * idempotent per handle, so exception-safe callers can release from both
+ * a rollback and a finally.
  */
 export function acquireServerExecutionEnabler(): () => void {
   serverExecutionEnablers += 1;
-  serverExecutionEnabled = true;
   let released = false;
   return () => {
     if (released) return;
     released = true;
     serverExecutionEnablers = Math.max(0, serverExecutionEnablers - 1);
-    if (serverExecutionEnablers === 0) {
-      serverExecutionEnabled = false;
-    }
   };
 }
 

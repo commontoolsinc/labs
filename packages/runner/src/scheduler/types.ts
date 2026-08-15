@@ -33,6 +33,18 @@ export interface SchedulerObservationIdentity {
    * demanded instances through this id at the reactive-action choke
    * point. */
   pieceRootId?: string;
+  /** The DEMAND roots this action's instances resolve through (Phase 7):
+   * `pieceRootId` plus every ANCESTOR piece root that instantiated it —
+   * a nested pattern node's or a result-as-pattern child's actions are
+   * demanded through the outer piece the client actually watches, so
+   * the run supply resolves their instances at any root in the chain
+   * (dedupe per instance). Absent means `[pieceRootId]`. Pre-Phase-7 a
+   * nested piece's scoped derivations fell to the wave-level identity —
+   * the serving session's own — and landed in the SERVICE identity's
+   * instances, unread by any demander (the lunch-gate wall's last
+   * mechanism; protocol.md §2's S1: "there is no third source of run
+   * identity"). */
+  demandRootIds?: readonly string[];
 }
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
