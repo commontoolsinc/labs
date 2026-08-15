@@ -5,8 +5,8 @@
  *
  *     deno bench --no-check bench/codec-json.bench.ts
  *
- * The subjects come from `fixtures/codec-fixtures.ts`, shared with the other
- * formats' benchmarks so that their numbers can be read side by side.
+ * The subjects come from `codec-fixtures.ts`, shared with the other formats'
+ * benchmarks so that their numbers can be read side by side.
  *
  * Each group pairs the two directions over one subject, so the encode/decode
  * ratio for that subject reads off a single block. A name repeats its group
@@ -15,7 +15,8 @@
  *
  * Every subject is built before any measurement, and no case has setup to
  * exclude, so these take the plain `fn()` form rather than bracketing with
- * `b.start()` / `b.end()`.
+ * `b.start()` / `b.end()`. Deno ignores that bracketing below 10µs an
+ * iteration anyway, which most of these are.
  */
 
 import { fabricFromJsonValue, jsonFromFabricValue } from "../src/codecs.ts";
