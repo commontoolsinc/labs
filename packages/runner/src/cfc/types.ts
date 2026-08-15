@@ -293,6 +293,19 @@ export type CfcAddress = Immutable<{
   path: string[];
 }>;
 
+/** One scalar validation-type change at a reviewed schema path. */
+export type CfcScalarTypeTransition = Immutable<{
+  path: string[];
+  storedTypes: string[];
+  candidateTypes: string[];
+}>;
+
+/** Scalar schema changes authorized for one reviewed document target. */
+export type CfcScalarMigrationAuthorization = Immutable<{
+  target: CfcAddress;
+  transitions: CfcScalarTypeTransition[];
+}>;
+
 export type ConsumedRead =
   & CfcAddress
   & Immutable<{

@@ -27,6 +27,7 @@ import {
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
 } from "../src/cfc/types.ts";
+import { CFC_CONFIRMED_SCALAR_MIGRATION_INPUT } from "../src/cfc/migration-reason.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
 import {
   getDerivedInternalCellLink,
@@ -3603,6 +3604,336 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }
     });
   }
+
+  it("scopes scalar migration authorization to its reviewed target", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const storedSchema = internSchema(
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { confidentiality: ["migration-policy"] },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+      const candidateSchema = internSchema(
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "number",
+              ifc: { confidentiality: ["migration-policy"] },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+      const seed = runtime.edit();
+      const authorized = runtime.getCell(
+        signer.did(),
+        "cfc-scalar-migration-authorized",
+        undefined,
+        seed,
+      );
+      const unrelated = runtime.getCell(
+        signer.did(),
+        "cfc-scalar-migration-unrelated",
+        undefined,
+        seed,
+      );
+      for (const cell of [authorized, unrelated]) {
+        const link = cell.getAsNormalizedFullLink();
+        seed.writeOrThrow({
+          space: link.space,
+          scope: link.scope,
+          id: link.id,
+          path: [],
+        }, {
+          value: { value: "old" },
+          cfc: {
+            version: 1,
+            schemaHash: storedSchema.taggedHashString,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: ["value"],
+                label: { confidentiality: ["migration-policy"] },
+                origin: "declared",
+              }],
+            },
+          },
+        });
+      }
+      for (const schema of [storedSchema, candidateSchema]) {
+        seed.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: `cid:${schema.taggedHashString}`,
+          path: [],
+        }, { value: schema.schema });
+      }
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const update = runtime.edit();
+      const authorizedLink = authorized.getAsNormalizedFullLink();
+      update.recordCfcWritePolicyInput({
+        kind: "custom",
+        target: {
+          space: authorizedLink.space,
+          scope: authorizedLink.scope,
+          id: authorizedLink.id,
+          path: [...authorizedLink.path],
+        },
+        name: CFC_CONFIRMED_SCALAR_MIGRATION_INPUT,
+        value: {
+          transitions: [{
+            path: ["value"],
+            storedTypes: ["string"],
+            candidateTypes: ["number"],
+          }],
+        },
+      });
+      runtime.getCell(
+        signer.did(),
+        "cfc-scalar-migration-unrelated",
+        candidateSchema.schema,
+        update,
+      ).key("value").set(1);
+      update.prepareCfc();
+      expect(String((await update.commit()).error?.message)).toContain(
+        "type changed incompatibly at /value",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  for (
+    const mismatch of [
+      {
+        name: "schema path",
+        transition: {
+          path: ["other"],
+          storedTypes: ["string"],
+          candidateTypes: ["number"],
+        },
+      },
+      {
+        name: "stored type",
+        transition: {
+          path: ["value"],
+          storedTypes: ["boolean"],
+          candidateTypes: ["number"],
+        },
+      },
+      {
+        name: "candidate type",
+        transition: {
+          path: ["value"],
+          storedTypes: ["string"],
+          candidateTypes: ["integer"],
+        },
+      },
+    ]
+  ) {
+    it(`requires an exact scalar migration ${mismatch.name}`, async () => {
+      const { runtime, storageManager } = createRuntime();
+      try {
+        const storedSchema = internSchema(
+          {
+            type: "object",
+            properties: {
+              value: {
+                type: "string",
+                ifc: { confidentiality: ["migration-policy"] },
+              },
+            },
+          } satisfies JSONSchema,
+          true,
+        );
+        const candidateSchema = internSchema(
+          {
+            type: "object",
+            properties: {
+              value: {
+                type: "number",
+                ifc: { confidentiality: ["migration-policy"] },
+              },
+            },
+          } satisfies JSONSchema,
+          true,
+        );
+        const targetId = `cfc-scalar-migration-${mismatch.name}`;
+        const seed = runtime.edit();
+        const target = runtime.getCell(
+          signer.did(),
+          targetId,
+          undefined,
+          seed,
+        );
+        const link = target.getAsNormalizedFullLink();
+        seed.writeOrThrow({
+          space: link.space,
+          scope: link.scope,
+          id: link.id,
+          path: [],
+        }, {
+          value: { value: "old" },
+          cfc: {
+            version: 1,
+            schemaHash: storedSchema.taggedHashString,
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: ["value"],
+                label: { confidentiality: ["migration-policy"] },
+                origin: "declared",
+              }],
+            },
+          },
+        });
+        for (const schema of [storedSchema, candidateSchema]) {
+          seed.writeOrThrow({
+            space: signer.did(),
+            scope: "space",
+            id: `cid:${schema.taggedHashString}`,
+            path: [],
+          }, { value: schema.schema });
+        }
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const update = runtime.edit();
+        update.recordCfcWritePolicyInput({
+          kind: "custom",
+          target: {
+            space: link.space,
+            scope: link.scope,
+            id: link.id,
+            path: [...link.path],
+          },
+          name: CFC_CONFIRMED_SCALAR_MIGRATION_INPUT,
+          value: { transitions: [mismatch.transition] },
+        });
+        runtime.getCell(
+          signer.did(),
+          targetId,
+          candidateSchema.schema,
+          update,
+        ).key("value").set(1);
+        update.prepareCfc();
+        expect(String((await update.commit()).error?.message)).toContain(
+          "type changed incompatibly at /value",
+        );
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  }
+
+  it("does not apply a confirmed scalar migration in reverse", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const stringSchema = internSchema(
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { confidentiality: ["migration-policy"] },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+      const numberSchema = internSchema(
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "number",
+              ifc: { confidentiality: ["migration-policy"] },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+      const seed = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-scalar-migration-reverse",
+        undefined,
+        seed,
+      );
+      const link = target.getAsNormalizedFullLink();
+      seed.writeOrThrow({
+        space: link.space,
+        scope: link.scope,
+        id: link.id,
+        path: [],
+      }, {
+        value: { value: 1 },
+        cfc: {
+          version: 1,
+          schemaHash: numberSchema.taggedHashString,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["value"],
+              label: { confidentiality: ["migration-policy"] },
+              origin: "declared",
+            }],
+          },
+        },
+      });
+      for (const schema of [stringSchema, numberSchema]) {
+        seed.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: `cid:${schema.taggedHashString}`,
+          path: [],
+        }, { value: schema.schema });
+      }
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const update = runtime.edit();
+      update.recordCfcWritePolicyInput({
+        kind: "custom",
+        target: {
+          space: link.space,
+          scope: link.scope,
+          id: link.id,
+          path: [...link.path],
+        },
+        name: CFC_CONFIRMED_SCALAR_MIGRATION_INPUT,
+        value: {
+          transitions: [{
+            path: ["value"],
+            storedTypes: ["string"],
+            candidateTypes: ["number"],
+          }],
+        },
+      });
+      runtime.getCell(
+        signer.did(),
+        "cfc-scalar-migration-reverse",
+        stringSchema.schema,
+        update,
+      ).key("value").set("old");
+      update.prepareCfc();
+      expect(String((await update.commit()).error?.message)).toContain(
+        "type changed incompatibly at /value",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 
   it("does not record link-write provenance when a link is collapsed to a snapshot", async () => {
     const { runtime, storageManager } = createRuntime("observe");

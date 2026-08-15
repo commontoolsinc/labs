@@ -61,6 +61,7 @@ import {
   type CfcPolicyEvaluationMode,
   type CfcPolicyRecordInput,
   type CfcPrefixProvenanceSummary,
+  type CfcScalarMigrationAuthorization,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTrustConfigInput,
@@ -2278,6 +2279,7 @@ export class Runtime {
       patternRepository?: string;
       pieceSourceTransition?: PieceSourceTransition;
       cfcRootConfidentiality?: readonly JSONValue[];
+      cfcScalarMigrations?: readonly CfcScalarMigrationAuthorization[];
     },
   ) {
     return this.runner.runSynced(resultCell, pattern, inputs, options);

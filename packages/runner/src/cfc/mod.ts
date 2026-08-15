@@ -60,6 +60,8 @@ export type {
   CfcSandboxJsonValue,
   CfcSandboxOutputPolicy,
   CfcSandboxResult,
+  CfcScalarMigrationAuthorization,
+  CfcScalarTypeTransition,
   CfcStreamChannel,
   CfcStreamObservation,
   CfcStreamSegment,
@@ -237,7 +239,11 @@ export type {
   StoredCfcEnvelope,
 } from "./prepare.ts";
 export { readStoredCfcMetadata } from "./metadata.ts";
-export { addRootConfidentiality, cfcSchemaMergeIssue } from "./schema-merge.ts";
+export {
+  addRootConfidentiality,
+  cfcScalarTypeTransitions,
+  cfcSchemaMergeIssue,
+} from "./schema-merge.ts";
 export type { CfcSchemaMergeIssue } from "./schema-merge.ts";
 export {
   createSinkRequestPolicyInput,

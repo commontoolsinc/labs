@@ -15,7 +15,11 @@ import {
 } from "@commonfabric/memory/v2";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { CFC_SOURCE_SCHEMA_MIGRATION_INPUT } from "./cfc/migration-reason.ts";
+import {
+  CFC_CONFIRMED_SCALAR_MIGRATION_INPUT,
+  CFC_SOURCE_SCHEMA_MIGRATION_INPUT,
+} from "./cfc/migration-reason.ts";
+import type { CfcScalarMigrationAuthorization } from "./cfc/types.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   isObjectNotArray,
@@ -827,6 +831,8 @@ type SetupValidationOptions = {
   prepareForResume?: boolean;
   /** Confidentiality maintained on the result document during setup. */
   cfcRootConfidentiality?: readonly JSONValue[];
+  /** Accept reviewed scalar validation-type changes during CFC migration. */
+  cfcScalarMigrations?: readonly CfcScalarMigrationAuthorization[];
 };
 
 export type PieceSourceRevisionOperation =
@@ -2263,6 +2269,14 @@ export class Runner {
         value: {
           revisionId: validationOptions.pieceSourceTransition.revisionId,
         },
+      });
+    }
+    for (const migration of validationOptions.cfcScalarMigrations ?? []) {
+      tx.recordCfcWritePolicyInput({
+        kind: "custom",
+        target: migration.target,
+        name: CFC_CONFIRMED_SCALAR_MIGRATION_INPUT,
+        value: { transitions: migration.transitions },
       });
     }
 
@@ -3759,6 +3773,7 @@ export class Runner {
       patternRepository?: string;
       pieceSourceTransition?: PieceSourceTransition;
       cfcRootConfidentiality?: readonly JSONValue[];
+      cfcScalarMigrations?: readonly CfcScalarMigrationAuthorization[];
     },
   ) {
     await resultCell.sync();
@@ -3807,6 +3822,7 @@ export class Runner {
           patternRepository: options?.patternRepository,
           pieceSourceTransition: options?.pieceSourceTransition,
           cfcRootConfidentiality: options?.cfcRootConfidentiality,
+          cfcScalarMigrations: options?.cfcScalarMigrations,
           validateCurrentArgument: options?.validateCurrentArgument,
           validateArgumentLinks: options?.validateArgumentLinks,
         },
@@ -3823,6 +3839,7 @@ export class Runner {
             patternRepository: options?.patternRepository,
             pieceSourceTransition: options?.pieceSourceTransition,
             cfcRootConfidentiality: options?.cfcRootConfidentiality,
+            cfcScalarMigrations: options?.cfcScalarMigrations,
             validateCurrentArgument: options?.validateCurrentArgument,
             validateArgumentLinks: options?.validateArgumentLinks,
           },

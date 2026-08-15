@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPatternIdentityRef,
+  getPieceSourceRevisions,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -120,6 +121,26 @@ function narrowedOutputProgram(): RuntimeProgram {
         "  () => ({",
         "    [NAME]: 'Compatibility check',",
         "    label: 7,",
+        "  }),",
+        ");",
+        "",
+      ].join("\n"),
+    }],
+  };
+}
+
+function narrowedOutputWithGeneratedFieldProgram(): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { NAME, pattern } from 'commonfabric';",
+        "export default pattern<{}, { label: number; added: string }>(",
+        "  () => ({",
+        "    [NAME]: 'Compatibility check',",
+        "    label: 7,",
+        "    added: 'generated',",
         "  }),",
         ");",
         "",
@@ -587,7 +608,7 @@ describe("setsrc compatibility preflight", () => {
   });
 });
 
-describe("setsrc integrity migration under strict CFC", () => {
+describe("setsrc scalar migration under strict CFC", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -633,5 +654,102 @@ describe("setsrc integrity migration under strict CFC", () => {
         }).properties?.label?.ifc?.addIntegrity,
       ).toEqual(["reviewed"]);
     }
+  });
+
+  it("carries the dangerous override through CFC preparation", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `strict-scalar-migration-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await pieces.synced();
+
+    const piece = await pieces.create(baseProgram(), {
+      input: { seed: "hello" },
+    });
+    await runtime.idle();
+
+    await piece.setPattern(narrowedOutputProgram(), {
+      dangerouslyAllowIncompatibleSchema: true,
+    });
+    await runtime.idle();
+    expect((piece.getCell().getAsQueryResult() as { label?: unknown }).label)
+      .toBe(7);
+    const link = piece.getCell().getAsNormalizedFullLink();
+    const stored = loadStoredCfcEnvelope(runtime.readTx(), {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+    });
+    expect(stored.status).toBe("loaded");
+    if (stored.status === "loaded") {
+      expect(
+        (stored.schema as {
+          properties?: { label?: { type?: unknown } };
+        }).properties?.label?.type,
+      ).toBe("number");
+    }
+  });
+
+  it("carries a result migration beside a new generated field", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `strict-confirmed-result-migration-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await pieces.synced();
+
+    const piece = await pieces.create(
+      narrowedOutputWithGeneratedFieldProgram(),
+      {
+        input: {},
+      },
+    );
+    await runtime.idle();
+    const narrowedIdentity = getPatternIdentityRef(piece.getCell())?.identity;
+    expect(narrowedIdentity).toBeDefined();
+    await piece.setPattern(baseProgram(), {
+      dangerouslyAllowIncompatibleSchema: true,
+    });
+    await runtime.idle();
+    const narrowedRevision = getPieceSourceRevisions(piece.getCell()).find(
+      (revision) => revision.pattern.identity === narrowedIdentity,
+    );
+    expect(narrowedRevision).toBeDefined();
+
+    const action = {
+      kind: "restore" as const,
+      revisionId: narrowedRevision!.revisionId,
+    };
+    const warning = await piece.changeSource(action);
+    expect(warning.status).toBe("incompatible");
+    if (warning.status !== "incompatible") {
+      throw new Error("expected an incompatible result migration");
+    }
+    expect(warning.prepared.review?.cfcScalarMigrations?.length).toBe(1);
+    expect(
+      await piece.changeSource(action, {
+        confirmedChange: warning.prepared,
+      }),
+    ).toEqual({ status: "applied" });
+    await runtime.idle();
+    expect(piece.getCell().getAsQueryResult()).toMatchObject({
+      label: 7,
+      added: "generated",
+    });
   });
 });

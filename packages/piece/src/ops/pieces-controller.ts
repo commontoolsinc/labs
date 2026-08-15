@@ -59,6 +59,7 @@ import {
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   addRootConfidentiality,
+  type CfcScalarMigrationAuthorization,
   spaceRootConfidentiality,
 } from "@commonfabric/runner/cfc";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
@@ -1266,6 +1267,7 @@ export class PiecesController<T = unknown> {
       ) => void;
       repository?: string;
       sourceTransition?: PieceSourceTransition;
+      cfcScalarMigrations?: readonly CfcScalarMigrationAuthorization[];
     },
   ): Promise<Cell<unknown>> {
     const piece = this.runtime.getCellFromEntityId(
@@ -1283,6 +1285,7 @@ export class PiecesController<T = unknown> {
         validateCurrentArgument: options?.validateCurrentArgument,
         validateArgumentLinks: options?.validateArgumentLinks,
         cfcRootConfidentiality: this.cfcRootConfidentiality(),
+        cfcScalarMigrations: options?.cfcScalarMigrations,
       });
     } else {
       if (options?.expectedPatternIdentity) {

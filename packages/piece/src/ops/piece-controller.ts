@@ -40,6 +40,8 @@ import {
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
 import {
+  type CfcScalarMigrationAuthorization,
+  cfcScalarTypeTransitions,
   cfcSchemaChildRoot,
   cfcSchemaMergeIssue,
   loadStoredCfcEnvelope,
@@ -375,6 +377,7 @@ export interface PreparedPieceSourceChange {
   review?: {
     argumentEvidence: string;
     issues: PieceSourceCompatibilityIssues;
+    cfcScalarMigrations?: readonly CfcScalarMigrationAuthorization[];
   };
 }
 
@@ -3480,7 +3483,11 @@ export class PieceController<T = unknown> {
       if (
         currentReview.argumentEvidence !==
           confirmed.review.argumentEvidence ||
-        !deepEqual(currentReview.issues, confirmed.review.issues)
+        !deepEqual(currentReview.issues, confirmed.review.issues) ||
+        !deepEqual(
+          currentReview.cfcScalarMigrations,
+          confirmed.review.cfcScalarMigrations,
+        )
       ) {
         if (hasPieceSourceCompatibilityIssues(currentReview.issues)) {
           prepared = { ...confirmed, review: currentReview };
@@ -3494,7 +3501,7 @@ export class PieceController<T = unknown> {
           "the retained piece input changed after compatibility was checked",
         );
       } else {
-        acceptedReview = confirmed.review;
+        acceptedReview = currentReview;
       }
     } else {
       const baseline = await preparePieceSourceTransitionBaseline(
@@ -3622,6 +3629,7 @@ export class PieceController<T = unknown> {
               }
             },
             sourceTransition: transition,
+            cfcScalarMigrations: acceptedReview?.cfcScalarMigrations,
           },
         ) as Cell<T>;
       });
@@ -3756,6 +3764,24 @@ export class PieceController<T = unknown> {
           null,
           baseline,
         );
+        const cfcScalarMigrations = options
+            ?.dangerouslyAllowIncompatibleSchema
+          ? [
+            pieceSourceScalarMigrationAuthorization(
+              this.#pieces.getArgument(this.#cell),
+              pattern.argumentSchema,
+              this.#pieces,
+            ),
+            pieceSourceScalarMigrationAuthorization(
+              this.#cell,
+              pattern.resultSchema,
+              this.#pieces,
+              [[]],
+            ),
+          ].filter((migration): migration is CfcScalarMigrationAuthorization =>
+            migration !== undefined
+          )
+          : undefined;
         return await execute(this.#pieces, this.id, pattern, undefined, {
           start: true,
           expectedPatternIdentity: previousRef,
@@ -3782,6 +3808,7 @@ export class PieceController<T = unknown> {
               ),
           repository: options?.repository,
           sourceTransition: transition,
+          cfcScalarMigrations,
         }) as Cell<T>;
       });
     } catch (error) {
@@ -4064,12 +4091,24 @@ async function pieceSourceCompatibilityReview(
       : String(error);
   }
 
-  const cfc = pieceSourceCfcEnvelopeIssue(argumentCell, candidate, pieces);
-  if (cfc !== undefined) issues.cfc = cfc;
+  const cfc = pieceSourceCfcEnvelopeReview(argumentCell, candidate, pieces);
+  if (cfc.issue !== undefined) issues.cfc = cfc.issue;
+  const cfcScalarMigrations = [
+    cfc.scalarMigration,
+    pieceSourceScalarMigrationAuthorization(
+      piece,
+      candidate.resultSchema,
+      pieces,
+      [[]],
+    ),
+  ].filter((migration): migration is CfcScalarMigrationAuthorization =>
+    migration !== undefined
+  );
 
   return {
     argumentEvidence: pieceSourceArgumentEvidence(argumentCell, pieces),
     issues,
+    ...(cfcScalarMigrations.length === 0 ? {} : { cfcScalarMigrations }),
   };
 }
 
@@ -4103,11 +4142,44 @@ async function pieceSourceCompatibilityReview(
  * (see `packages/piece/test/state-continuity.test.ts`). An argument is an
  * input: nothing generates it, so its merge is faithful here.
  */
-function pieceSourceCfcEnvelopeIssue(
+function pieceSourceScalarMigrationAuthorization(
+  argumentCell: Cell<unknown>,
+  candidateSchema: JSONSchema,
+  pieces: PiecesController,
+  generatedOutputPaths?: readonly (readonly string[])[],
+): CfcScalarMigrationAuthorization | undefined {
+  const link = argumentCell.getAsNormalizedFullLink();
+  const stored = loadStoredCfcEnvelope(pieces.runtime.readTx(), {
+    space: link.space,
+    id: link.id,
+    scope: link.scope,
+  });
+  if (stored.status !== "loaded") return undefined;
+  const transitions = cfcScalarTypeTransitions(
+    stored.schema,
+    candidateSchema,
+    generatedOutputPaths,
+  );
+  if (transitions === undefined) return undefined;
+  return {
+    target: {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      path: [...link.path],
+    },
+    transitions: [...transitions],
+  };
+}
+
+function pieceSourceCfcEnvelopeReview(
   argumentCell: Cell<unknown>,
   candidate: Pattern,
   pieces: PiecesController,
-): string | undefined {
+): {
+  issue?: string;
+  scalarMigration?: CfcScalarMigrationAuthorization;
+} {
   const link = argumentCell.getAsNormalizedFullLink();
   // `readTx()` cannot write, so the dry run stays a dry run.
   const stored = loadStoredCfcEnvelope(pieces.runtime.readTx(), {
@@ -4119,16 +4191,18 @@ function pieceSourceCfcEnvelopeIssue(
     // No stored envelope means the merge never runs for this document at
     // commit time, so there is genuinely nothing for it to reject. (Documents
     // only acquire one once a write carries an IFC claim.)
-    return undefined;
+    return {};
   }
   if (stored.status === "unreadable") {
     // The commit path records this same load failure as a rejection reason and
     // refuses the write. Skipping it here — the tempting reading, since we
     // cannot evaluate the merge — is precisely how a check green-lights an
     // update the deploy then refuses, so it is a blocker instead.
-    return `the CFC schema envelope stored for this piece's argument ` +
-      `document could not be read (${stored.reason}); applying a source ` +
-      `would be rejected over the same failure`;
+    return {
+      issue: `the CFC schema envelope stored for this piece's argument ` +
+        `document could not be read (${stored.reason}); applying a source ` +
+        `would be rejected over the same failure`,
+    };
   }
   // The commit takes the stored envelope unchanged when it already covers the
   // candidate's, so a preflight that skipped this fast path would manufacture
@@ -4136,15 +4210,23 @@ function pieceSourceCfcEnvelopeIssue(
   if (
     storedSchemaCoversCandidateEnvelope(stored.schema, candidate.argumentSchema)
   ) {
-    return undefined;
+    return {};
   }
   const issue = cfcSchemaMergeIssue(stored.schema, candidate.argumentSchema);
-  if (issue === undefined) return undefined;
-  return issue.migration
-    ? `the argument document stored for this piece predates the candidate's ` +
-      `schema and cannot migrate to it: ${issue.message}`
-    : `the candidate's argument schema does not merge with the CFC schema ` +
-      `envelope stored for this piece: ${issue.message}`;
+  if (issue === undefined) return {};
+  const scalarMigration = pieceSourceScalarMigrationAuthorization(
+    argumentCell,
+    candidate.argumentSchema,
+    pieces,
+  );
+  return {
+    issue: issue.migration
+      ? `the argument document stored for this piece predates the candidate's ` +
+        `schema and cannot migrate to it: ${issue.message}`
+      : `the candidate's argument schema does not merge with the CFC schema ` +
+        `envelope stored for this piece: ${issue.message}`,
+    ...(scalarMigration === undefined ? {} : { scalarMigration }),
+  };
 }
 
 function hasPieceSourceCompatibilityIssues(
@@ -4221,6 +4303,7 @@ async function execute(
     ) => void;
     repository?: string;
     sourceTransition?: PieceSourceTransition;
+    cfcScalarMigrations?: readonly CfcScalarMigrationAuthorization[];
   },
 ): Promise<Cell<unknown>> {
   return await pieces.runWithPattern(pattern, pieceId, input, options);

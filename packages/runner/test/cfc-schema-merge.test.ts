@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import type { JSONSchemaObj } from "../src/builder/types.ts";
 import {
   addRootConfidentiality,
+  cfcScalarTypeTransitions,
   cfcSchemaMergeIssue,
   mergeCfcSchemaEnvelopes,
 } from "../src/cfc/schema-merge.ts";
@@ -537,6 +538,53 @@ describe("mergeCfcSchemaEnvelopes", () => {
     }) as JSONSchemaObj;
     expect((removed.properties?.value as JSONSchemaObj).ifc).toEqual({});
   });
+
+  it("accepts a confirmed scalar type change without weakening policy", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "string",
+      ifc: { confidentiality: ["existing"] },
+    }, {
+      type: "number",
+      ifc: { integrity: ["candidate"] },
+    }, {
+      allowIncompatibleScalarTypes: true,
+    }) as JSONSchemaObj;
+
+    expect(merged.type).toBe("number");
+    expect(merged.ifc).toEqual({
+      confidentiality: ["existing"],
+      integrity: ["candidate"],
+    });
+    expect(() =>
+      mergeCfcSchemaEnvelopes({ type: "object" }, { type: "string" }, {
+        allowIncompatibleScalarTypes: true,
+      })
+    ).toThrow(/type changed incompatibly/);
+  });
+
+  it("finds a result scalar change beside a generated required field", () => {
+    const existing = {
+      type: "object",
+      properties: { label: { type: "string" } },
+      required: ["label"],
+    } as const;
+    const candidate = {
+      type: "object",
+      properties: {
+        label: { type: "number" },
+        added: { type: "string" },
+      },
+      required: ["label", "added"],
+    } as const;
+
+    expect(cfcScalarTypeTransitions(existing, candidate)).toBeUndefined();
+    expect(cfcScalarTypeTransitions(existing, candidate, [[]])).toEqual([{
+      path: ["label"],
+      storedTypes: ["string"],
+      candidateTypes: ["number"],
+    }]);
+  });
+
   it("merges item schemas and object defaults", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "array",

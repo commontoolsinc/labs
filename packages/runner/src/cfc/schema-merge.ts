@@ -15,6 +15,7 @@ import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { resolveCfcSchemaRefsOrThrow } from "./schema-refs.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
+import type { CfcScalarTypeTransition } from "./types.ts";
 
 const IFC_KEYS = [
   "confidentiality",
@@ -417,6 +418,16 @@ export interface MergeCfcSchemaEnvelopeOptions {
   generatedOutputPaths?: readonly (readonly string[])[];
   /** Permit an authenticated source update to remove integrity it minted. */
   allowAddIntegrityWeakening?: boolean;
+  /** Accept a confirmed change between scalar validation types. */
+  allowIncompatibleScalarTypes?: boolean;
+  /** Accept an exact reviewed scalar validation-type change. */
+  allowIncompatibleScalarTypeChange?: (
+    transition: CfcScalarTypeTransition,
+  ) => boolean;
+  /** Observe each accepted scalar validation-type change. */
+  onIncompatibleScalarTypeChange?: (
+    transition: CfcScalarTypeTransition,
+  ) => void;
 }
 
 const generatedOutputCovers = (
@@ -509,14 +520,38 @@ const mergeSchemaNode = (
     : [right.type];
   const leftIsUnknown = leftTypes?.includes("unknown") === true;
   const rightIsUnknown = rightTypes?.includes("unknown") === true;
+  const scalarTypes = new Set([
+    "boolean",
+    "integer",
+    "null",
+    "number",
+    "string",
+  ]);
+  const scalarTypeChange =
+    leftTypes?.every((type) => scalarTypes.has(type)) === true &&
+    rightTypes?.every((type) => scalarTypes.has(type)) === true;
   const typesChanged = leftTypes !== undefined && rightTypes !== undefined &&
     (leftTypes.length !== rightTypes.length ||
       !arraySubsetOf(leftTypes, rightTypes) ||
       !arraySubsetOf(rightTypes, leftTypes));
   const permissiveUnknownChange = typesChanged &&
     (leftIsUnknown || rightIsUnknown);
+  const scalarTransition = scalarTypeChange && typesChanged
+    ? {
+      path: [...logicalPath],
+      storedTypes: leftTypes as string[],
+      candidateTypes: rightTypes as string[],
+    }
+    : undefined;
+  const confirmedScalarChange = scalarTransition !== undefined &&
+    (options.allowIncompatibleScalarTypes === true ||
+      options.allowIncompatibleScalarTypeChange?.(scalarTransition) === true);
+  if (typesChanged && confirmedScalarChange) {
+    options.onIncompatibleScalarTypeChange?.(scalarTransition);
+  }
   if (
     typesChanged &&
+    !confirmedScalarChange &&
     !permissiveUnknownChange
   ) {
     throw new Error(
@@ -703,9 +738,10 @@ export interface CfcSchemaMergeIssue {
 export const cfcSchemaMergeIssue = (
   existing: JSONSchema,
   candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions = {},
 ): CfcSchemaMergeIssue | undefined => {
   try {
-    mergeCfcSchemaEnvelopes(existing, candidate);
+    mergeCfcSchemaEnvelopes(existing, candidate, options);
     return undefined;
   } catch (error) {
     if (error instanceof CfcSchemaMigrationError) {
@@ -716,4 +752,25 @@ export const cfcSchemaMergeIssue = (
       migration: false,
     };
   }
+};
+
+/** Exact scalar type transitions accepted by an otherwise valid merge. */
+export const cfcScalarTypeTransitions = (
+  existing: JSONSchema,
+  candidate: JSONSchema,
+  generatedOutputPaths?: readonly (readonly string[])[],
+): readonly CfcScalarTypeTransition[] | undefined => {
+  const transitions = new Map<string, CfcScalarTypeTransition>();
+  try {
+    mergeCfcSchemaEnvelopes(existing, candidate, {
+      generatedOutputPaths,
+      allowIncompatibleScalarTypes: true,
+      onIncompatibleScalarTypeChange: (transition) => {
+        transitions.set(JSON.stringify(transition), transition);
+      },
+    });
+  } catch {
+    return undefined;
+  }
+  return transitions.size > 0 ? [...transitions.values()] : undefined;
 };

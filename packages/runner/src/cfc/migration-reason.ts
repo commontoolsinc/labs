@@ -31,6 +31,10 @@ export const CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON =
 /** Transaction input recorded for an authenticated piece source update. */
 export const CFC_SOURCE_SCHEMA_MIGRATION_INPUT =
   "piece-source-schema-migration";
+
+/** Transaction input recorded for an explicitly confirmed scalar migration. */
+export const CFC_CONFIRMED_SCALAR_MIGRATION_INPUT =
+  "confirmed-scalar-schema-migration";
 /**
  * Additive-migration incompatibility raised by the CFC schema merge: an old
  * document predates a now-required field that declares no default, so the old

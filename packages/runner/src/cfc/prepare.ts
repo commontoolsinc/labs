@@ -81,6 +81,7 @@ import {
 } from "./label-representation.ts";
 import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
 import {
+  CFC_CONFIRMED_SCALAR_MIGRATION_INPUT,
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CFC_SOURCE_SCHEMA_MIGRATION_INPUT,
   CfcSchemaMigrationError,
@@ -110,6 +111,8 @@ import {
   type CfcAddress,
   cfcEnforcementStrictness,
   type CfcMetadata,
+  type CfcScalarMigrationAuthorization,
+  type CfcScalarTypeTransition,
   type IFCLabel,
   type ImplementationIdentity,
   type LabelMapEntry,
@@ -1060,6 +1063,10 @@ const candidateSchemasByTarget = (
     string,
     readonly (readonly string[])[]
   >,
+  scalarMigrationAuthorized: (
+    target: CfcAddress,
+    transition: CfcScalarTypeTransition,
+  ) => boolean,
 ): Map<string, JSONSchema> => {
   const result = new Map<string, JSONSchema>();
   for (const input of inputs) {
@@ -1123,6 +1130,8 @@ const candidateSchemasByTarget = (
         ? existing
         : mergeCfcSchemaEnvelopes(existing, candidate, {
           generatedOutputPaths: generatedOutputPaths.get(key),
+          allowIncompatibleScalarTypeChange: (transition) =>
+            scalarMigrationAuthorized(input.target, transition),
         }), // Guaranteed interned.
     );
   }
@@ -5828,6 +5837,60 @@ export const prepareBoundaryCommit = (
     input.kind === "custom" &&
     input.name === CFC_SOURCE_SCHEMA_MIGRATION_INPUT
   );
+  const scalarMigrations = new Map<
+    string,
+    Omit<CfcScalarMigrationAuthorization, "target">
+  >();
+  for (const input of state.writePolicyInputs) {
+    if (
+      input.kind !== "custom" ||
+      input.name !== CFC_CONFIRMED_SCALAR_MIGRATION_INPUT ||
+      input.target === undefined ||
+      !isObjectOrArray(input.value) ||
+      !Array.isArray(input.value.transitions)
+    ) {
+      continue;
+    }
+    const transitions = input.value.transitions.flatMap((value) =>
+      isObjectOrArray(value) &&
+        Array.isArray(value.path) &&
+        value.path.every((segment) => typeof segment === "string") &&
+        Array.isArray(value.storedTypes) &&
+        value.storedTypes.every((type) => typeof type === "string") &&
+        Array.isArray(value.candidateTypes) &&
+        value.candidateTypes.every((type) => typeof type === "string")
+        ? [{
+          path: value.path as string[],
+          storedTypes: value.storedTypes as string[],
+          candidateTypes: value.candidateTypes as string[],
+        }]
+        : []
+    );
+    if (transitions.length !== input.value.transitions.length) continue;
+    scalarMigrations.set(targetKey(input.target), {
+      transitions,
+    });
+  }
+  const scalarMigrationAuthorized = (
+    target: CfcAddress,
+    transition: CfcScalarTypeTransition,
+  ): boolean => {
+    const authorization = scalarMigrations.get(targetKey(target));
+    return authorization !== undefined &&
+      authorization.transitions.some((candidate) =>
+        deepEqual(candidate, transition)
+      );
+  };
+  const scalarMigrationAggregationAuthorized = (
+    target: CfcAddress,
+    transition: CfcScalarTypeTransition,
+  ): boolean =>
+    scalarMigrationAuthorized(target, transition) ||
+    (scalarMigrations.get(targetKey(target))?.transitions.some((candidate) =>
+      deepEqual(candidate.path, transition.path) &&
+      deepEqual(candidate.storedTypes, transition.candidateTypes) &&
+      deepEqual(candidate.candidateTypes, transition.storedTypes)
+    ) ?? false);
   // D4: per-target last-overlapping-write bounds over the ordered write-
   // attempt log, built once for the whole boundary pass. Each protected
   // write's input checks quantify over the reads in ITS prefix (see
@@ -5884,6 +5947,7 @@ export const prepareBoundaryCommit = (
       return stored.status === "loaded" ? stored.schema : undefined;
     },
     generatedOutputPaths,
+    scalarMigrationAggregationAuthorized,
   );
   const schemaWrites = schemaWritesByTarget(state.writePolicyInputs);
   const writeAuthorIdentities = writePolicyIdentitiesByTarget(
@@ -6150,6 +6214,8 @@ export const prepareBoundaryCommit = (
           : mergeCfcSchemaEnvelopes(storedSchema, schema, {
             generatedOutputPaths: generatedOutputPaths.get(key),
             allowAddIntegrityWeakening: sourceSchemaMigration,
+            allowIncompatibleScalarTypeChange: (transition) =>
+              scalarMigrationAuthorized({ ...target, path: [] }, transition),
           });
       } catch (error) {
         // Tag the additive-required migration incompatibility with a stable
