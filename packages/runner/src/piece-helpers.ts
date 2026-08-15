@@ -2,25 +2,28 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
+
+import { getLogger } from "../../utils/src/logger.ts";
 // Relative import (not "@commonfabric/utils/types") for the same rollup
 // reason as traverse.ts.
 import { isObjectOrArray } from "../../utils/src/types.ts";
-import { getLogger } from "../../utils/src/logger.ts";
+import type { JSONSchema, Pattern } from "./builder/types.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
+import type { RuntimeProgram } from "./harness/types.ts";
+import { resolveLink } from "./link-resolution.ts";
 import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
 import {
   normalizePatternSource,
   systemPatternSource,
 } from "./pattern-source-scheme.ts";
-import { resolveLink } from "./link-resolution.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
-import type { MemorySpace } from "./storage/interface.ts";
-import type { JSONSchema, Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
-import type { RuntimeProgram } from "./harness/types.ts";
+import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "./storage/interface.ts";
 
 const logger = getLogger("piece-helpers");
 

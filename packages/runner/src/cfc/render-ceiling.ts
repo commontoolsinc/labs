@@ -1,18 +1,19 @@
 import { CFC_ATOM_TYPE, type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
-import type { CfcConfClause } from "./clause.ts";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import type { CfcConfClause } from "./clause.ts";
+import { clauseAlternatives } from "./clause.ts";
+import {
+  type CfcGrantResolver,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
 import {
   buildCfcPolicySnapshot,
   type ExchangeRule,
   type PolicySnapshot,
 } from "./policy.ts";
-import {
-  type CfcGrantResolver,
-  evaluateExchangeRules,
-} from "./exchange-eval.ts";
-import { clauseAlternatives } from "./clause.ts";
-import { type CfcTrustConfig, createTrustResolver } from "./trust.ts";
 import type { SpaceMembershipProvider } from "./space-membership.ts";
+import { type CfcTrustConfig, createTrustResolver } from "./trust.ts";
 
 /**
  * Display-sink render ceiling resolution (Epic H3b of

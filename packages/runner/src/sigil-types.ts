@@ -4,13 +4,13 @@ import type {
   JSONValue,
   LinkScope,
 } from "@commonfabric/api";
-import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { URI } from "@commonfabric/memory/interface";
 import {
   LINK_V1_TAG,
   type LinkRef,
   type WireLinkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+
 import { isLinkScope } from "./scope.ts";
 
 export type { URI } from "@commonfabric/memory/interface";

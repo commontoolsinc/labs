@@ -1,5 +1,39 @@
-import { type Pattern } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import { type Pattern } from "../builder/types.ts";
+import { type AddCancel } from "../cancel.ts";
+import { type Cell } from "../cell.ts";
+import { resolveLink } from "../link-resolution.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import type { RawBuiltinReturnType } from "../module.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../storage/reactivity-log.ts";
+import {
+  listElementKeys,
+  releaseRemovedElements,
+} from "./list-element-keys.ts";
+import { listElementLink } from "./list-element-link.ts";
+import {
+  type ElementRun,
+  type SetupRecord,
+  trackListSetupRollback,
+} from "./list-element-rollback.ts";
+import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { issueResultContainerSetup } from "./list-result-container.ts";
+import { listResultSchema } from "./list-result-schema.ts";
+import { resolveOpPattern } from "./op-pattern-ref.ts";
+import {
+  exposedResultCell,
+  outputSpotFromBinding,
+  scopedCell,
+} from "./scope-policy.ts";
 
 const MAP_INPUT_SCHEMA = internSchema({
   type: "object",
@@ -22,37 +56,6 @@ const RESULT_PRESENCE_SCHEMA = internSchema({
   type: "array",
   items: { asCell: ["cell"], type: "unknown" },
 });
-
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import { type AddCancel } from "../cancel.ts";
-import type { Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { RawBuiltinReturnType } from "../module.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
-import { outputSpotFromBinding } from "./scope-policy.ts";
-import { listResultSchema } from "./list-result-schema.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
-import { issueResultContainerSetup } from "./list-result-container.ts";
-import { exposedResultCell, scopedCell } from "./scope-policy.ts";
-import { resolveLink } from "../link-resolution.ts";
-import { listElementLink } from "./list-element-link.ts";
-import {
-  listElementKeys,
-  releaseRemovedElements,
-} from "./list-element-keys.ts";
-import {
-  linkResolutionProbe,
-  machineryRead,
-} from "../storage/reactivity-log.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
-import {
-  type ElementRun,
-  type SetupRecord,
-  trackListSetupRollback,
-} from "./list-element-rollback.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
 

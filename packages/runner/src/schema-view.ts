@@ -40,19 +40,24 @@ import type {
   JSONSchemaObj,
   JSONSchemaTypes,
 } from "@commonfabric/api";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { toCell } from "./back-to-cell.ts";
+import { type Cell, createCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
   type CfcLabelView,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import { type Cell, createCell } from "./cell.ts";
-import { toCell } from "./back-to-cell.ts";
-import { type NormalizedFullLink } from "./link-utils.ts";
+import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import { isSigilLink, type NormalizedFullLink } from "./link-utils.ts";
 import { type Runtime } from "./runtime.ts";
+import { processDefaultValue, validateAndTransform } from "./schema.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   canBranchMatch,
@@ -62,11 +67,6 @@ import {
   SchemaObjectTraverser,
   schemaTypeMatchesValueType,
 } from "./traverse.ts";
-import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
-import { isSigilLink } from "./link-utils.ts";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
-import { processDefaultValue, validateAndTransform } from "./schema.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("schema-view", { enabled: false, level: "warn" });
 

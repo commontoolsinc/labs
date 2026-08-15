@@ -1,5 +1,12 @@
+import {
+  CFC_ATOM_TYPE,
+  type CfcAtom,
+  type CfcModulePolicyRefAtom,
+} from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
+
 import {
   type AtomPatternBindings,
   conceptGuard,
@@ -8,12 +15,6 @@ import {
   matchAtomPattern,
   matchAtomPatternAgainstAtoms,
 } from "./atom-pattern.ts";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import {
-  CFC_ATOM_TYPE,
-  type CfcAtom,
-  type CfcModulePolicyRefAtom,
-} from "@commonfabric/api/cfc";
 import {
   type CfcConfClause,
   type CfcOrClause,
@@ -21,11 +22,11 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
-import type { IFCLabel } from "./label-view-core.ts";
 import {
   commitmentAwareEquals,
   isCfcFieldCommitment,
 } from "./label-representation.ts";
+import type { IFCLabel } from "./label-view-core.ts";
 import {
   type ExchangeRule,
   lowerCfcPolicyTemplateRules,

@@ -7,12 +7,14 @@
  * the consumer must (a) inherit the labeled column's confidentiality AND (b)
  * resolve the link column to a live Cell — through the real toolshed server.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
-import { Runtime } from "../src/index.ts";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+
+import app from "../../toolshed/app.ts";
 import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
+import { Runtime } from "../src/index.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 async function runTest(base: URL) {
   const account = await Identity.fromPassphrase(

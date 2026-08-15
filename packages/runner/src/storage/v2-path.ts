@@ -1,5 +1,5 @@
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type { FabricValue } from "@commonfabric/api";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export type ReadPathOptions = {

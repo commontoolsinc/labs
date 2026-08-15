@@ -1,18 +1,23 @@
-import { LRUCache } from "@commonfabric/utils/cache";
 import {
   type VNode,
   type WishParams,
   type WishState,
   type WishTag,
 } from "@commonfabric/api";
-import { h } from "@commonfabric/html";
+import {
+  deepFrozenCloneAndInternSchema,
+  hashSchema,
+  internSchema,
+} from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
+import { h } from "@commonfabric/html";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
-import { type Cell } from "../cell.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { type Action, type ReactivityLog } from "../scheduler.ts";
-import { type Runtime, spaceCellSchema } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { LRUCache } from "@commonfabric/utils/cache";
+import { extractHashtags } from "@commonfabric/utils/hashtags";
+import { getLogger } from "@commonfabric/utils/logger";
+
 import {
   type CellScope,
   type JSONSchema,
@@ -20,24 +25,20 @@ import {
   type Pattern,
   UI,
 } from "../builder/types.ts";
-import {
-  deepFrozenCloneAndInternSchema,
-  hashSchema,
-  internSchema,
-} from "@commonfabric/data-model/schema-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { extractHashtags } from "@commonfabric/utils/hashtags";
+import { type Cell } from "../cell.ts";
 import { getPatternEnvironment } from "../env.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 import {
   createSigilLinkFromParsedLink,
   getMetaLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
-import { setRunnableName } from "../runner-utils.ts";
-import { isCellScope, narrowestScope } from "../scope.ts";
-import { scopedCell } from "./scope-policy.ts";
 import { isLegacyPieceRegistryRoot } from "../piece-helpers.ts";
+import { setRunnableName } from "../runner-utils.ts";
+import { type Runtime, spaceCellSchema } from "../runtime.ts";
+import { type Action, type ReactivityLog } from "../scheduler.ts";
+import { isCellScope, narrowestScope } from "../scope.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,

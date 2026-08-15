@@ -6,6 +6,7 @@
 // Spec: docs/specs/sqlite-builtin/06-cfc.md ("Read — re-derive per row,
 // attach, ceiling"; "Fail-closed rules").
 
+import type { CfcAtom, CfcAtomObject } from "@commonfabric/api/cfc";
 import {
   atomKey,
   evaluateRowLabel,
@@ -15,12 +16,11 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
-import type { CfcAtomObject } from "@commonfabric/api/cfc";
-import type { CfcAtom } from "@commonfabric/api/cfc";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
+
 import type { CfcConfClause } from "../../cfc/clause.ts";
-import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 import { clauseAlternatives } from "../../cfc/clause.ts";
+import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 
 interface ResultColumn {
   output: string;

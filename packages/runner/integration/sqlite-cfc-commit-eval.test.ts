@@ -14,11 +14,13 @@
  *    (the old row survives), a valid flip lands and the read side re-derives
  *    the row's label from the NEW value.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
+
+import app from "../../toolshed/app.ts";
+import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 import { Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 
 async function runTest(base: URL) {
   const account = await Identity.fromPassphrase(

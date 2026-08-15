@@ -4,8 +4,10 @@
  * Integration test: verify writable-array `.push()` works against the real
  * remote memory transport and toolshed app.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
+
+import app from "../../toolshed/app.ts";
 import { type JSONSchema, Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 

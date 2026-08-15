@@ -1,6 +1,18 @@
-import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  isFabricPrimitiveSchemaType,
+  type JSONSchemaObj,
+  type SchemaPathSelector,
+} from "@commonfabric/api";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   hashSchema,
   internSchema,
@@ -8,21 +20,19 @@ import {
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import {
-  FABRIC_SPECIAL_OBJECT_BRAND,
-  isFabricPrimitiveSchemaType,
-  type JSONSchemaObj,
-  type SchemaPathSelector,
-} from "@commonfabric/api";
+  DEFAULT_SELECTOR,
+  internPathSelector,
+  internSchemaPairAsKey,
+  REJECTING_SELECTOR,
+  schemaWithProperties,
+} from "@commonfabric/data-model/schema-utils";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+
+import { getLogger } from "../../utils/src/logger.ts";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
 // but rollup has issues
 import {
@@ -32,15 +42,6 @@ import {
   isObjectOrArray,
   isString,
 } from "../../utils/src/types.ts";
-import { getLogger } from "../../utils/src/logger.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import {
-  DEFAULT_SELECTOR,
-  internPathSelector,
-  internSchemaPairAsKey,
-  REJECTING_SELECTOR,
-  schemaWithProperties,
-} from "@commonfabric/data-model/schema-utils";
 import type {
   CellScope,
   JSONObject,
@@ -48,13 +49,24 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import type { LastNode } from "./link-resolution.ts";
+import {
+  type IMemorySpaceValueAddress,
+  isSigilLink,
+  isWriteRedirectLink,
+  type ValuePath,
+} from "./link-types.ts";
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
+import { type CellLinkRefPayload, SigilLink } from "./sigil-types.ts";
 import type {
   Activity,
   CommitError,
+  IAttestation,
   IExtendedStorageTransaction,
+  IMemoryAddress,
   IMemorySpaceAddress,
   InactiveTransactionError,
   IReadOptions,
@@ -71,16 +83,6 @@ import {
   ignoreReadForScheduling,
 } from "./storage/reactivity-log.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
-import {
-  type IMemorySpaceValueAddress,
-  isSigilLink,
-  isWriteRedirectLink,
-  type ValuePath,
-} from "./link-types.ts";
-import type { LastNode } from "./link-resolution.ts";
-import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
-import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { type CellLinkRefPayload, SigilLink } from "./sigil-types.ts";
 import {
   recordTraverseInvocation,
   wrapTxForTraverseCapture,

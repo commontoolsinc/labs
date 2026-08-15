@@ -1,8 +1,9 @@
+import { hashOf } from "@commonfabric/data-model/value-hash";
+
 import type { Module } from "../builder/types.ts";
 import type { HarnessedFunction } from "../harness/types.ts";
-import type { ImplementationIdentity } from "./types.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
+import type { ImplementationIdentity } from "./types.ts";
 import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 
 /**
