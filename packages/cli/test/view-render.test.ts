@@ -1,15 +1,16 @@
 import { assert, assertEquals } from "@std/assert";
-import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
+
+import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
+import { renderLineColored } from "../lib/view/highlight.ts";
 import {
+  _internal,
   labeledDiffMetadataLine,
   overlayBox,
   renderFrame,
   type ViewState,
 } from "../lib/view/render.ts";
-import { _internal } from "../lib/view/render.ts";
-import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
-import { renderLineColored } from "../lib/view/highlight.ts";
 import { lineBg, styleFor, ui } from "../lib/view/theme.ts";
+import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
 
 function baseView(over: Partial<ViewState> = {}): ViewState {
   return {

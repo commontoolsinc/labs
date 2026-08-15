@@ -1,4 +1,10 @@
 import { assert, assertEquals } from "@std/assert";
+
+import {
+  COMMONFABRIC_BUILDER_EXPORT_NAMES,
+  COMMONFABRIC_CALL_EXPORT_NAMES,
+} from "@commonfabric/ts-transformers/runtime-registry";
+
 import {
   BUILDER_NAMES,
   CALL_NAMES,
@@ -12,10 +18,6 @@ import {
   SYNTHETIC_MODULE_CALLBACK_PREFIX,
   SYNTHETIC_PATTERN_HOIST_PREFIX,
 } from "../lib/view/languages/typescript/vocab.ts";
-import {
-  COMMONFABRIC_BUILDER_EXPORT_NAMES,
-  COMMONFABRIC_CALL_EXPORT_NAMES,
-} from "@commonfabric/ts-transformers/runtime-registry";
 
 Deno.test("vocab: builders and calls come straight from the transformer registry", () => {
   // Drift guard: the pager's name sets ARE the transformer's registry sets.

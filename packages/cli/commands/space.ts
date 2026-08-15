@@ -19,6 +19,7 @@
 import { Command, ValidationError } from "@cliffy/command";
 import {
   clonePaths,
+  contentFingerprint,
   createClone,
   openSpace,
   readManifest,
@@ -27,7 +28,7 @@ import {
   verifyClone,
   type VerifyResult,
 } from "@commonfabric/state-inspector";
-import { contentFingerprint } from "@commonfabric/state-inspector";
+
 import { hasJsonArgument } from "../lib/json-output.ts";
 
 function out(json: boolean, data: unknown, render: () => void): void {

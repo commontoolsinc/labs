@@ -1,11 +1,12 @@
-import { createRouter } from "@/lib/create-app.ts";
-import env from "@/env.ts";
 import { bodyLimit } from "@hono/hono/body-limit";
-import { requireFirstPartyHttpAuth } from "@/middlewares/first-party-http-auth.ts";
-import { createRateLimiter, rateLimit } from "@/middlewares/rate-limit.ts";
+
 import { ingestGate } from "./gate.ts";
 import * as handlers from "./ingest-channels.handlers.ts";
 import * as routes from "./ingest-channels.routes.ts";
+import env from "@/env.ts";
+import { createRouter } from "@/lib/create-app.ts";
+import { requireFirstPartyHttpAuth } from "@/middlewares/first-party-http-auth.ts";
+import { createRateLimiter, rateLimit } from "@/middlewares/rate-limit.ts";
 
 const router = createRouter();
 

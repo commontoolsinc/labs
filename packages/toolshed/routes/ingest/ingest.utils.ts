@@ -1,12 +1,13 @@
+import { sha256 } from "@commonfabric/content-hash";
 import type { JSONSchema, MemorySpace, Runtime } from "@commonfabric/runner";
 import { isLink } from "@commonfabric/runner";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+
 import {
   custodyIngest,
   durableSet,
   type VouchedChannel,
 } from "@/lib/custody-ingest.ts";
-import { sha256 } from "@commonfabric/content-hash";
-import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 
 // The `journal` sink of a vouched ingest channel: a durable, append-only,
 // ExternalIngest-marked record log. This is the generic capability — location

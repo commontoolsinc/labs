@@ -18,11 +18,15 @@
  * pure parser remains the authoritative, dependency-free path for everything
  * else.
  */
-import ts from "typescript";
-import { dirname, fromFileUrl, isAbsolute, join, relative } from "@std/path";
+
 import { parse as parseJsonc } from "@std/jsonc";
-import type { Line } from "../../model.ts";
+import { dirname, fromFileUrl, isAbsolute, join, relative } from "@std/path";
+
+import ts from "typescript";
+
+import { cpLen } from "../../ansi.ts";
 import type { DiffMaps } from "../../diffdoc.ts";
+import type { Line } from "../../model.ts";
 import type {
   DefTarget,
   Semantics,
@@ -33,7 +37,6 @@ import {
   languageForFile,
   readOnlyReasonFor,
 } from "../language.ts";
-import { cpLen } from "../../ansi.ts";
 
 interface SectionFile {
   /** Virtual file name (the section header path, or `fileName`). */

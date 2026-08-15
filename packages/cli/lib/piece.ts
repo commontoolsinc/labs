@@ -1,7 +1,29 @@
-import { createSession, isDID, Session } from "@commonfabric/identity";
 import { ensureDir } from "@std/fs";
-import { caseFold } from "unicode-case-folding";
-import { loadIdentity } from "./identity.ts";
+import { common, dirname, join } from "@std/path";
+
+import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { codecOf } from "@commonfabric/data-model/codec-common";
+import {
+  FabricPrimitive,
+  FabricSpecialObject,
+} from "@commonfabric/data-model/fabric-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { createSession, isDID, Session } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { setLLMUrl } from "@commonfabric/llm";
+import {
+  assignSlug,
+  pieceId,
+  resolvePieceAddress as resolveStoredPieceAddress,
+  resolveSlugTargetCell,
+  setSlugLink,
+  SlugResolutionError,
+} from "@commonfabric/piece";
+import {
+  type PatternCompatibilityReport,
+  type PiecePatternRef,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 import {
   Cell,
   deepEqual,
@@ -37,36 +59,14 @@ import {
   resolveCfcSchemaRefs,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import type { CellScope, JSONSchema } from "@commonfabric/api";
-import { utf8Compare } from "@commonfabric/utils/utf8";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
-import {
-  assignSlug,
-  pieceId,
-  resolvePieceAddress as resolveStoredPieceAddress,
-  resolveSlugTargetCell,
-  setSlugLink,
-  SlugResolutionError,
-} from "@commonfabric/piece";
-import {
-  type PatternCompatibilityReport,
-  type PiecePatternRef,
-  PiecesController,
-} from "@commonfabric/piece/ops";
-import { common, dirname, join } from "@std/path";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { setLLMUrl } from "@commonfabric/llm";
-import {
-  FabricPrimitive,
-  FabricSpecialObject,
-} from "@commonfabric/data-model/fabric-value";
-import { codecOf } from "@commonfabric/data-model/codec-common";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
-import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+import { caseFold } from "unicode-case-folding";
+
 import { isHandlerCell, isStreamValue } from "../../fuse/callables.ts";
-import { throwOnSpaceAuthorizationError } from "./utils.ts";
+import { executeCallableCommand } from "./callable-command.ts";
 import {
   callableCommandSpec,
   type CallableExecutionDeps,
@@ -79,23 +79,25 @@ import {
   type InvocationOutcome,
   runtimeErrorLog,
 } from "./callable.ts";
-import { executeCallableCommand } from "./callable-command.ts";
+import {
+  type CellSelection,
+  CellSelectionError,
+  deriveSelectedValue,
+} from "./cell-selection.ts";
+import { cliCommand } from "./cli-name.ts";
 import {
   type ExecCommandSpec,
   type ParsedExecArgs,
   renderExecHelpJson,
   renderPieceCallHelp,
 } from "./exec-schema.ts";
-import { cliCommand } from "./cli-name.ts";
-import { deriveDiskHandleId } from "./sqlite-source.ts";
-import { startVersionCheck } from "./version-check.ts";
+import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
+import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
-import {
-  type CellSelection,
-  CellSelectionError,
-  deriveSelectedValue,
-} from "./cell-selection.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
+import { deriveDiskHandleId } from "./sqlite-source.ts";
+import { throwOnSpaceAuthorizationError } from "./utils.ts";
+import { startVersionCheck } from "./version-check.ts";
 
 export interface EntryConfig {
   mainPath: string;

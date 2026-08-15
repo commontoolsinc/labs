@@ -28,6 +28,12 @@
  */
 
 import {
+  createSession,
+  Identity,
+  type KeyPairRaw,
+} from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
   type Cell,
   type ConsoleHandler,
   ConsoleMethod,
@@ -41,25 +47,20 @@ import {
   TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { defer } from "@commonfabric/utils/defer";
+
+import { assertionOutcome } from "./assert-record.ts";
 import {
   flushDefaultModuleByteCache,
   getDefaultModuleByteCache,
 } from "./compile-byte-cache.ts";
-import { buildActionEvent } from "./trusted-test-event.ts";
 import {
   appendLoggerDeltaMessages,
   type LoggerErrorWarnSnapshot,
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
-import {
-  createSession,
-  Identity,
-  type KeyPairRaw,
-} from "@commonfabric/identity";
-import { defer } from "@commonfabric/utils/defer";
-import { assertionOutcome } from "./assert-record.ts";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 
 export interface WorkerRequest {
   id: number;

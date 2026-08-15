@@ -25,7 +25,12 @@
  * use the --root option to specify a common ancestor directory.
  */
 
+import { basename } from "@std/path";
+
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
@@ -49,28 +54,6 @@ import type {
   Stream,
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
-import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
-import { assertionOutcome } from "./assert-record.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { basename } from "@std/path";
-import { timeout } from "@commonfabric/utils/sleep";
-import {
-  appendLoggerDeltaMessages,
-  snapshotLoggerErrorWarnCounts,
-} from "./console-capture.ts";
-import { buildActionEvent } from "./trusted-test-event.ts";
-import {
-  multiUserDescriptorMeta,
-  runMultiUserTestPattern,
-} from "./multi-user-test-runner.ts";
-import {
-  type FetchMockEntry,
-  makeMockFetch,
-  readFetchMocks,
-} from "./fetch-mock.ts";
-import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import {
   type CDFPoint,
   getLogger,
@@ -81,6 +64,25 @@ import {
   resetAllTimingBaselines,
   resetAllTimingStats,
 } from "@commonfabric/utils/logger";
+import { timeout } from "@commonfabric/utils/sleep";
+
+import { assertionOutcome } from "./assert-record.ts";
+import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
+import {
+  appendLoggerDeltaMessages,
+  snapshotLoggerErrorWarnCounts,
+} from "./console-capture.ts";
+import {
+  type FetchMockEntry,
+  makeMockFetch,
+  readFetchMocks,
+} from "./fetch-mock.ts";
+import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
+import {
+  multiUserDescriptorMeta,
+  runMultiUserTestPattern,
+} from "./multi-user-test-runner.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 
 const phaseLogger = getLogger("test-runner-phase", {
   enabled: false,

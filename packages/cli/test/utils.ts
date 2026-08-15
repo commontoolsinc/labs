@@ -1,6 +1,7 @@
-import { decode, encode } from "@commonfabric/utils/encoding";
-import { join } from "@std/path";
 import { expect } from "@std/expect/expect";
+import { join } from "@std/path";
+
+import { decode, encode } from "@commonfabric/utils/encoding";
 
 // Decodes a `Uint8Array` into an array of strings for each line.
 export function bytesToLines(stream: Uint8Array): string[] {

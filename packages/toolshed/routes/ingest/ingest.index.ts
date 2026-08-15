@@ -1,8 +1,9 @@
-import { createRouter } from "@/lib/create-app.ts";
+import { bodyLimit } from "@hono/hono/body-limit";
+import { cors } from "@hono/hono/cors";
+
 import * as handlers from "./ingest.handlers.ts";
 import * as routes from "./ingest.routes.ts";
-import { cors } from "@hono/hono/cors";
-import { bodyLimit } from "@hono/hono/body-limit";
+import { createRouter } from "@/lib/create-app.ts";
 
 const router = createRouter();
 

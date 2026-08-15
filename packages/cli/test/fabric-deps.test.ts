@@ -1,12 +1,14 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
+import { InMemoryProgram } from "@commonfabric/js-compiler";
 import { entityIdFrom, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { slugIdForSpace } from "../../runner/src/slugs.ts";
-import { InMemoryProgram } from "@commonfabric/js-compiler";
-import { pinProgramFabricImports } from "../lib/fabric-deps.ts";
 import { collectLocalProgram } from "../lib/dev.ts";
+import { pinProgramFabricImports } from "../lib/fabric-deps.ts";
 import { cf, stripAnsi } from "./utils.ts";
 
 const signer = await Identity.fromPassphrase("cli fabric deps test");

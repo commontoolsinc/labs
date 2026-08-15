@@ -1,6 +1,8 @@
-import { Command } from "@cliffy/command";
-import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
+import { resolve } from "@std/path";
+
+import { Command } from "@cliffy/command";
+
 import { cliText } from "../lib/cli-name.ts";
 import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
