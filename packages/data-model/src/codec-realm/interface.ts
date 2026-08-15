@@ -1,3 +1,14 @@
+/**
+ * What the realm-crossing format is made of: the transport type a value takes
+ * on its way across, the shape a tag wears in it, and the descriptor a
+ * registry is built over.
+ *
+ * These sit apart from the engine because they are what a caller names. A
+ * caller holding an encoded value has its type from here; a caller assembling
+ * a registry of its own passes the descriptor from here. The engine is the
+ * thing that acts on them, and needs no mention to use either.
+ */
+
 import type { WireFormat } from "@/codec-interface/interface.ts";
 import { REALM_CODEC } from "@/codec-interface/interface.ts";
 

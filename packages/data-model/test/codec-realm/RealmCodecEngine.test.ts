@@ -1,11 +1,13 @@
-// Tests for the realm-crossing wire format: the engine, the entry points over
-// it, and the kind each participating class declares.
-//
-// The round trips go through a real `Worker`, not `structuredClone()` in this
-// realm. Cloning runs the same serialization algorithm, so it would prove the
-// walk is invertible -- but this format exists to carry values to another
-// realm, and only the far side can show that what arrives there is a live
-// instance of the right class rather than a shape that happens to match.
+/**
+ * Tests for the realm-crossing wire format: the engine, the entry points over
+ * it, and the kind each participating class declares.
+ *
+ * The round trips go through a real `Worker`, not `structuredClone()` in this
+ * realm. Cloning runs the same serialization algorithm, so it would prove the
+ * walk is invertible -- but this format exists to carry values to another
+ * realm, and only the far side can show that what arrives there is a live
+ * instance of the right class rather than a shape that happens to match.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -475,8 +477,15 @@ describe("RealmCodecEngine", () => {
         hash: "FabricHash",
         regexp: "FabricRegExp",
       });
+      // Content as well as class. A transposed field or a dropped value would
+      // leave every `classes` entry correct, so the class check alone cannot
+      // see it.
       expect(report.facts?.bytes).toEqual([1, 2, 250]);
       expect(report.facts?.nsec).toBe(1234567890123456789n);
+      expect(report.facts?.days).toBe(20_000n);
+      expect(report.facts?.hashTag).toBe("fid1");
+      expect(report.facts?.hashBytes).toEqual([9, 8, 7]);
+      expect(report.facts?.regexpParts).toEqual(["es2025", "ab+c", "gi"]);
     });
 
     it("carries what a plain `postMessage()` would lose or mangle", async () => {

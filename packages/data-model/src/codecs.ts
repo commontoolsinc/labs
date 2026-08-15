@@ -3,10 +3,11 @@
  * decode with this package's own set of fabric classes, for callers that want
  * the standard answer rather than a configured one.
  *
- * This sits above `codec-json` and `codec-common`, which carry the format and
- * the mechanism and know nothing about which classes participate. Nothing in
- * either of those directories may import from here; the dependency runs one
- * way, and a convenience import in the other direction would make it a cycle.
+ * This sits above `codec-json`, `codec-realm` and `codec-common`, which carry
+ * the formats and the mechanism and know nothing about which classes
+ * participate. Nothing in those directories may import from here; the
+ * dependency runs one way, and a convenience import in the other direction
+ * would make it a cycle.
  *
  * Both class rosters are imported at module scope and the registry is built at
  * first import, so this module pulls in every class that participates in the

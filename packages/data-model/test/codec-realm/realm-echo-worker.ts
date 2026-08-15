@@ -41,6 +41,23 @@ self.onmessage = (ev: MessageEvent) => {
             ? [...(value.bytes as { slice(): Uint8Array }).slice()]
             : undefined,
           nsec: (value.nsec as { value: bigint } | undefined)?.value,
+          // Content for every class that carries any, not just the two that
+          // happened to be checked first: a class can arrive with the right
+          // constructor and the wrong data, and only a value check sees it.
+          days: (value.days as { value: bigint } | undefined)?.value,
+          hashTag: (value.hash as { tag: string } | undefined)?.tag,
+          hashBytes: (value.hash as { bytes: Uint8Array } | undefined)
+            ? [...(value.hash as { bytes: Uint8Array }).bytes]
+            : undefined,
+          regexpParts: (value.regexp as
+              | { flavor: string; source: string; flags: string }
+              | undefined)
+            ? [
+              (value.regexp as { flavor: string }).flavor,
+              (value.regexp as { source: string }).source,
+              (value.regexp as { flags: string }).flags,
+            ]
+            : undefined,
           holeKeys: Array.isArray(value.sparse)
             ? Object.keys(value.sparse)
             : undefined,
