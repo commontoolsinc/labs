@@ -338,12 +338,17 @@ export function resolveSourceLocationFromStack(
  *
  * @returns A module node factory that also serializes as module.
  */
+// The first overload returns a BARE function type so that a generic
+// implementation's type parameter reaches the caller — see `LiftFunction` in
+// `packages/api/index.ts` for what TypeScript requires of that shape and what
+// declaring it costs. The two overloads below keep `ModuleFactory`: neither
+// carries a type parameter through, so neither has anything to preserve.
 export function lift<T, R>(
   implementation: (input: T) => R,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<StripCell<T>, R>;
+): (inputs: FactoryInput<StripCell<T>>) => Reactive<R>;
 export function lift<T>(
   implementation: (input: T) => any,
   argumentSchema?: JSONSchema,
