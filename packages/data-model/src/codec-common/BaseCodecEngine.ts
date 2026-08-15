@@ -83,9 +83,13 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * Encodes a fabric value into this format's serialized form, ready to cross
    * whatever boundary the format exists for.
    *
-   * The result carries a marker identifying the format, so that a receiver can
-   * tell one of these from an arbitrary value arriving on the same channel.
-   * What that marker is belongs to the format.
+   * Whether the result identifies itself is the format's to decide, and the
+   * decision follows from its boundary. A form that is persisted, or that
+   * shares a channel with values this system did not write, needs a marker so
+   * a receiver can tell one of these from anything else arriving; a form
+   * constructed, handed straight to a transport and decoded on the far side
+   * has nothing for a marker to distinguish it from. A format that carries one
+   * says what it is, and one that does not says why not.
    *
    * @throws If `value` holds something the format cannot carry: a
    *   `FabricSpecialObject` whose class no codec in the registry claims, a
@@ -110,8 +114,10 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * a value survives a round trip through a reader that does not know the
    * type.
    *
-   * @throws If `data` does not carry this format's marker, or if a codec
-   *   rejects a state and this instance is not lenient.
+   * @throws If `data` is not this format's serialized form -- which a format
+   *   carrying a marker can tell from the marker alone, and one without can
+   *   only tell from meeting something it never emits -- or if a codec rejects
+   *   a state and this instance is not lenient.
    */
   abstract decode(
     data: SerializedForm,
