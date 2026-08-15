@@ -171,7 +171,7 @@ const localDefinitionNamesInScope = (
  * Namespace one flattened schema scope so its local refs cannot bind to names
  * owned by another scope. Children with their own `$defs` remain independent.
  */
-const namespaceLocalDefinitionScope = (
+export const namespaceLocalDefinitionScope = (
   schema: JSONSchemaObj,
   definitions: SchemaDefinitions,
   reservedNames: ReadonlySet<string>,
@@ -780,11 +780,14 @@ const resolveCfcSchemaRefsUncached = (
         ? resolved
         : fullSchema;
     const resolvedRoot = cfcSchemaChildRoot(resolved, inheritedRoot);
-    if (Object.keys(rest).length > 0) {
+    const definedRest = Object.fromEntries(
+      Object.entries(rest).filter(([, value]) => value !== undefined),
+    ) as JSONSchemaObj;
+    if (Object.keys(definedRest).length > 0) {
       // Delay ref-site siblings until the referenced target's own ref chain is
       // resolved in its local definition scope. Unwinding then establishes
       // the ref-site `$defs` scope without rebinding an intermediate target.
-      const siblings = rest as JSONSchemaObj;
+      const siblings = definedRest;
       pendingSiblings.push({
         schema: siblings,
         root: cfcSchemaChildRoot(siblings, fullSchema),

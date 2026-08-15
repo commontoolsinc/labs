@@ -340,6 +340,62 @@ describe("CFC UI contract matching", () => {
       },
     }]);
   });
+
+  it("resolves a property root reference against its own definitions", () => {
+    const contracts = uiContractsFromSchema({
+      type: "object",
+      properties: {
+        action: {
+          $ref: "#/$defs/Action",
+          $defs: {
+            Action: trustedPatternUiActionSchema,
+          },
+        },
+      },
+    });
+
+    expect(contracts).toEqual([{
+      path: ["action"],
+      contract: {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      },
+    }]);
+  });
+
+  it("tracks repeated local reference names in separate definition scopes", () => {
+    const contracts = uiContractsFromSchema({
+      $ref: "#/$defs/Action",
+      $defs: {
+        Action: {
+          type: "object",
+          properties: {
+            nested: {
+              type: "object",
+              properties: {
+                action: { $ref: "#/$defs/Action" },
+              },
+              $defs: {
+                Action: trustedPatternUiActionSchema,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(contracts).toEqual([{
+      path: ["nested", "action"],
+      contract: {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      },
+    }]);
+  });
 });
 
 describe("CFC trusted UI event enforcement", () => {

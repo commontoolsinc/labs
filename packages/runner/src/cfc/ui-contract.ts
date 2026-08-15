@@ -4,13 +4,19 @@ import {
 } from "@commonfabric/data-model/data-uri-codec";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
-import type { CellScope, FabricValue, JSONSchema } from "../builder/types.ts";
+import type {
+  CellScope,
+  FabricValue,
+  JSONSchema,
+  JSONSchemaObj,
+} from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { findAndInlineDataUriLinks } from "../data-uri.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CfcAddress } from "./types.ts";
+import { cfcSchemaChildRoot } from "./schema-refs.ts";
 
 type UiContractTrustRequirements = {
   trustedPattern?: string;
@@ -145,23 +151,27 @@ const trustRequirementsFromContract = (
   };
 };
 
+type LocalSchemaRefVisit = {
+  root: JSONSchemaObj;
+  ref: string;
+};
+
 const resolveLocalSchemaRef = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
-  seenRefs: Set<string>,
+  seenRefs: LocalSchemaRefVisit[],
 ): JSONSchema | undefined => {
   if (!isObjectOrArray(schema) || typeof schema.$ref !== "string") {
     return schema;
   }
   const ref = schema.$ref;
-  if (!ref.startsWith("#/") || seenRefs.has(ref)) {
+  if (
+    !ref.startsWith("#/") || !isObjectOrArray(root) ||
+    seenRefs.some((visit) => visit.root === root && visit.ref === ref)
+  ) {
     return schema;
   }
-  seenRefs.add(ref);
-
-  if (!isObjectOrArray(root)) {
-    return schema;
-  }
+  seenRefs.push({ root, ref });
 
   return ContextualFlowControl.resolveSchemaRefs(schema, root) ?? schema;
 };
@@ -169,11 +179,14 @@ const resolveLocalSchemaRef = (
 const uiContractFromSchemaInternal = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
-  seenRefs: Set<string>,
+  seenRefs: LocalSchemaRefVisit[],
 ): UiContract | undefined => {
-  const resolvedSchema = resolveLocalSchemaRef(schema, root, seenRefs);
+  const schemaRoot = schema === undefined || root === undefined
+    ? root
+    : cfcSchemaChildRoot(schema, root);
+  const resolvedSchema = resolveLocalSchemaRef(schema, schemaRoot, seenRefs);
   if (resolvedSchema !== schema) {
-    return uiContractFromSchemaInternal(resolvedSchema, root, seenRefs);
+    return uiContractFromSchemaInternal(resolvedSchema, schemaRoot, seenRefs);
   }
   if (
     !isObjectOrArray(resolvedSchema) || !isObjectOrArray(resolvedSchema.ifc) ||
@@ -208,21 +221,23 @@ const uiContractFromSchemaInternal = (
 
 export const uiContractFromSchema = (
   schema: JSONSchema | undefined,
-): UiContract | undefined =>
-  uiContractFromSchemaInternal(schema, schema, new Set());
+): UiContract | undefined => uiContractFromSchemaInternal(schema, schema, []);
 
 const uiContractsFromSchemaInternal = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
   path: string[],
-  seenRefs: Set<string>,
+  seenRefs: LocalSchemaRefVisit[],
 ): UiContractEntry[] => {
-  const branchRefs = new Set(seenRefs);
-  const resolvedSchema = resolveLocalSchemaRef(schema, root, branchRefs);
+  const branchRefs = [...seenRefs];
+  const schemaRoot = schema === undefined || root === undefined
+    ? root
+    : cfcSchemaChildRoot(schema, root);
+  const resolvedSchema = resolveLocalSchemaRef(schema, schemaRoot, branchRefs);
   if (resolvedSchema !== schema) {
     return uiContractsFromSchemaInternal(
       resolvedSchema,
-      root,
+      schemaRoot,
       path,
       branchRefs,
     );
@@ -231,14 +246,14 @@ const uiContractsFromSchemaInternal = (
     return [];
   }
 
-  const childRoot = isObjectOrArray(resolvedSchema.$defs)
+  const childRoot = schemaRoot === undefined
     ? resolvedSchema
-    : root;
+    : cfcSchemaChildRoot(resolvedSchema, schemaRoot);
   const entries: UiContractEntry[] = [];
   const contract = uiContractFromSchemaInternal(
     resolvedSchema,
     childRoot,
-    new Set(),
+    [],
   );
   if (contract !== undefined) {
     entries.push(uiContractEntry([...path], contract, resolvedSchema));
@@ -270,7 +285,7 @@ const uiContractsFromSchemaInternal = (
           definition as JSONSchema,
           definition as JSONSchema,
           [],
-          new Set(),
+          [],
         )
       )
       .map((entry) => entry.contract);
@@ -346,8 +361,7 @@ const uiContractsFromSchemaInternal = (
 
 export const uiContractsFromSchema = (
   schema: JSONSchema | undefined,
-): UiContractEntry[] =>
-  uiContractsFromSchemaInternal(schema, schema, [], new Set());
+): UiContractEntry[] => uiContractsFromSchemaInternal(schema, schema, [], []);
 
 export const trustedEventProvenanceMatchesUiContract = (
   provenance: unknown,

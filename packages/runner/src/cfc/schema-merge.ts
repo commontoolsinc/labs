@@ -9,11 +9,16 @@ import {
 } from "@commonfabric/utils/types";
 
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
-import { forEachSubschema } from "../schema-walk.ts";
+import { forEachSubschema, mapSubschemas } from "../schema-walk.ts";
 import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
-import { resolveCfcSchemaRefsOrThrow } from "./schema-refs.ts";
+import {
+  cfcSchemaChildRoot,
+  namespaceLocalDefinitionScope,
+  resolveCfcSchemaRefsOrThrow,
+  selectReferencedCfcSchemaDefs,
+} from "./schema-refs.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
 import type { CfcScalarTypeTransition } from "./types.ts";
 
@@ -498,15 +503,1133 @@ const mergeDefaults = (
   return candidate;
 };
 
+const mergeDefinitions = (
+  existing: JSONSchemaObj["$defs"],
+  candidate: JSONSchemaObj["$defs"],
+): JSONSchemaObj["$defs"] => {
+  if (existing === undefined) return candidate;
+  if (candidate === undefined) return existing;
+  if (existing === candidate) return existing;
+  return { ...existing, ...candidate };
+};
+
+const namespaceCandidateDefinitionsForMerge = (
+  existing: JSONSchemaObj,
+  candidate: JSONSchemaObj,
+): JSONSchemaObj => {
+  const existingDefinitions = existing.$defs!;
+  const candidateDefinitions = candidate.$defs!;
+  const generatedName = /^__cfc_ref_site_(\d+)_/;
+  const existingNames = Object.keys(existingDefinitions);
+  const generatedCount =
+    existingNames.filter((name) => generatedName.test(name)).length;
+  for (let start = 0; start <= generatedCount; start++) {
+    const reserved = new Set(
+      existingNames.filter((name) => {
+        const match = generatedName.exec(name);
+        return match === null || Number(match[1]) < start;
+      }),
+    );
+    const namespaced = namespaceLocalDefinitionScope(
+      candidate,
+      candidateDefinitions,
+      reserved,
+    );
+    const compatible = Object.entries(namespaced.$defs ?? {}).every(
+      ([name, definition]) =>
+        !Object.hasOwn(existingDefinitions, name) ||
+        deepEqual(existingDefinitions[name], definition),
+    );
+    if (compatible) return namespaced;
+  }
+  return namespaceLocalDefinitionScope(
+    candidate,
+    candidateDefinitions,
+    new Set(existingNames),
+  );
+};
+
+interface ActiveRefMerge {
+  existingRoot: JSONSchema;
+  candidateRoot: JSONSchema;
+  existingRef: string | undefined;
+  candidateRef: string | undefined;
+  definitionName: string;
+}
+
+interface SchemaMergeContext {
+  nextDefinition: number;
+  syntheticDefinitions: Record<string, JSONSchema>;
+  reservedDefinitionNames: Set<string>;
+}
+
+const schemaDefinitionNames = (schema: JSONSchema): Set<string> => {
+  const names = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isObjectOrArray(value)) return;
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "$defs" && isObjectOrArray(child)) {
+        for (const [name, definition] of Object.entries(child)) {
+          names.add(name);
+          visit(definition);
+        }
+      } else {
+        visit(child);
+      }
+    }
+  };
+  visit(schema);
+  return names;
+};
+
+const localDefinitionTarget = (
+  root: JSONSchema,
+  ref: string,
+): JSONSchema | undefined => {
+  const match = ref.match(/^#\/\$defs\/([^/]+)$/);
+  if (match === null || !isObjectOrArray(root)) return undefined;
+  const name = match[1].replaceAll("~1", "/").replaceAll("~0", "~");
+  return root.$defs?.[name];
+};
+
+interface ResolvedLocalDefinitionTarget {
+  scope: object;
+  target: JSONSchema;
+}
+
+const localDefinitionScopeIdentity = (
+  root: JSONSchema,
+): object | undefined =>
+  isObjectOrArray(root)
+    ? isObjectOrArray(root.$defs) ? root.$defs : root
+    : undefined;
+
+const resolvedLocalDefinitionTarget = (
+  root: JSONSchema,
+  ref: string | undefined,
+): ResolvedLocalDefinitionTarget | undefined => {
+  if (ref === undefined) return undefined;
+  let currentRoot = root;
+  let target = localDefinitionTarget(currentRoot, ref);
+  const seen = new Set<object>();
+  while (
+    isObjectOrArray(target) && typeof target.$ref === "string" &&
+    !seen.has(target) &&
+    Object.keys(target).every((key) => key === "$ref" || key === "$defs")
+  ) {
+    seen.add(target);
+    currentRoot = cfcSchemaChildRoot(target, currentRoot);
+    const next = localDefinitionTarget(currentRoot, target.$ref);
+    if (next === undefined) break;
+    target = next;
+  }
+  const scope = localDefinitionScopeIdentity(currentRoot);
+  return target === undefined || scope === undefined
+    ? undefined
+    : { scope, target };
+};
+
+const localRefsResolveToSameTarget = (
+  leftRoot: JSONSchema,
+  leftRef: string | undefined,
+  rightRoot: JSONSchema,
+  rightRef: string | undefined,
+): boolean => {
+  const left = resolvedLocalDefinitionTarget(leftRoot, leftRef);
+  const right = resolvedLocalDefinitionTarget(rightRoot, rightRef);
+  return left !== undefined && right !== undefined &&
+    left.scope === right.scope && left.target === right.target;
+};
+
+const reusableMergedDefinitionName = (
+  ref: string | undefined,
+  scope: JSONSchema,
+): string | undefined => {
+  const match = ref?.match(/^#\/\$defs\/(__cfc_merged_ref_[0-9]+)$/);
+  const name = match?.[1];
+  if (
+    name === undefined || !isObjectOrArray(scope) ||
+    !Object.hasOwn(scope.$defs ?? {}, name)
+  ) return undefined;
+  const target = scope.$defs![name];
+  const ownedDefinitions = new Map<object, Set<object>>();
+  const definitionIsOwned = (
+    root: JSONSchema,
+    definition: unknown,
+  ): boolean => {
+    const scopeIdentity = localDefinitionScopeIdentity(root);
+    return scopeIdentity !== undefined && isObjectOrArray(definition) &&
+      ownedDefinitions.get(scopeIdentity)?.has(definition) === true;
+  };
+  const addOwnedDefinition = (
+    root: JSONSchema,
+    definition: JSONSchema,
+  ): void => {
+    const scopeIdentity = localDefinitionScopeIdentity(root);
+    if (scopeIdentity === undefined || !isObjectOrArray(definition)) return;
+    const definitions = ownedDefinitions.get(scopeIdentity) ??
+      new Set<object>();
+    definitions.add(definition);
+    ownedDefinitions.set(scopeIdentity, definitions);
+  };
+  addOwnedDefinition(scope, target);
+  const visitedSchemas = new Map<object, Set<object>>();
+  const markSchemaVisited = (
+    root: JSONSchema,
+    schema: JSONSchema,
+  ): boolean => {
+    const scopeIdentity = localDefinitionScopeIdentity(root);
+    if (scopeIdentity === undefined || !isObjectOrArray(schema)) return false;
+    const schemas = visitedSchemas.get(scopeIdentity) ?? new Set<object>();
+    if (schemas.has(schema)) return false;
+    schemas.add(schema);
+    visitedSchemas.set(scopeIdentity, schemas);
+    return true;
+  };
+  const collectOwnedDefinitions = (
+    schema: JSONSchema,
+    parentRoot: JSONSchema,
+  ): void => {
+    if (!isObjectOrArray(schema)) return;
+    const currentRoot = cfcSchemaChildRoot(schema, parentRoot);
+    if (!markSchemaVisited(currentRoot, schema)) return;
+    if (typeof schema.$ref === "string") {
+      const definition = localDefinitionTarget(currentRoot, schema.$ref);
+      if (
+        isObjectOrArray(definition) &&
+        !definitionIsOwned(currentRoot, definition)
+      ) {
+        addOwnedDefinition(currentRoot, definition);
+        collectOwnedDefinitions(definition, currentRoot);
+      }
+    }
+    forEachSubschema(
+      schema,
+      (child) => collectOwnedDefinitions(child, currentRoot),
+      { includeUnused: true },
+    );
+  };
+  collectOwnedDefinitions(target, scope);
+  let referenceSites = 0;
+  const visit = (value: unknown, parentRoot: JSONSchema): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, parentRoot);
+      return;
+    }
+    if (!isObjectOrArray(value)) return;
+    const currentRoot = cfcSchemaChildRoot(value, parentRoot);
+    if (typeof value.$ref === "string") {
+      const definition = localDefinitionTarget(currentRoot, value.$ref);
+      if (definitionIsOwned(currentRoot, definition ?? false)) {
+        referenceSites++;
+      }
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "$ref") continue;
+      if (key === "$defs" && isObjectOrArray(child)) {
+        for (const definition of Object.values(child)) {
+          if (!definitionIsOwned(currentRoot, definition)) {
+            visit(definition, currentRoot);
+          }
+        }
+      } else {
+        visit(child, currentRoot);
+      }
+    }
+  };
+  visit(scope, scope);
+  return referenceSites === 1 ? name : undefined;
+};
+
+const referencedTargetsHaveCorrespondingCycle = (
+  leftRef: string,
+  rightRef: string,
+  leftRoot: JSONSchema,
+  rightRoot: JSONSchema,
+): boolean => {
+  const backEdgePaths = (ref: string, root: JSONSchema): Set<string> => {
+    const target = localDefinitionTarget(root, ref);
+    const targetScope = localDefinitionScopeIdentity(root);
+    if (!isObjectOrArray(target) || targetScope === undefined) return new Set();
+    const paths = new Set<string>();
+    type DefinitionStack = ReadonlyMap<object, ReadonlySet<object>>;
+    const pushDefinition = (
+      stack: DefinitionStack,
+      scope: object,
+      definition: object,
+    ): DefinitionStack =>
+      new Map(stack).set(
+        scope,
+        new Set([...(stack.get(scope) ?? []), definition]),
+      );
+    const visit = (
+      schema: JSONSchema,
+      parentRoot: JSONSchema,
+      path: readonly string[],
+      definitionStack: DefinitionStack,
+    ): void => {
+      if (!isObjectOrArray(schema)) return;
+      const currentRoot = cfcSchemaChildRoot(schema, parentRoot);
+      if (typeof schema.$ref === "string") {
+        const resolved = localDefinitionTarget(currentRoot, schema.$ref);
+        const resolvedScope = localDefinitionScopeIdentity(currentRoot);
+        if (resolved === target && resolvedScope === targetScope) {
+          paths.add(JSON.stringify(path));
+        } else if (
+          isObjectOrArray(resolved) && resolvedScope !== undefined &&
+          !definitionStack.get(resolvedScope)?.has(resolved)
+        ) {
+          visit(
+            resolved,
+            currentRoot,
+            path,
+            pushDefinition(definitionStack, resolvedScope, resolved),
+          );
+        }
+      }
+      forEachSubschema(
+        schema,
+        (child, keyword, key, index) => {
+          visit(
+            child,
+            currentRoot,
+            [...path, `${keyword}:${key ?? index ?? ""}`],
+            definitionStack,
+          );
+        },
+        { includeUnused: true },
+      );
+    };
+    visit(target, root, [], pushDefinition(new Map(), targetScope, target));
+    return paths;
+  };
+  const leftPaths = backEdgePaths(leftRef, leftRoot);
+  const rightPaths = backEdgePaths(rightRef, rightRoot);
+  return leftPaths.size > 0 && leftPaths.size === rightPaths.size &&
+    [...leftPaths].every((path) => rightPaths.has(path));
+};
+
+const mergedDefinitionName = (
+  existingScope: JSONSchema,
+  candidateScope: JSONSchema,
+  context: SchemaMergeContext,
+  reusable: string | undefined,
+): string => {
+  if (
+    reusable !== undefined &&
+    !Object.hasOwn(context.syntheticDefinitions, reusable)
+  ) return reusable;
+  const existingDefinitions = isObjectOrArray(existingScope)
+    ? existingScope.$defs
+    : undefined;
+  const candidateDefinitions = isObjectOrArray(candidateScope)
+    ? candidateScope.$defs
+    : undefined;
+  while (true) {
+    const name = `__cfc_merged_ref_${context.nextDefinition++}`;
+    if (
+      !Object.hasOwn(existingDefinitions ?? {}, name) &&
+      !Object.hasOwn(candidateDefinitions ?? {}, name) &&
+      !Object.hasOwn(context.syntheticDefinitions, name) &&
+      !context.reservedDefinitionNames.has(name)
+    ) return name;
+  }
+};
+
+const attachSyntheticDefinitions = (
+  schema: JSONSchema,
+  context: SchemaMergeContext,
+): JSONSchema => {
+  if (!isObjectOrArray(schema)) return schema;
+  const withoutDefinitions = { ...schema };
+  delete withoutDefinitions.$defs;
+  const definitions = selectReferencedCfcSchemaDefs(
+    withoutDefinitions,
+    {
+      ...(schema.$defs ?? {}),
+      ...context.syntheticDefinitions,
+    },
+  );
+  return definitions === undefined
+    ? withoutDefinitions
+    : { ...withoutDefinitions, $defs: definitions };
+};
+
+const storedRecursiveGraphCoversCandidate = (
+  stored: JSONSchema,
+  candidate: JSONSchema,
+): boolean => {
+  const visited = new WeakSet<object>();
+  const containsDerivedSyntheticDefinition = (schema: unknown): boolean => {
+    if (!isObjectOrArray(schema) || visited.has(schema)) return false;
+    visited.add(schema);
+    return forEachSubschema(
+      schema,
+      (child, keyword, key) =>
+        keyword === "$defs" && key !== undefined &&
+          /^__cfc_merged_ref_[0-9]+$/.test(key) &&
+          isObjectOrArray(child) && Object.hasOwn(child, "default") &&
+          Object.hasOwn(child, "ifc") && Object.hasOwn(child, "required") ||
+        containsDerivedSyntheticDefinition(child),
+      { includeDefs: true, includeUnused: true },
+    );
+  };
+  if (
+    !isObjectOrArray(stored) || typeof stored.$ref === "string" ||
+    !containsDerivedSyntheticDefinition(stored)
+  ) return false;
+
+  const objectIds = new WeakMap<object, number>();
+  let nextObjectId = 0;
+  const objectId = (value: object): number => {
+    const existing = objectIds.get(value);
+    if (existing !== undefined) return existing;
+    const id = nextObjectId++;
+    objectIds.set(value, id);
+    return id;
+  };
+  const pairStates = new Map<string, "checking" | "covered" | "uncovered">();
+  const unsupportedSingleApplicatorKeys = new Set([
+    "not",
+    "if",
+    "then",
+    "else",
+    "contains",
+    "propertyNames",
+    "contentSchema",
+  ]);
+  const unsupportedArrayApplicatorKeys = new Set([
+    "allOf",
+    "anyOf",
+    "oneOf",
+  ]);
+  const unsupportedRecordApplicatorKeys = new Set([
+    "patternProperties",
+    "dependentSchemas",
+  ]);
+  const schemaContainsRef = (schema: unknown): boolean =>
+    isObjectOrArray(schema) &&
+    (typeof schema.$ref === "string" ||
+      forEachSubschema(
+        schema,
+        (child) => schemaContainsRef(child),
+        { includeDefs: true, includeUnused: true },
+      ));
+  const refHasOnlyStructuralSiblings = (schema: JSONSchemaObj): boolean =>
+    Object.entries(schema).every(([key, value]) =>
+      key === "$ref" || key === "$defs" || value === undefined ||
+      (key === "required" && Array.isArray(value) && value.length === 0)
+    );
+  const refSiblings = (schema: JSONSchemaObj): JSONSchemaObj =>
+    Object.fromEntries(
+      Object.entries(schema).filter(([key, value]) =>
+        key !== "$ref" && key !== "$defs" && value !== undefined &&
+        !(key === "required" && Array.isArray(value) && value.length === 0)
+      ),
+    ) as JSONSchemaObj;
+  const resolveBareRef = (
+    schema: JSONSchemaObj,
+    parentRoot: JSONSchema,
+  ): { node: JSONSchema; parentRoot: JSONSchema } | undefined => {
+    let node: JSONSchema = schema;
+    let root = parentRoot;
+    const seen = new Set<string>();
+    while (isObjectOrArray(node) && typeof node.$ref === "string") {
+      root = cfcSchemaChildRoot(node, root);
+      if (!refHasOnlyStructuralSiblings(node)) {
+        return { node, parentRoot: root };
+      }
+      const target = localDefinitionTarget(root, node.$ref);
+      const scope = localDefinitionScopeIdentity(root);
+      if (target === undefined || scope === undefined) return undefined;
+      if (isObjectOrArray(target)) {
+        const key = `${objectId(scope)}:${objectId(target)}`;
+        if (seen.has(key)) return undefined;
+        seen.add(key);
+      }
+      node = target;
+    }
+    return { node, parentRoot: root };
+  };
+
+  const covers = (
+    storedNode: JSONSchema,
+    candidateNode: JSONSchema,
+    storedParentRoot: JSONSchema,
+    candidateParentRoot: JSONSchema,
+  ): boolean => {
+    if (storedNode === false || candidateNode === true) return true;
+    if (storedNode === true || candidateNode === false) {
+      return storedNode === candidateNode;
+    }
+    const storedRoot = cfcSchemaChildRoot(storedNode, storedParentRoot);
+    const candidateRoot = cfcSchemaChildRoot(
+      candidateNode,
+      candidateParentRoot,
+    );
+    const storedScope = localDefinitionScopeIdentity(storedRoot);
+    const candidateScope = localDefinitionScopeIdentity(candidateRoot);
+    if (storedScope === undefined || candidateScope === undefined) return false;
+    const pairKey = [
+      objectId(storedNode),
+      objectId(storedScope),
+      objectId(candidateNode),
+      objectId(candidateScope),
+    ].join(":");
+    const pairState = pairStates.get(pairKey);
+    if (pairState === "checking" || pairState === "covered") return true;
+    if (pairState === "uncovered") return false;
+    pairStates.set(pairKey, "checking");
+
+    let covered: boolean;
+    if (typeof candidateNode.$ref === "string") {
+      const candidateSiblings = refSiblings(candidateNode);
+      if (Object.keys(candidateSiblings).length === 0) {
+        const resolvedCandidate = resolveBareRef(candidateNode, candidateRoot);
+        covered = resolvedCandidate !== undefined && covers(
+          storedNode,
+          resolvedCandidate.node,
+          storedRoot,
+          resolvedCandidate.parentRoot,
+        );
+      } else {
+        const candidateTarget = localDefinitionTarget(
+          candidateRoot,
+          candidateNode.$ref,
+        );
+        covered = candidateTarget !== undefined &&
+          covers(
+            storedNode,
+            candidateTarget,
+            storedRoot,
+            candidateRoot,
+          ) &&
+          covers(
+            storedNode,
+            candidateSiblings,
+            storedRoot,
+            candidateRoot,
+          );
+      }
+    } else if (typeof storedNode.$ref === "string") {
+      const storedSiblings = refSiblings(storedNode);
+      if (Object.keys(storedSiblings).length === 0) {
+        const resolvedStored = resolveBareRef(storedNode, storedRoot);
+        covered = resolvedStored !== undefined && covers(
+          resolvedStored.node,
+          candidateNode,
+          resolvedStored.parentRoot,
+          candidateRoot,
+        );
+      } else {
+        const storedTarget = localDefinitionTarget(storedRoot, storedNode.$ref);
+        covered = storedTarget !== undefined &&
+          (covers(
+            storedTarget,
+            candidateNode,
+            storedRoot,
+            candidateRoot,
+          ) ||
+            covers(
+              storedSiblings,
+              candidateNode,
+              storedRoot,
+              candidateRoot,
+            ));
+      }
+    } else {
+      covered = Object.entries(candidateNode).every(([key, candidateValue]) => {
+        if (key === "$defs" || candidateValue === undefined) return true;
+        const storedValue = storedNode[key as keyof JSONSchemaObj];
+        if (key === "required") {
+          return Array.isArray(candidateValue) && Array.isArray(storedValue) &&
+            candidateValue.every((name) => storedValue.includes(name));
+        }
+        if (key === "ifc") {
+          try {
+            return deepEqual(
+              mergeIfc(
+                storedValue as JSONSchemaObj["ifc"],
+                candidateValue as JSONSchemaObj["ifc"],
+                "",
+                {},
+              ),
+              mergeIfc(
+                storedValue as JSONSchemaObj["ifc"],
+                storedValue as JSONSchemaObj["ifc"],
+                "",
+                {},
+              ),
+            );
+          } catch {
+            return false;
+          }
+        }
+        if (key === "properties") {
+          if (
+            !isObjectOrArray(candidateValue) || !isObjectOrArray(storedValue)
+          ) {
+            return false;
+          }
+          const storedRecord = storedValue as Record<string, JSONSchema>;
+          return Object.entries(candidateValue).every(
+            ([name, candidateChild]) =>
+              Object.hasOwn(storedRecord, name) &&
+              covers(
+                storedRecord[name],
+                candidateChild as JSONSchema,
+                storedRoot,
+                candidateRoot,
+              ),
+          );
+        }
+        if (key === "items") {
+          return candidateNode.prefixItems === undefined &&
+            storedNode.prefixItems === undefined && storedValue !== undefined &&
+            covers(
+              storedValue as JSONSchema,
+              candidateValue as JSONSchema,
+              storedRoot,
+              candidateRoot,
+            );
+        }
+        if (key === "additionalProperties") {
+          if (
+            candidateNode.patternProperties !== undefined ||
+            storedNode.patternProperties !== undefined ||
+            storedValue === undefined ||
+            !covers(
+              storedValue as JSONSchema,
+              candidateValue as JSONSchema,
+              storedRoot,
+              candidateRoot,
+            )
+          ) return false;
+          const candidateProperties = candidateNode.properties ?? {};
+          return Object.entries(storedNode.properties ?? {}).every(
+            ([name, storedProperty]) =>
+              Object.hasOwn(candidateProperties, name) ||
+              covers(
+                storedProperty,
+                candidateValue as JSONSchema,
+                storedRoot,
+                candidateRoot,
+              ),
+          );
+        }
+        if (key === "prefixItems") {
+          return candidateNode.items === undefined &&
+            Array.isArray(candidateValue) && Array.isArray(storedValue) &&
+            candidateValue.length === storedValue.length &&
+            candidateValue.every((candidateChild, index) =>
+              covers(
+                storedValue[index],
+                candidateChild,
+                storedRoot,
+                candidateRoot,
+              )
+            );
+        }
+        if (unsupportedSingleApplicatorKeys.has(key)) {
+          return !schemaContainsRef(storedValue) &&
+            !schemaContainsRef(candidateValue) &&
+            deepEqual(storedValue, candidateValue);
+        }
+        if (unsupportedArrayApplicatorKeys.has(key)) {
+          return Array.isArray(storedValue) && Array.isArray(candidateValue) &&
+            !storedValue.some(schemaContainsRef) &&
+            !candidateValue.some(schemaContainsRef) &&
+            deepEqual(storedValue, candidateValue);
+        }
+        if (unsupportedRecordApplicatorKeys.has(key)) {
+          return isObjectOrArray(storedValue) &&
+            isObjectOrArray(candidateValue) &&
+            !Object.values(storedValue).some(schemaContainsRef) &&
+            !Object.values(candidateValue).some(schemaContainsRef) &&
+            deepEqual(storedValue, candidateValue);
+        }
+        return deepEqual(storedValue, candidateValue);
+      });
+    }
+    pairStates.set(pairKey, covered ? "covered" : "uncovered");
+    return covered;
+  };
+
+  return covers(stored, candidate, stored, candidate);
+};
+
 const mergeSchemaNode = (
   existing: JSONSchema,
   candidate: JSONSchema,
   path = "",
   logicalPath: readonly string[] = [],
   options: MergeCfcSchemaEnvelopeOptions = {},
+  existingRoot: JSONSchema = existing,
+  candidateRoot: JSONSchema = candidate,
+  activeRefMerges: readonly ActiveRefMerge[] = [],
+  context: SchemaMergeContext = {
+    nextDefinition: 0,
+    syntheticDefinitions: {},
+    reservedDefinitionNames: new Set([
+      ...schemaDefinitionNames(existingRoot),
+      ...schemaDefinitionNames(candidateRoot),
+    ]),
+  },
 ): JSONSchema => {
   const left = asSchemaObject(existing, path);
-  const right = asSchemaObject(candidate, path);
+  let right = asSchemaObject(candidate, path);
+  if (
+    isObjectOrArray(left.$defs) && isObjectOrArray(right.$defs) &&
+    Object.keys(left.$defs).some((name) =>
+      Object.hasOwn(right.$defs!, name) &&
+      !deepEqual(left.$defs![name], right.$defs![name])
+    )
+  ) {
+    right = namespaceCandidateDefinitionsForMerge(left, right);
+  }
+  const existingScope = cfcSchemaChildRoot(left, existingRoot);
+  const candidateScope = cfcSchemaChildRoot(right, candidateRoot);
+  if (typeof left.$ref === "string" || typeof right.$ref === "string") {
+    const repeated = activeRefMerges.find((active) =>
+      active.existingRoot === existingScope &&
+      active.candidateRoot === candidateScope &&
+      active.existingRef === left.$ref &&
+      active.candidateRef === right.$ref
+    ) ?? activeRefMerges.find((active) =>
+      localRefsResolveToSameTarget(
+        existingScope,
+        left.$ref,
+        active.existingRoot,
+        active.existingRef,
+      ) &&
+      localRefsResolveToSameTarget(
+        candidateScope,
+        right.$ref,
+        active.candidateRoot,
+        active.candidateRef,
+      )
+    );
+    if (repeated) {
+      if (deepEqual(left, right)) {
+        const repeatedRef = `#/$defs/${repeated.definitionName}`;
+        return typeof left.$ref === "string" &&
+            /^#\/\$defs\/__cfc_merged_ref_[0-9]+$/.test(left.$ref) &&
+            left.$ref !== repeatedRef
+          ? { ...left, $ref: repeatedRef }
+          : left;
+      }
+      const referenceNames = (schema: JSONSchemaObj): string[] => [
+        ...(typeof schema.$ref === "string" ? [schema.$ref] : []),
+        ...(Array.isArray(schema.allOf) &&
+            schema.allOf.every((branch) =>
+              isObjectOrArray(branch) &&
+              typeof branch.$ref === "string" &&
+              Object.keys(branch).length === 1
+            )
+          ? schema.allOf.map((branch) =>
+            (branch as JSONSchemaObj).$ref!
+          )
+          : []),
+      ];
+      const resolvedReferenceTargets = (
+        schema: JSONSchemaObj,
+        root: JSONSchema,
+      ): JSONSchemaObj[] =>
+        referenceNames(schema).map(($ref) =>
+          asSchemaObject(
+            resolveCfcSchemaRefsOrThrow({ $ref }, root),
+            path,
+          )
+        );
+      const resolvedLeft = resolvedReferenceTargets(left, existingScope);
+      const resolvedRight = resolvedReferenceTargets(right, candidateScope);
+      const withoutRefScopeAndRequired = (
+        schema: JSONSchemaObj,
+      ): JSONSchemaObj => {
+        const sibling = { ...schema };
+        delete sibling.$ref;
+        delete sibling.$defs;
+        delete sibling.required;
+        if (
+          Array.isArray(sibling.allOf) &&
+          sibling.allOf.every((branch) =>
+            isObjectOrArray(branch) &&
+            typeof branch.$ref === "string" &&
+            Object.keys(branch).length === 1
+          )
+        ) {
+          delete sibling.allOf;
+        }
+        return sibling;
+      };
+      const mergedSiblings = asSchemaObject(
+        mergeSchemaNode(
+          withoutRefScopeAndRequired(left),
+          withoutRefScopeAndRequired(right),
+          path,
+          logicalPath,
+          options,
+          existingScope,
+          candidateScope,
+          activeRefMerges,
+        ),
+        path,
+      );
+      const required = mergeRequired(
+        [
+          ...new Set([
+            ...resolvedLeft.flatMap((schema) => schema.required ?? []),
+            ...(left.required ?? []),
+          ]),
+        ],
+        [
+          ...new Set([
+            ...resolvedRight.flatMap((schema) => schema.required ?? []),
+            ...(right.required ?? []),
+          ]),
+        ],
+        [
+          ...resolvedLeft.map((schema) => ({
+            properties: schema.properties,
+            root: cfcSchemaChildRoot(schema, existingScope),
+          })),
+          { properties: left.properties, root: existingScope },
+          ...resolvedRight.map((schema) => ({
+            properties: schema.properties,
+            root: cfcSchemaChildRoot(schema, candidateScope),
+          })),
+          { properties: right.properties, root: candidateScope },
+        ].reduce<Record<string, JSONSchema>>((properties, source) => {
+          for (
+            const [name, unresolvedProperty] of Object.entries(
+              source.properties ?? {},
+            )
+          ) {
+            const property = isObjectOrArray(unresolvedProperty) &&
+                typeof unresolvedProperty.$ref === "string"
+              ? resolveCfcSchemaRefsOrThrow(
+                unresolvedProperty,
+                cfcSchemaChildRoot(unresolvedProperty, source.root),
+              )
+              : unresolvedProperty;
+            const previous = properties[name];
+            properties[name] = isObjectOrArray(previous) &&
+                isObjectOrArray(property)
+              ? {
+                ...previous,
+                ...property,
+                default: mergeDefaults(previous.default, property.default),
+              }
+              : property;
+          }
+          return properties;
+        }, {}),
+        logicalPath,
+        options,
+      );
+      const localDefinitions = mergeDefinitions(left.$defs, right.$defs);
+      return {
+        $ref: `#/$defs/${repeated.definitionName}`,
+        ...mergedSiblings,
+        ...(required !== undefined ? { required } : {}),
+        ...(localDefinitions !== undefined ? { $defs: localDefinitions } : {}),
+      };
+    }
+    const resolvedLeft = typeof left.$ref === "string"
+      ? resolveCfcSchemaRefsOrThrow({ $ref: left.$ref }, existingScope)
+      : left;
+    const resolvedRight = typeof right.$ref === "string"
+      ? resolveCfcSchemaRefsOrThrow({ $ref: right.$ref }, candidateScope)
+      : right;
+    const correspondingCycle = typeof left.$ref === "string" &&
+      typeof right.$ref === "string" &&
+      referencedTargetsHaveCorrespondingCycle(
+        left.$ref,
+        right.$ref,
+        existingScope,
+        candidateScope,
+      );
+    const reusableDefinitionName = correspondingCycle
+      ? reusableMergedDefinitionName(left.$ref, existingScope) ??
+        reusableMergedDefinitionName(right.$ref, candidateScope)
+      : undefined;
+    const reusesDefinition = reusableDefinitionName !== undefined;
+    const preservesReference = reusesDefinition ||
+      correspondingCycle &&
+        (activeRefMerges.length > 0 ||
+          /^#\/\$defs\/__cfc_merged_ref_[0-9]+$/.test(left.$ref ?? "") ||
+          /^#\/\$defs\/__cfc_merged_ref_[0-9]+$/.test(right.$ref ?? ""));
+    const definitionName = mergedDefinitionName(
+      existingScope,
+      candidateScope,
+      context,
+      reusableDefinitionName,
+    );
+    const mergedResolved = mergeSchemaNode(
+      resolvedLeft,
+      resolvedRight,
+      path,
+      logicalPath,
+      options,
+      cfcSchemaChildRoot(resolvedLeft, existingScope),
+      cfcSchemaChildRoot(resolvedRight, candidateScope),
+      [...activeRefMerges, {
+        existingRoot: existingScope,
+        candidateRoot: candidateScope,
+        existingRef: left.$ref,
+        candidateRef: right.$ref,
+        definitionName,
+      }],
+      context,
+    );
+    if (isObjectOrArray(mergedResolved)) {
+      const definition = { ...mergedResolved };
+      delete definition.$defs;
+      const scopeDefinitions = mergeDefinitions(
+        isObjectOrArray(existingScope) ? existingScope.$defs : undefined,
+        isObjectOrArray(candidateScope) ? candidateScope.$defs : undefined,
+      );
+      const availableDependencies = {
+        ...(scopeDefinitions ?? {}),
+        ...(mergedResolved.$defs ?? {}),
+      };
+      for (
+        const activeDefinitionName of [
+          definitionName,
+          ...activeRefMerges.map((active) => active.definitionName),
+          ...Object.keys(context.syntheticDefinitions),
+        ]
+      ) {
+        delete availableDependencies[activeDefinitionName];
+      }
+      const dependencies = selectReferencedCfcSchemaDefs(
+        definition,
+        availableDependencies,
+      );
+      if (dependencies === undefined) {
+        context.syntheticDefinitions[definitionName] = definition;
+      } else {
+        const usedNames = new Set([
+          definitionName,
+          ...Object.keys(context.syntheticDefinitions),
+          ...context.reservedDefinitionNames,
+        ]);
+        const renamed = new Map<string, string>();
+        let suffix = 0;
+        for (const name of Object.keys(dependencies).toSorted()) {
+          let candidate: string;
+          do {
+            candidate =
+              `__cfc_merged_dep_${definitionName}_${suffix++}_${name}`;
+          } while (usedNames.has(candidate));
+          usedNames.add(candidate);
+          renamed.set(name, candidate);
+        }
+        const recursiveTargetNames = new Set(
+          [left.$ref, right.$ref].flatMap((ref) => {
+            const match = ref?.match(/^#\/\$defs\/([^/]+)$/);
+            return match === null || match === undefined
+              ? []
+              : [match[1].replaceAll("~1", "/").replaceAll("~0", "~")];
+          }),
+        );
+        const rewriteDependencyRefs = (fragment: JSONSchema): JSONSchema => {
+          if (!isObjectOrArray(fragment) || fragment.$defs !== undefined) {
+            return fragment;
+          }
+          let rewritten = fragment;
+          if (typeof fragment.$ref === "string") {
+            const match = fragment.$ref.match(/^#\/\$defs\/([^/]+)$/);
+            const name = match?.[1].replaceAll("~1", "/").replaceAll(
+              "~0",
+              "~",
+            );
+            const nextName = name !== undefined &&
+                recursiveTargetNames.has(name)
+              ? definitionName
+              : name === undefined
+              ? undefined
+              : renamed.get(name);
+            if (nextName !== undefined) {
+              rewritten = {
+                ...fragment,
+                $ref: `#/$defs/${
+                  nextName.replaceAll("~", "~0").replaceAll("/", "~1")
+                }`,
+              };
+            }
+          }
+          return mapSubschemas(
+            rewritten,
+            rewriteDependencyRefs,
+            { includeUnused: true },
+          );
+        };
+        const liftedDependencies = Object.fromEntries(
+          Object.entries(dependencies).map(([name, dependency]) => [
+            renamed.get(name)!,
+            rewriteDependencyRefs(dependency),
+          ]),
+        );
+        Object.assign(context.syntheticDefinitions, liftedDependencies);
+        context.syntheticDefinitions[definitionName] = rewriteDependencyRefs(
+          definition,
+        );
+      }
+    } else {
+      context.syntheticDefinitions[definitionName] = mergedResolved;
+    }
+    const refSiteSiblings = (schema: JSONSchemaObj): JSONSchemaObj => {
+      if (typeof schema.$ref !== "string") return {};
+      const siblings = { ...schema };
+      delete siblings.$ref;
+      delete siblings.$defs;
+      delete siblings.required;
+      return siblings;
+    };
+    const mergedSiteSiblings = asSchemaObject(
+      mergeSchemaNode(
+        refSiteSiblings(left),
+        refSiteSiblings(right),
+        path,
+        logicalPath,
+        options,
+        existingScope,
+        candidateScope,
+        activeRefMerges,
+        context,
+      ),
+      path,
+    );
+    const effectiveRequired = (
+      schema: JSONSchemaObj,
+      resolved: JSONSchema,
+    ): string[] | undefined => {
+      const required = [
+        ...(isObjectOrArray(resolved) ? resolved.required ?? [] : []),
+        ...(schema.required ?? []),
+      ];
+      return required.length === 0 ? undefined : [...new Set(required)];
+    };
+    const siteRequired = mergeRequired(
+      effectiveRequired(left, resolvedLeft),
+      effectiveRequired(right, resolvedRight),
+      [
+        {
+          properties: isObjectOrArray(resolvedLeft)
+            ? resolvedLeft.properties
+            : undefined,
+          root: cfcSchemaChildRoot(resolvedLeft, existingScope),
+        },
+        { properties: left.properties, root: existingScope },
+        {
+          properties: isObjectOrArray(resolvedRight)
+            ? resolvedRight.properties
+            : undefined,
+          root: cfcSchemaChildRoot(resolvedRight, candidateScope),
+        },
+        { properties: right.properties, root: candidateScope },
+      ].reduce<Record<string, JSONSchema>>((properties, source) => {
+        for (
+          const [name, unresolvedProperty] of Object.entries(
+            source.properties ?? {},
+          )
+        ) {
+          const property = isObjectOrArray(unresolvedProperty) &&
+              typeof unresolvedProperty.$ref === "string"
+            ? resolveCfcSchemaRefsOrThrow(
+              unresolvedProperty,
+              cfcSchemaChildRoot(unresolvedProperty, source.root),
+            )
+            : unresolvedProperty;
+          const previous = properties[name];
+          properties[name] = isObjectOrArray(previous) &&
+              isObjectOrArray(property)
+            ? {
+              ...previous,
+              ...property,
+              default: mergeDefaults(previous.default, property.default),
+            }
+            : property;
+        }
+        return properties;
+      }, {}),
+      logicalPath,
+      options,
+    );
+    const { required: _mergedRequired, ...siteSiblingsWithoutRequired } =
+      mergedSiteSiblings;
+    const siteSiblings: JSONSchemaObj = siteRequired === undefined
+      ? siteSiblingsWithoutRequired
+      : { ...siteSiblingsWithoutRequired, required: siteRequired };
+    const definedSiteSiblings = Object.fromEntries(
+      Object.entries(siteSiblings).filter(([, value]) => value !== undefined),
+    ) as JSONSchemaObj;
+    const syntheticScope = { $defs: context.syntheticDefinitions };
+    const syntheticReference = `#/$defs/${definitionName}`;
+    if (
+      preservesReference &&
+      (activeRefMerges.length > 0 ||
+        referencedTargetsHaveCorrespondingCycle(
+          syntheticReference,
+          syntheticReference,
+          syntheticScope,
+          syntheticScope,
+        ))
+    ) {
+      const reference = {
+        $ref: syntheticReference,
+        ...definedSiteSiblings,
+      };
+      return path === ""
+        ? attachSyntheticDefinitions(reference, context)
+        : reference;
+    }
+    if (!isObjectOrArray(mergedResolved)) return mergedResolved;
+    return attachSyntheticDefinitions({
+      ...mergedResolved,
+      ...definedSiteSiblings,
+      ifc: mergeIfc(
+        mergedResolved.ifc,
+        siteSiblings.ifc,
+        path,
+        options,
+      ),
+      required: mergeRequired(
+        mergedResolved.required,
+        siteSiblings.required,
+        {
+          ...mergedResolved.properties,
+          ...siteSiblings.properties,
+        },
+        logicalPath,
+        options,
+      ),
+      default: mergeDefaults(
+        mergedResolved.default,
+        siteSiblings.default,
+      ),
+    }, context);
+  }
+  const requiredViewForMerge = (
+    schema: JSONSchemaObj,
+    root: JSONSchema,
+  ): Pick<JSONSchemaObj, "properties" | "required"> => {
+    if (typeof schema.$ref !== "string") {
+      return schema;
+    }
+    const definitionRoot = isObjectOrArray(schema.$defs) ? schema : root;
+    return asSchemaObject(
+      resolveCfcSchemaRefsOrThrow(schema, definitionRoot),
+      path,
+    );
+  };
+  const leftRequiredView = requiredViewForMerge(left, existingScope);
+  const rightRequiredView = requiredViewForMerge(right, candidateScope);
 
   const leftTypes = left.type === undefined
     ? undefined
@@ -591,9 +1714,18 @@ const mergeSchemaNode = (
         `${path}/${key}`,
         [...logicalPath, key],
         options,
+        existingScope,
+        candidateScope,
+        activeRefMerges,
+        context,
       )
       : (rightClaim ?? leftClaim)!;
   }
+  const requiredProperties = {
+    ...leftRequiredView.properties,
+    ...rightRequiredView.properties,
+    ...mergedProperties,
+  };
 
   // Object-valued rest claims merge like items; boolean forms keep the
   // spread's right-wins behavior (closed-object union semantics are
@@ -606,6 +1738,10 @@ const mergeSchemaNode = (
       `${path}/*`,
       [...logicalPath, "*"],
       options,
+      existingScope,
+      candidateScope,
+      activeRefMerges,
+      context,
     );
   } else if (right.additionalProperties !== undefined) {
     mergedAdditionalProperties = right.additionalProperties;
@@ -619,6 +1755,10 @@ const mergeSchemaNode = (
       `${path}/*`,
       [...logicalPath, "*"],
       options,
+      existingScope,
+      candidateScope,
+      activeRefMerges,
+      context,
     );
   } else if (right.items !== undefined) {
     mergedItems = right.items;
@@ -657,6 +1797,10 @@ const mergeSchemaNode = (
             `${path}/${index}`,
             [...logicalPath, String(index)],
             options,
+            existingScope,
+            candidateScope,
+            activeRefMerges,
+            context,
           )
           : (rightSlot ?? leftSlot)!,
       );
@@ -664,14 +1808,10 @@ const mergeSchemaNode = (
     mergedPrefixItems = slots;
   }
 
-  // `$defs` is not merged: `{...left, ...right}` lets a `right` envelope that
-  // declares its own `$defs` replace `left`'s wholesale, which can leave a
-  // surviving `items`/`properties` `$ref` (e.g. `#/$defs/Element`) pointing at
-  // a dropped def. The merged envelope's ifc (incl. writeAuthorizedBy) still
-  // rides on the node, so the policy matcher must not let the now-unresolvable
-  // value-condition ref exclude the entry — `policySchemaMatchesValue` in
-  // prepare.ts fails closed on unevaluable refs for exactly this reason.
-  return {
+  // Unequal same-name definition scopes are namespaced before their reference
+  // sites are merged. Equal definitions can share a name. Unreachable
+  // definitions are pruned after the two definition maps are combined.
+  const merged = {
     ...left,
     ...right,
     ...(permissiveUnknownChange && rightIsUnknown ? { type: left.type } : {}),
@@ -687,14 +1827,24 @@ const mergeSchemaNode = (
       : {}),
     ifc: mergeIfc(left.ifc, right.ifc, path, options),
     required: mergeRequired(
-      left.required,
-      right.required,
-      mergedProperties,
+      leftRequiredView.required,
+      rightRequiredView.required,
+      requiredProperties,
       logicalPath,
       options,
     ),
     default: mergeDefaults(left.default, right.default),
-  };
+  } as Record<string, unknown>;
+  delete merged.$defs;
+  const definitions = selectReferencedCfcSchemaDefs(
+    merged as JSONSchemaObj,
+    {
+      ...mergeDefinitions(left.$defs, right.$defs),
+      ...context.syntheticDefinitions,
+    },
+  );
+  if (definitions !== undefined) merged.$defs = definitions;
+  return merged as JSONSchemaObj;
 };
 
 export const mergeCfcSchemaEnvelopes = (
@@ -704,6 +1854,12 @@ export const mergeCfcSchemaEnvelopes = (
 ): JSONSchema => {
   assertNoDivergentIfcBranches(existing);
   assertNoDivergentIfcBranches(candidate);
+  if (
+    !options.allowAddIntegrityWeakening &&
+    storedRecursiveGraphCoversCandidate(existing, candidate)
+  ) {
+    return internSchema(existing);
+  }
   return internSchema(mergeSchemaNode(existing, candidate, "", [], options));
 };
 
