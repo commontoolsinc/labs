@@ -357,12 +357,12 @@ describe("data-uri", () => {
     // behavior (see the `TODO` in the walk) coincide, so this pins only the
     // codec round-trip, not the pass-through itself.
     it("represents a link-free `FabricInstance` via its codec", () => {
-      const inst = new UnknownValue("zzz@1", { a: 1 });
+      const inst = new UnknownValue("Zzz@1", { a: 1 });
       const parsed = valueFromDataUri(
         dataUriFromValueWithResolvedLinks({ inst }),
       );
       expect(parsed.inst).toBeInstanceOf(UnknownValue);
-      expect(parsed.inst.wireTypeTag).toBe("zzz@1");
+      expect(parsed.inst.wireTypeTag).toBe("Zzz@1");
       expect(parsed.inst.state).toEqual({ a: 1 });
     });
 
