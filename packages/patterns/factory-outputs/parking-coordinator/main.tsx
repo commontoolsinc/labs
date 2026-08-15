@@ -110,8 +110,29 @@ export type ParkingSpotList = RequiresIntegrity<
   readonly [typeof PARKING_ADMIN_INTEGRITY]
 >;
 
+type TrustedParkingSpotList = RequiresIntegrity<
+  AddIntegrity<
+    ParkingSpot,
+    readonly [typeof PARKING_ADMIN_INTEGRITY]
+  >[],
+  readonly [typeof PARKING_ADMIN_INTEGRITY]
+>;
+
 type SpotsCell = Writable<
   | ParkingSpotList
+  | Default<[
+    { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
+    { spotNumber: "5"; label: ""; notes: ""; active: true },
+    {
+      spotNumber: "12";
+      label: "Compact only";
+      notes: "Tight, no large vehicles";
+      active: true;
+    },
+  ]>
+>;
+type TrustedSpotsCell = Writable<
+  | TrustedParkingSpotList
   | Default<[
     { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
     { spotNumber: "5"; label: ""; notes: ""; active: true },
@@ -415,7 +436,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       adminRegistry: inputAdminRegistry,
     },
   ) => {
-    const spots = inputSpots ?? Writable.perSpace.of(DEFAULT_SPOTS);
+    const spots: TrustedSpotsCell = inputSpots ??
+      Writable.perSpace.of(DEFAULT_SPOTS);
     const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
     const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
     const defaultAdminRegistry = new Writable.perSpace<
@@ -859,7 +881,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
           notes: notes.trim(),
           active: true,
         },
-      ] as ParkingSpotList);
+      ] as TrustedParkingSpotList);
       newSpotNumber.set("");
       newSpotLabel.set("");
       newSpotNotes.set("");
@@ -906,7 +928,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               active: editSpotActiveArg,
             }
             : s
-        ) as ParkingSpotList,
+        ) as TrustedParkingSpotList,
       );
 
       if (trimNum !== originalNumber) {
@@ -931,7 +953,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         spots.set(
           spots.get().filter((s) =>
             s.spotNumber !== spotNumArg3
-          ) as ParkingSpotList,
+          ) as TrustedParkingSpotList,
         );
         removeSpotConfirmTarget.set(null);
       },
