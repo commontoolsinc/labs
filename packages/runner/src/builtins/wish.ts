@@ -1980,14 +1980,23 @@ export function wish(
   // Renders an error message into a pattern result cell in its own committed
   // transaction. Used when a deferred system-pattern run fails after the
   // originating wish transaction has already gone.
-  function commitPatternErrorUI(
+  async function commitPatternErrorUI(
     resultCell: Cell<any>,
     message: string,
-  ): Promise<unknown> {
+  ): Promise<void> {
     const errorTx = runtime.edit();
     resultCell.withTx(errorTx).set({ [UI]: errorUI(message) });
     runtime.prepareTxForCommit(errorTx);
-    return errorTx.commit();
+    const { error } = await errorTx.commit();
+    // The account of the failure failed to land, so the surface stays blank
+    // and this is the only place the reason exists. Writing it again would
+    // meet whatever refused it the first time.
+    if (error) {
+      console.error(
+        `Can't report "${message}" in the surface it belongs to`,
+        error,
+      );
+    }
   }
 
   // Run a just-fetched sidecar pattern (profile create / picker) into its result
