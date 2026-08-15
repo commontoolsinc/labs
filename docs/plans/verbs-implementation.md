@@ -52,7 +52,7 @@ without reconstructing it.
 | 4. `receipt` as a top-level envelope field | on main (#5694) |
 | 2. an unrecognized projection key is refused | **in review** (#5817); design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
-| 5. `cf wish` and `cf exec` take the read options | **in review** (#PRNUM) |
+| 5. `cf wish` and `cf exec` take the read options | **in review** (#5844) |
 | 11. a caller may name a reference | not started; sequenced, gated on one measurement |
 
 Item 9 is split because its two halves have different fates: the marks landed,
