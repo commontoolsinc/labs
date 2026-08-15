@@ -29,7 +29,7 @@ import {
   REALM_PASS_THROUGH_OMNIBUSES,
   SINGLES,
   SPARSE,
-} from "./codec-fixtures.ts";
+} from "./fixtures/codec-fixtures.ts";
 
 /** Encoded forms, for the decode direction. */
 const SINGLES_JSON = SINGLES.map(([n, v]) =>
