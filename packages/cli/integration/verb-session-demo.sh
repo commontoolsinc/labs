@@ -166,9 +166,13 @@ run cf piece call -s "$SPACE" --piece board addItem -- --help
 act "4 · Create, and act on what you were handed"
 say "The create returns the piece it made. Its address is the next command's target."
 run cf piece call -s "$SPACE" --piece board --select item@ addItem -- --title "Login rewrite"
-# The address the reader can see in the output above. Taken from that run, not
-# from a second one: `run` leaves the output it displayed in $OUT.
-EPIC=$(printf '%s' "$OUT" | jq -r '.result.item."$link".id' | sed 's/^of://')
+# The address the reader can see in the output above, carried whole. `--piece`
+# takes the `of:` form a read prints, on `get`, `call` and `verbs` alike, so
+# nothing here strips the scheme: the string passed below is the string act 4
+# displayed, which is the round-trip property this session exists to show. The
+# bare hash is a different spelling that resolves by defaulting to `of:`, not
+# the same address — the scheme is part of the identity.
+EPIC=$(printf '%s' "$OUT" | jq -r '.result.item."$link".id')
 say "That id is what --piece takes from here on."
 run cf piece call -s "$SPACE" --piece "$EPIC" addChild -- --title "Session cookies"
 say "The item it hands back can be reached from inside itself: its parent holds"
@@ -195,14 +199,14 @@ act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
 say "A grandchild is filed first, so there is a subtree to walk."
 KID=$(cf piece get -s "$SPACE" --piece "$EPIC" children --select @ 2>/dev/null |
-  jq -r '.[0]."$link".id' | sed 's/^of://')
+  jq -r '.[0]."$link".id')
 run cf piece call -s "$SPACE" --piece "$KID" --select item.title addChild -- --title "Rotate signing key"
 run cf piece call -s "$SPACE" --piece "$EPIC" finish -- --body "shipping behind a flag"
 
 act "9 · A verb that declares no result"
 say "archive is Stream<void>: there is nothing for it to hand back, and the"
 say "invocation says so by settling with no result at all."
-run cf piece call -s "$SPACE" --piece "$KID" archive
+run cf piece call -s "$SPACE" --piece "$KID" archive -- invoke
 say "What it changed is a read away, on the one field the caller never sets."
 run cf piece get -s "$SPACE" --piece "$KID" status
 
