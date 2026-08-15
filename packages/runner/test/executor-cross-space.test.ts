@@ -795,6 +795,31 @@ describe("Phase 5 cross-space serving", () => {
       );
       expect(foreignSpaceScope.error).toBeUndefined();
 
+      // The F3 fix — refusal is ENTRY-scoped, decided at sync() entry
+      // before the batch: a scoped read and an innocent SPACE-scope
+      // read issued concurrently coalesce into ONE watch-refresh batch
+      // with one shared pending promise, and pre-fix the scoped
+      // refusal threw over the whole batch — the load-bearing §2b
+      // free-read row failed alongside the offender (a persistently
+      // retrying scoped reader degraded a space's legitimate foreign
+      // reads into flake).
+      const provider = manager.open(foreignSpace);
+      const [poisoner, innocent] = await Promise.all([
+        provider.sync(
+          "of:x-batch-scoped" as never,
+          { path: [], schema: false },
+          "user",
+        ),
+        provider.sync(
+          "of:x-batch-plain" as never,
+          { path: [], schema: false },
+        ),
+      ]);
+      expect(poisoner.error?.message ?? "").toContain(
+        "foreign scoped read refused on the serving path",
+      );
+      expect(innocent.error).toBeUndefined();
+
       // HOME scoped reads keep today's behavior (the OW17 tolerated
       // collapsed view).
       const homeScoped = await manager.open(homeSpace).sync(

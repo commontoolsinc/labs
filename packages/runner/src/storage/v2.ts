@@ -2916,6 +2916,36 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const normalizedEntries = normalizeSyncEntries(entries);
+    // Phase 5's delegated-scoped-read fail-closed refusal, ENTRY-scoped
+    // (the F3 fix; protocol.md §2's grant-scoped read design): decided
+    // HERE, per caller, before the entries join the coalesced
+    // watch-refresh batch — the batch shares ONE pending promise across
+    // every concurrent caller, so a refusal thrown inside the batch
+    // (the refreshWatchSet backstop below) poisons innocent SPACE-scope
+    // foreign reads coalesced beside the offender: the load-bearing
+    // §2b free-read row would fail intermittently whenever any pattern
+    // persistently attempted one foreign scoped read. Refusing the
+    // OFFENDING caller's pull keeps the refusal action-scoped, the
+    // arc's standing refusal convention.
+    if (this.#refuseForeignScopedReads) {
+      for (const [address] of normalizedEntries) {
+        const scope = normalizeCellScope(address.scope) ?? "space";
+        if (scope !== "space") {
+          return {
+            error: toPullError(
+              new Error(
+                `foreign scoped read refused on the serving path: ` +
+                  `${address.id} (scope "${scope}") in ${this.#space} — ` +
+                  "a serving runtime reads foreign scoped instances only " +
+                  "under the grant-scoped read design (protocol.md §2; " +
+                  "delegated scoped reads are fail-closed until grant " +
+                  "resolution lands)",
+              ),
+            ),
+          };
+        }
+      }
+    }
     // Compose the dedup key from per-part hashes instead of hashing a fresh
     // wrapper object: hashOf's frozen-object cache is only consulted at entry
     // level, so embedding the (large, already canonical) selector schema in a
@@ -3448,6 +3478,15 @@ class SpaceReplica implements ISpaceReplica {
       // cannot yet name a per-run foreign instance on a subscription.
       // The memory server's admission carries the co-hosted belt; this
       // is the producer half, so the two land as one stack.
+      //
+      // BACKSTOP only (the F3 fix): the live refusal is ENTRY-scoped at
+      // pull() — per caller, before the entry joins the batch — because
+      // a throw HERE fails the whole coalesced batch (one shared
+      // pending promise), poisoning innocent space-scope reads beside
+      // the offender. Every watch entry flows through pull(), so this
+      // arm firing means a new path bypassed the entry refusal — a
+      // bug, kept loud rather than silently filtered (dropping the
+      // entry would resolve its caller OK without the data).
       if (this.#refuseForeignScopedReads) {
         for (const [address] of watchEntries) {
           const scope = address.scope ?? "space";
