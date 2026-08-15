@@ -173,7 +173,12 @@ run cf piece call -s "$SPACE" --piece board --select item@ addItem -- --title "L
 # bare hash is a different spelling that resolves by defaulting to `of:`, not
 # the same address — the scheme is part of the identity.
 EPIC=$(printf '%s' "$OUT" | jq -r '.result.item."$link".id')
-say "That id is what --piece takes from here on."
+say "That id is what --piece takes from here on. Ask it the same question act 2"
+say "asked the board, before assuming anything about what it can do."
+run cf piece verbs -s "$SPACE" --piece "$EPIC"
+say "Every verb an item has, and not the board's one: the listing is derived"
+say "from the piece in front of you, so an address is enough to discover a"
+say "surface you were never told about."
 run cf piece call -s "$SPACE" --piece "$EPIC" addChild -- --title "Session cookies"
 say "The item it hands back can be reached from inside itself: its parent holds"
 say "it, and it holds its parent. The position where the author's own type"

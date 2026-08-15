@@ -129,6 +129,14 @@ KIDS=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
   2>/dev/null)
 check "2" "$(echo "$KIDS" | jq -r 'length')" \
   "both children landed under the address the create returned"
+# Step 2's assertion one level down: an address alone discovers a surface, and
+# the surface it discovers is the item's own rather than the board's. Three
+# places say so in prose — the demo narrates it, and the walkthrough claims it
+# twice — and none of them could go stale without this failing first.
+ITEM_VERBS=$($CF piece verbs --piece "$EPIC" $ARGS --json 2>/dev/null)
+check "addChild,archive,blockOn,finish,recordNote" \
+  "$(echo "$ITEM_VERBS" | jq -r '[.verbs[]?.name] | sort | join(",")')" \
+  "an item lists its own verbs, and not the board's"
 
 step "5. Read addresses instead of contents"
 ADDR=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
