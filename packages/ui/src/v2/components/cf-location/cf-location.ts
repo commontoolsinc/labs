@@ -1,17 +1,18 @@
+import type { Schema } from "@commonfabric/api/schema";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
+import { classMap } from "lit/directives/class-map.js";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
-import type { Schema } from "@commonfabric/api/schema";
 import { createCellController } from "../../core/cell-controller.ts";
-import { consume } from "@lit/context";
 import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
-import { classMap } from "lit/directives/class-map.js";
 
 // Schema for LocationData
 const LocationDataSchema = {

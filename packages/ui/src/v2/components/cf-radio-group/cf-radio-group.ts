@@ -63,12 +63,12 @@
  * - clear() - Clear the selection
  */
 
+import { type CellHandle } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { html, PropertyValues, unsafeCSS } from "lit";
 import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { radioGroupStyles } from "./styles.ts";
-import { type CellHandle } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,
@@ -76,6 +76,7 @@ import {
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
+import { radioGroupStyles } from "./styles.ts";
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,
 // matching the prior phase-1 token migration pattern.

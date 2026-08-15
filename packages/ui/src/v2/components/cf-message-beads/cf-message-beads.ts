@@ -1,14 +1,15 @@
-import { css, html, nothing, render } from "lit";
-import { property } from "lit/decorators.js";
-import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
-import { createCellController } from "../../core/cell-controller.ts";
 import type {
   BuiltInLLMContentPart,
   BuiltInLLMMessage,
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commonfabric/api";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { css, html, nothing, render } from "lit";
+import { property } from "lit/decorators.js";
+
+import { BaseElement } from "../../core/base-element.ts";
+import { createCellController } from "../../core/cell-controller.ts";
 
 const MessagesSchema = {
   type: "array",

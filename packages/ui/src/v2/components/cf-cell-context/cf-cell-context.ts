@@ -1,7 +1,8 @@
-import { css } from "lit";
-import { RetiredElement } from "../../core/retired-element.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
+import { css } from "lit";
 import { property } from "lit/decorators.js";
+
+import { RetiredElement } from "../../core/retired-element.ts";
 
 /**
  * CFCellContext — RETIRED (#5132), kept as an inert passthrough.

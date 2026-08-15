@@ -1,20 +1,24 @@
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { classMap } from "lit/directives/class-map.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { marked } from "marked";
-import { HeadingIdRenderer } from "./heading-id.ts";
+
 import { BaseElement } from "../../core/base-element.ts";
+import { HeadingIdRenderer } from "./heading-id.ts";
+
 import "../cf-copy-button/index.ts";
 import "../cf-cell-link/index.ts";
+
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+
 import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
-import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
 export type MarkdownVariant = "default" | "inverse";
 

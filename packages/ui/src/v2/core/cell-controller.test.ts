@@ -1,12 +1,14 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { FakeTime } from "@std/testing/time";
-import type { ReactiveControllerHost } from "lit";
+
 import {
   CellHandle,
   type CellRef,
   isCellHandle,
 } from "@commonfabric/runtime-client";
+import type { ReactiveControllerHost } from "lit";
+
 import {
   createMockCellHandle,
   pushUpdate,

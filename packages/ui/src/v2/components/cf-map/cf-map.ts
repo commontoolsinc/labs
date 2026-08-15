@@ -5,13 +5,14 @@
  * Uses OpenStreetMap tiles (no API key required).
  */
 
-import { html, PropertyValues } from "lit";
-import { BaseElement } from "../../core/base-element.ts";
-import { styles } from "./styles.ts";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 // @ts-types="@types/leaflet"
 import * as L from "leaflet";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { html, PropertyValues } from "lit";
+
+import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
+import { styles } from "./styles.ts";
 import type {
   Bounds,
   CfBoundsChangeDetail,
@@ -25,6 +26,7 @@ import type {
   MapPolyline,
   MapValue,
 } from "./types.ts";
+
 import "../cf-render/index.ts";
 
 // Default map configuration

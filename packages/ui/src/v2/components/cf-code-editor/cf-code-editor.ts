@@ -1,7 +1,45 @@
-import { html, PropertyValues } from "lit";
-import { property } from "lit/decorators.js";
-import { BaseElement } from "../../core/base-element.ts";
-import { styles } from "./styles.ts";
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  Completion,
+  CompletionContext,
+  completionKeymap,
+  CompletionResult,
+  completionStatus,
+  startCompletion,
+} from "@codemirror/autocomplete";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+} from "@codemirror/commands";
+import { css as createCss } from "@codemirror/lang-css";
+import { html as createHtml } from "@codemirror/lang-html";
+import { javascript as createJavaScript } from "@codemirror/lang-javascript";
+import { json as createJson } from "@codemirror/lang-json";
+import { markdown as createMarkdown } from "@codemirror/lang-markdown";
+import {
+  bracketMatching,
+  defaultHighlightStyle,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
+  indentUnit,
+  LanguageSupport,
+  syntaxHighlighting,
+} from "@codemirror/language";
+import { lintKeymap } from "@codemirror/lint";
+import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  Extension,
+  Prec,
+} from "@codemirror/state";
+import { oneDark } from "@codemirror/theme-one-dark";
 import {
   crosshairCursor,
   drawSelection,
@@ -15,70 +53,23 @@ import {
   placeholder,
   rectangularSelection,
 } from "@codemirror/view";
-import {
-  defaultKeymap,
-  history,
-  historyKeymap,
-  indentWithTab,
-} from "@codemirror/commands";
-import {
-  Annotation,
-  Compartment,
-  EditorState,
-  Extension,
-  Prec,
-} from "@codemirror/state";
-import {
-  bracketMatching,
-  defaultHighlightStyle,
-  foldGutter,
-  foldKeymap,
-  indentOnInput,
-  indentUnit,
-  LanguageSupport,
-  syntaxHighlighting,
-} from "@codemirror/language";
-import { javascript as createJavaScript } from "@codemirror/lang-javascript";
-import { markdown as createMarkdown } from "@codemirror/lang-markdown";
-import { GFM } from "@lezer/markdown";
-import { css as createCss } from "@codemirror/lang-css";
-import { html as createHtml } from "@codemirror/lang-html";
-import { json as createJson } from "@codemirror/lang-json";
-import { oneDark } from "@codemirror/theme-one-dark";
-
-import {
-  autocompletion,
-  closeBrackets,
-  closeBracketsKeymap,
-  Completion,
-  CompletionContext,
-  completionKeymap,
-  CompletionResult,
-  completionStatus,
-  startCompletion,
-} from "@codemirror/autocomplete";
-import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import { lintKeymap } from "@codemirror/lint";
+import type { DID } from "@commonfabric/identity";
+import { parseFabricUrl } from "@commonfabric/runner/fabric-url";
+import { stringSchema } from "@commonfabric/runner/schemas";
 import {
   type CellHandle,
   isCellHandle,
   NAME,
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
-import { stringSchema } from "@commonfabric/runner/schemas";
-import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
-import { createStringCellController } from "../../core/cell-controller.ts";
+import { GFM } from "@lezer/markdown";
 import { consume } from "@lit/context";
-import { runtimeContext, spaceContext } from "../../runtime-context.ts";
-import type { DID } from "@commonfabric/identity";
-import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
-import { mentionIdFromCellId } from "../../utils/mention-id.ts";
-import {
-  Mentionable,
-  MentionableArray,
-  MentionableArraySchema,
-  MentionableSchema,
-} from "../../core/mentionable.ts";
+import { html, PropertyValues } from "lit";
+import { property } from "lit/decorators.js";
+
+import { BaseElement } from "../../core/base-element.ts";
+import { createStringCellController } from "../../core/cell-controller.ts";
+import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import {
   dedupeByDestination,
   labelForToken,
@@ -88,12 +79,20 @@ import {
   mintRefKey,
 } from "../../core/mention-refs.ts";
 import {
+  Mentionable,
+  MentionableArray,
+  MentionableArraySchema,
+  MentionableSchema,
+} from "../../core/mentionable.ts";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
+import { mentionIdFromCellId } from "../../utils/mention-id.ts";
+import {
   atomicBacklinkRanges,
   backlinkEditFilter,
   backlinkField,
   createBacklinkDecorationPlugin,
 } from "./features/backlinks.ts";
-import { parseFabricUrl } from "@commonfabric/runner/fabric-url";
 import {
   atomicMentionRefRanges,
   createMentionRefDecorationPlugin,
@@ -106,6 +105,7 @@ import {
   setKnownRefKeys,
 } from "./features/mention-refs.ts";
 import { createProseMarkdownPlugin } from "./features/prose-markdown.ts";
+import { styles } from "./styles.ts";
 
 /** A unique noteId, so notes created from a mention do not collide. */
 function generateNoteId(): string {
