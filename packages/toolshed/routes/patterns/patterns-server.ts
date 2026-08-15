@@ -1,10 +1,11 @@
-import { decode } from "@commonfabric/utils/encoding";
 import { join } from "@std/path/join";
 import { toFileUrl } from "@std/path/to-file-url";
+
 import {
   PATTERNS_ROUTE_PREFIX,
   resolveEntryIdentity,
 } from "@commonfabric/runner";
+import { decode } from "@commonfabric/utils/encoding";
 
 // The prefix this route serves patterns under is the runner's constant, not
 // this route's own. A pattern's content identity folds in each module's

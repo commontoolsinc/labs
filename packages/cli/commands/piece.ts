@@ -1,6 +1,30 @@
-import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
+import { Table } from "@cliffy/table";
+import type { CellScope } from "@commonfabric/api";
+import type {
+  PatternCompatibilityReport,
+  PiecePatternRef,
+} from "@commonfabric/piece/ops";
+import ports from "@commonfabric/ports" with { type: "json" };
+import { parseCellPath, UI } from "@commonfabric/runner";
+import { parseScopedIdSegment } from "@commonfabric/runner/shared";
+import { decode } from "@commonfabric/utils/encoding";
+
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
+import type {
+  InvocationIdentity,
+  InvocationOutcome,
+  InvocationPhase,
+} from "../lib/callable.ts";
+import {
+  type CellSelection,
+  CellSelectionError,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
+import { cliText } from "../lib/cli-name.ts";
+import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
+import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
+import { renderPiece } from "../lib/piece-render.ts";
 import {
   applyPieceInput,
   checkPiecePattern,
@@ -40,32 +64,10 @@ import type {
   ExecutedPieceCallable,
   PieceCallablesListing,
 } from "../lib/piece.ts";
-import type { PatternCompatibilityReport } from "@commonfabric/piece/ops";
-import type {
-  InvocationIdentity,
-  InvocationOutcome,
-  InvocationPhase,
-} from "../lib/callable.ts";
-import { newSessionId } from "../lib/session.ts";
-import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
-import { renderPiece } from "../lib/piece-render.ts";
-import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
-import { decode } from "@commonfabric/utils/encoding";
-import { cliText } from "../lib/cli-name.ts";
+import { newSessionId } from "../lib/session.ts";
+import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { absPath } from "../lib/utils.ts";
-import type { CellScope } from "@commonfabric/api";
-import { parseCellPath } from "@commonfabric/runner";
-import { parseScopedIdSegment } from "@commonfabric/runner/shared";
-import { UI } from "@commonfabric/runner";
-import ports from "@commonfabric/ports" with { type: "json" };
-import type { PiecePatternRef } from "@commonfabric/piece/ops";
-import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
-import {
-  type CellSelection,
-  CellSelectionError,
-  parseCellSelectionOptions,
-} from "../lib/cell-selection.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;

@@ -1,6 +1,11 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
+import { pieceId, SlugResolutionError } from "@commonfabric/piece";
 import {
   type Cell,
   getCellOrThrow,
@@ -14,10 +19,28 @@ import {
   newLoopbackServer,
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
-import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { cf, checkStderr, stripAnsi } from "./utils.ts";
+
+import { toCell } from "../../runner/src/back-to-cell.ts";
+import { setResultCell } from "../../runner/src/result-utils.ts";
+import {
+  checkPieceSourceFromCommand,
+  formatPatternIdentity,
+  formatPatternRef,
+  localPatternEntry,
+  mergePiecePath,
+  normalizeApiUrl,
+  parseLink,
+  parsePieceOptions,
+  parseSpaceOptions,
+  piece,
+  setPieceSourceFromCommand,
+} from "../commands/piece.ts";
+import {
+  CellSelectionError,
+  parseCellSelectionOptions,
+  parseSelectionFilter,
+  parseSelectionProjection,
+} from "../lib/cell-selection.ts";
 import {
   checkPiecePattern,
   getCellValue,
@@ -35,29 +58,8 @@ import {
   type SpaceConfig,
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
-import { pieceId, SlugResolutionError } from "@commonfabric/piece";
-import { setResultCell } from "../../runner/src/result-utils.ts";
-import { toCell } from "../../runner/src/back-to-cell.ts";
-import {
-  checkPieceSourceFromCommand,
-  formatPatternIdentity,
-  formatPatternRef,
-  localPatternEntry,
-  mergePiecePath,
-  normalizeApiUrl,
-  parseLink,
-  parsePieceOptions,
-  parseSpaceOptions,
-  piece,
-  setPieceSourceFromCommand,
-} from "../commands/piece.ts";
 import { safeStringify } from "../lib/render.ts";
-import {
-  CellSelectionError,
-  parseCellSelectionOptions,
-  parseSelectionFilter,
-  parseSelectionProjection,
-} from "../lib/cell-selection.ts";
+import { cf, checkStderr, stripAnsi } from "./utils.ts";
 
 const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";

@@ -1,8 +1,10 @@
-import { Command } from "@cliffy/command";
 import { isAbsolute, join } from "@std/path";
-import { render } from "../lib/render.ts";
-import { process } from "../lib/dev.ts";
+
+import { Command } from "@cliffy/command";
+
 import { cliText } from "../lib/cli-name.ts";
+import { process } from "../lib/dev.ts";
+import { render } from "../lib/render.ts";
 
 const description = cliText(`Compile and execute patterns for debugging.
 

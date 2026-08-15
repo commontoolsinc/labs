@@ -1,9 +1,10 @@
-import type { AppRouteHandler } from "@/lib/types.ts";
+import { ensureDir } from "@std/fs";
+
 import type { WebSearchRoute } from "./web-search.routes.ts";
 import env from "@/env.ts";
-import { sha256 } from "@/lib/sha2.ts";
 import { gatewayProvenanceHeaders } from "@/lib/gateway-provenance.ts";
-import { ensureDir } from "@std/fs";
+import { sha256 } from "@/lib/sha2.ts";
+import type { AppRouteHandler } from "@/lib/types.ts";
 
 const CACHE_DIR = `${env.CACHE_DIR}/agent-tools-web-search`;
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes in milliseconds

@@ -7,13 +7,14 @@ import {
   type MemorySpace,
   type NormalizedFullLink,
 } from "@commonfabric/runner";
-import { isInstance } from "@commonfabric/utils/types";
+import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
 import {
   localRefTarget,
   relaxDefaultedRequired,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc/schema-sanitization";
-import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
+import { isInstance } from "@commonfabric/utils/types";
+
 import {
   type CallableKind,
   classifyCallableEntry,

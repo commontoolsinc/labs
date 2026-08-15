@@ -1,7 +1,3 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import { sha256 } from "@/lib/sha2.ts";
-import { runtime } from "@/index.ts";
-import { identity } from "@/lib/identity.ts";
 import { WebhookConfigSchema } from "@commonfabric/runner";
 import {
   assertWebhookCellLinkRefPayload,
@@ -9,6 +5,11 @@ import {
   linkRefPayload,
   linkRefPayloadFromString,
 } from "@commonfabric/runner/shared";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import { runtime } from "@/index.ts";
+import { identity } from "@/lib/identity.ts";
+import { sha256 } from "@/lib/sha2.ts";
 
 const _logger = getLogger("webhooks.utils");
 

@@ -10,6 +10,12 @@
  * It is line-oriented (the only cross-line state is whether a fenced code block
  * is open), so re-highlighting is cheap enough to redo whole on every keystroke.
  */
+
+import { decodeHTMLStrict as decodeEntities } from "entities";
+import { Lexer } from "marked";
+
+import { cpLen } from "../../ansi.ts";
+import { computeLineStarts, lineIndexOf } from "../../lines.ts";
 import type {
   Document,
   Line,
@@ -19,10 +25,6 @@ import type {
 } from "../../model.ts";
 import { flattenStructure } from "../../model.ts";
 import type { Highlighter } from "../language.ts";
-import { cpLen } from "../../ansi.ts";
-import { computeLineStarts, lineIndexOf } from "../../lines.ts";
-import { Lexer } from "marked";
-import { decodeHTMLStrict as decodeEntities } from "entities";
 
 /** Color Markdown text into rendered lines. */
 export function highlightMarkdownLines(text: string): Line[] {
