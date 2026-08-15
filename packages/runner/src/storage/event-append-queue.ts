@@ -210,9 +210,26 @@ export class EventAppendQueue {
     this.#transact = options.transact;
     this.#nextLocalSeq = options.nextLocalSeq;
     this.#onRefused = options.onRefused;
-    this.#pacing = options.pacing === false
+    const pacing = options.pacing === false
       ? undefined
       : options.pacing ?? DEFAULT_EVENT_APPEND_PACING;
+    // A non-positive or non-finite rate/burst cannot pace (the deficit
+    // wait would never end); treat it as unpaced, loudly, rather than
+    // wedge the queue — the bound is a dial, never a trap.
+    if (
+      pacing !== undefined &&
+      !(Number.isFinite(pacing.ratePerSecond) && pacing.ratePerSecond > 0 &&
+        Number.isFinite(pacing.burst) && pacing.burst >= 1)
+    ) {
+      logger.warn("event-queue-pacing-invalid", () => [
+        `event queue pacing for ${options.space} is invalid ` +
+        `(ratePerSecond=${pacing.ratePerSecond}, burst=${pacing.burst}); ` +
+        "running UNPACED",
+      ]);
+      this.#pacing = undefined;
+    } else {
+      this.#pacing = pacing;
+    }
     this.#loaded = this.#store.load(this.#space).then((persisted) => {
       // Intents a dead predecessor replica left in the manager-shared
       // store were fired EARLIER than anything this instance enqueues:

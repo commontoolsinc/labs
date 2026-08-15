@@ -16,6 +16,16 @@ import {
 const envOf = (values: Record<string, string | undefined>) => (name: string) =>
   values[name];
 
+describe("the flip (server-execution v2 Phase 7, 2026-08-15)", () => {
+  it("the first-party default IS ON — flipping it back is the documented rollback (docs/plans/server-execution-v2.md Phase 7) and must update this pin, the CI lane roles, and EXPERIMENTAL_OPTIONS.md together", () => {
+    // Every other flip pin in the tree is deliberately RELATIVE to the
+    // constant (so the flip is one line); this is the one ABSOLUTE pin,
+    // so a silent revert cannot leave the "ON arm" CI lanes running OFF
+    // with every test still green.
+    expect(SERVER_EXECUTION_DEFAULT_ENABLED).toBe(true);
+  });
+});
+
 describe("serverExecutionEnabledFromEnv", () => {
   it("resolves an UNSET flag to the first-party default", () => {
     expect(serverExecutionEnabledFromEnv(envOf({}))).toBe(
