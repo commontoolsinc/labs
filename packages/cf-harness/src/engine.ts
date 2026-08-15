@@ -1,38 +1,23 @@
 import {
-  type HarnessConfig,
-  type ResolvedHarnessConfig,
-  resolveHarnessConfig,
-  type ResolveHarnessConfigOptions,
-} from "./config.ts";
+  dirname,
+  join as joinHostPath,
+  normalize as normalizeHostPath,
+  relative as relativeHostPath,
+} from "@std/path";
+import { normalize as normalizeSandboxPath } from "@std/path/posix";
+
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
+
 import {
   createFileSystemHarnessArtifactStore,
   type HarnessArtifactStore,
 } from "./artifacts.ts";
 import {
-  appendHarnessCfcModelContextObservations,
-  appendHarnessFailureRecord,
-  appendToHarnessRunState,
-  createHarnessRunState,
-  type HarnessRunState,
-  type HarnessRunTerminalReason,
-  patchHarnessRunState,
-  setHarnessRunStatus,
-  setHarnessSubagentRun,
-} from "./run-state.ts";
-import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
-import {
-  classifyBuiltinToolFailure,
-  classifyHarnessPolicyEventFailure,
-  classifyHarnessRunError,
-  type ClassifyHarnessRunErrorOptions,
-  collectHarnessCapabilitySnapshot,
-  createHarnessFailureRecord,
-  type HarnessFailureRecord,
-} from "./diagnostics.ts";
-import {
-  createHarnessPolicyEvent,
-  type HarnessPolicyEvent,
-} from "./contracts/policy.ts";
+  type HarnessConfig,
+  type ResolvedHarnessConfig,
+  resolveHarnessConfig,
+  type ResolveHarnessConfigOptions,
+} from "./config.ts";
 import {
   createHarnessCfcInvocationContext,
   type HarnessCfcInvocationContext,
@@ -40,16 +25,20 @@ import {
   type HarnessCfcInvocationOperation,
   summarizeCfcInvocationRunManifest,
 } from "./contracts/cfc-invocation-context.ts";
+import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
-import { assertValidHarnessHandleTable } from "./handle-table.ts";
-import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import {
   createHarnessPolicyDecisionRecord,
   type HarnessPolicyDecisionRecord,
   type HarnessPolicyTrace,
 } from "./contracts/policy-trace.ts";
+import {
+  createHarnessPolicyEvent,
+  type HarnessPolicyEvent,
+} from "./contracts/policy.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import type { HarnessRunReport } from "./contracts/run-report.ts";
 import type {
   HarnessSkillActivations,
@@ -63,25 +52,47 @@ import type {
   HarnessSubagentRunRef,
 } from "./contracts/subagent.ts";
 import {
+  type DelegateTaskToolInput,
+  type DelegateTaskToolOutput,
+} from "./contracts/subagent.ts";
+import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import {
   createToolResultRef,
   type ToolOutputId,
   type ToolResultRef,
 } from "./contracts/tool-result.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
-import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
+import {
+  classifyBuiltinToolFailure,
+  classifyHarnessPolicyEventFailure,
+  classifyHarnessRunError,
+  type ClassifyHarnessRunErrorOptions,
+  collectHarnessCapabilitySnapshot,
+  createHarnessFailureRecord,
+  type HarnessFailureRecord,
+} from "./diagnostics.ts";
+import {
+  cacheHarnessFabricSessionFactory,
+  createHarnessFabricSessionFactory,
+  type HarnessFabricSessionFactory,
+} from "./fabric-session.ts";
+import { assertValidHarnessHandleTable } from "./handle-table.ts";
+import {
+  appendHarnessCfcModelContextObservations,
+  appendHarnessFailureRecord,
+  appendToHarnessRunState,
+  createHarnessRunState,
+  type HarnessRunState,
+  type HarnessRunTerminalReason,
+  patchHarnessRunState,
+  setHarnessRunStatus,
+  setHarnessSubagentRun,
+} from "./run-state.ts";
 import {
   assertDockerRunscCfcTransportForMode,
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
 } from "./sandbox/docker-runsc.ts";
-import {
-  dirname,
-  join as joinHostPath,
-  normalize as normalizeHostPath,
-  relative as relativeHostPath,
-} from "@std/path";
-import { normalize as normalizeSandboxPath } from "@std/path/posix";
 import {
   DenoProcessRunner,
   type ProcessRunner,
@@ -93,10 +104,6 @@ import type {
 } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import {
-  type DelegateTaskToolInput,
-  type DelegateTaskToolOutput,
-} from "./contracts/subagent.ts";
-import {
   type EditFileToolInput,
   type EditFileToolOutput,
 } from "./tools/edit-file.ts";
@@ -104,6 +111,19 @@ import {
   type ReadFileToolInput,
   type ReadFileToolOutput,
 } from "./tools/read-file.ts";
+import {
+  type ReadSkillResourceToolInput,
+  type ReadSkillResourceToolOutput,
+} from "./tools/read-skill-resource.ts";
+import { getBuiltinTool } from "./tools/registry.ts";
+import {
+  type RunPatternToolInput,
+  type RunPatternToolOutput,
+} from "./tools/run-pattern.ts";
+import {
+  type RunSkillScriptToolInput,
+  type RunSkillScriptToolOutput,
+} from "./tools/run-skill-script.ts";
 import {
   type ViewImageToolInput,
   type ViewImageToolOutput,
@@ -113,27 +133,9 @@ import {
   type WebFetchToolOutput,
 } from "./tools/web-fetch.ts";
 import {
-  type ReadSkillResourceToolInput,
-  type ReadSkillResourceToolOutput,
-} from "./tools/read-skill-resource.ts";
-import {
-  type RunSkillScriptToolInput,
-  type RunSkillScriptToolOutput,
-} from "./tools/run-skill-script.ts";
-import {
-  type RunPatternToolInput,
-  type RunPatternToolOutput,
-} from "./tools/run-pattern.ts";
-import {
   type WriteFileToolInput,
   type WriteFileToolOutput,
 } from "./tools/write-file.ts";
-import {
-  cacheHarnessFabricSessionFactory,
-  createHarnessFabricSessionFactory,
-  type HarnessFabricSessionFactory,
-} from "./fabric-session.ts";
-import { getBuiltinTool } from "./tools/registry.ts";
 
 export interface BuiltinToolInputMap {
   bash: BashToolInput;

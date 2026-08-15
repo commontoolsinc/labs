@@ -5,8 +5,13 @@
  * Imports from `@commonfabric/runner` may be used freely in this directory.
  */
 import "core-js/proposals/explicit-resource-management";
+
 import "core-js/proposals/async-explicit-resource-management";
 
+import { getLogger } from "@commonfabric/utils/logger";
+import { unrefTimer } from "@commonfabric/utils/sleep";
+
+import { CompilerStackLoadError } from "../../../runner/src/harness/deferred-compiler-stack.ts";
 import {
   IPCRemoteResponse,
   isIPCClientMessage,
@@ -15,9 +20,6 @@ import {
   RuntimeErrorCode,
 } from "../../protocol/mod.ts";
 import { RuntimeProcessor } from "../mod.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { unrefTimer } from "@commonfabric/utils/sleep";
-import { CompilerStackLoadError } from "../../../runner/src/harness/deferred-compiler-stack.ts";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one

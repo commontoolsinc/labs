@@ -7,8 +7,21 @@ import {
   join as joinSandboxPath,
   normalize,
 } from "@std/path/posix";
-import { DenoProcessRunner, type ProcessRunner } from "./process-runner.ts";
+
+import type {
+  CfcEnforcementMode,
+  CfcSandboxJsonValue,
+  CfcSandboxResult,
+  CfcStreamChannel,
+  IFCLabel,
+} from "@commonfabric/runner/cfc";
+import {
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
+} from "@commonfabric/runner/cfc";
+
 import { SandboxPathEscapeError } from "./errors.ts";
+import { DenoProcessRunner, type ProcessRunner } from "./process-runner.ts";
 import type {
   DockerNetworkMode,
   DockerRunscAdditionalMount,
@@ -22,17 +35,6 @@ import type {
   SandboxRuntimeMountDescription,
   SandboxShellRequest,
 } from "./types.ts";
-import type {
-  CfcEnforcementMode,
-  CfcSandboxJsonValue,
-  CfcSandboxResult,
-  CfcStreamChannel,
-  IFCLabel,
-} from "@commonfabric/runner/cfc";
-import {
-  CFC_ENFORCING_STRICTNESS,
-  cfcEnforcementStrictness,
-} from "@commonfabric/runner/cfc";
 
 export const DEFAULT_DOCKER_RUNSC_IMAGE =
   "us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest";

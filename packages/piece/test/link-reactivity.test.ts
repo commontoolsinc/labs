@@ -1,14 +1,16 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { createSession, Identity } from "@commonfabric/identity";
 import {
   KeepAsCell,
   parseLink,
   resolveCellPath,
   Runtime,
 } from "@commonfabric/runner";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { createSession, Identity } from "@commonfabric/identity";
+
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("test link reactivity");

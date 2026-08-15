@@ -5,24 +5,25 @@
  * strings that name addresses come back as tokens.
  */
 
-import { describe, it } from "@std/testing/bdd";
+import { decodeBase64 } from "@std/encoding/base64";
 import { expect } from "@std/expect";
+import { join } from "@std/path";
+import { normalize } from "@std/path/posix";
+import { describe, it } from "@std/testing/bdd";
+
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { type Cell, isCell, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { CfHarnessEngine } from "../src/engine.ts";
-import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+
+import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
-import {
-  chatViewOfRequest,
-  responsesBodyFromChatFixture,
-} from "./support/responses-fixture.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
 import {
   createHarnessHandleTable,
   mintAddressHandle,
 } from "../src/handle-table.ts";
-import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import type {
   SandboxCommandRequest,
   SandboxCommandResult,
@@ -30,9 +31,10 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
-import { normalize } from "@std/path/posix";
-import { join } from "@std/path";
-import { decodeBase64 } from "@std/encoding/base64";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 
 const ONE_PIXEL_PNG = decodeBase64(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",

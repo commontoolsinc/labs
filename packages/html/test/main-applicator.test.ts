@@ -11,11 +11,13 @@ import {
   assertNotStrictEquals,
   assertStrictEquals,
 } from "@std/assert";
+
+import { $conn, type CellRef } from "@commonfabric/runtime-client";
+
 import { DomApplicator } from "../src/main/applicator.ts";
 import type { DomEventMessage } from "../src/main/events.ts";
-import type { VDomBatch } from "../src/vdom-ops.ts";
-import { $conn, type CellRef } from "@commonfabric/runtime-client";
 import { getPieceBoundary } from "../src/main/space-context.ts";
+import type { VDomBatch } from "../src/vdom-ops.ts";
 
 // Mock RuntimeClient for testing
 const createMockRuntimeClient = () => {

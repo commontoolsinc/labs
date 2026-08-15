@@ -7,12 +7,13 @@
  */
 
 import type { CellRef, RuntimeClient } from "@commonfabric/runtime-client";
+import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
+import type { VDomBatch, VDomOp } from "../vdom-ops.ts";
 import { serializeEvent } from "./events.ts";
 import type { DomEventMessage } from "./events.ts";
-import type { VDomBatch, VDomOp } from "../vdom-ops.ts";
-import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
-import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 import {
   clearPieceBoundary,
   provideElementSpace,

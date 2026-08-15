@@ -6,19 +6,19 @@
  * persisted artifact keeps the raw text.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { normalize } from "@std/path/posix";
+import { describe, it } from "@std/testing/bdd";
+
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { normalize } from "@std/path/posix";
+
+import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
-import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
-import { scrubBareFabricIdentifiers } from "../src/tools/run-pattern.ts";
-import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
-import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import type {
   SandboxCommandRequest,
   SandboxCommandResult,
@@ -26,6 +26,8 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import { scrubBareFabricIdentifiers } from "../src/tools/run-pattern.ts";
+import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {

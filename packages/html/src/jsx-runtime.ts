@@ -7,8 +7,9 @@
  * @module jsx-runtime
  */
 
-import { h } from "./h.ts";
 import type { JSXElement, RenderNode, VNode } from "@commonfabric/api";
+
+import { h } from "./h.ts";
 
 /**
  * Props type for JSX elements, including children

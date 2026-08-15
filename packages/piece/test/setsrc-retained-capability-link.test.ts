@@ -23,8 +23,10 @@
  * what `cf piece setsrc` drives.
  */
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   type Cell,
@@ -34,11 +36,11 @@ import {
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 // Test-only dependency; pinned in this package's deno.jsonc (see the comment
 // on the entry there).
 import { Database } from "@db/sqlite";
+
 import { PieceController } from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 

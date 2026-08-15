@@ -1,5 +1,12 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
+import { linkRefPayloadFromString } from "@commonfabric/runner/shared";
+
 import {
   $conn,
   $onCellUpdate,
@@ -10,11 +17,6 @@ import {
   type RuntimeClient,
 } from "./mod.ts";
 import { cellRefToKey } from "./shared/utils.ts";
-import { linkRefPayloadFromString } from "@commonfabric/runner/shared";
-import {
-  FabricBytes,
-  FabricEpochNsec,
-} from "@commonfabric/data-model/fabric-primitives";
 
 describe("CellHandle CFC label IPC", () => {
   it("queries the runtime for the label view behind a cell", async () => {
