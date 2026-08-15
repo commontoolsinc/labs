@@ -117,6 +117,77 @@ describe("verb prose", () => {
         });
       }
 
+      it("visits one definition once per arm that names it", () => {
+        // Both arms reference `Cat`, each adding its own sentence at the ref
+        // site. A guard recording "this reference has been seen" rather than
+        // "this reference is open on the path" drops the second arm whole, and
+        // with it the only account of `loud`.
+        const result = fold(
+          object({ quiet: { type: "string" }, loud: { type: "string" } }),
+          {
+            anyOf: [
+              {
+                $ref: "#/$defs/Cat",
+                properties: { quiet: { description: "Barely heard." } },
+              },
+              {
+                $ref: "#/$defs/Cat",
+                properties: { loud: { description: "Heard next door." } },
+              },
+            ],
+            $defs: {
+              Cat: object({
+                quiet: { type: "string" },
+                loud: { type: "string" },
+              }),
+            },
+          } as unknown as JSONSchema,
+        );
+        expect(result.properties.quiet.description).toBe("Barely heard.");
+        expect(result.properties.loud.description).toBe("Heard next door.");
+      });
+
+      it("prefers the arm that documents a field over one that merely declares it", () => {
+        // The first arm mentions `meow` without saying anything about it.
+        // Taking the first arm that HAS the key, rather than the first that
+        // SAYS something, loses the only sentence written about this field.
+        const result = fold(
+          object({ meow: { type: "string" } }),
+          {
+            anyOf: [
+              object({ meow: { type: "string" } }),
+              object({ meow: { type: "string", description: "How loud." } }),
+            ],
+          } as unknown as JSONSchema,
+        );
+        expect(result.properties.meow.description).toBe("How loud.");
+      });
+
+      it("resolves a nested reference in the scope that declares it", () => {
+        // `Outer` carries `$defs` of its own, and its `pet` names a `Cat`
+        // declared there — a different `Cat` from the one at the event root.
+        // Resolving in the root scope finds the root's, whose `meow` says
+        // nothing: the prose is lost, and a WRONG document answered.
+        const result = fold(
+          object({ pet: object({ meow: { type: "string" } }) }),
+          {
+            $ref: "#/$defs/Outer",
+            $defs: {
+              Outer: object({ pet: { $ref: "#/$defs/Cat" } }, {
+                $defs: {
+                  Cat: object({
+                    meow: { type: "string", description: "The inner cat." },
+                  }),
+                },
+              }),
+              Cat: object({ meow: { type: "string" } }),
+            },
+          } as unknown as JSONSchema,
+        );
+        expect(result.properties.pet.properties.meow.description)
+          .toBe("The inner cat.");
+      });
+
       it("finds a property's prose in whichever declared arm declares it", () => {
         // The served side spells a union as one merged object, which is what
         // the compiler emits when a handler reads fields from both arms. The
@@ -132,6 +203,53 @@ describe("verb prose", () => {
         );
         expect(result.properties.meow.description).toBe("How loud.");
         expect(result.properties.woof.description).toBe("How deep.");
+      });
+
+      it("reaches one served definition from every position that names it", () => {
+        // Two served positions share `$defs/Cat`. The first position's declared
+        // account says nothing; the second's documents the field. A guard that
+        // retires a served definition after one visit stops at the first and
+        // the prose is never found — the same "seen once" mistake as on the
+        // declared side, on the other document.
+        const served = object({
+          stray: { $ref: "#/$defs/Cat" },
+          housecat: { $ref: "#/$defs/Cat" },
+        }, { $defs: { Cat: object({ meow: { type: "string" } }) } });
+        const result = fold(
+          served,
+          object({
+            stray: object({ meow: { type: "string" } }),
+            housecat: object({
+              meow: { type: "string", description: "How loud." },
+            }),
+          }),
+        );
+        expect(result.$defs.Cat.properties.meow.description).toBe("How loud.");
+      });
+
+      it("gives a shared served definition the first account of it", () => {
+        // Both positions reach `$defs/Cat` and both are documented, so both
+        // want to write the same slot. A definition is shared, so one of them
+        // has to lose: the first in document order wins, deterministically.
+        // Letting the later one through would make the words a caller reads
+        // depend on property ordering.
+        const served = object({
+          alpha: { $ref: "#/$defs/Cat" },
+          beta: { $ref: "#/$defs/Cat" },
+        }, { $defs: { Cat: object({ meow: { type: "string" } }) } });
+        const result = fold(
+          served,
+          object({
+            alpha: object({
+              meow: { type: "string", description: "Alpha's account." },
+            }),
+            beta: object({
+              meow: { type: "string", description: "Beta's account." },
+            }),
+          }),
+        );
+        expect(result.$defs.Cat.properties.meow.description)
+          .toBe("Alpha's account.");
       });
 
       it("follows a reference on either side to reach a position", () => {

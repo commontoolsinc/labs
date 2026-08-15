@@ -28,10 +28,12 @@ import {
   type CfcLabelView,
   cfcLabelViewForCellWithStatus,
   cfcLabelViewFromSchema,
+  cfcSchemaChildRoot,
   getCarriedCfcLabelView,
   type IFCLabel,
   mergeCfcLabelViews,
   redactCaveatSourcesForDisplay,
+  resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
@@ -2103,6 +2105,21 @@ interface DescriptionEdit {
  * `additionalProperties`, `patternProperties`, `propertyNames`, `contains`,
  * `not`, `if`/`then`/`else`, `dependentSchemas`, and `unevaluated*`.
  *
+ * Three rules govern which declared account answers for a position, and each is
+ * a place a shorter implementation silently loses prose:
+ *
+ * - **Every** account is consulted, not the first one that mentions the
+ *   position. An arm declaring a field without documenting it must not shadow a
+ *   later arm that documents it.
+ * - The first account that actually SAYS something wins, in declaration order.
+ *   Two arms documenting one field differently describe two different values,
+ *   so their sentences are not merged — merging would produce prose no author
+ *   wrote.
+ * - A reference resolves in the scope that declares it. A definition may carry
+ *   `$defs` of its own, and its nested references name those; resolving them at
+ *   the event root finds nothing, or a same-named definition belonging to
+ *   someone else.
+ *
  * ANNOTATIONS ONLY, and that bound is the point rather than a simplification.
  * The two schemas disagree about shape by construction, not by accident:
  * `served` is the handler's read of the event, narrowed to what its body
@@ -2137,24 +2154,69 @@ export function withDeclaredFieldProse(
   }
   const edits: DescriptionEdit[] = [];
   collectDescriptionEdits(
-    { served, declared, servedRoot: served, declaredRoot: declared },
+    {
+      served,
+      servedRoot: served,
+      declared: [{ schema: declared, root: declared, direct: true }],
+    },
     [],
     false,
-    edits,
-    new Set<string>(),
+    { edits, written: new Set<string>(), openDefinitions: [], openRefs: [] },
   );
   return applyDescriptionEdits(served, edits);
 }
 
 /**
- * The two documents at one position, plus the roots their `$ref`s resolve
- * against. Held together because every step of the walk needs all four.
+ * One declared node that may describe a position, with the scope its own
+ * references resolve against.
+ *
+ * The scope travels WITH the node because a `$defs` closure is local: a
+ * definition may carry definitions of its own, and its nested references name
+ * those rather than the ones at the event root. Carrying one root for the whole
+ * walk resolves such a reference in the wrong document, which finds either
+ * nothing or — worse — a same-named definition belonging to someone else.
+ *
+ * `direct` separates an account OF the position from an account of one
+ * ALTERNATIVE at it. Both are read when looking a child up; only a direct one
+ * may give the position its own description.
  */
-interface ProsePair {
+interface DeclaredCandidate {
+  readonly schema: JSONSchema;
+  readonly root: JSONSchema;
+  readonly direct: boolean;
+}
+
+/** The served node at one position, with the declared accounts of it. */
+interface ProseWalk {
   readonly served: JSONSchema;
-  readonly declared: JSONSchema;
   readonly servedRoot: JSONSchema;
-  readonly declaredRoot: JSONSchema;
+  readonly declared: readonly DeclaredCandidate[];
+}
+
+/**
+ * State threaded through the whole walk: what has been recorded, and what is
+ * currently open on the path.
+ *
+ * Both open lists are STACKS rather than sets of everything ever seen. A set
+ * answers "have I been here before", and a legitimate second visit — two arms
+ * of a union naming one definition, two fields of the same type — is
+ * indistinguishable from a cycle under that question, so the second visit is
+ * dropped along with the prose it would have found. A stack answers "am I
+ * inside this right now", which is the question termination actually asks.
+ */
+interface ProseWalkState {
+  readonly edits: DescriptionEdit[];
+  /** Paths already recorded, so the first account of a position wins. Two
+   * positions sharing one `$defs` target can each reach it now that the guard
+   * is path-scoped, and without this the later one would silently overwrite
+   * the earlier. */
+  readonly written: Set<string>;
+  /** Served `$defs` names open on the current descent. */
+  readonly openDefinitions: string[];
+  /** Declared references open on the current expansion, each with the scope it
+   * was followed in — the same reference in two different scopes is two
+   * different targets. */
+  readonly openRefs: { ref: string; root: JSONSchema }[];
 }
 
 /**
@@ -2181,6 +2243,73 @@ function servedDefinitionName(
 }
 
 /**
+ * Every declared node that can describe one position: each entry with its
+ * references followed, plus — transitively — the members of any combinator it
+ * carries. Entries and their ref-chains are `direct`; combinator members are
+ * not.
+ *
+ * Flattening the combinator is what lets a served side that spells a union as
+ * one merged object still find each field's prose, which lives in whichever arm
+ * declares it. Nothing here is written back: these are read to look a position
+ * up, and the served document keeps its own shape.
+ *
+ * Scope is threaded rather than assumed. `cfcSchemaChildRoot` opens a new one
+ * wherever a subtree carries its own `$defs`, and `resolveCfcSchemaRefRoot`
+ * reports the scope a ref chain ends in, so a definition's nested references
+ * resolve in the document that declares them.
+ *
+ * Termination is by the open-reference stack, keyed on the pair of reference
+ * and scope, pushed on the way in and popped on the way out. Object identity
+ * is deliberately not used as a backstop: `resolveCfcSchemaRefs` hands back a
+ * fresh object whenever it merges ref-site siblings over a target, so identity
+ * is not stable across resolution and a guard built on it would never fire.
+ */
+function expandDeclared(
+  entries: readonly DeclaredCandidate[],
+  openRefs: { ref: string; root: JSONSchema }[],
+): DeclaredCandidate[] {
+  const candidates: DeclaredCandidate[] = [];
+  const visit = (
+    node: JSONSchema | undefined,
+    root: JSONSchema,
+    direct: boolean,
+  ): void => {
+    if (!isObjectOrArray(node)) return;
+    // A node carrying its own definitions opens a scope before its own `$ref`
+    // is read, because that reference may name one of them.
+    const scope = cfcSchemaChildRoot(node, root);
+    const ref = node.$ref;
+    let resolved: JSONSchema | undefined = node;
+    let childRoot = scope;
+    if (typeof ref === "string") {
+      if (openRefs.some((open) => open.ref === ref && open.root === scope)) {
+        return;
+      }
+      openRefs.push({ ref, root: scope });
+      resolved = resolveCfcSchemaRefs(node, scope);
+      childRoot = isObjectOrArray(resolved)
+        ? cfcSchemaChildRoot(resolved, resolveCfcSchemaRefRoot(node, scope))
+        : scope;
+    }
+    try {
+      if (!isObjectOrArray(resolved)) return;
+      candidates.push({ schema: resolved, root: childRoot, direct });
+      for (const keyword of COMBINATOR_KEYWORDS) {
+        const members = resolved[keyword];
+        if (!Array.isArray(members)) continue;
+        for (const member of members) {
+          visit(member as JSONSchema, childRoot, false);
+        }
+      }
+    } finally {
+      if (typeof ref === "string") openRefs.pop();
+    }
+  };
+  for (const entry of entries) visit(entry.schema, entry.root, entry.direct);
+  return candidates;
+}
+
+/**
  * Walk both documents in lockstep, recording every `description` the served
  * side lacks and the declared side supplies.
  *
@@ -2188,56 +2317,52 @@ function servedDefinitionName(
  * false only at the root, whose description belongs to the verb rather than to
  * the event object.
  *
+ * WHICH ACCOUNT WINS, where several describe one position: the first direct
+ * candidate that actually carries a description, in the order the declared
+ * document lists them. Not the first candidate that merely mentions the
+ * position — an arm declaring a field without documenting it must not shadow a
+ * later arm that documents it. Not a merge of every arm's sentence either: two
+ * arms documenting one field differently are describing two different values,
+ * and concatenating them would produce prose no author wrote. First that says
+ * something, deterministically.
+ *
  * TERMINATION, which `$ref`-following makes a real question. Descent is over
  * the SERVED structure, whose inline part is a finite tree, so the only way to
  * recur forever is through a served `$ref` — and every one of those resolves to
- * a `$defs` entry, so refusing a definition already in `visitedDefinitions`
- * bounds the walk at the number of definitions plus the inline depth. A
- * self-referential type is the case that needs it: an item whose `children` are
- * items reaches its own definition on the second hop. The declared side cannot
- * extend the walk, because following its refs never descends the served side,
- * and `resolveCfcSchemaRefs` carries a cycle guard of its own.
+ * a `$defs` entry. `openDefinitions` holds the ones open on the current path,
+ * pushed on descent and popped after, so a definition that reaches itself stops
+ * while two siblings naming one definition are each still walked. A
+ * self-referential type is the case that needs the first half: an item whose
+ * `children` are items reaches its own definition on the second hop. Two fields
+ * of one type are the case that needs the second.
  *
  * `schemaAtPath` would look like the shorter road here and is not: it resolves
  * refs eagerly and without a cycle guard, so it overflows the stack on exactly
  * the self-referential type above, before any guard written here could run.
- *
- * Visiting a definition once is also what decides a collision: two positions
- * referencing one definition write the prose found from the first, in the
- * stable order `Object.entries` gives. Both are the author's words for that
- * same definition, so the choice is between equals — and the position-specific
- * half never goes there, because a node's own description is recorded at the
- * node's own path, never at the shared target's.
  */
 function collectDescriptionEdits(
-  pair: ProsePair,
+  walk: ProseWalk,
   path: readonly string[],
   fillOwnDescription: boolean,
-  edits: DescriptionEdit[],
-  visitedDefinitions: Set<string>,
+  state: ProseWalkState,
 ): void {
-  const { served, servedRoot, declaredRoot } = pair;
+  const { served, servedRoot } = walk;
   if (!isObjectOrArray(served)) return;
-  // Every declared node that can describe this position: the node itself and,
-  // transitively, the members of any combinator it carries. A union the
-  // declared side spells as `anyOf` can arrive on the served side flattened
-  // into one object, and then a field's prose is inside whichever arm declares
-  // it — reachable only by asking the arms.
-  const candidates = declaredCandidates(pair.declared, declaredRoot);
+  const candidates = expandDeclared(walk.declared, state.openRefs);
   if (candidates.length === 0) return;
-  const declared = candidates[0];
 
-  if (
-    fillOwnDescription && served.description === undefined &&
-    typeof declared.description === "string"
-  ) {
-    // From the position's own node, never from an arm of a combinator on it: an
-    // arm describes one alternative, and promoting that to describe the whole
-    // position would state something the author did not.
-    edits.push({
-      path: [...path, "description"],
-      description: declared.description,
-    });
+  if (fillOwnDescription && served.description === undefined) {
+    const described = candidates.find((candidate) =>
+      candidate.direct && isObjectOrArray(candidate.schema) &&
+      typeof candidate.schema.description === "string"
+    );
+    if (described !== undefined) {
+      recordDescription(
+        state,
+        [...path, "description"],
+        (described.schema as Record<string, unknown>).description as string,
+      );
+    }
   }
 
   // Where the served node's CHILDREN live. For a `$ref` that is the definition
@@ -2248,15 +2373,17 @@ function collectDescriptionEdits(
   // where it does.
   let target = served;
   let targetPath = path;
+  let openedDefinition: string | undefined;
   const definitionName = servedDefinitionName(served, servedRoot);
   if (definitionName !== undefined) {
-    if (visitedDefinitions.has(definitionName)) return;
-    visitedDefinitions.add(definitionName);
+    if (state.openDefinitions.includes(definitionName)) return;
     const definitions = isObjectOrArray(servedRoot)
       ? servedRoot.$defs as Record<string, JSONSchema>
       : {};
     const definition = definitions[definitionName];
     if (!isObjectOrArray(definition)) return;
+    state.openDefinitions.push(definitionName);
+    openedDefinition = definitionName;
     target = definition;
     targetPath = ["$defs", definitionName];
   } else if (typeof served.$ref === "string") {
@@ -2265,37 +2392,67 @@ function collectDescriptionEdits(
     return;
   }
 
+  try {
+    descendInto(target, targetPath, candidates, walk, state);
+  } finally {
+    if (openedDefinition !== undefined) state.openDefinitions.pop();
+  }
+}
+
+/** Record one description unless this position already has an account. */
+function recordDescription(
+  state: ProseWalkState,
+  path: readonly string[],
+  description: string,
+): void {
+  // Keyed as JSON rather than by joining on a separator: a path segment is a
+  // property name and may contain any character, so no separator is safe.
+  const key = JSON.stringify(path);
+  if (state.written.has(key)) return;
+  state.written.add(key);
+  state.edits.push({ path, description });
+}
+
+/** The child positions of one served node, each paired with every declared
+ * account of it. Split out so the definition bookkeeping above reads as the one
+ * thing it is. */
+function descendInto(
+  target: Record<string, unknown>,
+  targetPath: readonly string[],
+  candidates: readonly DeclaredCandidate[],
+  walk: ProseWalk,
+  state: ProseWalkState,
+): void {
+  // `target` is either the served node this was reached with or a `$defs`
+  // entry, and the caller has already established that each is a record.
+  const { servedRoot } = walk;
   const descend = (
     servedChild: JSONSchema,
-    declaredChild: JSONSchema | undefined,
+    declared: DeclaredCandidate[],
     childPath: readonly string[],
     fillChildDescription: boolean,
   ): void => {
-    if (declaredChild === undefined) return;
+    if (declared.length === 0) return;
     collectDescriptionEdits(
-      {
-        served: servedChild,
-        declared: declaredChild,
-        servedRoot,
-        declaredRoot,
-      },
+      { served: servedChild, servedRoot, declared },
       childPath,
       fillChildDescription,
-      edits,
-      visitedDefinitions,
+      state,
     );
   };
 
-  /** The first candidate that offers something at this position. */
-  const fromCandidates = <T>(
-    pick: (candidate: Record<string, unknown>) => T | undefined,
-  ): T | undefined => {
-    for (const candidate of candidates) {
-      const found = pick(candidate);
-      if (found !== undefined) return found;
-    }
-    return undefined;
-  };
+  /** Every candidate's account of one child position, in declaration order. */
+  const accounts = (
+    pick: (candidate: Record<string, unknown>) => JSONSchema | undefined,
+  ): DeclaredCandidate[] =>
+    candidates.flatMap((candidate) => {
+      const found = isObjectOrArray(candidate.schema)
+        ? pick(candidate.schema)
+        : undefined;
+      return found === undefined
+        ? []
+        : [{ schema: found, root: candidate.root, direct: true }];
+    });
 
   if (isObjectOrArray(target.properties)) {
     for (
@@ -2305,7 +2462,7 @@ function collectDescriptionEdits(
     ) {
       descend(
         child,
-        fromCandidates((candidate) =>
+        accounts((candidate) =>
           isObjectOrArray(candidate.properties)
             ? (candidate.properties as Record<string, JSONSchema>)[key]
             : undefined
@@ -2321,7 +2478,7 @@ function collectDescriptionEdits(
   if (target.items !== undefined && !Array.isArray(target.items)) {
     descend(
       target.items as JSONSchema,
-      fromCandidates((candidate) =>
+      accounts((candidate) =>
         candidate.items !== undefined && !Array.isArray(candidate.items)
           ? candidate.items as JSONSchema
           : undefined
@@ -2337,17 +2494,15 @@ function collectDescriptionEdits(
   for (const keyword of ["prefixItems", "items"] as const) {
     const servedList = target[keyword];
     if (!Array.isArray(servedList)) continue;
-    const declaredList = fromCandidates((candidate) =>
-      Array.isArray(candidate[keyword])
-        ? candidate[keyword] as JSONSchema[]
-        : undefined
-    );
-    if (declaredList === undefined) continue;
-    const shared = Math.min(servedList.length, declaredList.length);
-    for (let index = 0; index < shared; index++) {
+    for (let index = 0; index < servedList.length; index++) {
       descend(
         servedList[index] as JSONSchema,
-        declaredList[index],
+        accounts((candidate) => {
+          const list = candidate[keyword];
+          return Array.isArray(list) && index < list.length
+            ? list[index] as JSONSchema
+            : undefined;
+        }),
         [...targetPath, keyword, String(index)],
         true,
       );
@@ -2360,26 +2515,39 @@ function collectDescriptionEdits(
   // the way the specification says, and this is annotation. A value satisfies
   // every conjunct, so a description on any conjunct describes the value.
   //
-  // Members pair by index when both sides spell the same keyword with the same
-  // arity. Otherwise each served member is offered the declared node whole, and
-  // takes no description of its own from it — a disjunction's arms are
-  // alternatives, and one sentence copied onto all of them describes each
+  // Members pair by index against a candidate spelling the same keyword with
+  // the same arity. Otherwise each served member is offered every candidate
+  // whole, and takes no description of its own from them — a disjunction's arms
+  // are alternatives, and one sentence copied onto all of them describes each
   // wrongly, while a field nested inside an arm is still worth reaching.
   for (const keyword of COMBINATOR_KEYWORDS) {
     const servedMembers = target[keyword];
     if (!Array.isArray(servedMembers)) continue;
-    const declaredMembers = fromCandidates((candidate) =>
-      Array.isArray(candidate[keyword]) &&
-        (candidate[keyword] as unknown[]).length === servedMembers.length
-        ? candidate[keyword] as JSONSchema[]
-        : undefined
+    const paired = candidates.filter((candidate) =>
+      isObjectOrArray(candidate.schema) &&
+      Array.isArray((candidate.schema as Record<string, unknown>)[keyword]) &&
+      ((candidate.schema as Record<string, unknown>)[keyword] as unknown[])
+          .length === servedMembers.length
     );
     for (let index = 0; index < servedMembers.length; index++) {
+      const declared = paired.length > 0
+        ? paired.map((candidate) => ({
+          schema: (candidate.schema as Record<string, unknown>)[
+            keyword
+          ] as JSONSchema[],
+          root: candidate.root,
+          direct: true,
+        })).map((entry) => ({
+          schema: (entry.schema as unknown as JSONSchema[])[index],
+          root: entry.root,
+          direct: true,
+        }))
+        : candidates.map((candidate) => ({ ...candidate, direct: false }));
       descend(
         servedMembers[index] as JSONSchema,
-        declaredMembers === undefined ? declared : declaredMembers[index],
+        declared,
         [...targetPath, keyword, String(index)],
-        declaredMembers !== undefined,
+        paired.length > 0,
       );
     }
   }
@@ -2387,51 +2555,6 @@ function collectDescriptionEdits(
 
 /** The combinator keywords the walk descends, in a fixed order. */
 const COMBINATOR_KEYWORDS = ["allOf", "anyOf", "oneOf"] as const;
-
-/**
- * Every declared node that can describe one position: the node itself, plus —
- * transitively — the members of any combinator it carries, each with its
- * references followed. The node itself is always first, so a caller wanting
- * only the position's own account can take `[0]`.
- *
- * Flattening the combinator is what lets a served side that spells a union as
- * one merged object still find each field's prose, which lives in whichever arm
- * declares it. Nothing here is written back: these are read to look a position
- * up, and the served document keeps its own shape.
- *
- * Terminates on a cycle two ways over, because either alone can be defeated: a
- * followed reference is recorded by its pointer string, and a resolved node by
- * its identity. Identity alone is not enough, since `resolveCfcSchemaRefs` only
- * interns when its input is deep-frozen and hands back a fresh object
- * otherwise.
- */
-function declaredCandidates(
-  declared: JSONSchema | undefined,
-  declaredRoot: JSONSchema,
-): Record<string, unknown>[] {
-  const candidates: Record<string, unknown>[] = [];
-  const seenNodes = new Set<unknown>();
-  const seenRefs = new Set<string>();
-  const visit = (node: JSONSchema | undefined): void => {
-    if (node === undefined || !isObjectOrArray(node)) return;
-    let resolved: JSONSchema | undefined = node;
-    if (typeof node.$ref === "string") {
-      if (seenRefs.has(node.$ref)) return;
-      seenRefs.add(node.$ref);
-      resolved = resolveCfcSchemaRefs(node, declaredRoot);
-    }
-    if (!isObjectOrArray(resolved) || seenNodes.has(resolved)) return;
-    seenNodes.add(resolved);
-    candidates.push(resolved);
-    for (const keyword of COMBINATOR_KEYWORDS) {
-      const members = resolved[keyword];
-      if (!Array.isArray(members)) continue;
-      for (const member of members) visit(member as JSONSchema);
-    }
-  };
-  visit(declared);
-  return candidates;
-}
 
 /**
  * `root` with every collected description written in, sharing every subtree no
