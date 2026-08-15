@@ -23,24 +23,45 @@ encoding.
 
 The two formats divide along what their transports carry. JSON reaches a
 `string`, so every type JavaScript has and JSON lacks — `bigint`, `undefined`,
-the special numbers, bytes, patterns — is written out as tagged text, and a
-`/`-prefixed key in user data has to be escaped clear of the tags. Structured
-cloning carries all of those but `symbol`, and carries them with their types
-intact, so most of a value passes through untouched and tagging is reserved for
-what genuinely needs it.
+the special numbers, bytes — is written out as tagged text, and a `/`-prefixed
+key in user data has to be escaped clear of the tags. Structured cloning
+carries all of those but `symbol`, and carries them with their types intact, so
+most of a value passes through untouched and tagging is reserved for what
+genuinely needs it.
+
+Tagging is not the same question as what the transport can carry, and the two
+should not be conflated. A `FabricRegExp` is tagged here even though cloning
+carries a native `RegExp` perfectly well, because it is a class instance and
+reconstructing one is a codec's job under any format.
 
 ### 1.1 Transport Requirements
 
 A transport carrying this format must:
 
-1. **Preserve the types** listed in Section 3 as self-representing.
-2. **Preserve shared object references** — one object referenced from many
-   positions must arrive as one object referenced from many positions.
+1. **Preserve the types this format emits**: `null`, `undefined`, `boolean`,
+   `number` (including `-0`, `NaN` and `±Infinity`), `bigint`, `string`,
+   `ArrayBuffer`, arrays, and plain objects.
+2. **Preserve a sparse array's length and its absent indices**, so that a hole
+   crosses as a hole (Section 3.2).
+3. **Preserve object reference identity, in both directions.** One object
+   referenced from many positions must arrive as one object referenced from
+   many positions; and two distinct objects must arrive distinct, however
+   equal they look.
 
-The second is load-bearing rather than incidental: Section 2 rests on it
-entirely. A transport that deep-copies naively, reproducing each reference as a
-fresh object, cannot carry this format at all. The structured clone algorithm
-provides it.
+The third is load-bearing rather than incidental: Section 2 rests on it
+entirely, and on *both* of its halves. A transport that deep-copied naively,
+reproducing each reference as a fresh object, would leave a decoder unable to
+recognize any tagged form. A transport that interned or deduplicated equal
+subtrees would do the opposite and worse: a payload's own array that happened
+to equal the marker would be merged with it, and that data would decode as a
+tagged form.
+
+**Both failures are silent.** Neither produces a refusal — the first decodes
+every tagged form as a plain three-element array, and the second decodes
+ordinary data as a tagged value. A transport is therefore something to verify
+against this contract before use, not something to try and see.
+
+The structured clone algorithm provides all three.
 
 ## 2. The Envelope and the Marker
 
@@ -74,8 +95,10 @@ The marker **must be an object**. Identity comparison on a primitive is value
 equality, so a primitive marker would be reproducible by any payload holding
 the same one, and would mark nothing.
 
-The marker **must be minted per encode call**, and must not outlive the call
-that made it. Two facts together are what make an envelope unforgeable from
+The marker **must be minted per encode call**, and **the encoder must not
+retain or reuse one**. It outlives the call inside the envelope, which is the
+point; what it must not do is survive *in the encoder*, available to a later
+call. Two facts together are what make an envelope unforgeable from
 within a payload:
 
 - It is **younger than the value**. It is created after the value exists, so
@@ -111,10 +134,18 @@ produced*, which is the escaping problem and the whole of what it is for.
 
 ### 2.4 Version
 
-The marker carries a version identifier, `fvr1`, as its contents. Recognition
-never reads it — identity does all the work — so it is there for two other
-purposes: legibility in a debugger, and giving a receiver something to check
-when it wants to know which build wrote a payload.
+The marker is a frozen one-element array holding the version identifier:
+
+```
+["fvr1"]
+```
+
+`fvr1` is *fabric value, realm encoding, version 1*, in the manner of JSON's
+`fvj1:` prefix. Recognition never reads any of it — identity does all the work
+— so the contents are there for two other purposes: legibility in a debugger,
+and giving a receiver something to check when it wants to know which build
+wrote a payload. The layout is specified because a receiver cannot perform that
+check without knowing where to look.
 
 This is the format's answer to a boundary it does not otherwise control.
 `postMessage()` spans tabs, windows and frames, any of which could pair two
@@ -184,12 +215,16 @@ the transferable object in the tree rather than having to reach through a view
 and reason about its offset. Both byte-carrying types do this. A bare
 `Uint8Array` is therefore not a form this format emits.
 
-Two of these differ from their JSON counterparts in kind rather than in
-spelling, which is most of the reason this format exists. `FabricBytes` is
-terminal here and carries bytes as bytes, where JSON must represent them as
+Three of these differ from their JSON counterparts in kind rather than in
+spelling, which is most of the reason this format exists, and they differ along
+two axes.
+
+`FabricBytes` carries bytes as bytes, where JSON must represent them as
 base64url text. `FabricRegExp` is terminal here and nonterminal under JSON —
 concrete proof that terminality belongs to the pair (class, format) rather than
-to the class.
+to the class. `FabricHash` differs on **both** axes at once: terminal here and
+nonterminal under JSON, and carrying its hash as a bare `ArrayBuffer` where
+JSON carries base64url text.
 
 Types binding a format-neutral codec — `FabricError`, `UnknownValue`,
 `ProblematicValue`, and every `FabricInstance` — encode the same way under both
@@ -223,8 +258,8 @@ always distinct.
 
 ## 5. Ownership
 
-**`decode()` cedes its input.** The decoder retains what it likes of the tree
-and freezes whatever it retains; a caller must not use the tree afterwards.
+**A caller cedes the tree to `decode()`.** The decoder retains what it likes of
+it and freezes whatever it retains; a caller must not use the tree afterwards.
 
 Two retentions are deliberate:
 
@@ -237,7 +272,10 @@ rather than a courtesy: sole ownership is the only available defense for a
 value that promises its bytes are immutable.
 
 **A tree carrying bytes decodes exactly once.** Taking a buffer over detaches
-it, so a second decode of the same tree fails where the first succeeded. On the
+it, so a second decode of the same tree cannot reconstruct the value the first
+did. It is settled against leniency like every other refusal in Section 6: a
+strict decode raises, and a lenient one yields a `ProblematicValue` where the
+bytes would have been. On the
 boundary this format exists for the restriction costs nothing — the tree is the
 receiver's own clone of a value it will not be handed again, which is the whole
 reason the copy can be elided — but a caller wanting two readings of one
@@ -255,10 +293,14 @@ leniency:
   callable in the realm that built its argument, and what the format never
   emits is refused wherever it is found.
 - Any other value the transport carries but this format never emits: a bare
-  `Uint8Array`, a `Date`, a `Map`, a `Set`.
+  `Uint8Array` or `DataView`, a bare `ArrayBuffer` outside a tagged state, a
+  `Date`, a `Map`, a `Set`, or any other class instance. `ArrayBuffer` is worth
+  naming: it is the one such type this format's own value union contains, and
+  it is legitimate only as the state under a byte-carrying tag.
 - A key this runtime reserves, per Section 3.2.
 - A tag that is not syntactically a tag, per Section 9 of
-  [1-fabric-values.md](./1-fabric-values.md).
+  [3-json-encoding.md](./3-json-encoding.md), whose tag syntax this format
+  shares.
 - A cycle, per Section 4.
 
 A tag that is *syntactically* a tag but that no codec claims is not a refusal:
@@ -285,3 +327,15 @@ The realm encoding context is responsible for:
 
 There is no escaping step and no stringify step, both of which the JSON context
 carries.
+
+### 7.1 Codec State Validation
+
+A codec **validates the state it is handed and rejects what it will not
+accept**, rather than coercing it. Wire data is untrusted: a `Bytes@1` whose
+state is a string, a `Hash@1` whose `tag` is not a string, a `Symbol@1` whose
+state is not a string — each is a malformation, settled against leniency like
+any other, and never a value built from whatever arrived.
+
+This is a requirement rather than an observation. An implementation that
+coerced instead would satisfy every other claim in this document while
+producing values a sender never sent.
