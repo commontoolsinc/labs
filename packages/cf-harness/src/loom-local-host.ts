@@ -18,6 +18,7 @@ import {
   resolveHarnessModelProviderPreference,
 } from "./auth/provider-settings.ts";
 import {
+  cfHarnessCliCommandName,
   cfHarnessCliInformationalControl,
   type CfHarnessCliIO,
   type CfHarnessHostFailure,
@@ -498,11 +499,28 @@ export const createLoomLocalCfHarnessHost = async (
           structuredHostFailures: true,
         });
       }
+      const io = options.cliDependencies?.io ?? defaultHostIo();
+      // Batch argv reaches the CLI behind a prepended --model-provider, which
+      // shifts a leading subcommand out of the CLI's own dispatch and into the
+      // prompt text. Reject it here rather than bill a run for it. Positional
+      // text opening on one of those words is caught too, so the message names
+      // the flag that says "prompt" unambiguously.
+      const command = cfHarnessCliCommandName(argv);
+      if (command !== "prompt") {
+        io.stderr(`${
+          JSON.stringify(createCfHarnessHostFailure(
+            new HarnessControlError(
+              "invalid-request",
+              `the local Loom host runs prompts only; a leading "${command}" is a cf-harness CLI command — use --prompt to send it as prompt text`,
+            ),
+          ))
+        }\n`);
+        return 1;
+      }
       let resolved;
       try {
         resolved = await resolveBinding(argv);
       } catch (error) {
-        const io = options.cliDependencies?.io ?? defaultHostIo();
         io.stderr(`${JSON.stringify(createCfHarnessHostFailure(error))}\n`);
         return 1;
       }
@@ -622,14 +640,22 @@ const defaultHostIo = (): CfHarnessCliIO => ({
   stderr: (text) => Deno.stderr.writeSync(new TextEncoder().encode(text)),
 });
 
+/**
+ * A startup blocker as the chat protocol states it. Only the provider codes
+ * and `internal-error` reach here: this answers a failure raised before the
+ * host was serving, while `invalid-request` and `operation-canceled` belong to
+ * the batch and control paths, which answer on stderr instead. The provider
+ * codes carry across by name, so the remaining branch totals the mapping
+ * rather than choosing between codes. A malformed chat request is a separate
+ * matter and has the protocol's own `invalid_request`, raised where the
+ * request is read.
+ */
 const chatError = (failure: CfHarnessHostFailure): HarnessChatError => ({
   code: failure.error.code === "provider-configuration-required" ||
       failure.error.code === "provider-auth-required" ||
       failure.error.code === "provider-mismatch" ||
       failure.error.code === "provider-unavailable"
     ? failure.error.code
-    : failure.error.code === "internal-error"
-    ? "internal_error"
     : "internal_error",
   message: failure.error.message,
 });

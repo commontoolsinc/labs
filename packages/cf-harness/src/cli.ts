@@ -2788,6 +2788,10 @@ export const runCfHarnessCli = async (
   setProvenanceCommand(cfHarnessCliCommandName(argv));
   const io = deps.io ?? defaultCliIo();
   let activeEngine: CfHarnessEngine | undefined;
+  // Set once the argv and the run's recorded binding have both been accepted.
+  // Past that point a fault is infrastructure, not a client error, and a host
+  // keying its retry policy on the reported code needs to tell them apart.
+  let requestAccepted = false;
   let signalCleanup: (() => void) | undefined;
   const activateEngine = (engine: CfHarnessEngine) => {
     activeEngine = engine;
@@ -2895,7 +2899,14 @@ export const runCfHarnessCli = async (
     };
     if (parsed.resumeRun !== undefined) {
       const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
-      const artifacts = await readRunArtifacts(parsed.resumeRun);
+      const artifacts = await readRunArtifacts(parsed.resumeRun).catch(
+        (error: unknown) => {
+          // Naming a run that is not there is a bad request. A run that is
+          // there and will not read is infrastructure, whatever the argv said.
+          if (!(error instanceof Deno.errors.NotFound)) requestAccepted = true;
+          throw error;
+        },
+      );
       if (artifacts.runState.lineage?.role === "subagent") {
         throw new Error(
           `Cannot resume subagent run ${artifacts.runState.runId} as a top-level run; resume root run ${artifacts.runState.lineage.rootRunId} instead.`,
@@ -2968,6 +2979,7 @@ export const runCfHarnessCli = async (
           "Loom openai-codex runs require an authenticated credential owner reference",
         );
       }
+      requestAccepted = true;
       const engine = new CfHarnessEngine({
         runState: artifacts.runState,
         artifactRoot: parsed.artifactRoot,
@@ -3125,6 +3137,7 @@ export const runCfHarnessCli = async (
           "Loom openai-codex runs require an authenticated credential owner reference",
         );
       }
+      requestAccepted = true;
       const modelClient = await createSelectedModelClient({
         provider: modelProvider,
         credentialOwner,
@@ -3282,10 +3295,10 @@ export const runCfHarnessCli = async (
     const hostError = deps.structuredHostFailures &&
         !(error instanceof HarnessControlError)
       ? new HarnessControlError(
-        activeEngine === undefined ? "invalid-request" : "internal-error",
-        activeEngine === undefined
-          ? "The cf-harness request is invalid"
-          : "The local cf-harness host operation failed",
+        requestAccepted ? "internal-error" : "invalid-request",
+        requestAccepted
+          ? "The local cf-harness host operation failed"
+          : "The cf-harness request is invalid",
       )
       : error;
     io.stderr(
