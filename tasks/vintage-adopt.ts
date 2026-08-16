@@ -26,6 +26,7 @@
  * fixture whose every replay fails — the dead end the capture guard exists to
  * prevent, one tool over.
  */
+
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { getPatternIdentityRef } from "@commonfabric/runner";

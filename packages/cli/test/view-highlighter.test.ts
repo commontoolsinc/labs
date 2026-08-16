@@ -8,6 +8,7 @@
  * the multi-line constructs (block comment, template, string) whose color
  * spills onto later lines.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import {
   createHighlighter,

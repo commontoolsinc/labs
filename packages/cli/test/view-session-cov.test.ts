@@ -4,6 +4,7 @@
  * and inspecting `view()` / `doc` / `quit`, mirroring the style of
  * `view-session.test.ts`, `view-filepicker.test.ts` and `view-diffedit.test.ts`.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument, promptText, SAMPLE } from "./view-helpers.ts";

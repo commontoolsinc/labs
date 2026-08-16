@@ -8,6 +8,7 @@
  * labels, and metadata extraction on malformed input, plus `safe`'s
  * degrade-to-undefined fallback via the test-only `_internal` handle.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import {
   _internal,

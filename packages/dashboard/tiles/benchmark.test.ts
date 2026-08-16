@@ -1,12 +1,15 @@
-// benchmark tile tests. The tile is driven through collect(ctx) and its /bench
-// route with globalThis.fetch stubbed, so the GitHub Actions workflow-run pages,
-// the per-run artifact listings and the artifact zips (real zip bytes, really
-// deflated) are all canned. No network, no files, no subprocess.
-//
-// The tile keeps a persistent cache of each run's results and a module-level
-// snapshot for the drill-down page. The dashboard test runner gives this module
-// a temporary server-data directory. These tests share that state, use distinct
-// run ids, and read snapshots after the collection that filled them.
+/**
+ * benchmark tile tests. The tile is driven through collect(ctx) and its /bench
+ * route with globalThis.fetch stubbed, so the GitHub Actions workflow-run pages,
+ * the per-run artifact listings and the artifact zips (real zip bytes, really
+ * deflated) are all canned. No network, no files, no subprocess.
+ *
+ * The tile keeps a persistent cache of each run's results and a module-level
+ * snapshot for the drill-down page. The dashboard test runner gives this module
+ * a temporary server-data directory. These tests share that state, use distinct
+ * run ids, and read snapshots after the collection that filled them.
+ */
+
 import {
   assert,
   assertEquals,

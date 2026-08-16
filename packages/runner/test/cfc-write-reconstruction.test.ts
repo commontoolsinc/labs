@@ -1,3 +1,14 @@
+/**
+ * `writeDetailValueForTarget` reconstructs "the value this transaction wrote
+ * at a path" from the recorded write-details. A value may be recorded either
+ * as a single coarse write (whole object) OR split across granular writes (an
+ * envelope `{}` at the path plus per-field writes at deeper paths) — e.g. when
+ * the value is deep-frozen and therefore written field-by-field. Both shapes
+ * MUST reconstruct to the same value; otherwise CFC's writeAuthorizedBy
+ * enforcement evaluates an item's policy against an incomplete value (e.g. the
+ * bare envelope `{}`) and mis-authorizes it.
+ */
+
 import { assertEquals, assertStrictEquals } from "@std/assert";
 
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
@@ -9,15 +20,6 @@ import type {
   IExtendedStorageTransaction,
   TransactionWriteDetail,
 } from "../src/storage/interface.ts";
-
-// `writeDetailValueForTarget` reconstructs "the value this transaction wrote
-// at a path" from the recorded write-details. A value may be recorded either
-// as a single coarse write (whole object) OR split across granular writes (an
-// envelope `{}` at the path plus per-field writes at deeper paths) — e.g. when
-// the value is deep-frozen and therefore written field-by-field. Both shapes
-// MUST reconstruct to the same value; otherwise CFC's writeAuthorizedBy
-// enforcement evaluates an item's policy against an incomplete value (e.g. the
-// bare envelope `{}`) and mis-authorizes it.
 
 const SPACE = "did:key:test-space" as MemorySpace;
 const ID = "of:fid1:test-entity" as URI;

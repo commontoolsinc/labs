@@ -12,6 +12,7 @@
  * These tests will fail in a standard Deno test environment because DOMParser
  * is not available outside of a browser context.
  */
+
 import { assert } from "@std/assert";
 import { sanitizeSvg } from "./sanitize-svg.ts";
 

@@ -278,9 +278,35 @@ function undeclaredFlagError(
   descriptors: Map<string, FlagDescriptor>,
 ): string {
   const declared = [...descriptors.keys()];
+  const opening = `"--${rawFlag}" at ${EVENT_ROOT_POSITION} is not a field ` +
+    "this verb declares. ";
+
+  // A caller who wrote `--no-something` is asking to negate, and only a
+  // boolean can be negated. Both halves of the answer narrow accordingly:
+  // the near miss is searched against the negatable names, and the
+  // vocabulary lists those rather than every field. Offering `--no-title`
+  // for a string `title` would name a spelling that fails just as surely.
+  //
+  // The prefix is stripped before matching because it is three edits of pure
+  // noise against the declared name, and the threshold scales with the
+  // misspelling's length — so leaving it on makes the match HARDER precisely
+  // because the caller typed more.
+  if (rawFlag.startsWith("no-")) {
+    const negatable = declared.filter((name) =>
+      schemaType(descriptors.get(name)!.schema) === "boolean"
+    );
+    const nearest = nearestName(rawFlag.slice(3), negatable);
+    return opening +
+      (nearest === undefined ? "" : `Did you mean "--no-${nearest}"? `) +
+      (negatable.length === 0
+        ? "Only a boolean field can be negated, and this verb declares none"
+        : `Only a boolean field can be negated, and this verb declares ${
+          negatable.map((name) => `"--${name}"`).join(", ")
+        }`);
+  }
+
   const nearest = nearestName(rawFlag, declared);
-  return `"--${rawFlag}" at ${EVENT_ROOT_POSITION} is not a field this verb ` +
-    "declares. " +
+  return opening +
     (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
     (declared.length === 0
       ? `${EVENT_ROOT_POSITION} declares no fields at all`

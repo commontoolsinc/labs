@@ -1,5 +1,8 @@
-// The main-build tile's streak: how long the tip conclusion has held on main.
-// Canned runs, no network. See tiles.test.ts for the rest of this tile's contract.
+/**
+ * The main-build tile's streak: how long the tip conclusion has held on main.
+ * Canned runs, no network. See tiles.test.ts for the rest of this tile's contract.
+ */
+
 import {
   assertEquals,
   assertRejects,

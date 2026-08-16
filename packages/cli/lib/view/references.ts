@@ -5,6 +5,7 @@
  * the definition index. Pure and dependency-free, so they unit-test easily and
  * power the Enter info card's "uses" and "depends on" sections.
  */
+
 import type { Document, StructureNode, TokenClass } from "./model.ts";
 
 /** Token classes that count as an identifier occurrence of a symbol. */

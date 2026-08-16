@@ -1,6 +1,9 @@
-// Tests for the two GCP auth routes and the BigQuery call that uses them, with
-// fetch stubbed. Nothing here reaches the network: every request the code makes
-// is captured and inspected, and the responses are canned.
+/**
+ * Tests for the two GCP auth routes and the BigQuery call that uses them, with
+ * fetch stubbed. Nothing here reaches the network: every request the code makes
+ * is captured and inspected, and the responses are canned.
+ */
+
 import { assertEquals, assertRejects } from "@std/assert";
 import { bigQuery, METADATA_TOKEN_URL } from "./gcp.ts";
 

@@ -5,6 +5,7 @@
  *   deno run --allow-all test/traverse-replay/profile-driver.ts \
  *     [fixture-name] [rounds]
  */
+
 import { loadFixture, replayFixture } from "./replay.ts";
 
 const name = Deno.args[0] ?? "notebook-test";

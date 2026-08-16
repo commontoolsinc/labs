@@ -4,6 +4,7 @@
  * aliases, quoted strings, and block scalars. It accepts incomplete input so
  * files remain highlighted while they are being edited.
  */
+
 import type { Document, Line, Span, TokenClass } from "../../model.ts";
 import { cpLen } from "../../ansi.ts";
 import type { Highlighter } from "../language.ts";

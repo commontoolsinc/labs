@@ -1,6 +1,9 @@
-// prod-errors tile tests: collect(ctx) against a stubbed SigNoz v5 query_range.
-// No real network — globalThis.fetch is swapped for the duration of each collect
-// and restored afterwards.
+/**
+ * prod-errors tile tests: collect(ctx) against a stubbed SigNoz v5 query_range.
+ * No real network — globalThis.fetch is swapped for the duration of each collect
+ * and restored afterwards.
+ */
+
 import { assert, assertEquals } from "@std/assert";
 import type { Ctx } from "../types.ts";
 import { prodErrors } from "./prod-errors.ts";

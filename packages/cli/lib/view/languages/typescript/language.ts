@@ -6,6 +6,7 @@
  * {@link ./semantics.ts}; this module only adapts them to the {@link Language}
  * contract.
  */
+
 import type { Language } from "../language.ts";
 import { utf8Decoder } from "../decoder.ts";
 import { remapStructure } from "../../diffremap.ts";

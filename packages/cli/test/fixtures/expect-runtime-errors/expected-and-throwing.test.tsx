@@ -2,6 +2,7 @@
  * Fixture: a throwing action with expectRuntimeErrors: 1.
  * The runner must treat the error as required-and-satisfied — no failure.
  */
+
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

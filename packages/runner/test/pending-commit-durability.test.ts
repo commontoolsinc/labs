@@ -1,20 +1,23 @@
-// The storage manager's pending-commit durability barrier and the scheduler's
-// client-facing quiescence built on it.
-//
-// Every write flows through a transaction from `storageManager.edit()`, and
-// `commit()` registers itself with the manager's barrier synchronously at the
-// entry point, so `hasPendingCommits()` is true from the moment a commit is
-// issued until the server confirms (or terminally rejects) it. The scheduler's
-// `idleWithPendingCommits()` — what the client-facing idle awaits — resolves
-// only when reactive quiescence and an empty barrier hold together, so a
-// client that treats "idle" as a safe point to navigate or reload cannot lose
-// an in-flight write. Plain `idle()` (internal reactive quiescence) ignores
-// the barrier by design.
-//
-// These tests drive REAL commits against the emulated server and gate its
-// responses, so they fail if the barrier ever stops observing the actual
-// commit pipeline (e.g. registration decoupled from the real commit promise)
-// and if the joint fixpoint ever stops re-checking after a commit settles.
+/**
+ * The storage manager's pending-commit durability barrier and the scheduler's
+ * client-facing quiescence built on it.
+ *
+ * Every write flows through a transaction from `storageManager.edit()`, and
+ * `commit()` registers itself with the manager's barrier synchronously at the
+ * entry point, so `hasPendingCommits()` is true from the moment a commit is
+ * issued until the server confirms (or terminally rejects) it. The scheduler's
+ * `idleWithPendingCommits()` — what the client-facing idle awaits — resolves
+ * only when reactive quiescence and an empty barrier hold together, so a
+ * client that treats "idle" as a safe point to navigate or reload cannot lose
+ * an in-flight write. Plain `idle()` (internal reactive quiescence) ignores
+ * the barrier by design.
+ *
+ * These tests drive REAL commits against the emulated server and gate its
+ * responses, so they fail if the barrier ever stops observing the actual
+ * commit pipeline (e.g. registration decoupled from the real commit promise)
+ * and if the joint fixpoint ever stops re-checking after a commit settles.
+ */
+
 import {
   afterEach,
   beforeEach,

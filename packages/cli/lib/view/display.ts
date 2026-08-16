@@ -18,6 +18,7 @@
  * carries the source column it stands for, so the renderer can map selection and
  * search ranges — stated in source columns — onto the cells it draws.
  */
+
 import type { Rgb, Style } from "./ansi.ts";
 import type { Line } from "./model.ts";
 import { spanStyle } from "./highlight.ts";

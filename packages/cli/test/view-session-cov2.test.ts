@@ -9,6 +9,7 @@
  * doctored `Document` so the natural card/structure machinery lands in the
  * defensive state being exercised.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";

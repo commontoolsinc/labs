@@ -29,6 +29,7 @@
  * syntax family but require separate ownership classification; consumers
  * should use `classifyArrayMethodCallSite(...)` when that distinction matters.
  */
+
 import ts from "typescript";
 
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";

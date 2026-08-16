@@ -8,6 +8,7 @@
  * that parses into a real hunk whose recorded path is deliberately absent from
  * `fileText`.
  */
+
 import { assertEquals } from "@std/assert";
 import { type DiffEdit, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";

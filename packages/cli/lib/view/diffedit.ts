@@ -10,6 +10,7 @@
  * edit makes the diff stop matching disk, which is exactly why it must not be
  * recomputed from the edited text.
  */
+
 import type { Document, Line, Span, ViewMode } from "./model.ts";
 import { cpLen } from "./ansi.ts";
 import {

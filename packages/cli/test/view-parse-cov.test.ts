@@ -27,6 +27,7 @@
  *     arrow or function initializer is routed to a closure node before
  *     describeInitializer (used only for variable-kind nodes) is ever called.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import {
   createHighlighter,

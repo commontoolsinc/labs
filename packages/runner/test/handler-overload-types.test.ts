@@ -19,6 +19,7 @@
  * Reorder them, or delete one, and inference starts picking those returns up
  * silently. These assertions fail if that happens.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type {

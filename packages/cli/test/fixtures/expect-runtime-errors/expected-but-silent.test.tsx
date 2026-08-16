@@ -3,6 +3,7 @@
  * The expectation asserts the loudness FIRES — zero errors must fail the run,
  * so a rejection quietly reverting to a silent return cannot pass.
  */
+
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

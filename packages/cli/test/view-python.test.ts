@@ -2,6 +2,7 @@
  * Python highlighting for direct files, diffs, and live edits. The scanner is
  * lenient and lossless, including while multiline strings are incomplete.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {

@@ -4,6 +4,7 @@
  * Desktop: Centered modal with fade + scale animation
  * Mobile (<480px): Bottom sheet with slide-up animation
  */
+
 import { css } from "lit";
 
 export const modalStyles = css`

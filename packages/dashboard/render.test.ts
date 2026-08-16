@@ -1,5 +1,8 @@
-// Rendering tests: renderTile turns a TileView into markup, shell wraps the grid
-// in the page. Pure string work — no server, no network, no subprocess.
+/**
+ * Rendering tests: renderTile turns a TileView into markup, shell wraps the grid
+ * in the page. Pure string work — no server, no network, no subprocess.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Status, TileView } from "./types.ts";
 import {

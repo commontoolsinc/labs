@@ -1,7 +1,10 @@
-// @db/sqlite loads its libsqlite3 at import (env still default). Only then do we
-// point DENO_SQLITE_LOCAL at a build column-origin can't derive, so a labeled
-// read's ensureColumnOriginAvailable() fails while @db/sqlite itself keeps
-// working — the one situation the server's fail-loud branch guards.
+/**
+ * @db/sqlite loads its libsqlite3 at import (env still default). Only then do we
+ * point DENO_SQLITE_LOCAL at a build column-origin can't derive, so a labeled
+ * read's ensureColumnOriginAvailable() fails while @db/sqlite itself keeps
+ * working — the one situation the server's fail-loud branch guards.
+ */
+
 import { Server } from "../../v2/server.ts";
 import { connect, loopback } from "../../v2/client.ts";
 import { table } from "../../v2/sqlite/schema.ts";

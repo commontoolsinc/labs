@@ -8,6 +8,7 @@
  * determine the color of later lines. It does not execute Python or require a
  * Python installation.
  */
+
 import type { Document, Line, Span, TokenClass } from "../../model.ts";
 import { cpLen } from "../../ansi.ts";
 import { computeLineStarts, lineIndexOf } from "../../lines.ts";

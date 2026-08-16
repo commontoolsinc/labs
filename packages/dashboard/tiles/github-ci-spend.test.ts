@@ -1,6 +1,9 @@
-// ci spend tests. The tile is a pure collect(ctx) -> TileView over GitHub and
-// Blacksmith billing data. The tests pin the clock and provide fixed responses
-// for both sources.
+/**
+ * ci spend tests. The tile is a pure collect(ctx) -> TileView over GitHub and
+ * Blacksmith billing data. The tests pin the clock and provide fixed responses
+ * for both sources.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";

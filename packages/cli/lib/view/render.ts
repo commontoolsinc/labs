@@ -9,6 +9,7 @@
  * then run-length encoded into ANSI. Horizontal scrolling, the line-number
  * gutter and the structure guide bar are all column maths over that grid.
  */
+
 import { diffContentRowCount, maxPagerTop, maxTop } from "./actions.ts";
 import { cpLen, paint, RESET, type Style } from "./ansi.ts";
 import type { Document, Line, StructureNode, ViewMode } from "./model.ts";

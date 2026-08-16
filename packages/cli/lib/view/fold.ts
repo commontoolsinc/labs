@@ -6,6 +6,7 @@
  * set of collapsed files into the per-file ranges and the collapsed line list
  * the session renders; the session owns the fold state and the key commands.
  */
+
 import type { Line, Span, TokenClass } from "./model.ts";
 import { parseDiff } from "./diff.ts";
 import { languageForFile } from "./languages/language.ts";
