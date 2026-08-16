@@ -41,6 +41,12 @@ import {
 } from "./fixtures/codec-fixtures.ts";
 import type { IpcAck, IpcRequest } from "./fixtures/realm-ipc-worker.ts";
 
+/** The outstanding request's settlement, held while it is in flight. */
+type PendingRequest = {
+  readonly resolve: () => void;
+  readonly reject: (reason: Error) => void;
+};
+
 /**
  * One worker, kept for the whole run, with one message outstanding at a time.
  *
@@ -50,7 +56,7 @@ import type { IpcAck, IpcRequest } from "./fixtures/realm-ipc-worker.ts";
  */
 class FarSide {
   readonly #worker: Worker;
-  #pending: ((ack: IpcAck) => void) | undefined;
+  #pending: PendingRequest | undefined;
 
   constructor() {
     this.#worker = new Worker(
@@ -59,16 +65,31 @@ class FarSide {
     );
 
     this.#worker.onmessage = (ev: MessageEvent<IpcAck>) => {
-      const settle = this.#pending;
+      const pending = this.#pending;
+
       this.#pending = undefined;
-      settle?.(ev.data);
+
+      if (ev.data.ok) {
+        pending?.resolve();
+      } else {
+        pending?.reject(
+          new Error(`Far side refused the payload: ${ev.data.error}`),
+        );
+      }
     };
   }
 
-  /** Sends one request and resolves when the far side acks it. */
-  send(request: IpcRequest): Promise<IpcAck> {
-    return new Promise((resolve) => {
-      this.#pending = resolve;
+  /**
+   * Sends one request and settles when the far side acks it.
+   *
+   * @throws If the far side reports failure. An unexamined ack is what makes a
+   *   benchmark measure the wrong thing silently: a far side whose decode
+   *   throws still acks, still returns in about the time a clone takes, and
+   *   the run then reports that decoding is nearly free.
+   */
+  send(request: IpcRequest): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.#pending = { resolve, reject };
       this.#worker.postMessage(request);
     });
   }
