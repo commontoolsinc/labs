@@ -4,6 +4,7 @@ import {
   type Cell,
   encodeJsonPointer,
   type IExtendedStorageTransaction,
+  isLink,
   type MemorySpace,
   type NormalizedFullLink,
 } from "@commonfabric/runner";
@@ -753,10 +754,16 @@ export function verbInputSchemaError(
   if (schema === undefined || schema === true) return undefined;
   const undeclared = undeclaredVerbFieldError(input, schema);
   if (undeclared !== undefined) return undeclared;
-  return validateSchemaValue(
-    relaxDefaultedRequired(schema, schema, new Map()),
-    input,
-  );
+
+  // The option the dispatch gate has always passed (`closedWorldEventRejection`,
+  // packages/runner/src/runner.ts). A link cannot be judged against the shape
+  // it points at, because its target is not read at dispatch; without this the
+  // validator measures the envelope against the target's schema and refuses
+  // every reference a caller names.
+  const relaxed = relaxDefaultedRequired(schema, schema, new Map());
+  return validateSchemaValue(relaxed, input, relaxed, {
+    acceptOpaqueValue: (value) => isLink(value),
+  });
 }
 
 /**

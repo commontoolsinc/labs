@@ -536,4 +536,79 @@ describe("verb prose", () => {
       expect(declaredVerbProse({ resultSchema: true }).size).toBe(0);
     });
   });
+
+  describe("the reference marker", () => {
+    it("recovers `asCell` the narrowed read dropped", () => {
+      // The served schema is the handler's READ of the event; `asCell` does
+      // not survive that narrowing, and it is the only thing distinguishing a
+      // declared reference from an ordinary nested object of the same type.
+      const served: JSONSchema = {
+        type: "object",
+        properties: { on: { $ref: "#/$defs/Item" } },
+        $defs: {
+          Item: { type: "object", properties: { title: { type: "string" } } },
+        },
+      };
+      const declared: JSONSchema = {
+        type: "object",
+        properties: { on: { $ref: "#/$defs/Item", asCell: ["cell"] } },
+        $defs: {
+          Item: { type: "object", properties: { title: { type: "string" } } },
+        },
+      };
+
+      const merged = withDeclaredFieldProse(served, declared) as Record<
+        string,
+        any
+      >;
+      expect(merged.properties.on.asCell).toEqual(["cell"]);
+    });
+
+    it("carries the author's declared kind, not the handler's read of it", () => {
+      // `Writable<T>` emits `["cell"]` in the declared schema; a handler whose
+      // body only reads it emits `["readonly"]`. The served schema answers a
+      // CALLER's question, so the author's declaration is the honest half.
+      const served: JSONSchema = { type: "object", properties: { on: {} } };
+      const declared: JSONSchema = {
+        type: "object",
+        properties: { on: { asCell: ["cell"] } },
+      };
+      expect(
+        (withDeclaredFieldProse(served, declared) as Record<string, any>)
+          .properties.on.asCell,
+      ).toEqual(["cell"]);
+    });
+
+    it("never overrules a marker the served schema already carries", () => {
+      // A served marker is the runtime's own statement about the position it
+      // dispatches through. This walk recovers what narrowing dropped; it does
+      // not get a vote on what survived.
+      const served: JSONSchema = {
+        type: "object",
+        properties: { on: { asCell: ["readonly"] } },
+      };
+      const declared: JSONSchema = {
+        type: "object",
+        properties: { on: { asCell: ["cell"] } },
+      };
+      expect(
+        (withDeclaredFieldProse(served, declared) as Record<string, any>)
+          .properties.on.asCell,
+      ).toEqual(["readonly"]);
+    });
+
+    it("leaves a position the declared schema does not mark", () => {
+      const served: JSONSchema = { type: "object", properties: { title: {} } };
+      const declared: JSONSchema = {
+        type: "object",
+        properties: { title: { description: "A title." } },
+      };
+      const merged = withDeclaredFieldProse(served, declared) as Record<
+        string,
+        any
+      >;
+      expect(merged.properties.title.asCell).toBeUndefined();
+      expect(merged.properties.title.description).toBe("A title.");
+    });
+  });
 });

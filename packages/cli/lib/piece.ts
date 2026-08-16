@@ -2084,15 +2084,30 @@ export function declaredVerbProse(
  * applying second lets one definition receive edits found from anywhere in the
  * walk without the walk having to know where it sits.
  */
-interface DescriptionEdit {
-  /** Keys from the served document's root down to the `description` slot. */
+/**
+ * One annotation to write into the served schema, addressed by its path.
+ *
+ * Two kinds travel this way, and both are recovered from the same declared
+ * document at the same positions: an author's `description`, and the `asCell`
+ * marker that says a position takes a reference rather than a shape. The walk
+ * that finds one finds the other, so they share a record rather than each
+ * getting a walk of its own that could drift from the other.
+ */
+interface AnnotationEdit {
+  /** Keys from the served document's root down to the slot being written. */
   readonly path: readonly string[];
-  readonly description: string;
+  readonly value: unknown;
 }
 
 /**
- * `served` with `description` annotations filled in from `declared` wherever it
- * has none.
+ * `served` with the annotations `declared` carries filled in wherever it has
+ * none.
+ *
+ * TWO ANNOTATIONS TRAVEL, and both for the same reason. An author's
+ * `description`, which the narrowed read never carried. And `asCell`, which it
+ * carried and lost: that marker is the only thing distinguishing a declared
+ * reference from an ordinary nested object of the same type, and without it a
+ * caller cannot name a cell where the author said one belongs.
  *
  * THE POSITIONS IT WALKS, enumerated rather than summarized, because the
  * summary is the part a reader would otherwise have to take on trust:
@@ -2116,7 +2131,8 @@ interface DescriptionEdit {
  * - The first account that actually SAYS something wins, in declaration order.
  *   Two arms documenting one field differently describe two different values,
  *   so their sentences are not merged — merging would produce prose no author
- *   wrote.
+ *   wrote. The same rule governs the marker: the first arm that marks the
+ *   position decides it.
  * - A reference resolves in the scope that declares it. A definition may carry
  *   `$defs` of its own, and its nested references name those; resolving them at
  *   the event root finds nothing, or a same-named definition belonging to
@@ -2154,8 +2170,8 @@ export function withDeclaredFieldProse(
   if (served === true || declared === undefined || !isObjectOrArray(served)) {
     return served;
   }
-  const edits: DescriptionEdit[] = [];
-  collectDescriptionEdits(
+  const edits: AnnotationEdit[] = [];
+  collectAnnotationEdits(
     {
       served,
       servedRoot: served,
@@ -2165,7 +2181,7 @@ export function withDeclaredFieldProse(
     false,
     { edits, written: new Set<string>(), openDefinitions: [], openRefs: [] },
   );
-  return applyDescriptionEdits(served, edits);
+  return applyAnnotationEdits(served, edits);
 }
 
 /**
@@ -2207,7 +2223,7 @@ interface ProseWalk {
  * inside this right now", which is the question termination actually asks.
  */
 interface ProseWalkState {
-  readonly edits: DescriptionEdit[];
+  readonly edits: AnnotationEdit[];
   /** Paths already recorded, so the first account of a position wins. Two
    * positions sharing one `$defs` target can each reach it now that the guard
    * is path-scoped, and without this the later one would silently overwrite
@@ -2342,7 +2358,7 @@ function expandDeclared(
  * refs eagerly and without a cycle guard, so it overflows the stack on exactly
  * the self-referential type above, before any guard written here could run.
  */
-function collectDescriptionEdits(
+function collectAnnotationEdits(
   walk: ProseWalk,
   path: readonly string[],
   fillOwnDescription: boolean,
@@ -2359,10 +2375,41 @@ function collectDescriptionEdits(
       typeof candidate.schema.description === "string"
     );
     if (described !== undefined) {
-      recordDescription(
+      recordAnnotation(
         state,
         [...path, "description"],
         (described.schema as Record<string, unknown>).description as string,
+      );
+    }
+  }
+
+  // The reference marker, recovered on this walk for the same reason the prose
+  // is: the served schema is the handler's READ of the event, narrowed to what
+  // its body touches, and `asCell` does not survive that narrowing. Without it
+  // a declared reference is indistinguishable from an ordinary nested object
+  // of the same type, so a caller cannot name a cell and a structural copy
+  // cannot be told apart from a value.
+  //
+  // The DECLARED value is carried rather than a synthesized one. `Writable<T>`
+  // emits `asCell: ["cell"]` there; the handler's own emission says
+  // `["readonly"]`, which describes what the BODY does with the position, not
+  // what a caller may put in it. The served schema answers the caller's
+  // question, so the author's declaration is the honest half of the pair.
+  //
+  // Only filled where the served position carries none. A served marker is
+  // the runtime's own statement about the position it dispatches through, and
+  // this walk recovers what narrowing dropped rather than overruling what
+  // survived it.
+  if (served.asCell === undefined) {
+    const marked = candidates.find((candidate) =>
+      candidate.direct && isObjectOrArray(candidate.schema) &&
+      candidate.schema.asCell !== undefined
+    );
+    if (marked !== undefined) {
+      recordAnnotation(
+        state,
+        [...path, "asCell"],
+        (marked.schema as Record<string, unknown>).asCell,
       );
     }
   }
@@ -2402,17 +2449,17 @@ function collectDescriptionEdits(
 }
 
 /** Record one description unless this position already has an account. */
-function recordDescription(
+function recordAnnotation(
   state: ProseWalkState,
   path: readonly string[],
-  description: string,
+  value: unknown,
 ): void {
   // Keyed as JSON rather than by joining on a separator: a path segment is a
   // property name and may contain any character, so no separator is safe.
   const key = JSON.stringify(path);
   if (state.written.has(key)) return;
   state.written.add(key);
-  state.edits.push({ path, description });
+  state.edits.push({ path, value });
 }
 
 /** The child positions of one served node, each paired with every declared
@@ -2435,7 +2482,7 @@ function descendInto(
     fillChildDescription: boolean,
   ): void => {
     if (declared.length === 0) return;
-    collectDescriptionEdits(
+    collectAnnotationEdits(
       { served: servedChild, servedRoot, declared },
       childPath,
       fillChildDescription,
@@ -2559,22 +2606,22 @@ function descendInto(
 const COMBINATOR_KEYWORDS = ["allOf", "anyOf", "oneOf"] as const;
 
 /**
- * `root` with every collected description written in, sharing every subtree no
+ * `root` with every collected annotation written in, sharing every subtree no
  * edit touches. Returns `root` itself when there is nothing to write.
  */
-function applyDescriptionEdits(
+function applyAnnotationEdits(
   root: JSONSchema,
-  edits: readonly DescriptionEdit[],
+  edits: readonly AnnotationEdit[],
 ): JSONSchema {
   let next = root;
   for (const edit of edits) {
-    next = writeDescriptionAt(next, edit.path, edit.description);
+    next = writeAnnotationAt(next, edit.path, edit.value);
   }
   return next;
 }
 
 /**
- * `node` with `description` set at `path`, copying only the nodes along it.
+ * `node` with `value` set at `path`, copying only the nodes along it.
  *
  * Every path ends at a `description` slot the walk found empty, so this only
  * ever fills a hole — it cannot overwrite an author's own words, and a path
@@ -2587,22 +2634,22 @@ function applyDescriptionEdits(
  * something no reader of it expects.
  *
  * It carries no guard against a path that addresses nothing, because there is
- * no such path to guard against: `collectDescriptionEdits` builds every one by
+ * no such path to guard against: `collectAnnotationEdits` builds every one by
  * walking this document, and an edit only ever ADDS a `description` key, which
  * leaves every other path it recorded still addressing what it addressed. That
  * invariant is the precondition — a caller assembling a path any other way owes
  * its own check.
  */
-function writeDescriptionAt(
+function writeAnnotationAt(
   node: JSONSchema,
   path: readonly string[],
-  description: string,
+  annotation: unknown,
 ): JSONSchema {
   const [head, ...rest] = path;
-  const value: unknown = rest.length === 0 ? description : writeDescriptionAt(
+  const value: unknown = rest.length === 0 ? annotation : writeAnnotationAt(
     (node as Record<string, JSONSchema>)[head],
     rest,
-    description,
+    annotation,
   );
   if (Array.isArray(node)) {
     const copy = [...node] as unknown[];
@@ -2944,10 +2991,17 @@ export async function listPieceCallables(
  * publishes — its result schema rides its callable cell and is already on the
  * spec.
  *
- * The served `inputSchema` stays the authority on shape. It is the document a
- * payload is validated against, and only its `description` annotations are
- * filled in here, so a page can never describe a flag the dispatch would
- * refuse.
+ * The served `inputSchema` stays the authority on shape: no field is added or
+ * removed here, so a page can never describe a flag the dispatch would refuse.
+ * What IS filled in is annotation — an author's `description`, and the
+ * `asCell` marker that says a position takes a reference. The marker is not
+ * shape; it says how the position is reached, which is the one thing the
+ * narrowed read drops and a caller most needs.
+ *
+ * This spec feeds the page. The DISPATCH gate reads
+ * `CallableResolution.inputSchema`, which is set at resolution time and does
+ * not pass through here — so a reference the page now advertises is still
+ * refused when called. Closing that is the remaining half of #5560.
  */
 async function withDeclaredPatternDocs(
   spec: ExecCommandSpec,

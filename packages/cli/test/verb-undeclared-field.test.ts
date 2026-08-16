@@ -987,4 +987,73 @@ describe("verb-undeclared-field", () => {
       });
     });
   });
+
+  describe("a reference a caller names", () => {
+    const withReference: JSONSchema = {
+      type: "object",
+      properties: { on: { $ref: "#/$defs/Item", asCell: ["cell"] } },
+      required: ["on"],
+      $defs: {
+        Item: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        },
+      },
+    };
+    const link = {
+      "/": {
+        "link@1": {
+          id: "of:fid1:target",
+          space: "did:key:zTest",
+          path: [],
+          scope: "space",
+        },
+      },
+    };
+
+    it("accepts a link where the position declares a reference", () => {
+      // The option the dispatch gate has always passed. A link cannot be
+      // judged against the shape it points at, because its target is not read
+      // at dispatch — without this the validator measures the envelope against
+      // the target's schema and refuses every reference a caller names.
+      expect(verbInputSchemaError({ on: link }, withReference)).toBeUndefined();
+    });
+
+    it("still refuses a link where no reference is declared", () => {
+      // The marker is what admits it. A position without one is an ordinary
+      // value, and an envelope is not one.
+      const plain: JSONSchema = {
+        type: "object",
+        properties: { on: { $ref: "#/$defs/Item" } },
+        required: ["on"],
+        $defs: {
+          Item: {
+            type: "object",
+            properties: { title: { type: "string" } },
+            required: ["title"],
+          },
+        },
+      };
+      expect(verbInputSchemaError({ on: link }, plain)).toMatch(
+        /is not a field/,
+      );
+    });
+
+    it("still refuses a payload that is wrong for reasons of its own", () => {
+      // Accepting links is not accepting anything: a declared field of the
+      // wrong type is still caught beside one that names a cell.
+      const both: JSONSchema = {
+        type: "object",
+        properties: {
+          on: { $ref: "#/$defs/Item", asCell: ["cell"] },
+          count: { type: "number" },
+        },
+        required: ["on"],
+        $defs: { Item: { type: "object", properties: {} } },
+      };
+      expect(verbInputSchemaError({ on: link, count: "not-a-number" }, both))
+        .toMatch(/count/);
+    });
+  });
 });
