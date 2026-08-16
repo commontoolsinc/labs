@@ -869,28 +869,47 @@ describe("RealmCodecEngine", () => {
       expect(Object.isFrozen(innerArray)).toBe(true);
     });
 
-    it("leaves an outer encode its own marker when one nests inside it", () => {
+    it("leaves an outer encode its own marker when a codec re-enters it", () => {
       // `#marker` is a field, so a call that starts DURING another walk has to
-      // hand the outer one back rather than clear it. A getter is the shortest
-      // way to reach that: it runs while the outer walk is suspended in
-      // `encodePlainObject()`, and re-enters through the public entry point.
+      // hand the outer one back rather than clear it. The way to reach that
+      // with input the model admits is a codec calling back through a public
+      // entry point, which is the case the engine's own contract names -- a
+      // getter would do it in fewer lines and would not be a fabric value,
+      // accessors being rejected by Section 1.5 of `1-fabric-values.md`.
       //
       // Sequential calls would test nothing here -- the outer has returned
       // before the second starts, so restoring and clearing look identical.
       // What discriminates them is a tagged form built AFTER the nested call
       // returns: with the marker cleared, `wrapTag()` has none and throws.
-      const engine = newDefaultRealmCodecEngine();
+      class Reentrant {}
+
       let nestedMarker: unknown;
+      let engine: RealmCodecEngine;
 
-      const value = {
-        get first(): FabricValue {
-          nestedMarker = (engine.encode(7n) as unknown as unknown[])[0];
-          return 1;
-        },
+      const codec =
+        new (class ReentrantCodec extends BaseTerminalCodec<RealmCodecValue> {
+          constructor() {
+            super("Reentrant@1", Reentrant);
+          }
+
+          encode(): RealmCodecValue {
+            nestedMarker = (engine.encode(7n) as unknown as unknown[])[0];
+            return 1;
+          }
+
+          decode(): FabricValue {
+            return 1;
+          }
+        })();
+
+      engine = new RealmCodecEngine({
+        registry: createDefaultRealmRegistry().extend(codec),
+      });
+
+      const encoded = engine.encode({
+        first: new Reentrant() as unknown as FabricValue,
         second: new FabricEpochDays(2n),
-      };
-
-      const encoded = engine.encode(value) as unknown as [
+      }) as unknown as [
         unknown,
         Record<string, unknown[]>,
       ];
