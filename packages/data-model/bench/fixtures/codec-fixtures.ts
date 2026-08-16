@@ -155,20 +155,27 @@ export function makeBytes(size: number): FabricValue {
 }
 
 /**
- * Builds a `bigint` occupying `size` bytes.
+ * Builds a positive `bigint` occupying `size` bytes, and as sparse as one that
+ * size can be: the lowest bit set and the highest, nothing between them.
  *
- * Every bit set, which is what makes the byte count exact: a value chosen any
- * other way would have to be checked rather than constructed, and one with
- * leading zero bytes would carry less data than its size claims. `size` of
- * zero gives `0n`, the ladder's empty case.
+ * The high bit is what makes the byte count exact -- a value with leading zero
+ * bytes would carry less data than its size claims -- and the low bit is what
+ * keeps the value from being a power of two, which is the shape an
+ * implementation is likeliest to have a shortcut for. Between them the value
+ * is all zeroes, so nothing here is measuring dense magnitude when it means to
+ * be measuring size. `size` of zero gives `0n`, the ladder's empty case.
  *
- * Its decimal form is about 2.41 digits per byte, which is the number to have
- * in hand when reading this series against the byte one under JSON: the two
- * are not carrying the same amount of *text* even where they carry the same
- * amount of data.
+ * Positive throughout: sign is stored apart from magnitude, so a negative
+ * counterpart would cost what these do, and JSON's decimal form would gain a
+ * single character.
+ *
+ * That decimal form runs about 2.41 digits per byte, which is the number to
+ * have in hand when reading this series against the byte one under JSON: the
+ * two are not carrying the same amount of *text* even where they carry the
+ * same amount of data.
  */
 export function makeBigint(size: number): FabricValue {
-  return (1n << BigInt(8 * size)) - 1n;
+  return (size === 0) ? 0n : (1n << BigInt((8 * size) - 1)) | 1n;
 }
 
 /** Builds a plain object of `size` distinct keys, every value zero. */
