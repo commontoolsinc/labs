@@ -258,6 +258,9 @@ const crossrefTable = lift(
     },
   ): TopicCrossrefRow[] => {
     const rows: unknown[] = [];
+    // Each topic's mention list, read once. The scan below is quadratic, so a
+    // read inside it materializes the same list once per topic per topic.
+    const mentions = sources.map((topic) => topic?.get().mentions);
     sources.forEach((topic, index) => {
       // An entry with nothing behind it yet (mid-sync) has no identity to
       // address a row by, and `Writable.for(undefined)` is not a cause. It gets
@@ -268,7 +271,7 @@ const crossrefTable = lift(
       // is no id to key a map by — and nothing to mint, keep in step, or
       // migrate when a piece moves. At board scale this is a few hundred
       // comparisons of already-resolved links.
-      const mentionedBy = sources.filter((other, from) =>
+      const mentionedBy = sources.filter((_other, from) =>
         // A topic mentioning itself is not an edge, the rule a self-link has
         // always had here.
         from !== index &&
@@ -276,7 +279,7 @@ const crossrefTable = lift(
         // these name the same document" whether each side arrived as a cell or
         // as the raw link a read left behind. A method call on the value would
         // depend on which of those it happens to be.
-        other?.get().mentions.some((mention) => equals(mention, topic))
+        mentions[from]?.some((mention) => equals(mention, topic))
       );
       // Addressed by the topic it describes, so a row keeps its identity
       // wherever it sits and however the board is reordered. That is what lets
