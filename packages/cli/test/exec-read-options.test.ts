@@ -280,11 +280,10 @@ describe("cf exec read options", () => {
     // handling settled to.
     expect(result.invocation?.status).toBe("settled");
     expect(result.invocation?.id).toBeTruthy();
-    expect(result.invocation?.receipt).toEqual({
-      id: "of:receipt-cell",
-      space: "did:key:test-home",
-      scope: "space",
-    });
+    // The address is the one canonical reference string `--piece` takes back
+    // in, and the call's own space is the one it targeted, so it carries no
+    // `@did` prefix.
+    expect(result.invocation?.receipt).toBe("/of:receipt-cell");
   });
 
   it("reaches the committed phase before a selection can fail the call", async () => {

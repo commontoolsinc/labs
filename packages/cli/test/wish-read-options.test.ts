@@ -128,15 +128,14 @@ describe("cf wish read options", () => {
     expect(error).toBeUndefined();
     // The profile's own cell, in its own space — not the wish's result cell in
     // the reading space, and not the detached copy the handle-stripping walk
-    // would produce if the selection ran after it.
+    // would produce if the selection ran after it. One canonical reference
+    // string carries all of that: the profile's space differs from the space
+    // the wish read against, so it rides in front as `@did`.
     expect(result).toEqual({
-      $link: {
-        id: runtime.getCell(profileSpace, "profile-default")
-          .getAsNormalizedFullLink().id,
-        space: profileSpace,
-        scope: "space",
-        path: [],
-      },
+      $link: `/@${profileSpace}/${
+        runtime.getCell(profileSpace, "profile-default")
+          .getAsNormalizedFullLink().id
+      }`,
     });
 
     // And the address survives the walk that strips handles, which is the
@@ -161,14 +160,12 @@ describe("cf wish read options", () => {
     // whose value is unset still HAS an address, which is the whole of what a
     // marked position asks for — deciding absence from the dereferenced value
     // answers null here and loses an address that exists.
+    // The path rides inside the one reference string, after the id.
     expect(result).toEqual({
-      $link: {
-        id: runtime.getCell(profileSpace, "profile-default")
-          .getAsNormalizedFullLink().id,
-        space: profileSpace,
-        scope: "space",
-        path: ["bio"],
-      },
+      $link: `/@${profileSpace}/${
+        runtime.getCell(profileSpace, "profile-default")
+          .getAsNormalizedFullLink().id
+      }/bio`,
     });
   });
 

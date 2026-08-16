@@ -336,7 +336,7 @@ describe("read options, four ways", () => {
     expect(new Set(Object.values(rendered)).size).toBe(1);
   });
 
-  it("renders one cell's address identically through get, call, wish and exec", async () => {
+  it("names one cell's address through get, call, wish and exec", async () => {
     const profile = await seedProfile();
     const selection = await parseCellSelectionOptions({ select: "@" });
 
@@ -348,21 +348,26 @@ describe("read options, four ways", () => {
     // the marker against a value with no cell behind it — the wish's
     // handle-stripping walk run first — has no address to compose and answers
     // nothing at all.
-    const address = {
-      $link: {
-        id: profile.getAsNormalizedFullLink().id,
-        space: profileSpace,
-        scope: "space",
-        path: [],
-      },
-    };
+    //
+    // One canonical reference string, not four fields to reassemble. The three
+    // arrivals that target the profile's own space name it with no prefix; the
+    // wish reads from the user's space and resolves ACROSS into the profile's,
+    // so its address says which space it crossed into. That is the difference
+    // an address must carry to stay readable from where it was handed out —
+    // both spellings name the one cell, and each is the one `--piece` takes
+    // back in from the arrival that wrote it.
+    const id = profile.getAsNormalizedFullLink().id;
     expect(parseEach(rendered)).toEqual({
-      "piece get": address,
-      "piece call": address,
-      "wish": address,
-      "exec": address,
+      "piece get": { $link: `/${id}` },
+      "piece call": { $link: `/${id}` },
+      "wish": { $link: `/@${profileSpace}/${id}` },
+      "exec": { $link: `/${id}` },
     });
-    expect(new Set(Object.values(rendered)).size).toBe(1);
+    // And the three that share a target space share their bytes, key order
+    // included: one rendering, not three that happen to agree in content.
+    const sameSpace = ["piece get", "piece call", "exec"]
+      .map((arrival) => rendered[arrival]);
+    expect(new Set(sameSpace).size).toBe(1);
   });
 
   it("wraps the identical selected value in each arrival's own envelope", async () => {
