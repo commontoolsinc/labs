@@ -719,7 +719,12 @@ export function declaredEventFields(
   ) {
     return null;
   }
-  if (schema.anyOf !== undefined || schema.oneOf !== undefined) return null;
+  // A disjunction BESIDE properties is not a reason to report none. It adds
+  // constraints the flag surfaces cannot express, but the properties it sits
+  // next to are still declared and still typed, and refusing to name them
+  // would take away flags that already worked. `declaredFieldsAt` reads the
+  // conjunction and steps over the disjunction, which is the whole of what is
+  // wanted here — a root check would only discard the fields beside it.
   const declared = declaredFieldsAt(schema, cfcSchemaChildRoot(schema, schema));
   const properties: Record<string, JSONSchema> = {};
   for (const source of declared.sources) {

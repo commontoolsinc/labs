@@ -612,6 +612,25 @@ describe("parseExecArgs edge cases", () => {
       .toBeUndefined();
   });
 
+  it("keeps the flags beside a disjunction it cannot express", () => {
+    // A root `anyOf` adds constraints no flag list can express, but the
+    // properties beside it are still declared and still typed. Reporting none
+    // because a disjunction is present would take away flags that already
+    // worked — the disjunction is stepped over, not treated as a veto.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" }, count: { type: "number" } },
+      anyOf: [
+        { required: ["note"] },
+        { required: ["count"] },
+      ],
+    });
+
+    expect(parseExecArgs(spec, ["invoke", "--note", "a", "--count", "2"]).input)
+      .toEqual({ note: "a", count: 2 });
+    expect(renderExecHelp("/mnt/x.handler", spec, {})).toMatch(/--note/);
+  });
+
   it("accepts an undeclared flag exactly where the payload door accepts the field", () => {
     // The two doors are one gate asked in two spellings, so what they let
     // through must not depend on which the caller reached for. Both
