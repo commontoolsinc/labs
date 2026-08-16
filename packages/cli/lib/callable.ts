@@ -4,6 +4,7 @@ import {
   type Cell,
   encodeJsonPointer,
   type IExtendedStorageTransaction,
+  isLink,
   type MemorySpace,
   type NormalizedFullLink,
 } from "@commonfabric/runner";
@@ -509,6 +510,38 @@ function schemaIsArrayShaped(node: Record<string, unknown>): boolean {
   return node.items !== undefined || node.prefixItems !== undefined;
 }
 
+/**
+ * Whether `value` is a link this gate may treat as opaque.
+ *
+ * `isLink` answers on the envelope's SHAPE — a `/` carrying a `link@1` — and
+ * says nothing about what rides inside it, so it is true of
+ * `{"/": {"link@1": "nope"}}`, of an array, and of `null`. Bypassing both
+ * checks on that answer would let malformed data through as a reference and
+ * normalize to an empty relative link rather than being refused or judged as
+ * the ordinary object it is.
+ *
+ * A plain record is the line, and it is where the real forms fall: a full
+ * address, an id alone, and a relative link carrying only a path are all
+ * records, while every malformed spelling above is not. Requiring an `id`
+ * would be tighter and wrong — a relative link legitimately has none.
+ *
+ * Only the envelope form is narrowed. Every other thing `isLink` recognizes —
+ * a live `Cell`, a primitive link — is already a value rather than a caller's
+ * JSON, and has no payload to malform.
+ */
+function isOpaqueReference(value: unknown): boolean {
+  if (!isLink(value)) return false;
+  const payload = (value as Record<string, Record<string, unknown>> | null)
+    ?.["/"]?.["link@1"];
+  // No payload here means this is not the envelope form at all — a live cell,
+  // which reaches this gate from code rather than from a caller's JSON and has
+  // nothing to malform. Every link a PAYLOAD can carry is the envelope form,
+  // since the primitive spelling is that same sigil.
+  if (payload === undefined) return true;
+  return typeof payload === "object" && payload !== null &&
+    !Array.isArray(payload);
+}
+
 /** Whether a schema node marks its position as a cell or a stream, which is
  * where a caller may write a link in place of a value. */
 function carriesCellMarker(node: Record<string, unknown>): boolean {
@@ -557,6 +590,12 @@ function firstUndeclaredEventField(
   atRoot: boolean,
 ): UndeclaredEventField | undefined {
   if (typeof value !== "object" || value === null) return undefined;
+  // A link is not an object whose fields can be judged. Its `/` key is the
+  // envelope's own structure, not a name the caller chose, and the document it
+  // points at is not read at dispatch — so there is nothing here to compare a
+  // declaration against. Descending anyway reported `/` as an undeclared field
+  // and refused every reference a caller named.
+  if (isOpaqueReference(value)) return undefined;
   if (!isSchemaObject(schema)) return undefined;
   if (!atRoot && carriesCellMarker(schema)) return undefined;
   const scopeRoot = cfcSchemaChildRoot(schema, root);
@@ -753,10 +792,16 @@ export function verbInputSchemaError(
   if (schema === undefined || schema === true) return undefined;
   const undeclared = undeclaredVerbFieldError(input, schema);
   if (undeclared !== undefined) return undeclared;
-  return validateSchemaValue(
-    relaxDefaultedRequired(schema, schema, new Map()),
-    input,
-  );
+  // The option the dispatch gate has always passed
+  // (`closedWorldEventRejection`, packages/runner/src/runner.ts). Without it
+  // this validator measures the envelope against the schema of the value it
+  // points at, which no link can satisfy. Passing it is what stops the two
+  // gates disagreeing about one payload — the CLI refusing what the runtime
+  // would have accepted and dispatched.
+  const relaxed = relaxDefaultedRequired(schema, schema, new Map());
+  return validateSchemaValue(relaxed, input, relaxed, {
+    acceptOpaqueValue: (value) => isOpaqueReference(value),
+  });
 }
 
 /**
