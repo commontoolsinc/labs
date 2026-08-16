@@ -94,6 +94,23 @@ async function crossRealm(value: FabricValue): Promise<EchoReport> {
 
 describe("RealmCodecEngine", () => {
   describe("encode()", () => {
+    it("mints a marker equal to the one this file hand-builds", () => {
+      // `WIRE_MARKER` stands in for the engine's own marker everywhere wire
+      // data is assembled by hand here, so every one of those cases rests on
+      // the two agreeing. Pinned in one place rather than assumed: a change
+      // to the minted marker's shape or version would otherwise surface as
+      // a spray of unrelated-looking failures across the file, and one that
+      // moved `decode()`'s validation along with it would surface as none at
+      // all, leaving those cases exercising a form the engine never emits.
+      const minted = realmFromFabricValue(null)[0];
+
+      expect(minted).toEqual(WIRE_MARKER);
+      // Equal and deliberately NOT the same object, which is the property
+      // that lets a peer's own marker work: what `decode()` checks at the
+      // envelope is shape and version, never identity against a local one.
+      expect(minted).not.toBe(WIRE_MARKER);
+    });
+
     it("wraps the walked tree, which is otherwise the caller's own", () => {
       const value = { a: 1 };
 

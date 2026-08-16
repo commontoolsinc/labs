@@ -26,6 +26,12 @@ import {
  * `[marker, tree]` that crosses, and a **tagged form** is the three-element
  * `[marker, tag, state]` that a codec's output wears inside it.
  *
+ * The marker answers both of the questions `BaseCodecEngine.encode()` frames.
+ * Which parts of a payload are the format's own: identity settles that, where
+ * JSON escapes instead, and it is the question a private channel does not
+ * excuse. And what wrote this: the marker carries a version, and `decode()`
+ * refuses one it does not implement.
+ *
  * **Cycles are refused and a shared reference survives exactly where nothing
  * beneath it needed encoding**, per Section 1.6 of the formal spec, which
  * requires an engine to say which of these it does. Section 4 of the realm
