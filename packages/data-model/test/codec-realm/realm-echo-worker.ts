@@ -1,8 +1,10 @@
-// The far side of the boundary this format exists for. It decodes what
-// arrives and reports what it got, so that a test can assert on the value as
-// reconstructed in a *different realm* rather than in the one that encoded it.
-//
-// Not a `*.test.ts` file, so the runner does not pick it up as a suite.
+/**
+ * The far side of the boundary this format exists for. It decodes what
+ * arrives and reports what it got, so that a test can assert on the value as
+ * reconstructed in a *different realm* rather than in the one that encoded it.
+ *
+ * Not a `*.test.ts` file, so the runner does not pick it up as a suite.
+ */
 
 import { fabricFromRealmValue } from "@/codecs.ts";
 import type { RealmEncodedValue } from "@/codec-realm/interface.ts";

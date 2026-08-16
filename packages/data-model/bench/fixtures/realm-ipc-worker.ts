@@ -1,14 +1,16 @@
-// The far side of a `postMessage()` benchmark: it receives a realm-encoded
-// tree, does what the message asks, and acks.
-//
-// Lives under `fixtures/` rather than beside the benchmarks because a file
-// here is neither a `*.bench.ts` nor a test, and the coverage tooling counts
-// anything else under `packages/` as source a suite failed to reach.
-//
-// The ack carries one boolean and nothing else. What a benchmark wants to know
-// is what the send and the far-side work cost, and a reply carrying any part
-// of the decoded value would put a second clone of it on the return leg and
-// bury exactly that.
+/**
+ * The far side of a `postMessage()` benchmark: it receives a realm-encoded
+ * tree, does what the message asks, and acks.
+ *
+ * Lives under `fixtures/` rather than beside the benchmarks because a file
+ * here is neither a `*.bench.ts` nor a test, and the coverage tooling counts
+ * anything else under `packages/` as source a suite failed to reach.
+ *
+ * The ack carries one boolean and nothing else. What a benchmark wants to know
+ * is what the send and the far-side work cost, and a reply carrying any part
+ * of the decoded value would put a second clone of it on the return leg and
+ * bury exactly that.
+ */
 
 import type { RealmEncodedValue } from "@/codec-realm/interface.ts";
 import { fabricFromRealmValue } from "@/codecs.ts";

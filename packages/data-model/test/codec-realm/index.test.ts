@@ -1,7 +1,9 @@
-// The package exposes this directory as `./codec-realm`, so what the barrel
-// re-exports is the public surface. A name added to `interface.ts` and not
-// added here is invisible to every consumer outside this package, and nothing
-// else would say so: the engine's own tests reach past the barrel.
+/**
+ * The package exposes this directory as `./codec-realm`, so what the barrel
+ * re-exports is the public surface. A name added to `interface.ts` and not
+ * added here is invisible to every consumer outside this package, and nothing
+ * else would say so: the engine's own tests reach past the barrel.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
