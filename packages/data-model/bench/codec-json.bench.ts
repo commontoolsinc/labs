@@ -172,8 +172,10 @@ for (const [size, json] of OBJECTS_JSON) {
 }
 
 //
-// Bulk payloads by magnitude: bytes as base64url text, `bigint` as decimal
-// text. Sized in bytes so the two columns answer the same question of each.
+// Bulk payloads by magnitude, both reaching base64url text of a byte string
+// of the same length. Sized in bytes so the two columns answer the same
+// question of each; what separates them is the trip a `bigint` takes through
+// `toString(16)` to become bytes in the first place.
 //
 
 const BULK: readonly (readonly [

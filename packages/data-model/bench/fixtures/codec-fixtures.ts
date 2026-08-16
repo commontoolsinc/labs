@@ -39,9 +39,9 @@ export const SPARSE_SIZES = SIZES.filter((size) => size >= 10);
  * Bytes rather than elements, and the same ladder for both, because the point
  * of these two series is to be read against each other. A `FabricBytes` and a
  * `bigint` of the same size carry the same quantity of data through formats
- * that treat them oppositely: cloning takes each as itself, where JSON must
- * reach text for both -- base64url for one, decimal for the other -- and the
- * two text encodings do not cost alike.
+ * that treat them oppositely: cloning takes each as itself, where JSON writes
+ * both as base64url of the same byte count -- the same wire text, to within a
+ * character or two -- and still does not spend alike getting there.
  */
 export const BYTE_SIZES = [
   0,
@@ -165,14 +165,16 @@ export function makeBytes(size: number): FabricValue {
  * is all zeroes, so nothing here is measuring dense magnitude when it means to
  * be measuring size. `size` of zero gives `0n`, the ladder's empty case.
  *
- * Positive throughout: sign is stored apart from magnitude, so a negative
- * counterpart would cost what these do, and JSON's decimal form would gain a
- * single character.
+ * Positive throughout, sign being stored apart from magnitude, so a negative
+ * counterpart would cost what these do.
  *
- * That decimal form runs about 2.41 digits per byte, which is the number to
- * have in hand when reading this series against the byte one under JSON: the
- * two are not carrying the same amount of *text* even where they carry the
- * same amount of data.
+ * What to have in hand when reading this series against the byte one under
+ * JSON: the two reach the *same* wire form, base64url of a two's-complement
+ * byte string, and at these sizes the same length to within a character. What
+ * separates them is the cost of getting a `bigint`'s bytes out of the runtime
+ * at all, which goes through `toString(16)` and a hex parse -- linear, base 16
+ * being a power of two, but several times what handing over a `Uint8Array`
+ * costs.
  */
 export function makeBigint(size: number): FabricValue {
   return (size === 0) ? 0n : (1n << BigInt((8 * size) - 1)) | 1n;
