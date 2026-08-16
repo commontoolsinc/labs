@@ -24,7 +24,7 @@
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -622,7 +622,9 @@ export function recomposeSchema(
     document: JSONSchema,
   ): Map<string, string> => {
     const members = new Map<string, string>();
-    if (isObjectOrArray(document) && isObjectOrArray(document.$defs)) {
+    // A definition map is a non-array record; an array's indices are not
+    // member names.
+    if (isObjectNotArray(document) && isObjectNotArray(document.$defs)) {
       for (const name of Object.keys(document.$defs)) {
         members.set(
           name,
@@ -671,7 +673,7 @@ export function recomposeSchema(
       // Object.hasOwn before the read: a member named `__proto__` must be
       // read as an own property, never through the prototype accessor.
       const groupDefs = (document as JSONSchemaObj).$defs;
-      const body = groupDefs !== undefined &&
+      const body = isObjectNotArray(groupDefs) &&
           Object.hasOwn(groupDefs, parsed.defName)
         ? groupDefs[parsed.defName]
         : undefined;

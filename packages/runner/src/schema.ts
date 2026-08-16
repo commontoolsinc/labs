@@ -114,10 +114,15 @@ const linkWithAsCellScope = (
 // Cache per deep-frozen schema identity; mutable schemas recompute per call.
 // The cached candidates are interned (combineSchema interns its results), so
 // downstream identity-keyed memos see stable references too.
-const compoundAsCellCandidatesCache = new WeakMap<
+let compoundAsCellCandidatesCache = new WeakMap<
   JSONSchemaObj,
   readonly JSONSchemaObj[]
 >();
+// Candidates embed resolved branch content, so a registry clear (last lease
+// out) swaps the cache — a resolution success must not outlive its epoch.
+onSchemaRegistryClear(() => {
+  compoundAsCellCandidatesCache = new WeakMap();
+});
 
 const asCellCompoundCandidates = (
   schema: JSONSchemaObj,
@@ -146,7 +151,11 @@ const asCellCompoundCandidates = (
       }
     }
   }
-  if (cacheable) {
+  // Populate only when every external ref's document closure is at hand: a
+  // branch whose cid: ref missed resolves to nothing and would be missing
+  // from a memoized candidate list forever, though the document can still
+  // arrive.
+  if (cacheable && isExternalClosureComplete(schema)) {
     compoundAsCellCandidatesCache.set(schema, candidates);
   }
   return candidates;

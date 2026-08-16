@@ -213,6 +213,51 @@ describe("schema-doc-sync", () => {
     expect(stored).toBeDefined();
   });
 
+  it("re-chases a dependency that was absent on the first arrival", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { rechase: { $ref: "#/$defs/RechaseLeaf" } },
+      $defs: {
+        RechaseLeaf: {
+          type: "object",
+          properties: { rechaseLeaf: { type: "string" } },
+        },
+      },
+    };
+    const decomposed = decomposeSchema(schema);
+    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    const leafHash = [...decomposed.documents.keys()]
+      .find((hash) => hash !== rootHash)!;
+
+    // Only the root exists; the first arrival's chase for the leaf settles
+    // empty, which must release the seen-marker rather than pin it.
+    await writeDocs({
+      [`cid:${rootHash}`]: decomposed.documents.get(rootHash)! as FabricValue,
+    });
+    const provider = readerStorage.open(space);
+    const first = await provider.sync(`cid:${rootHash}` as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(first.error).toBeUndefined();
+    await readerStorage.synced();
+    expect(isSchemaDocumentClosureComplete(rootHash)).toBe(false);
+
+    // The leaf lands late. A second root arrival (a differently-selected
+    // sync, so coverage does not elide it) re-runs the chase — a pinned
+    // marker would leave the closure incomplete forever.
+    await writeDocs({
+      [`cid:${leafHash}`]: decomposed.documents.get(leafHash)! as FabricValue,
+    });
+    const second = await provider.sync(`cid:${rootHash}` as URI, {
+      path: [],
+      schema: true,
+    });
+    expect(second.error).toBeUndefined();
+    await readerStorage.synced();
+    expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
+  });
+
   it("keeps registrations alive past one manager's close while another session holds its lease", async () => {
     const schema: JSONSchemaObj = {
       type: "object",

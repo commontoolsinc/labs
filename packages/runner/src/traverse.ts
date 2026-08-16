@@ -39,6 +39,7 @@ import {
   containsExternalSchemaRef,
 } from "./schema-decompose.ts";
 import {
+  isExternalClosureComplete,
   lookupSchemaDocument,
   onSchemaRegistryClear,
   registerSchemaDocument,
@@ -306,10 +307,16 @@ const EMPTY_PROPERTIES_MARKER: JSONSchema = Object.freeze(
 const MISSING_PROPERTY_MARKER: JSONSchema = Object.freeze(
   { $comment: "missingProperty" },
 );
-const _schemaAtPathCache = new WeakMap<
+let _schemaAtPathCache = new WeakMap<
   JSONSchemaObj,
   Map<string, JSONSchema>
 >();
+// Derivations can embed registry content resolved through external refs, so
+// a registry clear (last lease out) swaps the cache — a resolution success
+// must not outlive its lease epoch.
+onSchemaRegistryClear(() => {
+  _schemaAtPathCache = new WeakMap();
+});
 
 function schemaAtPathCanonical(
   schema: JSONSchema,
@@ -341,6 +348,10 @@ function schemaAtPathCanonical(
   // since `schema` is interned) children. Default calls may already be the
   // core method's canonical result; interning is idempotent in that case.
   const result = internSchema(compute());
+  // Populate only when every external ref's document closure is at hand: a
+  // derivation computed over a hole must not outlive the documents'
+  // arrival.
+  if (!isExternalClosureComplete(schema)) return result;
   if (byPath.size >= INTERN_CACHE_MAX) byPath.clear();
   byPath.set(key, result);
   return result;
@@ -1127,12 +1138,15 @@ export type TraversalContext = {
    */
   schemaDocsLoaded: Set<string>;
   /**
-   * Tagged hashes of the schema documents this traversal loaded AND
-   * verified in its own space. `loadExternalSchemaDocs` records successes
-   * here and derives its closure-collection verdict from it, so a schema
-   * admitted at a traversal entry point (the selector, a link) is one
-   * whose whole closure this space holds — the query can deliver every
-   * document its selection depended on.
+   * `\${space}/\${taggedHash}` keys for the schema documents this traversal
+   * loaded AND verified, qualified by the space each was collected from —
+   * one traversal can cross spaces through links, and a document collected
+   * in one space must not satisfy a reference encountered in another.
+   * `loadExternalSchemaDocs` records successes here and derives its
+   * closure-collection verdict from it, so a schema admitted at a traversal
+   * entry point (the selector, a link) is one whose whole closure the
+   * encountering space holds — the query can deliver every document its
+   * selection depended on.
    */
   schemaDocsAvailable: Set<string>;
 };
@@ -2439,19 +2453,20 @@ function loadExternalSchemaDocs(
     // absent document's later arrival re-triggers the reader.
     const result = tx.read(address);
     if (result.error !== undefined) {
-      // Absent from the local replica: report it so the runtime kicks an
-      // asynchronous load (the missing-link-target channel; server-side
-      // traversals have no replica gap and no receiver). Arrival registers
-      // the document and re-runs the reader; its own refs chase from there.
-      context.onMissingLinkTarget?.(
-        {
-          space: address.space,
-          id: address.id,
-          path: [],
-          scope: address.scope,
-        } as NormalizedFullLink,
-        referrer.space,
-      );
+      // Absence is the only failure the missing-link-target channel is
+      // for (the followPointer pattern): a permission or transport error
+      // is not a doc to fetch, and reporting it would kick spurious loads.
+      if (result.error.name === "NotFoundError") {
+        context.onMissingLinkTarget?.(
+          {
+            space: address.space,
+            id: address.id,
+            path: [],
+            scope: address.scope,
+          } as NormalizedFullLink,
+          referrer.space,
+        );
+      }
       continue;
     }
     context.schemaTracker.add(key, REJECTING_SELECTOR);
@@ -2463,9 +2478,8 @@ function loadExternalSchemaDocs(
         hash,
         schemaValue as JSONSchema,
       );
-      // Loaded in this space and verified: visible to this traversal's
-      // availability scope.
-      context.schemaDocsAvailable.add(hash);
+      // Loaded in this space and verified.
+      context.schemaDocsAvailable.add(`${address.space}/${hash}`);
       for (const dep of collectExternalSchemaRefHashes(interned)) {
         pending.push(dep);
       }
@@ -2489,7 +2503,9 @@ function loadExternalSchemaDocs(
     const hash = pendingCheck.pop()!;
     if (checked.has(hash)) continue;
     checked.add(hash);
-    if (!context.schemaDocsAvailable.has(hash)) return false;
+    if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
+      return false;
+    }
     const document = lookupSchemaDocument(hash);
     if (document === undefined) return false;
     pendingCheck.push(...collectExternalSchemaRefHashes(document));

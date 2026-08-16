@@ -251,6 +251,55 @@ describe("traverse-schema-docs", () => {
     expect(resolveSchema({ $ref: decomposed.rootRef })).not.toBe(false);
   });
 
+  it("does not accept availability collected in another space", () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { crossMarker: { type: "string" } },
+      title: "cross-space availability fixture",
+    };
+    const decomposed = decomposeSchema(schema);
+    for (const [hash, document] of decomposed.documents) {
+      registerSchemaDocument(hash, document);
+    }
+
+    // The traversed store lacks the documents; a prior hop "in another
+    // space" collected them. Space-qualified availability must not let
+    // that satisfy this space's reference.
+    const store = new Map<string, Revision<State>>();
+    putDoc(store, "of:cross-target", { crossMarker: "hidden" });
+    const rootValue = {
+      crossed: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:cross-target",
+            path: [],
+            schema: { $ref: decomposed.rootRef },
+          },
+        },
+      },
+    };
+    putDoc(store, "of:cross-root", rootValue, 2);
+
+    const manager = new StoreObjectManager(store);
+    const tx = new ExtendedStorageTransaction(
+      new ManagedStorageTransaction(manager),
+    );
+    const context = createDefaultTraversalContext();
+    for (const hash of decomposed.documents.keys()) {
+      context.schemaDocsAvailable.add(`did:key:elsewhere/${hash}`);
+    }
+    const traverser = new SchemaObjectTraverser(
+      tx,
+      { path: ["value"], schema: true },
+      context,
+    );
+    const { ok } = traverser.traverse({
+      address: { space, id: "of:cross-root" as URI, type, path: ["value"] },
+      value: rootValue,
+    });
+    expect((ok as { crossed: unknown }).crossed).toBeNull();
+  });
+
   it("reads schema documents at the canonical space scope whatever the referrer's scope", () => {
     const schema: JSONSchemaObj = {
       type: "object",

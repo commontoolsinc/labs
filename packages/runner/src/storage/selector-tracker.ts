@@ -7,6 +7,10 @@ import type { Result, Unit } from "@commonfabric/memory/interface";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import {
+  isExternalClosureComplete,
+  onSchemaRegistryClear,
+} from "../schema-registry.ts";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import * as Address from "./transaction/address.ts";
 
@@ -263,6 +267,15 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     Map<JSONSchema, readonly string[]>
   >();
 
+  static {
+    // Entries can embed $ref-resolved forms, so a registry clear (last
+    // lease out) swaps the cache — a resolution success must not outlive
+    // its lease epoch.
+    onSchemaRegistryClear(() => {
+      SelectorTracker.#anyOfItemHashesCache = new WeakMap();
+    });
+  }
+
   static #anyOfItemHashes(
     schema: JSONSchema & object,
     item: JSONSchema,
@@ -286,18 +299,25 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       hashes.push(hashSchema(current));
     }
     if (isObjectOrArray(current) && current.$ref !== undefined) {
-      hashes.push(
-        hashSchema(
-          SelectorTracker.getStandardSchema(
-            ContextualFlowControl.resolveSchemaRefs(
-              current,
-              schema,
-            ) as JSONSchema,
-          ),
-        ),
+      // An unresolvable ref contributes no resolved-form hash. For an
+      // external ref that is a recoverable miss — the schema document can
+      // arrive later — which is also why the populate below is gated on
+      // closure completeness: a hash list computed over the hole must not
+      // outlive the arrival.
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        current,
+        schema,
       );
+      if (resolved !== undefined) {
+        hashes.push(
+          hashSchema(SelectorTracker.getStandardSchema(resolved)),
+        );
+      }
     }
-    if (cacheable) {
+    if (
+      cacheable && isExternalClosureComplete(item) &&
+      isExternalClosureComplete(schema)
+    ) {
       if (byItem === undefined) {
         byItem = new Map();
         SelectorTracker.#anyOfItemHashesCache.set(schema, byItem);

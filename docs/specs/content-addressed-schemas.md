@@ -142,7 +142,9 @@ Decomposition refuses input it cannot represent faithfully — a `$ref`
 outside the `#/$defs/<name>` and external vocabularies, a dangling local
 ref, a nested `$defs` scope, the deprecated `definitions` keyword, the
 resource-scope keywords (`$id`, `$anchor`, `$dynamicAnchor`,
-`$dynamicRef`, whose scoping the rewrite cannot preserve), and an external
+`$dynamicRef`, and the 2019-09 pair `$recursiveAnchor` and
+`$recursiveRef`, whose scoping the rewrite cannot preserve), and an
+external
 ref whose document is not at hand — and a writer falls back to carrying
 such a schema inline, as today.
 
@@ -426,7 +428,10 @@ phased on the op-migration playbook:
    for CFC schema documents today (the S5 / A2 items in the CFC audit).
    Making the server the sole acceptor of `cid:` writes — rejecting content
    that does not hash to the id — would cover schema documents and CFC
-   documents in one change.
+   documents in one change. Accepted as non-urgent: a forged document is
+   confined to the space it was written into — every path into the shared
+   registry re-computes the hash before trusting a claim, so refs in that
+   space fail closed and no other space is affected.
 3. **Fetch-once for immutable documents.** Every pull is a watch add, so
    schema documents permanently grow the session watch set even though they
    can never change. Quiet but not free; a fetch-without-subscribe

@@ -548,6 +548,13 @@ describe("schema-decompose", () => {
       expect(recomposed.$ref).toBe("#/$defs/Folder");
     });
 
+    it("throws for a fragment into a document whose `$defs` is an array", () => {
+      const document = { $defs: [{ type: "string" }] } as unknown as JSONSchema;
+      const hash = internSchemaAsTaggedHashString(document);
+      expect(() => recomposeSchema(`cid:${hash}#/$defs/0`, () => document))
+        .toThrow("no member");
+    });
+
     it("throws for a missing document", () => {
       const decomposed = decomposeSchema({
         type: "object",

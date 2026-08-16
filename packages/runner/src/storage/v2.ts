@@ -1175,31 +1175,40 @@ export class StorageManager implements IStorageManager {
   }
 
   async close(): Promise<void> {
-    this.#schemaRegistryLease?.();
-    this.#schemaRegistryLease = undefined;
-    if (this.#providers.size === 0) {
-      return;
+    // The lease releases AFTER teardown drains: a queued sync frame applied
+    // during provider destruction still registers its schema documents
+    // inside this session's epoch, not after the clear.
+    try {
+      if (this.#providers.size === 0) {
+        return;
+      }
+      await Promise.all(
+        [...this.#providers.values()].map((provider) => provider.destroy()),
+      );
+      this.#providers.clear();
+      this.#dataURISyncs.clear();
+      this.#sessionId = crypto.randomUUID();
+    } finally {
+      this.#schemaRegistryLease?.();
+      this.#schemaRegistryLease = undefined;
     }
-    await Promise.all(
-      [...this.#providers.values()].map((provider) => provider.destroy()),
-    );
-    this.#providers.clear();
-    this.#dataURISyncs.clear();
-    this.#sessionId = crypto.randomUUID();
   }
 
   async closeNow(): Promise<void> {
-    this.#schemaRegistryLease?.();
-    this.#schemaRegistryLease = undefined;
-    if (this.#providers.size === 0) {
-      return;
+    try {
+      if (this.#providers.size === 0) {
+        return;
+      }
+      await Promise.all(
+        [...this.#providers.values()].map((provider) => provider.destroyNow()),
+      );
+      this.#providers.clear();
+      this.#dataURISyncs.clear();
+      this.#sessionId = crypto.randomUUID();
+    } finally {
+      this.#schemaRegistryLease?.();
+      this.#schemaRegistryLease = undefined;
     }
-    await Promise.all(
-      [...this.#providers.values()].map((provider) => provider.destroyNow()),
-    );
-    this.#providers.clear();
-    this.#dataURISyncs.clear();
-    this.#sessionId = crypto.randomUUID();
   }
 
   edit(): IStorageTransaction {
@@ -4247,10 +4256,19 @@ class SpaceReplica implements ISpaceReplica {
         // here (the space-boundary rule in the spec).
         if (this.#schemaDocsSeenHere.has(dep)) continue;
         this.#schemaDocsSeenHere.add(dep);
-        const chase = this.sync(`cid:${dep}` as URI, {
-          path: [],
-          schema: false,
-        });
+        const uri = `cid:${dep}` as URI;
+        const chase = this.sync(uri, { path: [], schema: false }).then(
+          (result) => {
+            // A settle without a locally stored document must not suppress
+            // the next chase: the marker means "present here", not "tried".
+            if (
+              result.error !== undefined || this.getDocument(uri) === undefined
+            ) {
+              this.#schemaDocsSeenHere.delete(dep);
+            }
+            return result;
+          },
+        );
         this.#trackPendingWork?.(chase);
       }
     }
