@@ -404,6 +404,12 @@ interface DeclaredFieldSource {
 interface DeclaredFields {
   sources: DeclaredFieldSource[];
   honorsUndeclared: boolean;
+  /** Every name any reached member marks required. A conjunction constrains
+   * one value from all its members at once, so a name any of them requires is
+   * required of the payload. A DISJUNCTION contributes none — a payload
+   * satisfies one branch, so no branch's requirement binds it, and the walk
+   * stops at one rather than reading its members. */
+  required: Set<string>;
 }
 
 /**
@@ -432,7 +438,11 @@ interface DeclaredFields {
 function declaredFieldsAt(
   node: Record<string, unknown>,
   root: JSONSchema,
-  into: DeclaredFields = { sources: [], honorsUndeclared: false },
+  into: DeclaredFields = {
+    sources: [],
+    honorsUndeclared: false,
+    required: new Set<string>(),
+  },
   followed: Map<JSONSchema, Set<string>> = new Map(),
 ): DeclaredFields {
   if (isSchemaObject(node.properties as JSONSchema)) {
@@ -451,6 +461,11 @@ function declaredFieldsAt(
     node.additionalProperties !== false
   ) {
     into.honorsUndeclared = true;
+  }
+  if (Array.isArray(node.required)) {
+    for (const name of node.required as unknown[]) {
+      if (typeof name === "string") into.required.add(name);
+    }
   }
   if (!Array.isArray(node.allOf)) return into;
   for (const member of node.allOf as JSONSchema[]) {
@@ -660,6 +675,59 @@ function firstUndeclaredEventField(
     if (found !== undefined) return found;
   }
   return undefined;
+}
+
+/** Every flag-facing surface's view of what a verb's event declares. */
+export interface DeclaredEventFields {
+  /** The declared properties, merged across every conjunction member. A name
+   * declared more than once keeps its FIRST account, in declaration order,
+   * which is the rule the refusal vocabulary already follows. */
+  properties: Record<string, JSONSchema>;
+  /** Names any member marks required. */
+  required: Set<string>;
+}
+
+/**
+ * What a verb's event schema declares at its root, reading a conjunction.
+ *
+ * `properties` alone answers for the common schema and misses every field an
+ * `allOf` member contributes — which the payload door has always read and the
+ * flag surfaces never did, so a field could be judged on one door and invisible
+ * on the other. This is the one reader both can share.
+ *
+ * `null` where the position is not object-shaped at all, which is a verb taking
+ * a single value rather than fields.
+ *
+ * A DISJUNCTION contributes nothing, deliberately. A payload need satisfy only
+ * one branch, so no single flag list describes the position and no branch's
+ * `required` binds it — `declaredFieldsAt` stops at one rather than reading its
+ * members, and this inherits that.
+ */
+export function declaredEventFields(
+  schema: JSONSchema | undefined,
+): DeclaredEventFields | null {
+  if (!isSchemaObject(schema)) return null;
+  // The gate the flag surfaces have always applied, widened by exactly one
+  // term. A position stating `type: "object"` or carrying `properties` is a
+  // fields position, and now so is one carrying `allOf` — because that is
+  // where its fields live. A root `$ref` is deliberately NOT resolved here:
+  // doing so would give flags to verbs that have never had them, which is a
+  // wider change than reading a conjunction and belongs to whoever wants it.
+  if (
+    schema.type !== "object" && !schema.properties &&
+    !Array.isArray(schema.allOf)
+  ) {
+    return null;
+  }
+  if (schema.anyOf !== undefined || schema.oneOf !== undefined) return null;
+  const declared = declaredFieldsAt(schema, cfcSchemaChildRoot(schema, schema));
+  const properties: Record<string, JSONSchema> = {};
+  for (const source of declared.sources) {
+    for (const [name, property] of Object.entries(source.properties)) {
+      if (!Object.hasOwn(properties, name)) properties[name] = property;
+    }
+  }
+  return { properties, required: declared.required };
 }
 
 /**
