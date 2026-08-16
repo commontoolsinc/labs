@@ -4,6 +4,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [answering-without-reading-2026-08.md](packages/cf-harness/answering-without-reading-2026-08.md) — the CT-2003 arc (#5736, #5747, #5748, #5781): how a cf-harness agent computes over references it cannot read, the decisions behind unconditional handles, unlisted detached pieces and the space authority boundary, what six live runs showed and the enforcement caveat they carry, plus the shared-machinery bugs and open threads left behind, August 2026.
 - [verbs-arc-independent-review-2026-08-14.md](verbs-arc-independent-review-2026-08-14.md) — independent full-codebase review of the landed verbs implementation arc at `5ca4c1296`, with a reconciliation against the PR #5765 review, August 2026.
 - [cf-view-parser-adapter-spike-2026-08.md](packages/cli/cf-view-parser-adapter-spike-2026-08.md) — Python, Go, shell, and HTML parser-adapter measurements, August 2026.
 - [cf-view-parser-adapter-spike-2026-08-methodology.md](packages/cli/cf-view-parser-adapter-spike-2026-08-methodology.md) — retained fixtures and procedure for the parser-adapter measurements, August 2026.
