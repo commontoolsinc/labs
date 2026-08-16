@@ -2067,13 +2067,23 @@ export function declaredVerbProse(
   if (!isObjectOrArray(declared) || !isObjectOrArray(declared.properties)) {
     return prose;
   }
+  // The scope a property's own references resolve in. A `$defs` closure is
+  // local: the definition the root names may carry definitions of its own, and
+  // a reference inside it names THOSE. Resolving at the outer root finds
+  // nothing, or — worse — a same-named definition belonging to someone else.
+  // `cfcSchemaChildRoot` opens the inner scope where there is one and hands
+  // back the outer root where there is not.
+  const declaredRoot = cfcSchemaChildRoot(
+    declared as JSONSchema,
+    resultSchema as JSONSchema,
+  );
   for (const [name, property] of Object.entries(declared.properties)) {
     if (!isObjectOrArray(property)) continue;
     const description = typeof property.description === "string"
       ? property.description
       : undefined;
     const eventSchema = typeof property.$ref === "string"
-      ? resolveCfcSchemaRefs(property, resultSchema as JSONSchema)
+      ? resolveCfcSchemaRefs(property, declaredRoot)
       : property as JSONSchema;
     if (description === undefined && eventSchema === undefined) continue;
     prose.set(name, {

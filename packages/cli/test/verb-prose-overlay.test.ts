@@ -584,5 +584,39 @@ describe("verb prose", () => {
       const pattern = { resultSchema: { $ref: "#/$defs/Absent" } };
       expect(declaredVerbProse(pattern).size).toBe(0);
     });
+
+    it("resolves a property reference in the definition's OWN scope", () => {
+      // A `$defs` closure is local. The definition the root names may carry
+      // definitions of its own, and a property reference inside it names
+      // those — resolving at the outer root finds nothing, or a same-named
+      // definition belonging to someone else. Both roots here declare `Ev`,
+      // and only the inner one is correct for a property of `Item`.
+      const pattern = {
+        resultSchema: {
+          $ref: "#/$defs/Item",
+          $defs: {
+            Item: {
+              type: "object",
+              properties: { act: { $ref: "#/$defs/Ev", description: "Act." } },
+              $defs: {
+                Ev: {
+                  type: "object",
+                  properties: { inner: { type: "string" } },
+                },
+              },
+            },
+            Ev: {
+              type: "object",
+              properties: { outer: { type: "string" } },
+            },
+          },
+        },
+      };
+
+      const eventSchema = declaredVerbProse(pattern).get("act")
+        ?.eventSchema as Record<string, unknown> | undefined;
+      const props = eventSchema?.properties as Record<string, unknown>;
+      expect(Object.keys(props)).toEqual(["inner"]);
+    });
   });
 });
