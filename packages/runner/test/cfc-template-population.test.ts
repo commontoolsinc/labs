@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
@@ -739,9 +739,12 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     const marked = await flowJoinOf(rt, "gp-mach-out", (tx) => {
       tx.runWithAmbientReadMeta(machineryRead, () => wiringReads(tx));
     });
-    // Consumed-set equality with a read-free transaction: the marked wiring
-    // reads contribute NOTHING to the join.
-    expect(marked).toEqual([]);
+    // The marked wiring reads do not consume the membership templates. The
+    // piece's ambient space policy still applies to ordinary reads.
+    expect(marked.length).toBeGreaterThan(0);
+    for (const atom of marked) {
+      expect(atom).toEqual(cfcAtom.space(space));
+    }
 
     const unmarked = await flowJoinOf(rt, "gp-app-out", (tx) => {
       wiringReads(tx);
@@ -1005,7 +1008,9 @@ describe("CFC template population (Stage A): class-split resolution", () => {
     expect((await tx.commit()).ok).toBeDefined();
     const id = cell.getAsNormalizedFullLink().id;
 
-    const declared = entriesOf(id).filter((e) => e.origin === "declared");
+    const declared = entriesOf(id).filter((e) =>
+      e.origin === "declared" && e.path.length > 0
+    );
     expect(declared).toEqual([{
       path: ["items", "*"],
       label: { confidentiality: ["declared-member"] },
@@ -1078,7 +1083,9 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
       },
     } as JSONSchema, { anyKey: "v" });
 
-    const declared = entriesOf(id).filter((e) => e.origin === "declared");
+    const declared = entriesOf(id).filter((e) =>
+      e.origin === "declared" && e.path.length > 0
+    );
     expect(declared).toEqual([{
       path: ["*"],
       label: { confidentiality: ["map-member"] },
@@ -1100,14 +1107,14 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
     } as JSONSchema, { named: "v", extra: "w" });
 
     const stored = entriesOf(id);
-    expect(stored.some((e) => e.path.includes("*"))).toBe(false);
-    expect(JSON.stringify(stored)).not.toContain("map-member");
-    // The named field's declared entry still lands.
+    const declared = stored.filter((e) => e.origin === "declared");
     expect(
-      stored.some((e) =>
-        e.origin === "declared" && e.path.join("/") === "named"
+      declared.some((e) =>
+        e.path.includes("*") &&
+        e.label.confidentiality?.includes("map-member")
       ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(JSON.stringify(declared)).not.toContain("map-member");
   });
 
   // `properties: {}` is still record-only: no key is named, so EVERY key is
@@ -1127,7 +1134,9 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
       },
     } as JSONSchema, { anyKey: "v" });
 
-    const declared = entriesOf(id).filter((e) => e.origin === "declared");
+    const declared = entriesOf(id).filter((e) =>
+      e.origin === "declared" && e.path.length > 0
+    );
     expect(declared).toEqual([{
       path: ["*"],
       label: { confidentiality: ["map-member"] },

@@ -1657,7 +1657,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     doc.current = collapsedNext;
     invalidateFrozenReadsOnChain(doc, address.path);
-    this.recordPatchIntent(
+    const journalIndex = this.recordPatchIntent(
       space,
       address,
       readValueAtPath(collapsedNext.value, address.path, {
@@ -1666,6 +1666,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       cloneIfNecessary(result.ok.previousValue) as FabricValue | undefined,
       doc,
       previousPresent,
+      address.path.length === 0
+        ? collapsedNext.value !== undefined
+        : hasValueAtPath(collapsedNext.value, address.path, {
+          allowArrayLength: true,
+        }),
     );
     this.recordWriteActivity(
       space,
@@ -1676,6 +1681,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       previousActivityValue,
       doc,
       previousActivityPresent,
+      activityPath.length === 0
+        ? collapsedNext.value !== undefined
+        : hasValueAtPath(collapsedNext.value, activityPath, {
+          allowArrayLength: true,
+        }),
+      journalIndex,
     );
 
     return { ok: collapsedNext };
@@ -1799,7 +1810,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
       changed = true;
       writtenPaths.push(address.path);
-      this.recordPatchIntent(
+      const journalIndex = this.recordPatchIntent(
         space,
         address,
         readValueAtPath(result.ok.root, address.path, {
@@ -1808,6 +1819,11 @@ export class V2StorageTransaction implements IStorageTransaction {
         cloneIfNecessary(previousValue) as FabricValue | undefined,
         doc,
         previousPresent,
+        address.path.length === 0
+          ? result.ok.root !== undefined
+          : hasValueAtPath(result.ok.root, address.path, {
+            allowArrayLength: true,
+          }),
       );
       this.recordWriteActivity(
         space,
@@ -1818,6 +1834,12 @@ export class V2StorageTransaction implements IStorageTransaction {
         previousActivityValue,
         doc,
         previousActivityPresent,
+        activityPath.length === 0
+          ? result.ok.root !== undefined
+          : hasValueAtPath(result.ok.root, activityPath, {
+            allowArrayLength: true,
+          }),
+        journalIndex,
       );
     }
 
@@ -1844,6 +1866,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     previousValue: FabricValue | undefined,
     doc: WritableDocumentEntry,
     previousPresent?: boolean,
+    present?: boolean,
+    journalIndex?: number,
   ): void {
     recordWriteStackTrace(
       {
@@ -1865,6 +1889,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       value,
       previousValue,
       previousPresent,
+      present,
+      journalIndex,
     );
     this.invalidateReactivityLog();
   }
@@ -1876,7 +1902,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     previousValue: FabricValue | undefined,
     doc: WritableDocumentEntry,
     previousPresent?: boolean,
-  ): void {
+    present?: boolean,
+  ): number {
     // The per-attempt order stamp. recordPatchIntent runs once per applied
     // write in both the single-write and batch paths, with the EXACT write
     // address (unlike recordWriteActivity's materialized-parent activity
@@ -1885,12 +1912,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     // (writeDetails/reactivity) sees, in temporal order. Raw path on
     // purpose: the CFC consumer distinguishes `["value",...]` user writes
     // from `["cfc"]`/`["source"]` runtime surfaces.
+    const journalIndex = this.#activityClock++;
     this.#writeAttemptLog.push({
       space,
       scope: normalizeCellScope(address.scope),
       id: address.id,
       path: address.path,
-      journalIndex: this.#activityClock++,
+      journalIndex,
     });
     this.upsertWriteDetail(
       doc.patchDetails,
@@ -1899,7 +1927,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       value,
       previousValue,
       previousPresent,
+      present,
     );
+    return journalIndex;
   }
 
   private upsertWriteDetail(
@@ -1909,6 +1939,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     value: FabricValue | undefined,
     previousValue: FabricValue | undefined,
     previousPresent?: boolean,
+    present?: boolean,
+    journalIndex?: number,
   ): void {
     const writeActivity = {
       space,
@@ -1924,15 +1956,33 @@ export class V2StorageTransaction implements IStorageTransaction {
       // journal.history() reports the correct before-snapshot for reverts
       // and conflict detection.
       existing.value = value;
+      existing.present = present;
+      if (journalIndex !== undefined) existing.lastJournalIndex = journalIndex;
       return;
     }
 
-    details.set(key, {
+    const detail: TransactionWriteDetail = {
       address: writeActivity,
       value,
       previousValue,
+      ...(present !== undefined ? { present } : {}),
       ...(previousPresent !== undefined ? { previousPresent } : {}),
-    });
+    };
+    if (journalIndex !== undefined) {
+      Object.defineProperties(detail, {
+        firstJournalIndex: {
+          value: journalIndex,
+          writable: true,
+          enumerable: false,
+        },
+        lastJournalIndex: {
+          value: journalIndex,
+          writable: true,
+          enumerable: false,
+        },
+      });
+    }
+    details.set(key, detail);
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {

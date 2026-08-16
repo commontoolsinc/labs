@@ -1,4 +1,3 @@
-import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/api";
 import {
   CFC_ATOM_TYPE,
@@ -6,14 +5,13 @@ import {
   type CfcAtom,
   cfcAtom,
 } from "@commonfabric/api/cfc";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import {
   cloneForMutation,
   type CloneForMutationResult,
-  FabricPrimitive,
   isFabricObjectOrArray,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
 import {
   internSchema,
   internSchemaAsTaggedHashString,
@@ -22,7 +20,7 @@ import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
@@ -34,11 +32,11 @@ import {
 } from "../link-utils.ts";
 import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
-import { arrayMatchesPositionally } from "../schema-match.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   IExtendedStorageTransaction,
   MediaType,
+  TransactionWriteDetail,
 } from "../storage/interface.ts";
 import {
   internalVerifierRead,
@@ -99,7 +97,12 @@ import {
   uniqueCfcAtoms,
 } from "./observation.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
-import { cfcSchemaEntries } from "./schema-label-view.ts";
+import {
+  cfcPolicyPlacementIssue,
+  cfcSchemaEntries,
+  type CfcSchemaEntry,
+} from "./schema-label-view.ts";
+import { validateSchemaValueResult } from "./schema-sanitization.ts";
 import {
   addRootConfidentiality,
   mergeCfcSchemaEnvelopes,
@@ -371,6 +374,15 @@ const mergeLabelValues = (
   return merged.length > 0 ? merged : undefined;
 };
 
+const mergePresentLabelValues = <T>(
+  left: readonly T[] | undefined,
+  right: readonly T[] | undefined,
+): T[] | undefined => {
+  if (left === undefined) return right === undefined ? undefined : [...right];
+  if (right === undefined) return [...left];
+  return uniqueCfcAtoms([...left, ...right]) as T[];
+};
+
 const hasLabelValues = (label: IFCLabel): boolean =>
   (label.confidentiality?.length ?? 0) > 0 ||
   (label.integrity?.length ?? 0) > 0;
@@ -444,9 +456,10 @@ const resolveCurrentPrincipalLabelValues = (
   return resolved.length > 0 ? (resolved as readonly CfcAtom[]) : undefined;
 };
 
-const currentPrincipalIntegrityParts = (
+const perWriteIntegrityParts = (
   schema: JSONSchema,
   label: IFCLabel,
+  valueConditional: boolean,
 ): {
   staticSchema: JSONSchema;
   staticLabel: IFCLabel;
@@ -459,18 +472,23 @@ const currentPrincipalIntegrityParts = (
   const addIntegrity = Array.isArray(schema.ifc.addIntegrity)
     ? schema.ifc.addIntegrity
     : [];
-  const dynamicIntegrity = [...integrity, ...addIntegrity].filter(
-    hasCurrentPrincipalPlaceholder,
-  ) as CfcAtom[];
+  const dynamicIntegrity = [
+    ...integrity.filter((value) =>
+      valueConditional || hasCurrentPrincipalPlaceholder(value)
+    ),
+    ...addIntegrity.filter((value) =>
+      valueConditional || hasCurrentPrincipalPlaceholder(value)
+    ),
+  ] as CfcAtom[];
   if (dynamicIntegrity.length === 0) {
     return { staticSchema: schema, staticLabel: label, dynamicIntegrity };
   }
-  const staticIntegrity = integrity.filter((value) =>
-    !hasCurrentPrincipalPlaceholder(value)
-  );
-  const staticAddIntegrity = addIntegrity.filter((value) =>
-    !hasCurrentPrincipalPlaceholder(value)
-  );
+  const staticIntegrity = valueConditional
+    ? []
+    : integrity.filter((value) => !hasCurrentPrincipalPlaceholder(value));
+  const staticAddIntegrity = valueConditional
+    ? []
+    : addIntegrity.filter((value) => !hasCurrentPrincipalPlaceholder(value));
   return {
     staticSchema: {
       ...schema,
@@ -891,7 +909,9 @@ const writeIsSeedMaterialization = (
     detail.address.id === target.id &&
     normalizeCellScope(detail.address.scope) === target.scope &&
     detail.address.path.length <= 1 &&
-    detail.previousValue === undefined
+    (detail.previousPresent === false ||
+      detail.previousPresent === undefined &&
+        detail.previousValue === undefined)
   );
 };
 
@@ -1386,6 +1406,13 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
     if (
+      key === "default" || key === "const" || key === "enum" ||
+      key === "examples"
+    ) {
+      next[key] = entry;
+      continue;
+    }
+    if (
       (key === "bundleId" || key === "moduleIdentity") &&
       typeof value.file === "string"
     ) {
@@ -1396,20 +1423,13 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   return next;
 };
 
-// TODO(danfuzz): `stripWriterIdentityStamp` rebuilds every record node it
-// meets, including schema `default` VALUES, and a fabric value rebuilds as
-// `{}` — so two schemas whose only difference is a fabric-valued default
-// compare equal here, and the candidate's default is silently discarded by
-// the merge-skip decisions this feeds. The strip wants to carry
-// value-bearing keys by reference and the comparison wants a fabric-aware
-// equality.
 const schemasEqualIgnoringWriterStamp = (
   left: JSONSchema,
   right: JSONSchema,
 ): boolean =>
-  deepEqual(
-    stripWriterIdentityStamp(left),
-    stripWriterIdentityStamp(right),
+  valueEqual(
+    stripWriterIdentityStamp(left) as FabricValue,
+    stripWriterIdentityStamp(right) as FabricValue,
   );
 
 // Exported for unit testing of the merge-skip decision. Not part of the
@@ -1763,14 +1783,15 @@ const valueWriteTargets = (
       // document-root write's `previousValue` is the prior RAW envelope, so
       // the logical root existed before only if that envelope carried a
       // `value` member (the detail's presence flag describes the envelope,
-      // not the member — definedness stands in at that one level).
+      // not the member).
       const previousWrittenValue = rawPath.length === 0
         ? (isObjectOrArray(write.previousValue)
           ? (write.previousValue as { value?: unknown }).value
           : undefined)
         : write.previousValue;
       const previousWrittenPresent = rawPath.length === 0
-        ? previousWrittenValue !== undefined
+        ? isObjectOrArray(write.previousValue) &&
+          Object.hasOwn(write.previousValue, "value")
         : write.previousPresent ?? write.previousValue !== undefined;
       const key = targetKey(write.address);
       const existing = result.get(key);
@@ -1971,8 +1992,13 @@ const concreteWrittenPathsForPattern = (
       continue;
     }
     if (isPrefix(writtenPath, pattern)) {
-      const value = writeValueForTarget(tx, { ...target, path: [] });
-      expand(value, { ...target, path: [] }, 0, []);
+      const value = writeValueForTarget(tx, { ...target, path: writtenPath });
+      expand(
+        value,
+        { ...target, path: writtenPath },
+        writtenPath.length,
+        writtenPath,
+      );
     }
   }
   for (const input of linkWrites) {
@@ -2040,19 +2066,13 @@ export const flowReadExcluded = (
 // non-link leaf (string, number, boolean, null) makes the value content.
 // Such writes get `structure` (shape-only) stamps instead of covering
 // `derived` ones — see `pureLinkContainerPaths`.
-// TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose
-// `Object.values` are empty and vacuously "all links" — so a `FabricBytes`
-// leaf, or a `FabricInstance` with real contents, classifies as pure link
-// structure and the write receives shape-only stamps in place of its content
-// label. Fails open. Wants a `FabricSpecialObject` test taking the
-// content-bearing (`false`) arm.
 const isPureLinkStructure = (value: unknown): boolean => {
-  if (value === undefined) return true;
+  if (value === undefined) return false;
   if (isPrimitiveCellLink(value)) return true;
   if (Array.isArray(value)) {
     return value.every((member) => isPureLinkStructure(member));
   }
-  if (isObjectOrArray(value)) {
+  if (isPlainObject(value)) {
     return Object.values(value).every((member) => isPureLinkStructure(member));
   }
   return false;
@@ -2084,11 +2104,7 @@ const pureLinkContainerPaths = (
     );
     return;
   }
-  // TODO(danfuzz): same `isObjectOrArray` gap as `isPureLinkStructure` above: a
-  // `FabricPrimitive` is pushed as if it were a container (a stamp path for
-  // an opaque leaf), and a `FabricInstance`'s codec contents are never
-  // enumerated, so nothing nested in one gets a per-slot stamp.
-  if (isObjectOrArray(value)) {
+  if (isPlainObject(value)) {
     out.push(path);
     for (const [key, member] of Object.entries(value)) {
       pureLinkContainerPaths(member, [...path, key], out);
@@ -2639,59 +2655,6 @@ export const gatedSinkRequestExists = (
   );
 };
 
-const policyOnlySchema = (schema: JSONSchema): JSONSchema => {
-  if (!isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)) {
-    return {};
-  }
-  return { ifc: { ...schema.ifc } } as JSONSchema;
-};
-
-const linkWritePolicyOnlySchema = (
-  schema: JSONSchema,
-  path: readonly string[],
-): JSONSchema => {
-  const policy = policyOnlySchema(schema);
-  if (
-    !isObjectOrArray(policy) || !isObjectOrArray(policy.ifc) ||
-    !path.includes("*")
-  ) {
-    return policy;
-  }
-  const { integrity: _integrity, ...ifc } = policy.ifc;
-  return Object.keys(ifc).length === 0 ? {} : { ifc } as JSONSchema;
-};
-
-const storedSchemaClaimsForLinkWrites = (
-  schema: JSONSchema,
-  inputs: readonly LinkWritePolicyInput[],
-): JSONSchema => {
-  let result: JSONSchema | undefined;
-  const targetPaths = inputs.map((input) =>
-    canonicalizeLogicalPath(input.target.path)
-  );
-  for (const entry of cfcSchemaEntries(schema)) {
-    if (
-      !targetPaths.some((targetPath) => pathsOverlap(targetPath, entry.path))
-    ) {
-      continue;
-    }
-    const policySchema = linkWritePolicyOnlySchema(entry.schema, entry.path);
-    if (
-      isObjectOrArray(policySchema) && Object.keys(policySchema).length === 0
-    ) {
-      continue;
-    }
-    const envelope = schemaEnvelopeForTargetPath(
-      policySchema,
-      entry.path,
-    );
-    result = result === undefined
-      ? envelope
-      : mergeCfcSchemaEnvelopes(result, envelope);
-  }
-  return result ?? {};
-};
-
 // The consumption class an authored schema declares for its ifc label (C5).
 // Only the four class values count; anything else (including absence) is
 // covering — the over-taint direction, so a typo'd class can only widen
@@ -3039,12 +3002,129 @@ export const writeDetailValueForTarget = (
     }
     | undefined;
   let matchingWritePath: string[] | undefined;
-  // Deeper ("descendant") writes under the target path are overlaid onto the
-  // base value below, so a value recorded granularly (an envelope plus
-  // per-field writes -- as happens when it is deep-frozen and so written
-  // field-by-field) reconstructs the same as one recorded coarsely (a single
-  // whole-object write). Reconstruction must not depend on write granularity.
-  const descendants: { rel: string[]; value: FabricValue | undefined }[] = [];
+  if (key === "value") {
+    const relevant = writeDetails.filter((write) =>
+      write.address.id === target.id &&
+      normalizeCellScope(write.address.scope) === target.scope &&
+      write.address.path[0] === "value"
+    );
+    const keyForPath = (path: readonly string[]): string =>
+      encodePointer(path.map(String));
+    const ordered: TransactionWriteDetail[] = relevant.every((write) =>
+        write.lastJournalIndex !== undefined
+      )
+      ? relevant.toSorted((left, right) =>
+        left.lastJournalIndex! - right.lastJournalIndex!
+      )
+      : (() => {
+        const detailsByPath = new Map(
+          relevant.map((write) => [keyForPath(write.address.path), write]),
+        );
+        const attempts = (tx.getWriteAttemptLog?.() ?? []).filter((attempt) =>
+          attempt.space === target.space && attempt.id === target.id &&
+          normalizeCellScope(attempt.scope) === target.scope &&
+          attempt.path[0] === "value"
+        );
+        const lastAttemptByPath = new Map<string, number>();
+        attempts.forEach((attempt, index) => {
+          lastAttemptByPath.set(keyForPath(attempt.path), index);
+        });
+        const fallback: TransactionWriteDetail[] = [];
+        const included = new Set<string>();
+        attempts.forEach((attempt, index) => {
+          const attemptKey = keyForPath(attempt.path);
+          if (lastAttemptByPath.get(attemptKey) !== index) return;
+          const detail = detailsByPath.get(attemptKey);
+          if (detail === undefined) return;
+          fallback.push(detail);
+          included.add(attemptKey);
+        });
+        for (const write of relevant) {
+          const writeKey = keyForPath(write.address.path);
+          if (!included.has(writeKey)) fallback.push(write);
+        }
+        return fallback;
+      })();
+
+    let resolved = false;
+    let present = false;
+    let result: FabricValue | undefined;
+    for (const write of ordered) {
+      const writePath = write.address.path.slice(1).map(String);
+      const writeIsAncestor = writePath.length <= targetPath.length &&
+        writePath.every((segment, index) => segment === targetPath[index]);
+      const writeIsDescendant = writePath.length > targetPath.length &&
+        targetPath.every((segment, index) => segment === writePath[index]);
+      if (!writeIsAncestor && !writeIsDescendant) continue;
+
+      if (writeIsAncestor) {
+        resolved = true;
+        present = write.present !== false;
+        result = write.value;
+        for (const segment of targetPath.slice(writePath.length)) {
+          if (
+            !present || !isObjectOrArray(result) ||
+            !Object.hasOwn(result, segment)
+          ) {
+            present = false;
+            result = undefined;
+            break;
+          }
+          result = result[segment] as FabricValue;
+        }
+        continue;
+      }
+
+      if (!resolved) continue;
+      const rel = writePath.slice(targetPath.length);
+      if (!present || !isFabricObjectOrArray(result)) {
+        result = isArrayIndexPropertyName(rel[0]) ? [] : {};
+        present = true;
+      }
+      const leaf = rel.at(-1)!;
+      const thawed: CloneForMutationResult<FabricValue> = cloneForMutation(
+        result,
+        rel.slice(0, -1),
+        { createMissing: true, nextKeyAfterPath: leaf },
+      );
+      const parent = thawed.pathValue as
+        | Record<PropertyKey, unknown>
+        | unknown[];
+      if (write.present === false) {
+        delete (parent as Record<PropertyKey, unknown>)[leaf];
+      } else {
+        setValueAtPath(parent, [leaf], write.value);
+      }
+      result = thawed.value;
+    }
+    return resolved && present ? result : undefined;
+  }
+
+  if (key === "previousValue") {
+    const earliest = writeDetails.filter((write) => {
+      if (write.firstJournalIndex === undefined) return false;
+      if (write.address.id !== target.id) return false;
+      if (normalizeCellScope(write.address.scope) !== target.scope) {
+        return false;
+      }
+      if (write.address.path[0] !== "value") return false;
+      const writePath = write.address.path.slice(1).map(String);
+      return writePath.length <= targetPath.length &&
+        writePath.every((segment, index) => segment === targetPath[index]);
+    }).toSorted((left, right) =>
+      left.firstJournalIndex! - right.firstJournalIndex!
+    )[0];
+    if (earliest !== undefined) {
+      const writePath = earliest.address.path.slice(1).map(String);
+      return writePath.length === targetPath.length
+        ? earliest.previousValue
+        : getValueAtPath(
+          earliest.previousValue,
+          targetPath.slice(writePath.length),
+        );
+    }
+  }
+
   for (const write of writeDetails) {
     if (write.address.id !== target.id) continue;
     if (normalizeCellScope(write.address.scope) !== target.scope) continue;
@@ -3052,17 +3132,7 @@ export const writeDetailValueForTarget = (
       continue;
     }
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
-    if (writePath.length > targetPath.length) {
-      // Descendant write: when `targetPath` is a prefix, keep it to overlay
-      // onto the base value (composing granular field-writes).
-      if (targetPath.every((segment, index) => segment === writePath[index])) {
-        descendants.push({
-          rel: writePath.slice(targetPath.length),
-          value: write[key],
-        });
-      }
-      continue;
-    }
+    if (writePath.length > targetPath.length) continue;
     if (!writePath.every((segment, index) => segment === targetPath[index])) {
       continue;
     }
@@ -3083,49 +3153,7 @@ export const writeDetailValueForTarget = (
     ? value
     : getValueAtPath(value, targetPath.slice(matchingWritePath.length));
 
-  // Only the effective `value` composes deeper field-writes; the
-  // `previousValue` of the longest ancestor write already captures the whole
-  // pre-write subtree.
-  if (key !== "value" || descendants.length === 0) {
-    return baseValue;
-  }
-
-  if (!isFabricObjectOrArray(baseValue)) {
-    // Base isn't a container yet deeper writes exist (rare/incoherent): build a
-    // fresh container and overlay onto it (it's freshly mutable -- no COW).
-    const result: Record<PropertyKey, unknown> | unknown[] =
-      descendants.every(({ rel }) => isArrayIndexPropertyName(rel[0]))
-        ? []
-        : {};
-    for (const { rel, value: descendantValue } of descendants) {
-      setValueAtPath(result, rel, descendantValue);
-    }
-    return result as FabricValue;
-  }
-
-  // Overlay the deeper field-writes onto the base via copy-on-write
-  // spine-thawing: only the containers along each overlay path are shallow-
-  // copied; large off-spine subtrees are preserved by reference, never
-  // deep-copied. Process shallowest-first so an envelope write at a parent
-  // path lands before writes to its children. `cloneForMutation` defaults to
-  // `force: true`, so the shared (deep-frozen) base is never mutated.
-  const ordered = [...descendants].sort((a, b) => a.rel.length - b.rel.length);
-  let root: FabricValue = baseValue;
-  for (const { rel, value: descendantValue } of ordered) {
-    const leaf = rel[rel.length - 1]!;
-    const thawed: CloneForMutationResult<FabricValue> = cloneForMutation(
-      root,
-      rel.slice(0, -1),
-      { createMissing: true, nextKeyAfterPath: leaf },
-    );
-    setValueAtPath(
-      thawed.pathValue as Record<PropertyKey, unknown> | unknown[],
-      [leaf],
-      descendantValue,
-    );
-    root = thawed.value;
-  }
-  return root;
+  return baseValue;
 };
 
 const writeValueForTarget = (
@@ -3137,6 +3165,129 @@ const writeValueForTarget = (
     path: readonly string[];
   },
 ): FabricValue => writeDetailValueForTarget(tx, target, "value");
+
+const writeValuePresenceForTarget = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
+  },
+  previous = false,
+): boolean | undefined => {
+  const targetPath = target.path.map(String);
+  const writes = [...(tx.getWriteDetails?.(target.space) ?? [])].filter(
+    (write) =>
+      write.address.id === target.id &&
+      normalizeCellScope(write.address.scope) === target.scope &&
+      write.address.path[0] === "value",
+  );
+  const pathKey = (path: readonly string[]): string =>
+    encodePointer(path.map(String));
+  const attempts = (tx.getWriteAttemptLog?.() ?? []).filter((attempt) =>
+    attempt.space === target.space && attempt.id === target.id &&
+    normalizeCellScope(attempt.scope) === target.scope &&
+    attempt.path[0] === "value"
+  );
+  const selectedAttemptByPath = new Map<string, number>();
+  attempts.forEach((attempt, index) => {
+    const key = pathKey(attempt.path);
+    if (!previous || !selectedAttemptByPath.has(key)) {
+      selectedAttemptByPath.set(key, index);
+    }
+  });
+  const useDetailOrder = writes.every((write) =>
+    previous
+      ? write.firstJournalIndex !== undefined
+      : write.lastJournalIndex !== undefined
+  );
+  let bestPath: string[] | undefined;
+  let bestValue: FabricValue | undefined;
+  let bestPresent: boolean | undefined;
+  let bestOrder = previous ? Number.POSITIVE_INFINITY : -1;
+  for (let index = 0; index < writes.length; index++) {
+    const write = writes[index];
+    const writePath = write.address.path.slice(1).map(String);
+    if (writePath.length > targetPath.length) continue;
+    if (!writePath.every((segment, index) => segment === targetPath[index])) {
+      continue;
+    }
+    const writeOrder = useDetailOrder
+      ? previous ? write.firstJournalIndex : write.lastJournalIndex
+      : selectedAttemptByPath.get(pathKey(write.address.path));
+    if (
+      useDetailOrder || attempts.length > 0
+        ? writeOrder !== undefined &&
+          (previous ? writeOrder <= bestOrder : writeOrder >= bestOrder)
+        : bestPath === undefined || writePath.length > bestPath.length
+    ) {
+      bestPath = writePath;
+      bestValue = previous ? write.previousValue : write.value;
+      bestPresent = previous ? write.previousPresent : write.present;
+      bestOrder = writeOrder ?? index;
+    }
+  }
+  if (bestPath === undefined) return undefined;
+  if (bestPath.length === targetPath.length) return bestPresent ?? true;
+  if (bestPresent === false) return false;
+
+  let value: unknown = bestValue;
+  for (const segment of targetPath.slice(bestPath.length)) {
+    if (!isObjectOrArray(value) || !Object.hasOwn(value, segment)) {
+      return false;
+    }
+    value = value[segment];
+  }
+  return true;
+};
+
+const previousWriteValuePresenceForTarget = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
+  },
+): boolean | undefined => writeValuePresenceForTarget(tx, target, true);
+
+const policyValueForTarget = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
+  },
+): { resolved: boolean; value?: unknown } => {
+  try {
+    const envelope = tx.readOrThrow({
+      ...target,
+      type: "application/json",
+      path: [],
+    }, {
+      meta: INTERNAL_VERIFIER_META,
+    });
+    if (isObjectOrArray(envelope) && Object.hasOwn(envelope, "value")) {
+      let value: unknown = envelope.value;
+      for (const segment of target.path) {
+        if (!isObjectOrArray(value) || !Object.hasOwn(value, segment)) {
+          return { resolved: false };
+        }
+        value = value[segment];
+      }
+      return { resolved: true, value };
+    }
+  } catch {
+    // Fall through to backends and test transactions that expose write
+    // details but not a raw current-document read.
+  }
+  const writtenPresence = writeValuePresenceForTarget(tx, target);
+  return writtenPresence === undefined || !writtenPresence
+    ? { resolved: false }
+    : { resolved: true, value: writeValueForTarget(tx, target) };
+};
 
 const previousWriteValueForTarget = (
   tx: IExtendedStorageTransaction,
@@ -3166,7 +3317,7 @@ const writeInstallsInitialSchemaDefault = (
   // deeply-readonly, `ReadonlyArray`-based JSON shape is not assignable to
   // `FabricValue` -- though the runtime value is one (a native
   // `Uint8Array`/`Date` default interns to a `FabricPrimitive`).
-  return previousWriteValueForTarget(tx, pathTarget) === undefined &&
+  return previousWriteValuePresenceForTarget(tx, pathTarget) === false &&
     valueEqual(
       writeValueForTarget(tx, pathTarget),
       schema.default,
@@ -3179,42 +3330,114 @@ const linkedWriteValueForPolicy = (
     space: MemorySpace;
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
+    path?: readonly string[];
   },
   value: unknown,
-): unknown => {
-  if (!isPrimitiveCellLink(value)) {
-    return undefined;
-  }
-
-  const link = parseLink(value, { ...baseTarget, path: [] });
-  if (link?.id === undefined || link.space === undefined) {
-    return undefined;
-  }
-
-  const linkedTarget = {
-    space: link.space,
-    id: link.id as URI,
-    scope: normalizeCellScope(link.scope),
-    path: canonicalizeLogicalPath(link.path),
+): {
+  resolved: boolean;
+  value?: unknown;
+  target?: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
   };
-  const written = writeValueForTarget(tx, linkedTarget);
-  if (written !== undefined) {
-    return written;
+} => {
+  let candidate = value;
+  let relativeTarget = {
+    ...baseTarget,
+    path: baseTarget.path ?? [] as readonly string[],
+  };
+  const visited = new Set<string>();
+  while (isPrimitiveCellLink(candidate)) {
+    const link = parseLink(candidate, relativeTarget);
+    if (link?.id === undefined || link.space === undefined) {
+      return { resolved: false };
+    }
+    const linkedTarget = {
+      space: link.space,
+      id: link.id as URI,
+      scope: normalizeCellScope(link.scope),
+      path: canonicalizeLogicalPath(link.path),
+    };
+    const key = targetKey(linkedTarget);
+    if (visited.has(key)) return { resolved: false };
+    visited.add(key);
+    const linked = policyValueForTarget(tx, linkedTarget);
+    if (!linked.resolved) return linked;
+    candidate = linked.value;
+    relativeTarget = linkedTarget;
   }
-
-  return tx.readValueOrThrow(linkedTarget, {
-    meta: INTERNAL_VERIFIER_META,
-  });
+  return { resolved: true, value: candidate, target: relativeTarget };
 };
 
-// TODO(danfuzz): this descent (and `changedValuesAtPatternPath` below) gates
-// on `typeof value === "object"` and then `head in value`, both true-shaped
-// for a `FabricSpecialObject` — but no key of an instance's codec contents is
-// an own (or any) property, so a pattern path into one resolves to no values
-// and the policy condition it feeds is never evaluated for that content.
-// `changedValuesAtPatternPath`'s leaf case additionally compares with
-// `deepEqual`, which calls two same-class fabric values equal regardless of
-// contents, so a genuine change reads as "unchanged". Both fail open.
+const materializeLinkedValuesForPolicy = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
+  },
+  value: unknown,
+  activeLinks = new Set<string>(),
+): { resolved: boolean; value?: unknown } => {
+  if (isPrimitiveCellLink(value)) {
+    const linked = linkedWriteValueForPolicy(tx, target, value);
+    if (!linked.resolved || linked.target === undefined) {
+      return { resolved: true, value };
+    }
+    const key = targetKey(linked.target);
+    if (activeLinks.has(key)) return { resolved: true, value };
+    activeLinks.add(key);
+    const materialized = materializeLinkedValuesForPolicy(
+      tx,
+      linked.target,
+      linked.value,
+      activeLinks,
+    );
+    activeLinks.delete(key);
+    return materialized;
+  }
+
+  if (Array.isArray(value)) {
+    const result = new Array(value.length);
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.hasOwn(value, index)) continue;
+      const materialized = materializeLinkedValuesForPolicy(
+        tx,
+        { ...target, path: [...target.path, String(index)] },
+        value[index],
+        activeLinks,
+      );
+      if (!materialized.resolved) return materialized;
+      result[index] = materialized.value;
+    }
+    return { resolved: true, value: result };
+  }
+
+  if (
+    isObjectOrArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype ||
+      Object.getPrototypeOf(value) === null)
+  ) {
+    const result: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      const materialized = materializeLinkedValuesForPolicy(
+        tx,
+        { ...target, path: [...target.path, key] },
+        child,
+        activeLinks,
+      );
+      if (!materialized.resolved) return materialized;
+      result[key] = materialized.value;
+    }
+    return { resolved: true, value: result };
+  }
+
+  return { resolved: true, value };
+};
+
 const valuesAtPatternPath = (
   value: unknown,
   path: readonly string[],
@@ -3225,18 +3448,16 @@ const valuesAtPatternPath = (
 
   const [head, ...rest] = path;
   if (head === "*") {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    return value.flatMap((item, index) =>
-      index in value ? valuesAtPatternPath(item, rest) : []
+    if (!isObjectOrArray(value)) return [];
+    return Object.keys(value).flatMap((key) =>
+      valuesAtPatternPath(value[key], rest)
     );
   }
 
   if (value === null || value === undefined || typeof value !== "object") {
     return [];
   }
-  if (!(head in value)) {
+  if (!Object.hasOwn(value, head)) {
     return [];
   }
   return valuesAtPatternPath((value as Record<string, unknown>)[head], rest);
@@ -3246,39 +3467,49 @@ const changedValuesAtPatternPath = (
   value: unknown,
   previousValue: unknown,
   path: readonly string[],
+  includeRemoved: boolean,
+  present = true,
+  previousPresent = true,
 ): unknown[] => {
   if (path.length === 0) {
-    return deepEqual(value, previousValue) ? [] : [value];
+    if (!present) {
+      return includeRemoved && previousPresent ? [previousValue] : [];
+    }
+    return previousPresent &&
+        valueEqual(value as FabricValue, previousValue as FabricValue)
+      ? []
+      : [value];
   }
 
   const [head, ...rest] = path;
   if (head === "*") {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    const previousArray = Array.isArray(previousValue) ? previousValue : [];
-    return value.flatMap((item, index) =>
-      index in value
-        ? changedValuesAtPatternPath(item, previousArray[index], rest)
-        : []
+    const current = isObjectOrArray(value) ? value : undefined;
+    const previous = isObjectOrArray(previousValue) ? previousValue : undefined;
+    const keys = new Set([
+      ...Object.keys(current ?? {}),
+      ...(includeRemoved ? Object.keys(previous ?? {}) : []),
+    ]);
+    return [...keys].flatMap((key) =>
+      changedValuesAtPatternPath(
+        current?.[key],
+        previous?.[key],
+        rest,
+        includeRemoved,
+        current !== undefined && Object.hasOwn(current, key),
+        previous !== undefined && Object.hasOwn(previous, key),
+      )
     );
   }
 
-  if (value === null || value === undefined || typeof value !== "object") {
-    return [];
-  }
-  const previousChild = previousValue !== null &&
-      previousValue !== undefined &&
-      typeof previousValue === "object"
-    ? (previousValue as Record<string, unknown>)[head]
-    : undefined;
-  if (!(head in value)) {
-    return [];
-  }
+  const current = isObjectOrArray(value) ? value : undefined;
+  const previous = isObjectOrArray(previousValue) ? previousValue : undefined;
   return changedValuesAtPatternPath(
-    (value as Record<string, unknown>)[head],
-    previousChild,
+    current?.[head],
+    previous?.[head],
     rest,
+    includeRemoved,
+    current !== undefined && Object.hasOwn(current, head),
+    previous !== undefined && Object.hasOwn(previous, head),
   );
 };
 
@@ -3289,150 +3520,21 @@ const concretePathHasPrefix = (
   prefix.length <= path.length &&
   prefix.every((segment, index) => segment === path[index]);
 
-const schemaTypeMatchesValue = (
-  type: unknown,
-  value: unknown,
-): boolean => {
-  const types = Array.isArray(type) ? type : [type];
-  return types.some((candidate) => {
-    switch (candidate) {
-      case "array":
-        return Array.isArray(value);
-      case "boolean":
-        return typeof value === "boolean";
-      case "integer":
-        return typeof value === "number" && Number.isInteger(value);
-      case "null":
-        return value === null;
-      case "number":
-        return typeof value === "number";
-      case "object":
-        return isObjectNotArray(value);
-      case "string":
-        return typeof value === "string";
-      default:
-        if (
-          typeof candidate === "string" &&
-          isFabricPrimitiveSchemaType(candidate)
-        ) {
-          return value instanceof FabricPrimitive &&
-            schemaTypeOfFabricPrimitive(value) === candidate;
-        }
-        return true;
-    }
-  });
-};
-
-// Thrown when a policy `$ref` cannot be resolved against its own document, so
-// the value condition cannot be evaluated. It propagates past the matcher's
-// boolean combinators (notably `oneOf`'s exactly-one count, where neither
-// `true` nor `false` reliably biases toward "applies") and is caught at the
-// `wildcardPolicyMatchesValue` boundary, which fails closed by treating the
-// ifc entry as applying — mirroring the unresolvable-LINK branch (audit S17).
-class UnevaluablePolicyRefError extends Error {}
-
 const policySchemaMatchesValue = (
   schema: JSONSchema,
   value: unknown,
-  // Schema document whose `$defs` resolves `$ref`s below the root node
-  // (generated schemas put named types there, e.g. an array's items
-  // `#/$defs/<name>` ref). Threaded through recursion so only a ref that is
-  // unresolvable against its own document fails closed.
   root: JSONSchema = schema,
 ): boolean => {
-  // Keep this narrow matcher aligned with resolveSchemaForValue() in
-  // schema.ts. This copy is intentionally local because CFC policy checks must
-  // fail closed on unresolved refs and partial wildcard writes.
-  if (typeof schema === "boolean") {
-    return schema;
+  const failure = validateSchemaValueResult(schema, value, root, {
+    indeterminateOpaqueValue: isPrimitiveCellLink,
+  });
+  if (failure?.kind === "indeterminate") {
+    throw new UnevaluablePolicyConditionError(failure.message);
   }
-  const schemaRoot = schema.$defs !== undefined ? schema : root;
-  if (typeof schema.$ref === "string") {
-    const resolved = ContextualFlowControl.resolveSchemaRefs(
-      schema,
-      schemaRoot,
-    );
-    // An unresolvable policy ref (missing/dropped `$def`, or a ref that
-    // resolves to itself with no progress) leaves the condition unevaluable.
-    // Unlike S17's author-controlled LINK schema, this schema IS the policy we
-    // enforce, but the same rule holds: an unevaluable condition must never
-    // silently exclude the entry (fail open) — signal it so the boundary fails
-    // closed.
-    if (resolved === undefined || resolved === schema) {
-      throw new UnevaluablePolicyRefError(schema.$ref);
-    }
-    return policySchemaMatchesValue(resolved, value, schemaRoot);
-  }
-  // TODO(danfuzz): these `deepEqual` checks call two same-class fabric
-  // values equal regardless of contents, so a fabric-valued `const`/`enum`
-  // condition matches the wrong value; and the `properties` arm below admits
-  // a `FabricSpecialObject` through `isObjectOrArray` and reads `undefined` for
-  // every key, matching vacuously. Each fails open — the ifc entry applies
-  // (or the policy passes) with nothing actually checked. `valueEqual` and a
-  // `FabricSpecialObject` gate are the fabric-aware shapes;
-  // `schemaTypeMatchesValue` below already carries the type half.
-  if (schema.const !== undefined && !deepEqual(schema.const, value)) {
-    return false;
-  }
-  if (
-    Array.isArray(schema.enum) &&
-    !schema.enum.some((candidate) => deepEqual(candidate, value))
-  ) {
-    return false;
-  }
-  if (
-    schema.type !== undefined && !schemaTypeMatchesValue(schema.type, value)
-  ) {
-    return false;
-  }
-  if (
-    Array.isArray(schema.anyOf) &&
-    !schema.anyOf.some((branch) =>
-      policySchemaMatchesValue(branch, value, schemaRoot)
-    )
-  ) {
-    return false;
-  }
-  if (
-    Array.isArray(schema.oneOf) &&
-    schema.oneOf.filter((branch) =>
-        policySchemaMatchesValue(branch, value, schemaRoot)
-      ).length !== 1
-  ) {
-    return false;
-  }
-  if (
-    Array.isArray(schema.allOf) &&
-    !schema.allOf.every((branch) =>
-      policySchemaMatchesValue(branch, value, schemaRoot)
-    )
-  ) {
-    return false;
-  }
-  if (isObjectOrArray(value) && isObjectOrArray(schema.properties)) {
-    return Object.entries(schema.properties).every(([key, childSchema]) =>
-      value[key] === undefined ||
-      policySchemaMatchesValue(childSchema, value[key], schemaRoot)
-    );
-  }
-  if (Array.isArray(value)) {
-    // Shared position rule (schema-match.ts): tuple slots condition their
-    // exact position, `items` conditions the positions past them. Before
-    // prefixItems was handled here, a tuple-shaped condition fell through
-    // to `return true` and vacuously matched any array.
-    if (
-      !arrayMatchesPositionally(
-        schema,
-        value,
-        (childSchema, childValue) =>
-          policySchemaMatchesValue(childSchema, childValue, schemaRoot),
-      )
-    ) {
-      return false;
-    }
-  }
-  return true;
+  return failure === undefined;
 };
+
+class UnevaluablePolicyConditionError extends Error {}
 
 // Exported for unit testing of the unresolvable-link fail-closed branch (S17).
 // Not part of the public CFC surface.
@@ -3454,40 +3556,41 @@ export const wildcardPolicyMatchesValue = (
   // valid policy. Defaults to `schema` for callers whose schema is already
   // self-contained (e.g. the unit-test surface).
   root?: JSONSchema,
+  unevaluableMatches = true,
 ): boolean => {
   if (schema === undefined) {
     return true;
   }
   const resolutionRoot = root ?? schema;
 
-  // An unevaluable policy `$ref` (UnevaluablePolicyRefError) fails closed:
+  // An unevaluable policy condition fails closed:
   // treat the entry as applying rather than letting a broken/poisoned schema
   // envelope silently exclude its writeAuthorizedBy/maxConfidentiality checks.
   const matches = (candidate: unknown): boolean => {
     try {
       return policySchemaMatchesValue(schema, candidate, resolutionRoot);
     } catch (error) {
-      if (error instanceof UnevaluablePolicyRefError) {
-        return true;
+      if (error instanceof UnevaluablePolicyConditionError) {
+        return unevaluableMatches;
       }
       throw error;
     }
   };
 
-  if (!isPrimitiveCellLink(value)) {
-    return matches(value);
-  }
-
-  const linkedValue = linkedWriteValueForPolicy(tx, target, value);
-  if (linkedValue !== undefined) {
-    return matches(linkedValue);
+  const linkedValue = materializeLinkedValuesForPolicy(
+    tx,
+    { ...target, path: [] },
+    value,
+  );
+  if (linkedValue.resolved) {
+    return matches(linkedValue.value);
   }
 
   // The link's target value is unresolvable, so the policy's value condition
   // cannot be evaluated against real data. The link's embedded schema is
   // author-controlled and must not be trusted to exclude the policy (audit
   // S17): fail closed by treating the entry as applying.
-  return true;
+  return unevaluableMatches;
 };
 
 const ifcEntryAppliesToAttemptedWrite = (
@@ -3504,22 +3607,76 @@ const ifcEntryAppliesToAttemptedWrite = (
   // `cfcSchemaEntries()` entries, whose
   // captured ifc node lacks the document's `$defs`.
   root?: JSONSchema,
+  unevaluableMatches = true,
 ): boolean => {
   const wildcardIndex = path.indexOf("*");
   if (wildcardIndex === -1) {
     const writes = [...(tx.getWriteDetails?.(target.space) ?? [])];
     let touched = false;
+    const valueAtOwnPath = (
+      value: unknown,
+      present: boolean,
+      relativePath: readonly string[],
+    ): { present: boolean; value?: unknown } => {
+      if (!present) return { present: false };
+      let current = value;
+      for (const segment of relativePath) {
+        if (!isObjectOrArray(current) || !Object.hasOwn(current, segment)) {
+          return { present: false };
+        }
+        current = current[segment];
+      }
+      return { present: true, value: current };
+    };
     for (const write of writes) {
       if (write.address.id !== target.id) continue;
       if (normalizeCellScope(write.address.scope) !== target.scope) continue;
-      if (write.address.path[0] !== "value") continue;
-      const writePath = write.address.path.slice(1).map((entry) =>
-        String(entry)
-      );
+      const documentRootWrite = write.address.path.length === 0;
+      if (!documentRootWrite && write.address.path[0] !== "value") continue;
+      const writePath = documentRootWrite
+        ? []
+        : write.address.path.slice(1).map((entry) => String(entry));
       if (
         concretePathHasPrefix(path, writePath) ||
         concretePathHasPrefix(writePath, path)
       ) {
+        if (writePath.length < path.length) {
+          const relativePath = path.slice(writePath.length);
+          const writtenEnvelope = documentRootWrite &&
+              isObjectOrArray(write.value)
+            ? write.value as { value?: unknown }
+            : undefined;
+          const previousEnvelope = documentRootWrite &&
+              isObjectOrArray(write.previousValue)
+            ? write.previousValue as { value?: unknown }
+            : undefined;
+          const written = valueAtOwnPath(
+            documentRootWrite ? writtenEnvelope?.value : write.value,
+            documentRootWrite
+              ? writtenEnvelope !== undefined &&
+                Object.hasOwn(writtenEnvelope, "value")
+              : write.present !== false,
+            relativePath,
+          );
+          const previous = valueAtOwnPath(
+            documentRootWrite ? previousEnvelope?.value : write.previousValue,
+            documentRootWrite
+              ? previousEnvelope !== undefined &&
+                Object.hasOwn(previousEnvelope, "value")
+              : write.previousPresent !== false,
+            relativePath,
+          );
+          if (
+            written.present === previous.present &&
+            (!written.present ||
+              valueEqual(
+                written.value as FabricValue,
+                previous.value as FabricValue,
+              ))
+          ) {
+            continue;
+          }
+        }
         touched = true;
         break;
       }
@@ -3534,16 +3691,23 @@ const ifcEntryAppliesToAttemptedWrite = (
         if (write.id !== target.id) return false;
         if (normalizeCellScope(write.scope) !== target.scope) return false;
         const writePath = canonicalizeLogicalPath(write.path);
-        return concretePathHasPrefix(path, writePath) ||
-          concretePathHasPrefix(writePath, path);
+        // An exact or descendant attempt targets this policy even when the
+        // storage layer elides it as a no-op. An ancestor attempt targets the
+        // entry only when its write details show that the entry changed; that
+        // comparison happens above. Container-level attempts emitted while a
+        // sibling changes do not authorize every protected child.
+        return concretePathHasPrefix(writePath, path);
       });
     }
     if (!touched) {
       return false;
     }
     const pathTarget = { ...target, path };
+    const writtenValueIsPresent =
+      writeValuePresenceForTarget(tx, pathTarget) ===
+        true;
     const written = writeValueForTarget(tx, pathTarget);
-    const value = written !== undefined ? written : (() => {
+    const value = writtenValueIsPresent ? written : (() => {
       try {
         return tx.readValueOrThrow(pathTarget, {
           meta: INTERNAL_VERIFIER_META,
@@ -3552,15 +3716,36 @@ const ifcEntryAppliesToAttemptedWrite = (
         return undefined;
       }
     })();
-    if (path.length === 0) {
-      return value === undefined ||
-        wildcardPolicyMatchesValue(tx, target, schema, value, root);
-    }
     if (value === undefined) {
-      return previousWriteValueForTarget(tx, pathTarget) !== undefined;
+      return writtenValueIsPresent
+        ? wildcardPolicyMatchesValue(
+          tx,
+          target,
+          schema,
+          value,
+          root,
+          unevaluableMatches,
+        )
+        : unevaluableMatches &&
+          previousWriteValuePresenceForTarget(tx, pathTarget) === true &&
+          wildcardPolicyMatchesValue(
+            tx,
+            target,
+            schema,
+            previousWriteValueForTarget(tx, pathTarget),
+            root,
+            unevaluableMatches,
+          );
     }
     return value !== undefined &&
-      wildcardPolicyMatchesValue(tx, target, schema, value, root);
+      wildcardPolicyMatchesValue(
+        tx,
+        target,
+        schema,
+        value,
+        root,
+        unevaluableMatches,
+      );
   }
 
   const exactAttemptedPaths = [
@@ -3577,15 +3762,29 @@ const ifcEntryAppliesToAttemptedWrite = (
     !writePath.includes("*")
   ).map(({ path }) => path);
   if (exactAttemptedPaths.length > 0) {
-    return exactAttemptedPaths.some((writePath) =>
-      wildcardPolicyMatchesValue(
-        tx,
-        target,
-        schema,
-        writeValueForTarget(tx, { ...target, path: writePath }),
-        root,
-      )
-    );
+    return exactAttemptedPaths.some((writePath) => {
+      const pathTarget = { ...target, path: writePath };
+      if (writeValuePresenceForTarget(tx, pathTarget) === true) {
+        return wildcardPolicyMatchesValue(
+          tx,
+          target,
+          schema,
+          writeValueForTarget(tx, pathTarget),
+          root,
+          unevaluableMatches,
+        );
+      }
+      return unevaluableMatches &&
+        previousWriteValuePresenceForTarget(tx, pathTarget) === true &&
+        wildcardPolicyMatchesValue(
+          tx,
+          target,
+          schema,
+          previousWriteValueForTarget(tx, pathTarget),
+          root,
+          unevaluableMatches,
+        );
+    });
   }
 
   const writes = [...(tx.getWriteDetails?.(target.space) ?? [])];
@@ -3602,8 +3801,26 @@ const ifcEntryAppliesToAttemptedWrite = (
       // regardless of contents, so a genuine change to a fabric-valued slot
       // reads as "unchanged" and the ifc entry is skipped. Fails open;
       // `valueEqual` is the fabric-aware comparison.
-      return !deepEqual(write.value, write.previousValue) &&
-        wildcardPolicyMatchesValue(tx, target, schema, write.value, root);
+      if (write.present === false) {
+        return unevaluableMatches && write.previousPresent === true &&
+          wildcardPolicyMatchesValue(
+            tx,
+            target,
+            schema,
+            write.previousValue,
+            root,
+            unevaluableMatches,
+          );
+      }
+      return !valueEqual(write.value, write.previousValue) &&
+        wildcardPolicyMatchesValue(
+          tx,
+          target,
+          schema,
+          write.value,
+          root,
+          unevaluableMatches,
+        );
     }
     if (concretePathHasPrefix(prefix, writePath)) {
       const relativePrefix = prefix.slice(writePath.length);
@@ -3615,10 +3832,18 @@ const ifcEntryAppliesToAttemptedWrite = (
         value,
         previousValue,
         path.slice(wildcardIndex),
+        unevaluableMatches,
       );
       if (
         matches.some((match) =>
-          wildcardPolicyMatchesValue(tx, target, schema, match, root)
+          wildcardPolicyMatchesValue(
+            tx,
+            target,
+            schema,
+            match,
+            root,
+            unevaluableMatches,
+          )
         )
       ) {
         return true;
@@ -3636,8 +3861,230 @@ const ifcEntryAppliesToAttemptedWrite = (
   }
   const matches = valuesAtPatternPath(value, path.slice(wildcardIndex));
   return matches.some((match) =>
-    wildcardPolicyMatchesValue(tx, target, schema, match, root)
+    wildcardPolicyMatchesValue(
+      tx,
+      target,
+      schema,
+      match,
+      root,
+      unevaluableMatches,
+    )
   );
+};
+
+const cfcSchemaEntryAppliesToAttemptedWrite = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  entry: CfcSchemaEntry,
+): boolean =>
+  ifcEntryAppliesToAttemptedWrite(
+    tx,
+    target,
+    entry.path,
+    entry.schema,
+    entry.root,
+  ) && entry.branchConditions.every((condition) =>
+    condition.enclosing ||
+    ifcEntryAppliesToAttemptedWrite(
+      tx,
+      target,
+      condition.path,
+      condition.schema,
+      condition.root,
+    )
+  );
+
+const concreteBranchConditionPath = (
+  conditionPath: readonly string[],
+  entryPath: readonly string[],
+  concreteEntryPath: readonly string[],
+): readonly string[] =>
+  conditionPath.map((segment, index) =>
+    segment === "*" && entryPath[index] === "*"
+      ? concreteEntryPath[index]
+      : segment
+  );
+
+const cfcSchemaEntryBranchConditionsApplyAtConcretePath = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  entry: CfcSchemaEntry,
+  concretePath: readonly string[],
+  unevaluableMatches: boolean,
+): boolean =>
+  entry.branchConditions.every((condition) =>
+    (unevaluableMatches && condition.enclosing) ||
+    ifcEntryAppliesToAttemptedWrite(
+      tx,
+      target,
+      concreteBranchConditionPath(
+        condition.path,
+        entry.path,
+        concretePath,
+      ),
+      condition.schema,
+      condition.root,
+      unevaluableMatches,
+    )
+  );
+
+const cfcSchemaEntryAppliesAtConcretePath = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  entry: CfcSchemaEntry,
+  concretePath: readonly string[],
+  unevaluableMatches: boolean,
+): boolean =>
+  ifcEntryAppliesToAttemptedWrite(
+    tx,
+    target,
+    concretePath,
+    entry.schema,
+    entry.root,
+    unevaluableMatches,
+  ) && cfcSchemaEntryBranchConditionsApplyAtConcretePath(
+    tx,
+    target,
+    entry,
+    concretePath,
+    unevaluableMatches,
+  );
+
+const cfcSchemaEntryMintsAtConcretePath = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  entry: CfcSchemaEntry,
+  concretePath: readonly string[],
+): boolean =>
+  cfcSchemaEntryAppliesAtConcretePath(
+    tx,
+    target,
+    entry,
+    concretePath,
+    false,
+  );
+
+const schemaMatchesCurrentValueAtPath = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  path: readonly string[],
+  schema: JSONSchema,
+  root: JSONSchema,
+  unevaluableMatches: boolean,
+): boolean => {
+  const current = policyValueForTarget(tx, { ...target, path });
+  return current.resolved
+    ? wildcardPolicyMatchesValue(
+      tx,
+      target,
+      schema,
+      current.value,
+      root,
+      unevaluableMatches,
+    )
+    : unevaluableMatches;
+};
+
+const cfcSchemaEntryMatchesCurrentValueAtConcretePath = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  entry: CfcSchemaEntry,
+  concretePath: readonly string[],
+  unevaluableMatches: boolean,
+): boolean =>
+  schemaMatchesCurrentValueAtPath(
+    tx,
+    target,
+    concretePath,
+    entry.schema,
+    entry.root,
+    unevaluableMatches,
+  ) && entry.branchConditions.every((condition) =>
+    (unevaluableMatches && condition.enclosing) ||
+    schemaMatchesCurrentValueAtPath(
+      tx,
+      target,
+      concreteBranchConditionPath(
+        condition.path,
+        entry.path,
+        concretePath,
+      ),
+      condition.schema,
+      condition.root,
+      unevaluableMatches,
+    )
+  );
+
+const schemaEntryLabelsForConcreteSourcePath = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  entries: readonly CfcSchemaEntry[],
+  sourcePath: readonly string[],
+): Map<string, IFCLabel> => {
+  const result = new Map<string, IFCLabel>();
+  for (const entry of entries) {
+    if (!entryPathCoversPrefix(entry.path, sourcePath)) continue;
+    const concretePath = entry.path.map((segment, index) =>
+      segment === "*" ? sourcePath[index]! : segment
+    );
+    const confidentiality = cfcSchemaEntryMatchesCurrentValueAtConcretePath(
+        tx,
+        target,
+        entry,
+        concretePath,
+        !(Array.isArray(entry.label.confidentiality) &&
+          entry.label.confidentiality.length === 0),
+      )
+      ? entry.label.confidentiality
+      : undefined;
+    const integrity = cfcSchemaEntryMatchesCurrentValueAtConcretePath(
+        tx,
+        target,
+        entry,
+        concretePath,
+        false,
+      )
+      ? entry.label.integrity
+      : undefined;
+    const key = pathKey(entry.path);
+    const prior = result.get(key);
+    result.set(key, {
+      confidentiality: mergePresentLabelValues(
+        prior?.confidentiality,
+        confidentiality,
+      ),
+      integrity: mergePresentLabelValues(prior?.integrity, integrity),
+    });
+  }
+  return result;
 };
 
 // ---------------------------------------------------------------------------
@@ -4059,13 +4506,7 @@ const verifyInputRequirements = (
 
   for (const entry of cfcSchemaEntries(schema)) {
     if (
-      !ifcEntryAppliesToAttemptedWrite(
-        tx,
-        target,
-        entry.path,
-        entry.schema,
-        entry.root,
-      )
+      !cfcSchemaEntryAppliesToAttemptedWrite(tx, target, entry)
     ) {
       continue;
     }
@@ -4094,7 +4535,9 @@ const verifyInputRequirements = (
         detail.address.id === target.id &&
         normalizeCellScope(detail.address.scope) === target.scope &&
         detail.address.path.length <= 1 &&
-        detail.previousValue === undefined
+        (detail.previousPresent === false ||
+          detail.previousPresent === undefined &&
+            detail.previousValue === undefined)
       );
     const trustedSetupProjection = setupProjectionSourceMatchesValue(
       tx,
@@ -4324,7 +4767,21 @@ const verifyTrustedEventRequirements = (
 ): string | undefined => {
   for (const entry of uiContractsFromSchema(schema)) {
     if (
-      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+      !ifcEntryAppliesToAttemptedWrite(
+        tx,
+        target,
+        entry.path,
+        entry.schema,
+      ) || !(entry.branchConditions ?? []).every((condition) =>
+        condition.enclosing ||
+        ifcEntryAppliesToAttemptedWrite(
+          tx,
+          target,
+          condition.path,
+          condition.schema,
+          condition.root,
+        )
+      )
     ) {
       continue;
     }
@@ -4374,13 +4831,7 @@ const verifyExactCopyRequirements = (
     // Without this gate an untouched entry compares undefined to undefined and
     // passes vacuously, accepting the claim (and copying its label) unverified.
     if (
-      !ifcEntryAppliesToAttemptedWrite(
-        tx,
-        target,
-        entry.path,
-        entry.schema,
-        entry.root,
-      )
+      !cfcSchemaEntryAppliesToAttemptedWrite(tx, target, entry)
     ) {
       continue;
     }
@@ -4393,21 +4844,25 @@ const verifyExactCopyRequirements = (
         entry.path.join("/")
       }`;
     }
-    const targetValue = writeValueForTarget(tx, {
+    if (!cfcSchemaEntryMintsAtConcretePath(tx, target, entry, entry.path)) {
+      continue;
+    }
+    const targetValue = policyValueForTarget(tx, {
       ...target,
       path: entry.path,
     });
-    const sourceValue = writeValueForTarget(tx, {
+    const sourceValue = policyValueForTarget(tx, {
       ...target,
       path: sourcePath,
     });
 
-    // TODO(danfuzz): `deepEqual` calls two same-class fabric values equal
-    // regardless of contents — under the modern cell rep even two
-    // `FabricLink`s to different documents — so an `exactCopyOf` claim over
-    // fabric-valued state verifies for values that are not copies, and the
-    // source label is carried anyway. Fails open; wants `valueEqual`.
-    if (!deepEqual(sourceValue, targetValue)) {
+    if (
+      !targetValue.resolved || !sourceValue.resolved ||
+      !valueEqual(
+        sourceValue.value as FabricValue,
+        targetValue.value as FabricValue,
+      )
+    ) {
       return `exactCopyOf failed at /${entry.path.join("/")}`;
     }
   }
@@ -4438,13 +4893,7 @@ const verifyProjectionRequirements = (
     // undefined to undefined and would accept the claim — and copy its
     // label — unverified).
     if (
-      !ifcEntryAppliesToAttemptedWrite(
-        tx,
-        target,
-        entry.path,
-        entry.schema,
-        entry.root,
-      )
+      !cfcSchemaEntryAppliesToAttemptedWrite(tx, target, entry)
     ) {
       continue;
     }
@@ -4464,19 +4913,25 @@ const verifyProjectionRequirements = (
         entry.path.join("/")
       }`;
     }
-    const targetValue = writeValueForTarget(tx, {
+    if (!cfcSchemaEntryMintsAtConcretePath(tx, target, entry, entry.path)) {
+      continue;
+    }
+    const targetValue = policyValueForTarget(tx, {
       ...target,
       path: entry.path,
     });
-    const sourceValue = writeValueForTarget(tx, {
+    const sourceValue = policyValueForTarget(tx, {
       ...target,
       path: sourcePath,
     });
 
-    // TODO(danfuzz): same `deepEqual` gap as `verifyExactCopyRequirements`
-    // above — fabric-valued state verifies as a projection when it is not
-    // one. Fails open; wants `valueEqual`.
-    if (!deepEqual(sourceValue, targetValue)) {
+    if (
+      !targetValue.resolved || !sourceValue.resolved ||
+      !valueEqual(
+        sourceValue.value as FabricValue,
+        targetValue.value as FabricValue,
+      )
+    ) {
       return `projection claim failed at /${entry.path.join("/")}`;
     }
   }
@@ -4487,13 +4942,28 @@ const derivePersistedLabel = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   schemaLabel: IFCLabel,
-  sourceEntryLabels?: Map<string, IFCLabel>,
+  sourceEntryLabels?:
+    | Map<string, IFCLabel>
+    | ((sourcePath: readonly string[]) => Map<string, IFCLabel>),
   owningSpace?: MemorySpace,
 ): IFCLabel => {
   const ifc = isObjectOrArray(schema) ? schema.ifc : undefined;
   const actingPrincipal = tx.getCfcState().trustSnapshot?.actingPrincipal;
-  const copiedInputLabel = sourceEntryLabels && exactCopySourcePath(schema)
-    ? sourceEntryLabels.get(pathKey(exactCopySourcePath(schema)!))
+  const exactSourcePath = exactCopySourcePath(schema);
+  const exactSourceLabels = sourceEntryLabels && exactSourcePath
+    ? typeof sourceEntryLabels === "function"
+      ? sourceEntryLabels(exactSourcePath)
+      : sourceEntryLabels
+    : undefined;
+  const copiedInputLabel = exactSourceLabels && exactSourcePath
+    ? labelForEntriesAtPath(
+      [...exactSourceLabels].map(([key, label]) => ({
+        path: entryPathFromKey(key),
+        label,
+        origin: "declared" as const,
+      })),
+      exactSourcePath,
+    )
     : undefined;
   // §8.3 projection carry — full confidentiality, scoped integrity (see
   // projectedSourceLabel). A malformed claim carries nothing: verification
@@ -4502,9 +4972,23 @@ const derivePersistedLabel = (
   const projectionClaim = sourceEntryLabels !== undefined
     ? projectionClaimSpec(schema)
     : undefined;
-  const projectedInputLabel =
+  const projectionSourcePath =
     projectionClaim !== undefined && projectionClaim !== "malformed"
-      ? projectedSourceLabel(sourceEntryLabels!, projectionClaim)
+      ? canonicalizeLogicalPath([
+        ...projectionClaim.source,
+        ...projectionClaim.field,
+      ])
+      : undefined;
+  const projectionSourceLabels = projectionSourcePath !== undefined &&
+      sourceEntryLabels !== undefined
+    ? typeof sourceEntryLabels === "function"
+      ? sourceEntryLabels(projectionSourcePath)
+      : sourceEntryLabels
+    : undefined;
+  const projectedInputLabel =
+    projectionClaim !== undefined && projectionClaim !== "malformed" &&
+      projectionSourceLabels !== undefined
+      ? projectedSourceLabel(projectionSourceLabels, projectionClaim)
       : undefined;
   return {
     // Normalize confidentiality clauses on persist (Epic A4): an authored or
@@ -4771,34 +5255,92 @@ const gateRuntimeMintedIntegrity = (
 const persistedLabelFromSchemaAtPath = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
-  path: readonly string[],
-  owningSpace: MemorySpace,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
+  },
 ): IFCLabel | undefined => {
-  const logicalPath = canonicalizeLogicalPath(path);
+  const logicalPath = canonicalizeLogicalPath(target.path);
   const entries = cfcSchemaEntries(schema);
-  let match:
-    | { path: readonly string[]; label: IFCLabel; schema: JSONSchema }
-    | undefined;
-  for (const entry of entries) {
-    if (!isPrefix(entry.path, logicalPath)) {
-      continue;
-    }
-    if (match === undefined || match.path.length < entry.path.length) {
-      match = entry;
-    }
-  }
-  if (match === undefined) {
-    return undefined;
-  }
-  const entryLabels = new Map<string, IFCLabel>(
-    entries.map((entry) => [pathKey(entry.path), entry.label]),
+  const covering = entries.filter((entry) =>
+    entryPathCoversPrefix(entry.path, logicalPath)
   );
-  return derivePersistedLabel(
-    tx,
-    match.schema,
-    match.label,
-    entryLabels,
-    owningSpace,
+  if (covering.length === 0) return undefined;
+  const entryLabels = (sourcePath: readonly string[]) =>
+    schemaEntryLabelsForConcreteSourcePath(tx, target, entries, sourcePath);
+  return labelForEntriesAtPath(
+    covering.map((entry): LabelMapEntry => {
+      const concretePath = entry.path.map((segment, index) =>
+        segment === "*" ? logicalPath[index]! : segment
+      );
+      const effectiveLabel: IFCLabel = {
+        confidentiality: cfcSchemaEntryMatchesCurrentValueAtConcretePath(
+            tx,
+            target,
+            entry,
+            concretePath,
+            true,
+          )
+          ? entry.label.confidentiality
+          : undefined,
+        integrity: cfcSchemaEntryMatchesCurrentValueAtConcretePath(
+            tx,
+            target,
+            entry,
+            concretePath,
+            false,
+          )
+          ? entry.label.integrity
+          : undefined,
+      };
+      const positiveMatch = cfcSchemaEntryMintsAtConcretePath(
+        tx,
+        target,
+        entry,
+        concretePath,
+      );
+      const parts = perWriteIntegrityParts(
+        entry.schema,
+        effectiveLabel,
+        true,
+      );
+      const derived = mergeLabels(
+        derivePersistedLabel(
+          tx,
+          parts.staticSchema,
+          parts.staticLabel,
+          positiveMatch ? entryLabels : undefined,
+          target.space,
+        ),
+        {
+          integrity: positiveMatch
+            ? [
+              ...resolveCurrentPrincipalLabelValues(
+                parts.dynamicIntegrity,
+                tx.getCfcState().trustSnapshot?.actingPrincipal,
+              ) ?? [],
+            ]
+            : undefined,
+        },
+      );
+      return {
+        path: entry.path,
+        label: {
+          confidentiality: effectiveLabel.confidentiality !== undefined &&
+              derived.confidentiality === undefined
+            ? []
+            : derived.confidentiality,
+          integrity: effectiveLabel.integrity !== undefined &&
+              derived.integrity === undefined
+            ? []
+            : derived.integrity,
+        },
+        origin: "declared",
+      };
+    }),
+    logicalPath,
   );
 };
 
@@ -4830,17 +5372,76 @@ const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
 const rootLabelFromSchema = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema | undefined,
-  owningSpace: MemorySpace,
+  target: {
+    space: MemorySpace;
+    id: string;
+    scope: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
+  },
 ): IFCLabel => {
-  if (schema === undefined) {
-    return {};
-  }
-  const root = cfcSchemaEntries(schema).find((entry) =>
+  if (schema === undefined) return {};
+  const sourceTarget = {
+    ...target,
+    id: target.id as URI,
+  };
+  const entries = cfcSchemaEntries(schema).filter((entry) =>
     entry.path.length === 0
   );
-  return root === undefined
-    ? {}
-    : derivePersistedLabel(tx, root.schema, root.label, undefined, owningSpace);
+  return labelForEntriesAtPath(
+    entries.map((entry): LabelMapEntry => {
+      const rebasedEntry: CfcSchemaEntry = {
+        ...entry,
+        path: [...target.path, ...entry.path],
+        branchConditions: entry.branchConditions.map((condition) => ({
+          ...condition,
+          path: [...target.path, ...condition.path],
+        })),
+      };
+      const positiveMatch = cfcSchemaEntryMintsAtConcretePath(
+        tx,
+        sourceTarget,
+        rebasedEntry,
+        rebasedEntry.path,
+      );
+      const label: IFCLabel = {
+        confidentiality: cfcSchemaEntryMatchesCurrentValueAtConcretePath(
+            tx,
+            sourceTarget,
+            rebasedEntry,
+            rebasedEntry.path,
+            true,
+          )
+          ? entry.label.confidentiality
+          : undefined,
+        integrity: positiveMatch ? entry.label.integrity : undefined,
+      };
+      const parts = perWriteIntegrityParts(entry.schema, label, true);
+      return {
+        path: [],
+        label: mergeLabels(
+          derivePersistedLabel(
+            tx,
+            parts.staticSchema,
+            parts.staticLabel,
+            undefined,
+            target.space,
+          ),
+          {
+            integrity: positiveMatch
+              ? [
+                ...resolveCurrentPrincipalLabelValues(
+                  parts.dynamicIntegrity,
+                  tx.getCfcState().trustSnapshot?.actingPrincipal,
+                ) ?? [],
+              ]
+              : undefined,
+          },
+        ),
+        origin: "declared",
+      };
+    }),
+    [],
+  ) ?? {};
 };
 
 /**
@@ -4913,8 +5514,7 @@ const derivePersistedLinkLabel = (
     ? persistedLabelFromSchemaAtPath(
       tx,
       pendingSourceSchema,
-      input.source.path,
-      input.source.space,
+      { ...input.source, id: input.source.id as URI },
     )
     : undefined;
   if (pendingSourceSchema === undefined && sourceMetadata === undefined) {
@@ -4929,11 +5529,24 @@ const derivePersistedLinkLabel = (
     // even when this tx touched one of its fields.
     const sourceCreatedInThisTx = [
       ...(tx.getWriteDetails?.(input.source.space) ?? []),
-    ].some((detail) =>
-      detail.address.id === input.source.id &&
-      detail.address.path.length <= 1 &&
-      detail.previousValue === undefined
-    );
+    ].some((detail) => {
+      if (
+        detail.address.id !== input.source.id ||
+        normalizeCellScope(detail.address.scope) !== input.source.scope
+      ) {
+        return false;
+      }
+      const path = detail.address.path.map(String);
+      if (path.length === 1 && path[0] === "value") {
+        return detail.previousPresent === false ||
+          detail.previousPresent === undefined &&
+            detail.previousValue === undefined;
+      }
+      if (path.length !== 0) return false;
+      if (detail.previousPresent === false) return true;
+      return isObjectOrArray(detail.previousValue) &&
+        !Object.hasOwn(detail.previousValue, "value");
+    });
     if (sourceCreatedInThisTx || !setupResult.exists) {
       const targetCandidate = candidateSchemas.get(targetKey(input.target));
       if (targetCandidate !== undefined) {
@@ -4941,8 +5554,7 @@ const derivePersistedLinkLabel = (
         pendingSourceLabel = persistedLabelFromSchemaAtPath(
           tx,
           targetCandidate,
-          input.target.path,
-          input.target.space,
+          { ...input.target, id: input.target.id as URI },
         );
       }
     }
@@ -4950,7 +5562,7 @@ const derivePersistedLinkLabel = (
   const linkSchemaLabel = rootLabelFromSchema(
     tx,
     input.linkSchema,
-    input.source.space,
+    input.source,
   );
   const hasCarriedLabel =
     input.cfcLabelView?.entries.some((entry) => hasLabelValues(entry.label)) ??
@@ -4972,13 +5584,17 @@ const derivePersistedLinkLabel = (
     return {};
   }
   const withMetadata = sourceMetadata === undefined ? {} : { sourceMetadata };
-  const sourceLabel = mergeLabels(
-    sourceMetadata === undefined ? undefined : labelAtPath(
-      sourceMetadata,
-      canonicalizeLogicalPath(input.source.path),
-    ) ?? {},
-    pendingSourceLabel,
-  );
+  const storedSourceLabel = sourceMetadata === undefined ? {} : labelAtPath(
+    sourceMetadata,
+    canonicalizeLogicalPath(input.source.path),
+  ) ?? {};
+  const sourceLabel = pendingSourceSchema === undefined ? storedSourceLabel : {
+    confidentiality: mergeLabelValues(
+      storedSourceLabel.confidentiality,
+      pendingSourceLabel?.confidentiality,
+    ),
+    integrity: pendingSourceLabel?.integrity,
+  };
   // The source/link-schema integrity is author-influenceable (a link value can
   // carry a forged link schema or label view). Gate runtime-minted evidence
   // atoms out of it unless a trusted builtin authored the link write, THEN add
@@ -5030,9 +5646,26 @@ const coalesceLabelEntries = (
       pathKey(path)
     }`;
     const existing = byKey.get(key);
+    const incoming = cloneLabel(entry.label);
+    const merged = existing === undefined
+      ? incoming
+      : mergeLabels(existing.label, incoming);
+    const compactMerged = cloneLabel(merged);
     byKey.set(key, {
       path,
-      label: mergeLabels(existing?.label, cloneLabel(entry.label)),
+      label: existing === undefined ? compactMerged : {
+        ...compactMerged,
+        ...(merged.confidentiality === undefined &&
+            (existing?.label.confidentiality !== undefined ||
+              incoming.confidentiality !== undefined)
+          ? { confidentiality: [] }
+          : {}),
+        ...(merged.integrity === undefined &&
+            (existing?.label.integrity !== undefined ||
+              incoming.integrity !== undefined)
+          ? { integrity: [] }
+          : {}),
+      },
       ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
       ...(entry.observes !== undefined ? { observes: entry.observes } : {}),
     });
@@ -5603,14 +6236,42 @@ const verifyWriteFloor = (
   // it; plain floors ignore it (Epic D5).
   const trust = cfcFloorTrustContext(tx);
   const entries = cfcSchemaEntries(schema);
-  const entryLabels = new Map<string, IFCLabel>(
-    entries.map((entry) => [pathKey(entry.path), entry.label]),
-  );
+  const entryLabels = (sourcePath: readonly string[]) =>
+    schemaEntryLabelsForConcreteSourcePath(tx, target, entries, sourcePath);
   const writtenPaths = valueWriteTargets(tx).get(targetKey(target))?.paths ??
     [];
   const linkPaths = ctx.linkWriteInputs.map((input) =>
     canonicalizeLogicalPath(input.target.path)
   );
+  const schemaEntryIntegrityAtPath = (
+    entry: CfcSchemaEntry,
+    concretePath: readonly string[],
+  ): readonly CfcAtom[] => {
+    const entryPath = concretePath.slice(0, entry.path.length);
+    if (!cfcSchemaEntryMintsAtConcretePath(tx, target, entry, entryPath)) {
+      return [];
+    }
+    const parts = perWriteIntegrityParts(
+      entry.schema,
+      entry.label,
+      entry.branchConditions.length > 0,
+    );
+    const staticIntegrity = derivePersistedLabel(
+      tx,
+      parts.staticSchema,
+      parts.staticLabel,
+      entryLabels,
+      target.space,
+    ).integrity ?? [];
+    const dynamicIntegrity = resolveCurrentPrincipalLabelValues(
+      parts.dynamicIntegrity,
+      tx.getCfcState().trustSnapshot?.actingPrincipal,
+    ) ?? [];
+    return gateRuntimeMintedIntegrity(
+      { integrity: uniqueCfcAtoms([...staticIntegrity, ...dynamicIntegrity]) },
+      ctx.identityForPath(entryPath),
+    ).integrity ?? [];
+  };
   const schemaIntegrityAtPath = (
     concretePath: readonly string[],
   ): readonly CfcAtom[] =>
@@ -5623,16 +6284,7 @@ const verifyWriteFloor = (
       ) {
         return [];
       }
-      return gateRuntimeMintedIntegrity(
-        derivePersistedLabel(
-          tx,
-          candidate.schema,
-          candidate.label,
-          entryLabels,
-          target.space,
-        ),
-        ctx.identityForPath(candidate.path),
-      ).integrity ?? [];
+      return schemaEntryIntegrityAtPath(candidate, concretePath);
     }));
   const linkedValueIntegrity = (
     input: LinkWritePolicyInput,
@@ -5673,6 +6325,18 @@ const verifyWriteFloor = (
       )
       : [entry.path];
     for (const floorPath of floorPaths) {
+      if (
+        entry.branchConditions.length > 0 &&
+        !cfcSchemaEntryBranchConditionsApplyAtConcretePath(
+          tx,
+          target,
+          entry,
+          floorPath,
+          true,
+        )
+      ) {
+        continue;
+      }
       // Floor applicability is STRUCTURAL — did anything land at/under the floor
       // path, or does a link cover it? It must never hinge solely on the
       // value-conditioned `ifcEntryAppliesToAttemptedWrite`, whose schema/value
@@ -5716,16 +6380,7 @@ const verifyWriteFloor = (
       // `addIntegrity` mints + `exactCopyOf`/`projection` carries,
       // evidence-gated so a pattern author cannot forge runtime-minted atoms
       // to satisfy their own floor.
-      const base = gateRuntimeMintedIntegrity(
-        derivePersistedLabel(
-          tx,
-          entry.schema,
-          entry.label,
-          entryLabels,
-          target.space,
-        ),
-        ctx.identityForPath(entry.path),
-      ).integrity ?? [];
+      const base = schemaEntryIntegrityAtPath(entry, floorPath);
 
       // One contribution per link written at/under the floor path (each linked
       // value must individually carry the floor), plus one `value` contribution
@@ -5761,7 +6416,7 @@ const verifyWriteFloor = (
           scope: normalizeCellScope(input.source.scope),
           path: canonicalizeLogicalPath(input.source.path),
         }, relative);
-        if (resolved?.value === undefined) continue;
+        if (resolved === undefined) continue;
         const resolvedInput = {
           ...input,
           source: {
@@ -5788,8 +6443,16 @@ const verifyWriteFloor = (
       // that populate it. Judge only the deepest plain-value writes so an array
       // item can carry the integrity declared by its item schema without an
       // earlier empty-container write becoming a second, unendorsed value.
+      const floorValue = policyValueForTarget(tx, {
+        ...target,
+        path: floorPath,
+      });
       const plainWritePaths = writesUnder.filter((writePath) =>
-        writeValueForTarget(tx, { ...target, path: writePath }) !== undefined &&
+        writeValuePresenceForTarget(tx, { ...target, path: writePath }) ===
+          true &&
+        !(floorValue.resolved && Array.isArray(floorValue.value) &&
+          writePath.length === floorPath.length + 1 &&
+          writePath.at(-1) === "length") &&
         !linksHere.some((input) =>
           concretePathHasPrefix(
             writePath,
@@ -5833,6 +6496,18 @@ export const prepareBoundaryCommit = (
 ): string[] => {
   const reasons: string[] = [];
   const state = tx.getCfcState();
+  const invalidPolicyTargets = new Set<string>();
+  for (const input of state.writePolicyInputs) {
+    if (input.kind !== "schema" && input.kind !== "link-write") continue;
+    const inputSchema = input.kind === "schema"
+      ? input.schema
+      : input.linkSchema;
+    if (inputSchema === undefined) continue;
+    const issue = cfcPolicyPlacementIssue(inputSchema);
+    if (issue === undefined) continue;
+    reasons.push(`unsupported CFC policy placement: ${issue}`);
+    invalidPolicyTargets.add(targetKey(input.target));
+  }
   const sourceSchemaMigration = state.writePolicyInputs.some((input) =>
     input.kind === "custom" &&
     input.name === CFC_SOURCE_SCHEMA_MIGRATION_INPUT
@@ -6019,26 +6694,32 @@ export const prepareBoundaryCommit = (
     if (existing === undefined) {
       continue;
     }
-    const overwritesRuntimeIntegrity = existing.labelMap.entries.some((entry) =>
-      entry.origin === "runtime-integrity" &&
-      target.paths.some((path) =>
-        isPrefix(entry.path, path) || isPrefix(path, entry.path)
+    if (
+      existing.labelMap.entries.some((entry) =>
+        entry.origin === "runtime-integrity" &&
+        target.paths.some((path) =>
+          isPrefix(entry.path, path) || isPrefix(path, entry.path)
+        )
       )
-    );
-    if (overwritesRuntimeIntegrity) {
+    ) {
       runtimeIntegrityOverwriteTargets.add(key);
     }
-    if (
-      !overwritesRuntimeIntegrity &&
-      !metadataAppliesToAnyPath(existing, target.paths)
-    ) {
-      continue;
-    }
-    const schemaWriteInputs = schemaWrites.get(key) ?? [];
     const storedEnvelope = storedEnvelopeForTarget({ ...target, path: [] });
     const storedSchema = storedEnvelope.status === "loaded"
       ? storedEnvelope.schema
       : undefined;
+    const storedPolicyApplies = storedSchema !== undefined &&
+      cfcSchemaEntries(storedSchema).some((entry) =>
+        hasFuturePolicyContract(entry.schema) &&
+        cfcSchemaEntryAppliesToAttemptedWrite(tx, target, entry)
+      );
+    if (
+      !metadataAppliesToAnyPath(existing, target.paths) &&
+      !storedPolicyApplies
+    ) {
+      continue;
+    }
+    const schemaWriteInputs = schemaWrites.get(key) ?? [];
     const shapeSchemas = [candidates.get(key), storedSchema];
     if (
       schemaWriteInputs.length > 0 &&
@@ -6155,7 +6836,9 @@ export const prepareBoundaryCommit = (
     const schema = candidateSchema ?? emptySchemaObject();
     const undefinedCandidate = candidateSchema === undefined;
     const target = targetFromKey(key);
+    if (invalidPolicyTargets.has(key)) continue;
     const { space, id, scope } = target;
+    if (isFabricDataUri(id)) continue;
     const isIngestTarget = ingestKey !== undefined && key === ingestKey;
     // Inv-12 Stage 1 (SC-25; spec §4.6.4.1): the per-target cross-space
     // predicate. An entry is ELIGIBLE for the representation transform when
@@ -6236,32 +6919,39 @@ export const prepareBoundaryCommit = (
       }
     }
 
+    const placementIssue = cfcPolicyPlacementIssue(mergedSchema);
+    if (placementIssue !== undefined) {
+      reasons.push(`unsupported CFC policy placement: ${placementIssue}`);
+      continue;
+    }
+
     const linkWriteInputs = linkWrites.get(key) ?? [];
     const generatedVerificationSchema = generatedSetupInitializationPaths.has(
         key,
       )
       ? mergedSchema
       : schema;
-    const verificationSchema = storedSchema !== undefined &&
+    const storedLinkClaims = storedSchema !== undefined &&
         linkWriteInputs.length > 0
-      ? undefinedCandidate
-        ? storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs)
-        : mergeCfcSchemaEnvelopes(
-          generatedVerificationSchema,
-          storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
-          { generatedOutputPaths: generatedOutputPaths.get(key) },
-        )
-      : generatedVerificationSchema;
+      ? storedSchema
+      : undefined;
+    const verificationSchemas = storedLinkClaims === undefined
+      ? [generatedVerificationSchema]
+      : undefinedCandidate
+      ? [storedLinkClaims]
+      : [generatedVerificationSchema, storedLinkClaims];
 
-    const requirementFailure = verifyInputRequirements(
-      tx,
-      verificationSchema,
-      target,
-      (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
-      prefixBounds,
-      generatedSetupInitializationPaths.get(key) ?? [],
-      prefixProvenance,
-    );
+    const requirementFailure = verificationSchemas.map((verificationSchema) =>
+      verifyInputRequirements(
+        tx,
+        verificationSchema,
+        target,
+        (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
+        prefixBounds,
+        generatedSetupInitializationPaths.get(key) ?? [],
+        prefixProvenance,
+      )
+    ).find((failure) => failure !== undefined);
     // A verification failure records a reason (which rejects the whole commit
     // in enforcing modes) and skips persisting this target's declared label.
     // But the external-ingest MARK is runtime-authored provenance, orthogonal
@@ -6279,11 +6969,10 @@ export const prepareBoundaryCommit = (
       if (!isIngestTarget) continue;
       ingestVerificationFailed = true;
     }
-    const trustedEventFailure = verifyTrustedEventRequirements(
-      tx,
-      target,
-      verificationSchema,
-    );
+    const trustedEventFailure = verificationSchemas.map(
+      (verificationSchema) =>
+        verifyTrustedEventRequirements(tx, target, verificationSchema),
+    ).find((failure) => failure !== undefined);
     if (trustedEventFailure) {
       reasons.push(trustedEventFailure);
       if (!isIngestTarget) continue;
@@ -6293,15 +6982,10 @@ export const prepareBoundaryCommit = (
     // Copy-claim verification: exactCopyOf and its §8.3 sub-path
     // generalization share one failure branch — both are "the written value
     // must equal a claimed source value" checks.
-    const exactCopyFailure = verifyExactCopyRequirements(
-      tx,
-      target,
-      verificationSchema,
-    ) ?? verifyProjectionRequirements(
-      tx,
-      target,
-      verificationSchema,
-    );
+    const exactCopyFailure = verificationSchemas.map((verificationSchema) =>
+      verifyExactCopyRequirements(tx, target, verificationSchema) ??
+        verifyProjectionRequirements(tx, target, verificationSchema)
+    ).find((failure) => failure !== undefined);
     if (exactCopyFailure) {
       reasons.push(exactCopyFailure);
       if (!isIngestTarget) continue;
@@ -6313,19 +6997,22 @@ export const prepareBoundaryCommit = (
     // `observe` diagnoses; `enforce` records a reason (rejecting the commit
     // under the enforcing enforcement modes, mirroring requirementFailure).
     if (state.writeFloorMode !== "off") {
-      const floorFailures = verifyWriteFloor(tx, verificationSchema, target, {
-        identityForPath: (path) =>
-          identityForSchemaPath(writeAuthorIdentities.get(key), path),
-        identityForInput,
-        linkWriteInputs,
-        candidateSchemas: candidates,
-        // Only PERSISTED flow integrity may credit the floor: `observe` mode
-        // computes the join for diagnostics but stores nothing on the value, so
-        // crediting it would let a plain write pass a floor with integrity that
-        // never lands (codex/cubic review). Only `persist` writes the derived
-        // component.
-        flowIntegrity: flowPersist ? flowIntegrity : [],
-      });
+      const floorFailures = verificationSchemas.flatMap(
+        (verificationSchema) =>
+          verifyWriteFloor(tx, verificationSchema, target, {
+            identityForPath: (path) =>
+              identityForSchemaPath(writeAuthorIdentities.get(key), path),
+            identityForInput,
+            linkWriteInputs,
+            candidateSchemas: candidates,
+            // Only PERSISTED flow integrity may credit the floor: `observe`
+            // mode computes the join for diagnostics but stores nothing on the
+            // value, so crediting it would let a plain write pass a floor with
+            // integrity that never lands (codex/cubic review). Only `persist`
+            // writes the derived component.
+            flowIntegrity: flowPersist ? flowIntegrity : [],
+          }),
+      );
       if (floorFailures.length > 0) {
         if (state.writeFloorMode === "enforce") {
           reasons.push(...floorFailures);
@@ -6341,18 +7028,57 @@ export const prepareBoundaryCommit = (
 
     const schemaAndHash = internSchema(mergedSchema, true);
     const mergedSchemaEntries = cfcSchemaEntries(schemaAndHash.schema);
-    const mergedSchemaEntryLabels = new Map<string, IFCLabel>(
-      mergedSchemaEntries.map((entry) => [
-        pathKey(entry.path),
-        entry.label,
-      ]),
-    );
+    const mergedSchemaEntryLabels = (sourcePath: readonly string[]) =>
+      schemaEntryLabelsForConcreteSourcePath(
+        tx,
+        target,
+        mergedSchemaEntries,
+        sourcePath,
+      );
     const mergedSchemaEntrySchemas = new Map<string, JSONSchema>(
       mergedSchemaEntries.map((entry) => [
         pathKey(entry.path),
         entry.schema,
       ]),
     );
+    const emptyLabelOverridesAtPath = (path: readonly string[]) => {
+      const matchingEntries = mergedSchemaEntries.filter((entry) =>
+        entry.path.length === path.length &&
+        entry.path.every((segment, index) => segment === path[index])
+      );
+      const shadowsField = (
+        field: "confidentiality" | "integrity",
+      ): boolean =>
+        matchingEntries.some((entry) => {
+          const ifc = isObjectOrArray(entry.schema) &&
+              isObjectOrArray(entry.schema.ifc)
+            ? entry.schema.ifc
+            : undefined;
+          const values = ifc?.[field];
+          if (!Array.isArray(values) || values.length !== 0) return false;
+          const applies = field === "confidentiality"
+            ? cfcSchemaEntryMintsAtConcretePath(tx, target, entry, entry.path)
+            : cfcSchemaEntryAppliesToAttemptedWrite(tx, target, entry);
+          if (!applies) return false;
+          return mergedSchemaEntries.some((ancestor) => {
+            if (
+              ancestor.path.length >= path.length ||
+              !isPrefix(ancestor.path, path) ||
+              !cfcSchemaEntryAppliesToAttemptedWrite(tx, target, ancestor)
+            ) return false;
+            const ancestorIfc = isObjectOrArray(ancestor.schema) &&
+                isObjectOrArray(ancestor.schema.ifc)
+              ? ancestor.schema.ifc
+              : undefined;
+            const ancestorValues = ancestorIfc?.[field];
+            return Array.isArray(ancestorValues) && ancestorValues.length > 0;
+          });
+        });
+      return {
+        confidentiality: shadowsField("confidentiality"),
+        integrity: shadowsField("integrity"),
+      };
+    };
     const flowTarget = flowPersist ? flowTargets?.get(key) : undefined;
     const flowWrittenPaths = flowTarget?.paths ?? [];
     const valueWrittenPaths = writeTargets.get(key)?.paths ?? [];
@@ -6385,21 +7111,22 @@ export const prepareBoundaryCommit = (
       ? []
       : mergedSchemaEntries
         .flatMap((entry) => {
-          if (
-            !ifcEntryAppliesToAttemptedWrite(
-              tx,
-              target,
-              entry.path,
-              entry.schema,
-              entry.root,
-            )
-          ) {
+          const applies = cfcSchemaEntryAppliesToAttemptedWrite(
+            tx,
+            target,
+            entry,
+          );
+          const persistsPolicy = hasPersistedPolicyClaim(entry.schema);
+          if (!applies) {
             return [];
           }
           const ifc =
             isObjectOrArray(entry.schema) && isObjectOrArray(entry.schema.ifc)
               ? entry.schema.ifc
               : undefined;
+          const emptyOverrides = emptyLabelOverridesAtPath(entry.path);
+          const persistsLabelOverride = emptyOverrides.confidentiality ||
+            emptyOverrides.integrity;
           if (
             ifc !== undefined &&
             (Object.hasOwn(ifc, "confidentiality") ||
@@ -6407,16 +7134,23 @@ export const prepareBoundaryCommit = (
           ) {
             remintedDeclaredPaths.set(pathKey(entry.path), entry.path);
           }
-          const currentPrincipalParts = currentPrincipalIntegrityParts(
+          const positiveMatch = cfcSchemaEntryMintsAtConcretePath(
+            tx,
+            target,
+            entry,
+            entry.path,
+          );
+          const currentPrincipalParts = perWriteIntegrityParts(
             entry.schema,
             entry.label,
+            entry.branchConditions.length > 0 || !positiveMatch,
           );
           const derived = gateRuntimeMintedIntegrity(
             derivePersistedLabel(
               tx,
               currentPrincipalParts.staticSchema,
               currentPrincipalParts.staticLabel,
-              mergedSchemaEntryLabels,
+              positiveMatch ? mergedSchemaEntryLabels : undefined,
               target.space,
             ),
             identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
@@ -6431,19 +7165,25 @@ export const prepareBoundaryCommit = (
           const prior = existingConfidentiality
             .filter((e) => isPrefix(e.path, entry.path))
             .flatMap((e) => e.confidentiality);
-          const label = prior.length > 0
+          const inheritedLabel = prior.length > 0
             ? {
               ...derived,
               confidentiality: mergeLabelValues(derived.confidentiality, prior),
             }
             : derived;
+          const label = {
+            ...inheritedLabel,
+            ...(emptyOverrides.confidentiality ? { confidentiality: [] } : {}),
+            ...(emptyOverrides.integrity ? { integrity: [] } : {}),
+          };
           // C5: an authored `ifc.observes` classes the declared entry (the
           // sqlite null-origin merge declares `observes:"value"` this way).
           // Anything but the four class values — including the absent
           // default — mints a covering entry: over-taint, fail-safe, and
           // wire-identical for pre-C readers.
           const observes = declaredObservesClass(entry.schema);
-          return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
+          return hasLabelValues(label) || persistsPolicy ||
+              persistsLabelOverride
             ? [{
               path: entry.path,
               label,
@@ -6455,20 +7195,16 @@ export const prepareBoundaryCommit = (
     if (!ingestVerificationFailed) {
       const actingPrincipal = state.trustSnapshot?.actingPrincipal;
       for (const entry of mergedSchemaEntries) {
-        const { dynamicIntegrity } = currentPrincipalIntegrityParts(
+        const { dynamicIntegrity } = perWriteIntegrityParts(
           entry.schema,
           entry.label,
+          entry.branchConditions.length > 0,
         );
         const resolvedIntegrity = resolveCurrentPrincipalLabelValues(
           dynamicIntegrity,
           actingPrincipal,
         );
         if (resolvedIntegrity === undefined) continue;
-        const gated = gateRuntimeMintedIntegrity(
-          { integrity: [...resolvedIntegrity] },
-          identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
-        ).integrity;
-        if (gated === undefined || gated.length === 0) continue;
         for (
           const path of concreteWrittenPathsForPattern(
             tx,
@@ -6477,6 +7213,14 @@ export const prepareBoundaryCommit = (
             writeTargets.get(key)?.paths ?? [],
           )
         ) {
+          if (!cfcSchemaEntryMintsAtConcretePath(tx, target, entry, path)) {
+            continue;
+          }
+          const gated = gateRuntimeMintedIntegrity(
+            { integrity: [...resolvedIntegrity] },
+            identityForSchemaPath(writeAuthorIdentities.get(key), path),
+          ).integrity;
+          if (gated === undefined || gated.length === 0) continue;
           persistedLabelEntries.push({
             path,
             label: { integrity: [...gated] },
@@ -6785,8 +7529,14 @@ export const prepareBoundaryCommit = (
         continue;
       }
       const schemaEntry = mergedSchemaEntrySchemas.get(key);
+      const emptyOverrides = emptyLabelOverridesAtPath(entryPath);
+      const preservesEmptyOverride = emptyOverrides.confidentiality &&
+          Array.isArray(entry.label.confidentiality) &&
+          entry.label.confidentiality.length === 0 ||
+        emptyOverrides.integrity && Array.isArray(entry.label.integrity) &&
+          entry.label.integrity.length === 0;
       if (
-        hasLabelValues(entry.label) ||
+        hasLabelValues(entry.label) || preservesEmptyOverride ||
         (schemaEntry !== undefined && hasPersistedPolicyClaim(schemaEntry))
       ) {
         // Carry-forward of an untouched path preserves the entry's
@@ -6980,6 +7730,12 @@ export const prepareBoundaryCommit = (
           continue;
         }
         const written = flowWrittenValues?.get(flowKey);
+        if (
+          written === undefined &&
+          writeValuePresenceForTarget(tx, { ...target, path }) !== true
+        ) {
+          continue;
+        }
         if (isPureLinkStructure(written)) {
           pureLinkContainerPaths(written, path, structureStampPaths);
           continue;
@@ -7186,7 +7942,10 @@ export const prepareBoundaryCommit = (
         // separate components (review on this PR).
         const hasShapeEntry = persistedLabelEntries.some((entry) =>
           (entry.origin === "derived" || entry.origin === "structure") &&
-          entry.observes === "shape" && pathKey(entry.path) === pathKey(path)
+          entry.observes === "shape" && pathKey(entry.path) === pathKey(path) &&
+          entry.label.confidentiality?.some((atom) =>
+              !deepEqual(atom, cfcAtom.space(target.space))
+            ) === true
         );
         if (!hasShapeEntry) {
           const shapeConfidentiality = frozenConfidentialityFor(path);
@@ -7289,7 +8048,10 @@ export const prepareBoundaryCommit = (
         // this attempt's join); a carried entry above wins.
         const hasFrozenExistence = persistedLabelEntries.some((entry) =>
           (entry.origin === "derived" || entry.origin === "structure") &&
-          entry.observes === "shape" && pathKey(entry.path) === pathKey(path)
+          entry.observes === "shape" && pathKey(entry.path) === pathKey(path) &&
+          entry.label.confidentiality?.some((atom) =>
+              !deepEqual(atom, cfcAtom.space(target.space))
+            ) === true
         );
         if (!hasFrozenExistence) {
           const frozen = frozenConfidentialityFor(path);

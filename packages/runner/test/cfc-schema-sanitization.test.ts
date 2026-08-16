@@ -20,6 +20,8 @@ import {
   validateSchemaValue,
 } from "../src/cfc/mod.ts";
 import { CELL_KINDS } from "../src/scope.ts";
+import { validateSchemaValueResult } from "../src/cfc/schema-sanitization.ts";
+import { cfcPolicyPlacementIssue } from "../src/cfc/schema-label-view.ts";
 
 const promptRisk = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
@@ -2181,5 +2183,139 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       value: { id: 1, note: "ok" },
       opaqueHandleId: "run-1",
     })).toEqual({ value: { id: 1, note: "ok" }, linkedStringCount: 0 });
+  });
+
+  it("lets a definite property mismatch dominate opaque siblings", () => {
+    const opaque = {};
+    const value = { payload: opaque, kind: "plain" };
+    const propertyOrders = [
+      {
+        payload: { type: "string" },
+        kind: { const: "trusted" },
+      },
+      {
+        kind: { const: "trusted" },
+        payload: { type: "string" },
+      },
+    ] as const;
+
+    for (const properties of propertyOrders) {
+      expect(
+        validateSchemaValueResult(
+          {
+            type: "object",
+            properties,
+            required: ["payload", "kind"],
+          },
+          value,
+          undefined,
+          { indeterminateOpaqueValue: (candidate) => candidate === opaque },
+        )?.kind,
+      ).toBe("mismatch");
+    }
+  });
+
+  it("rejects IFC under applicators without label-path semantics", () => {
+    const labeled = { ifc: { confidentiality: ["secret"] } };
+    const schemas = [
+      { if: labeled },
+      { then: labeled },
+      { else: labeled },
+      { contains: labeled },
+      { not: labeled },
+      { patternProperties: { "^x": labeled } },
+      { dependentSchemas: { x: labeled } },
+    ] as unknown as JSONSchema[];
+
+    for (const schema of schemas) {
+      expect(cfcPolicyPlacementIssue(schema)).toContain("unsupported");
+    }
+  });
+
+  it("finds unsupported IFC placements through references", () => {
+    const schema = {
+      if: { $ref: "#/$defs/Guard" },
+      $defs: {
+        Guard: { ifc: { writeAuthorizedBy: ["trusted"] } },
+      },
+    } as unknown as JSONSchema;
+
+    expect(cfcPolicyPlacementIssue(schema)).toContain("$.if");
+  });
+
+  it("rejects labeled additional properties beside named properties", () => {
+    const schema = {
+      type: "object",
+      properties: { known: { type: "string" } },
+      additionalProperties: {
+        type: "string",
+        ifc: { confidentiality: ["secret"] },
+      },
+    } as unknown as JSONSchema;
+
+    expect(cfcPolicyPlacementIssue(schema)).toContain(
+      "$.additionalProperties",
+    );
+  });
+
+  it("rejects recursive IFC whose repeated paths cannot be represented", () => {
+    const schema = {
+      $ref: "#/$defs/Node",
+      $defs: {
+        Node: {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { confidentiality: ["secret"] },
+            },
+            next: { $ref: "#/$defs/Node" },
+          },
+        },
+      },
+    } as unknown as JSONSchema;
+
+    expect(cfcPolicyPlacementIssue(schema)).toContain("recursive IFC policy");
+
+    const runtimeMintSchema = {
+      $ref: "#/$defs/Node",
+      $defs: {
+        Node: {
+          type: "object",
+          ifc: {
+            addIntegrity: [{ type: CFC_ATOM_TYPE.LlmDerived }],
+          },
+          properties: { next: { $ref: "#/$defs/Node" } },
+        },
+      },
+    } as unknown as JSONSchema;
+
+    expect(cfcPolicyPlacementIssue(runtimeMintSchema)).toContain(
+      "recursive IFC policy",
+    );
+  });
+
+  it("accepts policy-free recursion beside unrelated IFC", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        tree: { $ref: "#/$defs/Node" },
+        secret: {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        },
+      },
+      $defs: {
+        Node: {
+          type: "object",
+          properties: {
+            value: { type: "string" },
+            next: { $ref: "#/$defs/Node" },
+          },
+        },
+      },
+    } as unknown as JSONSchema;
+
+    expect(cfcPolicyPlacementIssue(schema)).toBeUndefined();
   });
 });

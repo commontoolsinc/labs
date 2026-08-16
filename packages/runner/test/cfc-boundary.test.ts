@@ -2200,6 +2200,87 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("persists an explicit empty child label override", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-empty-child-override",
+        {
+          type: "object",
+          ifc: { integrity: ["ancestor"] },
+          properties: {
+            child: { type: "string", ifc: { integrity: [] } },
+          },
+          required: ["child"],
+        },
+        tx,
+      );
+      cell.set({ child: "untrusted" });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: { labelMap?: { entries: unknown[] } };
+        } | undefined;
+      };
+      expect(replica.getDocument(persistedId)?.cfc?.labelMap?.entries)
+        .toContainEqual({
+          path: ["child"],
+          label: { integrity: [] },
+          origin: "declared",
+        });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists a nonmatching branch with an empty confidentiality ceiling", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-empty-future-ceiling",
+        {
+          anyOf: [
+            {
+              const: true,
+              ifc: { maxConfidentiality: [] },
+            },
+            { const: false },
+          ],
+        },
+        tx,
+      );
+      cell.set(false);
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: { schemaHash: string; labelMap?: { entries: unknown[] } };
+          value?: unknown;
+        } | undefined;
+      };
+      const persisted = replica.getDocument(persistedId);
+      expect(persisted?.cfc?.labelMap?.entries).toEqual([]);
+      expect(
+        replica.getDocument(`cid:${persisted!.cfc!.schemaHash}`)?.value,
+      ).toMatchObject({
+        anyOf: [{ ifc: { maxConfidentiality: [] } }, { const: false }],
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("persists IFC labels for each path that reuses the same schema ref", async () => {
     const { runtime, storageManager } = createRuntime();
     const guardedRef: JSONSchema = { $ref: "#/$defs/Guarded" };
@@ -6010,6 +6091,252 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.error?.message).toContain(
         "writeAuthorizedBy requires a trusted builtin identity",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not authorize an unchanged field copied by a root write", async () => {
+    const { runtime, storageManager } = createRuntime("disabled");
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          protected: {
+            type: "string",
+            ifc: { writeAuthorizedBy: ["trusted-handler"] },
+          },
+          messages: { type: "array", items: { type: "string" } },
+        },
+      } as const satisfies JSONSchema;
+      const schemaAndHash = internSchema(schema, true);
+      const seed = runtime.edit();
+      const seeded = runtime.getCell(
+        signer.did(),
+        "cfc-unchanged-field-in-root-write",
+        undefined,
+        seed,
+      );
+      seed.writeOrThrow({ ...seeded.getAsNormalizedFullLink(), path: [] }, {
+        value: { protected: "kept", messages: [] },
+        cfc: {
+          version: 1,
+          schemaHash: schemaAndHash.taggedHashString,
+          labelMap: {
+            version: 1,
+            entries: [{ path: ["protected"], label: {} }],
+          },
+        },
+      });
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: `cid:${schemaAndHash.taggedHashString}`,
+        path: [],
+      }, { value: schemaAndHash.schema });
+      expect((await seed.commit()).error).toBeUndefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-unchanged-field-in-root-write",
+        schema,
+        tx,
+      );
+      const address = cell.getAsNormalizedFullLink();
+      const envelope = tx.readOrThrow({ ...address, path: [] }) as Record<
+        string,
+        unknown
+      >;
+      tx.writeOrThrow({ ...address, path: [] }, {
+        ...envelope,
+        value: { protected: "kept", messages: ["new"] },
+      });
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...address, path: [] },
+        schema,
+      });
+      tx.prepareCfc();
+
+      expect((await tx.commit()).error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps deletion authorization after a later ancestor write", async () => {
+    const { runtime, storageManager } = createRuntime("disabled");
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          a: {
+            type: "object",
+            properties: {
+              x: {
+                type: "string",
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+              y: { type: "number" },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const seed = runtime.edit();
+      const seeded = runtime.getCell(
+        signer.did(),
+        "cfc-delete-before-ancestor-write",
+        undefined,
+        seed,
+      );
+      const storedSchema = internSchema(schema, true);
+      seed.writeOrThrow({
+        ...seeded.getAsNormalizedFullLink(),
+        path: [],
+      }, {
+        value: { a: { x: "protected", y: 0 } },
+        cfc: {
+          version: 1,
+          schemaHash: storedSchema.taggedHashString,
+          labelMap: {
+            version: 1,
+            entries: [{ path: ["a", "x"], label: {} }],
+          },
+        },
+      });
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: `cid:${storedSchema.taggedHashString}`,
+        path: [],
+      }, { value: storedSchema.schema });
+      expect((await seed.commit()).error).toBeUndefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-delete-before-ancestor-write",
+        schema,
+        tx,
+      );
+      const address = cell.getAsNormalizedFullLink();
+      tx.writeOrThrow(
+        { ...address, path: ["value", "a", "x"] },
+        undefined,
+        { delete: true },
+      );
+      tx.writeOrThrow(
+        { ...address, path: ["value", "a"] },
+        { y: 1 },
+      );
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...address, path: [] },
+        schema,
+      });
+      tx.prepareCfc();
+
+      expect((await tx.commit()).error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity at /a/x",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not apply a true-branch authorization to deleting false", async () => {
+    const { runtime, storageManager } = createRuntime("disabled");
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          out: {
+            anyOf: [
+              {
+                const: true,
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+              { const: false },
+            ],
+          },
+        },
+      } as const satisfies JSONSchema;
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "cfc-delete-nonmatching-branch",
+        schema,
+        seed,
+      ).set({ out: false });
+      seed.prepareCfc();
+      expect((await seed.commit()).error).toBeUndefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-delete-nonmatching-branch",
+        schema,
+        tx,
+      );
+      tx.writeOrThrow(
+        { ...cell.getAsNormalizedFullLink(), path: ["value", "out"] },
+        undefined,
+        { delete: true },
+      );
+      tx.prepareCfc();
+
+      expect((await tx.commit()).error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not apply a true-branch authorization to deleting false at the root", async () => {
+    const { runtime, storageManager } = createRuntime("disabled");
+    try {
+      const schema = {
+        anyOf: [
+          {
+            const: true,
+            ifc: { writeAuthorizedBy: ["trusted-handler"] },
+          },
+          { const: false },
+        ],
+      } as const satisfies JSONSchema;
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "cfc-delete-root-nonmatching-branch",
+        schema,
+        seed,
+      ).set(false);
+      seed.prepareCfc();
+      expect((await seed.commit()).error).toBeUndefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-delete-root-nonmatching-branch",
+        schema,
+        tx,
+      );
+      tx.writeOrThrow(
+        { ...cell.getAsNormalizedFullLink(), path: ["value"] },
+        undefined,
+        { delete: true },
+      );
+      tx.prepareCfc();
+
+      expect((await tx.commit()).error).toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();

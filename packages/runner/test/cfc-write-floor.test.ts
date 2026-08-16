@@ -46,6 +46,27 @@ const MINT_SCHEMA = {
   required: ["out"],
 } as const satisfies JSONSchema;
 
+const BRANCH_SEPARATED_FLOOR_SCHEMA = {
+  type: "object",
+  properties: {
+    out: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["mint"],
+          ifc: { addIntegrity: [ADMIN_ATOM] },
+        },
+        {
+          type: "string",
+          enum: ["protected"],
+          ifc: { requiredIntegrity: [ADMIN_ATOM] },
+        },
+      ],
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
 const makeRuntime = (opts: {
   storageManager: ReturnType<typeof StorageManager.emulate>;
   cfcWriteFloor?: CfcWriteFloorMode;
@@ -104,6 +125,34 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       const result = await tx.commit();
       expect(String((result.error as Error | undefined)?.message)).toContain(
         "write floor failed",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects a present undefined value without floor integrity", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          out: {
+            type: "undefined",
+            ifc: { requiredIntegrity: [ADMIN_ATOM] },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "wf-undefined", schema, tx).set({
+        out: undefined,
+      });
+      tx.prepareCfc();
+
+      expect((await tx.commit()).error?.message).toContain(
+        "write floor failed at /out",
       );
     } finally {
       await runtime.dispose();
@@ -204,6 +253,211 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not credit a mint from a nonmatching sibling branch", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      const tx = runtime.edit();
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-branch-separated-sink",
+        BRANCH_SEPARATED_FLOOR_SCHEMA,
+        tx,
+      );
+      sink.set({ out: "protected" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(String((result.error as Error | undefined)?.message)).toContain(
+        "write floor failed",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("enforces a floor in an overlapping oneOf branch", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          out: {
+            oneOf: [
+              {
+                type: "number",
+                ifc: { requiredIntegrity: [ADMIN_ATOM] },
+              },
+              { type: "integer" },
+            ],
+          },
+        },
+        required: ["out"],
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "wf-overlapping-one-of", schema, tx).set({
+        out: 1,
+      });
+      tx.prepareCfc();
+      expect(String((await tx.commit()).error?.message)).toContain(
+        "write floor failed",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not satisfy an exact-copy floor from a nonmatching source", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          source: {
+            anyOf: [
+              { const: true, ifc: { integrity: [ADMIN_ATOM] } },
+              { const: false },
+            ],
+          },
+          copy: {
+            type: "boolean",
+            ifc: {
+              exactCopyOf: ["source"],
+              requiredIntegrity: [ADMIN_ATOM],
+            },
+          },
+        },
+        required: ["source", "copy"],
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "wf-conditional-copy", schema, tx).set({
+        source: false,
+        copy: false,
+      });
+      tx.prepareCfc();
+      expect(String((await tx.commit()).error?.message)).toContain(
+        "write floor failed",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not flatten stored branch mints for a later link write", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "off" });
+    try {
+      await seedLabeledDoc(runtime, "wf-stored-branch-src", false, {});
+      const schema = {
+        type: "object",
+        properties: {
+          out: {
+            anyOf: [
+              {
+                const: true,
+                ifc: { addIntegrity: [ADMIN_ATOM] },
+              },
+              { const: false },
+            ],
+            ifc: { requiredIntegrity: [ADMIN_ATOM] },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "wf-stored-branch-sink",
+        schema,
+        seed,
+      ).set({ out: false });
+      seed.prepareCfc();
+      expect((await seed.commit()).error).toBeUndefined();
+
+      const tx = runtime.edit();
+      tx.setCfcWriteFloorMode("enforce");
+      const source = runtime.getCell(
+        signer.did(),
+        "wf-stored-branch-src",
+        undefined,
+        tx,
+      );
+      runtime.getCell(
+        signer.did(),
+        "wf-stored-branch-sink",
+        undefined,
+        tx,
+      ).key("out").set(source as unknown as boolean);
+      tx.prepareCfc();
+
+      expect((await tx.commit()).error?.message).toContain(
+        "write floor failed at /out",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("uses current same-transaction source integrity for a link", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "off" });
+    try {
+      const sourceSchema = {
+        anyOf: [
+          { const: true, ifc: { addIntegrity: [ADMIN_ATOM] } },
+          { const: false },
+        ],
+      } as const satisfies JSONSchema;
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "wf-pending-source",
+        sourceSchema,
+        seed,
+      ).set(true);
+      seed.prepareCfc();
+      expect((await seed.commit()).error).toBeUndefined();
+
+      const tx = runtime.edit();
+      tx.setCfcWriteFloorMode("enforce");
+      const source = runtime.getCell(
+        signer.did(),
+        "wf-pending-source",
+        sourceSchema,
+        tx,
+      );
+      source.set(false);
+      const sinkSchema = {
+        type: "object",
+        properties: {
+          out: {
+            type: "boolean",
+            ifc: { requiredIntegrity: [ADMIN_ATOM] },
+          },
+        },
+        required: ["out"],
+      } as const satisfies JSONSchema;
+      runtime.getCell(
+        signer.did(),
+        "wf-pending-source-sink",
+        sinkSchema,
+        tx,
+      ).set({ out: source as unknown as boolean });
+      tx.prepareCfc();
+
+      expect((await tx.commit()).error?.message).toContain(
+        "write floor failed at /out",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -380,6 +634,50 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not treat an array length update as a separate floored value", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      await seedLabeledDoc(runtime, "wf-array-link-src", "endorsed-value", {
+        integrity: [ADMIN_ATOM],
+      });
+      const seed = runtime.edit();
+      runtime.getCell<string[]>(
+        signer.did(),
+        "wf-array-link-sink",
+        undefined,
+        seed,
+      ).set([]);
+      expect((await seed.commit()).error).toBeUndefined();
+
+      const schema = {
+        type: "array",
+        items: { type: "string" },
+        ifc: { requiredIntegrity: [ADMIN_ATOM] },
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "wf-array-link-src",
+        undefined,
+        tx,
+      );
+      const sink = runtime.getCell<string[]>(
+        signer.did(),
+        "wf-array-link-sink",
+        schema,
+        tx,
+      );
+      sink.push(source as unknown as string);
+      tx.prepareCfc();
+
+      expect((await tx.commit()).error).toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -799,6 +1097,54 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       ).set({ out: src as unknown as { secret?: string } });
       tx.prepareCfc();
       expect((await tx.commit()).error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("requires integrity for present undefined behind an ancestor link", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      await seedLabeledDoc(
+        runtime,
+        "wf-ancestor-undefined-src",
+        { secret: undefined },
+        {},
+      );
+      const schema = {
+        type: "object",
+        properties: {
+          out: {
+            type: "object",
+            properties: {
+              secret: {
+                type: "undefined",
+                ifc: { requiredIntegrity: [ADMIN_ATOM] },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "wf-ancestor-undefined-src",
+        undefined,
+        tx,
+      );
+      runtime.getCell(
+        signer.did(),
+        "wf-ancestor-undefined-sink",
+        schema,
+        tx,
+      ).set({ out: source as unknown as { secret: undefined } });
+      tx.prepareCfc();
+
+      expect((await tx.commit()).error?.message).toContain(
+        "write floor failed at /out/secret",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

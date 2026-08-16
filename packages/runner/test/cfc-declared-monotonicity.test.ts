@@ -91,6 +91,208 @@ const SCHEMA_MINT_XY = {
   required: ["out"],
 } as const satisfies JSONSchema;
 
+const SCHEMA_CONDITIONAL_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      anyOf: [
+        {
+          type: "boolean",
+          enum: [true],
+          ifc: { addIntegrity: [ATOM_X] },
+        },
+        { type: "boolean", enum: [false] },
+      ],
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_SIBLING_CONDITIONAL_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { const: "trusted" },
+            value: { type: "string", ifc: { addIntegrity: [ATOM_X] } },
+          },
+          required: ["kind", "value"],
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "plain" },
+            value: { type: "string" },
+          },
+          required: ["kind", "value"],
+        },
+      ],
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_ARRAY_CONDITIONAL_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      type: "array",
+      items: SCHEMA_CONDITIONAL_MINT_X.properties.out,
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_ARRAY_CONDITIONAL_INTEGRITY_X = {
+  type: "object",
+  properties: {
+    out: {
+      type: "array",
+      items: {
+        anyOf: [
+          { const: true, ifc: { integrity: [ATOM_X] } },
+          { const: false },
+        ],
+      },
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_CONSTRAINED_CONDITIONAL_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      anyOf: [
+        { type: "number", minimum: 10, ifc: { addIntegrity: [ATOM_X] } },
+        { type: "number", maximum: 9 },
+      ],
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_OVERLAPPING_ONE_OF_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      oneOf: [
+        { type: "number", ifc: { addIntegrity: [ATOM_X] } },
+        { type: "integer" },
+      ],
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_REJECTED_ALL_OF_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      allOf: [
+        { type: "number", ifc: { addIntegrity: [ATOM_X] } },
+        { minimum: 10 },
+      ],
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_UNDEFINED_CONDITIONAL_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      anyOf: [
+        { type: "string", ifc: { addIntegrity: [ATOM_X] } },
+        { type: "boolean" },
+        { type: "undefined", ifc: { addIntegrity: [ATOM_Y] } },
+      ],
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_LINKED_SIBLING_CONDITIONAL_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { const: "trusted" },
+            payload: {},
+          },
+          required: ["kind", "payload"],
+          ifc: { addIntegrity: [ATOM_X] },
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "plain" },
+            payload: {},
+          },
+          required: ["kind", "payload"],
+        },
+      ],
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_CONDITIONAL_EXACT_COPY_X = {
+  type: "object",
+  properties: {
+    source: {
+      anyOf: [
+        { const: true, ifc: { integrity: [ATOM_X] } },
+        { const: false },
+      ],
+    },
+    copy: {
+      type: "boolean",
+      ifc: { exactCopyOf: ["source"] },
+    },
+  },
+  required: ["source", "copy"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_UNRESOLVED_CONDITIONAL_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      anyOf: [
+        {
+          $ref: "#/$defs/Missing",
+          ifc: { addIntegrity: [ATOM_X] },
+        },
+        { type: "string" },
+      ],
+    },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_CYCLIC_CONDITIONAL_MINT_X = {
+  type: "object",
+  properties: {
+    out: {
+      anyOf: [
+        {
+          $ref: "#/$defs/Loop",
+          ifc: { addIntegrity: [ATOM_X] },
+        },
+        { type: "string" },
+      ],
+    },
+  },
+  required: ["out"],
+  $defs: { Loop: { $ref: "#/$defs/Loop" } },
+} as const satisfies JSONSchema;
+
 const SCHEMA_INTEGRITY_X = {
   type: "object",
   properties: {
@@ -219,6 +421,31 @@ const rewriteStoredEntries = async (
 };
 
 describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
+  it("rejects IFC under an unsupported conditional applicator", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager });
+    try {
+      const schema = {
+        type: "object",
+        properties: { out: { type: "string" } },
+        required: ["out"],
+        if: { properties: { out: { const: "trusted" } } },
+        then: { ifc: { writeAuthorizedBy: ["trusted-handler"] } },
+      } as unknown as JSONSchema;
+      const result = await commitWrite(
+        runtime,
+        "unsupported-conditional-policy",
+        schema,
+        { out: "plain" },
+      );
+
+      expect(result.error).toBeDefined();
+    } finally {
+      await runtime.dispose({ closeStorage: false });
+      await storageManager.close();
+    }
+  });
+
   // ------------------------------------------------------------------
   // Characterization: what the re-mint does TODAY, with no gate dial.
   // These pin the `off`/`observe` byte-compat contract.
@@ -999,6 +1226,613 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
   // The gate under enforce: §8.12.1 tightenings pass.
   // ------------------------------------------------------------------
   describe("enforce: monotone tightenings pass", () => {
+    it("stores value-conditional integrity mints as per-write evidence", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const first = await commitWrite(
+          runtime,
+          "dm-conditional-mint",
+          SCHEMA_CONDITIONAL_MINT_X,
+          { out: false },
+        );
+        expect(first.error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, first.docId).some((entry) =>
+            entry.path.join("/") === "out" &&
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+        const second = await commitWrite(
+          runtime,
+          "dm-conditional-mint",
+          SCHEMA_CONDITIONAL_MINT_X,
+          { out: true },
+        );
+        expect(second.error).toBeUndefined();
+        const entries = persistedEntriesFor(storageManager, second.docId)
+          .filter((entry) => entry.path.join("/") === "out");
+        expect(entries).toContainEqual({
+          path: ["out"],
+          label: { integrity: [ATOM_X] },
+          origin: "derived",
+        });
+        expect(
+          entries.some((entry) =>
+            entry.origin === "declared" &&
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("uses sibling fields to select a conditional integrity mint", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        for (
+          const [name, out] of [
+            ["missing", { value: "missing-kind" }],
+            ["undefined", { kind: undefined, value: "undefined-kind" }],
+          ] as const
+        ) {
+          const unmatched = await commitWrite(
+            runtime,
+            `dm-sibling-conditional-mint-${name}`,
+            SCHEMA_SIBLING_CONDITIONAL_MINT_X,
+            { out },
+          );
+          expect(unmatched.error).toBeUndefined();
+          expect(
+            persistedEntriesFor(storageManager, unmatched.docId).some(
+              (entry) => entry.label.integrity?.includes(ATOM_X),
+            ),
+          ).toBe(false);
+        }
+
+        const first = await commitWrite(
+          runtime,
+          "dm-sibling-conditional-mint",
+          SCHEMA_SIBLING_CONDITIONAL_MINT_X,
+          { out: { kind: "plain", value: "first" } },
+        );
+        expect(first.error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, first.docId).some((entry) =>
+            entry.path.join("/") === "out/value" &&
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+
+        const second = await commitWrite(
+          runtime,
+          "dm-sibling-conditional-mint",
+          SCHEMA_SIBLING_CONDITIONAL_MINT_X,
+          { out: { kind: "trusted", value: "second" } },
+        );
+        expect(second.error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, second.docId),
+        ).toContainEqual({
+          path: ["out", "value"],
+          label: { integrity: [ATOM_X] },
+          origin: "derived",
+        });
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("mints only matching items in a mixed conditional array", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const result = await commitWrite(
+          runtime,
+          "dm-array-conditional-mint",
+          SCHEMA_ARRAY_CONDITIONAL_MINT_X,
+          { out: [true, false] },
+        );
+        expect(result.error).toBeUndefined();
+        const entries = persistedEntriesFor(storageManager, result.docId);
+        expect(entries).toContainEqual({
+          path: ["out", "0"],
+          label: { integrity: [ATOM_X] },
+          origin: "derived",
+        });
+        expect(
+          entries.some((entry) =>
+            entry.path.join("/") === "out/1" &&
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("stores conditional integrity only on matching array items", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const result = await commitWrite(
+          runtime,
+          "dm-array-conditional-integrity",
+          SCHEMA_ARRAY_CONDITIONAL_INTEGRITY_X,
+          { out: [true, false] },
+        );
+        expect(result.error).toBeUndefined();
+        const entries = persistedEntriesFor(storageManager, result.docId);
+        expect(entries).toContainEqual({
+          path: ["out", "0"],
+          label: { integrity: [ATOM_X] },
+          origin: "derived",
+        });
+        expect(
+          entries.some((entry) =>
+            (entry.path.join("/") === "out/*" ||
+              entry.path.join("/") === "out/1") &&
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("does not mint from a branch whose constraints reject the value", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const result = await commitWrite(
+          runtime,
+          "dm-constrained-conditional-mint",
+          SCHEMA_CONSTRAINED_CONDITIONAL_MINT_X,
+          { out: 5 },
+        );
+        expect(result.error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, result.docId).some((entry) =>
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("does not mint from an overlapping oneOf branch", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const result = await commitWrite(
+          runtime,
+          "dm-overlapping-one-of-mint",
+          SCHEMA_OVERLAPPING_ONE_OF_MINT_X,
+          { out: 1 },
+        );
+        expect(result.error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, result.docId).some((entry) =>
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("does not mint from an allOf whose sibling rejects the value", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const result = await commitWrite(
+          runtime,
+          "dm-rejected-all-of-mint",
+          SCHEMA_REJECTED_ALL_OF_MINT_X,
+          { out: 5 },
+        );
+        expect(result.error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, result.docId).some((entry) =>
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("does not mint a string branch while overwriting with undefined", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const first = await commitWrite(
+          runtime,
+          "dm-undefined-conditional-mint",
+          SCHEMA_UNDEFINED_CONDITIONAL_MINT_X,
+          { out: false },
+        );
+        expect(first.error).toBeUndefined();
+        const second = await commitWrite(
+          runtime,
+          "dm-undefined-conditional-mint",
+          SCHEMA_UNDEFINED_CONDITIONAL_MINT_X,
+          { out: undefined },
+        );
+        expect(second.error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, second.docId).some((entry) =>
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+        expect(persistedEntriesFor(storageManager, second.docId))
+          .toContainEqual(
+            {
+              path: ["out"],
+              label: { integrity: [ATOM_Y] },
+              origin: "derived",
+            },
+          );
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("does not mint a conditional branch while deleting its value", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const schema = {
+          type: "object",
+          properties: {
+            out: {
+              anyOf: [
+                { const: true, ifc: { addIntegrity: [ATOM_X] } },
+                { const: false },
+              ],
+            },
+          },
+          required: [],
+        } as const satisfies JSONSchema;
+        const first = await commitWrite(
+          runtime,
+          "dm-deleted-conditional-mint",
+          schema,
+          { out: false },
+        );
+        expect(first.error).toBeUndefined();
+
+        const tx = runtime.edit();
+        runtime.getCell(
+          signer.did(),
+          "dm-deleted-conditional-mint",
+          schema,
+          tx,
+        );
+        tx.writeOrThrow(
+          {
+            space: signer.did(),
+            id: first.docId as URI,
+            type: "application/json",
+            path: ["value", "out"],
+          },
+          undefined,
+          { delete: true },
+        );
+        tx.prepareCfc();
+        expect((await tx.commit()).error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, first.docId).some((entry) =>
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("does not retain a constrained direct mint after deletion", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const schema = {
+          type: "object",
+          properties: {
+            out: {
+              const: true,
+              ifc: { integrity: [ATOM_X], addIntegrity: [ATOM_X] },
+            },
+          },
+          required: [],
+        } as const satisfies JSONSchema;
+        const first = await commitWrite(
+          runtime,
+          "dm-deleted-direct-mint",
+          schema,
+          { out: true },
+        );
+        expect(first.error).toBeUndefined();
+
+        const tx = runtime.edit();
+        runtime.getCell(signer.did(), "dm-deleted-direct-mint", schema, tx);
+        tx.recordCfcWritePolicyInput({
+          kind: "schema",
+          target: {
+            space: signer.did(),
+            id: first.docId,
+            scope: "space",
+            path: [],
+          },
+          schema,
+        });
+        tx.writeOrThrow(
+          {
+            space: signer.did(),
+            id: first.docId as URI,
+            type: "application/json",
+            path: ["value", "out"],
+          },
+          undefined,
+          { delete: true },
+        );
+        tx.prepareCfc();
+        expect((await tx.commit()).error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, first.docId).some((entry) =>
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("uses the last overlapping write when deciding a conditional mint", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const schema = {
+          type: "object",
+          properties: {
+            out: {
+              type: "object",
+              properties: {
+                x: {
+                  anyOf: [
+                    { const: "trusted", ifc: { addIntegrity: [ATOM_X] } },
+                    { const: "plain" },
+                  ],
+                },
+              },
+              required: [],
+            },
+          },
+          required: [],
+        } as const satisfies JSONSchema;
+        const first = await commitWrite(
+          runtime,
+          "dm-overlapping-conditional-mint",
+          schema,
+          { out: { x: "plain" } },
+        );
+        expect(first.error).toBeUndefined();
+
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "dm-overlapping-conditional-mint",
+          schema,
+          tx,
+        );
+        cell.key("out").key("x").set("trusted");
+        tx.writeValueOrThrow({
+          space: signer.did(),
+          id: first.docId as URI,
+          scope: "space",
+          path: ["out"],
+        }, { x: "plain" });
+        tx.prepareCfc();
+        expect((await tx.commit()).error).toBeUndefined();
+        expect(cell.get()).toEqual({ out: { x: "plain" } });
+        expect(
+          persistedEntriesFor(storageManager, first.docId).some((entry) =>
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("uses a later leaf write after the first write creates its parents", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const schema = {
+          type: "object",
+          properties: {
+            out: {
+              type: "object",
+              properties: {
+                x: {
+                  anyOf: [
+                    { const: "trusted", ifc: { addIntegrity: [ATOM_X] } },
+                    { const: "plain" },
+                  ],
+                },
+              },
+            },
+          },
+        } as const satisfies JSONSchema;
+        const first = await commitWrite(
+          runtime,
+          "dm-materialized-parent-conditional-mint",
+          schema,
+          {},
+        );
+        expect(first.error).toBeUndefined();
+
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "dm-materialized-parent-conditional-mint",
+          schema,
+          tx,
+        );
+        cell.key("out").key("x").set("trusted");
+        cell.key("out").key("x").set("plain");
+        tx.prepareCfc();
+        expect((await tx.commit()).error).toBeUndefined();
+        expect(cell.get()).toEqual({ out: { x: "plain" } });
+        expect(
+          persistedEntriesFor(storageManager, first.docId).some((entry) =>
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("keeps an unrelated link out of a rejected minting branch", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const payload = runtime.getCell(
+          signer.did(),
+          "dm-linked-sibling-payload",
+          { type: "string" },
+        ).getAsNormalizedFullLink();
+        const result = await commitWrite(
+          runtime,
+          "dm-linked-sibling-conditional-mint",
+          SCHEMA_LINKED_SIBLING_CONDITIONAL_MINT_X,
+          { out: { kind: "plain", payload } },
+        );
+        expect(result.error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, result.docId).some((entry) =>
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("does not copy integrity from a nonmatching source branch", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const result = await commitWrite(
+          runtime,
+          "dm-conditional-exact-copy",
+          SCHEMA_CONDITIONAL_EXACT_COPY_X,
+          { source: false, copy: false },
+        );
+        expect(result.error).toBeUndefined();
+        expect(
+          persistedEntriesFor(storageManager, result.docId).some((entry) =>
+            entry.path.join("/") === "copy" &&
+            entry.label.integrity?.includes(ATOM_X)
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
+    it("does not mint integrity from an unresolved branch condition", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        for (
+          const [name, schema] of [
+            ["missing", SCHEMA_UNRESOLVED_CONDITIONAL_MINT_X],
+            ["cycle", SCHEMA_CYCLIC_CONDITIONAL_MINT_X],
+          ] as const
+        ) {
+          const result = await commitWrite(
+            runtime,
+            `dm-unresolved-conditional-mint-${name}`,
+            schema,
+            { out: "plain" },
+          );
+          expect(result.error).toBeUndefined();
+          expect(
+            persistedEntriesFor(storageManager, result.docId).some((entry) =>
+              entry.label.integrity?.includes(ATOM_X)
+            ),
+          ).toBe(false);
+        }
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
+    });
+
     it("an added clause passes and persists", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = makeRuntime({

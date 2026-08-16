@@ -580,6 +580,7 @@ Deno.test("memory v2 transactions preserve the original previousValue across rep
         path: ["value", "count"],
       },
       value: 2,
+      present: true,
       previousValue: 0,
       previousPresent: true,
     }]);
@@ -645,6 +646,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
           path: ["value", "profile", "name"],
         },
         value: "Grace",
+        present: true,
         previousValue: "Ada",
         previousPresent: true,
       },
@@ -656,6 +658,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
           path: ["value", "profile", "title"],
         },
         value: "Professor",
+        present: true,
         previousValue: "Dr",
         previousPresent: true,
       },

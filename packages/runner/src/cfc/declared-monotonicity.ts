@@ -98,16 +98,14 @@ export const collectDeclaredMonotonicityViolations = (input: {
     ? input.exemption
     : undefined;
   // Both sides are compared as the per-path JOIN of same-path declared
-  // entries, not entry-by-entry (codex/cubic review on this PR). The walk
-  // mints at most one declared entry per path (divergent-branch ifc is
-  // rejected at merge time), but STORED metadata is data — peers/hydration
-  // can present duplicates — and reads join same-component entries at one
-  // path. Joining means: the stored clause set is the union across the
-  // group (all clauses apply — a stored clause survives if ANY proposed
-  // entry witnesses it), and the stored integrity CLAIM is the union of
-  // atoms any same-path declared entry already claimed — keeping such an
-  // atom is a shrink of the claim, not an addition, so proposed [X] against
-  // stored entries [X] and [Y] is monotone.
+  // entries, not entry-by-entry. A value-conditional `addIntegrity` mint is
+  // stored as derived evidence, so mutually exclusive schema branches do not
+  // create competing declared entries here. STORED metadata is data:
+  // peers and hydration can still present duplicates, and reads join
+  // same-component entries at one path. Joining means the stored clause set
+  // is the union across the group, and the stored integrity claim is the union
+  // of atoms that any same-path declared entry already claimed. Keeping one of
+  // those atoms is a shrink of the claim rather than an addition.
   const storedByPath = new Map<
     string,
     { path: readonly string[]; entries: LabelMapEntry[] }

@@ -93,7 +93,10 @@ import {
   storedCfcMetadataAppliesToPath,
 } from "./cfc/metadata.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
-import { cfcSchemaEntries } from "./cfc/schema-label-view.ts";
+import {
+  cfcPolicyPlacementIssue,
+  cfcSchemaEntries,
+} from "./cfc/schema-label-view.ts";
 import { addRootConfidentiality } from "./cfc/schema-merge.ts";
 import { spaceRootConfidentiality } from "./cfc/space-root-policy.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
@@ -218,6 +221,20 @@ const recordSchemaWritePolicyInput = (
   schema: JSONSchema | undefined,
   schemaRole?: "output",
 ): void => {
+  if (schema !== undefined && cfcPolicyPlacementIssue(schema) !== undefined) {
+    tx.recordCfcWritePolicyInput({
+      kind: "schema",
+      target: {
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+        path: [...link.path],
+      },
+      schema,
+      ...(schemaRole !== undefined && { schemaRole }),
+    });
+    return;
+  }
   const resolvedSchema = resolveSchema(schema) ??
     storedSchemaForWritePolicyInput(tx, link);
   if (resolvedSchema === undefined) {
@@ -269,13 +286,20 @@ export const recordRelevantSchemaWritePolicyInput = (
   schema: JSONSchema | undefined,
   schemaRole?: "output",
 ): void => {
+  const placementIssue = schema === undefined
+    ? undefined
+    : cfcPolicyPlacementIssue(schema);
   const resolvedSchema = resolveSchema(schema);
-  const schemaCarriesIfc = schemaHasIfc(resolvedSchema);
-  const schemaCarriesPolicy = resolvedSchema !== undefined &&
-    cfcSchemaEntries(resolvedSchema).some((entry) =>
-      isObjectOrArray(entry.schema) && isObjectOrArray(entry.schema.ifc) &&
-      Object.keys(entry.schema.ifc).some((key) => key !== "flowPrecisionClaim")
-    );
+  const schemaCarriesIfc = placementIssue !== undefined ||
+    schemaHasIfc(resolvedSchema);
+  const schemaCarriesPolicy = placementIssue !== undefined ||
+    (resolvedSchema !== undefined &&
+      cfcSchemaEntries(resolvedSchema).some((entry) =>
+        isObjectOrArray(entry.schema) && isObjectOrArray(entry.schema.ifc) &&
+        Object.keys(entry.schema.ifc).some((key) =>
+          key !== "flowPrecisionClaim"
+        )
+      ));
   const state = tx.getCfcState();
   const rootConfidentiality = spaceRootConfidentiality(
     state.enforcementMode,
@@ -303,7 +327,9 @@ export const recordRelevantSchemaWritePolicyInput = (
   recordSchemaWritePolicyInput(
     tx,
     link,
-    schemaCarriesPolicy && rootConfidentiality !== undefined
+    placementIssue !== undefined
+      ? schema
+      : schemaCarriesPolicy && rootConfidentiality !== undefined
       ? addRootConfidentiality(resolvedSchema, rootConfidentiality)
       : schemaCarriesIfc
       ? resolvedSchema

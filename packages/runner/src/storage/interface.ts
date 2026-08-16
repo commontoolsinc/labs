@@ -1903,6 +1903,12 @@ export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
   value?: FabricValue;
   previousValue?: FabricValue;
+  /** Activity-clock position of the first write represented by this detail. */
+  firstJournalIndex?: number;
+  /** Activity-clock position of the latest write represented by this detail. */
+  lastJournalIndex?: number;
+  /** Current slot presence after the latest write at `address.path`. */
+  present?: boolean;
   /**
    * Pre-transaction slot presence at `address.path` — distinguishes an
    * absent slot from a present slot holding `undefined`, which

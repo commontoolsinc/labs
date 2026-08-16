@@ -589,7 +589,11 @@ describe("transaction inspection", () => {
         path: ["value", "count"],
       }, 3);
 
-      assertEquals([...getTransactionWriteDetails(tx, space)], [{
+      const orderedDetails = [...getTransactionWriteDetails(tx, space)];
+      assertEquals(orderedDetails[0].firstJournalIndex, 0);
+      assertEquals(orderedDetails[0].lastJournalIndex, 1);
+
+      assertEquals(orderedDetails, [{
         address: {
           space,
           scope: "space",
@@ -597,6 +601,7 @@ describe("transaction inspection", () => {
           path: ["value", "count"],
         },
         value: 3,
+        present: true,
         previousValue: 1,
         previousPresent: true,
       }]);
@@ -655,12 +660,14 @@ describe("transaction inspection", () => {
           {
             address: { space, scope: "space", id, path: ["value", "a"] },
             value: 10,
+            present: true,
             previousValue: 1,
             previousPresent: true,
           },
           {
             address: { space, scope: "space", id, path: ["value", "b"] },
             value: 20,
+            present: true,
             previousValue: 2, // <- regression: was 20 (post-mutation) before fix
             previousPresent: true,
           },
@@ -723,6 +730,7 @@ describe("transaction inspection", () => {
         assertEquals(detailByPath.get("value/a"), {
           address: { space, scope: "space", id, path: ["value", "a"] },
           value: 10,
+          present: true,
           previousValue: 1,
           previousPresent: true,
         });
@@ -733,6 +741,7 @@ describe("transaction inspection", () => {
         assertEquals(detailByPath.get("value"), {
           address: { space, scope: "space", id, path: ["value"] },
           value: { a: 10, new: { nested: "hello" } },
+          present: true,
           previousValue: { a: 10 },
           previousPresent: true,
         });

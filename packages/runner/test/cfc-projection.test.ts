@@ -271,6 +271,55 @@ describe("CFC projection claims", () => {
     }
   });
 
+  it("does not carry a matching sibling item's conditional label", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-projection-mixed-array",
+        {
+          type: "object",
+          properties: {
+            values: {
+              type: "array",
+              items: {
+                anyOf: [
+                  {
+                    const: true,
+                    ifc: { confidentiality: ["secret"] },
+                  },
+                  { const: false },
+                ],
+              },
+            },
+            projected: {
+              type: "boolean",
+              ifc: { projection: { from: "/values", path: "/1" } },
+            },
+          },
+          required: ["values", "projected"],
+        },
+        tx,
+      );
+      cell.set({ values: [true, false], projected: false });
+      tx.prepareCfc();
+      expect((await tx.commit()).error).toBeUndefined();
+
+      const entries = readPersistedEntries(
+        storageManager,
+        parseLink(cell.getAsLink()).id!,
+      );
+      const projected = entries?.find((entry) =>
+        entry.path.join("/") === "projected"
+      );
+      expect(projected?.label.confidentiality ?? []).not.toContain("secret");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("fails closed for a projection into a normalized (object) array element", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

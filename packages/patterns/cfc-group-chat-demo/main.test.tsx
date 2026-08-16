@@ -262,6 +262,13 @@ export default pattern(() => {
   const assert_bob_cannot_add_room_after_lockdown = assert(() =>
     roomsValue(rooms).length === 1
   );
+  const assert_everyone_reenabled = assert(() =>
+    chat.currentUserIsAdmin === true &&
+    bobChat.currentUserIsAdmin === true &&
+    chatAdminRolesValue(adminRegistry).length === 1 &&
+    (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
+      true
+  );
   const assert_bob_admin_enabled = assert(() =>
     bobChat.currentUserIsAdmin === true &&
     bobChat.currentUserCanManageAdmins === true &&
@@ -389,6 +396,14 @@ export default pattern(() => {
       { action: action_set_room_bob },
       { action: bobChat.addTrustedRoom, trustedUi: roomGesture },
       { assertion: assert_bob_cannot_add_room_after_lockdown },
+      {
+        action: chat.toggleEveryoneAdmin,
+        event: { everyoneIsAdmin: true },
+        trustedUi: adminGesture,
+      },
+      { assertion: assert_everyone_reenabled },
+      { action: bobChat.addTrustedRoom, trustedUi: roomGesture },
+      { assertion: assert_bob_can_add_room },
       // Granting Bob admin writes the RequiresIntegrity admins list. The CFC
       // requiredIntegrity over-rejection that used to block this (audit S7 —
       // the grant's provenance-only participant-row reads quantified into the

@@ -1,21 +1,33 @@
 import type { JSONValue } from "@commonfabric/api";
 import type { CfcAtom } from "@commonfabric/api/cfc";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   isObjectNotArray,
   isObjectOrArray,
-  isReadonlyObjectOrArray,
+  isPlainObject,
 } from "@commonfabric/utils/types";
 
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
-import { forEachSubschema, mapSubschemas } from "../schema-walk.ts";
+import {
+  forEachSubschema,
+  isSubschema,
+  mapSubschemas,
+  type SubschemaKeyword,
+} from "../schema-walk.ts";
 import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import {
   cfcSchemaChildRoot,
+  findCfcSchemaRefs,
   namespaceLocalDefinitionScope,
+  pruneCfcSchemaDefinitions,
+  resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefsOrThrow,
   selectReferencedCfcSchemaDefs,
 } from "./schema-refs.ts";
@@ -360,33 +372,401 @@ const mergeIfc = (
   return merged as JSONSchemaObj["ifc"];
 };
 
-// `$defs` bodies were part of this walk before the shared-walker move, so keep
-// descending them (`includeDefs`). This walk does not resolve `$ref`, so a
-// definition referenced but not inlined is only seen through `$defs`.
-const branchContainsIfc = (schema: JSONSchema): boolean => {
+interface BranchIfcVisit {
+  readonly schema: object;
+  readonly root: object;
+  readonly parent?: BranchIfcVisit;
+}
+
+const resolvedSchemaTreeContainsIfc = (
+  schema: JSONSchema,
+  inheritedRoot: JSONSchema,
+  active?: BranchIfcVisit,
+): boolean => {
   if (!isObjectOrArray(schema)) return false;
-  if ((schema as JSONSchemaObj).ifc !== undefined) return true;
-  return forEachSubschema(schema, (child) => branchContainsIfc(child), {
-    includeDefs: true,
-  });
+  const root = cfcSchemaChildRoot(schema, inheritedRoot);
+  const rootKey = isObjectOrArray(root) ? root : schema;
+  for (let cursor = active; cursor !== undefined; cursor = cursor.parent) {
+    if (cursor.schema === schema && cursor.root === rootKey) return false;
+  }
+  const nextActive = { schema, root: rootKey, parent: active };
+  const current = resolvedBranchCheckPosition(schema, inheritedRoot);
+  if (!isObjectOrArray(current.schema)) return false;
+  if ((current.schema as JSONSchemaObj).ifc !== undefined) return true;
+  return forEachSubschema(
+    current.schema,
+    (child) => resolvedSchemaTreeContainsIfc(child, current.root, nextActive),
+    { includeUnused: true },
+  );
+};
+
+const correspondingSubschema = (
+  schema: JSONSchema | undefined,
+  keyword: SubschemaKeyword,
+  key: string | undefined,
+  index: number | undefined,
+): JSONSchema | undefined => {
+  if (!isObjectOrArray(schema)) return undefined;
+  const value = schema[keyword];
+  let child: unknown;
+  if (key !== undefined) {
+    child = isObjectOrArray(value)
+      ? (value as Readonly<Record<string, unknown>>)[key]
+      : undefined;
+    if (
+      child === undefined && keyword === "properties" &&
+      isObjectOrArray(schema.additionalProperties)
+    ) {
+      child = schema.additionalProperties;
+    }
+  } else if (index !== undefined) {
+    child = Array.isArray(value) ? value[index] : undefined;
+    if (child === undefined && keyword === "prefixItems") {
+      child = schema.items;
+    }
+  } else {
+    child = value;
+  }
+  return isSubschema(child) ? child : undefined;
+};
+
+const resolvedBranchCheckPosition = (
+  schema: JSONSchema,
+  inheritedRoot: JSONSchema,
+): { schema: JSONSchema; root: JSONSchema } => {
+  const root = cfcSchemaChildRoot(schema, inheritedRoot);
+  if (!isObjectOrArray(schema) || typeof schema.$ref !== "string") {
+    return { schema, root };
+  }
+  const resolved = resolveCfcSchemaRefsOrThrow(schema, root);
+  const resolvedRoot = resolveCfcSchemaRefRoot(schema, root);
+  return {
+    schema: resolved,
+    root: cfcSchemaChildRoot(resolved, resolvedRoot),
+  };
+};
+
+interface BranchCheckVisit {
+  readonly schema: JSONSchema;
+  readonly root: JSONSchema;
+  readonly counterpart: JSONSchema;
+  readonly counterpartRoot: JSONSchema;
+  readonly parent?: BranchCheckVisit;
+}
+
+const branchComparisonValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(branchComparisonValue);
+  }
+  if (!isPlainObject(value)) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (child === undefined) continue;
+    Object.defineProperty(result, key, {
+      value: branchComparisonValue(child),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return result;
+};
+
+const branchSchemasEqual = (
+  left: JSONSchema,
+  right: JSONSchema,
+): boolean =>
+  deepEqual(
+    branchComparisonValue(pruneCfcSchemaDefinitions(left)),
+    branchComparisonValue(pruneCfcSchemaDefinitions(right)),
+  );
+
+const schemaFragmentContainsRefs = (schema: JSONSchema): boolean => {
+  const refs = new Set<string>();
+  findCfcSchemaRefs(schema, refs);
+  return refs.size > 0;
+};
+
+const BRANCH_EQUALITY_SINGLE_SUBSCHEMAS = new Set([
+  "not",
+  "items",
+  "additionalProperties",
+  "if",
+  "then",
+  "else",
+  "contains",
+  "propertyNames",
+  "contentSchema",
+]);
+const BRANCH_EQUALITY_ARRAY_SUBSCHEMAS = new Set([
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "prefixItems",
+]);
+const BRANCH_EQUALITY_RECORD_SUBSCHEMAS = new Set([
+  "properties",
+  "patternProperties",
+  "dependentSchemas",
+]);
+
+const branchSchemasEquivalent = (
+  left: JSONSchema,
+  leftRoot: JSONSchema,
+  right: JSONSchema,
+  rightRoot: JSONSchema,
+  active?: BranchCheckVisit,
+  ignoreIfc = false,
+): boolean => {
+  for (let cursor = active; cursor !== undefined; cursor = cursor.parent) {
+    if (
+      cursor.schema === left && cursor.root === leftRoot &&
+      cursor.counterpart === right && cursor.counterpartRoot === rightRoot
+    ) {
+      return true;
+    }
+  }
+  const nextActive: BranchCheckVisit = {
+    schema: left,
+    root: leftRoot,
+    counterpart: right,
+    counterpartRoot: rightRoot,
+    parent: active,
+  };
+  const resolvedLeft = resolvedBranchCheckPosition(left, leftRoot);
+  const resolvedRight = resolvedBranchCheckPosition(right, rightRoot);
+  if (
+    typeof resolvedLeft.schema === "boolean" ||
+    typeof resolvedRight.schema === "boolean"
+  ) {
+    return resolvedLeft.schema === resolvedRight.schema;
+  }
+
+  const leftObject = resolvedLeft.schema as JSONSchemaObj;
+  const rightObject = resolvedRight.schema as JSONSchemaObj;
+  const keys = new Set([
+    ...Object.keys(leftObject),
+    ...Object.keys(rightObject),
+  ]);
+  for (const key of keys) {
+    // Branch conditions measure the resolved logical value. `asCell` controls
+    // how that value is materialized and does not change the condition.
+    if (
+      key === "$defs" || key === "$ref" || key === "asCell" ||
+      key === "default" || ignoreIfc && key === "ifc"
+    ) continue;
+    const leftValue = leftObject[key as keyof JSONSchemaObj];
+    const rightValue = rightObject[key as keyof JSONSchemaObj];
+    if (leftValue === undefined || rightValue === undefined) {
+      if (leftValue !== rightValue) return false;
+      continue;
+    }
+    if (BRANCH_EQUALITY_SINGLE_SUBSCHEMAS.has(key)) {
+      if (
+        !isSubschema(leftValue) || !isSubschema(rightValue) ||
+        !branchSchemasEquivalent(
+          leftValue,
+          resolvedLeft.root,
+          rightValue,
+          resolvedRight.root,
+          nextActive,
+          ignoreIfc,
+        )
+      ) {
+        return false;
+      }
+      continue;
+    }
+    if (BRANCH_EQUALITY_ARRAY_SUBSCHEMAS.has(key)) {
+      if (
+        !Array.isArray(leftValue) || !Array.isArray(rightValue) ||
+        leftValue.length !== rightValue.length
+      ) {
+        return false;
+      }
+      for (let index = 0; index < leftValue.length; index++) {
+        if (
+          !isSubschema(leftValue[index]) ||
+          !isSubschema(rightValue[index]) ||
+          !branchSchemasEquivalent(
+            leftValue[index],
+            resolvedLeft.root,
+            rightValue[index],
+            resolvedRight.root,
+            nextActive,
+            ignoreIfc,
+          )
+        ) {
+          return false;
+        }
+      }
+      continue;
+    }
+    if (BRANCH_EQUALITY_RECORD_SUBSCHEMAS.has(key)) {
+      if (!isObjectOrArray(leftValue) || !isObjectOrArray(rightValue)) {
+        return false;
+      }
+      const childKeys = new Set([
+        ...Object.keys(leftValue),
+        ...Object.keys(rightValue),
+      ]);
+      const leftRecord = leftValue as Readonly<Record<string, unknown>>;
+      const rightRecord = rightValue as Readonly<Record<string, unknown>>;
+      for (const childKey of childKeys) {
+        const leftChild = leftRecord[childKey];
+        const rightChild = rightRecord[childKey];
+        if (
+          !isSubschema(leftChild) || !isSubschema(rightChild) ||
+          !branchSchemasEquivalent(
+            leftChild,
+            resolvedLeft.root,
+            rightChild,
+            resolvedRight.root,
+            nextActive,
+            ignoreIfc,
+          )
+        ) {
+          return false;
+        }
+      }
+      continue;
+    }
+    if (!deepEqual(leftValue, rightValue)) return false;
+  }
+  return true;
 };
 
 const assertNoDivergentIfcBranches = (
   schema: JSONSchema,
+  counterpart: JSONSchema | undefined,
   path = "",
+  inheritedRoot: JSONSchema = schema,
+  counterpartInheritedRoot: JSONSchema | undefined = counterpart,
+  active?: BranchCheckVisit,
 ): void => {
-  if (!isObjectOrArray(schema)) {
+  if (counterpart === undefined || counterpartInheritedRoot === undefined) {
     return;
   }
-  const object = schema as JSONSchemaObj;
+  for (let cursor = active; cursor !== undefined; cursor = cursor.parent) {
+    if (
+      cursor.schema === schema && cursor.root === inheritedRoot &&
+      cursor.counterpart === counterpart &&
+      cursor.counterpartRoot === counterpartInheritedRoot
+    ) {
+      return;
+    }
+  }
+  const nextActive = {
+    schema,
+    root: inheritedRoot,
+    counterpart,
+    counterpartRoot: counterpartInheritedRoot,
+    parent: active,
+  };
+  const current = resolvedBranchCheckPosition(schema, inheritedRoot);
+  const counterpartCurrent = resolvedBranchCheckPosition(
+    counterpart,
+    counterpartInheritedRoot,
+  );
+  if (
+    branchSchemasEqual(current.schema, counterpartCurrent.schema) &&
+    !schemaFragmentContainsRefs(current.schema) &&
+    !schemaFragmentContainsRefs(counterpartCurrent.schema)
+  ) {
+    return;
+  }
+  if (
+    branchSchemasEquivalent(
+      current.schema,
+      current.root,
+      counterpartCurrent.schema,
+      counterpartCurrent.root,
+    )
+  ) {
+    return;
+  }
+  if (!isObjectOrArray(current.schema)) return;
+  const object = current.schema as JSONSchemaObj;
+  const isPolicyFreeClosedEmptyObject = (
+    branch: JSONSchema,
+    root: JSONSchema,
+  ): boolean => {
+    const resolved = resolvedBranchCheckPosition(branch, root).schema;
+    return isObjectOrArray(resolved) && resolved.type === "object" &&
+      isObjectOrArray(resolved.properties) &&
+      Object.keys(resolved.properties).length === 0 &&
+      resolved.additionalProperties === false &&
+      !resolvedSchemaTreeContainsIfc(branch, root);
+  };
+  const isDefaultedProjectionOfClosedEmptyUnion = (
+    union: JSONSchemaObj,
+    unionRoot: JSONSchema,
+    projection: JSONSchemaObj,
+    projectionRoot: JSONSchema,
+  ): boolean => {
+    if (!Object.hasOwn(projection, "default")) return false;
+    return [union.anyOf, union.oneOf].some((branches) =>
+      Array.isArray(branches) &&
+      branches.some((branch) =>
+        isPolicyFreeClosedEmptyObject(branch, unionRoot)
+      ) &&
+      branches.some((branch) =>
+        !isPolicyFreeClosedEmptyObject(branch, unionRoot) &&
+        branchSchemasEquivalent(
+          branch,
+          unionRoot,
+          projection,
+          projectionRoot,
+          undefined,
+          true,
+        )
+      )
+    );
+  };
+  if (
+    isObjectOrArray(counterpartCurrent.schema) &&
+    (isDefaultedProjectionOfClosedEmptyUnion(
+      object,
+      current.root,
+      counterpartCurrent.schema,
+      counterpartCurrent.root,
+    ) || isDefaultedProjectionOfClosedEmptyUnion(
+      counterpartCurrent.schema,
+      counterpartCurrent.root,
+      object,
+      current.root,
+    ))
+  ) {
+    return;
+  }
   const branchGroups = [
     object.anyOf ? ["anyOf", object.anyOf] as const : undefined,
     object.oneOf ? ["oneOf", object.oneOf] as const : undefined,
     object.allOf ? ["allOf", object.allOf] as const : undefined,
   ].filter((value) => value !== undefined);
-
   for (const [kind, branches] of branchGroups) {
-    if (branches.some(branchContainsIfc)) {
+    const counterpartBranches = isObjectOrArray(counterpartCurrent.schema)
+      ? counterpartCurrent.schema[kind]
+      : undefined;
+    if (
+      Array.isArray(counterpartBranches) &&
+      branches.length === counterpartBranches.length &&
+      branches.every((branch, index) =>
+        branchSchemasEquivalent(
+          branch,
+          current.root,
+          counterpartBranches[index],
+          counterpartCurrent.root,
+        )
+      )
+    ) {
+      continue;
+    }
+    if (
+      branches.some((branch) =>
+        resolvedSchemaTreeContainsIfc(branch, current.root)
+      )
+    ) {
       throw new Error(
         `ifc inside divergent ${kind} branches is unsupported at ${
           path || "/"
@@ -408,7 +788,19 @@ const assertNoDivergentIfcBranches = (
       : keyword === "prefixItems"
       ? `${path}/${index}`
       : path;
-    assertNoDivergentIfcBranches(child, childPath);
+    assertNoDivergentIfcBranches(
+      child,
+      correspondingSubschema(
+        counterpartCurrent.schema,
+        keyword,
+        key,
+        index,
+      ),
+      childPath,
+      current.root,
+      counterpartCurrent.root,
+      nextActive,
+    );
   });
 };
 
@@ -470,7 +862,14 @@ const mergeRequired = (
     if (generatedOutputCovers(options, [...path, name])) {
       continue;
     }
-    if (!isObjectOrArray(property) || property.default === undefined) {
+    const acceptsExplicitUndefinedDefault = isObjectOrArray(property) &&
+      Object.hasOwn(property, "default") && property.default === undefined &&
+      (property.type === "undefined" ||
+        Array.isArray(property.type) && property.type.includes("undefined"));
+    if (
+      !isObjectOrArray(property) ||
+      property.default === undefined && !acceptsExplicitUndefinedDefault
+    ) {
       // Typed so the CFC prepare catch can tag this as the recoverable
       // schema-migration class (see migration-reason.ts) without sniffing the
       // message. The message text stays human-readable and unchanged.
@@ -482,22 +881,24 @@ const mergeRequired = (
   return merged;
 };
 
-// TODO(danfuzz): `isReadonlyObjectOrArray` admits a `FabricSpecialObject` on either
-// side, and the spread copies zero properties from one — so two fabric
-// defaults merge to `{}`, and a plain-record `existing` plus a fabric
-// `candidate` silently drops the candidate's value. Wants a
-// `FabricSpecialObject` test taking the `candidate` arm.
 const mergeDefaults = (
   existing: JSONSchemaObj["default"],
   candidate: JSONSchemaObj["default"],
+  existingHasDefault: boolean,
+  candidateHasDefault: boolean,
 ): JSONSchemaObj["default"] => {
-  if (existing === undefined) {
+  if (!existingHasDefault) {
     return candidate;
   }
-  if (candidate === undefined) {
+  if (!candidateHasDefault) {
     return existing;
   }
-  if (isReadonlyObjectOrArray(existing) && isReadonlyObjectOrArray(candidate)) {
+  if (
+    valueEqual(existing as FabricValue, candidate as FabricValue)
+  ) {
+    return existing;
+  }
+  if (isPlainObject(existing) && isPlainObject(candidate)) {
     return { ...existing, ...candidate };
   }
   return candidate;
@@ -872,8 +1273,8 @@ const storedRecursiveGraphCoversCandidate = (
       (child, keyword, key) =>
         keyword === "$defs" && key !== undefined &&
           /^__cfc_merged_ref_[0-9]+$/.test(key) &&
-          isObjectOrArray(child) && Object.hasOwn(child, "default") &&
-          Object.hasOwn(child, "ifc") && Object.hasOwn(child, "required") ||
+          isObjectOrArray(child) && Object.hasOwn(child, "ifc") &&
+          Object.hasOwn(child, "required") ||
         containsDerivedSyntheticDefinition(child),
       { includeDefs: true, includeUnused: true },
     );
@@ -1322,7 +1723,17 @@ const mergeSchemaNode = (
               ? {
                 ...previous,
                 ...property,
-                default: mergeDefaults(previous.default, property.default),
+                ...(Object.hasOwn(previous, "default") ||
+                    Object.hasOwn(property, "default")
+                  ? {
+                    default: mergeDefaults(
+                      previous.default,
+                      property.default,
+                      Object.hasOwn(previous, "default"),
+                      Object.hasOwn(property, "default"),
+                    ),
+                  }
+                  : {}),
               }
               : property;
           }
@@ -1552,7 +1963,17 @@ const mergeSchemaNode = (
             ? {
               ...previous,
               ...property,
-              default: mergeDefaults(previous.default, property.default),
+              ...(Object.hasOwn(previous, "default") ||
+                  Object.hasOwn(property, "default")
+                ? {
+                  default: mergeDefaults(
+                    previous.default,
+                    property.default,
+                    Object.hasOwn(previous, "default"),
+                    Object.hasOwn(property, "default"),
+                  ),
+                }
+                : {}),
             }
             : property;
         }
@@ -1609,10 +2030,17 @@ const mergeSchemaNode = (
         logicalPath,
         options,
       ),
-      default: mergeDefaults(
-        mergedResolved.default,
-        siteSiblings.default,
-      ),
+      ...(Object.hasOwn(mergedResolved, "default") ||
+          Object.hasOwn(siteSiblings, "default")
+        ? {
+          default: mergeDefaults(
+            mergedResolved.default,
+            siteSiblings.default,
+            Object.hasOwn(mergedResolved, "default"),
+            Object.hasOwn(siteSiblings, "default"),
+          ),
+        }
+        : {}),
     }, context);
   }
   const requiredViewForMerge = (
@@ -1833,7 +2261,16 @@ const mergeSchemaNode = (
       logicalPath,
       options,
     ),
-    default: mergeDefaults(left.default, right.default),
+    ...(Object.hasOwn(left, "default") || Object.hasOwn(right, "default")
+      ? {
+        default: mergeDefaults(
+          left.default,
+          right.default,
+          Object.hasOwn(left, "default"),
+          Object.hasOwn(right, "default"),
+        ),
+      }
+      : {}),
   } as Record<string, unknown>;
   delete merged.$defs;
   const definitions = selectReferencedCfcSchemaDefs(
@@ -1852,8 +2289,8 @@ export const mergeCfcSchemaEnvelopes = (
   candidate: JSONSchema,
   options: MergeCfcSchemaEnvelopeOptions = {},
 ): JSONSchema => {
-  assertNoDivergentIfcBranches(existing);
-  assertNoDivergentIfcBranches(candidate);
+  assertNoDivergentIfcBranches(existing, candidate);
+  assertNoDivergentIfcBranches(candidate, existing);
   if (
     !options.allowAddIntegrityWeakening &&
     storedRecursiveGraphCoversCandidate(existing, candidate)

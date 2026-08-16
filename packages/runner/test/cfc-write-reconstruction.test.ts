@@ -27,9 +27,18 @@ const SCOPE = normalizeCellScope(undefined);
 
 const txWith = (
   details: TransactionWriteDetail[],
+  attemptPaths: readonly (readonly string[])[] = [],
 ): IExtendedStorageTransaction =>
   ({
     getWriteDetails: (_space: MemorySpace) => details,
+    getWriteAttemptLog: () =>
+      attemptPaths.map((path, journalIndex) => ({
+        space: SPACE,
+        id: ID,
+        scope: SCOPE,
+        path,
+        journalIndex,
+      })),
   }) as unknown as IExtendedStorageTransaction;
 
 const detail = (
@@ -106,6 +115,37 @@ Deno.test("writeDetailValueForTarget: deeper writes win over a stale envelope fi
     origin: "imported",
     body: "allowed",
   });
+});
+
+Deno.test("writeDetailValueForTarget: a later ancestor write replaces an earlier child", () => {
+  const tx = txWith([
+    detail(["value", "x"], "trusted"),
+    detail(["value"], { x: "plain" }),
+  ], [
+    ["value", "x"],
+    ["value"],
+  ]);
+  assertEquals(writeDetailValueForTarget(tx, target([]), "value"), {
+    x: "plain",
+  });
+});
+
+Deno.test("writeDetailValueForTarget: descendant deletion removes the property", () => {
+  const deleted = detail(["value", "a"], undefined);
+  deleted.present = false;
+  const tx = txWith([
+    detail(["value"], { a: undefined, b: true }),
+    deleted,
+  ], [
+    ["value"],
+    ["value", "a"],
+  ]);
+  const value = writeDetailValueForTarget(tx, target([]), "value") as Record<
+    string,
+    unknown
+  >;
+  assertEquals(value, { b: true });
+  assertEquals(Object.hasOwn(value, "a"), false);
 });
 
 Deno.test("writeDetailValueForTarget: descendant writes overlay onto a base (no base => undefined)", () => {

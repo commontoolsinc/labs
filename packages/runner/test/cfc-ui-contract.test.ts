@@ -396,6 +396,45 @@ describe("CFC UI contract matching", () => {
       },
     }]);
   });
+
+  it("retains enclosing union conditions for property contracts", () => {
+    const schema = {
+      type: "object",
+      anyOf: [
+        {
+          properties: {
+            kind: { const: "protected" },
+            value: trustedPatternUiActionSchema,
+          },
+          required: ["kind", "value"],
+        },
+        {
+          properties: {
+            kind: { const: "plain" },
+            value: { type: "string" },
+          },
+          required: ["kind", "value"],
+        },
+      ],
+    } as const;
+
+    const [entry] = uiContractsFromSchema(schema);
+
+    expect(entry.path).toEqual(["value"]);
+    expect(entry.branchConditions).toEqual([
+      {
+        path: [],
+        schema,
+        root: schema,
+        enclosing: true,
+      },
+      {
+        path: [],
+        schema: schema.anyOf[0],
+        root: schema,
+      },
+    ]);
+  });
 });
 
 describe("CFC trusted UI event enforcement", () => {
@@ -472,6 +511,71 @@ describe("CFC trusted UI event enforcement", () => {
     await runtime.idle();
 
     expect(output.get()).toBe("accepted");
+    cancel();
+  });
+
+  it("does not require a contract from a nonmatching union branch", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-branch-stream",
+      { asCell: ["stream"] },
+    );
+    const output = runtime.getCell(
+      space,
+      "cfc-ui-contract-branch-output",
+      {
+        type: "object",
+        anyOf: [
+          {
+            properties: {
+              kind: { const: "protected" },
+              value: trustedPatternUiActionSchema,
+            },
+            required: ["kind", "value"],
+          },
+          {
+            properties: {
+              kind: { const: "plain" },
+              value: { type: "string" },
+            },
+            required: ["kind", "value"],
+          },
+        ],
+      },
+    );
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        output.withTx(tx).set({ kind: "plain", value: "accepted" });
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [output.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
+      type: "untrusted",
+    });
+    await runtime.idle();
+
+    expect(output.get()).toEqual({ kind: "plain", value: "accepted" });
     cancel();
   });
 

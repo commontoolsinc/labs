@@ -1238,6 +1238,11 @@ const validateSchemaDefinitionInternal = (
 interface SchemaValidationOptions {
   strictConstraints: boolean;
   implicitAdditionalPropertiesOpen: boolean;
+  indeterminateOpaqueValue?: (
+    value: unknown,
+    schema: JSONSchema,
+    fullSchema: JSONSchema,
+  ) => boolean;
   acceptOpaqueValue?: (
     value: unknown,
     schema: JSONSchema,
@@ -1284,6 +1289,12 @@ const nestedValueValidationOptions = (
     : { ...options, reservedAdditionalProperties: undefined };
 
 export interface SchemaValueValidationOptions {
+  /** Treat a runtime wrapper as unavailable data rather than a mismatch. */
+  indeterminateOpaqueValue?: (
+    value: unknown,
+    schema: JSONSchema,
+    fullSchema: JSONSchema,
+  ) => boolean;
   /**
    * Accept runtime materializations such as Cell handles whose schema was
    * already proven by canonical traversal, without treating the handle object
@@ -1343,7 +1354,7 @@ interface SchemaRootValidationActivity {
   activePrimitiveValues: WeakMap<object, Set<string>>;
 }
 
-interface SchemaValidationFailure {
+export interface SchemaValidationFailure {
   kind: "mismatch" | "indeterminate";
   message: string;
 }
@@ -1568,8 +1579,8 @@ export function relaxDefaultedRequired(
       const chainEndResolved = isSchemaObject(target) &&
         typeof target.$ref !== "string";
       if (
-        (isSchemaObject(propSchema) && propSchema.default !== undefined) ||
-        (chainEndResolved && target.default !== undefined)
+        (isSchemaObject(propSchema) && Object.hasOwn(propSchema, "default")) ||
+        (chainEndResolved && Object.hasOwn(target, "default"))
       ) {
         defaulted.add(key);
       }
@@ -1626,18 +1637,31 @@ export function relaxDefaultedRequired(
   return relaxed as JSONSchema;
 }
 
-export const validateSchemaValue = (
+export const validateSchemaValueResult = (
   schema: JSONSchema,
   value: unknown,
   fullSchema: JSONSchema = schema,
   validationOptions: SchemaValueValidationOptions = {},
-): string | undefined =>
+): SchemaValidationFailure | undefined =>
   validateAgainstSchemaInternal(
     schema,
     value,
     fullSchema,
     { ...VALUE_VALIDATION, ...validationOptions },
     createSchemaValidationContext(),
+  );
+
+export const validateSchemaValue = (
+  schema: JSONSchema,
+  value: unknown,
+  fullSchema: JSONSchema = schema,
+  validationOptions: SchemaValueValidationOptions = {},
+): string | undefined =>
+  validateSchemaValueResult(
+    schema,
+    value,
+    fullSchema,
+    validationOptions,
   )?.message;
 
 export const validateAgainstSchema = (
@@ -1721,6 +1745,9 @@ const validateAgainstSchemaInternal = (
         context,
       );
     }
+    if (options.indeterminateOpaqueValue?.(value, schema, schemaRoot)) {
+      return indeterminate("value is not available for schema validation");
+    }
     if (options.acceptOpaqueValue?.(value, schema, schemaRoot)) {
       return undefined;
     }
@@ -1744,6 +1771,7 @@ const validateAgainstSchemaInternal = (
       const branchOptions = options.optionalUndefinedIsAbsent === true
         ? { ...options, optionalUndefinedIsAbsent: false }
         : options;
+      let schemaFailure: SchemaValidationFailure | undefined;
       for (const branch of schema.allOf) {
         const failure = validateAgainstSchemaInternal(
           branch,
@@ -1752,8 +1780,10 @@ const validateAgainstSchemaInternal = (
           branchOptions,
           context,
         );
-        if (failure !== undefined) return failure;
+        if (failure?.kind === "mismatch") return failure;
+        if (failure !== undefined) schemaFailure ??= failure;
       }
+      if (schemaFailure !== undefined) return schemaFailure;
     }
     if (Array.isArray(schema.anyOf)) {
       let matched = false;
@@ -1879,6 +1909,7 @@ const validateAgainstSchemaInternal = (
           return mismatch(`missing required property ${key}`);
         }
       }
+      let propertyFailure: SchemaValidationFailure | undefined;
       for (const [key, child] of Object.entries(schema.properties ?? {})) {
         if (
           Object.hasOwn(value, key) &&
@@ -1891,7 +1922,12 @@ const validateAgainstSchemaInternal = (
             nestedOptions,
             context,
           );
-          if (failure !== undefined) return atValidationPath(key, failure);
+          if (failure?.kind === "mismatch") {
+            return atValidationPath(key, failure);
+          }
+          if (failure !== undefined) {
+            propertyFailure ??= atValidationPath(key, failure);
+          }
         }
       }
       // Reserved names are excused from the unmodeled-key rules below; a
@@ -1944,10 +1980,16 @@ const validateAgainstSchemaInternal = (
               nestedOptions,
               context,
             );
-            if (failure !== undefined) return atValidationPath(key, failure);
+            if (failure?.kind === "mismatch") {
+              return atValidationPath(key, failure);
+            }
+            if (failure !== undefined) {
+              propertyFailure ??= atValidationPath(key, failure);
+            }
           }
         }
       }
+      if (propertyFailure !== undefined) return propertyFailure;
     }
 
     if (

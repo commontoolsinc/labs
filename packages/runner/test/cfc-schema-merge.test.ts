@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { JSONSchemaObj } from "../src/builder/types.ts";
+import {
+  FabricBytes,
+  FabricHash,
+} from "@commonfabric/data-model/fabric-primitives";
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { cfcSchemaEntries } from "../src/cfc/schema-label-view.ts";
 import { vnodeSchema } from "../src/schemas.ts";
 import {
@@ -12,6 +16,24 @@ import {
 import { storedSchemaCoversCandidateEnvelope } from "../src/cfc/prepare.ts";
 
 describe("mergeCfcSchemaEnvelopes", () => {
+  it("accepts an additive required field with an explicit undefined default", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: {},
+    }, {
+      type: "object",
+      properties: {
+        marker: { type: "undefined", default: undefined },
+      },
+      required: ["marker"],
+    }) as JSONSchemaObj;
+
+    expect(merged.required).toEqual(["marker"]);
+    const marker = merged.properties!.marker as JSONSchemaObj;
+    expect(Object.hasOwn(marker, "default")).toBe(true);
+    expect(marker.default).toBeUndefined();
+  });
+
   it("keeps an authored false schema impossible", () => {
     expect(addRootConfidentiality(false, ["space"])).toEqual({
       not: {},
@@ -96,55 +118,51 @@ describe("mergeCfcSchemaEnvelopes", () => {
     });
   });
 
-  it("keeps referenced policy definitions when another branch is merged", () => {
+  it("rejects referenced policy when another branch is merged", () => {
     const sharedPolicy = {
       writeAuthorizedBy: ["trusted-writer"],
       requiredIntegrity: ["admin"],
     } as const;
-    const merged = mergeCfcSchemaEnvelopes({
-      type: "object",
-      properties: {
-        list: { $ref: "#/$defs/SharedList" },
-      },
-      $defs: {
-        SharedList: {
-          type: "array",
-          items: { type: "string" },
-          ifc: sharedPolicy,
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: {
+          list: { $ref: "#/$defs/SharedList" },
         },
-      },
-    }, {
-      anyOf: [
-        { $ref: "#/$defs/Empty" },
-        {
-          type: "object",
-          properties: {
-            list: { $ref: "#/$defs/TrustedList" },
+        $defs: {
+          SharedList: {
+            type: "array",
+            items: { type: "string" },
+            ifc: sharedPolicy,
           },
         },
-      ],
-      $defs: {
-        Empty: {
-          type: "object",
-          properties: {},
-          additionalProperties: false,
-        },
-        TrustedList: {
-          type: "array",
-          items: {
-            type: "string",
-            ifc: { addIntegrity: ["admin"] },
+      }, {
+        anyOf: [
+          { $ref: "#/$defs/Empty" },
+          {
+            type: "object",
+            properties: {
+              list: { $ref: "#/$defs/TrustedList" },
+            },
           },
-          ifc: sharedPolicy,
+        ],
+        $defs: {
+          Empty: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+          TrustedList: {
+            type: "array",
+            items: {
+              type: "string",
+              ifc: { addIntegrity: ["admin"] },
+            },
+            ifc: sharedPolicy,
+          },
         },
-      },
-    }) as JSONSchemaObj;
-
-    expect(merged.$defs?.SharedList).toEqual({
-      type: "array",
-      items: { type: "string" },
-      ifc: sharedPolicy,
-    });
+      })
+    ).toThrow(/divergent anyOf branches/);
   });
 
   it("keeps a retained reference bound across an unused name collision", () => {
@@ -2244,6 +2262,21 @@ describe("mergeCfcSchemaEnvelopes", () => {
     });
   });
 
+  it("preserves special-object defaults atomically", () => {
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const hash = new FabricHash(new Uint8Array([4, 5, 6]), "test");
+    const merged = mergeCfcSchemaEnvelopes(
+      { default: bytes } as unknown as JSONSchema,
+      { default: hash } as unknown as JSONSchema,
+    ) as JSONSchemaObj;
+
+    expect(merged.default).toBe(hash);
+    expect(storedSchemaCoversCandidateEnvelope(
+      { default: bytes } as unknown as JSONSchema,
+      { default: hash } as unknown as JSONSchema,
+    )).toBe(false);
+  });
+
   it("merges tuple (prefixItems) slots slot-wise", () => {
     // CT-1895: the {...left, ...right} spread let one side's prefixItems
     // win wholesale, dropping the other side's slot ifc/defaults.
@@ -2491,6 +2524,468 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/divergent.*ifc|ifc.*divergent/i);
   });
 
+  it("accepts a defaulted concrete projection of an empty-or-value union", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        anyOf: [
+          { type: "object", properties: {}, additionalProperties: false },
+          {
+            type: "object",
+            properties: {
+              list: {
+                type: "array",
+                ifc: { requiredIntegrity: ["admin"] },
+              },
+            },
+          },
+        ],
+      }, {
+        type: "object",
+        properties: {
+          list: {
+            type: "array",
+            ifc: { requiredIntegrity: ["admin"] },
+          },
+        },
+        default: {},
+      })
+    ).not.toThrow();
+  });
+
+  it("accepts nested policy added to a defaulted union projection", () => {
+    const stored = {
+      type: "object",
+      properties: {
+        list: { $ref: "#/$defs/StoredList" },
+      },
+      default: {},
+      $defs: {
+        StoredList: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { value: { type: "string" } },
+          },
+        },
+      },
+    } as const;
+    const candidate = {
+      anyOf: [
+        { type: "object", properties: {}, additionalProperties: false },
+        {
+          type: "object",
+          properties: {
+            list: { $ref: "#/$defs/CandidateList" },
+          },
+        },
+      ],
+      $defs: {
+        CandidateList: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { value: { type: "string" } },
+            ifc: { addIntegrity: ["admin"] },
+          },
+        },
+      },
+    } as const;
+
+    expect(() => mergeCfcSchemaEnvelopes(stored, candidate)).not.toThrow();
+  });
+
+  it("rejects policy on the empty branch of a defaulted projection", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        anyOf: [
+          {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+            ifc: { confidentiality: ["secret"] },
+          },
+          {
+            type: "object",
+            properties: { list: { type: "array" } },
+          },
+        ],
+      }, {
+        type: "object",
+        properties: { list: { type: "array" } },
+        default: {},
+      })
+    ).toThrow(/divergent anyOf branches/);
+  });
+
+  it("rejects changed policy in a defaulted empty-or-value union", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        anyOf: [
+          { type: "object", properties: {}, additionalProperties: false },
+          {
+            type: "object",
+            properties: {
+              list: {
+                type: "array",
+                ifc: { addIntegrity: ["admin"] },
+              },
+            },
+          },
+        ],
+        default: {},
+      }, {
+        anyOf: [
+          { type: "object", properties: {}, additionalProperties: false },
+          {
+            type: "object",
+            properties: {
+              list: {
+                type: "array",
+                ifc: { addIntegrity: ["attacker"] },
+              },
+            },
+          },
+        ],
+      })
+    ).toThrow(/divergent anyOf branches/);
+  });
+
+  it("retains equal branch-local policy while siblings change", () => {
+    const valueSpecificPolicy = {
+      anyOf: [
+        {
+          type: "boolean",
+          const: true,
+          ifc: { addIntegrity: ["admin"] },
+        },
+        { type: "boolean", const: false },
+      ],
+    } as const;
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: { everyoneIsAdmin: valueSpecificPolicy },
+    }, {
+      type: "object",
+      properties: {
+        everyoneIsAdmin: valueSpecificPolicy,
+        importedMessages: { type: "array" },
+      },
+    }) as JSONSchemaObj;
+
+    expect(merged.properties?.everyoneIsAdmin).toEqual(valueSpecificPolicy);
+    expect(merged.properties?.importedMessages).toEqual({ type: "array" });
+  });
+
+  it("retains equal branches while adding policy beside the union", () => {
+    const branches = [
+      {
+        type: "boolean",
+        const: true,
+        ifc: { addIntegrity: ["admin"] },
+      },
+      { type: "boolean", const: false },
+    ] as const satisfies readonly JSONSchema[];
+    const merged = mergeCfcSchemaEnvelopes({
+      anyOf: branches,
+      asCell: ["cell"],
+    }, {
+      anyOf: branches,
+      ifc: { confidentiality: ["space"] },
+    }) as JSONSchemaObj;
+
+    expect(merged.anyOf).toEqual(branches);
+    expect(merged.ifc?.confidentiality).toEqual(["space"]);
+  });
+
+  it("retains branch policy across cell materialization markers", () => {
+    const branch = (asCell: boolean): JSONSchema => ({
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { const: "trusted" },
+            author: {
+              type: "object",
+              ...(asCell ? { asCell: ["cell"] } : {}),
+            },
+          },
+          required: ["kind", "author"],
+          ifc: { addIntegrity: ["trusted"] },
+        },
+        {
+          type: "object",
+          properties: { kind: { const: "plain" } },
+          required: ["kind"],
+        },
+      ],
+    });
+
+    expect(() => mergeCfcSchemaEnvelopes(branch(true), branch(false)))
+      .not.toThrow();
+  });
+
+  it("retains one-sided branch-local policy without merging it", () => {
+    const valueSpecificPolicy = {
+      anyOf: [
+        {
+          type: "boolean",
+          const: true,
+          ifc: { addIntegrity: ["admin"] },
+        },
+        { type: "boolean", const: false },
+      ],
+    } as const;
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: { messages: { type: "array" } },
+    }, {
+      type: "object",
+      properties: { everyoneIsAdmin: valueSpecificPolicy },
+    }) as JSONSchemaObj;
+
+    expect(merged.properties?.everyoneIsAdmin).toEqual(valueSpecificPolicy);
+    expect(merged.properties?.messages).toEqual({ type: "array" });
+  });
+
+  it("rejects branch-policy changes hidden behind local references", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: { value: { $ref: "#/$defs/Value" } },
+        $defs: {
+          Value: {
+            anyOf: [
+              {
+                type: "string",
+                ifc: { confidentiality: ["secret"] },
+              },
+              { type: "number" },
+            ],
+          },
+        },
+      }, {
+        type: "object",
+        properties: { value: { $ref: "#/$defs/Value" } },
+        $defs: {
+          Value: {
+            anyOf: [
+              { type: "string" },
+              {
+                type: "number",
+                ifc: { confidentiality: ["secret"] },
+              },
+            ],
+          },
+        },
+      })
+    ).toThrow(/divergent anyOf branches/);
+  });
+
+  it("rejects changed policy directly behind alternative references", () => {
+    const schema = (atom: string): JSONSchema => ({
+      anyOf: [
+        { $ref: "#/$defs/Protected" },
+        { type: "number" },
+      ],
+      $defs: {
+        Protected: {
+          type: "string",
+          ifc: { addIntegrity: [atom] },
+        },
+      },
+    });
+
+    expect(() => mergeCfcSchemaEnvelopes(schema("x"), schema("y")))
+      .toThrow(/divergent anyOf branches/);
+  });
+
+  it("rejects changed policy behind nested alternative references", () => {
+    const schema = (atom: string): JSONSchema => ({
+      anyOf: [
+        { $ref: "#/$defs/Wrapper" },
+        { type: "number" },
+      ],
+      $defs: {
+        Wrapper: {
+          type: "object",
+          properties: {
+            value: { $ref: "#/$defs/Protected" },
+          },
+        },
+        Protected: {
+          type: "string",
+          ifc: { addIntegrity: [atom] },
+        },
+      },
+    });
+
+    expect(() => mergeCfcSchemaEnvelopes(schema("x"), schema("y")))
+      .toThrow(/divergent anyOf branches/);
+  });
+
+  it("rejects changed policy behind recursive alternative references", () => {
+    const schema = (atom: string): JSONSchema => ({
+      anyOf: [
+        { $ref: "#/$defs/Node" },
+        { type: "number" },
+      ],
+      $defs: {
+        Node: {
+          type: "object",
+          properties: {
+            next: { $ref: "#/$defs/Node" },
+          },
+          ifc: { addIntegrity: [atom] },
+        },
+      },
+    });
+
+    expect(() => mergeCfcSchemaEnvelopes(schema("x"), schema("y")))
+      .toThrow(/divergent anyOf branches/);
+  });
+
+  it("checks inherited references inside equal wrapper schemas", () => {
+    const wrapper = {
+      type: "object",
+      properties: {
+        nested: { $ref: "#/$defs/Value" },
+      },
+    } as const;
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: "object",
+        properties: { wrapper },
+        $defs: {
+          Value: {
+            anyOf: [
+              {
+                type: "string",
+                ifc: { confidentiality: ["secret"] },
+              },
+              { type: "number" },
+            ],
+          },
+        },
+      }, {
+        type: "object",
+        properties: { wrapper },
+        $defs: {
+          Value: {
+            anyOf: [
+              { type: "string" },
+              {
+                type: "number",
+                ifc: { confidentiality: ["secret"] },
+              },
+            ],
+          },
+        },
+      })
+    ).toThrow(/divergent anyOf branches/);
+  });
+
+  it("retains equal referenced branch policy while definitions grow", () => {
+    const branchPolicy = {
+      anyOf: [
+        {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        },
+        { type: "number" },
+      ],
+    } as const;
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: { value: { $ref: "#/$defs/Value" } },
+      $defs: { Value: branchPolicy },
+    }, {
+      type: "object",
+      properties: { value: { $ref: "#/$defs/Value" } },
+      $defs: {
+        Value: {
+          anyOf: [
+            { ...branchPolicy.anyOf[0], default: undefined },
+            branchPolicy.anyOf[1],
+          ],
+        },
+        Unrelated: { type: "boolean" },
+      },
+    }) as JSONSchemaObj;
+
+    expect(merged.properties?.value).toEqual(branchPolicy);
+  });
+
+  it("accepts renamed references in equal recursive branch policy", () => {
+    const recursiveBranchPolicy = (name: string): JSONSchemaObj => ({
+      $ref: `#/$defs/${name}`,
+      $defs: {
+        [name]: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                next: { $ref: `#/$defs/${name}` },
+              },
+              ifc: { confidentiality: ["secret"] },
+            },
+            { type: "null" },
+          ],
+        },
+      },
+    });
+
+    expect(() =>
+      mergeCfcSchemaEnvelopes(
+        recursiveBranchPolicy("StoredNode"),
+        recursiveBranchPolicy("CandidateNode"),
+      )
+    ).not.toThrow();
+  });
+
+  it("checks branch-local policy against an object rest claim", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: "object",
+        additionalProperties: { type: "boolean" },
+      }, {
+        type: "object",
+        properties: {
+          everyoneIsAdmin: {
+            anyOf: [
+              {
+                type: "boolean",
+                const: true,
+                ifc: { addIntegrity: ["admin"] },
+              },
+              { type: "boolean", const: false },
+            ],
+          },
+        },
+      })
+    ).toThrow(/divergent anyOf branches/);
+  });
+
+  it("checks branch-local tuple policy against an array rest claim", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        type: "array",
+        items: { type: "boolean" },
+      }, {
+        type: "array",
+        prefixItems: [{
+          anyOf: [
+            {
+              type: "boolean",
+              const: true,
+              ifc: { addIntegrity: ["admin"] },
+            },
+            { type: "boolean", const: false },
+          ],
+        }],
+      })
+    ).toThrow(/divergent anyOf branches/);
+  });
+
   it("allows branch-external ifc labels beside divergent schemas", () => {
     const merged = mergeCfcSchemaEnvelopes({
       anyOf: [
@@ -2519,7 +3014,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
               type: "string",
               ifc: { confidentiality: ["secret"] },
             },
-            { type: "number" },
+            { type: "number", minimum: 0 },
           ],
         },
       }, {
@@ -2537,6 +3032,28 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/divergent oneOf branches/);
   });
 
+  it("rejects divergent branches with policy under conditional keywords", () => {
+    expect(() =>
+      mergeCfcSchemaEnvelopes({
+        anyOf: [
+          {
+            type: "string",
+            if: {
+              type: "string",
+              ifc: { addIntegrity: ["admin"] },
+            },
+          },
+          { type: "number" },
+        ],
+      }, {
+        anyOf: [
+          { type: "boolean" },
+          { type: "number" },
+        ],
+      })
+    ).toThrow(/divergent anyOf branches/);
+  });
+
   it("rejects divergent ifc branches nested under a tuple slot", () => {
     // CT-1895: the guard's recursion visited only properties and items, so
     // a divergent-ifc shape under a prefixItems slot escaped it.
@@ -2549,8 +3066,17 @@ describe("mergeCfcSchemaEnvelopes", () => {
         ],
       }],
     } as const;
-    expect(() => mergeCfcSchemaEnvelopes(withTupleBranches, withTupleBranches))
-      .toThrow(/divergent oneOf branches/);
+    expect(() =>
+      mergeCfcSchemaEnvelopes(withTupleBranches, {
+        type: "array",
+        prefixItems: [{
+          oneOf: [
+            { type: "string", ifc: { confidentiality: ["secret"] } },
+            { type: "number", minimum: 0 },
+          ],
+        }],
+      })
+    ).toThrow(/divergent oneOf branches/);
   });
 
   it("rejects divergent ifc branches nested under additionalProperties", () => {
@@ -2563,8 +3089,17 @@ describe("mergeCfcSchemaEnvelopes", () => {
         ],
       },
     } as const;
-    expect(() => mergeCfcSchemaEnvelopes(withMapBranches, withMapBranches))
-      .toThrow(/divergent anyOf branches/);
+    expect(() =>
+      mergeCfcSchemaEnvelopes(withMapBranches, {
+        type: "object",
+        additionalProperties: {
+          anyOf: [
+            { type: "string", ifc: { confidentiality: ["secret"] } },
+            { type: "number", minimum: 0 },
+          ],
+        },
+      })
+    ).toThrow(/divergent anyOf branches/);
   });
 
   it("allows non-object divergent branches without ifc labels", () => {

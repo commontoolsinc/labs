@@ -100,12 +100,124 @@ describe("CFC wildcard policy applicability on unresolvable links", () => {
     } as const satisfies JSONSchema;
     const tx = {
       getWriteDetails: () => [],
-      readValueOrThrow: () => ({ origin: "imported" }),
+      readOrThrow: () => ({ value: { origin: "imported" } }),
     } as unknown as IExtendedStorageTransaction;
 
     expect(
       wildcardPolicyMatchesValue(tx, target, mergedTrustedPolicy, linkValue),
     ).toBe(false);
+  });
+
+  it("keeps a definite sibling mismatch beside an unresolved nested link", () => {
+    const tx = {
+      getWriteDetails: () => [],
+      readOrThrow: () => undefined,
+    } as unknown as IExtendedStorageTransaction;
+    const schema = {
+      type: "object",
+      properties: {
+        kind: { const: "trusted" },
+        payload: { type: "object" },
+      },
+      required: ["kind", "payload"],
+    } as const satisfies JSONSchema;
+
+    expect(
+      wildcardPolicyMatchesValue(tx, target, schema, {
+        kind: "plain",
+        payload: linkValue,
+      }),
+    ).toBe(false);
+  });
+
+  it("matches a stored root value that is present and undefined", () => {
+    const tx = {
+      getWriteDetails: () => [],
+      readOrThrow: () => ({ value: undefined }),
+    } as unknown as IExtendedStorageTransaction;
+
+    expect(
+      wildcardPolicyMatchesValue(
+        tx,
+        target,
+        { type: "undefined" },
+        linkValue,
+        undefined,
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it("follows link chains to the concrete value", () => {
+    const secondLink = {
+      "/": {
+        [LINK_V1_TAG]: {
+          id: "of:second-target",
+          path: [] as string[],
+          space,
+          scope: "space",
+          schema: { type: "object" },
+        },
+      },
+    };
+    const tx = {
+      getWriteDetails: () => [
+        {
+          address: {
+            id: "of:unresolvable-target",
+            scope: "space",
+            path: ["value"],
+          },
+          value: secondLink,
+          present: true,
+        },
+        {
+          address: {
+            id: "of:second-target",
+            scope: "space",
+            path: ["value"],
+          },
+          value: { kind: "trusted" },
+          present: true,
+        },
+      ],
+      readOrThrow: () => undefined,
+    } as unknown as IExtendedStorageTransaction;
+    const concretePolicy = {
+      type: "object",
+      properties: { kind: { const: "trusted" } },
+      required: ["kind"],
+    } as const satisfies JSONSchema;
+
+    expect(
+      wildcardPolicyMatchesValue(
+        tx,
+        target,
+        concretePolicy,
+        linkValue,
+        undefined,
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it("preserves sparse array holes while matching a policy", () => {
+    const tx = {
+      getWriteDetails: () => [],
+      readValueOrThrow: () => undefined,
+    } as unknown as IExtendedStorageTransaction;
+    const sparse: unknown[] = [];
+    sparse.length = 1;
+
+    expect(
+      wildcardPolicyMatchesValue(
+        tx,
+        target,
+        { type: "array", items: { type: "string" } },
+        sparse,
+      ),
+    ).toBe(true);
+    expect(Object.hasOwn(sparse, 0)).toBe(false);
   });
 });
 

@@ -18,7 +18,10 @@ import {
   redactSigilCfcLabelViewsForDisplay,
   stripSigilCfcLabelViews,
 } from "../src/cfc/link-label-view.ts";
-import { cfcLabelViewFromSchema } from "../src/cfc/schema-label-view.ts";
+import {
+  cfcLabelViewFromSchema,
+  cfcSchemaEntries,
+} from "../src/cfc/schema-label-view.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -97,6 +100,67 @@ describe("CFC label view helpers", () => {
         },
       ],
     });
+  });
+
+  it("marks policy inside value alternatives as conditional", () => {
+    const entries = cfcSchemaEntries({
+      anyOf: [
+        { type: "boolean", ifc: { integrity: ["conditional"] } },
+        { type: "boolean" },
+      ],
+      allOf: [{ ifc: { integrity: ["unconditional"] } }],
+    });
+
+    expect(entries.map(({ label, branchConditions }) => ({
+      integrity: label.integrity,
+      branchConditions: branchConditions.length,
+    }))).toEqual(expect.arrayContaining([
+      { integrity: ["conditional"], branchConditions: 2 },
+      { integrity: ["unconditional"], branchConditions: 1 },
+    ]));
+  });
+
+  it("retains the enclosing alternative for nested declarations", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        out: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                kind: { const: "trusted" },
+                value: { type: "string", ifc: { addIntegrity: ["trusted"] } },
+              },
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { const: "plain" },
+                value: { type: "string" },
+              },
+            },
+          ],
+        },
+      },
+    } as const;
+
+    const entry = cfcSchemaEntries(schema).find((candidate) =>
+      candidate.path.join("/") === "out/value"
+    );
+    expect(entry?.branchConditions).toEqual([
+      {
+        path: ["out"],
+        schema: schema.properties.out,
+        root: schema,
+        enclosing: true,
+      },
+      {
+        path: ["out"],
+        schema: schema.properties.out.anyOf[0],
+        root: schema,
+      },
+    ]);
   });
 
   it("ignores a root value that is not a schema", () => {

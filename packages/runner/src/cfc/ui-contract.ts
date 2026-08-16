@@ -17,6 +17,7 @@ import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CfcAddress } from "./types.ts";
 import { cfcSchemaChildRoot } from "./schema-refs.ts";
+import type { CfcSchemaBranchCondition } from "./schema-label-view.ts";
 
 type UiContractTrustRequirements = {
   trustedPattern?: string;
@@ -48,17 +49,25 @@ export type UiContractEntry = {
   path: string[];
   contract: UiContract;
   schema?: JSONSchema;
+  branchConditions?: readonly CfcSchemaBranchCondition[];
 };
 
 const uiContractEntry = (
   path: string[],
   contract: UiContract,
   schema?: JSONSchema,
+  branchConditions: readonly CfcSchemaBranchCondition[] = [],
 ): UiContractEntry => {
   const entry: UiContractEntry = { path, contract };
   if (schema !== undefined) {
     Object.defineProperty(entry, "schema", {
       value: schema,
+      enumerable: false,
+    });
+  }
+  if (branchConditions.length > 0) {
+    Object.defineProperty(entry, "branchConditions", {
+      value: branchConditions,
       enumerable: false,
     });
   }
@@ -228,6 +237,7 @@ const uiContractsFromSchemaInternal = (
   root: JSONSchema | undefined,
   path: string[],
   seenRefs: LocalSchemaRefVisit[],
+  branchConditions: readonly CfcSchemaBranchCondition[],
 ): UiContractEntry[] => {
   const branchRefs = [...seenRefs];
   const schemaRoot = schema === undefined || root === undefined
@@ -240,6 +250,7 @@ const uiContractsFromSchemaInternal = (
       schemaRoot,
       path,
       branchRefs,
+      branchConditions,
     );
   }
   if (!isObjectOrArray(resolvedSchema)) {
@@ -256,7 +267,14 @@ const uiContractsFromSchemaInternal = (
     [],
   );
   if (contract !== undefined) {
-    entries.push(uiContractEntry([...path], contract, resolvedSchema));
+    entries.push(
+      uiContractEntry(
+        [...path],
+        contract,
+        resolvedSchema,
+        branchConditions,
+      ),
+    );
   }
 
   const hasProperties = isObjectOrArray(resolvedSchema.properties);
@@ -286,6 +304,7 @@ const uiContractsFromSchemaInternal = (
           definition as JSONSchema,
           [],
           [],
+          [],
         )
       )
       .map((entry) => entry.contract);
@@ -302,25 +321,61 @@ const uiContractsFromSchemaInternal = (
           childRoot,
           [...path, key],
           seenRefs,
+          branchConditions,
         ),
       );
     }
   }
 
-  const compound = [
+  const alternatives = [
     ...(Array.isArray(resolvedSchema.anyOf) ? resolvedSchema.anyOf : []),
     ...(Array.isArray(resolvedSchema.oneOf) ? resolvedSchema.oneOf : []),
-    ...(Array.isArray(resolvedSchema.allOf) ? resolvedSchema.allOf : []),
   ];
-  for (const child of compound) {
+  for (const child of alternatives) {
     entries.push(
       ...uiContractsFromSchemaInternal(
         child as JSONSchema,
         childRoot,
         path,
         seenRefs,
+        [
+          ...branchConditions,
+          {
+            path,
+            schema: resolvedSchema,
+            root: childRoot,
+            enclosing: true,
+          },
+          {
+            path,
+            schema: child as JSONSchema,
+            root: cfcSchemaChildRoot(child as JSONSchema, childRoot),
+          },
+        ],
       ),
     );
+  }
+
+  if (Array.isArray(resolvedSchema.allOf)) {
+    for (const child of resolvedSchema.allOf) {
+      entries.push(
+        ...uiContractsFromSchemaInternal(
+          child as JSONSchema,
+          childRoot,
+          path,
+          seenRefs,
+          [
+            ...branchConditions,
+            {
+              path,
+              schema: resolvedSchema,
+              root: childRoot,
+              enclosing: true,
+            },
+          ],
+        ),
+      );
+    }
   }
 
   // `items` keeps its `*` entry even beside prefixItems, mirroring
@@ -339,6 +394,7 @@ const uiContractsFromSchemaInternal = (
         childRoot,
         [...path, "*"],
         seenRefs,
+        branchConditions,
       ),
     );
   }
@@ -351,6 +407,7 @@ const uiContractsFromSchemaInternal = (
           childRoot,
           [...path, String(index)],
           seenRefs,
+          branchConditions,
         ),
       );
     }
@@ -361,7 +418,8 @@ const uiContractsFromSchemaInternal = (
 
 export const uiContractsFromSchema = (
   schema: JSONSchema | undefined,
-): UiContractEntry[] => uiContractsFromSchemaInternal(schema, schema, [], []);
+): UiContractEntry[] =>
+  uiContractsFromSchemaInternal(schema, schema, [], [], []);
 
 export const trustedEventProvenanceMatchesUiContract = (
   provenance: unknown,

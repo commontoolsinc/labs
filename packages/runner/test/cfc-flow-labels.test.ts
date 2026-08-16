@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -151,6 +152,87 @@ describe("CFC flow labels (default transition)", () => {
       egress.prepareCfc();
       const result = await egress.commit();
       expect(result.error?.message).toContain("maxConfidentiality");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("labels present undefined and Fabric special outputs", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-flow-unusual-values-source",
+          { type: "object", properties: { secret: { type: "string" } } },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "s3cr3t" },
+        cfc: {
+          version: 1,
+          schemaHash: storedSeedSchema.taggedHashString,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-flow-unusual-values-source",
+        undefined,
+        tx,
+      );
+      expect((source.getRaw() as { secret?: string }).secret).toBe("s3cr3t");
+
+      const undefinedTarget = runtime.getCell(
+        signer.did(),
+        "cfc-flow-present-undefined",
+        undefined,
+        tx,
+      );
+      undefinedTarget.set({ marker: undefined });
+      const bytesTarget = runtime.getCell(
+        signer.did(),
+        "cfc-flow-fabric-bytes",
+        undefined,
+        tx,
+      );
+      bytesTarget.set(new FabricBytes(new Uint8Array([1, 2, 3])));
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      for (const target of [undefinedTarget, bytesTarget]) {
+        const entries = replicaEntries(
+          storageManager,
+          target.getAsNormalizedFullLink().id,
+        );
+        const derived = entries.find((entry) => entry.origin === "derived");
+        expect(derived).toBeDefined();
+        expect(derived!.label.confidentiality).toContainEqual("secret");
+      }
     } finally {
       await runtime.dispose();
       await storageManager.close();

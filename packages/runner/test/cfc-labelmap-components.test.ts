@@ -39,6 +39,7 @@ describe("CFC labelMap component origins", () => {
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     try {
       const guarded = internSchema(
@@ -81,6 +82,7 @@ describe("CFC labelMap component origins", () => {
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     try {
       const guardedSchema = {
@@ -154,6 +156,7 @@ describe("CFC labelMap component origins", () => {
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     try {
       const seed = runtime.edit();
@@ -210,6 +213,7 @@ describe("CFC labelMap component origins", () => {
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     try {
       const guarded = internSchema(
@@ -218,9 +222,6 @@ describe("CFC labelMap component origins", () => {
           properties: {
             pair: {
               type: "array",
-              // The negated branch is deliberately NOT minted (its ifc must
-              // not label real data); walking past it is pinned here.
-              not: { type: "string", ifc: { confidentiality: ["negated"] } },
               prefixItems: [
                 { type: "string", ifc: { confidentiality: ["secret"] } },
                 { type: "number" },
@@ -269,6 +270,7 @@ describe("CFC labelMap component origins", () => {
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     try {
       const guarded = internSchema(

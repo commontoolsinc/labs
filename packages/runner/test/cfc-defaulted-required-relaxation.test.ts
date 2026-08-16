@@ -30,6 +30,16 @@ describe("relaxDefaultedRequired", () => {
     })).toBeUndefined();
   });
 
+  it("treats an explicit undefined default as present", () => {
+    expect(relaxedValidationError({}, {
+      type: "object",
+      properties: {
+        marker: { type: "undefined", default: undefined },
+      },
+      required: ["marker"],
+    })).toBeUndefined();
+  });
+
   it("treats a defaulted property as satisfied when nested", () => {
     expect(relaxedValidationError({ opts: {} }, {
       type: "object",
