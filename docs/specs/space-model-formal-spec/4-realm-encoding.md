@@ -142,16 +142,20 @@ The marker is a frozen one-element array holding the version identifier:
 
 `fvr1` is *fabric value, realm encoding, version 1*, in the manner of JSON's
 `fvj1:` prefix. Recognition never reads any of it — identity does all the work
-— so the contents are there for two other purposes: legibility in a debugger,
-and giving a receiver something to check when it wants to know which build
-wrote a payload. The layout is specified because a receiver cannot perform that
-check without knowing where to look.
+— so within the walk the contents serve only to be legible in a debugger.
 
-This is the format's answer to a boundary it does not otherwise control.
-`postMessage()` spans tabs, windows and frames, any of which could pair two
-different deployments, and a receiver that reads the version can refuse a build
-whose encoding it does not understand. A receiver that wants that check
-performs it itself; carrying the version is what makes it possible.
+**A decoder must refuse an envelope whose marker is not a one-element array
+holding the version it implements**, and it performs that check before adopting
+the marker. This is the format's answer to a boundary it does not otherwise
+control: `postMessage()` spans tabs, windows and frames, any of which could
+pair two different deployments, and a payload written by a build the decoder
+does not understand is refused rather than walked.
+
+The check earns little in the deployment this format is for, where both ends
+are the same build and the marker always matches. It costs one comparison, and
+it is what makes adoption safe to state as a rule: without it a decoder takes
+an arbitrary object as its marker, every tagged form beneath goes unrecognized,
+and a foreign tree decodes as ordinary data instead of being refused.
 
 ## 3. Type Encodings
 
@@ -286,8 +290,8 @@ payload keeps the value it decoded, not the tree it decoded from.
 A conforming decoder refuses, reporting each as a malformation settled against
 leniency:
 
-- An envelope that is not a two-element array, or whose slot zero is not an
-  object.
+- An envelope that is not a two-element array, or whose slot zero is not a
+  one-element array holding the decoder's own version, per Section 2.4.
 - A `symbol` or a function met in an untagged position. The transport carries
   neither, so neither can arrive across the boundary — but a decoder is
   callable in the realm that built its argument, and what the format never
@@ -314,8 +318,8 @@ The realm encoding context is responsible for:
 - Minting a marker per `encode()` call, per Section 2.2, and building the
   envelope around the walked tree.
 - Adopting the marker from an envelope's slot zero on decode, after validating
-  the envelope's shape — the one place the decoder takes instruction from the
-  data it is reading.
+  the envelope's shape and the marker's version per Section 2.4 — the one place
+  the decoder takes instruction from the data it is reading.
 - Owning recursion and tag-wrapping around the shallow per-type codecs, as the
   JSON context does (`3-json-encoding.md` Section 7): tags come from
   `codec.tagForValue(value)` on encode, and decode routes each tag to its

@@ -35,12 +35,12 @@ import {
  * that encode returns, is what keeps a payload from containing one.
  * {@link RealmFormatMarker} states all three.
  *
- * The marker carries a version string, which is what a receiver would check
- * to hold the boundary this format exists for: worker IPC within one process,
- * where both ends are the same build. `postMessage()` also spans tabs, windows
- * and frames, any of which could pair two deployments. Nothing here enforces
- * it -- the version is carried rather than checked -- but carrying it is what
- * makes the check possible at all.
+ * The marker carries a version string, and `decode()` refuses an envelope
+ * whose marker is not this build's. That holds the boundary this format exists
+ * for: worker IPC within one process, where both ends are the same build.
+ * `postMessage()` also spans tabs, windows and frames, any of which could pair
+ * two deployments, and a payload from one this build does not understand is
+ * refused rather than walked.
  *
  * Two pieces of `JsonCodecEngine` have no counterpart here, each because the
  * transport does the work directly:
@@ -163,11 +163,18 @@ export class RealmCodecEngine
    * @inheritDoc
    *
    * Takes the marker from the envelope and walks what it wraps. The envelope
-   * is the one place this method takes instruction from the data, so its shape
-   * is checked before anything is read from it -- two elements, and an object
-   * in slot zero, a primitive there being reproducible by any payload holding
-   * the same one. What cloning carries but this format never emits is refused
-   * where it is found, by `decodeValue()`.
+   * is the one place this method takes instruction from the data, so it is
+   * checked in full before anything is read from it: two elements, and a
+   * one-element array in slot zero holding this format's version. What cloning
+   * carries but this format never emits is refused where it is found, by
+   * `decodeValue()`.
+   *
+   * Checking the marker's contents buys little in practice, since a payload
+   * from the same build always satisfies it and recognition never reads it
+   * afterwards. It is cheap, though, and it is what keeps the adoption below
+   * from being a cast that outruns what was checked -- an arbitrary object
+   * adopted as a marker would leave every tagged form beneath unrecognized and
+   * a foreign tree decoding as ordinary data rather than being refused.
    *
    * Adopting the sender's marker is what makes recognition work across the
    * boundary. The receiver's own objects are no use -- a marker minted here is
@@ -195,21 +202,32 @@ export class RealmCodecEngine
     data: RealmEncodedValue,
     context: ReconstructionContext,
   ): FabricValue {
+    if (!Array.isArray(data) || (data.length !== 2)) {
+      return this.reportMalformed(
+        "",
+        toCompactDebugString(data, 50),
+        "not a value this format emits: expected a two-element envelope",
+      );
+    }
+
+    const marker = data[0];
+
     if (
-      !Array.isArray(data) || (data.length !== 2) || (data[0] === null) ||
-      (typeof data[0] !== "object")
+      !Array.isArray(marker) || (marker.length !== 1) ||
+      (marker[0] !== REALM_FORMAT_VERSION)
     ) {
       return this.reportMalformed(
         "",
         toCompactDebugString(data, 50),
-        "not a value this format emits: expected a two-element envelope " +
-          "headed by a marker object",
+        `not a value this format emits: expected an envelope headed by a ${
+          backtickQuote(REALM_FORMAT_VERSION)
+        } marker`,
       );
     }
 
     const outer = this.#marker;
 
-    this.#marker = data[0] as RealmFormatMarker;
+    this.#marker = marker as RealmFormatMarker;
 
     try {
       // A set is started here because this format's transport is the tree

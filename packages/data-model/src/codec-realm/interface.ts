@@ -62,9 +62,9 @@ export type RealmCodecValue =
 
 /**
  * Content of the marker object. Recognition never reads it -- identity does
- * all the work -- so this is here to be legible in a debugger, and to give a
- * receiver something to check when it wants to know which build wrote a
- * payload.
+ * all the work -- so within a decode it serves to be legible in a debugger.
+ * `RealmCodecEngine.decode()` reads it once, at the envelope, to refuse a
+ * payload written by a build this one does not understand.
  */
 export const REALM_FORMAT_VERSION = "fvr1";
 
@@ -85,7 +85,8 @@ export const REALM_FORMAT_VERSION = "fvr1";
  * value equality rather than identity, so a primitive in slot zero would be
  * reproducible by any payload that happened to hold the same one --
  * and the argument below would evaporate. `decode()` refuses an envelope whose
- * slot zero is not an object.
+ * slot zero is not a one-element array holding this version, which is that
+ * requirement and the version check at once.
  *
  * **A payload cannot contain the marker**, and two facts together are what
  * say so.
@@ -144,11 +145,10 @@ export type RealmTaggedValue = readonly [
  * What crosses: `[marker, encodedValue]`.
  *
  * The outer envelope exists to carry the marker, and carries the version with
- * it. A receiver reads slot zero to learn what to compare against, and the
- * version inside it is there for one that wants to refuse a build whose
- * encoding it does not understand. Nothing in this package does that yet: the
- * version is carried, not enforced, and a receiver that cares has to check it
- * for itself.
+ * it. A receiver reads slot zero to learn what to compare against, and
+ * `RealmCodecEngine.decode()` refuses an envelope whose marker is not this
+ * build's before adopting it, so a payload written by a build this one does
+ * not understand is refused rather than walked.
  */
 export type RealmEncodedValue = readonly [RealmFormatMarker, RealmCodecValue];
 

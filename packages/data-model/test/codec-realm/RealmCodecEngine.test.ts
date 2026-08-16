@@ -42,9 +42,10 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { EchoReport } from "./realm-echo-worker.ts";
 
 /**
- * A marker for hand-built wire data. `decode()` adopts whatever object the
- * envelope carries, so a test's own marker works exactly as the engine's does
- * -- which is itself the property that lets a peer send a well-formed payload.
+ * A marker for hand-built wire data. `decode()` checks an envelope's marker by
+ * shape and version rather than by identity, so a test's own marker works
+ * exactly as the engine's does -- which is itself the property that lets a
+ * peer send a well-formed payload.
  */
 const WIRE_MARKER = ["fvr1"] as unknown as RealmFormatMarker;
 
@@ -296,12 +297,20 @@ describe("RealmCodecEngine", () => {
 
     it("refuses an envelope that is not two elements", () => {
       // The one place this engine takes instruction from the data, so the
-      // shape is checked before slot zero is read as a marker.
-      // Two of these have an object at slot zero, so only the slot-count
-      // clause refuses them. Without those the check would be pinned by
-      // nothing: every other shape here is caught by the array or
-      // marker-object clauses instead.
-      for (const bad of [[], [{}], [{}, 1, 2], [1, 2, 3], "nope", 42]) {
+      // slot count is checked before slot zero is read as a marker at all.
+      // Three of these carry a well-formed marker, so only the slot-count
+      // clause refuses them; the rest are not arrays, which that same clause
+      // catches.
+      for (
+        const bad of [
+          [],
+          [["fvr1"]],
+          [["fvr1"], 1, 2],
+          [["fvr1"], 1, 2, 3],
+          "nope",
+          42,
+        ]
+      ) {
         expect(() => fabricFromRealmValue(bad as never))
           .toThrow(/two-element envelope/);
       }
@@ -382,14 +391,42 @@ describe("RealmCodecEngine", () => {
         .toThrow(/Cannot decode symbol/);
     });
 
-    it("refuses an envelope whose marker is not an object", () => {
-      // `===` on a primitive is value equality, so a primitive in slot zero
-      // would be reproducible by any payload holding the same one, and the
-      // marker would stop marking anything.
-      for (const bad of ["fvr1", 42, null, undefined, 7n, true]) {
-        expect(() => fabricFromRealmValue([bad, { a: 1 }] as never))
-          .toThrow(/two-element envelope/);
+    it("refuses an envelope whose marker is not this format's", () => {
+      // A primitive at slot zero is the case that would break recognition
+      // outright: `===` on one is value equality, so any payload holding the
+      // same primitive would reproduce the marker. The rest are refused
+      // because a marker this build did not write is one whose encoding it
+      // cannot claim to understand.
+      const bad = [
+        // Primitives, which cannot mark anything.
+        "fvr1",
+        42,
+        null,
+        undefined,
+        7n,
+        true,
+        // Objects, but not the shape Section 2.4 specifies.
+        {},
+        { 0: "fvr1", length: 1 },
+        [],
+        ["fvr1", "extra"],
+        // The right shape, carrying a version this build does not implement.
+        ["fvr2"],
+        ["FVR1"],
+      ];
+
+      for (const marker of bad) {
+        expect(() => fabricFromRealmValue([marker, { a: 1 }] as never))
+          .toThrow(/expected an envelope headed by a `fvr1` marker/);
       }
+    });
+
+    it("decodes an envelope headed by a peer's own equal marker", () => {
+      // The control for the case above, and the property that lets a peer
+      // send a well-formed payload at all: what is checked is the marker's
+      // shape and version, never its identity against one this realm minted.
+      expect(fabricFromRealmValue([["fvr1"], { a: 1 }] as never))
+        .toEqual({ a: 1 });
     });
 
     it("treats a two-element array in a data position as data", () => {
