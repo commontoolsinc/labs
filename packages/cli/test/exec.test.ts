@@ -585,6 +585,56 @@ describe("parseExecArgs edge cases", () => {
     ).toEqual({ titel: "x" });
   });
 
+  it("offers a negated near miss, and only over fields that can be negated", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: {
+        title: { type: "boolean" },
+        done: { type: "boolean" },
+        body: { type: "string" },
+      },
+    });
+
+    // The case the caller actually hits: a typo inside the negated name. The
+    // `no-` prefix is stripped before matching, because otherwise it is three
+    // edits of noise and the threshold scales with the misspelling's length —
+    // so it would get HARDER to match precisely because they typed more.
+    expect(() => parseExecArgs(spec, ["invoke", "--no-titel"]))
+      .toThrow(/Did you mean "--no-title"\?/);
+
+    // Only booleans are offered, because only a boolean can be negated.
+    expect(() => parseExecArgs(spec, ["invoke", "--no-titel"]))
+      .toThrow(
+        /Only a boolean field can be negated, and this verb declares "--title", "--done"/,
+      );
+
+    // A near miss toward a NON-boolean is withheld: `--no-body` would fail
+    // too, so naming it sends the caller to a spelling that does not work.
+    expect(() => parseExecArgs(spec, ["invoke", "--no-bodi"]))
+      .not.toThrow(/Did you mean/);
+
+    // The unnegated door is untouched, and still lists every field.
+    expect(() => parseExecArgs(spec, ["invoke", "--titel", "x"]))
+      .toThrow(
+        /Did you mean "--title"\? <event> takes "--title", "--done", "--body"/,
+      );
+
+    // A valid negation still works.
+    expect(parseExecArgs(spec, ["invoke", "--no-title"]).input)
+      .toEqual({ title: false });
+  });
+
+  it("says so when a verb declares nothing that can be negated", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { body: { type: "string" } },
+    });
+    expect(() => parseExecArgs(spec, ["invoke", "--no-body-x"]))
+      .toThrow(
+        /Only a boolean field can be negated, and this verb declares none/,
+      );
+  });
+
   it("refuses a declared field typed in its schema spelling, not aliases it", () => {
     // The permissive path turns on whether the SCHEMA judges its fields, not
     // on whether a NAME is declared. Asking the second would read `--fooBar`
