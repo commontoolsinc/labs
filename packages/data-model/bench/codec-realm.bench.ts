@@ -20,9 +20,11 @@
  * The `bytes` and `bigint` series answer a narrower question, and answer it
  * against each other: both are sized in bytes, so a row from one and the row
  * of the same size from the other carry the same quantity of data. Cloning
- * takes each as itself. JSON has to reach text for both, base64url for one and
- * decimal for the other, and those two do not cost alike -- which is the
- * comparison the four columns are for.
+ * takes each as itself, and takes a `bigint` in constant time whatever its
+ * magnitude. JSON reaches the same wire form for both -- base64url of a
+ * two's-complement byte string, the same length to within a character -- and
+ * still spends several times more on the `bigint`, which is what the four
+ * columns are for.
  *
  * **A decoded tree carries no guarantee of being usable again.** `decode()`
  * cedes its input, and `FabricBytes` takes over the `ArrayBuffer` it arrived
