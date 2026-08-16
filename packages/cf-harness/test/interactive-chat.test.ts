@@ -325,8 +325,8 @@ Deno.test("interactive chat responses carry protocol version and errors", () => 
   });
   assertEquals(
     createHarnessChatErrorResponse("req-2", {
-      code: "browser_access_required",
-      message: "Browser Access lease is required for browser profile turns.",
+      code: "turn_already_running",
+      message: "session session-1 already has active turn turn-1",
       retryable: true,
     }),
     {
@@ -335,8 +335,8 @@ Deno.test("interactive chat responses carry protocol version and errors", () => 
       requestId: "req-2",
       ok: false,
       error: {
-        code: "browser_access_required",
-        message: "Browser Access lease is required for browser profile turns.",
+        code: "turn_already_running",
+        message: "session session-1 already has active turn turn-1",
         retryable: true,
       },
     },
