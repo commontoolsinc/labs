@@ -1,4 +1,7 @@
-// Unit tests for the pure helpers. No network, subprocess, or filesystem.
+/**
+ * Unit tests for the pure helpers. No network, subprocess, or filesystem.
+ */
+
 import { assert, assertEquals } from "@std/assert";
 import { budgetStatus, clampInt, concDot, daysLabel, durationTag, escapeHtml, friendlyError, humanDur, humanSpan, landingHref, lighten, multiSparkline, readBudget, sparkline, strip, thin, usd } from "./lib.ts";
 

@@ -1,6 +1,9 @@
-// github users: GitHub and the history file are replaced with in-memory
-// stand-ins. The tests cover pagination, both organization rosters, retained
-// history, and the gray states for unavailable data.
+/**
+ * github users: GitHub and the history file are replaced with in-memory
+ * stand-ins. The tests cover pagination, both organization rosters, retained
+ * history, and the gray states for unavailable data.
+ */
+
 import {
   assert,
   assertEquals,

@@ -1,7 +1,10 @@
-// Tests for the model-spend tile: three provider billing APIs, read through a
-// stubbed fetch. Nothing here touches the network. The day keys are built from the
-// real current UTC date, because the tile reads the clock to decide which days are
-// this month and how far back to ask.
+/**
+ * Tests for the model-spend tile: three provider billing APIs, read through a
+ * stubbed fetch. Nothing here touches the network. The day keys are built from the
+ * real current UTC date, because the tile reads the clock to decide which days are
+ * this month and how far back to ask.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx } from "../types.ts";
 import { themedChartSeries } from "../theme.ts";

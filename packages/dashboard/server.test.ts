@@ -1,8 +1,11 @@
-// Tests for the generic runtime: the ticker, the SSE fan-out, the routes, and
-// the page. Importing server.ts neither serves nor collects, so nothing here
-// binds a port or reaches a source; the tiles are stand-ins with a canned
-// collect(), registered under the ids the real registry uses so their views
-// reach the page.
+/**
+ * Tests for the generic runtime: the ticker, the SSE fan-out, the routes, and
+ * the page. Importing server.ts neither serves nor collects, so nothing here
+ * binds a port or reaches a source; the tiles are stand-ins with a canned
+ * collect(), registered under the ids the real registry uses so their views
+ * reach the page.
+ */
+
 import {
   assert,
   assertEquals,

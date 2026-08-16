@@ -1,12 +1,15 @@
 /// <reference path="./clock.d.ts" />
-// The SES pattern compartment endows no timers (part of the structural barrier
-// pinned by security-timing.test.ts). Code that wants a delay in both a host
-// context and a compartment must therefore guard its timer use: read
-// `globalThis.setTimeout` (a member access that yields undefined in-sandbox,
-// not a ReferenceError) and no-op when it is absent, so the wait degrades to an
-// immediate return rather than throwing. These tests pin that the compartment
-// omits the timers, that a RAW `setTimeout(...)` call throws inside it, and
-// that the guard resolves immediately there.
+/**
+ * The SES pattern compartment endows no timers (part of the structural barrier
+ * pinned by security-timing.test.ts). Code that wants a delay in both a host
+ * context and a compartment must therefore guard its timer use: read
+ * `globalThis.setTimeout` (a member access that yields undefined in-sandbox,
+ * not a ReferenceError) and no-op when it is absent, so the wait degrades to an
+ * immediate return rather than throwing. These tests pin that the compartment
+ * omits the timers, that a RAW `setTimeout(...)` call throws inside it, and
+ * that the guard resolves immediately there.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {

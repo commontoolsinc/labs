@@ -1,8 +1,11 @@
-// discord online: the tile drives a Discord gateway socket, two timers and a
-// history file on disk. All four are replaced with stand-ins here — the socket is
-// driven frame by frame, the timers fire on demand, the clock is fixed, and the
-// file reads and writes are captured in memory. No network, no filesystem, no
-// waiting.
+/**
+ * discord online: the tile drives a Discord gateway socket, two timers and a
+ * history file on disk. All four are replaced with stand-ins here — the socket is
+ * driven frame by frame, the timers fire on demand, the clock is fixed, and the
+ * file reads and writes are captured in memory. No network, no filesystem, no
+ * waiting.
+ */
+
 import {
   assert,
   assertEquals,

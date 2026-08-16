@@ -1,14 +1,17 @@
-// Pins fixed-length tuple emission (mapping spec §4, quirk §16.1): tuples
-// emit { type: "array", items: <merged element union> } via the
-// numeric-index fallback (type-utils.ts getArrayElementInfo). Positional
-// structure and arity are LOST — no prefixItems, no minItems/maxItems —
-// so [number, number, number] is indistinguishable from number[], and an
-// optional element leaks "undefined" into the items type array.
-//
-// NOTE this lossiness is load-bearing today: UnionFormatter's empty-array
-// pruning safety argument (union-formatter.ts ~:280-285) explicitly relies
-// on tuple schemas having no length bounds. If prefixItems emission is ever
-// added, gate that pruning first — then update these pins.
+/**
+ * Pins fixed-length tuple emission (mapping spec §4, quirk §16.1): tuples
+ * emit { type: "array", items: <merged element union> } via the
+ * numeric-index fallback (type-utils.ts getArrayElementInfo). Positional
+ * structure and arity are LOST — no prefixItems, no minItems/maxItems —
+ * so [number, number, number] is indistinguishable from number[], and an
+ * optional element leaks "undefined" into the items type array.
+ *
+ * NOTE this lossiness is load-bearing today: UnionFormatter's empty-array
+ * pruning safety argument (union-formatter.ts ~:280-285) explicitly relies
+ * on tuple schemas having no length bounds. If prefixItems emission is ever
+ * added, gate that pruning first — then update these pins.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { SchemaGenerator } from "../src/schema-generator.ts";
