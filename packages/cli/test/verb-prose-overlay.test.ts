@@ -536,4 +536,87 @@ describe("verb prose", () => {
       expect(declaredVerbProse({ resultSchema: true }).size).toBe(0);
     });
   });
+
+  describe("a result schema that is a reference at its root", () => {
+    it("reads the verbs from the definition the root names", () => {
+      // A pattern whose result is a NAMED type compiles this way, which is
+      // every piece a verb creates: its result is the type its author
+      // declared, so the properties live in `$defs` rather than on the root.
+      // A root piece, whose result is written inline, kept its prose while a
+      // created one lost all of it.
+      const pattern = {
+        resultSchema: {
+          $ref: "#/$defs/Item",
+          $defs: {
+            Item: {
+              type: "object",
+              properties: {
+                blockOn: {
+                  $ref: "#/$defs/BlockOnEvent",
+                  asCell: ["stream"],
+                  description: "Record that this item waits on another.",
+                },
+              },
+            },
+            BlockOnEvent: { type: "object", properties: { on: {} } },
+          },
+        },
+      };
+
+      const prose = declaredVerbProse(pattern);
+      expect(prose.get("blockOn")?.description)
+        .toBe("Record that this item waits on another.");
+    });
+
+    it("still reads an inline result schema", () => {
+      // The root-piece shape, which worked before and must keep working.
+      const pattern = {
+        resultSchema: {
+          type: "object",
+          properties: { addItem: { description: "File a new root item." } },
+        },
+      };
+      expect(declaredVerbProse(pattern).get("addItem")?.description)
+        .toBe("File a new root item.");
+    });
+
+    it("returns nothing for a root reference that resolves to nothing", () => {
+      const pattern = { resultSchema: { $ref: "#/$defs/Absent" } };
+      expect(declaredVerbProse(pattern).size).toBe(0);
+    });
+
+    it("resolves a property reference in the definition's OWN scope", () => {
+      // A `$defs` closure is local. The definition the root names may carry
+      // definitions of its own, and a property reference inside it names
+      // those — resolving at the outer root finds nothing, or a same-named
+      // definition belonging to someone else. Both roots here declare `Ev`,
+      // and only the inner one is correct for a property of `Item`.
+      const pattern = {
+        resultSchema: {
+          $ref: "#/$defs/Item",
+          $defs: {
+            Item: {
+              type: "object",
+              properties: { act: { $ref: "#/$defs/Ev", description: "Act." } },
+              $defs: {
+                Ev: {
+                  type: "object",
+                  properties: { inner: { type: "string" } },
+                },
+              },
+            },
+            Ev: {
+              type: "object",
+              properties: { outer: { type: "string" } },
+            },
+          },
+        },
+      };
+
+      const eventSchema = declaredVerbProse(pattern).get("act")
+        ?.eventSchema as Record<string, unknown> | undefined;
+      const props = eventSchema?.properties as Record<string, unknown>;
+      expect(Object.keys(props)).toEqual(["inner"]);
+    });
+  });
 });
