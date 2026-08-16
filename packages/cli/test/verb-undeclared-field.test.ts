@@ -1047,6 +1047,37 @@ describe("verb-undeclared-field", () => {
         .toMatch(/count/);
     });
 
+    it("accepts the link forms that carry no id", () => {
+      // A relative link legitimately has only a path, and an id alone is a
+      // complete address. Requiring an `id` would be tighter and wrong.
+      expect(verbInputSchemaError(
+        { on: { "/": { "link@1": { id: "of:fid1:x" } } } },
+        narrowed,
+      )).toBeUndefined();
+      expect(verbInputSchemaError(
+        { on: { "/": { "link@1": { path: ["a"] } } } },
+        narrowed,
+      )).toBeUndefined();
+    });
+
+    it("refuses an envelope whose payload is not a record", () => {
+      // `isLink` answers on the envelope's SHAPE and says nothing about what
+      // rides inside, so it is true of all three of these. Bypassing the walk
+      // on that answer would let malformed data through as a reference and
+      // normalize to an empty relative link rather than being refused.
+      for (
+        const payload of ["nope", [1], null, 42] as const
+      ) {
+        expect(
+          verbInputSchemaError(
+            { on: { "/": { "link@1": payload } } },
+            narrowed,
+          ),
+          `payload ${JSON.stringify(payload)} must not pass as a reference`,
+        ).toBeDefined();
+      }
+    });
+
     it("still refuses a non-link object that does not fit its position", () => {
       // The link is what is opaque, not the position. A plain object at the
       // same place is judged exactly as before.

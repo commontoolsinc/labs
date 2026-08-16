@@ -510,6 +510,36 @@ function schemaIsArrayShaped(node: Record<string, unknown>): boolean {
   return node.items !== undefined || node.prefixItems !== undefined;
 }
 
+/**
+ * Whether `value` is a link this gate may treat as opaque.
+ *
+ * `isLink` answers on the envelope's SHAPE — a `/` carrying a `link@1` — and
+ * says nothing about what rides inside it, so it is true of
+ * `{"/": {"link@1": "nope"}}`, of an array, and of `null`. Bypassing both
+ * checks on that answer would let malformed data through as a reference and
+ * normalize to an empty relative link rather than being refused or judged as
+ * the ordinary object it is.
+ *
+ * A plain record is the line, and it is where the real forms fall: a full
+ * address, an id alone, and a relative link carrying only a path are all
+ * records, while every malformed spelling above is not. Requiring an `id`
+ * would be tighter and wrong — a relative link legitimately has none.
+ *
+ * Only the envelope form is narrowed. Every other thing `isLink` recognizes —
+ * a live `Cell`, a primitive link — is already a value rather than a caller's
+ * JSON, and has no payload to malform.
+ */
+function isOpaqueReference(value: unknown): boolean {
+  if (!isLink(value)) return false;
+  if (typeof value !== "object" || value === null) return true;
+  const envelope = (value as Record<string, unknown>)["/"];
+  if (typeof envelope !== "object" || envelope === null) return true;
+  if (!Object.hasOwn(envelope as object, "link@1")) return true;
+  const payload = (envelope as Record<string, unknown>)["link@1"];
+  return typeof payload === "object" && payload !== null &&
+    !Array.isArray(payload);
+}
+
 /** Whether a schema node marks its position as a cell or a stream, which is
  * where a caller may write a link in place of a value. */
 function carriesCellMarker(node: Record<string, unknown>): boolean {
@@ -563,7 +593,7 @@ function firstUndeclaredEventField(
   // points at is not read at dispatch — so there is nothing here to compare a
   // declaration against. Descending anyway reported `/` as an undeclared field
   // and refused every reference a caller named.
-  if (isLink(value)) return undefined;
+  if (isOpaqueReference(value)) return undefined;
   if (!isSchemaObject(schema)) return undefined;
   if (!atRoot && carriesCellMarker(schema)) return undefined;
   const scopeRoot = cfcSchemaChildRoot(schema, root);
@@ -768,7 +798,7 @@ export function verbInputSchemaError(
   // would have accepted and dispatched.
   const relaxed = relaxDefaultedRequired(schema, schema, new Map());
   return validateSchemaValue(relaxed, input, relaxed, {
-    acceptOpaqueValue: (value) => isLink(value),
+    acceptOpaqueValue: (value) => isOpaqueReference(value),
   });
 }
 
