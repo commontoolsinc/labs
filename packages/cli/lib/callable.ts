@@ -440,7 +440,17 @@ function declaredFieldsAt(
       root,
     });
   }
-  if (node.additionalProperties !== undefined) into.honorsUndeclared = true;
+  // `false` is the one value that does NOT honor undeclared fields — it is
+  // the schema saying no extra field is permitted. Reading mere presence as
+  // permission inverts the strictest spelling into the most permissive one,
+  // and the field is then dropped by the runtime and the call reported
+  // settled, which is the silent loss this refusal exists to prevent.
+  if (
+    node.additionalProperties !== undefined &&
+    node.additionalProperties !== false
+  ) {
+    into.honorsUndeclared = true;
+  }
   if (!Array.isArray(node.allOf)) return into;
   for (const member of node.allOf as JSONSchema[]) {
     const memberRoot = cfcSchemaChildRoot(member, root);
@@ -618,8 +628,9 @@ function firstUndeclaredEventField(
  *
  * It does when it names fields somewhere — directly or through a conjunction —
  * and does not also say extra ones are welcome. A schema naming none judges
- * none, so every field passes; one carrying `additionalProperties` has said
- * undeclared fields are fine.
+ * none, so every field passes; one carrying `additionalProperties` set to
+ * anything but `false` has said undeclared fields are fine. `false` is the
+ * one value that says the opposite, so a schema carrying it judges.
  *
  * Exported for the flag door, which needs the same answer about the same
  * schema and must not derive it a second way. It asks whether the SCHEMA
