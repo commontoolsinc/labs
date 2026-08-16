@@ -33,6 +33,28 @@ export const SIZES = [0, 1, 10, 100, 1000, 10000, 100000] as const;
 export const SPARSE_SIZES = SIZES.filter((size) => size >= 10);
 
 /**
+ * Payload sizes **in bytes** for the two series that carry bulk data rather
+ * than structure, one magnitude further than the containers reach.
+ *
+ * Bytes rather than elements, and the same ladder for both, because the point
+ * of these two series is to be read against each other. A `FabricBytes` and a
+ * `bigint` of the same size carry the same quantity of data through formats
+ * that treat them oppositely: cloning takes each as itself, where JSON writes
+ * both as base64url of the same byte count -- the same wire text, to within a
+ * character or two -- and still does not spend alike getting there.
+ */
+export const BYTE_SIZES = [
+  0,
+  1,
+  10,
+  100,
+  1000,
+  10000,
+  100000,
+  1000000,
+] as const;
+
+/**
  * One subject per interesting path through the codec system: the
  * self-representing cases, the four JavaScript types JSON cannot carry, a
  * terminal and a nonterminal fabric codec, and both structural escapes.
@@ -112,6 +134,50 @@ export function makeSparseArray(size: number): FabricValue {
   }
 
   return Object.freeze(result);
+}
+
+/**
+ * Builds a `FabricBytes` of `size` bytes.
+ *
+ * The content is a repeating byte ramp rather than zeroes, unlike the
+ * containers: base64url costs the same either way, but a run of zeroes is the
+ * one input a future encoder might reasonably special-case, and a series meant
+ * to price bulk data should not be measuring a shortcut.
+ */
+export function makeBytes(size: number): FabricValue {
+  const bytes = new Uint8Array(size);
+
+  for (let i = 0; i < size; i++) {
+    bytes[i] = i & 0xff;
+  }
+
+  return new FabricBytes(bytes, true);
+}
+
+/**
+ * Builds a positive `bigint` occupying `size` bytes, and as sparse as one that
+ * size can be: the lowest bit set and the highest, nothing between them.
+ *
+ * The high bit is what makes the byte count exact -- a value with leading zero
+ * bytes would carry less data than its size claims -- and the low bit is what
+ * keeps the value from being a power of two, which is the shape an
+ * implementation is likeliest to have a shortcut for. Between them the value
+ * is all zeroes, so nothing here is measuring dense magnitude when it means to
+ * be measuring size. `size` of zero gives `0n`, the ladder's empty case.
+ *
+ * Positive throughout, sign being stored apart from magnitude, so a negative
+ * counterpart would cost what these do.
+ *
+ * What to have in hand when reading this series against the byte one under
+ * JSON: the two reach the *same* wire form, base64url of a two's-complement
+ * byte string, and at these sizes the same length to within a character. What
+ * separates them is the cost of getting a `bigint`'s bytes out of the runtime
+ * at all, which goes through `toString(16)` and a hex parse -- linear, base 16
+ * being a power of two, but several times what handing over a `Uint8Array`
+ * costs.
+ */
+export function makeBigint(size: number): FabricValue {
+  return (size === 0) ? 0n : (1n << BigInt((8 * size) - 1)) | 1n;
 }
 
 /** Builds a plain object of `size` distinct keys, every value zero. */
@@ -283,6 +349,16 @@ export const SPARSE = SPARSE_SIZES.map(
   (size) => [size, makeSparseArray(size)] as const,
 );
 export const OBJECTS = SIZES.map((size) => [size, makeObject(size)] as const);
+
+/** Byte payloads by magnitude. */
+export const BYTES = BYTE_SIZES.map(
+  (size) => [size, makeBytes(size)] as const,
+);
+
+/** `bigint` payloads by magnitude, sized in bytes to match {@link BYTES}. */
+export const BIGINTS = BYTE_SIZES.map(
+  (size) => [size, makeBigint(size)] as const,
+);
 /** Leaf counts for every omnibus series, so the three are read against each other. */
 const OMNIBUS_SIZES = [10, 100, 1000] as const;
 
