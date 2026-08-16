@@ -298,9 +298,11 @@ describe("RealmCodecEngine", () => {
     it("refuses an envelope that is not two elements", () => {
       // The one place this engine takes instruction from the data, so the
       // slot count is checked before slot zero is read as a marker at all.
-      // Three of these carry a well-formed marker, so only the slot-count
-      // clause refuses them; the rest are not arrays, which that same clause
-      // catches.
+      // Three of these carry a well-formed marker, which is what gives the
+      // slot-count clause its grip: with that clause gone nothing else here
+      // refuses them. The empty array reaches the same clause, having no
+      // second slot rather than a bad marker; only `"nope"` and `42` are
+      // refused for not being arrays at all.
       for (
         const bad of [
           [],
