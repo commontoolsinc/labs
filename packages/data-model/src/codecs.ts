@@ -19,7 +19,7 @@ import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./codec-interface/interface.ts";
-import { EmptyReconstructionContext } from "./codec-interface/EmptyReconstructionContext.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "./codec-interface/EmptyReconstructionContext.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodecEngine } from "./codec-json/JsonCodecEngine.ts";
@@ -75,22 +75,6 @@ export function newDefaultJsonCodecEngine(
 const jsonCodecEngine = newDefaultJsonCodecEngine();
 
 /**
- * Shared empty `ReconstructionContext` used when a JSON decode is requested
- * without a runtime context. Behaviorally identical to the bare empty
- * singleton (`shouldDeepFreeze` is `true`); only the `getCell()` throw
- * message is decode-framed, so an unexpected cell reference during a
- * context-less decode produces a message that names the situation. This
- * single instance covers both public entry points (`fabricFromJsonValue()` and
- * `plainObjectFromJson()`, the latter delegating to the former).
- */
-const JSON_DECODE_EMPTY_CONTEXT = Object.freeze(
-  new EmptyReconstructionContext(
-    true,
-    "no runtime context (JSON decode); a cell reference cannot be reconstructed.",
-  ),
-);
-
-/**
  * Encodes a fabric value to a JSON string in the standard `FabricValue`
  * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  */
@@ -130,18 +114,14 @@ export function plainObjectFromJson<T extends object = object>(
 
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
- * `context` is omitted, the shared decode-framed empty context
- * (`JSON_DECODE_EMPTY_CONTEXT`) is substituted, which throws if any
- * reconstruction is needed.
+ * `context` is omitted, {@link EMPTY_RECONSTRUCTION_CONTEXT} is substituted,
+ * which throws if any reconstruction is needed.
  */
 export function fabricFromJsonValue(
   json: string,
   context?: ReconstructionContext | undefined,
 ): FabricValue {
-  return jsonCodecEngine.decode(
-    json,
-    context ?? JSON_DECODE_EMPTY_CONTEXT,
-  );
+  return jsonCodecEngine.decode(json, context ?? EMPTY_RECONSTRUCTION_CONTEXT);
 }
 
 /**
@@ -177,20 +157,6 @@ export function newDefaultRealmCodecEngine(
 const realmCodecEngine = newDefaultRealmCodecEngine();
 
 /**
- * Shared empty `ReconstructionContext` used when a realm decode is requested
- * without a runtime context. The realm-crossing counterpart to
- * {@link JSON_DECODE_EMPTY_CONTEXT}; only the `getCell()` throw message
- * differs, so that an unexpected cell reference names the situation it arose
- * in.
- */
-const REALM_DECODE_EMPTY_CONTEXT = Object.freeze(
-  new EmptyReconstructionContext(
-    true,
-    "no runtime context (realm decode); a cell reference cannot be reconstructed.",
-  ),
-);
-
-/**
  * Encodes a fabric value into the realm-crossing transport form: a value that
  * `structuredClone()` or `postMessage()` carries to another realm without
  * loss. The result is `[marker, tree]`, and the tree inside shares whatever
@@ -208,7 +174,7 @@ export function realmFromFabricValue(value: FabricValue): RealmEncodedValue {
 
 /**
  * Decodes a value in the realm-crossing transport form. If `context` is
- * omitted, the shared decode-framed empty context is substituted, which throws
+ * omitted, {@link EMPTY_RECONSTRUCTION_CONTEXT} is substituted, which throws
  * if any reconstruction is needed.
  *
  * `data` is ceded to this function, which retains what it likes of it and
@@ -219,5 +185,5 @@ export function fabricFromRealmValue(
   data: RealmEncodedValue,
   context?: ReconstructionContext | undefined,
 ): FabricValue {
-  return realmCodecEngine.decode(data, context ?? REALM_DECODE_EMPTY_CONTEXT);
+  return realmCodecEngine.decode(data, context ?? EMPTY_RECONSTRUCTION_CONTEXT);
 }
