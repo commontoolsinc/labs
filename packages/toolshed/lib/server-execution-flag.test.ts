@@ -7,22 +7,26 @@ import {
 } from "@/lib/server-execution-flag.ts";
 
 // The toolshed process's ONE flag resolution (server-execution v2 Phase 7,
-// the flip): unset means the FIRST-PARTY DEFAULT — the value of
+// flip-ready): unset means the FIRST-PARTY DEFAULT — the value of
 // `SERVER_EXECUTION_DEFAULT_ENABLED`, whichever it is — and an explicit
-// "false" is the OFF arm (the rollback lever), an explicit "true" the ON
-// arm. Pinned against the constant, not a literal, so the test states the
-// contract rather than the current default.
+// "false" is the OFF arm, an explicit "true" the ON arm. Pinned against
+// the constant, not a literal, so the tests state the contract rather
+// than the current default — except the ONE absolute pin below.
 
 const envOf = (values: Record<string, string | undefined>) => (name: string) =>
   values[name];
 
-describe("the flip (server-execution v2 Phase 7, 2026-08-15)", () => {
-  it("the first-party default IS ON — flipping it back is the documented rollback (docs/plans/server-execution-v2.md Phase 7) and must update this pin, the CI lane roles, and EXPERIMENTAL_OPTIONS.md together", () => {
+describe("the landing posture (server-execution v2 Phase 7, landed dark by owner ruling 2026-08-16)", () => {
+  it("the first-party default IS OFF — the flip to ON is its own separate one-line PR (docs/plans/server-execution-v2.md Phase 7 task 1) and must update this pin, the CI lane roles, and EXPERIMENTAL_OPTIONS.md together", () => {
     // Every other flip pin in the tree is deliberately RELATIVE to the
-    // constant (so the flip is one line); this is the one ABSOLUTE pin,
-    // so a silent revert cannot leave the "ON arm" CI lanes running OFF
-    // with every test still green.
-    expect(SERVER_EXECUTION_DEFAULT_ENABLED).toBe(true);
+    // constant (so the flip PR is one line plus this pin); this is the
+    // one ABSOLUTE pin, so a silent flip in EITHER direction cannot hide
+    // behind green relative pins — flipped silently ON, the REQUIRED
+    // default CI lanes would carry the ON posture (the P7 independent
+    // review's blocker: two two-browser gates red under ON); flipped
+    // silently OFF after the flip PR, the "ON arm" default lanes would
+    // run OFF with every test still green.
+    expect(SERVER_EXECUTION_DEFAULT_ENABLED).toBe(false);
   });
 });
 
@@ -33,7 +37,7 @@ describe("serverExecutionEnabledFromEnv", () => {
     );
   });
 
-  it("honors an explicit value either way (the OFF arm stays selectable)", () => {
+  it("honors an explicit value either way (both arms stay selectable — CI's explicit-`true` lanes run the ON posture on an ON-built binary)", () => {
     expect(
       serverExecutionEnabledFromEnv(
         envOf({ EXPERIMENTAL_SERVER_EXECUTION: "false" }),

@@ -38,10 +38,27 @@ export function serverExecutionEnabledFromEnv(envGet: EnvReader): boolean {
  * reads too — the posture every deployment checklist already requires of
  * the operator DID (docs/plans/ingest-channels-journal-sink.md), made
  * automatic where the loop actually runs. OFF the flag: the configured
- * list verbatim (byte-identical). Foreign WRITES are NOT widened by this:
- * the wave's §2b accept gate checks the ACTING identity's structural
- * grant and deliberately ignores the service-DID blanket
- * (`foreignWriteAuthorityFor`).
+ * list verbatim (byte-identical).
+ *
+ * WHAT THIS WIDENS, honestly (P7 independent review finding 6; the P7
+ * build's "not a write widening" was overstated): a memory service
+ * principal is implicit OWNER for its sessions on EVERY space
+ * (`packages/memory/v2/server.ts` — transact, queries, watches, ACL-doc
+ * writes, fresh-space genesis; the ACL policy has no read-only service
+ * class). So under the flag the process identity's ORDINARY session
+ * traffic — its own `productionServer` runtime (ingest / webhooks) and
+ * the loopback plane's authored/bookkeeping commits — gains OWNER
+ * everywhere, wherever `MEMORY_SERVICE_DIDS` did not already list it.
+ * Bounded by process trust (the same process already derives every
+ * space), and NOT widened at the wave's foreign-write accept gate, which
+ * checks the ACTING identity's structural grant and deliberately ignores
+ * the service-DID blanket (`foreignWriteAuthorityFor`). The wish's own
+ * bootstrap needs only READ on the demanding user's home space; a
+ * read-only service class in the memory ACL would be the narrower shape,
+ * but that is a memory-ACL policy addition and depends on what the
+ * served create handler's `.inSpace()` provisioning needs at genesis —
+ * FLAGGED as a ruled-posture item for the owner (verification-coverage.md
+ * OW31), not narrowed here.
  */
 export function memoryServiceDidsFor(options: {
   configured: readonly string[];
