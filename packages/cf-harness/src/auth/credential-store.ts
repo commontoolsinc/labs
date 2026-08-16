@@ -266,8 +266,8 @@ const parseDocument = (text: string): CredentialDocument => {
   try {
     parsed = JSON.parse(text) as unknown;
   } catch {
-    // A parse error quotes the surrounding source text, which here is the
-    // stored token.
+    // A parse error quotes the source text around the failure, which in this
+    // file can be the stored token.
     throw new Error("credential store is not valid JSON");
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
