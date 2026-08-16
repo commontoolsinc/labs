@@ -628,8 +628,9 @@ function firstUndeclaredEventField(
  *
  * It does when it names fields somewhere — directly or through a conjunction —
  * and does not also say extra ones are welcome. A schema naming none judges
- * none, so every field passes; one carrying `additionalProperties` has said
- * undeclared fields are fine.
+ * none, so every field passes; one carrying `additionalProperties` set to
+ * anything but `false` has said undeclared fields are fine. `false` is the
+ * one value that says the opposite, so a schema carrying it judges.
  *
  * Exported for the flag door, which needs the same answer about the same
  * schema and must not derive it a second way. It asks whether the SCHEMA
