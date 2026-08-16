@@ -42,5 +42,7 @@ system, schemas.
   reservation rule.
 - [4-realm-encoding.md](./4-realm-encoding.md) -- The realm-crossing wire
   format, for `structuredClone()` and `postMessage()`: the `[marker, tree]`
-  envelope, identity-based detection, standard type encodings, cycles and
-  sharing, and the ownership contract that ceding `decode()`'s input carries.
+  outer envelope, identity-based detection, standard type encodings, cycles
+  and sharing, and the ownership contract each direction carries -- an encoded
+  tree sharing structure with the value it came from, and a decoded one
+  carrying no guarantee of being usable again.
