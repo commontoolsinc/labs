@@ -66,24 +66,30 @@ import {
  * needs encoding rather than to the size of the value. `JsonCodecEngine` never
  * faces the choice, having to reach text.
  *
- * **`decode()` cedes its input.** The engine retains what it likes of the tree,
- * and two retentions are deliberate: a subtree needing no decoding comes back
- * by identity, and a byte-carrying value takes over the `ArrayBuffer` it
- * arrived in rather than copying it. Every container it returns is frozen,
- * retained and rebuilt alike; an `ArrayBuffer` cannot be, which is what makes
- * ceding it a requirement rather than a courtesy. A failed decode cedes the
- * tree too, a refusal being able to arrive after a buffer is already detached.
+ * **`decode()` cedes its input**, and **a decoded tree carries no guarantee of
+ * being usable again**. The engine retains what it likes of the tree, and two
+ * retentions are deliberate: a subtree needing no decoding comes back by
+ * identity, and a byte-carrying value takes over the `ArrayBuffer` it arrived
+ * in rather than copying it. Every container it returns is frozen, retained
+ * and rebuilt alike; an `ArrayBuffer` cannot be, which is what makes ceding it
+ * a requirement rather than a courtesy. A call that raised consumed the tree
+ * as thoroughly as one that returned, a refusal being able to arrive after a
+ * buffer is already detached.
  *
- * Taking a buffer over detaches it, so **a tree carrying bytes decodes exactly
- * once**: a second `decode()` of the same tree cannot reconstruct what the
- * first did, and is settled against leniency like any other refusal -- strict
- * raises, lenient yields a `ProblematicValue` where the bytes would have been.
- * `FabricBytes` and `FabricHash` are the classes that reach that
- * path, directly or nested anywhere beneath. On the boundary this format
- * exists for the restriction costs nothing -- the tree is the receiver's own
- * clone of a value it will not be handed again, which is the whole reason the
- * copy can be elided -- but a caller wanting two readings of one payload keeps
- * the value it decoded, not the tree it decoded from.
+ * Nothing detects a second `decode()` or sets out to defeat one -- the
+ * guarantee is withheld, not enforced -- and which trees survive follows from
+ * what they carry. Bytes are the case where it definitely fails: taking a
+ * buffer over detaches it, so a second call cannot reconstruct what the first
+ * did, and the attempt is settled against leniency like any other refusal,
+ * strict raising and lenient yielding a `ProblematicValue` where the bytes
+ * would have been. `FabricBytes` and `FabricHash` are the classes that reach
+ * that path, directly or nested anywhere beneath; a tree holding neither
+ * happens to decode repeatedly, which is a fact about these containers rather
+ * than a promise. On the boundary this format exists for none of it costs a
+ * caller anything -- the tree is the receiver's own clone of a value it will
+ * not be handed again, which is the whole reason the copy can be elided -- but
+ * a caller wanting two readings of one payload keeps the value it decoded, not
+ * the tree it decoded from.
  *
  * **Cycles are refused by both walks**, and **a shared reference survives
  * exactly where nothing beneath it needed encoding**, per Section 1.6 of the
@@ -191,8 +197,9 @@ export class RealmCodecEngine
    * Every container this returns is frozen, retained and rebuilt alike; the
    * byte buffer cannot be, which is what makes ceding it a requirement rather
    * than a courtesy. Taking a buffer over detaches it, so a tree carrying
-   * bytes decodes exactly once, a second call on the same tree raising when
-   * strict and reporting a `ProblematicValue` when lenient.
+   * bytes cannot be decoded a second time, such a call raising when strict and
+   * yielding a `ProblematicValue` when lenient. No tree is guaranteed to
+   * survive a decode; one holding no bytes merely happens to.
    *
    * Across the boundary that costs a caller nothing, the tree being the
    * receiver's own clone of a sender's value. Same-realm it is visible:
@@ -521,6 +528,13 @@ export class RealmCodecEngine
    * one. Nothing about the shape is evidence, which is why the comparison is
    * `===` and not a structural test.
    *
+   * With no marker in hand there is nothing to compare against, so nothing is
+   * a tagged form. Stated rather than left to `===`: `undefined` is a value
+   * this format carries directly, so a payload can put one in slot zero for
+   * free, and identity against an absent marker would match it. The walk
+   * reaches here only from `decode()`, which always has one, and this is the
+   * counterpart to `wrapTag()` refusing to build a tagged form without one.
+   *
    * The tag is handed over as it was found, of whatever type.
    * {@link RealmTaggedValue} says a tag is a `string`, but that describes what
    * this format _emits_, and decoding is where data from somewhere else
@@ -532,8 +546,8 @@ export class RealmCodecEngine
     data: RealmCodecValue,
   ): { tag: any; state: RealmCodecValue } | null {
     if (
-      !Array.isArray(data) || (data.length !== 3) ||
-      (data[0] !== this.#marker)
+      (this.#marker === undefined) || !Array.isArray(data) ||
+      (data.length !== 3) || (data[0] !== this.#marker)
     ) {
       return null;
     }

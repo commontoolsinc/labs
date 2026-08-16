@@ -269,7 +269,11 @@ always distinct.
 ## 5. Ownership
 
 **A caller cedes the tree to `decode()`.** The decoder retains what it likes of
-it; a caller must not use the tree afterwards.
+it, and **a decoded tree carries no guarantee of being usable again**. This is
+a promise withheld rather than a prohibition imposed: nothing detects a second
+decode or sets out to defeat one, and whether a given tree survives depends
+entirely on what it happened to carry. A caller that reuses one is relying on
+the shape of its own data, not on anything stated here.
 
 Two retentions are deliberate:
 
@@ -288,22 +292,26 @@ An `ArrayBuffer` cannot be frozen, which is what makes ceding it a requirement
 rather than a courtesy: sole ownership is the only available defense for a
 value that promises its bytes are immutable.
 
-**A failed decode cedes the tree too.** A refusal can arrive after the walk has
-already detached a buffer and frozen part of what it reached, so a tree is
-spent whether or not the call that consumed it succeeded. A caller cannot
-answer a strict refusal by re-running the same tree through a lenient decoder:
-the second run would find the bytes gone and report a `ProblematicValue` where
-they had been. Choose the disposition before decoding, not after.
+**A failed decode consumes the tree as thoroughly as a successful one.** A
+refusal can arrive after the walk has already detached a buffer and frozen part
+of what it reached, so the guarantee is no better for a call that raised. In
+particular, answering a strict refusal by re-running the same tree through a
+lenient decoder does not work: the second run finds the bytes gone and reports
+a `ProblematicValue` where they had been. Choose the disposition before
+decoding, not after.
 
-**A tree carrying bytes decodes exactly once.** Taking a buffer over detaches
-it, so a second decode of the same tree cannot reconstruct the value the first
-did. It is settled against leniency like every other refusal in Section 6: a
-strict decode raises, and a lenient one yields a `ProblematicValue` where the
-bytes would have been. On the
-boundary this format exists for the restriction costs nothing — the tree is the
-receiver's own clone of a value it will not be handed again, which is the whole
-reason the copy can be elided — but a caller wanting two readings of one
-payload keeps the value it decoded, not the tree it decoded from.
+**A tree carrying bytes is the case where the guarantee definitely fails.**
+Taking a buffer over detaches it, so a second decode of such a tree cannot
+reconstruct what the first did, and the attempt is settled against leniency
+like every other refusal in Section 6: a strict decode raises, and a lenient
+one yields a `ProblematicValue` where the bytes would have been. A byte-free
+tree happens to survive a second decode today, which is a fact about this
+encoding's containers rather than a promise to build on.
+
+On the boundary this format exists for, none of this costs a caller anything —
+the tree is the receiver's own clone of a value it will not be handed again,
+which is the whole reason the copy can be elided. A caller wanting two readings
+of one payload keeps the value it decoded, not the tree it decoded from.
 
 ## 6. Refusals
 

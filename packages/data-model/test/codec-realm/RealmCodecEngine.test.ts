@@ -43,9 +43,9 @@ import type { EchoReport } from "./realm-echo-worker.ts";
 
 /**
  * A marker for hand-built wire data. `decode()` checks the outer envelope's
- * marker by shape and version rather than by identity, so a test's own marker works
- * exactly as the engine's does -- which is itself the property that lets a
- * peer send a well-formed payload.
+ * marker by shape and version rather than by identity, so a test's own marker
+ * works exactly as the engine's does -- which is itself the property that lets
+ * a peer send a well-formed payload.
  */
 const WIRE_MARKER = ["fvr1"] as unknown as RealmFormatMarker;
 
@@ -353,6 +353,37 @@ describe("RealmCodecEngine", () => {
 
       expect(() => engine.wrapOutsideEncode())
         .toThrow(/Cannot wrap a tag outside an encode/);
+    });
+
+    it("returns three slots headed by `undefined` as data, with no marker in hand", () => {
+      // The counterpart to the case above, on the decode side, and reachable
+      // the same way: `decodeValue()` is walked into from `decode()`, which
+      // always holds a marker, so a subclass is what gets here without one.
+      // `undefined` is a value this format carries directly, so a payload can
+      // put one in slot zero for free; identity against an absent marker would
+      // match it and read the array as a tagged form.
+      class Exposed extends RealmCodecEngine {
+        decodeOutsideDecode(data: unknown): FabricValue {
+          return (this as unknown as {
+            decodeValue(d: unknown, c: unknown): FabricValue;
+          }).decodeValue(data, EMPTY_RECONSTRUCTION_CONTEXT);
+        }
+      }
+
+      const engine = new Exposed({ registry: createDefaultRealmRegistry() });
+      // A state this format carries as data, so that what the walk does with
+      // slot zero is the only thing under test: a bare `ArrayBuffer` would be
+      // refused on its own account once the array is walked as data.
+      const decoded = engine.decodeOutsideDecode([
+        undefined,
+        "EpochDays@1",
+        7n,
+      ]);
+
+      // Data, not a `FabricEpochDays` built from a forged tagged form.
+      expect(Array.isArray(decoded)).toBe(true);
+      expect((decoded as FabricValue[])[1]).toBe("EpochDays@1");
+      expect(decoded).not.toBeInstanceOf(FabricEpochDays);
     });
 
     it("returns a `ProblematicValue` for a bad state, for every codec that validates one", () => {

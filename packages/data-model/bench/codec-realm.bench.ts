@@ -17,11 +17,11 @@
  * JSON also takes directly. The gap between those two rows, read against the
  * same two rows in the JSON table, is what a second format buys.
  *
- * **A payload carrying bytes decodes exactly once.** `decode()` cedes its
- * input, and `FabricBytes` takes over the `ArrayBuffer` it arrived in, which
- * detaches it -- so a second decode of the same tree throws. That is by
- * design, the tree across a real boundary being the receiver's own clone, and
- * it decides the shape of the decode direction here:
+ * **A decoded tree carries no guarantee of being usable again.** `decode()`
+ * cedes its input, and `FabricBytes` takes over the `ArrayBuffer` it arrived
+ * in, which detaches it -- so a tree carrying bytes cannot be decoded twice.
+ * That is by design, the tree across a real boundary being the receiver's own
+ * clone, and it decides the shape of the decode direction here:
  *
  * * Subjects that survive repeated decoding take the plain `fn()` form.
  * * The omnibus subjects hold a `FabricBytes`, so each iteration encodes a
@@ -32,6 +32,15 @@
  * * `single-bytes` is too small for bracketing to be honored, so it appears as
  *   a `round-trip` row instead -- named for what it measures rather than
  *   reported as a decode that is really an encode and a decode.
+ *
+ * Every other decode row reuses one encoded tree across all of its iterations,
+ * which the guarantee does not cover: it works because a byte-free tree holds
+ * nothing the walk consumes, not because a decoded tree is promised to
+ * survive. Measured, it also costs nothing -- a reused tree and a fresh one
+ * per iteration are within noise of each other, the reused one being frozen by
+ * its first decode and V8 not caring. **A decode that exploited ceding harder
+ * would silently turn these rows into measurements of something else**, so a
+ * change to what `decode()` retains is a reason to revisit this file.
  */
 
 import { fabricFromRealmValue, realmFromFabricValue } from "@/codecs.ts";
