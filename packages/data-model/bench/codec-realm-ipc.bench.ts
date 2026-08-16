@@ -35,6 +35,8 @@ import { realmFromFabricValue } from "@/codecs.ts";
 import type { FabricValue } from "@/interface.ts";
 import {
   JSON_PASS_THROUGH_OMNIBUSES,
+  makeBigint,
+  makeBytes,
   makeOmnibus,
   OBJECTS,
   REALM_PASS_THROUGH_OMNIBUSES,
@@ -118,6 +120,17 @@ const SUBJECTS: readonly (readonly [string, FabricValue])[] = [
   ["omnibus-000100", makeOmnibus(100)],
   // A byte payload large enough that copying it is the story.
   ["omnibus-001000", makeOmnibus(1000)],
+  // Bulk data, the same quantity of it each way, at three magnitudes. Bytes
+  // reach the far side as an `ArrayBuffer` and a `bigint` as a `bigint`, so
+  // what separates these columns is what the transport does with each rather
+  // than anything either walk spends: both are one tagged form or one
+  // primitive, whatever their size.
+  ["bytes-001000", makeBytes(1000)],
+  ["bigint-001000", makeBigint(1000)],
+  ["bytes-100000", makeBytes(100000)],
+  ["bigint-100000", makeBigint(100000)],
+  ["bytes-1000000", makeBytes(1000000)],
+  ["bigint-1000000", makeBigint(1000000)],
 ];
 
 /** Encoded once; `postMessage()` clones, so the far side never consumes this. */

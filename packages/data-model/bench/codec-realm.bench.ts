@@ -17,6 +17,13 @@
  * JSON also takes directly. The gap between those two rows, read against the
  * same two rows in the JSON table, is what a second format buys.
  *
+ * The `bytes` and `bigint` series answer a narrower question, and answer it
+ * against each other: both are sized in bytes, so a row from one and the row
+ * of the same size from the other carry the same quantity of data. Cloning
+ * takes each as itself. JSON has to reach text for both, base64url for one and
+ * decimal for the other, and those two do not cost alike -- which is the
+ * comparison the four columns are for.
+ *
  * **A decoded tree carries no guarantee of being usable again.** `decode()`
  * cedes its input, and `FabricBytes` takes over the `ArrayBuffer` it arrived
  * in, which detaches it -- so a tree carrying bytes cannot be decoded twice.
@@ -29,9 +36,12 @@
  *   Deno honors that bracketing when an iteration averages at least 10µs and
  *   warns when it does not; these are far above it, but that is a fact about
  *   this machine rather than about the subjects, so read the warnings.
- * * `single-bytes` is too small for bracketing to be honored, so it appears as
- *   a `round-trip` row instead -- named for what it measures rather than
- *   reported as a decode that is really an encode and a decode.
+ * * `single-bytes` and the whole `bytes` series are too small for bracketing
+ *   to be honored, so each appears as a `round-trip` row instead -- named for
+ *   what it measures rather than reported as a decode that is really an encode
+ *   and a decode. Nothing is lost by it: a byte decode takes the buffer over
+ *   by `transfer()` rather than copying, so it is ~1µs at any size, and the
+ *   climb those rows show is the encode's copy.
  *
  * Every other decode row reuses one encoded tree across all of its iterations,
  * which the guarantee does not cover: it works because a byte-free tree holds
@@ -47,6 +57,8 @@ import { fabricFromRealmValue, realmFromFabricValue } from "@/codecs.ts";
 import type { FabricValue } from "@/interface.ts";
 import {
   ARRAYS,
+  BIGINTS,
+  BYTES,
   groupKey,
   JSON_PASS_THROUGH_OMNIBUSES,
   OBJECTS,
@@ -67,6 +79,9 @@ const ARRAYS_REALM = ARRAYS.map(([n, v]) =>
   [n, realmFromFabricValue(v)] as const
 );
 const SPARSE_REALM = SPARSE.map(([n, v]) =>
+  [n, realmFromFabricValue(v)] as const
+);
+const BIGINTS_REALM = BIGINTS.map(([n, v]) =>
   [n, realmFromFabricValue(v)] as const
 );
 const OBJECTS_REALM = OBJECTS.map(([n, v]) =>
@@ -149,6 +164,9 @@ const SERIES: readonly (readonly [
   ["array", ARRAYS, ARRAYS_REALM],
   ["sparse", SPARSE, SPARSE_REALM],
   ["object", OBJECTS, OBJECTS_REALM],
+  // Repeat-decodable, cloning carrying a `bigint` as itself with no buffer to
+  // take over. Its byte counterpart below cannot join it here for that reason.
+  ["bigint", BIGINTS, BIGINTS_REALM],
   ["json-pass-through", JSON_PASS_THROUGH_OMNIBUSES, JSON_PASS_THROUGH_REALM],
   ["pass-through", REALM_PASS_THROUGH_OMNIBUSES, REALM_PASS_THROUGH_REALM],
 ];
@@ -174,6 +192,44 @@ for (const [prefix, subjects, encodedForms] of SERIES) {
       },
     });
   }
+}
+
+//
+// Byte payloads by magnitude, against the `bigint` series above it.
+//
+// The second row of each group is a round trip rather than a decode, as
+// `single-bytes` is and for the same reason: a tree holding a `FabricBytes`
+// decodes once, so the encode cannot be hoisted out of the iteration, and
+// bracketing it away is not honored at these sizes -- an iteration has to
+// average 10µs before Deno will, and only the largest reaches that.
+//
+// Naming the row for the round trip costs nothing here, because the decode
+// half does not vary with size to begin with. Taking the buffer over is
+// `ArrayBuffer.prototype.transfer()`, which moves ownership rather than
+// copying, so a decode is ~1µs whether the payload is 1KB or 10MB. Encoding
+// copies (`sliceBuffer()`), and that is the whole of what this series shows
+// climbing.
+//
+
+for (const [size, value] of BYTES) {
+  Deno.bench({
+    name: `encode ${realmKey("bytes", size)}`,
+    group: realmKey("bytes", size),
+    baseline: true,
+    fn() {
+      realmFromFabricValue(value);
+    },
+  });
+}
+
+for (const [size, value] of BYTES) {
+  Deno.bench({
+    name: `round-trip ${realmKey("bytes", size)}`,
+    group: realmKey("bytes", size),
+    fn() {
+      fabricFromRealmValue(realmFromFabricValue(value));
+    },
+  });
 }
 
 //

@@ -19,8 +19,11 @@
  */
 
 import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
+import type { FabricValue } from "@/interface.ts";
 import {
   ARRAYS,
+  BIGINTS,
+  BYTES,
   groupKey,
   JSON_PASS_THROUGH_OMNIBUSES,
   OBJECTS,
@@ -41,6 +44,10 @@ const SPARSE_JSON = SPARSE.map(([n, v]) =>
   [n, jsonFromFabricValue(v)] as const
 );
 const OBJECTS_JSON = OBJECTS.map(([n, v]) =>
+  [n, jsonFromFabricValue(v)] as const
+);
+const BYTES_JSON = BYTES.map(([n, v]) => [n, jsonFromFabricValue(v)] as const);
+const BIGINTS_JSON = BIGINTS.map(([n, v]) =>
   [n, jsonFromFabricValue(v)] as const
 );
 const OMNIBUSES_JSON = OMNIBUSES.map(([n, v]) =>
@@ -162,6 +169,43 @@ for (const [size, json] of OBJECTS_JSON) {
       fabricFromJsonValue(json);
     },
   });
+}
+
+//
+// Bulk payloads by magnitude: bytes as base64url text, `bigint` as decimal
+// text. Sized in bytes so the two columns answer the same question of each.
+//
+
+const BULK: readonly (readonly [
+  string,
+  readonly (readonly [number, FabricValue])[],
+  readonly (readonly [number, string])[],
+])[] = [
+  ["bytes", BYTES, BYTES_JSON],
+  ["bigint", BIGINTS, BIGINTS_JSON],
+];
+
+for (const [prefix, subjects, encodedForms] of BULK) {
+  for (const [size, value] of subjects) {
+    Deno.bench({
+      name: `encode ${groupKey(prefix, size)}`,
+      group: groupKey(prefix, size),
+      baseline: true,
+      fn() {
+        jsonFromFabricValue(value);
+      },
+    });
+  }
+
+  for (const [size, json] of encodedForms) {
+    Deno.bench({
+      name: `decode ${groupKey(prefix, size)}`,
+      group: groupKey(prefix, size),
+      fn() {
+        fabricFromJsonValue(json);
+      },
+    });
+  }
 }
 
 //
