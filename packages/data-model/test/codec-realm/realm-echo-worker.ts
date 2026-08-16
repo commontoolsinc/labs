@@ -72,6 +72,16 @@ self.onmessage = (ev: MessageEvent) => {
             (Symbol.keyFor(value.sym) === "interned"),
           big: value.big,
           nothingPresent: "nothing" in value,
+          // A payload's own array, equal to a marker but not one. Section 1.1
+          // requires the transport to keep two distinct-but-equal objects
+          // distinct, and this is where that gets checked against the
+          // transport actually in use rather than same-realm: had cloning
+          // deduplicated it against the real marker, it would arrive here as
+          // a reconstructed value instead of the array it went out as.
+          lookalikeIsArray: Array.isArray(value.lookalike),
+          lookalikeTag: Array.isArray(value.lookalike)
+            ? value.lookalike[1]
+            : undefined,
         },
       } satisfies EchoReport,
     );

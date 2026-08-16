@@ -106,10 +106,20 @@ a payload:
   has seen of some earlier encoding.
 - It is **confined**. It never leaves the encoder until the call returns,
   living only in encoder-private state and in the tagged forms the walk is
-  building. Age alone would not settle it, because a value's contents need not
-  all exist when the walk starts: a getter runs mid-walk, after the marker
-  exists. What closes that gap is that such a getter has nowhere to read the
-  marker from.
+  building.
+
+For a value that satisfies the fabric contract, age alone settles it: a fabric
+record's own properties are enumerable data properties, an accessor-backed one
+causing rejection (Section 1.5 of
+[1-fabric-values.md](./1-fabric-values.md)), so its contents are all in
+existence before the walk starts, and none of them can be the marker. **The
+confinement requirement is what makes the argument hold without resting on
+that.** An encoder is handed values by callers, not by the type system; a
+value carrying live code — an accessor that runs mid-walk, after the marker
+exists — is outside the model, and confinement means such a value still has
+nowhere to read the marker from. It is stated as a requirement rather than
+left to inertness because a rule that fails open on out-of-model input is not
+worth much.
 
 A marker held across calls fails the first of these. A value may legitimately
 contain a subtree of some *earlier* encoding — the code that assembled it is
@@ -134,7 +144,7 @@ produced*, which is the escaping problem and the whole of what it is for.
 
 ### 2.4 Version
 
-The marker is a frozen one-element array holding the version identifier:
+The marker is a one-element array holding the version identifier:
 
 ```
 ["fvr1"]
@@ -143,6 +153,13 @@ The marker is a frozen one-element array holding the version identifier:
 `fvr1` is *fabric value, realm encoding, version 1*, in the manner of JSON's
 `fvj1:` prefix. Recognition never reads any of it — identity does all the work
 — so within the walk the contents serve only to be legible in a debugger.
+
+An encoder freezes the marker it mints, which is an invariant of the sending
+side and not a property of the wire: structured cloning reproduces value and
+structure, not property descriptors, so the marker a decoder adopts is an
+ordinary mutable array. Nothing downstream depends on it being otherwise. A
+decoder identifies a marker by shape, version and object identity, and a
+conforming one must not require a frozen marker on arrival.
 
 **A decoder must refuse an outer envelope whose marker is not a one-element
 array holding the version it implements**, and it performs that check before
@@ -189,7 +206,9 @@ Arrays and plain objects are carried directly.
 - **A `/`-prefixed key is ordinary.** This format reserves no key.
 
 A key this runtime reserves — `__proto__` or `constructor` — is refused on both
-sides, because a rebuild by assignment cannot reproduce one faithfully.
+sides, because a rebuild by assignment cannot reproduce one faithfully. Like
+every rule in this section, that applies to a container the walk *traverses*;
+Section 3.3 says which values those are.
 
 ### 3.3 The Tagged Form
 
@@ -202,6 +221,19 @@ A value that a codec claims is encoded as a three-element array:
 `tag` is the wire type tag (`3-json-encoding.md` Section 2 defines the
 `<Type>@<Version>` syntax, which is shared). `state` is the codec's encoded
 state — final for a terminal codec, and itself walked for a nonterminal one.
+
+**A terminal state is opaque, and that bounds every other rule here.** The walk
+hands it to its codec without descending, so nothing inside one is traversed
+and nothing inside one is validated except by the codec itself, reading the
+fields it knows (Section 7.1). The reserved-key rule of Section 3.2, the cycle
+rule of Section 4, and the refusals of Section 6 all describe values the walk
+reaches; none of them reaches into a terminal state. A `Hash@1` state carrying
+a `constructor` key or a reference back to itself therefore decodes, because
+its codec reads `tag` and `hash` and never looks.
+
+This is what terminality buys and what it costs. A codec that wants its state
+examined declares itself nonterminal, and then every rule here applies to that
+state, because the walk goes through it.
 
 Three positional slots rather than a container keyed by the tag, because an
 array is the cheapest shape the transport carries: no hash table, and a tag
@@ -245,7 +277,8 @@ formats, their state being fabric values all the way down.
 Per Section 1.6 of [1-fabric-values.md](./1-fabric-values.md), an engine must
 state what it does about each. This format:
 
-- **Refuses cycles**, in both directions.
+- **Refuses cycles**, in both directions, wherever the walk goes — which is not
+  into a terminal codec's state (Section 3.3).
 - **Preserves a shared reference exactly where nothing beneath it needed
   encoding.**
 
@@ -349,11 +382,11 @@ leniency:
   `Date`, a `Map`, a `Set`, or any other class instance. `ArrayBuffer` is worth
   naming: it is the one such type this format's own value union contains, and
   it is legitimate only as the state under a byte-carrying tag.
-- A key this runtime reserves, per Section 3.2.
+- A key this runtime reserves, per Section 3.2, in a container it traverses.
 - A tag that is not syntactically a tag, per Section 9 of
   [3-json-encoding.md](./3-json-encoding.md), whose tag syntax this format
   shares.
-- A cycle, per Section 4.
+- A cycle, per Section 4, among the values it traverses.
 
 A tag that is *syntactically* a tag but that no codec claims is not a refusal:
 it becomes an `UnknownValue` and round-trips, exactly as under JSON
@@ -397,3 +430,17 @@ refused.** A state is matched by what it must carry, so a record arriving with
 more than that decodes as though the extra were absent. Two implementations
 would otherwise be free to disagree — one ignoring, one refusing — over data
 that cloning carries perfectly well and that a peer can send.
+
+**An absent field is not the same as one present holding `undefined`.** Where a
+codec gives a field a default, the default applies to a field that is *absent*;
+a field that is present and not of the type the codec requires is a
+malformation, `undefined` included. The distinction is worth stating because
+this format carries `undefined` directly, so unlike under JSON a peer can send
+one on purpose — and defaulting it would silently answer a question the wire
+did ask.
+
+`RegExp@1` is the codec this reaches. All three of its fields default: `flavor`
+to `es2025`, and `source` and `flags` to the empty string, so `{}` decodes to
+an empty `es2025` pattern. That is what lets a narrower encoder omit what it
+has nothing to say about. `{ source: undefined }` is refused, being a `source`
+that is present and not a string.

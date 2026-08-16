@@ -306,6 +306,75 @@ describe("RealmCodecEngine", () => {
       }
     });
 
+    it("returns a `FabricHash` for a terminal state carrying a reserved key and a cycle", () => {
+      // A terminal state is opaque, per Section 3.3: the walk hands it to its
+      // codec without descending, so the reserved-key rule of Section 3.2 and
+      // the cycle rule of Section 4 -- both of which refuse these outright in
+      // a walked container -- never reach inside one. `Hash@1` reads `tag`
+      // and `hash` and never looks at the rest.
+      const state: Record<string, unknown> = {
+        tag: "fid1",
+        hash: new Uint8Array([1, 2, 3]).buffer,
+      };
+
+      Object.defineProperty(state, "constructor", {
+        value: "reserved, and ignored",
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      state.self = state;
+
+      const decoded = fabricFromRealmValue(wire(tagged("Hash@1", state)));
+
+      expect(decoded).toBeInstanceOf(FabricHash);
+      expect((decoded as FabricHash).tag).toBe("fid1");
+      expect([...(decoded as FabricHash).bytes]).toEqual([1, 2, 3]);
+    });
+
+    it("throws when given a reserved key in a container it walks", () => {
+      // The control for the case above, and what bounds it: the same key in a
+      // position the walk reaches IS refused. Without this pair, the opacity
+      // case alone would read as the rule not existing.
+      const walked: Record<string, unknown> = { a: 1 };
+
+      Object.defineProperty(walked, "constructor", {
+        value: "reserved, and refused",
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+
+      expect(() => fabricFromRealmValue(wire(walked))).toThrow(/reserves/);
+    });
+
+    it("returns an empty `es2025` pattern for a `RegExp@1` state with no fields", () => {
+      // Section 7.1: every field of this codec's state defaults when absent,
+      // which is what lets a narrower encoder omit what it has nothing to say
+      // about.
+      const decoded = fabricFromRealmValue(wire(tagged("RegExp@1", {})));
+
+      expect(decoded).toBeInstanceOf(FabricRegExp);
+      expect((decoded as FabricRegExp).flavor).toBe("es2025");
+      expect((decoded as FabricRegExp).source).toBe("");
+      expect((decoded as FabricRegExp).flags).toBe("");
+    });
+
+    it("returns a `ProblematicValue` for a `RegExp@1` field present as `undefined`", () => {
+      // Absent and present-as-`undefined` are different, and this format is
+      // where the difference can arise: cloning carries `undefined` directly,
+      // so a peer can send one on purpose, and defaulting it would answer a
+      // question the wire did ask.
+      const engine = newDefaultRealmCodecEngine({ lenient: true });
+      const decoded = engine.decode(
+        wire(tagged("RegExp@1", { source: undefined })),
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      );
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect((decoded as ProblematicValue).error).toMatch(/expected string/);
+    });
+
     it("throws when given a `Map`, which is no form this format emits", () => {
       // Cloning carries one faithfully, so a peer can send one; nothing here
       // makes one, so finding one is a malformation like any other.
@@ -985,6 +1054,13 @@ describe("RealmCodecEngine", () => {
         negZero: -0,
         nothing: undefined,
         sym: Symbol.for("interned"),
+        // A payload's own array, shaped exactly like a tagged form and headed
+        // by an equal-looking marker. Section 1.1 asks the transport to keep
+        // two distinct-but-equal objects distinct, and only a crossing can
+        // check the transport: same-realm this is a fact about `===`, but a
+        // transport that interned equal subtrees would merge this with the
+        // real marker and the far side would decode ordinary data as a value.
+        lookalike: [["fvr1"], "EpochDays@1", 7n],
       });
 
       expect(report.ok).toBe(true);
@@ -1003,6 +1079,13 @@ describe("RealmCodecEngine", () => {
       // checked: identity across a realm boundary is not a question it
       // answers, there being no realm in which both symbols exist to compare.
       expect(report.facts?.symbolIsInterned).toBe(true);
+      // Still an array on the far side, and still carrying its own contents:
+      // the transport kept it distinct from the marker it resembles. The
+      // classes check above says the same thing from the other direction --
+      // a merged marker would have made this a `FabricEpochDays`.
+      expect(report.facts?.lookalikeIsArray).toBe(true);
+      expect(report.facts?.lookalikeTag).toBe("EpochDays@1");
+      expect(report.classes?.lookalike).toBe("Array");
     });
 
     it("expands a nonterminal codec's state, terminating what is inside it", async () => {
