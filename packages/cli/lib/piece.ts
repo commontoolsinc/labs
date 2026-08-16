@@ -1797,6 +1797,17 @@ async function resolvePieceCallable(
       ...resolved,
       declaredResult: () => declaredVerbResult(loadPattern, callableName),
       declaredProse: () => declaredVerbProseFor(loadPattern, callableName),
+      // The served schema with the declaration's annotations merged in. The
+      // gate asks for this only after the served schema has refused, so an
+      // accepted call still loads no pattern.
+      declaredInputSchema: async () => {
+        const prose = await declaredVerbProseFor(loadPattern, callableName);
+        if (prose?.eventSchema === undefined) return undefined;
+        const served = resolved.inputSchema ?? resolved.callableCell.schema;
+        if (served === undefined) return undefined;
+        const merged = withDeclaredFieldProse(served, prose.eventSchema);
+        return merged === true ? undefined : merged;
+      },
     };
   }
 

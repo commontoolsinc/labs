@@ -59,6 +59,23 @@ export interface CallableResolution {
    * to consult — which says this resolution cannot describe a result rather
    * than promising there is none. */
   declaredResult?: () => Promise<JSONSchema | undefined>;
+  /**
+   * The published event schema with the DECLARED schema's annotations merged
+   * in, resolved on demand.
+   *
+   * A THUNK, and consulted only after the served schema has already refused,
+   * because reaching it costs a pattern load and almost no call needs it. The
+   * served schema is the handler's read of the event, narrowed to what its
+   * body touches; `asCell` does not survive that narrowing, so a caller naming
+   * a cell where the author declared one is refused against a schema that has
+   * forgotten the position takes a reference. Consulting the declaration
+   * recovers it — and paying for that only on the refusal path keeps an
+   * ordinary dispatch loading no pattern, which is the promise above.
+   *
+   * Absent where the resolution cannot reach a declaration, which says so
+   * rather than promising there is none.
+   */
+  declaredInputSchema?: () => Promise<JSONSchema | undefined>;
   /** The verb's published event schema, when the resolution knows a richer
    * one than the dispatch cell carries.
    *
@@ -773,13 +790,29 @@ export function verbInputSchemaError(
  * cannot satisfy the schema. The absent-payload refusal says so explicitly:
  * "send a payload" has to read differently from "fix your payload".
  */
-function assertVerbInputSatisfiesSchema(
+async function assertVerbInputSatisfiesSchema(
   verb: string,
   input: unknown,
   schema: JSONSchema | undefined,
-): unknown {
+  declaredSchema?: () => Promise<JSONSchema | undefined>,
+): Promise<unknown> {
   const normalized = normalizeAbsentVerbPayload(input, schema);
-  const detail = verbInputSchemaError(normalized, schema);
+  let detail = verbInputSchemaError(normalized, schema);
+  if (detail !== undefined && declaredSchema !== undefined) {
+    // The served schema refused. It is the handler's narrowed read, which
+    // drops `asCell`, so it cannot tell a caller naming a cell from a caller
+    // sending a shape — and refuses both. The declaration remembers, so ask it
+    // before reporting. Only on this path: a call the served schema accepts
+    // never loads a pattern, which is what keeps an ordinary dispatch cheap.
+    const declared = await declaredSchema();
+    if (declared !== undefined) {
+      const second = verbInputSchemaError(normalized, declared);
+      // The declaration ADMITS rather than overrules: a payload it also
+      // refuses keeps the served schema's message, which is the one describing
+      // the document the dispatch actually validates against.
+      if (second === undefined) detail = undefined;
+    }
+  }
   if (detail !== undefined) {
     throw new VerbInputValidationError(
       verb,
@@ -1237,10 +1270,12 @@ export async function executeResolvedCallable(
     // is what the gate judged. A resolution carrying a richer published
     // schema than its dispatch cell (the forced-stream fallback) is judged
     // against that one.
-    const dispatchInput = assertVerbInputSatisfiesSchema(
+    const servedSchema = resolved.inputSchema ?? resolved.callableCell.schema;
+    const dispatchInput = await assertVerbInputSatisfiesSchema(
       resolved.cellKey,
       input,
-      resolved.inputSchema ?? resolved.callableCell.schema,
+      servedSchema,
+      resolved.declaredInputSchema,
     );
     const runtimeErrors = runtimeErrorLog(resolved.pieces.runtime);
     const errorCountBefore = runtimeErrors.length;
