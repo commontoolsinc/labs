@@ -281,8 +281,8 @@ Two retentions are deliberate:
 Stating it of the result rather than of what is retained is deliberate: an
 implementation that rebuilt everything would retain nothing, and a rule phrased
 around retention would then oblige it to freeze nothing and let it hand back
-mutable values. Which containers a caller sees frozen therefore varies with
-what needed decoding; that any of them is mutable does not.
+mutable values. Which containers a caller sees returned by identity therefore
+varies with what needed decoding; whether any of them is mutable does not.
 
 An `ArrayBuffer` cannot be frozen, which is what makes ceding it a requirement
 rather than a courtesy: sole ownership is the only available defense for a

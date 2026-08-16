@@ -208,7 +208,7 @@ export class RealmCodecEngine
       return this.reportMalformed(
         "",
         toCompactDebugString(data, 50),
-        "not a value this format emits: expected a two-element envelope",
+        "not a value this format emits: expected a two-element outer envelope",
       );
     }
 
@@ -221,7 +221,7 @@ export class RealmCodecEngine
       return this.reportMalformed(
         "",
         toCompactDebugString(data, 50),
-        `not a value this format emits: expected an envelope headed by a ${
+        `not a value this format emits: expected an outer envelope headed by a ${
           backtickQuote(REALM_FORMAT_VERSION)
         } marker`,
       );

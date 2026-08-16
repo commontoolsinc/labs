@@ -97,7 +97,7 @@ describe("RealmCodecEngine", () => {
     it("wraps the walked tree, which is otherwise the caller's own", () => {
       const value = { a: 1 };
 
-      // Not merely equal: the same object. An envelope would make that
+      // Not merely equal: the same object. An outer envelope would make that
       // impossible for any value at all, however little of it needed
       // encoding.
       expect(payloadOf(realmFromFabricValue(value))).toBe(value);
@@ -255,14 +255,14 @@ describe("RealmCodecEngine", () => {
       expect(payload.a).toEqual(payload.b);
     });
 
-    it("throws given a circular reference", () => {
+    it("throws when given a circular reference", () => {
       const value: Record<string, FabricValue> = { a: 1 };
       value.self = value;
 
       expect(() => realmFromFabricValue(value)).toThrow(/Circular reference/);
     });
 
-    it("throws given an object with a key this runtime reserves", () => {
+    it("throws when given an object with a key this runtime reserves", () => {
       const value = Object.defineProperty({}, "__proto__", {
         value: 1,
         enumerable: true,
@@ -276,7 +276,8 @@ describe("RealmCodecEngine", () => {
 
   describe("decode()", () => {
     it("returns a plain payload as it stands", () => {
-      // With no envelope to strip, an ordinary value decodes to itself.
+      // With no tagged form anywhere in it, an ordinary value decodes to
+      // itself once the outer envelope is stripped.
       expect(fabricFromRealmValue(wire({ a: 1 }))).toEqual({ a: 1 });
     });
 
@@ -288,7 +289,7 @@ describe("RealmCodecEngine", () => {
       );
     });
 
-    it("throws when given a bare buffer or view, which no tag carries here", () => {
+    it("throws when given a buffer or view in an untagged position", () => {
       // Section 6 names all three, and singles out `ArrayBuffer`: it is the
       // one such type this format's own value union contains, legitimate only
       // as the state under a byte-carrying tag and never on its own. Cloning
@@ -331,7 +332,7 @@ describe("RealmCodecEngine", () => {
         ]
       ) {
         expect(() => fabricFromRealmValue(bad as never))
-          .toThrow(/two-element envelope/);
+          .toThrow(/two-element outer envelope/);
       }
     });
 
@@ -361,11 +362,17 @@ describe("RealmCodecEngine", () => {
       // what is under test -- strictly these raise, which the cases above
       // already cover.
       const engine = newDefaultRealmCodecEngine({ lenient: true });
-      const bad = (tag: string, state: unknown) =>
-        engine.decode(
+      const bad = (tag: string, state: unknown) => {
+        const result = engine.decode(
           wire(tagged(tag, state)),
           EMPTY_RECONSTRUCTION_CONTEXT,
-        ) as ProblematicValue;
+        );
+
+        // Asserted here rather than at each call: the name of this case
+        // promises the class, and a cast promises nothing.
+        expect(result).toBeInstanceOf(ProblematicValue);
+        return result as ProblematicValue;
+      };
 
       // Wrong primitive type where a `bigint` is required.
       expect(bad("EpochDays@1", "7").error).toMatch(/expected `bigint`/);
@@ -436,7 +443,7 @@ describe("RealmCodecEngine", () => {
 
       for (const marker of bad) {
         expect(() => fabricFromRealmValue([marker, { a: 1 }] as never))
-          .toThrow(/expected an envelope headed by a `fvr1` marker/);
+          .toThrow(/expected an outer envelope headed by a `fvr1` marker/);
       }
     });
 
@@ -451,7 +458,7 @@ describe("RealmCodecEngine", () => {
     it("treats a two-element array in a data position as data", () => {
       // A genuine payload cannot hold the current marker at all, but a peer
       // can send anything. Slot count is checked before identity, so this is
-      // an array and not an envelope missing its state.
+      // an array and not a tagged form missing its state.
       const marker = realmFromFabricValue(null)[0];
       const decoded = fabricFromRealmValue(
         [marker, { a: [marker, "EpochDays@1"] }] as never,
@@ -655,6 +662,8 @@ describe("RealmCodecEngine", () => {
         EMPTY_RECONSTRUCTION_CONTEXT,
       ) as Record<string, ProblematicValue>;
 
+      expect(decoded.first).toBeInstanceOf(ProblematicValue);
+      expect(decoded.second).toBeInstanceOf(ProblematicValue);
       expect(decoded.first?.error).toMatch(/reserves/);
       expect(decoded.second?.error).toMatch(/reserves/);
     });
@@ -796,8 +805,8 @@ describe("RealmCodecEngine", () => {
       // legitimately hold a subtree of some earlier encoding -- whatever
       // assembled it is trusted and has seen one -- and copy-on-write carries
       // that subtree through, so the older marker ends up sitting in a *data*
-      // position. A marker that outlived its call would be read there as an
-      // envelope, and user data would decode as a tagged value. What is
+      // position. A marker that outlived its call would be read there as a
+      // tagged form, and user data would decode as a tagged value. What is
       // asserted is only that: whether the walk passed the subtree through or
       // rebuilt it, the same older marker object lands in slot zero either
       // way, and the point is that it is not this call's.
@@ -819,7 +828,7 @@ describe("RealmCodecEngine", () => {
     it("reads those same three slots as tagged under a matching marker", () => {
       // The control for the case above, and what makes the pair a statement
       // about identity rather than about shape: the very same slots, under the
-      // marker the envelope carries, do decode as the value they name.
+      // marker the outer envelope carries, do decode as the value they name.
       const marker = realmFromFabricValue(null)[0];
       const decoded = fabricFromRealmValue(
         [marker, [marker, "EpochDays@1", 7n]] as never,
