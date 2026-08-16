@@ -649,6 +649,14 @@ const defaultHostIo = (): CfHarnessCliIO => ({
  * rather than choosing between codes. A malformed chat request is a separate
  * matter and has the protocol's own `invalid_request`, raised where the
  * request is read.
+ *
+ * `retryable` carries HTTP's `Retry-After` sense: it is set only where waiting
+ * is known to help, so a provider that is unreachable now and may answer later
+ * is the one blocker that gets it. The rest need someone to change something
+ * first — connect a provider, configure one, resume the run it was recorded
+ * against — and an unauthenticated provider is no more retryable here than a
+ * 401 is, whatever the operator can go on to do about it. Absent means
+ * unknown, which is the honest answer for a host that broke unexpectedly.
  */
 const chatError = (failure: CfHarnessHostFailure): HarnessChatError => ({
   code: failure.error.code === "provider-configuration-required" ||
@@ -658,6 +666,7 @@ const chatError = (failure: CfHarnessHostFailure): HarnessChatError => ({
     ? failure.error.code
     : "internal_error",
   message: failure.error.message,
+  ...(failure.error.code === "provider-unavailable" ? { retryable: true } : {}),
 });
 
 /** Keeps the interactive protocol alive long enough to return startup blockers. */

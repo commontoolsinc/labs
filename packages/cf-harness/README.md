@@ -359,12 +359,17 @@ through `--prompt` to send it as prompt text.
 
 Batch startup failures are one `cf-harness.host-failure` JSON object on stderr.
 Interactive startup failures remain on the NDJSON chat protocol so hosts that do
-not consume stderr still receive the stable provider error code. A failure is
-`invalid-request` only while the argv and the recorded binding are still being
-checked; once a run starts being built, an infrastructure fault reports
-`internal-error`, so a host can keep a retry policy keyed on the code. Run
-state, manifests, reports, child manifests, and structured batch results record
-only provider, the non-secret auth-source label, and the fixed owner reference.
+not consume stderr still receive the stable provider error code. Those failures
+carry `retryable` in HTTP's `Retry-After` sense — set only where waiting alone
+can clear the blocker, which among startup blockers means an unreachable
+provider and nothing else. An unauthenticated or unconfigured provider needs
+someone to act before a retry means anything, so it stays unset, as does a host
+that broke unexpectedly and cannot say. A failure is `invalid-request` only
+while the argv and the recorded binding are still being checked; once a run
+starts being built, an infrastructure fault reports `internal-error`, so a host
+can keep a retry policy keyed on the code. Run state, manifests, reports, child
+manifests, and structured batch results record only provider, the non-secret
+auth-source label, and the fixed owner reference.
 
 Hosted or multi-user Loom must not reuse this single-user adapter. A trusted
 multi-user host must instead:
