@@ -1,21 +1,24 @@
-// List every ingest channel this deployment has minted.
-//
-// Why: a minted token is a durable append capability into a user's space, and
-// the registration lives in the toolshed's own service space where no user can
-// see it. Without this, "what have we handed out, to whom, and is any of it
-// still in use" is unanswerable — which matters most on the day the answer
-// determines what has to be retired (see `retire-ingest-channels.ts`).
-//
-// This is the only production reader of the global registration index, which
-// exists precisely so channels are enumerable for audit.
-//
-// Usage:
-//   deno task audit-ingest-channels                  # human-readable
-//   deno task audit-ingest-channels --json           # machine-readable
-//   deno task audit-ingest-channels --repair-indexes # backfill by-space index
-//   deno task audit-ingest-channels --repair-indexes --recover known.txt
-//                                                    # also visit channels the
-//                                                    # index never learned of
+/**
+ * List every ingest channel this deployment has minted.
+ *
+ * Why: a minted token is a durable append capability into a user's space, and
+ * the registration lives in the toolshed's own service space where no user can
+ * see it. Without this, "what have we handed out, to whom, and is any of it
+ * still in use" is unanswerable — which matters most on the day the answer
+ * determines what has to be retired (see `retire-ingest-channels.ts`).
+ *
+ * This is the only production reader of the global registration index, which
+ * exists precisely so channels are enumerable for audit.
+ *
+ * Usage:
+ *   deno task audit-ingest-channels                  # human-readable
+ *   deno task audit-ingest-channels --json           # machine-readable
+ *   deno task audit-ingest-channels --repair-indexes # backfill by-space index
+ *   deno task audit-ingest-channels --repair-indexes --recover known.txt
+ *                                                    # also visit channels the
+ *                                                    # index never learned of
+ */
+
 import { parseArgs } from "@std/cli/parse-args";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";

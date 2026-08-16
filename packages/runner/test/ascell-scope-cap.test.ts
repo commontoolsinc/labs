@@ -1,19 +1,22 @@
-// An `asCell` entry's `scope` is a follow cap: it bounds which link scopes a
-// read arriving through that schema may follow (ContextualFlowControl
-// .getSchemaScopeCap). It is what lets a space-scoped list require that every
-// handle in it points somewhere every reader in the space can resolve.
-//
-// The cap has to mean the same thing however the handle is reached. These tests
-// pin the three routes to one answer:
-//
-//   1. the value projection            -- cell.key("handle").get()
-//   2. a key() chain past the handle   -- cell.key("handle", "field").get()
-//   3. an explicit dereference         -- cell.key("handle").resolveAsCell()
-//
-// Before #5230 only (3) consulted the cap: (1) never checked it, and (2) lost
-// it because key() narrows through getSchemaAtPath, which drops the ancestor's
-// asCell entry, leaving resolveLink's schemaScopeForLink() with nothing to
-// check one hop later.
+/**
+ * An `asCell` entry's `scope` is a follow cap: it bounds which link scopes a
+ * read arriving through that schema may follow (ContextualFlowControl
+ * .getSchemaScopeCap). It is what lets a space-scoped list require that every
+ * handle in it points somewhere every reader in the space can resolve.
+ *
+ * The cap has to mean the same thing however the handle is reached. These tests
+ * pin the three routes to one answer:
+ *
+ *   1. the value projection            -- cell.key("handle").get()
+ *   2. a key() chain past the handle   -- cell.key("handle", "field").get()
+ *   3. an explicit dereference         -- cell.key("handle").resolveAsCell()
+ *
+ * Before #5230 only (3) consulted the cap: (1) never checked it, and (2) lost
+ * it because key() narrows through getSchemaAtPath, which drops the ancestor's
+ * asCell entry, leaving resolveLink's schemaScopeForLink() with nothing to
+ * check one hop later.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";

@@ -1,8 +1,11 @@
-// spendChart: the shared multi-source daily-spend chart. Each source's line
-// covers only the days that source is known for — reported days plus settled
-// quiet days — so one source's freshness never pads another with zeros. Plus
-// the two readings a tile takes of a source's reports to decide whether the
-// quiet days are quiet at all.
+/**
+ * spendChart: the shared multi-source daily-spend chart. Each source's line
+ * covers only the days that source is known for — reported days plus settled
+ * quiet days — so one source's freshness never pads another with zeros. Plus
+ * the two readings a tile takes of a source's reports to decide whether the
+ * quiet days are quiet at all.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { newestReportedDay, reportLagDays, spendChart } from "../spend.ts";

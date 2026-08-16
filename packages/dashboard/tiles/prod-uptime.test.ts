@@ -1,5 +1,8 @@
-// prod-uptime tests use canned HTTP, DNS and SOCKS5 replies. No test reaches
-// the network.
+/**
+ * prod-uptime tests use canned HTTP, DNS and SOCKS5 replies. No test reaches
+ * the network.
+ */
+
 import {
   assert,
   assertEquals,

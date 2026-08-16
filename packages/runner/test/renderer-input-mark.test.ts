@@ -1,8 +1,11 @@
-// Plan B ($value provenance): a renderer keystroke write is marked so the
-// scheduler can recognize it at the storage-notification choke point (via
-// notification.source) and shape the resulting subscriber wake. The mark must
-// survive to commit (unlike the blind-write mark, which is cleared), and must be
-// found on any tx layer, since the notification's source is an inner layer.
+/**
+ * Plan B ($value provenance): a renderer keystroke write is marked so the
+ * scheduler can recognize it at the storage-notification choke point (via
+ * notification.source) and shape the resulting subscriber wake. The mark must
+ * survive to commit (unlike the blind-write mark, which is cleared), and must be
+ * found on any tx layer, since the notification's source is an inner layer.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
