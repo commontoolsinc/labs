@@ -2085,9 +2085,12 @@ export function declaredVerbProse(
  * walk without the walk having to know where it sits.
  */
 interface DescriptionEdit {
-  /** Keys from the served document's root down to the `description` slot. */
+  /** Keys from the served document's root down to the slot being filled. */
   readonly path: readonly string[];
-  readonly description: string;
+  /** PROTOTYPE: was `description: string`. Widened so one walk can carry the
+   * reference marker as well as the prose — both are recovered from the same
+   * declared document, at the same positions, for the same reason. */
+  readonly description: unknown;
 }
 
 /**
@@ -2367,6 +2370,32 @@ function collectDescriptionEdits(
     }
   }
 
+  // PROTOTYPE (#5560 part 4, option 1): carry the reference marker across, on
+  // the same walk and for the same reason as the prose.
+  //
+  // The served schema is the handler's READ of the event, narrowed to the
+  // fields the body touches. Narrowing is deliberate, but it also drops
+  // `asCell`, and that marker is the only thing distinguishing a declared
+  // reference from an ordinary nested object of the same type. Without it the
+  // pre-dispatch gate walks into a link envelope and refuses it, and nothing
+  // can tell a structural copy from a legitimate value.
+  //
+  // The declared schema keeps it — `Writable<T>` emits `asCell` there — so the
+  // marker is recovered from exactly the document the prose is recovered from.
+  if (served.asCell === undefined) {
+    const marked = candidates.find((candidate) =>
+      candidate.direct && isObjectOrArray(candidate.schema) &&
+      candidate.schema.asCell !== undefined
+    );
+    if (marked !== undefined) {
+      recordDescription(
+        state,
+        [...path, "asCell"],
+        (marked.schema as Record<string, unknown>).asCell as string,
+      );
+    }
+  }
+
   // Where the served node's CHILDREN live. For a `$ref` that is the definition
   // it names, which is left in place: a caller's tooling reads the served
   // shape, and inlining the target to annotate it would rewrite what it reads.
@@ -2405,7 +2434,7 @@ function collectDescriptionEdits(
 function recordDescription(
   state: ProseWalkState,
   path: readonly string[],
-  description: string,
+  description: unknown,
 ): void {
   // Keyed as JSON rather than by joining on a separator: a path segment is a
   // property name and may contain any character, so no separator is safe.
@@ -2596,7 +2625,7 @@ function applyDescriptionEdits(
 function writeDescriptionAt(
   node: JSONSchema,
   path: readonly string[],
-  description: string,
+  description: unknown,
 ): JSONSchema {
   const [head, ...rest] = path;
   const value: unknown = rest.length === 0 ? description : writeDescriptionAt(
