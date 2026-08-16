@@ -904,7 +904,6 @@ describe("RealmCodecEngine", () => {
       class Reentrant {}
 
       let nestedMarker: unknown;
-      let engine: RealmCodecEngine;
 
       const codec =
         new (class ReentrantCodec extends BaseTerminalCodec<RealmCodecValue> {
@@ -922,7 +921,7 @@ describe("RealmCodecEngine", () => {
           }
         })();
 
-      engine = new RealmCodecEngine({
+      const engine = new RealmCodecEngine({
         registry: createDefaultRealmRegistry().extend(codec),
       });
 
