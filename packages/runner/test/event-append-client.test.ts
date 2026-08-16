@@ -507,6 +507,64 @@ describe("OW27 event-flood shaping — per-stream pacing, pace-never-drop (READM
       holdTwo.eventId,
     ]);
   });
+
+  it("streams are INDEPENDENT: a paced head on stream A does not hold stream B (no cross-stream head-of-line hold), and each stream's own fired order stays exact", async () => {
+    // Adopted from the P7 independent review's cross-stream probe
+    // (finding 5) with the ruled semantics: pacing is PER STREAM (the
+    // buckets are keyed by sidecar), so a stream that has exhausted its
+    // burst holds only ITS OWN later sends — an unrelated stream with a
+    // token in its bucket sends now. Pre-fix the queue sent strictly the
+    // fired-order head, so b1 waited behind a2's ~500 ms hold; a
+    // "send the head only" mutation of #drain turns this red (b1 lands
+    // at ≥400 ms), and a "per-stream order lost" mutation turns the
+    // a1<a2 / b1<b2 assertions red.
+    const sent: Array<{ id: string; at: number }> = [];
+    const queue = new EventAppendQueue({
+      space,
+      transact: (commit: ClientCommit) => {
+        sent.push({
+          id: (commit.eventAppends ?? [])[0]?.eventId ?? "?",
+          at: Date.now(),
+        });
+        return Promise.resolve();
+      },
+      nextLocalSeq: (() => {
+        let seq = 1;
+        return () => seq++;
+      })(),
+      // burst 1, 2/s: a stream's second send is held ~500 ms.
+      pacing: { ratePerSecond: 2, burst: 1 },
+    });
+    const t0 = Date.now();
+    const [a1, a2, a3] = floodOf(3, "A");
+    const [b1, b2] = floodOf(2, "B");
+    // Fired order: a1, a2, b1, b2, a3.
+    const outcomes = await Promise.all([
+      queue.enqueue(a1),
+      queue.enqueue(a2),
+      queue.enqueue(b1),
+      queue.enqueue(b2),
+      queue.enqueue(a3),
+    ]);
+    expect(outcomes.every((o) => o.delivered)).toBe(true);
+    const at = (id: string) => sent.find((s) => s.id === id)!.at - t0;
+    const order = sent.map((s) => s.id);
+    // Within a stream fired order is exact.
+    expect(order.indexOf(a1.eventId)).toBeLessThan(order.indexOf(a2.eventId));
+    expect(order.indexOf(a2.eventId)).toBeLessThan(order.indexOf(a3.eventId));
+    expect(order.indexOf(b1.eventId)).toBeLessThan(order.indexOf(b2.eventId));
+    // b1 (B's burst) sends immediately, NOT behind a2's hold; b2 waits
+    // only on B's own bucket (~500 ms), never on A's.
+    expect(at(b1.eventId)).toBeLessThan(250);
+    expect(at(a2.eventId)).toBeGreaterThanOrEqual(400);
+    expect(at(b2.eventId)).toBeGreaterThanOrEqual(400);
+    // a3 waits for A's SECOND refill (~1 s), independent of B.
+    expect(at(a3.eventId)).toBeGreaterThanOrEqual(900);
+    expect(at(a3.eventId)).toBeLessThan(1500);
+    // Every intent still delivered — pace-never-drop holds across streams.
+    expect(sent.length).toBe(5);
+    queue.close();
+  });
 });
 
 describe("intent outcome consumption (events.md §5's client signal)", () => {

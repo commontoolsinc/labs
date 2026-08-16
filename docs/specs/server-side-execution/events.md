@@ -228,7 +228,14 @@ handler-run provenance records.
   the consequence — else a poison event wedges the stream), push.
 - Client offline at fire time (RULED 2026-08-02): events accumulate
   client-side as unacked authored commits and discharge on reconnect
-  in fired order. The queue is PROCESS-LIFETIME (LT9, RE-RULED
+  in fired order — PER STREAM: a stream's sidecar carries only that
+  stream's entries and nothing on the wire orders one stream against
+  another, so the guarantee is each stream's own fired order (unpaced,
+  the queue sends the fired-order head, which serializes the space in
+  fired order as a consequence; under README §3.8's OW27 pacing streams
+  are independent — a paced stream holds only its own later sends,
+  never another stream's; ruled 2026-08-16 with the P7 review's
+  finding 5). The queue is PROCESS-LIFETIME (LT9, RE-RULED
   2026-08-15 by the owner, superseding the 2026-08-03 "durable"
   ruling): queued-but-undischarged intents surviving a client RELOAD
   is a NON-GOAL this round — in the owner's words, *"the status quo

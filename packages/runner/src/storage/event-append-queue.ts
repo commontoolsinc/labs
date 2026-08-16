@@ -17,10 +17,17 @@
 // treats it as delivered rather than re-raising forever (events.md §5's
 // duplicate-submission rule).
 //
-// Ordering: strictly one in-flight append per space, in fired order —
-// events.md §5's "discharge on reconnect in fired order". (Per-stream
-// order is the spec's requirement; per-space serialization implies it
-// and keeps the machinery obvious.)
+// Ordering: strictly one in-flight append per space, PER-STREAM fired
+// order — events.md §5's "discharge on reconnect in fired order" is the
+// per-stream requirement (a stream's sidecar carries that stream's
+// entries; nothing on the wire orders one stream against another).
+// Unpaced, the queue sends the fired-order head, which serializes the
+// whole space in fired order as a consequence. Under OW27 pacing the
+// next send is the earliest-fired entry whose STREAM has a token: a
+// paced stream holds only its own later sends, never an unrelated
+// stream's (no cross-stream head-of-line hold — the P7 review's
+// finding 5, ruled per-stream independence), and one in-flight append
+// per space still holds.
 //
 // Persistence class (LT9, RE-RULED 2026-08-15 — owner): the queue is
 // PROCESS-LIFETIME. Queued-but-undischarged intents surviving a client
@@ -104,11 +111,14 @@ const RETRY_CAP_MS = 10_000;
  * A per-stream token bucket sits between the queue head and the wire:
  * `burst` sends pass immediately, sustained sends drain at
  * `ratePerSecond`, and a flood (key-repeat driving `stream.send()`)
- * is HELD, in fired order, never coalesced and never dropped — events
- * are intent, and dropping loses it. Because the queue discharges one
- * append at a time in fired order (events.md §5), a paced head holds
- * everything behind it, streams included: cross-stream head-of-line
- * hold is the accepted cost of keeping fired order exact.
+ * is HELD, in that stream's fired order, never coalesced and never
+ * dropped — events are intent, and dropping loses it. Streams are
+ * INDEPENDENT: the buckets are per stream and so is the hold — the
+ * drain sends the earliest-fired entry whose stream has a token, so a
+ * paced stream never holds an unrelated stream's sends (no cross-stream
+ * head-of-line hold; ruled with the P7 review's finding 5) while each
+ * stream's own fired order stays exact (its entries share one bucket
+ * and are scanned in fired order).
  *
  * The bound this imposes on the flooding user's OWN legitimate rapid
  * interactions is the dial: with N sends queued past the burst the
@@ -367,57 +377,84 @@ export class EventAppendQueue {
     });
   }
 
+  /** Refill `streamKey`'s bucket from the elapsed time (capped at
+   * `burst`) and report its token balance; a fresh bucket starts full. */
+  #refilledTokens(
+    pacing: EventAppendPacing,
+    streamKey: string,
+    at: number,
+  ): { tokens: number; refilledAt: number } {
+    let bucket = this.#buckets.get(streamKey);
+    if (bucket === undefined) {
+      bucket = { tokens: pacing.burst, refilledAt: at };
+      this.#buckets.set(streamKey, bucket);
+    } else {
+      const elapsedS = Math.max(0, at - bucket.refilledAt) / 1000;
+      bucket.tokens = Math.min(
+        pacing.burst,
+        bucket.tokens + elapsedS * pacing.ratePerSecond,
+      );
+      bucket.refilledAt = at;
+    }
+    return bucket;
+  }
+
   /**
-   * OW27: wait for the head's stream to have a send token. Refills the
-   * stream's bucket from the elapsed time (capped at `burst`), consumes
-   * one token when available, else sleeps for the deficit — a closable
-   * wait on the same release seam as the retry backoff, so close()
-   * settles it. Never reorders: the head is the only send considered.
+   * OW27: the next entry to send — the EARLIEST-FIRED queued entry whose
+   * stream has a send token now, that token consumed. Streams are
+   * independent: an entry whose stream's bucket is empty is skipped for
+   * this pass (and so is every later entry of the same stream — they
+   * share the bucket, which is what keeps a stream's own fired order
+   * exact), and an unrelated stream's entry behind it sends. When no
+   * queued stream has a token the loop sleeps for the smallest deficit —
+   * a closable wait on the same release seam as the retry backoff, so
+   * close() settles it — and re-scans. Unpaced: the fired-order head.
+   * Undefined only once closed (or the queue emptied under it).
    */
-  async #acquireSendToken(streamKey: string): Promise<void> {
+  async #nextSendable(): Promise<QueuedEventAppend | undefined> {
     const pacing = this.#pacing;
-    if (pacing === undefined) return;
-    const now = pacing.now ?? Date.now;
     for (;;) {
-      if (this.#closed) return;
+      if (this.#closed || this.#queue.length === 0) return undefined;
+      if (pacing === undefined) return this.#queue[0];
+      const now = pacing.now ?? Date.now;
       const at = now();
-      let bucket = this.#buckets.get(streamKey);
-      if (bucket === undefined) {
-        bucket = { tokens: pacing.burst, refilledAt: at };
-        this.#buckets.set(streamKey, bucket);
-      } else {
-        const elapsedS = Math.max(0, at - bucket.refilledAt) / 1000;
-        bucket.tokens = Math.min(
-          pacing.burst,
-          bucket.tokens + elapsedS * pacing.ratePerSecond,
-        );
-        bucket.refilledAt = at;
-      }
-      if (bucket.tokens >= 1) {
-        bucket.tokens -= 1;
-        // Housekeeping: a quiet stream's bucket refills to full and can
-        // be forgotten (a fresh bucket starts full).
-        if (this.#buckets.size > 64) {
-          for (const [key, other] of this.#buckets) {
-            if (key !== streamKey && other.tokens >= pacing.burst) {
-              this.#buckets.delete(key);
+      const held = new Set<string>();
+      let minDeficitMs = Infinity;
+      for (const entry of this.#queue) {
+        const streamKey = entry.sidecarId;
+        if (held.has(streamKey)) continue;
+        const bucket = this.#refilledTokens(pacing, streamKey, at);
+        if (bucket.tokens >= 1) {
+          bucket.tokens -= 1;
+          // Housekeeping: a quiet stream's bucket refills to full and
+          // can be forgotten (a fresh bucket starts full).
+          if (this.#buckets.size > 64) {
+            for (const [key, other] of this.#buckets) {
+              if (key !== streamKey && other.tokens >= pacing.burst) {
+                this.#buckets.delete(key);
+              }
             }
           }
+          return entry;
         }
-        return;
+        held.add(streamKey);
+        minDeficitMs = Math.min(
+          minDeficitMs,
+          Math.max(
+            1,
+            Math.ceil(((1 - bucket.tokens) / pacing.ratePerSecond) * 1000),
+          ),
+        );
       }
+      // Every queued stream is paced: hold until the earliest refill.
       this.#pacedHolds += 1;
-      const deficitMs = Math.max(
-        1,
-        Math.ceil(((1 - bucket.tokens) / pacing.ratePerSecond) * 1000),
-      );
       await new Promise<void>((resolve) => {
         this.#retryRelease = resolve;
         this.#retryTimer = setTimeout(() => {
           this.#retryTimer = undefined;
           this.#retryRelease = undefined;
           resolve();
-        }, deficitMs);
+        }, Number.isFinite(minDeficitMs) ? minDeficitMs : 1);
       });
     }
   }
@@ -426,14 +463,13 @@ export class EventAppendQueue {
     await this.#loaded;
     let attempt = 0;
     while (this.#queue.length > 0 && !this.#closed) {
-      const head = this.#queue[0];
+      // OW27: pace per stream before the send (pace-never-drop; a paced
+      // stream holds only its own later sends — see #nextSendable).
+      const next = await this.#nextSendable();
+      if (next === undefined || this.#closed) break;
       try {
-        // OW27: pace per stream before the send (pace-never-drop; the
-        // head holds everything behind it in fired order).
-        await this.#acquireSendToken(head.sidecarId);
-        if (this.#closed) break;
-        await this.#transact(this.#commitFor(head));
-        this.#settle(head, { delivered: true });
+        await this.#transact(this.#commitFor(next));
+        this.#settle(next, { delivered: true });
         attempt = 0;
       } catch (error) {
         const name = (error as { name?: string })?.name ?? "";
@@ -441,24 +477,27 @@ export class EventAppendQueue {
         if (name === "EventAppendDuplicateError") {
           // The first append landed; its consequences are (or will be)
           // the authoritative outcome (events.md §5).
-          this.#settle(head, { delivered: true, deduped: true });
+          this.#settle(next, { delivered: true, deduped: true });
           attempt = 0;
           continue;
         }
         if (REFUSED_ERROR_NAMES.has(name)) {
           logger.warn("event-append-refused", () => [
-            `event append ${head.eventId} refused deterministically; ` +
+            `event append ${next.eventId} refused deterministically; ` +
             "dropped from the queue",
             { name, message },
           ]);
-          this.#settle(head, { delivered: false, refused: message });
-          this.#onRefused?.(head, message);
+          this.#settle(next, { delivered: false, refused: message });
+          this.#onRefused?.(next, message);
           attempt = 0;
           continue;
         }
         // Transient (transport death, session replacement, handshake
-        // in progress): keep the head queued and retry with backoff.
-        // Delivery order holds — nothing behind the head sends first.
+        // in progress): keep the entry queued in place and retry with
+        // backoff. Its stream's delivery order holds — nothing of that
+        // stream behind it sends first (it stays the earliest-fired
+        // entry of its stream, and a token spent on a failed attempt
+        // is one token per WIRE attempt).
         attempt += 1;
         const delay = Math.min(
           RETRY_BASE_MS * 2 ** Math.min(attempt - 1, 10),
