@@ -641,12 +641,14 @@ const defaultHostIo = (): CfHarnessCliIO => ({
 });
 
 /**
- * A startup blocker as the chat protocol states it. The provider codes carry
- * across by name. `invalid-request` and `operation-canceled` report as
- * `internal_error` rather than through the protocol's own `invalid_request`
- * and `turn_canceled`: those two describe the chat request being answered,
- * and a startup blocker is about the host process instead — its argv, or its
- * cancellation — so reporting them would blame a caller whose request is fine.
+ * A startup blocker as the chat protocol states it. Only the provider codes
+ * and `internal-error` reach here: this answers a failure raised before the
+ * host was serving, while `invalid-request` and `operation-canceled` belong to
+ * the batch and control paths, which answer on stderr instead. The provider
+ * codes carry across by name, so the remaining branch totals the mapping
+ * rather than choosing between codes. A malformed chat request is a separate
+ * matter and has the protocol's own `invalid_request`, raised where the
+ * request is read.
  */
 const chatError = (failure: CfHarnessHostFailure): HarnessChatError => ({
   code: failure.error.code === "provider-configuration-required" ||
