@@ -589,6 +589,10 @@ Deno.test("interactive service rejects browser-profile turns without Browser Acc
     turn.ok === false ? turn.error.code : "",
     "browser_access_required",
   );
+  // No request attaches a lease to a running session, so resending this turn
+  // unchanged fails identically forever. Waiting is not the remedy, and the
+  // response must not offer it as one.
+  assertEquals(turn.ok === false ? turn.error.retryable : "unset", undefined);
   assertEquals(createdLoop, false);
   assertEquals(
     service.events("session-1").map((event) => event.event.kind),
@@ -1328,6 +1332,16 @@ Deno.test("interactive service rejects missing sessions and concurrent turns", a
   assertEquals(
     concurrent.ok === false ? concurrent.error.code : "",
     "turn_already_running",
+  );
+  // Waiting is the whole remedy here, and nothing else in this file can say
+  // that: the busy turn ends on its own and the identical request then works.
+  assertEquals(
+    concurrent.ok === false ? concurrent.error.retryable : undefined,
+    true,
+  );
+  assertEquals(
+    missing.ok === false ? missing.error.retryable : "unset",
+    undefined,
   );
   release?.();
   await busyService.waitForTurn("session-1", "turn-1");
