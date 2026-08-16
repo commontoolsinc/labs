@@ -268,6 +268,26 @@ always distinct.
 
 ## 5. Ownership
 
+The two directions divide the memory they are handed in opposite ways, and
+each is easy to get wrong in a way nothing reports.
+
+### 5.1 Encoding
+
+**An encoded tree shares structure with the value it was built from, and is
+not frozen.** Copy-on-write is what makes that so: a subtree needing no
+encoding *is* that subtree rather than a reconstruction of it, which is the
+same mechanism Section 4 credits with preserving shared references.
+
+So a value must not be mutated after it is encoded. A caller that does so
+changes the encoded tree, and over a transport that clones on send, changes
+what arrives — with nothing raising, because nothing has gone wrong as far as
+either side can see. Encode last, or encode a value nothing else is holding.
+
+Only the outer envelope is new on every call. It and the marker are two
+allocations; nothing beneath them is rebuilt unless it needed encoding.
+
+### 5.2 Decoding
+
 **A caller cedes the tree to `decode()`.** The decoder retains what it likes of
 it, and **a decoded tree carries no guarantee of being usable again**. This is
 a promise withheld rather than a prohibition imposed: nothing detects a second

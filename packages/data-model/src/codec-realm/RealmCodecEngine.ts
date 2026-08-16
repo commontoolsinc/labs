@@ -18,106 +18,27 @@ import {
  * fabric value takes when it is handed to `structuredClone()` or
  * `postMessage()` to reach another realm.
  *
- * The counterpart to `JsonCodecEngine`, and the two divide along what their
- * transports carry. JSON reaches a `string`, so every type JavaScript has and
- * JSON lacks -- `bigint`, `undefined`, the special numbers, bytes, patterns --
- * is written out as tagged text, and a `/`-prefixed key in user data has to be
- * escaped clear of the tags. Cloning carries all of those but `symbol`, and
- * carries them with their types intact, so most of a value passes through
- * untouched and tagging is reserved for what genuinely needs it.
+ * The format is specified by `4-realm-encoding.md` of the formal spec, which
+ * is the authority on the shape of an encoded value, the marker and its rules,
+ * what the walks refuse, and what each direction does with the memory it is
+ * given. Two of its terms are worth naming here because they are what the
+ * methods below are written in: the **outer envelope** is the two-element
+ * `[marker, tree]` that crosses, and a **tagged form** is the three-element
+ * `[marker, tag, state]` that a codec's output wears inside it.
  *
- * **An encoded value is `[marker, tree]`**, and the marker is what makes every
- * tagged form beneath it recognizable. It is a fresh object per `encode()`
- * call, repeated at slot zero of each tagged form, and a receiver takes it from
- * the outer envelope and recognizes the rest by `===` against it. Structured
- * cloning preserving shared references is what carries that across; the marker
- * being younger than the value it encodes, and confined to the engine until
- * that encode returns, is what keeps a payload from containing one.
- * {@link RealmFormatMarker} states all three.
- *
- * The marker carries a version string, and `decode()` refuses an outer
- * envelope whose marker is not this build's. That holds the boundary it exists
- * for: worker IPC within one process, where both ends are the same build.
- * `postMessage()` also spans tabs, windows and frames, any of which could pair
- * two deployments, and a payload from one this build does not understand is
- * refused rather than walked.
- *
- * Two pieces of `JsonCodecEngine` have no counterpart here, each because the
- * transport does the work directly:
- *
- * * **No escaping.** `/quote` and `/object` exist because a JSON object is the
- *   only container JSON has, so a tag and a user's data compete for the same
- *   shape. Here they compete for the same shape too -- a tagged form is an
- *   ordinary three-element array -- and identity settles it instead, which
- *   costs nothing on the wire where escaping costs a rewrite of the object
- *   around it.
- * * **No `/hole`.** Cloning preserves a sparse array's length and its absent
- *   indices, so a hole crosses as a hole.
- *
- * Both walks are copy-on-write: a subtree in which nothing changed is returned
- * by identity rather than rebuilt. A payload holding no `FabricSpecialObject`
- * and no symbol is therefore handed to the transport exactly as it arrived --
- * the same object, not a reconstruction of it -- and copied once by the
- * transport instead of twice. The outer envelope stops that one layer in -- the
- * outermost value is always the two-element wrapper -- which costs two
- * allocations per call, the wrapper and the marker, and no rebuild of
- * anything beneath it. That is the ordinary case
- * for plain data, and it makes the walk's cost proportional to what actually
- * needs encoding rather than to the size of the value. `JsonCodecEngine` never
- * faces the choice, having to reach text.
- *
- * **`decode()` cedes its input**, and **a decoded tree carries no guarantee of
- * being usable again**. The engine retains what it likes of the tree, and two
- * retentions are deliberate: a subtree needing no decoding comes back by
- * identity, and a byte-carrying value takes over the `ArrayBuffer` it arrived
- * in rather than copying it. Every container it returns is frozen, retained
- * and rebuilt alike; an `ArrayBuffer` cannot be, which is what makes ceding it
- * a requirement rather than a courtesy. A call that raised consumed the tree
- * as thoroughly as one that returned, a refusal being able to arrive after a
- * buffer is already detached.
- *
- * Nothing detects a second `decode()` or sets out to defeat one -- the
- * guarantee is withheld, not enforced -- and which trees survive follows from
- * what they carry. Bytes are the case where it definitely fails: taking a
- * buffer over detaches it, so a second call cannot reconstruct what the first
- * did, and the attempt is settled against leniency like any other refusal,
- * strict raising and lenient yielding a `ProblematicValue` where the bytes
- * would have been. `FabricBytes` and `FabricHash` are the classes that reach
- * that path, directly or nested anywhere beneath; a tree holding neither
- * happens to decode repeatedly, which is a fact about these containers rather
- * than a promise. On the boundary this format exists for none of it costs a
- * caller anything -- the tree is the receiver's own clone of a value it will
- * not be handed again, which is the whole reason the copy can be elided -- but
- * a caller wanting two readings of one payload keeps the value it decoded, not
- * the tree it decoded from.
- *
- * **Cycles are refused by both walks**, and **a shared reference survives
- * exactly where nothing beneath it needed encoding**, per Section 1.6 of the
- * formal spec, which requires an engine to say which of these it does. Neither
- * answer comes from the transport, which would carry either faithfully; both
- * come from the walk.
- *
- * The two walks refuse a cycle differently, and for the reason they differ
- * everywhere else. Encoding raises: the value is a local caller's, and a cycle
- * in it is that caller's bug. Decoding reports, settled against `lenient`,
- * because a cycle arriving on a channel is untrusted data like any other
- * malformation -- and cloning delivers one faithfully, so a peer can send one.
- * Leniently the report lands at the cycle, leaving the rest of the value
- * intact.
- *
- * Copy-on-write is what preserves the sharing it preserves. A subtree needing
- * no encoding comes back by identity, so every position that held the one
- * object still holds it. Where a shared subtree does need encoding, each
- * position rebuilds it on its own, and the encoding has two equal objects
- * where the value had one -- structure that a receiver cannot tell from two
- * that were always distinct.
+ * **Cycles are refused and a shared reference survives exactly where nothing
+ * beneath it needed encoding**, per Section 1.6 of the formal spec, which
+ * requires an engine to say which of these it does. Section 4 of the realm
+ * spec gives both, and the encode and decode sides of the ownership contract
+ * are Section 5 -- the half a caller is likeliest to get wrong being that an
+ * encoded tree shares structure with the value it came from and is not frozen.
  *
  * TODO(danfuzz): A memo from each visited object to its encoded counterpart
- * closes both at once: a repeat visit yields the node already built for it,
- * which preserves sharing through a rebuild and lets a back-edge resolve
- * instead of recursing. It has to reach `BaseCodecEngine`'s walk state rather
- * than living here, since a cycle can run through a codec-matched object as
- * readily as through a container.
+ * closes cycles and sharing at once: a repeat visit yields the node already
+ * built for it, which preserves sharing through a rebuild and lets a back-edge
+ * resolve instead of recursing. It has to reach `BaseCodecEngine`'s walk state
+ * rather than living here, since a cycle can run through a codec-matched
+ * object as readily as through a container.
  */
 export class RealmCodecEngine
   extends BaseCodecEngine<RealmCodecValue, RealmEncodedValue> {
@@ -142,16 +63,15 @@ export class RealmCodecEngine
   /**
    * @inheritDoc
    *
-   * Mints this call's marker and returns `[marker, walkedTree]`. The tree
-   * inside is still copy-on-write, so a payload needing no encoding is the
-   * caller's own object rather than a reconstruction of it; what the outer
-   * envelope costs is two allocations per call, the wrapper and the marker,
-   * and what it buys is a receiver able to tell this form from anything else
-   * on the channel, and to tell which build wrote it.
+   * Mints this call's marker and returns `[marker, walkedTree]`.
    *
-   * The marker is created here, after `value` exists, which is the whole of
-   * why neither an outer envelope nor a tagged form can be forged from within
-   * a payload. See {@link RealmFormatMarker}.
+   * **The tree shares structure with `value` and is not frozen**, per Section
+   * 5.1 of the realm spec: a subtree needing no encoding is the caller's own
+   * object rather than a reconstruction of it, so mutating `value` afterwards
+   * changes what was encoded.
+   *
+   * The marker is minted here, after `value` exists, which is what Section 2.2
+   * requires of it and why it cannot be forged from within a payload.
    */
   override encode(value: FabricValue): RealmEncodedValue {
     // Saved and restored rather than set and cleared, so that an encode
@@ -170,42 +90,22 @@ export class RealmCodecEngine
   /**
    * @inheritDoc
    *
-   * Takes the marker from the outer envelope and walks what it wraps. That
+   * Adopts the marker from the outer envelope and walks what it wraps. This
    * envelope is the one place this method takes instruction from the data, so
    * it is checked in full before anything is read from it: two elements, and a
-   * one-element array in slot zero holding this format's version. What cloning
-   * carries but this format never emits is refused where it is found, by
-   * `decodeValue()`.
+   * one-element array in slot zero holding this format's version. Adopting the
+   * sender's own marker rather than comparing against one minted here is what
+   * makes recognition work across the boundary, per Section 2.1.
    *
-   * Checking the marker's contents buys little in practice, since a payload
-   * from the same build always satisfies it and recognition never reads it
-   * afterwards. It is cheap, though, and it is what keeps the adoption below
-   * from being a cast that outruns what was checked -- an arbitrary object
-   * adopted as a marker would leave every tagged form beneath unrecognized and
-   * a foreign tree decoding as ordinary data rather than being refused.
+   * **`data` is ceded to this method**, and no tree is guaranteed to survive a
+   * decode -- Section 5.2, which is worth reading before calling this twice.
+   * `FabricBytes` and `FabricHash` are the classes whose take-over spends a
+   * tree outright, directly or nested anywhere beneath.
    *
-   * Adopting the sender's marker is what makes recognition work across the
-   * boundary. The receiver's own objects are no use -- a marker minted here is
-   * a different object from the one that crossed -- and cloning having
-   * preserved the sender's sharing, the object in slot zero is the same object
-   * that sits in slot zero of every tagged form beneath it.
-   *
-   * **`data` is ceded to this method**, which retains whatever parts of it it
-   * likes, so a caller must not use it afterwards. Two retentions are
-   * deliberate: a subtree needing no decoding comes back by identity rather
-   * than rebuilt, and a `FabricBytes` takes over the buffer it arrived in.
-   * Every container this returns is frozen, retained and rebuilt alike; the
-   * byte buffer cannot be, which is what makes ceding it a requirement rather
-   * than a courtesy. Taking a buffer over detaches it, so a tree carrying
-   * bytes cannot be decoded a second time, such a call raising when strict and
-   * yielding a `ProblematicValue` when lenient. No tree is guaranteed to
-   * survive a decode; one holding no bytes merely happens to.
-   *
-   * Across the boundary that costs a caller nothing, the tree being the
-   * receiver's own clone of a sender's value. Same-realm it is visible:
-   * `encode()` returns unchanged subtrees by identity too, so
-   * `decode(encode(value))` can hand back the very objects that went in, and
-   * `value` is frozen as deeply as the walk reached.
+   * Same-realm the ceding is visible in a way it is not across a boundary,
+   * because `encode()` shares structure too: `decode(encode(value))` can hand
+   * back the very objects that went in, leaving `value` frozen as deeply as
+   * the walk reached.
    */
   override decode(
     data: RealmEncodedValue,
