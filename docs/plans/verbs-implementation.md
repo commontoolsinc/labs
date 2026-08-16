@@ -314,8 +314,8 @@ Four parts. Two are independent of everything:
   against a declared field rather than the `any` the probe used.
 - **Lift resolution to a shared home**, beside `parseLink` and the LLM-friendly
   pair in `packages/runner/src/link-utils.ts`. This is what admits the *other*
-  spellings — the `$link` shape a read emits, and the LLM-friendly form — so it
-  serves composition rather than basic capability.
+  spelling — the canonical reference string a read emits under a `$link`
+  marker — so it serves composition rather than basic capability.
 - **Fix event-schema emission.** The handler-side stream schema is a usage
   summary: `applyCapabilitySummaryToArgument`
   (`packages/ts-transformers/src/transformers/schema-injection.ts`) shrinks

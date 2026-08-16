@@ -305,6 +305,7 @@ export {
 } from "./schema-refs.ts";
 export {
   type SchemaOpaqueLinkSanitizationResult,
+  type StructuredResultReservedKeys,
   validateAndSanitizeSchemaValueWithOpaqueLinks,
   validateAndSanitizeStructuredResultValue,
   validateStructuredResultValue,

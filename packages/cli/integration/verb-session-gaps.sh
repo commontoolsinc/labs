@@ -137,7 +137,7 @@ R=$($CF piece call --quiet --show-links --piece board $ARGS \
   addItem '{"title":"Login rewrite"}' 2>/dev/null)
 check "Login rewrite" "$(echo "$R" | jq -r '.result.item["$NAME"] // empty')" \
   "the result carries the created item"
-EPIC=$(echo "$R" | jq -r '.links["/item"].id // empty' | sed 's/^of://')
+EPIC=$(echo "$R" | jq -r '.links["/item"] // empty')
 if [ -n "$EPIC" ]; then ok "the result names its document: $EPIC"; else
   bad "no link for /item"
 fi
@@ -171,7 +171,7 @@ ADDR=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
   2>/dev/null)
 check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link") and (.title|length>0)] | all')" \
   "a marker beside a projection returns the address AND the fields"
-KID=$(echo "$ADDR" | jq -r '.[] | select(.title=="Session cookies") | .["$link"].id')
+KID=$(echo "$ADDR" | jq -r '.[] | select(.title=="Session cookies") | .["$link"]')
 # The very same read, run a second time. A (source cell, schema) pair is
 # reusable: it answers with what it answered before, which is what a caller
 # reaching for one projection twice depends on. Asserted by equality against
@@ -199,11 +199,10 @@ step "6. Two routes hand back an address, and either one addresses the piece"
 # fed back to --piece, reads the same piece.
 MADE=$($CF piece call --quiet --show-links --piece board $ARGS \
   addItem '{"title":"Rate limiting"}' 2>/dev/null |
-  jq -r '.links["/item"].id // empty' | sed 's/^of://')
+  jq -r '.links["/item"] // empty')
 VIA_READ=$($CF piece get --quiet --piece board items $ARGS --step \
   --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
-  2>/dev/null | jq -r '.[] | select(.title=="Rate limiting") | .["$link"].id' |
-  sed 's/^of://')
+  2>/dev/null | jq -r '.[] | select(.title=="Rate limiting") | .["$link"]')
 if [ -z "$MADE" ] || [ -z "$VIA_READ" ]; then
   bad "one of the two routes produced no address (call=$MADE read=$VIA_READ)"
 else
@@ -256,7 +255,7 @@ step "10. GAP: an address cannot be a verb argument"
 # and result layers.
 OTHER=$($CF piece get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
-  jq -r '.[0]["$link"].id // empty')
+  jq -r '.[0]["$link"] // empty')
 # Guarded, and matched against the SPECIFIC refusal: an empty address, a
 # renamed verb, or a server hiccup would also exit nonzero, and a probe that
 # reads any failure as "gap still open" is a probe that cannot fail.
@@ -286,8 +285,8 @@ CALLED=$($CF piece call --quiet --piece "$EPIC" $ARGS \
   addChild '{"title":"Cycle probe"}' 2>/dev/null)
 RC=$?
 check "0" "$RC" "addChild readback on a doubly-linked tree"
-BACKREF=$(printf '%s' "$CALLED" | jq -r '.result.item.parent["$link"].id // ""')
-check "of:" "${BACKREF:0:3}" \
+BACKREF=$(printf '%s' "$CALLED" | jq -r '.result.item.parent["$link"] // ""')
+check "/of:" "${BACKREF:0:4}" \
   "the position that closes the circle returns an address"
 AFTER=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')

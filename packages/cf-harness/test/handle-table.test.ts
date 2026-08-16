@@ -23,6 +23,10 @@ const HASH_B = "B".repeat(43);
 const LINK_A = `/of:fid1:${HASH_A}`;
 const LINK_B = `/of:fid1:${HASH_B}`;
 const SPACE_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+const SUMMARY_SCHEMA = {
+  type: "object",
+  properties: { summary: { type: "string" } },
+} as const;
 
 /**
  * A hasher that yields the same digest for every first-attempt preimage
@@ -121,6 +125,44 @@ describe("handle-table", () => {
       expect(second.token).toBe(first.token);
     });
 
+    it("records a schema supplied with the mint on the entry", async () => {
+      const { table, token } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { schema: SUMMARY_SCHEMA },
+      );
+      expect(resolveHandleToken(table, token)?.schema).toEqual(SUMMARY_SCHEMA);
+    });
+
+    it("fills in a schema on an entry minted without one", async () => {
+      const first = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const second = await mintAddressHandle(first.table, LINK_A, {
+        schema: SUMMARY_SCHEMA,
+      });
+      expect(second.token).toBe(first.token);
+      expect(second.table.entries.length).toBe(1);
+      expect(resolveHandleToken(second.table, second.token)?.schema).toEqual(
+        SUMMARY_SCHEMA,
+      );
+    });
+
+    it("keeps the first schema when a later mint supplies a different one", async () => {
+      const first = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { schema: SUMMARY_SCHEMA },
+      );
+      const second = await mintAddressHandle(first.table, LINK_A, {
+        schema: { type: "string" },
+      });
+      expect(resolveHandleToken(second.table, second.token)?.schema).toEqual(
+        SUMMARY_SCHEMA,
+      );
+    });
+
     it("stores the canonical ref, space DID and path included, for a cross-space link", async () => {
       const ref = `/@${SPACE_DID}${LINK_A}/items/0`;
       const { table, token } = await mintAddressHandle(
@@ -134,12 +176,12 @@ describe("handle-table", () => {
       const first = await mintAddressHandle(
         createHarnessHandleTable("run-1"),
         LINK_A,
-        collidingHasher,
+        { hasher: collidingHasher },
       );
       const second = await mintAddressHandle(
         first.table,
         LINK_B,
-        collidingHasher,
+        { hasher: collidingHasher },
       );
       expect(first.token).toBe(
         ADDRESS_HANDLE_TOKEN_PREFIX +
@@ -508,6 +550,45 @@ describe("handle-table", () => {
       };
       expect(() => assertValidHarnessHandleTable(broken)).toThrow(
         "empty ref",
+      );
+    });
+
+    it("throws for an entry schema that is not a JSON Schema", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { schema: SUMMARY_SCHEMA },
+      );
+      for (const schema of ["a string", 42, ["an", "array"], null]) {
+        const broken = {
+          ...table,
+          entries: [{ ...table.entries[0], schema }],
+        } as unknown as HarnessHandleTable;
+        expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+          "not a JSON Schema object or boolean",
+        );
+      }
+      // A boolean schema is a JSON Schema, so it passes.
+      expect(() =>
+        assertValidHarnessHandleTable({
+          ...table,
+          entries: [{ ...table.entries[0], schema: false }],
+        } as unknown as HarnessHandleTable)
+      ).not.toThrow();
+    });
+
+    it("throws for an entry schemaSource other than `harness`", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { schema: SUMMARY_SCHEMA },
+      );
+      const broken = {
+        ...table,
+        entries: [{ ...table.entries[0], schemaSource: "model" }],
+      } as unknown as HarnessHandleTable;
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "unknown schemaSource `model`",
       );
     });
 

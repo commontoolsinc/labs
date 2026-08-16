@@ -1,6 +1,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import {
   type SchemaOpaqueLinkSanitizationResult,
+  type StructuredResultReservedKeys,
   validateAndSanitizeStructuredResultValue,
   validateStructuredResultValue as validateCfcStructuredResultValue,
 } from "@commonfabric/runner/cfc";
@@ -112,6 +113,6 @@ export const validateAndSanitizeStructuredResult = (
     schema: JSONSchema;
     value: unknown;
     opaqueHandleId: string;
-  },
+  } & StructuredResultReservedKeys,
 ): SanitizedStructuredResult =>
   validateAndSanitizeStructuredResultValue(options);

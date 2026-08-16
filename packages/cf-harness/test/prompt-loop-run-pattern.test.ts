@@ -139,6 +139,98 @@ describe("prompt-loop run_pattern model boundary", () => {
     });
   });
 
+  it("records the compiled pattern's result schema on the handle minted for its result reference", async () => {
+    const signer = await Identity.fromPassphrase("run-pattern result schema");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const fabricRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `run-pattern-schema-${crypto.randomUUID()}`,
+      }),
+      fabricRuntime,
+    );
+    await pieces.synced();
+    try {
+      const runId = "run-pattern-result-schema";
+      const doublingSource = [
+        "import { computed, pattern } from 'commonfabric';",
+        "export default pattern<{ n: number }, { doubled: number }>(",
+        "  ({ n }) => ({ doubled: computed(() => n * 2) }),",
+        ");",
+      ].join("\n");
+      const requestBodies: unknown[] = [];
+      const fetchFn: typeof fetch = (_input, init) => {
+        requestBodies.push(JSON.parse(String(init?.body)));
+        const payload = requestBodies.length === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-1",
+                  type: "function",
+                  function: {
+                    name: "run_pattern",
+                    arguments: JSON.stringify({
+                      sourceText: doublingSource,
+                      inputs: { n: 3 },
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "Done." },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-5.4",
+          cfcEnforcementMode: "disabled",
+          fabricSessionFactory: () => Promise.resolve({ pieces }),
+        }),
+        fetchFn,
+      });
+
+      const result = await loop.runPrompt({ prompt: "Run the pattern." });
+
+      // One handle: the result reference, carrying the shape compilation
+      // already knew, so the token is checkable without reading the cell.
+      const entries = result.runState.handleTable?.entries ?? [];
+      expect(entries.length).toBe(1);
+      const schema = entries[0]?.schema as
+        | { properties?: Record<string, unknown> }
+        | undefined;
+      expect(schema?.properties?.doubled).toBeDefined();
+      // The schema reaches the model through the token, not inline.
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).not.toContain("resultRefSchema");
+    } finally {
+      await fabricRuntime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("keeps bare fabric identifiers in compile diagnostics out of the model-facing tool message while the artifact keeps the raw text", async () => {
     const signer = await Identity.fromPassphrase("run-pattern scrub");
     const storageManager = StorageManager.emulate({ as: signer });

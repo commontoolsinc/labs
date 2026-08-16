@@ -158,6 +158,7 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
     ],
     allowedSubagentProfiles: ["default"],
   });

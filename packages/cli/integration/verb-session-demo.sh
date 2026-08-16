@@ -191,15 +191,18 @@ run cf piece call -s "$SPACE" --piece board addItem -- --help
 act "4 · Create, and act on what you were handed"
 say "The create returns the piece it made. Its address is the next command's target."
 run cf piece call -s "$SPACE" --piece board --select item@ addItem -- --title "Login rewrite"
-# The address the reader can see in the output above, carried whole. `--piece`
-# takes the `of:` form a read prints, on `get`, `call` and `verbs` alike, so
-# nothing here strips the scheme: the string passed below is the string act 4
-# displayed, which is the round-trip property this session exists to show. The
-# bare hash is a different spelling that resolves by defaulting to `of:`, not
-# the same address — the scheme is part of the identity.
-EPIC=$(printf '%s' "$OUT" | jq -r '.result.item."$link".id')
-say "That id is what --piece takes from here on. Ask it the same question act 2"
-say "asked the board, before assuming anything about what it can do."
+# The address the reader can see in the output above, carried whole. Taken
+# from that run, not from a second one: `run` leaves the output it displayed
+# in $OUT. It is one reference string, handed to --piece exactly as it was
+# printed, on `get`, `call` and `verbs` alike, so nothing here strips the
+# scheme: the string passed below is the string act 4 displayed, which is the
+# round-trip property this session exists to show. The bare hash is a
+# different spelling that resolves by defaulting to `of:`, not the same
+# address — the scheme is part of the identity.
+EPIC=$(printf '%s' "$OUT" | jq -r '.result.item."$link"')
+say "That address is what --piece takes from here on, exactly as printed. Ask"
+say "it the same question act 2 asked the board, before assuming anything"
+say "about what it can do."
 run cf piece verbs -s "$SPACE" --piece "$EPIC"
 say "Every verb an item has, and not the board's one: the listing is derived"
 say "from the piece in front of you, so an address is enough to discover a"
@@ -229,7 +232,7 @@ act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
 say "A grandchild is filed first, so there is a subtree to walk."
 KID=$(cf piece get -s "$SPACE" --piece "$EPIC" children --select @ 2>/dev/null |
-  jq -r '.[0]."$link".id')
+  jq -r '.[0]."$link"')
 run cf piece call -s "$SPACE" --piece "$KID" --select item.title addChild -- --title "Rotate signing key"
 run cf piece call -s "$SPACE" --piece "$EPIC" finish -- --body "shipping behind a flag"
 
@@ -280,8 +283,8 @@ pending "cf piece call -s $SPACE --piece <cookies> blockOn -- --on <csrf-address
   '{
   "status": "settled",
   "result": {
-    "blocked":         { "$link": { "id": "of:fid1:…" }, "title": "Session cookies" },
-    "on":              { "$link": { "id": "of:fid1:…" }, "title": "CSRF tokens" },
+    "blocked":         { "$link": "/of:fid1:…", "title": "Session cookies" },
+    "on":              { "$link": "/of:fid1:…", "title": "CSRF tokens" },
     "blockedOnCount":  1
   }
 }'

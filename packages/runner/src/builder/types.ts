@@ -94,6 +94,23 @@ export const FS = "$FS";
 // runner reads `[TESTS]` off the pattern output.
 export const TESTS = "$TESTS";
 
+/**
+ * Every reserved key the framework puts on a pattern result: the type marker,
+ * the display name, the rendering variants, the filesystem view, and the test
+ * steps. Their spellings belong to the framework rather than to anything the
+ * pattern computed, which is what lets a reader that describes only the
+ * computed fields excuse them by name instead of failing on them.
+ */
+export const FRAMEWORK_RESULT_KEYS = [
+  TYPE,
+  NAME,
+  UI,
+  TILE_UI,
+  CHIP_UI,
+  FS,
+  TESTS,
+] as const;
+
 // Symbol for accessing self-reference in patterns
 export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
 

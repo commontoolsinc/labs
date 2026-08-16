@@ -376,15 +376,15 @@ needs.
 
 ```bash
 EPIC=$(cf piece call --piece board addItem -- --title "Login rewrite" \
-       --select 'item@' | jq -r '.result.item."$link".id')
+       --select 'item@' | jq -r '.result.item."$link"')
 
 cf piece call --piece "$EPIC" addChild -- --title "Session cookie handling"
 cf piece call --piece "$EPIC" recordNote -- --body "Blocked on the cookie spec"
 ```
 
 **This is the composition the surface exists for.** A create hands back the
-piece it made, the address renders in place, and the next call takes it as its
-target. Identity survives the round trip instead of being flattened into a copy
+piece it made, the address renders in place as one canonical reference, and the
+next call takes that same string as its target. Identity survives the round trip instead of being flattened into a copy
 of the item's contents.
 
 `--show-links` is the **[today]** spelling of the same move: it returns a

@@ -269,7 +269,7 @@ cf piece call --piece "$EPIC" addChild -- --title "Session cookie handling"
       "title": "Session cookie handling",
       "status": "open",
       "children": [],
-      "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+      "parent": { "$link": "/of:fid1:…/parent" }
     }
   }
 }
@@ -534,17 +534,18 @@ cf piece call --show-links --piece <board> createNote '{"title":"Notes"}'
   "status": "settled",
   "result": { "note": { "$NAME": "Notes", "…": "…" } },
   "links": {
-    "/": { "space": "did:key:…", "id": "of:receipt…", "scope": "space" },
-    "/note": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" }
+    "/": "/of:receipt…",
+    "/note": "/of:fid1:…"
   }
 }
 ```
 
-`/note` is the created piece's own document, so it addresses directly —
-`--piece` takes the id exactly as emitted, `of:` prefix included:
+`/note` is the created piece's own document, and each entry is written in the
+canonical reference syntax `--piece` reads — taken exactly as emitted, `of:`
+prefix included — so it addresses directly:
 
 ```bash
-cf piece call --piece <the id from /note> \
+cf piece call --piece "$(echo "$RESULT" | jq -r '.links["/note"]')" \
   append '{"text":"second line"}'
 ```
 
@@ -587,33 +588,35 @@ cf piece get --piece <board> notes \
 
 ```json
 [
-  { "$link": { "id": "of:fid1:…", "space": "did:key:…", "scope": "space", "path": [] } }
+  { "$link": "/of:fid1:…" }
 ]
 ```
 
-Those four fields are always present, so a caller indexes them without
-branching. `id` keeps its scheme, because the scheme is the kind and dropping
-it retargets the address silently. No schema is inlined: a stored link can
+The address is one string in the fabric's canonical reference syntax —
+`/[@did/]<id>[@scope][/path]` — the same form `--piece` reads, so an address a
+read hands you is passed onward as it stands. The space rides in front only
+when it differs from the space the command targeted, and the scope follows the
+id only when it is not the default. No schema is inlined: a stored link can
 carry an entire one, and what was asked for is where the value lives.
 
 Marking a position deeper than a link names the linked document and the path
 below it — `notes[0].title`, where `notes` holds links, renders the note's own
-`id` with `path` `["title"]`. A link is a durable identity for the edge it
+id followed by `/title`. A link is a durable identity for the edge it
 records; the slot that holds it stops naming the same value the moment the
 collection is reordered.
 
 **What comes back is a link to read next, not a claim about canonical
 identity.** Addresses are many-to-one over cells: a holder of one cannot tell a
 canonical id from an alias, and normal use does not require it. Two positions
-holding one piece can render two different `id`s, and a marker and
+holding one piece can render two different addresses, and a marker and
 `cf piece call --show-links` can disagree about the same piece, because a piece
 created inside a handler and pushed into a collection is held through a link
 that redirects to it and the two stop at different points along that redirect.
 
 So feed an address into the next command rather than comparing it to another:
-two ids differing is not evidence of two pieces. Comparing contents answers a
-different question — distinct pieces can hold identical contents, and one
-piece's contents change under it. **Whether two addresses name the same
+two addresses differing is not evidence of two pieces. Comparing contents
+answers a different question — distinct pieces can hold identical contents, and
+one piece's contents change under it. **Whether two addresses name the same
 piece is not a question the CLI answers today.**
 
 The marker sits beside a projection when both are wanted, and the answer
@@ -625,7 +628,7 @@ cf piece get --piece <board> notes --schema \
 ```
 
 ```json
-[{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }]
+[{ "$link": "/of:fid1:…", "title": "First note" }]
 ```
 
 A field list unions the same way, and its two paths meet at the one position.
@@ -636,7 +639,7 @@ cf piece get --piece <board> --step --select 'notes@,noteCount'
 ```
 
 ```json
-{ "notes": [{ "$link": { "id": "of:fid1:…", "…": "…" } }], "noteCount": 3 }
+{ "notes": [{ "$link": "/of:fid1:…" }], "noteCount": 3 }
 ```
 
 A field list applies to each element wherever it crosses an array, and an

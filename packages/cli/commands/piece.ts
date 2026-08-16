@@ -762,12 +762,12 @@ export function renderPieceCallOutcome(
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
     // The address the envelope published, when the runtime wrote a receipt.
     // It leads the detached next steps because it collects the outcome
-    // without running the verb again, and it is written as an address
-    // argument so it composes into the command named beside it.
-    const receipt = result.invocation.receipt;
-    const receiptId = receipt === undefined
-      ? undefined
-      : addressArgument(receipt);
+    // without running the verb again, and it composes into the command named
+    // beside it: the envelope publishes it as one canonical reference string,
+    // which `--piece` takes back in unchanged. The scope rides inside it, so
+    // reopening a user- or session-scoped receipt cannot land on the
+    // space-scoped instance, a different cell (CallableResultRef).
+    const receiptId = result.invocation.receipt;
     hintOut(
       opts.detached
         ? cliText(
@@ -1750,7 +1750,8 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   .option(
     "--select <fields:string>",
     "Project output to comma-separated field paths; a trailing @ asks for a " +
-      "position's address, and @ alone for the source's own",
+      "position's address, and @ alone for the source's own. An address " +
+      "comes back as one reference string, which --piece takes back in",
   )
   .option(
     "--schema <schema:string>",
@@ -2020,15 +2021,16 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "Exit once this handling's commit is acknowledged (before the callable " +
       "name), skipping only the receipt readback: stdout reports status " +
       '"committed" plus the receipt address, so `cf piece get --piece <that ' +
-      "id>` collects the outcome later without re-running the handler; a " +
-      "call naming the same session and --invocation recovers it too, but " +
+      "address>` collects the outcome later without re-running the handler; " +
+      "a call naming the same session and --invocation recovers it too, but " +
       "runs the handler body again. The handler still executes here and its " +
       "commit is durable. Handler invocations only.",
   )
   .option(
     "--show-links",
     "Annotate the Invocation JSON with a links dictionary mapping result " +
-      "paths to their backing cell addresses (before the callable name). " +
+      "paths to their backing cell addresses, each one reference string " +
+      "--piece takes back in (before the callable name). " +
       'The root "/" entry is the result\'s own backing document — the ' +
       "receipt, unless the result is itself a reference, in which case a " +
       'separate "receipt" entry keeps the receipt address; other entries ' +
