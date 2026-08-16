@@ -321,13 +321,15 @@ chase and `syncSchemaDocumentClosure` complete a closure within their own
 space — never satisfied by realm-registry presence alone.
 
 Outside a traversal — direct runtime resolution of an already-read
-schema — realm-wide value sharing means resolution can succeed for a
-reference whose document the encountering space does not hold, when
-another session in the realm fetched the same content elsewhere. That is
-value sharing working as intended; the delivery guarantees above are what
-keep any such reference backed by a real per-space document, and the
-write gate under the server-enforcement open question would make the
-write-side guarantee server-checked as well.
+schema — a reader MAY reuse an identical, hash-verified schema another
+synced space in the realm supplied. That is value sharing working as
+intended, and it is strictly a read-side recovery: it never satisfies or
+repairs the write-side guarantee, a cold realm still fails closed, and a
+traversal deliberately does not take it — traversal is where the
+read-side guarantee is enforced, and its strictness only ever bites where
+the write-side guarantee was violated, which is exactly where a loud
+signal is wanted. The write gate under the server-enforcement open
+question would make the write-side guarantee server-checked as well.
 
 ### Traversal and sync
 

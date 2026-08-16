@@ -53,6 +53,7 @@ import {
   registerSchemaDocument,
 } from "../schema-registry.ts";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import { isSubschema } from "../schema-walk.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -1182,9 +1183,17 @@ export class StorageManager implements IStorageManager {
       if (this.#providers.size === 0) {
         return;
       }
-      await Promise.all(
+      // allSettled: one rejecting teardown must not release the lease (the
+      // finally below) while sibling teardowns are still draining frames.
+      const outcomes = await Promise.allSettled(
         [...this.#providers.values()].map((provider) => provider.destroy()),
       );
+      const rejected = outcomes.find(
+        (outcome) => outcome.status === "rejected",
+      );
+      if (rejected !== undefined) {
+        throw (rejected as PromiseRejectedResult).reason;
+      }
       this.#providers.clear();
       this.#dataURISyncs.clear();
       this.#sessionId = crypto.randomUUID();
@@ -1199,9 +1208,15 @@ export class StorageManager implements IStorageManager {
       if (this.#providers.size === 0) {
         return;
       }
-      await Promise.all(
+      const outcomes = await Promise.allSettled(
         [...this.#providers.values()].map((provider) => provider.destroyNow()),
       );
+      const rejected = outcomes.find(
+        (outcome) => outcome.status === "rejected",
+      );
+      if (rejected !== undefined) {
+        throw (rejected as PromiseRejectedResult).reason;
+      }
       this.#providers.clear();
       this.#dataURISyncs.clear();
       this.#sessionId = crypto.randomUUID();
@@ -1501,10 +1516,16 @@ export class StorageManager implements IStorageManager {
    * document its external refs reach, so a subsequent resolution of
    * `cid:<taggedHash>` finds a complete closure. Registration happens as
    * each document's frame is applied (`#registerArrivedSchemaDocuments`);
-   * this helper only drives the pulls and reads the registry between them.
-   * Returns the failure when a document cannot be pulled, does not exist,
-   * or does not verify — the closure then stays incomplete and resolution
-   * stays closed, which is the intended fail state, not a retry condition.
+   * this helper drives the pulls and checks between them.
+   *
+   * Success promises PER-SPACE VERIFIED PRESENCE: every document in the
+   * closure is stored in `space` and its stored content hashes to its id.
+   * A realm-verified copy from another space never stands in for this
+   * space's — a forged local copy fails with "did not verify" even when
+   * the realm registry could resolve the hash. Returns the failure when a
+   * document cannot be pulled, is absent here, or does not verify — the
+   * closure then stays incomplete for this space, which is the intended
+   * fail state, not a retry condition.
    */
   async syncSchemaDocumentClosure(
     space: MemorySpace,
@@ -1528,6 +1549,16 @@ export class StorageManager implements IStorageManager {
       }).get?.(uri);
       if (stored === undefined) {
         return new Error(`Schema document is absent in this space: ${uri}`);
+      }
+      // Verify THIS SPACE's copy, not merely realm resolvability: a forged
+      // local document with a valid twin elsewhere must fail here.
+      const storedSchema = isObjectOrArray(stored) ? stored.value : undefined;
+      if (
+        internSchemaAsTaggedHashString(storedSchema as JSONSchema) !== hash
+      ) {
+        return new Error(
+          `Schema document did not verify in this space: ${uri}`,
+        );
       }
       const document = lookupSchemaDocument(hash);
       if (document === undefined) {

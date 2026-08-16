@@ -178,6 +178,28 @@ describe("schema-doc-sync", () => {
     expect(String(failure)).toContain("absent in this space");
   });
 
+  it("syncSchemaDocumentClosure() fails on a forged local copy even when the realm registry can resolve the hash", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { forgedTwin: { type: "string" } },
+    };
+    const decomposed = decomposeSchema(schema);
+    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    // The realm holds the valid content (as if another space supplied it);
+    // THIS space stores a forgery under the same id.
+    registerSchemaDocument(rootHash, decomposed.documents.get(rootHash)!);
+    await writeDocs({
+      [`cid:${rootHash}`]: { type: "number", title: "forged twin" },
+    });
+
+    const failure = await readerStorage.syncSchemaDocumentClosure(
+      space,
+      rootHash,
+    );
+    expect(failure).toBeDefined();
+    expect(String(failure)).toContain("did not verify in this space");
+  });
+
   it("chases a dependency into the space even when the realm registry already holds it", async () => {
     const schema: JSONSchemaObj = {
       type: "object",
