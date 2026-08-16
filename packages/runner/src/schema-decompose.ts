@@ -45,13 +45,16 @@ import { decodeJsonPointer, encodeJsonPointer } from "./link-types.ts";
 // itself.
 const ALL_SUBSCHEMAS: SchemaWalkOptions = { includeUnused: true };
 
-// Keywords that start or address a JSON Schema resource scope. Decomposition
-// refuses them (see scanFragment).
+// Keywords that start or address a JSON Schema resource scope, including the
+// 2019-09 recursive pair the dynamic keywords replaced. Decomposition refuses
+// them all (see scanFragment).
 const RESOURCE_SCOPE_KEYWORDS = [
   "$id",
   "$anchor",
   "$dynamicAnchor",
   "$dynamicRef",
+  "$recursiveAnchor",
+  "$recursiveRef",
 ] as const;
 
 /** The URI scheme prefix of a content-addressed schema document reference. */

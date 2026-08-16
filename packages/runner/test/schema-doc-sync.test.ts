@@ -18,6 +18,7 @@ import {
 import {
   isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
+  registerSchemaDocument,
 } from "../src/schema-registry.ts";
 import { resolveSchema } from "../src/schema.ts";
 import { LINK_V1_TAG, type URI } from "../src/sigil-types.ts";
@@ -155,6 +156,61 @@ describe("schema-doc-sync", () => {
       missing,
     );
     expect(holeFailure).toBeDefined();
+  });
+
+  it("syncSchemaDocumentClosure() fails for a space that lacks the documents the realm registry holds", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { spaceless: { type: "string" } },
+    };
+    const decomposed = decomposeSchema(schema);
+    // Realm-registered (as if another space delivered them), but never
+    // written to THIS space.
+    for (const [hash, document] of decomposed.documents) {
+      registerSchemaDocument(hash, document);
+    }
+    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    const failure = await readerStorage.syncSchemaDocumentClosure(
+      space,
+      rootHash,
+    );
+    expect(failure).toBeDefined();
+    expect(String(failure)).toContain("absent in this space");
+  });
+
+  it("chases a dependency into the space even when the realm registry already holds it", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { chaseDespite: { $ref: "#/$defs/ChaseDespiteLeaf" } },
+      $defs: {
+        ChaseDespiteLeaf: {
+          type: "object",
+          properties: { despiteLeaf: { type: "string" } },
+        },
+      },
+    };
+    const decomposed = decomposeSchema(schema);
+    await writeSchemaDocs(decomposed);
+
+    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    const leafHash = [...decomposed.documents.keys()]
+      .find((hash) => hash !== rootHash)!;
+    // The leaf is already realm-registered (as if another space delivered
+    // it); the chase must still pull it into THIS space.
+    registerSchemaDocument(leafHash, decomposed.documents.get(leafHash)!);
+
+    const provider = readerStorage.open(space);
+    const result = await provider.sync(`cid:${rootHash}` as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(result.error).toBeUndefined();
+    await readerStorage.synced();
+
+    const stored = (provider as unknown as {
+      get: (uri: URI) => unknown;
+    }).get(`cid:${leafHash}` as URI);
+    expect(stored).toBeDefined();
   });
 
   it("keeps registrations alive past one manager's close while another session holds its lease", async () => {

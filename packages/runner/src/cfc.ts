@@ -26,7 +26,10 @@ import {
   selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
 import { forEachSubschema } from "./schema-walk.ts";
-import { isExternalClosureComplete } from "./schema-registry.ts";
+import {
+  isExternalClosureComplete,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
 export {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,
@@ -46,7 +49,12 @@ type IFCAtom = JSONValue;
 // a fresh ContextualFlowControl per call (storage pull/watch, traversal
 // contexts), which would leave a per-instance cache permanently cold.
 // Mutable schemas are never cached (in-place edits must be observed).
-const schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+let schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+// Path derivations can embed registry content; the registry clear (last
+// lease out) swaps the cache so an epoch's derivations do not outlive it.
+onSchemaRegistryClear(() => {
+  schemaAtPathCache = new WeakMap();
+});
 const SCHEMA_AT_PATH_CACHE_MAX_ENTRIES = 2_048;
 
 type SymbolicSchemaAtPathClassifier = (part: string) => string;

@@ -29,6 +29,7 @@ import {
 import {
   isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
+  onSchemaRegistryClear,
 } from "../schema-registry.ts";
 
 const logger = getLogger("cfc");
@@ -432,10 +433,17 @@ export const pruneCfcSchemaDefinitions = (schema: JSONSchema): JSONSchema =>
 // identity-keyed caches see one object rather than a fresh spread per
 // resolution. Documents are interned before entering the registry, so keying
 // weakly on the document is stable.
-const memberViewCache = new WeakMap<
+let memberViewCache = new WeakMap<
   JSONSchemaObj,
   Map<string, JSONSchema | undefined>
 >();
+// Both caches memoize resolution SUCCESSES that embed registry content, so
+// a registry clear (last lease out) swaps them for empty ones — a success
+// cached in one lease epoch must not keep resolving in the next.
+onSchemaRegistryClear(() => {
+  memberViewCache = new WeakMap();
+  resolvedRefsCache = new WeakMap();
+});
 
 /**
  * Resolve an external `cid:` ref through the schema-document registry.
@@ -637,7 +645,7 @@ const resolveCfcSchemaRefUncached = (
 // full content hash at downstream interning on every read. A sentinel marks
 // `undefined` results so failed resolutions are memoized too.
 const RESOLVED_UNDEFINED = Symbol("resolved-undefined");
-const resolvedRefsCache = new WeakMap<
+let resolvedRefsCache = new WeakMap<
   object,
   WeakMap<object, JSONSchema | typeof RESOLVED_UNDEFINED>
 >();

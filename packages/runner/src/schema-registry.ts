@@ -39,6 +39,19 @@ export class SchemaDocumentHashMismatchError extends Error {
 
 const documentsByHash = new Map<string, JSONSchema>();
 
+// Listeners invoked when the registry clears (last lease out). Modules that
+// memoize resolution SUCCESSES by schema identity register here to drop
+// those caches in the same moment: a success cached in one lease epoch
+// would otherwise keep resolving in the next, after the availability it
+// proved is gone. Content addressing means such an entry could never hold a
+// WRONG value — this is about not outliving the epoch's availability.
+const clearListeners = new Set<() => void>();
+
+/** Registers a callback for the registry-clear transition. */
+export function onSchemaRegistryClear(listener: () => void): void {
+  clearListeners.add(listener);
+}
+
 let activeLeases = 0;
 
 /**
@@ -63,6 +76,7 @@ export function acquireSchemaRegistryLease(): () => void {
     if (activeLeases === 0) {
       documentsByHash.clear();
       completeClosures.clear();
+      for (const listener of clearListeners) listener();
     }
   };
 }
@@ -117,14 +131,6 @@ export function lookupSchemaDocument(
 const completeClosures = new Set<string>();
 
 /**
- * Whether `taggedHash`'s document and every document transitively reachable
- * from its external refs are registered. Resolution treats an incomplete
- * closure as a miss (`cfc/schema-refs.ts`), so a derived result — an IFC
- * scan, a standardized form — is only ever computed over a schema whose
- * whole closure is at hand; a result cached before a child document arrived
- * would otherwise stay wrong forever.
- */
-/**
  * Whether every external ref `schema` carries has a fully registered
  * closure. Trivially true for a schema with no external refs. Derived
  * caches keyed by schema identity (`schemaHasIfc`'s memo, `schemaAtPath`'s)
@@ -140,6 +146,15 @@ export function isExternalClosureComplete(
   return true;
 }
 
+/**
+ * Whether `taggedHash`'s document and every document transitively reachable
+ * from its external refs are registered. Resolution treats an incomplete
+ * closure as a miss
+ * (`cfc/schema-refs.ts`), so a derived result — an IFC scan, a standardized
+ * form — is only ever computed over a schema whose whole closure is at
+ * hand; a result cached before a child document arrived would otherwise
+ * stay wrong forever.
+ */
 export function isSchemaDocumentClosureComplete(taggedHash: string): boolean {
   if (completeClosures.has(taggedHash)) return true;
   const visited = new Set<string>();

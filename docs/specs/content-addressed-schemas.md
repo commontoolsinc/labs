@@ -11,13 +11,10 @@ document's hash is well-founded.
 
 Design; the readers-first resolution infrastructure (Phase 0 of
 [the implementation plan](../history/plans/content-addressed-schemas-phase-0.md))
-is landing, and nothing writes references yet. The unmerged branch
-`memory/connection-scoped-schema-cas` (`syncSchemaCasV1`) addresses the
-transport half of the same problem — it scopes the sync schema table to the
-connection instead of the frame. This design subsumes that branch's benefit
-for link schemas (a reference at rest never needs transport compression) but
-does not conflict with it; sequencing against that branch is an open
-question below.
+is landing, and nothing writes references yet. The connection-scoped
+transport experiment (`syncSchemaCasV1`, unmerged) is not being pursued;
+this design is the storage-side successor for link positions, and a
+reference at rest never needs transport compression.
 
 ## Last Updated
 
@@ -49,8 +46,8 @@ duplicated on three surfaces:
    `v2-sync-schema-table.test.ts` fixture shows schema repetition at over
    80% of frame bytes before compression.
 
-Transport compression can only ever address surface 3 (and, with the
-connection-scoped branch, repetition across frames). Surfaces 1 and 2 need
+Transport compression can only ever address surface 3. Surfaces 1 and 2
+need
 durable schema identity: a name that is valid in storage, in queries, and
 across sessions. The system already has the pieces:
 
@@ -230,10 +227,13 @@ fixes the uncompressed client→server surface: a watch spec for a document
 whose schema is already persisted carries `{ "$ref": "cid:…" }` instead of
 the full schema, and reconnect re-sends references, not bodies.
 
-The server resolves the reference against the space's own storage (an
-engine read; no new protocol). A client may send a reference only for a
-schema whose documents it knows are persisted in that space — one it wrote,
-or one it received by sync. For anything else it sends the schema inline,
+The server side of this needs no new machinery: selector schemas flow
+through the shared traversal, whose loader collects referenced documents
+from the requesting space's own storage and whose entry gate keeps an
+uncollectable schema from selecting anything (see Space boundaries). What remains
+for clients is the sending half: a client may send a reference only for a
+schema whose documents it knows are persisted in that space — one it
+wrote, or one it received by sync — and sends the schema inline otherwise,
 as today. A reference the server cannot resolve fails the query loudly
 (protocol error), not silently as an empty match: an unresolvable selector
 is a client bug, and matching nothing would mask it.
@@ -288,26 +288,44 @@ closure is complete.
 
 A schema document's value is space-free: content addressing makes the
 bytes identical wherever they are stored, so the realm-wide registry
-shares one verified object across spaces. Access is not space-free. Every
-fetch happens in the space where the reference was encountered — the
-traversal loader reads in the referring document's space, the
-arrival-time dependency chase syncs within its own replica's space, the
-cold-miss kick targets the space whose read failed — because that space
-is where the reader's authorization lives and where the writer installed
-the closure (the per-space install invariant above). For the same reason,
-the server-side selector resolution of Phase 2 resolves against the
-requesting space's own store, never against the server realm's shared
-registry, which is fed by every space's traversals.
+shares one verified object across spaces, and using a shared value can
+never produce a wrong answer. Which space a document EXISTS in matters in
+exactly two guarantees, both about delivery rather than about values:
 
-One consequence of realm-wide value sharing: resolution can succeed for a
+- **The write-side guarantee.** The client that replaces an inline schema
+  with a reference created the obligation, so it discharges it: the
+  decomposed closure is written into the space that will hold the
+  reference, in the same transaction as the reference itself. A
+  transaction commits against one space's session, so the closure reaches
+  whichever server handles that space by construction, and
+  `decomposeSchema` refuses to emit a reference whose closure the writer
+  does not hold — the guarantee is the only path through the API.
+- **The read-side guarantee.** A query result is self-sufficient: every
+  schema reference embedded in delivered documents resolves within the
+  delivered set. The traversal loader collects each referenced closure
+  from the traversed space (reads at the canonical `"space"` scope,
+  tracked into the query result and watch set), and a schema whose closure
+  the space does not hold selects nothing — the gate sits at the two
+  places a schema enters a traversal, the selector and a link, and
+  availability is closure-transitive, so interior resolution needs no
+  per-lookup scoping. Selecting by an uncollectable schema would produce a
+  result whose shape the receiving client could never reproduce from what
+  arrives.
+
+The recovery path repairs per-space presence when the guarantees meet a
+hole: the loader's reads are tracked (arrival re-runs the reader), the
+missing-target kick requests the fetch, and the arrival-time dependency
+chase and `syncSchemaDocumentClosure` complete a closure within their own
+space — never satisfied by realm-registry presence alone.
+
+Outside a traversal — direct runtime resolution of an already-read
+schema — realm-wide value sharing means resolution can succeed for a
 reference whose document the encountering space does not hold, when
-another session in the realm fetched the same content elsewhere. That gap
-does not heal silently — the per-space read still runs and fails, the
-document stays out of that space's query results and watch sets, and the
-missing-target kick still reports it — and a realm without the shared
-entry fails closed. The writer invariant is what keeps the case
-exceptional rather than structural: a reference is only ever written to a
-space in the same transaction as its closure.
+another session in the realm fetched the same content elsewhere. That is
+value sharing working as intended; the delivery guarantees above are what
+keep any such reference backed by a real per-space document, and the
+write gate under the server-enforcement open question would make the
+write-side guarantee server-checked as well.
 
 ### Traversal and sync
 
@@ -365,11 +383,14 @@ phased on the op-migration playbook:
   links keep reading forever — links rewrite on every re-instantiation, so
   inline forms age out without a data migration. A canary pins the inline
   vintage.
-- **Phase 2 — references in selectors.** Watch specs and one-shot queries
-  send references for persisted schemas; server-side resolution; the
-  loud-failure rule for unresolvable references.
+- **Phase 2 — clients send references in selectors.** Watch specs and
+  one-shot queries carry references for persisted schemas. The server side
+  already ships with Phase 0 — selector schemas resolve through the shared
+  traversal, per space, under the availability scope — so this phase is
+  the client emission plus the loud protocol error for an unresolvable
+  selector reference.
 - **Phase 3 — retire transport compression for link positions.**
-  `syncSchemaTableV2` (and `syncSchemaCasV1`, if landed) stop matching
+  `syncSchemaTableV2` stops matching
   anything on link positions once reference-bearing links dominate; the
   `$alias` carve-out retires with the alias flip. Transport compression for
   inline selector schemas from old clients remains until the protocol
@@ -395,33 +416,27 @@ phased on the op-migration playbook:
 
 ## Open questions
 
-1. **Sequencing against `syncSchemaCasV1`.** The connection-scoped
-   transport table helps immediately and needs no storage change; this
-   design makes it unnecessary for link positions but not for inline
-   selector schemas during migration. Land transport first and retire it
-   later, or skip straight to references? Owner coordination needed
-   (Bernhard's branch).
-2. **Small-definition threshold.** A `{ "type": "string" }` definition as
+1. **Small-definition threshold.** A `{ "type": "string" }` definition as
    its own document costs more in envelope and round-trip bookkeeping than
    it saves. Start with unconditional decomposition (simplest, canonical),
    measure, and only then consider an inline-below-N-bytes rule — a
    threshold changes document identity, so it must be part of the
    decomposition's versioned contract, not a tuning knob.
-3. **Server-side integrity enforcement.** Verification is client-side, as
+2. **Server-side integrity enforcement.** Verification is client-side, as
    for CFC schema documents today (the S5 / A2 items in the CFC audit).
    Making the server the sole acceptor of `cid:` writes — rejecting content
    that does not hash to the id — would cover schema documents and CFC
    documents in one change.
-4. **Fetch-once for immutable documents.** Every pull is a watch add, so
+3. **Fetch-once for immutable documents.** Every pull is a watch add, so
    schema documents permanently grow the session watch set even though they
    can never change. Quiet but not free; a fetch-without-subscribe
    primitive for `cid:` documents would benefit blobs and module sources
    equally.
-5. **Garbage collection.** Nothing collects unreferenced documents today;
+4. **Garbage collection.** Nothing collects unreferenced documents today;
    schema documents accumulate like `pattern:` and CFC `cid:` documents do.
    Net bytes still fall (each document replaces many inline copies), so
    this stays in the existing GC-design bucket rather than blocking here.
-6. **Definition naming.** Singleton documents are name-free and so
+5. **Definition naming.** Singleton documents are name-free and so
    deduplicate name-independently; only cyclic-group members keep their
    authored names, so two structurally identical cyclic groups with
    different member names are different documents. Acceptable (names are

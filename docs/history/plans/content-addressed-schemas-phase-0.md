@@ -155,10 +155,12 @@ Phase 0 is done when a reference-bearing link and a reference-bearing
 selector, constructed by tests against hand-persisted schema documents,
 read correctly through the shared traversal module (which both the client
 and the memory server execute), and every stage's checkbox above is
-checked. Protocol-level selector references — a client SENDING
-`{ "$ref": "cid:…" }` in a watch spec, and the server resolving it from
-storage at the protocol boundary — are the spec's Phase 2, not part of
-this exit. Phase 0 unblocks Phase 1 (flag-gated writers) in the spec.
+checked. Server-side selector resolution ships WITHIN this phase: selector
+schemas flow through the shared traversal, whose loader reads referenced
+documents from the requesting space's storage. What Phase 2 adds is the
+client half — SENDING `{ "$ref": "cid:…" }` in a watch spec — plus the
+loud protocol error for an unresolvable selector reference. Phase 0
+unblocks Phase 1 (flag-gated writers) in the spec.
 
 All four stages are checked, and the registry-lifetime open item below is
 settled. Phase 0 is complete.

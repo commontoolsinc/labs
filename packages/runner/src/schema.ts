@@ -28,7 +28,10 @@ import {
 import { createCell, isCell } from "./cell.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import { forEachSubschema } from "./schema-walk.ts";
-import { isExternalClosureComplete } from "./schema-registry.ts";
+import {
+  isExternalClosureComplete,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import {
   readMaybeLink,
@@ -526,7 +529,12 @@ export function resolveSchemaForValue(
 // A future contributor must not relax the populate guard to accept
 // non-deep-frozen inputs. `Object.isFrozen` is **not** sufficient; it
 // is shallow-only.
-const _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
+let _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
+// A verdict computed over registry content must not outlive the lease epoch
+// that made the content available; the clear swaps the cache.
+onSchemaRegistryClear(() => {
+  _hasIfcCache = new WeakMap();
+});
 
 interface SchemaHasIfcContext {
   seenByRoot: WeakMap<object, WeakSet<object>>;

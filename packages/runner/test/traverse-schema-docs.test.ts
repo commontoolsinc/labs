@@ -24,7 +24,11 @@ import {
   decomposeSchema,
   parseExternalSchemaRef,
 } from "../src/schema-decompose.ts";
-import { lookupSchemaDocument } from "../src/schema-registry.ts";
+import {
+  lookupSchemaDocument,
+  registerSchemaDocument,
+} from "../src/schema-registry.ts";
+import { resolveSchema } from "../src/schema.ts";
 
 const type = "application/json" as const;
 const space = "did:null:null";
@@ -209,6 +213,81 @@ describe("traverse-schema-docs", () => {
     }).list;
     expect(list.label).toBe("a");
     expect(list.next.next.label).toBe("c");
+  });
+
+  it("does not resolve through a realm-registered document the traversed space does not hold", () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { gateMarker: { type: "string" } },
+      title: "availability gate fixture",
+    };
+    const decomposed = decomposeSchema(schema);
+    // Fed into the realm registry by "another space" — directly, here.
+    for (const [hash, document] of decomposed.documents) {
+      registerSchemaDocument(hash, document);
+    }
+
+    // The traversed store does NOT hold the schema documents.
+    const store = new Map<string, Revision<State>>();
+    putDoc(store, "of:gate-target", { gateMarker: "hidden" });
+    const rootValue = {
+      gated: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:gate-target",
+            path: [],
+            schema: { $ref: decomposed.rootRef },
+          },
+        },
+      },
+    };
+    putDoc(store, "of:gate-root", rootValue, 2);
+
+    const { result } = traverse(store, "of:gate-root", rootValue, true);
+    // Fail closed inside the traversal, even though the realm registry
+    // could have answered...
+    expect((result as { gated: unknown }).gated).toBeNull();
+    // ...and outside any traversal, realm-shared resolution still works.
+    expect(resolveSchema({ $ref: decomposed.rootRef })).not.toBe(false);
+  });
+
+  it("reads schema documents at the canonical space scope whatever the referrer's scope", () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { scopedMarker: { type: "string" } },
+    };
+    const decomposed = decomposeSchema(schema);
+    const store = new Map<string, Revision<State>>();
+    putSchemaDocs(store, decomposed);
+    const rootValue = { scopedMarker: "hello" };
+    putDoc(store, "of:scoped-root", rootValue);
+
+    const manager = new StoreObjectManager(store);
+    const tx = new ExtendedStorageTransaction(
+      new ManagedStorageTransaction(manager),
+    );
+    const context = createDefaultTraversalContext();
+    const traverser = new SchemaObjectTraverser(
+      tx,
+      { path: ["value"], schema: { $ref: decomposed.rootRef } },
+      context,
+    );
+    traverser.traverse({
+      address: {
+        space,
+        id: "of:scoped-root" as URI,
+        type,
+        path: ["value"],
+        scope: "session",
+      },
+      value: rootValue,
+    });
+
+    const keys = trackedKeys(context);
+    for (const hash of decomposed.documents.keys()) {
+      expect(keys).toContain(`${space}/space/cid:${hash}`);
+      expect(keys).not.toContain(`${space}/session/cid:${hash}`);
+    }
   });
 
   it("neither registers nor resolves through a forged schema document, without failing the traversal", () => {

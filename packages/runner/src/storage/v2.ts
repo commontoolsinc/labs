@@ -1508,19 +1508,21 @@ export class StorageManager implements IStorageManager {
       const hash = pending.pop()!;
       if (visited.has(hash)) continue;
       visited.add(hash);
-      let document = lookupSchemaDocument(hash);
+      // Sync unconditionally: realm-registry presence proves verified
+      // content exists SOMEWHERE, not that this space holds it, and the
+      // caller is asking about this space (the space-boundary rule).
+      const uri = `cid:${hash}` as URI;
+      const result = await provider.sync(uri, { path: [], schema: false });
+      if (result.error !== undefined) return result.error;
+      const stored = (provider as {
+        get?: (uri: URI, scope?: CellScope) => EntityDocument | undefined;
+      }).get?.(uri);
+      if (stored === undefined) {
+        return new Error(`Schema document is absent in this space: ${uri}`);
+      }
+      const document = lookupSchemaDocument(hash);
       if (document === undefined) {
-        const result = await provider.sync(`cid:${hash}` as URI, {
-          path: [],
-          schema: false,
-        });
-        if (result.error !== undefined) return result.error;
-        document = lookupSchemaDocument(hash);
-        if (document === undefined) {
-          return new Error(
-            `Schema document did not arrive or verify: cid:${hash}`,
-          );
-        }
+        return new Error(`Schema document did not verify: ${uri}`);
       }
       pending.push(...collectExternalSchemaRefHashes(document));
     }
@@ -2162,6 +2164,11 @@ class SpaceReplica implements ISpaceReplica {
     | Promise<Result<Unit, StorageTransactionRejected>>
     | undefined;
   readonly #trackPendingWork?: (work: Promise<unknown>) => void;
+  // cid: schema documents seen IN THIS SPACE — arrived in a frame or already
+  // chased from here. Chase dedup keys on this, never on the realm-global
+  // registry: a document another space registered still needs syncing here,
+  // so this space's replica holds it and its watch set covers it.
+  readonly #schemaDocsSeenHere = new Set<string>();
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
@@ -4218,6 +4225,8 @@ class SpaceReplica implements ISpaceReplica {
         ? (upsert.doc as { value?: unknown }).value
         : undefined;
       if (!isSubschema(value)) continue;
+      // Arrived means present in this space, verified or not.
+      this.#schemaDocsSeenHere.add(id.slice("cid:".length));
       let registered: JSONSchema;
       try {
         registered = registerSchemaDocument(
@@ -4233,7 +4242,11 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
       for (const dep of collectExternalSchemaRefHashes(registered)) {
-        if (lookupSchemaDocument(dep) !== undefined) continue;
+        // Dedupe on THIS SPACE's history, not on the realm registry: a
+        // dependency verified elsewhere still has to exist and be watched
+        // here (the space-boundary rule in the spec).
+        if (this.#schemaDocsSeenHere.has(dep)) continue;
+        this.#schemaDocsSeenHere.add(dep);
         const chase = this.sync(`cid:${dep}` as URI, {
           path: [],
           schema: false,

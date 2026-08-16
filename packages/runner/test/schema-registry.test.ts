@@ -120,6 +120,46 @@ describe("schema-registry", () => {
       expect(lookupSchemaDocument(hash)).toBeUndefined();
     });
 
+    it("stops resolving through caches warmed in an earlier lease epoch", () => {
+      const release = acquireSchemaRegistryLease();
+      const schema: JSONSchemaObj = {
+        type: "object",
+        properties: { epochBound: { $ref: "#/$defs/EpochChild" } },
+        $defs: {
+          EpochChild: {
+            type: "string",
+            ifc: { confidentiality: ["secret"] },
+          },
+        },
+      };
+      const decomposed = decomposeSchema(schema);
+      registerAll(decomposed);
+      const refSchema = internSchema({
+        $ref: decomposed.rootRef,
+      }) as JSONSchemaObj;
+
+      // Warm every identity-keyed cache with successes.
+      expect(resolveSchema(refSchema)).not.toBe(false);
+      expect(resolveSchemaRefsCanonical(refSchema)).toBeDefined();
+      expect(schemaHasIfc(refSchema)).toBe(true);
+
+      release();
+
+      // The epoch ended: the same frozen schema fails closed everywhere. A
+      // cache surviving the clear would keep resolving here.
+      expect(lookupSchemaDocument(
+        parseExternalSchemaRef(decomposed.rootRef)!.taggedHash,
+      )).toBeUndefined();
+      expect(resolveSchema(refSchema)).toBe(false);
+      expect(resolveSchemaRefsCanonical(refSchema)).toBeUndefined();
+      expect(schemaHasIfc(refSchema)).toBe(false);
+
+      // And the next epoch recovers on arrival, as always.
+      registerAll(decomposed);
+      expect(resolveSchema(refSchema)).not.toBe(false);
+      expect(schemaHasIfc(refSchema)).toBe(true);
+    });
+
     it("retains lease-less registrations until the next last-lease-out transition", () => {
       // The memory server's shape: registration with no lease held.
       const schema: JSONSchema = {

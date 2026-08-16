@@ -449,6 +449,51 @@ describe("schema-decompose", () => {
       );
     });
 
+    it("externalizes a definition referenced only under `unevaluatedProperties`", () => {
+      const schema: JSONSchemaObj = {
+        type: "object",
+        unevaluatedProperties: { $ref: "#/$defs/UnevaluatedLeaf" },
+        $defs: { UnevaluatedLeaf: { type: "string", title: "unevaluated" } },
+      } as JSONSchemaObj;
+      const { rootRef, documents } = decomposeSchema(schema);
+      const leafHash = internSchemaAsTaggedHashString({
+        type: "string",
+        title: "unevaluated",
+      });
+      // The definition became a document and the position now references
+      // it — a walk missing `unevaluatedProperties` would have dropped the
+      // definition and left a dangling local ref.
+      expect(documents.get(leafHash)).toBeDefined();
+      const rootDoc = documents.get(
+        parseExternalSchemaRef(rootRef)!.taggedHash,
+      ) as JSONSchemaObj;
+      expect(
+        (rootDoc as Record<string, JSONSchemaObj>).unevaluatedProperties.$ref,
+      ).toBe(`cid:${leafHash}`);
+    });
+
+    it("throws for the 2019-09 recursive keywords", () => {
+      expect(() =>
+        decomposeSchema({
+          type: "object",
+          properties: {
+            x: { $recursiveRef: "#" } as unknown as JSONSchemaObj,
+          },
+        })
+      ).toThrow(SchemaNotDecomposableError);
+      expect(() =>
+        decomposeSchema({
+          type: "object",
+          properties: {
+            x: {
+              $recursiveAnchor: true,
+              type: "object",
+            } as unknown as JSONSchemaObj,
+          },
+        })
+      ).toThrow(SchemaNotDecomposableError);
+    });
+
     it("throws for `$id` and the anchor keywords", () => {
       expect(() =>
         decomposeSchema({

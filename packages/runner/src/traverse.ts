@@ -38,7 +38,11 @@ import {
   collectExternalSchemaRefHashes,
   containsExternalSchemaRef,
 } from "./schema-decompose.ts";
-import { registerSchemaDocument } from "./schema-registry.ts";
+import {
+  lookupSchemaDocument,
+  onSchemaRegistryClear,
+  registerSchemaDocument,
+} from "./schema-registry.ts";
 import {
   DEFAULT_SELECTOR,
   internPathSelector,
@@ -678,7 +682,12 @@ export function traverseDiagnosticsEnabled(): boolean {
  * memoized: the referenced schema document can arrive after the first
  * failed lookup, and a pinned `null` would outlive the arrival.
  */
-const _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
+let _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
+// Successful resolutions embed registry content; the registry clear (last
+// lease out) swaps the cache so an epoch's successes do not outlive it.
+onSchemaRegistryClear(() => {
+  _resolvedRefCache = new WeakMap();
+});
 
 export function resolveSchemaRefsCanonical(
   schema: JSONSchemaObj,
@@ -1117,6 +1126,15 @@ export type TraversalContext = {
    * (triggered by the arrival) retries.
    */
   schemaDocsLoaded: Set<string>;
+  /**
+   * Tagged hashes of the schema documents this traversal loaded AND
+   * verified in its own space. `loadExternalSchemaDocs` records successes
+   * here and derives its closure-collection verdict from it, so a schema
+   * admitted at a traversal entry point (the selector, a link) is one
+   * whose whole closure this space holds — the query can deliver every
+   * document its selection depended on.
+   */
+  schemaDocsAvailable: Set<string>;
 };
 
 export function createTraversalContext(
@@ -1129,6 +1147,7 @@ export function createTraversalContext(
     sourceSpace: MemorySpace,
   ) => void,
   schemaDocsLoaded: Set<string> = new Set<string>(),
+  schemaDocsAvailable: Set<string> = new Set<string>(),
 ): TraversalContext {
   return {
     tracker,
@@ -1137,6 +1156,7 @@ export function createTraversalContext(
     metaDocsVisited,
     onMissingLinkTarget,
     schemaDocsLoaded,
+    schemaDocsAvailable,
   };
 }
 
@@ -1613,9 +1633,19 @@ export abstract class BaseObjectTraverser {
         // We can follow all the links, since we don't need to track cells
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DEFAULT_SELECTOR);
         this.tx.read(valueDoc.address, READ_FOR_SCHEDULING);
+        // Same entry gate as followPointer: a link schema whose document
+        // closure this space does not hold selects nothing (the delivery
+        // guarantee) — the loader's tracked reads re-run this on arrival.
+        const linkSchemaCollected = link?.schema === undefined ||
+          loadExternalSchemaDocs(
+            this.tx,
+            doc.address,
+            link.schema,
+            this.context,
+          );
         return this.traverseLinkedDoc(
           valueDoc,
-          link.schema,
+          linkSchemaCollected ? link?.schema : false,
           defaultValue,
           itemLink,
         );
@@ -2049,7 +2079,7 @@ function followPointer(
 ] {
   // doc.address's path doesn't have the same value nesting semantics as
   // link path, but we don't use the path field from that argument.
-  const link = parseLink(doc.value, doc.address)!;
+  let link = parseLink(doc.value, doc.address)!;
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
   const target: IMemorySpaceValueAddress = {
@@ -2061,9 +2091,25 @@ function followPointer(
     path: ["value", ...link.path as string[]],
   };
   // A link schema carrying external refs needs its schema documents loaded
-  // before the narrowing below consults it.
+  // before the narrowing below consults it — and a schema whose closure
+  // this space does not hold must not select data here (the delivery
+  // guarantee): narrow with a false schema instead, which selects nothing.
+  // The loader's reads are tracked, so the documents' arrival re-runs this.
   if (link.schema !== undefined) {
-    loadExternalSchemaDocs(tx, doc.address, link.schema, context);
+    const collected = loadExternalSchemaDocs(
+      tx,
+      doc.address,
+      link.schema,
+      context,
+    );
+    if (!collected) {
+      logger.warn("traverse", () => [
+        "Link schema references documents this space does not hold; " +
+        "selecting nothing until they arrive:",
+        doc.address,
+      ]);
+      link = { ...link, schema: false };
+    }
   }
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
@@ -2359,23 +2405,31 @@ function loadMetaLinkedDocFromLink(
  * documents' own external refs are followed; the DAG property bounds the
  * walk, and `context.schemaDocsLoaded` bounds it per traversal.
  *
- * Documents are read in the referrer's space at the referrer's scope, the
- * same defaulting the CFC `cid:` metadata links get from `parseLink`.
+ * Returns whether the WHOLE closure was collected — loaded and verified in
+ * this space. That verdict is the delivery guarantee's gate: a schema whose
+ * closure this space does not hold must not select data here, because the
+ * result would depend on documents the query cannot deliver. Availability
+ * is closure-transitive, so gating at the two places a schema enters a
+ * traversal (the selector, a link) covers every interior resolution.
+ *
+ * Documents are read in the referrer's space at the canonical `"space"`
+ * scope: schema documents are installed space-scoped, so a session- or
+ * user-scoped referrer must not redirect the read to its own partition.
  */
 function loadExternalSchemaDocs(
   tx: IExtendedStorageTransaction,
   referrer: IMemorySpaceAddress,
   schema: JSONSchema | undefined,
   context: TraversalContext,
-): void {
-  if (!containsExternalSchemaRef(schema)) return;
+): boolean {
+  if (!containsExternalSchemaRef(schema)) return true;
   const pending = [...collectExternalSchemaRefHashes(schema)];
   while (pending.length > 0) {
     const hash = pending.pop()!;
     const address = {
       space: referrer.space,
       id: `cid:${hash}` as URI,
-      scope: referrer.scope,
+      scope: "space" as const,
       path: [],
     };
     const key = getTrackerKey(address);
@@ -2409,6 +2463,9 @@ function loadExternalSchemaDocs(
         hash,
         schemaValue as JSONSchema,
       );
+      // Loaded in this space and verified: visible to this traversal's
+      // availability scope.
+      context.schemaDocsAvailable.add(hash);
       for (const dep of collectExternalSchemaRefHashes(interned)) {
         pending.push(dep);
       }
@@ -2422,6 +2479,22 @@ function loadExternalSchemaDocs(
       ]);
     }
   }
+
+  // The verdict: every hash transitively reachable from the schema's own
+  // refs was collected in this traversal (this call or an earlier one — the
+  // per-context set accumulates).
+  const pendingCheck = [...collectExternalSchemaRefHashes(schema)];
+  const checked = new Set<string>();
+  while (pendingCheck.length > 0) {
+    const hash = pendingCheck.pop()!;
+    if (checked.has(hash)) continue;
+    checked.add(hash);
+    if (!context.schemaDocsAvailable.has(hash)) return false;
+    const document = lookupSchemaDocument(hash);
+    if (document === undefined) return false;
+    pendingCheck.push(...collectExternalSchemaRefHashes(document));
+  }
+  return true;
 }
 
 function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
@@ -2463,6 +2536,7 @@ function traverseMetaLinkedDoc(
     context.metaDocsVisited,
     context.onMissingLinkTarget,
     context.schemaDocsLoaded,
+    context.schemaDocsAvailable,
   );
   const traverser = new SchemaObjectTraverser(
     tx,
@@ -3132,8 +3206,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
       this.schemaMemo.clear();
     }
     // A selector schema carrying external refs needs its schema documents
-    // loaded before traversal resolves against them.
-    loadExternalSchemaDocs(
+    // loaded before traversal resolves against them; a selector whose
+    // closure this space does not hold selects nothing (the delivery
+    // guarantee). The loader's reads are tracked, so arrival re-runs this.
+    const selectorCollected = loadExternalSchemaDocs(
       this.tx,
       doc.address,
       this.selector.schema,
@@ -3150,7 +3226,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
     );
     // Flag the top level read of doc for the scheduler
     this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
-    const rv = this.traverseWithSelector(doc, this.selector, link);
+    const rv: TraverseResult<FabricValue> = selectorCollected
+      ? this.traverseWithSelector(doc, this.selector, link)
+      : fail<FabricValue>(TRAVERSE_FAILURES.schemaRefResolution);
     const { error } = rv;
     const elapsed = logger.timeEnd("traverse") ?? 0;
     this.maybeReportSlowTraverse(elapsed, doc);
