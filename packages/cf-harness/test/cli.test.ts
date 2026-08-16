@@ -5536,3 +5536,34 @@ Deno.test("a startup fault is internal, and only bad argv is an invalid request"
   assertEquals(failure.error.code, "internal-error");
   assertEquals(JSON.stringify(failure).includes("artifact store"), false);
 });
+
+Deno.test("a resume reads a missing run as bad argv and an unreadable one as internal", async () => {
+  const workspace = await Deno.makeTempDir();
+  const run = async (
+    error: Error,
+  ): Promise<{ code: string; message: string }> => {
+    const buffers = createIoBuffers();
+    assertEquals(
+      await runCfHarnessCli(["--resume-run", "/runs/one"], {
+        cwd: workspace,
+        env: {},
+        io: buffers.io,
+        structuredHostFailures: true,
+        readRunArtifacts: () => Promise.reject(error),
+      }),
+      1,
+    );
+    return JSON.parse(buffers.stderr[0]).error;
+  };
+
+  // Naming a run that was never written is the caller's mistake, and no retry
+  // will change it. A run that exists and will not read is the host's problem,
+  // and the argv that asked for it was fine.
+  assertEquals(
+    (await run(new Deno.errors.NotFound("no such run"))).code,
+    "invalid-request",
+  );
+  const unreadable = await run(new Deno.errors.PermissionDenied("run-state"));
+  assertEquals(unreadable.code, "internal-error");
+  assertEquals(unreadable.message.includes("run-state"), false);
+});

@@ -502,14 +502,16 @@ export const createLoomLocalCfHarnessHost = async (
       const io = options.cliDependencies?.io ?? defaultHostIo();
       // Batch argv reaches the CLI behind a prepended --model-provider, which
       // shifts a leading subcommand out of the CLI's own dispatch and into the
-      // prompt text. Reject it here rather than bill a run for it.
+      // prompt text. Reject it here rather than bill a run for it. Positional
+      // text opening on one of those words is caught too, so the message names
+      // the flag that says "prompt" unambiguously.
       const command = cfHarnessCliCommandName(argv);
       if (command !== "prompt") {
         io.stderr(`${
           JSON.stringify(createCfHarnessHostFailure(
             new HarnessControlError(
               "invalid-request",
-              `the local Loom host runs prompts only; "${command}" is a cf-harness CLI command`,
+              `the local Loom host runs prompts only; a leading "${command}" is a cf-harness CLI command — use --prompt to send it as prompt text`,
             ),
           ))
         }\n`);
@@ -640,9 +642,11 @@ const defaultHostIo = (): CfHarnessCliIO => ({
 
 /**
  * A startup blocker as the chat protocol states it. The provider codes carry
- * across by name; `invalid-request` and `operation-canceled` report as
- * `internal_error`, because a startup blocker precedes any request or turn the
- * protocol's own `invalid_request` and `turn_canceled` would be about.
+ * across by name. `invalid-request` and `operation-canceled` report as
+ * `internal_error` rather than through the protocol's own `invalid_request`
+ * and `turn_canceled`: those two describe the chat request being answered,
+ * and a startup blocker is about the host process instead — its argv, or its
+ * cancellation — so reporting them would blame a caller whose request is fine.
  */
 const chatError = (failure: CfHarnessHostFailure): HarnessChatError => ({
   code: failure.error.code === "provider-configuration-required" ||

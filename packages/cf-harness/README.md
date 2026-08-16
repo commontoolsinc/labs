@@ -353,7 +353,9 @@ Batch argv is a prompt run and nothing else. `--help` and
 other argv is bound and executed, so argv led by a CLI subcommand — `auth`,
 `config`, `models`, `whoami` — is rejected as `invalid-request` rather than
 billed as a prompt whose text happens to read like a command. Run those against
-the cf-harness CLI itself.
+the cf-harness CLI itself. The leading token is what decides, so positional
+prompt text opening on one of those four words is refused the same way; pass it
+through `--prompt` to send it as prompt text.
 
 Batch startup failures are one `cf-harness.host-failure` JSON object on stderr.
 Interactive startup failures remain on the NDJSON chat protocol so hosts that do

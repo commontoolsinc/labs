@@ -180,7 +180,63 @@ Deno.test("local Loom batch rejects control argv before it bills a prompt run", 
       failure.error.message,
       argv[0] === "--" ? argv[1] : argv[0],
     );
+    assertStringIncludes(failure.error.message, "--prompt");
   }
+});
+
+Deno.test("local Loom batch runs a prompt whose own first word is a subcommand", async () => {
+  // The guard reads the leading token, so `--prompt` is what separates "run
+  // the models subcommand" from "ask the model about models". The rejection
+  // above names this flag; a caller who follows it has to get a run.
+  const home = await Deno.makeTempDir();
+  const io = ioBuffers();
+  let prompt: string | undefined;
+  const host = await createLoomLocalCfHarnessHost({
+    harnessHome: home,
+    env: {
+      CF_HARNESS_GATEWAY_BASE_URL: "https://gateway.example/",
+      CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+    },
+    providerSettingsStore: {
+      inspect: () =>
+        Promise.resolve({
+          state: "configured" as const,
+          settings: {
+            version: 1 as const,
+            modelProvider: "openai-compatible-gateway" as const,
+          },
+        }),
+    },
+    cliDependencies: {
+      cwd: home,
+      io: io.io,
+      createPromptLoop: (options: CreateHarnessPromptLoopOptions) => ({
+        runPrompt: (request: { prompt: string }) => {
+          prompt = request.prompt;
+          return Promise.resolve<HarnessPromptLoopResult>({
+            model: options.model ?? "gpt-5.6-terra",
+            finalAssistantText: "answered",
+            transcript: [],
+            modelTurns: 1,
+            runState: options.engine!.getRunState(),
+          });
+        },
+        runTranscript: () => Promise.reject(new Error("unexpected resume")),
+      }),
+    },
+  });
+
+  assertEquals(
+    await host.runBatch([
+      "--prompt",
+      "models are great",
+      "--cfc-enforcement-mode",
+      "disabled",
+    ]),
+    0,
+    io.stderr.join(""),
+  );
+  assertEquals(prompt, "models are great");
 });
 
 Deno.test("local Loom batch executable exposes help and capabilities before setup", async () => {

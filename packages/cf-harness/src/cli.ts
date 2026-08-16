@@ -2899,7 +2899,14 @@ export const runCfHarnessCli = async (
     };
     if (parsed.resumeRun !== undefined) {
       const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
-      const artifacts = await readRunArtifacts(parsed.resumeRun);
+      const artifacts = await readRunArtifacts(parsed.resumeRun).catch(
+        (error: unknown) => {
+          // Naming a run that is not there is a bad request. A run that is
+          // there and will not read is infrastructure, whatever the argv said.
+          if (!(error instanceof Deno.errors.NotFound)) requestAccepted = true;
+          throw error;
+        },
+      );
       if (artifacts.runState.lineage?.role === "subagent") {
         throw new Error(
           `Cannot resume subagent run ${artifacts.runState.runId} as a top-level run; resume root run ${artifacts.runState.lineage.rootRunId} instead.`,
