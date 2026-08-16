@@ -110,6 +110,13 @@ export function flatMap(
   awaitSync?: boolean,
 ): RawBuiltinReturnType {
   let result: Cell<any[]> | undefined;
+  // The containing piece's root: every element sub-piece this coordinator
+  // starts is that piece's structure, so its actions' demand roots carry
+  // the parent's chain (server-execution v2 Phase 7's demand-root chain;
+  // RunnerRunOptions.parentPieceRootId) — a serving runtime resolves the
+  // element's demanded instances through the OUTER root a client watches
+  // instead of falling to the service identity (P7 review finding 4).
+  const parentPieceRootId = parentCell.getAsNormalizedFullLink().id;
 
   // Identity-based tracking: maps element address key → element run.
   // resultCell holds the per-element result array.
@@ -452,6 +459,7 @@ export function flatMap(
               {
                 doNotUpdateOnPatternChange: true,
                 awaitSyncBeforeInitialRun: elementAwaitSync,
+                parentPieceRootId,
               },
             );
             rollback.setupIssued(existing);
@@ -479,6 +487,7 @@ export function flatMap(
           {
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
+            parentPieceRootId,
           },
         );
         // Link the new result cells to the pattern cell too

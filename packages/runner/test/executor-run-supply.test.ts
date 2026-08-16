@@ -250,6 +250,167 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     runtime.runner.stop(parentCell);
   });
 
+  /** The child derivation runs the stamper saw (`computed` lifts to a
+   * `__cfLift_*` derivation), with each run's demanded principal —
+   * undefined = the wave-level (service) fallback. */
+  const childDerivationPrincipals = (): (string | undefined)[] =>
+    stamped
+      .filter((info) =>
+        info.kind === "derivation" &&
+        (info.actionId.includes("__cfLift") ||
+          info.actionId.includes("computed"))
+      )
+      .map((info) => info.scopeKeyIdentity?.principal);
+
+  // Same class as the nested-pattern-node case above, through a different
+  // instantiation site: `builtins/map.ts`, `filter.ts` and `flatmap.ts`
+  // start each element's sub-piece with `runtime.runner.run` directly.
+  // Before this landed those calls carried no `parentPieceRootId`, so a
+  // list item's sub-piece ran its scoped derivations with NO demanded
+  // identity — the service fallback — while the parent's own `raw:map`
+  // action ran per instance (the P7 independent review's probe: alice=0
+  // bob=0 fallback=2). Any per-user state inside a list item's sub-piece
+  // was mis-keyed under the service identity — at cardinality 1 too.
+  const LIST_BUILTIN_CHILD_SOURCES: Record<
+    "map" | "filter" | "flatMap",
+    string
+  > = {
+    map: [
+      "export default pattern<{ items: number[] }, { out: { doubled: number }[] }>(({ items }) => {",
+      "  const out = items.map((n) => child({ n }));",
+      "  return { out };",
+      "});",
+    ].join("\n"),
+    filter: [
+      // The predicate reads the sub-piece's derived field directly (an
+      // expression around it would be lifted into a computed of the
+      // element piece and never instantiate the child).
+      "export default pattern<{ items: number[] }, { out: number[] }>(({ items }) => {",
+      "  const out = items.filter((n) => { const c = child({ n }); return c.keep; });",
+      "  return { out };",
+      "});",
+    ].join("\n"),
+    flatMap: [
+      "export default pattern<{ items: number[] }, { out: { doubled: number }[] }>(({ items }) => {",
+      "  const out = items.flatMap((n) => [child({ n })]);",
+      "  return { out };",
+      "});",
+    ].join("\n"),
+  };
+  for (
+    const builtin of Object.keys(LIST_BUILTIN_CHILD_SOURCES) as Array<
+      keyof typeof LIST_BUILTIN_CHILD_SOURCES
+    >
+  ) {
+    it(`carries the chain through the LIST builtins' child instantiation: a sub-piece a \`${builtin}\` callback starts resolves its instances through the OUTER demanded root (P7 review finding 4)`, async () => {
+      const aliceKey = resolveScopeKey("user", alice);
+      const bobKey = resolveScopeKey("user", bob);
+      const parentSource = [
+        "import { computed, pattern } from 'commonfabric';",
+        "const child = pattern<{ n: number }, { doubled: number; keep: boolean }>(",
+        "  ({ n }) => ({ doubled: computed(() => n * 2), keep: computed(() => n > 1) }),",
+        ");",
+        LIST_BUILTIN_CHILD_SOURCES[builtin],
+        "",
+      ].join("\n");
+      const tx = runtime.edit();
+      const parentPattern = await runtime.patternManager.compilePattern(
+        programOf(parentSource),
+        { space, tx },
+      );
+      const parentCell = runtime.getCell<{ out?: unknown }>(
+        space,
+        `p7-${builtin}-chain-parent`,
+        undefined,
+        tx,
+      );
+      const parentRootId = parentCell.getAsNormalizedFullLink().id;
+      // The registry knows ONLY the outer root (what a browser watches).
+      runtime.installSealDestination(passThroughDestination(), {
+        runStamper: recordingStamper,
+        runInstanceResolver: (pieceRootIds) =>
+          pieceRootIds.includes(parentRootId)
+            ? [
+              { scopeKeyIdentity: alice, actionScopeKey: aliceKey },
+              { scopeKeyIdentity: bob, actionScopeKey: bobKey },
+            ]
+            : [],
+      });
+      const running = runtime.runner.run(
+        tx,
+        parentPattern,
+        { items: [1, 2] },
+        parentCell,
+      );
+      expect((await tx.commit()).error).toBeUndefined();
+      await running.pull();
+      await runtime.idle();
+
+      const principals = childDerivationPrincipals();
+      expect(principals.length).toBeGreaterThan(0);
+      // Every element sub-piece's derivation ran per demanded instance of
+      // the OUTER root — alice and bob both present, no service fallback.
+      expect(principals).toContain(alice.principal);
+      expect(principals).toContain(bob.principal);
+      expect(principals.every((p) => p !== undefined)).toBe(true);
+      runtime.runner.stop(parentCell);
+    });
+  }
+
+  it("composes across two levels: a GRANDCHILD nested pattern node resolves through the outermost demanded root (the chain is transitive)", async () => {
+    // Pinned from the P7 independent review's second probe (it composed
+    // at head): a child of a child carries the whole ancestor chain, so
+    // demand on the outermost root reaches the grandchild's derivations.
+    const aliceKey = resolveScopeKey("user", alice);
+    const bobKey = resolveScopeKey("user", bob);
+    const src = [
+      "import { computed, pattern } from 'commonfabric';",
+      "const grandchild = pattern<{ n: number }, { tripled: number }>(",
+      "  ({ n }) => ({ tripled: computed(() => n * 3) }),",
+      ");",
+      "const child = pattern<{ n: number }, { g: { tripled: number } }>(",
+      "  ({ n }) => ({ g: grandchild({ n }) }),",
+      ");",
+      "export default pattern<{ n: number }, { out: number }>(({ n }) => {",
+      "  const c = child({ n });",
+      "  return { out: c.g.tripled };",
+      "});",
+      "",
+    ].join("\n");
+    const tx = runtime.edit();
+    const parentPattern = await runtime.patternManager.compilePattern(
+      programOf(src),
+      { space, tx },
+    );
+    const parentCell = runtime.getCell<{ out?: number }>(
+      space,
+      "p7-grandchild-parent",
+      undefined,
+      tx,
+    );
+    const parentRootId = parentCell.getAsNormalizedFullLink().id;
+    runtime.installSealDestination(passThroughDestination(), {
+      runStamper: recordingStamper,
+      runInstanceResolver: (pieceRootIds) =>
+        pieceRootIds.includes(parentRootId)
+          ? [
+            { scopeKeyIdentity: alice, actionScopeKey: aliceKey },
+            { scopeKeyIdentity: bob, actionScopeKey: bobKey },
+          ]
+          : [],
+    });
+    const running = runtime.runner.run(tx, parentPattern, { n: 5 }, parentCell);
+    expect((await tx.commit()).error).toBeUndefined();
+    await running.pull();
+    await runtime.idle();
+    const principals = childDerivationPrincipals();
+    expect(principals.length).toBeGreaterThan(0);
+    expect(principals).toContain(alice.principal);
+    expect(principals).toContain(bob.principal);
+    expect(principals.every((p) => p !== undefined)).toBe(true);
+    runtime.runner.stop(parentCell);
+  });
+
   it("hands the emitting run's identity to the dispatched handler run (LT6: events run as the session they originated from)", async () => {
     const aliceKey = resolveScopeKey("user", alice);
     runtime.installSealDestination(passThroughDestination(), {
