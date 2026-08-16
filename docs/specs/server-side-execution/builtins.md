@@ -178,8 +178,12 @@ stream is passed to other spaces, which then append intents to it.
   identity — under the flag the toolshed process's identity is a
   memory service principal (protocol.md §2b's free-read row;
   `memoryServiceDidsFor`), the posture every deployment checklist
-  already requires of the operator DID; foreign WRITES are not widened
-  by it (the §2b accept gate checks the ACTING identity's grant).*
+  already requires of the operator DID. Honestly (P7 independent review
+  finding 6): a service principal is implicit OWNER for its sessions on
+  every space, so this WIDENS the process identity's ORDINARY session
+  traffic to OWNER everywhere; it is not widened at the wave's §2b
+  accept gate (which checks the ACTING identity's grant). The narrower
+  read-only shape is a ruled item — verification-coverage.md OW31.*
 
 ## 6. Adding a new built-in under v2 (checklist for future work)
 

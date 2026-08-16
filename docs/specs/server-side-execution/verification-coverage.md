@@ -625,8 +625,12 @@ client does not; this PR):
   demand-cycle starvation fork's reproducer. Stage P2-F
   (2026-08-13) RETIRED that entry too: the terminal state closed
   the fork (the OW19 row below records the closure), and the ON-arm
-  skip list is EMPTY again — the full patterns suite runs both
-  arms.
+  skip list was EMPTY again — the full patterns suite runs both
+  arms. (Dated history: Phase 4 re-added `topics-navigation`, Phase 7's
+  fixer added five more `phase-7` entries — and found the mechanism
+  had been INERT since Phase 4, so "runs and passes ON" for the
+  two-browsers gate was true only of the MIXED-posture lane; see OW25
+  and the 2026-08-16 delta.)
 - testing §4's single-deriver envelope gate: impl-covered — the
   store-attribution query pinned in `speculation-overlay.test.ts`
   (every derived commit's holder is the service identity; none from a
@@ -957,9 +961,21 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   no third source of run identity") violated in practice (fixed: the
   demand-root CHAIN, `SchedulerObservationIdentity.demandRootIds` —
   nested pieces resolve through the outer root; `executor-run-supply.
-  test.ts`, red-first). With (1)–(3) the gate reaches the join UI
-  ("host name filled") and stalls at the join click's consequence. Two
-  further extensions were BUILT AND REVERTED because they make
+  test.ts`, red-first). The build report's "with (1)–(3) the gate
+  reaches the join UI ('host name filled') and stalls at the join
+  click" DID NOT REPRODUCE at head (P7 independent review, 0/2 runs;
+  `review-p7-logs/lunch-head-default-run{1,2}`): at head the served
+  `#profile` wish ran once identity-less and threw at STEP 1
+  (`home-space resolution on a serving runtime requires the run's
+  demanding identity`) — the client's demand supplies NO identity for
+  the wish's piece root (the OW29 space-root-demander gap is live at
+  FIRST demand, not at the join click) — and because fix (2) makes the
+  flag-ON client REFERENCE-ONLY, the client wish churns (~13.6/s,
+  `wish/phase/send-error` n=4078 / 300 s) waiting for a sidecar the
+  server cannot produce: fix (2) without OW29 converts a racy-but-
+  rendering client into a wait-forever client. The builder's join-UI
+  observation was on his tree WITH the reverted extensions applied.
+  Two further extensions were BUILT AND REVERTED because they make
   cardinality ≥ 2 real on the collapsed replica: (4) SPACE-ROOT
   DEMANDERS — a client watching only the space-scoped piece root
   registers NO identity (`watchedRootsForSpace` records identity for
@@ -979,13 +995,58 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   commits in 5 min, watermarkLag 1,685) — the OW17 VALUE half in its
   purest form. (4)+(5) are recorded here as the designed shape and are
   GATED on this row's owed leg (replica-level per-instance keying);
-  they must land WITH it, not before. The same signature (client
-  actionRuns 60–75k / 5 min, no settle) reproduces on the two-browsers
-  gate under the full ON posture at the UNMODIFIED Phase-6 base — the
-  "browser-ON red family" (OW25) IS this collapse at cardinality ≥ 2.
-  Trigger, sharpened: BEFORE the flip's soak can be judged on
-  multi-user browser scenarios; the flip's Phase-7 gates table carries
-  it as the top blocker.
+  they must land WITH it, not before. CORRECTION (P7 independent
+  review, 2026-08-15; fixer 2026-08-16): the two-browsers gate's stall
+  under the full ON posture — at the unmodified Phase-6 base AND at the
+  Phase-7 head — is NOT evidenced as this collapse. Its server stats are
+  QUIET (waves 20–26, derivedCommits 19–25, events 2/2 appended/
+  processed, watermarkLag 1–2; `wavesBudgetExhausted` 12–16 of those
+  waves — but the single-browser `counter` gate exhausts 2/5 with no
+  client loop, so exhaustion alone is not the discriminator) while BOTH
+  browsers run a CLIENT-side `scheduler-non-settling` loop (every
+  ~6.6 s; 40–56 k client action runs / 5 min at head and base;
+  `runner/start/resumeCellSync` n=458–644 piece re-starts). The
+  4,427-wave storm signature above exists ONLY with (4)+(5) applied.
+  The client loop is its own UNATTRIBUTED row (OW32) whose triage comes
+  FIRST in the flip's ordered gates; "the browser-ON red family IS this
+  collapse" is withdrawn.
+  **CLASS VERDICT (P7 independent review, 2026-08-15): a bounded
+  architectural LEG — not a bug, not a redesign.** ONE layer was never
+  re-keyed: the runner-side local view. `SpaceReplica` keys every local
+  doc by scope NAME (`docKey(id, scope)` = `${normalizeCellScope(scope)}
+  \0${id}`, `packages/runner/src/storage/v2.ts` — used by `#docs`,
+  `#sinks`, `#staleFloor`, `#watchedIds`, `#shadowedForeignSeqs`,
+  `#syncTasks`: ~20 sites in one class); the wire upsert cannot name an
+  instance (`SessionSyncUpsert.scope?: CellScope`, `packages/memory/
+  v2.ts` — no scope key); `IMemoryAddress` carries no instance; and the
+  scheduler dependency graph resolves reads/writes against the
+  runtime's OWN identity (`scheduling-writes.ts`; C11b's singular node).
+  Everything else already speaks per instance (engine rows and dirty
+  keys `toDirtyKey(id, scopeKey)`, the lease-holder explicit-instance
+  reads, `DerivedWriteAnnotation.scopeKey`, the P2-F run supply's N
+  stamped runs). Fix SHAPE, with precedent (stage F/M2 re-keyed the
+  scheduler's `entityKey` from name to scope key with the cardinality-1
+  partition unchanged): (1) `SessionSyncUpsert`/`Remove` gain
+  `scopeKey`, populated by the memory server for lease-holder-exempt
+  sessions (the value is already `entry.scopeKey` at the push site);
+  (2) `docKey` takes the scope KEY, resolved from the replica's own
+  identity when no explicit key rides (OFF-arm neutral by
+  construction); (3) the tx→replica read/write seam passes the run's
+  stamped identity (`waveRunContextOf(tx).scopeKeyIdentity`) so an
+  instance run reads/writes ITS doc; (4) scoped-doc change notification
+  fans in to the singular node (any instance's change dirties the node;
+  the N-run loop re-runs; equality cutoffs absorb siblings — the "local
+  dirtiness precision" half stays an optimization). Nothing in C11b
+  forbids this ("instances live in keys" — the local doc map is a key
+  space); no serving-loop, demand, or wave redesign is implied. Size:
+  P2-F-shaped (a stage), cross-cutting but mechanical; not a one-site
+  fix. OW29's two extensions are prerequisites for user #2 to be served
+  at all, and the whole-doc-set write-half hack becomes unnecessary once
+  the diff base is the right instance's doc. Landing OW17+OW29 alone is
+  NOT shown to green the two-user journeys (OW32 first).
+  Trigger, re-stated: the flip's ordered gates (plan Phase 7 task 1):
+  OW32 triage → THIS leg (with OW29) → OW28 → the honest benchmark →
+  the flip PR.
 - OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
   (2026-08-13; the RULED 2026-08-07 direction, built whole). A
   demanded root CONFIRMED synced with no pattern meta parks TERMINAL
@@ -1125,22 +1186,28 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   (the inherited red's fix), and no later than the Phase-7 flip
   (a flip criterion measured on a mixed-posture lane would be
   vacuous).
-  Phase 7 (2026-08-15): the ON shell build LANDS BY THE FLIP — the
-  default binary bakes the shell ON (unset define = the first-party
-  default), so the default CI lanes are the FULL ON posture, and the
-  OFF regression guard gets its own OFF-built binary
-  (`build-toolshed-off`). The inherited red did NOT lift; it is now
-  ATTRIBUTED (OW17's Phase-7 evidence): under the full posture, at the
-  unmodified Phase-6 base, `cfc-group-chat-demo-two-browsers` stalls at
-  the first per-user write with 60–70k client action runs (the
-  cardinality-2 collapse), the lunch gate as recorded, and
-  `topics-navigation` fails fast at the controller's write-destination
-  validation (`missing required property myName` — the same class as
-  the intermittent `counter` failure below, OW30). The topics-navigation
-  skip entry stands with the Phase-7 reason; no browser-posture
-  criterion ticks on the default lanes' green until this family is
-  triaged — the flip's gates table records the lanes as expected-red
-  on the browser-ON family.
+  Phase 7 (2026-08-15, re-tensed 2026-08-16 by the P7 fixer on the
+  independent review — the flip landed DARK, constant `false`): the ON
+  shell build LANDS as its own CI job, `build-toolshed-on` (the shell
+  define baked `true`), feeding the explicit-`EXPERIMENTAL_SERVER_
+  EXECUTION=true` ON lanes — the FULL ON posture (server ON, test
+  processes declaring ON, shell ON-built), VERIFIED by a posture probe
+  before every ON suite (`/api/meta`'s `shellServerExecutionDefine ===
+  "true"` from the COMPILED marker + `/api/health/stats`.servingLoop
+  present). The default lanes stay the OFF posture (their probe pins
+  server OFF + define unset). This row's owed leg is DISCHARGED: no
+  ON-lane green rides a mixed posture anymore. The inherited red did NOT
+  lift and its attribution is CORRECTED: `cfc-group-chat-demo-two-
+  browsers` and `lunch-poll-vote` stall on the UNATTRIBUTED client-side
+  scheduler-non-settling loop (OW32; NOT evidenced as OW17 — see the
+  correction in OW17), `topics-navigation` fails fast at the
+  controller's write-destination validation (`missing required property
+  myName`, OW30's class). All three are ON-skip-listed with loud reasons
+  (`tasks/server-execution-on-skips.ts`), and the fixer found the skip
+  mechanism itself had been INERT since Phase 4 (`deno test --ignore`
+  does not apply to explicitly listed files; fixed and pinned — the
+  quoted-glob tasks + the pattern shard's `--filter`); no browser-
+  posture criterion ticks until OW32/OW30 are triaged.
 - OW26 — the DEMANDED-EFFECT retry wedge (scheduler adjacency,
   surfaced by the owner-review P1 batch, 2026-08-12): when an
   `isEffect` builtin's action THROWS (the arms are builtins.md §4's
@@ -1245,9 +1312,21 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   per-stream token bucket, pace-never-drop"): the client event-append
   queue paces per stream (`EventAppendQueue` — `pacing`, keyed by the
   stream's sidecar doc; burst passes, sustained sends drain at the
-  rate, a flood is HELD in fired order, never coalesced, never dropped;
-  the head holds everything behind it — cross-stream head-of-line
-  hold is the accepted cost of exact fired order). Default posture
+  rate, a flood is HELD in that stream's fired order, never coalesced,
+  never dropped). Streams are INDEPENDENT — RULED 2026-08-16 (P7 fixer,
+  on the P7 independent review's finding 5): the queue sends the
+  earliest-fired entry whose stream has a token, so a paced stream
+  holds only its own later sends and never an unrelated stream's (NO
+  cross-stream head-of-line hold; the P7 build's "accepted cost" wording
+  described a defect — the shipped drain sent strictly the fired-order
+  head, so b1 waited behind a2's hold, reproduced by the review's probe
+  and unpinned by the shipped suite). Fixed red-first: the adopted
+  cross-stream test in `event-append-client.test.ts` (b1 sends
+  immediately, a2/b2 wait only on their own buckets, a3 on A's second
+  refill; every stream's own fired order exact; every intent delivered)
+  went red at head and green with the per-stream selection; events.md
+  §5 and README §3.8 now state per-stream fired order + independence.
+  Default posture
   `DEFAULT_EVENT_APPEND_PACING` = 20/s sustained, 20 burst — a DIAL,
   FLAGGED for the owner (the bound on the flooding user's own rapid
   interactions ≈ (queued − burst)/rate seconds; a held key at ~30 Hz
@@ -2222,12 +2301,31 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   every non-wave run and the serving side's async writebacks are
   unstamped, so they refuse at the wave seal — and the flip ships that
   inertness by default (`common-fabric.tsx`'s piece-creation flow among
-  the consumers). Owed: the port — compilation on the outbox as an
-  effect kind (request-hash memo on the program), the instantiation
-  joining the graph as a completion-class writeback. Trigger: BEFORE
-  the flip's soak is judged (a flip blocker in product terms; nothing
-  in CI exercises fresh compile-and-run in the ON arm — the pins in
-  `compile-and-run.test.ts` assert the gate, not the port).
+  the consumers). CHARACTERIZED by the P7 independent review
+  (2026-08-15) as a product regression relative to OFF: on a flag-ON
+  runtime whose tx carries no wave run context (every CLIENT run —
+  derivation, handler, imperative) `builtins/compile-and-run.ts` sets
+  `pending = true` and RETURNS before launching the compile — no
+  compile, no result, no error, `pending` never clears; on the SERVER
+  (wave-stamped run) the compile launches but its writebacks
+  (`runtime.editWithRetry`, `runSynced`) are UNSTAMPED floating
+  transactions on a serving runtime → refused at the wave seal
+  (`unstampedSealRefusals`), so `pending=false`/`result`/`error` never
+  land either. User-visible under ON: every `compileAndRun` consumer
+  shows "compiling…" forever — `fetchAndRunPattern` in
+  `packages/patterns/system/common-fabric.tsx` (the LLM/tool piece-
+  instantiation flow: `ifElse(pending || …)` never resolves),
+  `packages/patterns/compiler.tsx`, `write-and-run.tsx`,
+  `email-pattern-launcher.tsx`. The pins in `compile-and-run.test.ts`
+  assert exactly the gate (0 launches non-wave, 1 launch wave-stamped),
+  not a working port. FIX SHAPE (owning layer: runner
+  `builtins/compile-and-run.ts` + `executor/outbox.ts` /
+  `effect-completion.ts`, following the request-hash builtins):
+  compilation as an OUTBOX EFFECT KIND memoized on the program hash,
+  the instantiation landing as a COMPLETION-CLASS stamped writeback;
+  the client keeps reading through (speculation.md §2). Trigger: a
+  named flip blocker — third in the flip's ordered gates (plan Phase 7
+  task 1); nothing in CI exercises fresh compile-and-run in the ON arm.
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
   the space-scoped piece root supplies NO identity to the run supply,
@@ -2235,7 +2333,28 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   are needed for a second user of a shared space to be served at all;
   both are GATED on OW17's replica per-instance keying (without it they
   turn silent under-serving into a wave storm). Land the three
-  together. Trigger: OW17.
+  together. Trigger: OW17. The demand-root CHAIN'S coverage folds in
+  here (P7 independent review finding 4, 2026-08-15): the chain
+  (`demandRootIds`) covered nested pattern nodes and result-as-pattern
+  children but MISSED the list builtins' child instantiation
+  (`builtins/map.ts`, `filter.ts`, `flatmap.ts` call `runtime.runner.
+  run` directly) — a mapped child's derivations ran with the service
+  fallback while the parent's `raw:map` ran per instance (probe:
+  alice=0 bob=0 fallback=2), so any per-user state inside a list item's
+  sub-piece was mis-keyed under `user:<serviceDID>` at cardinality 1
+  too. FIXED by the P7 fixer (2026-08-16): the six list-builtin sites
+  pass `parentPieceRootId`; red-first via the adopted probe,
+  parametrized over map/filter/flatMap in `executor-run-supply.test.ts`
+  (mutation-verified per site); the grandchild-composes probe pinned.
+  STILL OPEN, FLAGGED (not filled): wish.ts's four `runtime.run`
+  sidecar launches (profile create / picker / suggestion) also carry no
+  parent — the served sidecar's own actions run under the wave-level
+  identity — but chaining them to the wish's parent root would run each
+  per-demander sidecar for EVERY demanded instance of the outer root
+  (bob's run over alice's sidecar; spurious per-user writes under bob's
+  key), and whether a per-demander sidecar wants the chain's instances
+  or exactly its own demander is an UNSTATED semantic — owner ruling
+  needed before it is wired.
 - OW30 — the controller-side write-destination validation RACE under
   the flag (`piece-controller.ts` `validateWriteDestination`, the
   #4717 guard as narrowed 2026-08-07): under the full ON posture
@@ -2247,7 +2366,100 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   the convergence step the 2026-08-07 narrowing anticipated (validate
   against a settled view — `waitForSettled` on the piece's space —
   before judging the written subtree), and its pin. Trigger: the flip
-  soak (an intermittent red in the default lanes).
+  soak (an intermittent red in the ON lanes; `topics-navigation` is
+  ON-skip-listed on it).
+
+**Rows opened by the Phase 7 independent review and the fixer pass
+(2026-08-15/16; the flip landed DARK — constant `false`):**
+
+- OW31 — the service-principal READ-AUTHORITY grant is a WRITE-AUTHORITY
+  WIDENING for the process identity's ordinary session traffic (P7
+  independent review finding 6; the P7 build's "NOT a write widening"
+  was overstated). Under the flag `memoryServiceDidsFor` makes the
+  toolshed process identity a memory service principal, and a service
+  principal is implicit OWNER for its sessions on EVERY space
+  (`packages/memory/v2/server.ts` — transact, queries, watches, ACL-doc
+  writes, fresh-space genesis; the ACL policy has no read-only service
+  class). So the process identity's ORDINARY session traffic — its own
+  `productionServer` runtime (ingest / webhooks) and the loopback
+  plane's authored/bookkeeping commits — gains OWNER everywhere,
+  wherever `MEMORY_SERVICE_DIDS` did not already list it. Bounded by
+  process trust (the same process already derives every space through
+  the engine-direct sink) and NOT widened at the wave's foreign-write
+  accept gate (`foreignWriteAuthorityFor` ignores the blanket). What the
+  wish's bootstrap NEEDS is READ on the demanding user's home space; the
+  narrower shape — a read-only service-principal class in the memory
+  ACL — is a memory-ACL POLICY addition, and whether it suffices depends
+  on what the served create handler's `.inSpace()` provisioning needs at
+  fresh-space GENESIS (a service DID may initialize a genesis ACL; a
+  read-only principal could not). RULED-POSTURE ITEM FOR THE OWNER:
+  accept the OWNER-everywhere posture under the flag (the deployment
+  checklist's operator-DID posture made automatic where the loop runs),
+  or add the read-only class and route the wish's read through it. Not
+  narrowed by the fixer (flag-don't-fill). Inert while the constant is
+  `false` (the grant is flag-gated; OFF the configured list is used
+  verbatim). Trigger: before the flip PR.
+- OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
+  ON posture in the two-browser journeys — the EVIDENCED mechanism of
+  the two two-browser gates' red, UNATTRIBUTED (P7 independent review
+  findings 1/2; the P7 build had attributed the red to OW17 by
+  inference). Evidence (`review-p7-logs/`, two-browsers 2/2 at head +
+  1 at base, lunch 2/2 at head, 300 s stalls each): the SERVING LOOP is
+  QUIET (waves 20–26, derivedCommits 19–25, events 2/2 appended/
+  processed, watermarkLag 1–2 — no storm) while BOTH browsers run
+  `scheduler-non-settling` every ~6.6 s (40–56 k client action runs /
+  5 min at head AND base; `runner/start/resumeCellSync` n=458–644 piece
+  re-starts); 50–70 % of the server's waves exhaust the flush deadline
+  (`wavesBudgetExhausted` 12–16 of 20–26 — reported here because it was
+  reported nowhere; the single-browser `counter` gate also exhausts 2/5
+  with NO client loop, so exhaustion alone is not the discriminator).
+  Base stall ≈ head stall (head run 1 got one step further; run 2
+  stalled identically at the first per-user write) — P7 is not a
+  regression, but neither is it evidenced progress. The 4,427-wave storm
+  signature exists ONLY on the builder's tree with OW29's reverted
+  extensions applied. NOT evidenced as OW17. The lunch gate ADDITIONALLY
+  hits the served `#profile` wish throwing identity-less at step 1 (see
+  OW17's correction; the OW29 gap at first demand). Owed FIRST in the
+  flip's ordered gates: the discriminating experiment — a
+  `commonfabric.detectNonIdempotent()` capture in one browser of the
+  two-browsers gate plus a debug-level `wave-budget-exhausted` trace
+  naming the non-quiescing server actions — then the fix. Until then
+  both gates are ON-skip-listed with this reason (`tasks/server-
+  execution-on-skips.ts`), red under the full ON posture, NOT green-by-
+  vacuity. Trigger: first of the flip's ordered gates (plan Phase 7 task
+  1); the flip PR needs the skip list EMPTY.
+- OW33 — the ON-posture DENO-CLIENT family, surfaced by making the ON
+  lanes UNIFORM (P7 independent review finding 7; fixer 2026-08-16):
+  once the runner integration tests that talk to the lane's toolshed
+  and the runtime-client worker DECLARE the posture from the env
+  (before: bare `new Runtime` / undeclared worker → OFF client against
+  an ON server, so "runner 14/14" and "runtime-client 45 steps" under
+  the ON lane were mixed-posture evidence), the uniform ON posture is
+  RED on: (a) `packages/runner/integration/pattern-and-data-
+  persistence.test.ts` — Phase 3 starts a NEW piece, `pull()`s its
+  result and reads `getAsQueryResult().sum` (15 under OFF, `undefined`
+  under ON; no sink → no demand — the sink is the demand — and the ON
+  client's own speculative run did not surface the value through this
+  read path either; 13/14 green otherwise); (b) `runtime-client/
+  integration/client.test.ts` step "renders PerUser-derived computed
+  JSX inside cf-screen header slot (CT-1606)" — never reaches its FIRST
+  render in 15 s (3/3 red; a `computed` over `PerUser<myName>` — the
+  same PerUser shape `topics-navigation` fails on under full ON); (c)
+  the same file's "dispatches one navigateTo when a rendered handler
+  changes local state" — FLAKY (1/3 red: two dispatches observed for
+  one handler fire — the double-dispatch class the F10 handler-fork
+  contract exists to prevent); (d) `derive_array_leak.test.ts` counts 0
+  of 50 increments under ON (its own warning fires; green only because
+  it asserts memory). UNTRIAGED — whether the Deno-client speculation
+  overlay should have shown (a)/(b) or the demand should have been
+  registered, and what double-fires (c). Recorded as ON-skip entries
+  (a file entry for (a); STEP-level entries for (b)/(c) so the one-file
+  runtime-client suite keeps its other 43 steps ON — the step guard is
+  in-file, bound to the register and validated). The 8 runner
+  integration files that serve toolshed's `app.ts` in-process (no
+  ExecutorHost) are single-process harnesses, OFF by construction in
+  either lane. Trigger: with OW32's triage (the same "client under ON
+  never settles/renders" family); the flip PR needs the skip list EMPTY.
 
 Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
 
@@ -2263,8 +2475,11 @@ Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
   a memory service principal under the flag —
   `packages/toolshed/lib/server-execution-flag.ts`, pinned in
   `server-execution-flag.test.ts`: OFF the configured list verbatim,
-  ON the identity joins it exactly once). NOT a write widening: the
-  wave's §2b accept gate ignores the service-DID blanket by design.
+  ON the identity joins it exactly once). CORRECTED 2026-08-16: this IS
+  a write widening for the process identity's ordinary session traffic
+  (implicit OWNER everywhere) — not widened at the wave's §2b accept
+  gate, which ignores the service-DID blanket by design; OW31 carries
+  the ruled-posture question.
 - builtins.md §5's wish row: +1 binding sentence (a flag-ON non-serving
   runtime references the served sidecar cell, never instantiates it)
   — impl-gate; witnessed live on the lunch gate (the ~13/s stale-basis
@@ -2276,10 +2491,11 @@ Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
   spec granularity, FLAGGED: scopes.md §5's "the demand supplies the
   identity" now resolves a nested piece through its ancestors; pinned
   red-first (`executor-run-supply.test.ts`).
-- testing.md §2: the CI arms' role swap by env (default = ON full
-  posture; explicit false = OFF full posture on the OFF-built binary);
-  `tasks/server-execution-on-skips.ts` prints on the default lanes.
-- The flip's own default: `SERVER_EXECUTION_DEFAULT_ENABLED = true`
+- testing.md §2: the CI arms (SUPERSEDED the next day — see the fixer
+  delta below): the phase PR swapped the lanes by env (default = ON;
+  explicit false = OFF on an OFF-built binary).
+- The flip's own default (SUPERSEDED — see the fixer delta below): the
+  phase PR set `SERVER_EXECUTION_DEFAULT_ENABLED = true`
   (`packages/memory/v2/server-execution-default.ts`), resolved by the
   `productionServer` / `remoteClient` presets, the shell define
   fallback, and toolshed's flag helper; the single-process presets keep
@@ -2287,12 +2503,82 @@ Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
   `runtime-presets.test.ts` (deployed-topology presets carry the
   default), `shell/test/env.test.ts` (define unset → default; `false`
   → OFF), `toolshed/lib/server-execution-flag.test.ts`.
-- The plan's Phase-7 section carries the honest gates table: sx2 family
-  green ON (default) and OFF (explicit) fresh-store; runner and
-  runtime-client package integration suites green under the default;
-  the browser-ON multi-user family red at base and head (OW17); the
-  propagation benchmark leg BUILT (opt-in on the two-browsers gate) but
-  UNMEASURED — its harness is red under the full posture at the base.
+- The plan's Phase-7 section carries the honest gates table (re-tensed
+  by the fixer delta below).
+
+Delta 2026-08-16 — Phase 7 fixer pass (the independent review's 12
+findings; the OWNER RULING — the flip lands DARK):
+
+- The landing posture: `SERVER_EXECUTION_DEFAULT_ENABLED = false`
+  (owner ruling 2026-08-16 on the review's verdict LANDABLE-WITH-FIXES
+  as flip-READY / NOT-LANDABLE as the flip). The OFF posture is the
+  default again everywhere the constant reaches; the ON posture stays
+  fully selectable; the ONE absolute pin (`server-execution-flag.test.
+  ts`) now states the default IS OFF. THE FLIP IS ITS OWN SEPARATE
+  ONE-LINE PR (repo convention: a flip is reverted by reverting the PR
+  that only flips) — owed after the ON posture works and is performant,
+  in the plan's ordered gates: OW32 triage → OW17 re-keying (+OW29) →
+  OW28 → the honest benchmark → the flip PR (which also flips the
+  absolute pin, the CI lane roles and their posture probes, and
+  EXPERIMENTAL_OPTIONS.md; and MUST land with the ON skip list EMPTY).
+- CI lanes (testing.md §2 re-tensed): default lanes = the OFF posture
+  (probe: server not serving, shell define unset); explicit-`true` ON
+  lanes on `build-toolshed-on` (shell define baked `true`), FULL ON
+  posture VERIFIED before each suite (`/api/meta.shellServerExecution
+  Define === "true"` — a new field read from the COMPILED marker
+  `tasks/build-binaries.ts` writes from the same env the shell bakes;
+  `/api/health/stats.servingLoop` present); the ON lanes' Deno-side
+  clients DECLARE the posture from the env (runner integration tests
+  that talk to the lane's toolshed; the runtime-client worker) — the
+  ON lane is UNIFORM, no longer the mixed posture the review found. The
+  future flip PR's gate obligation for the deployed-topology binaries
+  the review named (finding 8: `background-piece-service`, the CLI,
+  cf-harness, every `PiecesController` resolve ON by the presets — no
+  gate exercises them ON) is RECORDED in the plan's Phase-7 task 1;
+  with the constant `false` none of them flips today.
+- The ON skip mechanism was INERT since Phase 4 (found while adding
+  entries; pinned by spawning deno on both shapes in
+  `tasks/server-execution-on-skips.test.ts`): `deno test --ignore`
+  filters only discovered modules and ignores nothing for explicitly
+  listed files — a shell-expanded glob or the pattern shards' list. The
+  runner/runtime-client/shell `integration` tasks now hand deno a
+  QUOTED glob; the pattern ON shard filters its list through the
+  script's `--filter` mode; STEP-level entries exist (in-file guard
+  bound to the register, validated). Entries today (ALL `phase-7`, none
+  of the lists EMPTY — the P7 phase PR's "one entry" and every earlier
+  "EMPTY" wording were about a mechanism that never bit): patterns ×3
+  (`topics-navigation`, `cfc-group-chat-demo-two-browsers`,
+  `lunch-poll-vote` — the last two on OW32's characterized, unattributed
+  loop), runner ×1 (`pattern-and-data-persistence` — OW33),
+  runtime-client ×2 STEP entries in `client.test.ts` (OW33). Verified
+  locally: runner integration 14/14 default posture, 13/14 + 1 skipped
+  under ON; runtime-client 45 steps default, 43 + 2 ignored under ON.
+- Rows: OW17 gains the review's CLASS VERDICT and the correction (the
+  two-browser red is NOT evidenced as OW17; the lunch "(1)+(2)+(3) →
+  join UI" narrative did not reproduce); OW25 DISCHARGED (the ON shell
+  build runs and is verified); OW27 corrected (cross-stream head-of-line
+  hold was a defect, fixed and pinned — streams independent); OW28
+  carries the characterization and fix shape (compile as an outbox
+  effect kind + completion-class writeback); OW29 folds in the
+  demand-root chain's list-builtin gap (fixed) and the wish-sidecar
+  question (flagged); NEW OW31 (write-authority posture — ruled item),
+  OW32 (the client non-settling loop — first gate), OW33 (the ON-posture
+  Deno-client family).
+- protocol.md §2 gains the `capabilityRef` vocabulary sentence (review
+  finding 11 — adjudicated spec-sentence, no rename): the values are
+  provenance TAGS naming the authorizing context, admitted by PRESENCE,
+  never resolved (OW13/FP7); the name does not denote a capability
+  object.
+- Benchmark (review finding 12): the two-browsers harness red is the
+  OW32 client loop, not a harness bug and not evidenced as OW17. An
+  HONEST partial number has a shape (not built): `sx2-scale.test.ts`
+  already builds N `PiecesController` clients with a timed
+  `settleWrite`; two controllers (distinct identities) on ONE space — A
+  appends an event, B's replica sinks the served consequence — timed
+  under explicit ON vs explicit OFF, fresh store per arm, n ≥ 20, gives
+  a byte-identical cross-user propagation number for the Deno client
+  posture today. Recorded in the plan; the browser number waits for the
+  two-user family.
 
 ## 4. Standing rule
 

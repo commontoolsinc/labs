@@ -281,6 +281,21 @@ validation, no certificates: no commit ever asserts that an execution
 happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
 
+**`capabilityRef` — the vocabulary, stated (adjudicated by the Phase-7
+independent review, 2026-08-15; spec-sentence, no rename).** The value
+is a provenance TAG naming the authorizing CONTEXT of a server-produced
+authored write, from a closed vocabulary: `stream-append:<sidecarId>`
+(an outbox event append), `event-consequence:<eventId>` (a consequence
+of a processed event), `demanded-run:<user>` (a demanded instance run's
+provisioning). Admission checks its PRESENCE (the completeness floor
+above; wave.ts's staging refusal), never RESOLVES it — resolution
+against a per-doc grant is the owed hardening OW13/FP7 — and the name
+does NOT denote a capability object: nothing is looked up, delegated,
+or transferred through it today. Renaming it would churn the outbox
+column `capability_ref`, the executable model and their pins for no
+semantic gain; when OW13 lands, the value becomes the key of the
+resolved grant and this sentence retires.
+
 **The Phase-3 floor carve-out for sessionless space-scope emissions
 (SHAPE RULED 2026-08-05; implementation lands with Phase 3).** The
 server-produced row's completeness floor admits an ABSENT acting
@@ -448,7 +463,7 @@ them). v2 keeps that invariant and adds the class discipline:
 
 | crossing | mechanism |
 | --- | --- |
-| read a foreign doc | free — logged read + server-internal wake (§3b). *Mechanism (Phase 7): the serving runtime's loopback session is admitted by the memory ACL as the process identity, which is a memory service principal under the flag (`memoryServiceDidsFor`, toolshed) — the deployment checklist's operator-DID posture, automatic where the loop runs; OFF the flag the configured list is used verbatim.* |
+| read a foreign doc | free — logged read + server-internal wake (§3b). *Mechanism (Phase 7): the serving runtime's loopback session is admitted by the memory ACL as the process identity, which is a memory service principal under the flag (`memoryServiceDidsFor`, toolshed) — the deployment checklist's operator-DID posture, automatic where the loop runs; OFF the flag the configured list is used verbatim. Posture, honestly: a service principal is implicit OWNER everywhere for its sessions, so the process identity's ordinary session traffic is widened to OWNER (not this table's accept gate, which checks the acting identity's grant) — verification-coverage.md OW31, a ruled item.* |
 | derive FROM foreign state | home derivation reading foreign inputs; result commits HOME |
 | mutate a foreign space | **an event append to a foreign stream — the ONLY cross-space mutation** |
 | `derived` commit into a foreign space | FORBIDDEN — SpaceServer(B) is B's only deriver; A never derives into B |
