@@ -1172,6 +1172,152 @@ describe("piece schema compatibility", () => {
     );
   });
 
+  it("allows monotonic CFC policy evolution", () => {
+    const schema = (
+      addIntegrity?: readonly string[],
+      confidentiality?: string,
+      writer?: {
+        moduleIdentity: string;
+        path: readonly string[];
+        file?: string;
+      },
+    ) =>
+      ({
+        type: "object",
+        properties: {
+          value: {
+            type: "string",
+            ...(addIntegrity === undefined && confidentiality === undefined &&
+                writer === undefined
+              ? {}
+              : {
+                ifc: {
+                  ...(addIntegrity === undefined ? {} : { addIntegrity }),
+                  ...(confidentiality === undefined
+                    ? {}
+                    : { confidentiality: [confidentiality] }),
+                  ...(writer === undefined ? {} : {
+                    writeAuthorizedBy: {
+                      __ctWriterIdentityOf: {
+                        file: writer.file ?? "/pattern.tsx",
+                        path: writer.path,
+                        moduleIdentity: writer.moduleIdentity,
+                      },
+                    },
+                  }),
+                },
+              }),
+          },
+        },
+        required: ["value"],
+      }) as const;
+    const unstamped = pattern(schema(), schema());
+    const argumentStamped = pattern(schema(["verified"]), schema());
+    const resultStamped = pattern(schema(), schema(["verified"]));
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(unstamped, argumentStamped)
+    ).toThrow(/ifc changed/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(unstamped, resultStamped)
+    ).toThrow(/ifc changed/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(schema(["verified", "reviewed"]), schema()),
+        argumentStamped,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(schema(), schema(["verified", "reviewed"])),
+        resultStamped,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(argumentStamped, unstamped)
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(resultStamped, unstamped)
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        unstamped,
+        pattern(schema(["verified"], "private"), schema()),
+      )
+    ).toThrow(/ifc changed/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        unstamped,
+        pattern(schema(), schema(["verified"], "private")),
+      )
+    ).toThrow(/ifc changed/);
+
+    const writer = (
+      moduleIdentity: string,
+      path: readonly string[] = ["save"],
+      file = "/pattern.tsx",
+    ) => schema(undefined, undefined, { moduleIdentity, path, file });
+    const oldArgumentWriter = pattern(writer("old"), schema());
+    const oldResultWriter = pattern(schema(), writer("old"));
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        oldArgumentWriter,
+        pattern(writer("new"), schema()),
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        oldResultWriter,
+        pattern(schema(), writer("new")),
+      )
+    ).not.toThrow();
+
+    for (
+      const [previousFile, candidateFile] of [
+        [
+          "/api/patterns/system/example.tsx",
+          "api/patterns/system/example.tsx",
+        ],
+        [
+          "/api/patterns/system/example.tsx",
+          "/patterns/system/example.tsx",
+        ],
+      ] as const
+    ) {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(writer("old", ["save"], previousFile), schema()),
+          pattern(writer("new", ["save"], candidateFile), schema()),
+        )
+      ).not.toThrow();
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(schema(), writer("old", ["save"], previousFile)),
+          pattern(schema(), writer("new", ["save"], candidateFile)),
+        )
+      ).not.toThrow();
+    }
+
+    for (
+      const changedWriter of [
+        writer("new", ["erase"]),
+        writer("new", ["save"], "/other.tsx"),
+      ]
+    ) {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          oldArgumentWriter,
+          pattern(changedWriter, schema()),
+        )
+      ).toThrow(/ifc changed/);
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          oldResultWriter,
+          pattern(schema(), changedWriter),
+        )
+      ).toThrow(/ifc changed/);
+    }
+  });
+
   it("checks referenced definitions inside unchanged complex constraints", () => {
     const withComplexRef = (
       valueType: "number" | "string",

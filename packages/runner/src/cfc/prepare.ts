@@ -82,6 +82,7 @@ import {
 import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
 import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
+  CFC_SOURCE_SCHEMA_MIGRATION_INPUT,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
 import {
@@ -5756,6 +5757,10 @@ export const prepareBoundaryCommit = (
 ): string[] => {
   const reasons: string[] = [];
   const state = tx.getCfcState();
+  const sourceSchemaMigration = state.writePolicyInputs.some((input) =>
+    input.kind === "custom" &&
+    input.name === CFC_SOURCE_SCHEMA_MIGRATION_INPUT
+  );
   // D4: per-target last-overlapping-write bounds over the ordered write-
   // attempt log, built once for the whole boundary pass. Each protected
   // write's input checks quantify over the reads in ITS prefix (see
@@ -6067,6 +6072,7 @@ export const prepareBoundaryCommit = (
           ? storedSchema
           : mergeCfcSchemaEnvelopes(storedSchema, schema, {
             generatedOutputPaths: generatedOutputPaths.get(key),
+            allowAddIntegrityWeakening: sourceSchemaMigration,
           });
       } catch (error) {
         // Tag the additive-required migration incompatibility with a stable

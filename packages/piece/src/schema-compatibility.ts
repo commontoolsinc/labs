@@ -11,6 +11,7 @@ import {
   resolveCfcSchemaRefs,
   validateSchemaDefinition,
   validateSchemaValue,
+  writerClaimFilesCorrespond,
 } from "@commonfabric/runner/cfc";
 import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -150,6 +151,89 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
   } catch {
     return deepEqual(left, right);
   }
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+// Pattern compilation changes the module identity on every source revision.
+// The file and schema path identify the stable writer slot across revisions.
+const writerClaimWithoutModuleIdentity = (
+  policy: Record<string, unknown>,
+): {
+  policy: Record<string, unknown>;
+  identity?: Record<string, unknown>;
+  file?: string;
+} => {
+  const writeAuthorizedBy = policy.writeAuthorizedBy;
+  if (!isRecord(writeAuthorizedBy)) return { policy };
+  const identity = writeAuthorizedBy.__ctWriterIdentityOf;
+  if (!isRecord(identity) || typeof identity.moduleIdentity !== "string") {
+    return { policy };
+  }
+  const {
+    moduleIdentity: _moduleIdentity,
+    file,
+    ...stableIdentity
+  } = identity;
+  return {
+    policy: {
+      ...policy,
+      writeAuthorizedBy: {
+        ...writeAuthorizedBy,
+        __ctWriterIdentityOf: stableIdentity,
+      },
+    },
+    identity,
+    ...(typeof file === "string" ? { file } : {}),
+  };
+};
+
+const cfcPolicyEvolutionIsCompatible = (
+  source: unknown,
+  target: unknown,
+  role: SchemaRole,
+): boolean => {
+  // Pattern evolution may weaken an integrity claim by removing evidence.
+  // Every other policy field remains equal after accounting for a compiled
+  // writer's new module identity.
+  const previous = role === "argument" ? source : target;
+  const candidate = role === "argument" ? target : source;
+  if (previous !== undefined && !isRecord(previous)) return false;
+  if (candidate !== undefined && !isRecord(candidate)) return false;
+
+  const {
+    addIntegrity: previousIntegrity = [],
+    ...previousPolicy
+  } = previous ?? {};
+  const {
+    addIntegrity: candidateIntegrity = [],
+    ...candidatePolicy
+  } = candidate ?? {};
+  const previousWriter = writerClaimWithoutModuleIdentity(previousPolicy);
+  const candidateWriter = writerClaimWithoutModuleIdentity(candidatePolicy);
+  if (
+    !Array.isArray(previousIntegrity) ||
+    !Array.isArray(candidateIntegrity) ||
+    (previousWriter.identity === undefined) !==
+      (candidateWriter.identity === undefined) ||
+    (previousWriter.identity !== undefined &&
+      candidateWriter.identity !== undefined &&
+      (previousWriter.file === undefined || candidateWriter.file === undefined
+        ? previousWriter.file !== candidateWriter.file
+        : !writerClaimFilesCorrespond(
+          previousWriter.file,
+          candidateWriter.file,
+        ))) ||
+    !fabricAwareEqual(previousWriter.policy, candidateWriter.policy)
+  ) {
+    return false;
+  }
+  return candidateIntegrity.every((atom) =>
+    previousIntegrity.some((previousAtom) =>
+      fabricAwareEqual(atom, previousAtom)
+    )
+  );
 };
 
 /**
@@ -418,6 +502,16 @@ function schemaSubsetIssue(
     if (constraintIssue) return constraintIssue;
 
     for (const key of SEMANTIC_EXTENSION_KEYS) {
+      if (
+        key === "ifc" && context.defaultComparison === "evolution" &&
+        cfcPolicyEvolutionIsCompatible(
+          source[key],
+          target[key],
+          context.role,
+        )
+      ) {
+        continue;
+      }
       if (!fabricAwareEqual(source[key], target[key])) {
         return `${path}: ${key} changed`;
       }

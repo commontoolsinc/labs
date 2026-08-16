@@ -215,11 +215,15 @@ const mergeSetLikeIfcArray = (
   existing: unknown,
   candidate: unknown,
   path: string,
+  options: MergeCfcSchemaEnvelopeOptions,
 ): unknown => {
   if (existing === undefined) {
     return candidate;
   }
   if (candidate === undefined) {
+    if (key === "addIntegrity" && options.allowAddIntegrityWeakening) {
+      return undefined;
+    }
     return existing;
   }
 
@@ -249,6 +253,12 @@ const mergeSetLikeIfcArray = (
         ? (candidate as readonly CfcConfClause[]).map(normalizeClause)
         : candidate as readonly unknown[];
       if (!arraySubsetOf(existingArray, candidateArray)) {
+        if (
+          key === "addIntegrity" && options.allowAddIntegrityWeakening &&
+          arraySubsetOf(candidateArray, existingArray)
+        ) {
+          return candidateArray;
+        }
         throw new Error(`${key} cannot be weakened at ${path || "/"}`);
       }
       return mergeArraySet(existingArray, candidateArray);
@@ -310,16 +320,17 @@ const mergeIfc = (
   existing: JSONSchemaObj["ifc"],
   candidate: JSONSchemaObj["ifc"],
   path: string,
+  options: MergeCfcSchemaEnvelopeOptions,
 ): JSONSchemaObj["ifc"] => {
   if (existing === undefined) {
     return candidate;
   }
-  if (candidate === undefined) {
+  if (candidate === undefined && !options.allowAddIntegrityWeakening) {
     return existing;
   }
 
   const existingIfc = existing as Record<string, unknown>;
-  const candidateIfc = candidate as Record<string, unknown>;
+  const candidateIfc = (candidate ?? {}) as Record<string, unknown>;
   const merged: Record<string, unknown> = {};
   for (const key of IFC_KEYS) {
     merged[key] = mergeSetLikeIfcArray(
@@ -327,6 +338,7 @@ const mergeIfc = (
       existingIfc[key],
       candidateIfc[key],
       path,
+      options,
     );
   }
   // `observes` (C5) is a scalar consumption class, not a set-like claim:
@@ -403,6 +415,8 @@ export interface MergeCfcSchemaEnvelopeOptions {
    * preserve older documents.
    */
   generatedOutputPaths?: readonly (readonly string[])[];
+  /** Permit an authenticated source update to remove integrity it minted. */
+  allowAddIntegrityWeakening?: boolean;
 }
 
 const generatedOutputCovers = (
@@ -636,7 +650,7 @@ const mergeSchemaNode = (
     ...(mergedAdditionalProperties !== undefined
       ? { additionalProperties: mergedAdditionalProperties }
       : {}),
-    ifc: mergeIfc(left.ifc, right.ifc, path),
+    ifc: mergeIfc(left.ifc, right.ifc, path, options),
     required: mergeRequired(
       left.required,
       right.required,

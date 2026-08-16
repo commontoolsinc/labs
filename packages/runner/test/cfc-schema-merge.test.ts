@@ -499,6 +499,44 @@ describe("mergeCfcSchemaEnvelopes", () => {
       })
     ).toThrow(/required field value needs a default/);
   });
+
+  it("removes minted integrity only for a source schema migration", () => {
+    const existing = {
+      type: "object",
+      properties: {
+        value: {
+          type: "string",
+          ifc: { addIntegrity: ["reviewed", "verified"] },
+        },
+      },
+    } as const;
+    const candidate = {
+      type: "object",
+      properties: {
+        value: {
+          type: "string",
+          ifc: { addIntegrity: ["reviewed"] },
+        },
+      },
+    } as const;
+    expect(() => mergeCfcSchemaEnvelopes(existing, candidate)).toThrow(
+      /addIntegrity cannot be weakened/,
+    );
+    const reduced = mergeCfcSchemaEnvelopes(existing, candidate, {
+      allowAddIntegrityWeakening: true,
+    }) as JSONSchemaObj;
+    expect(
+      (reduced.properties?.value as JSONSchemaObj).ifc?.addIntegrity,
+    ).toEqual(["reviewed"]);
+
+    const removed = mergeCfcSchemaEnvelopes(existing, {
+      type: "object",
+      properties: { value: { type: "string" } },
+    }, {
+      allowAddIntegrityWeakening: true,
+    }) as JSONSchemaObj;
+    expect((removed.properties?.value as JSONSchemaObj).ifc).toEqual({});
+  });
   it("merges item schemas and object defaults", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "array",

@@ -12,7 +12,10 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
+import {
+  loadStoredCfcEnvelope,
+  readStoredCfcMetadata,
+} from "@commonfabric/runner/cfc";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import { LEGACY_CFC_OPTIONS } from "./cfc-options.ts";
 
@@ -118,6 +121,28 @@ function narrowedOutputProgram(): RuntimeProgram {
         "    [NAME]: 'Compatibility check',",
         "    label: 7,",
         "  }),",
+        ");",
+        "",
+      ].join("\n"),
+    }],
+  };
+}
+
+function integrityOutputProgram(atoms: readonly string[]): RuntimeProgram {
+  const outputType = atoms.length === 0
+    ? "string"
+    : `AddIntegrity<string, readonly [${
+      atoms.map((atom) => JSON.stringify(atom)).join(", ")
+    }]>`;
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { type AddIntegrity, pattern } from 'commonfabric';",
+        `type Output = { label: ${outputType} };`,
+        "export default pattern<{}, Output>(",
+        "  () => ({ label: 'value' as Output['label'] }),",
         ");",
         "",
       ].join("\n"),
@@ -559,5 +584,54 @@ describe("setsrc compatibility preflight", () => {
     await runtime.idle();
     expect((piece.getCell().getAsQueryResult() as { label?: unknown }).label)
       .toBe(7);
+  });
+});
+
+describe("setsrc integrity migration under strict CFC", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("removes stale integrity mints during a source update", async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `strict-integrity-migration-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await pieces.synced();
+
+    const piece = await pieces.create(
+      integrityOutputProgram(["reviewed", "verified"]),
+      { input: {} },
+    );
+    await runtime.idle();
+    await piece.setPattern(integrityOutputProgram(["reviewed"]));
+    await runtime.idle();
+
+    const link = piece.getCell().getAsNormalizedFullLink();
+    const stored = loadStoredCfcEnvelope(runtime.readTx(), {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+    });
+    expect(stored.status).toBe("loaded");
+    if (stored.status === "loaded") {
+      expect(
+        (stored.schema as {
+          properties?: { label?: { ifc?: { addIntegrity?: unknown[] } } };
+        }).properties?.label?.ifc?.addIntegrity,
+      ).toEqual(["reviewed"]);
+    }
   });
 });

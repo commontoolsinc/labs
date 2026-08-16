@@ -15,6 +15,7 @@ import {
 } from "@commonfabric/memory/v2";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { CFC_SOURCE_SCHEMA_MIGRATION_INPUT } from "./cfc/migration-reason.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   isObjectNotArray,
@@ -2255,6 +2256,15 @@ export class Runner {
     validationOptions: SetupValidationOptions = {},
   ): SetupResult<R> {
     const tx = providedTx ?? this.runtime.edit();
+    if (validationOptions.pieceSourceTransition !== undefined) {
+      tx.recordCfcWritePolicyInput({
+        kind: "custom",
+        name: CFC_SOURCE_SCHEMA_MIGRATION_INPUT,
+        value: {
+          revisionId: validationOptions.pieceSourceTransition.revisionId,
+        },
+      });
+    }
 
     logger.debug("cell-info", () => [
       `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
