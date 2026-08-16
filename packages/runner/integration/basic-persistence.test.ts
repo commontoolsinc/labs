@@ -1,6 +1,10 @@
 #!/usr/bin/env -S deno run -A
 
-import { deepEqual, Runtime } from "@commonfabric/runner";
+import {
+  deepEqual,
+  experimentalOptionsFromEnv,
+  Runtime,
+} from "@commonfabric/runner";
 import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema } from "@commonfabric/runner";
@@ -19,6 +23,11 @@ async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
     apiUrl: new URL(API_URL),
+    // The posture this client runs (server-execution v2, testing.md §2):
+    // declared from the environment so the CI ON lane's test process
+    // really runs the ON client arm (a bare construction resolved OFF and
+    // made the ON lane a MIXED posture — P7 review finding 7); unset = OFF.
+    experimental: experimentalOptionsFromEnv(Deno.env.get),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(API_URL),
@@ -50,6 +59,11 @@ async function test() {
   // Second runtime - fetch data
   const runtime2 = new Runtime({
     apiUrl: new URL(API_URL),
+    // The posture this client runs (server-execution v2, testing.md §2):
+    // declared from the environment so the CI ON lane's test process
+    // really runs the ON client arm (a bare construction resolved OFF and
+    // made the ON lane a MIXED posture — P7 review finding 7); unset = OFF.
+    experimental: experimentalOptionsFromEnv(Deno.env.get),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(API_URL),

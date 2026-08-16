@@ -2,14 +2,18 @@
 
 // The EXPLICIT per-phase skip lists of the server-execution v2 ON arm
 // (docs/specs/server-side-execution/testing.md §2): in CI the integration
-// suites run twice — since the plan's Phase 7 flip the DEFAULT lanes (flag
-// unset = the first-party default, ON) ARE the ON arm, and the
-// explicit-`EXPERIMENTAL_SERVER_EXECUTION=false` lanes are the OFF
-// regression guard (byte-identical to the pre-flip posture) — and the ON
-// arm may skip a test only by listing it here, with the plan phase whose
-// not-yet-landed surface it exercises and a reason. Never by silent
-// filtering: the CI step prints every skip from this file, and an empty
-// list means the ON arm runs the full suite.
+// suites run twice — the DEFAULT lanes (flag unset = the first-party
+// default, which is OFF: Phase 7 landed flip-READY with the constant
+// `false` by owner ruling 2026-08-16, the flip being its own later PR) and
+// the explicit-`EXPERIMENTAL_SERVER_EXECUTION=true` ON lanes (the toolshed
+// server ON, the test processes ON, AND the binary's baked browser shell
+// ON-built — `build-toolshed-on`) — and the ON arm may skip a test only by
+// listing it here, with the plan phase whose not-yet-landed surface it
+// exercises and a reason. Never by silent filtering: the CI step prints
+// every skip from this file, and an empty list means the ON arm runs the
+// full suite. When the flip PR lands the lane roles swap (default = ON
+// with this list; explicit-`false` = the OFF regression guard on an
+// OFF-built binary) — the flip PR MUST land with this list EMPTY.
 //
 // An entry retires when its phase lands (docs/plans/server-execution-v2.md);
 // a file listed here that no longer exists fails the run, so the lists
@@ -38,10 +42,23 @@ export type ServerExecutionOnSkip = {
   /** Test file, relative to the suite's package root (the directory the
    * suite's `deno test` runs from), e.g. "integration/counter.test.ts". */
   file: string;
-  /** The plan phase that, once landed, unskips this file. */
+  /** The plan phase that, once landed, unskips this file (or step). */
   phase: ServerExecutionPhase;
-  /** Why the ON arm cannot run this file before that phase. */
+  /** Why the ON arm cannot run this file (or step) before that phase. */
   reason: string;
+  /**
+   * STEP-LEVEL entry (Phase 7 fixer, 2026-08-16): the exact name of ONE
+   * `it`/step inside `file` that the ON arm skips while the REST of the
+   * file runs. The file is NOT dropped (`--ignore` / `--filter` leave it
+   * in); instead the test file itself guards that step with
+   * {@link serverExecutionOnStepSkip} — so the guard is BOUND to this entry
+   * (remove the entry and the step runs again) and the validator requires
+   * the file to name the step AND call the guard. For a one-file suite
+   * (runtime-client's `integration/client.test.ts`, 45 steps) this keeps
+   * the ON lane's coverage instead of turning the whole lane vacuous over
+   * one red step. Printed by the CI step like every other entry.
+   */
+  step?: string;
 };
 
 const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
@@ -71,11 +88,55 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * the load pass runs under the flush deadline), so the surface runs —
  * carrying the in-CI amplification-ratio gate and the pattern-updater
  * CHECK-half witness (verification-coverage.md's closed OW19 row).
- * Every list is EMPTY but for the ONE topics-navigation entry below
- * (Phase 4's mixed-posture entry, re-justified by Phase 7 — the ON
- * shell build landed with the flip, the inherited red did not lift):
- * the ON arm otherwise runs the full suites.
+ * Every list is EMPTY but for FOUR `phase-7` entries: three `patterns`
+ * — topics-navigation (Phase 4's mixed-posture entry, re-justified by
+ * Phase 7 — the ON shell build now runs in the ON lanes, the inherited
+ * red did not lift) and, added by the Phase 7 fixer on the independent
+ * review (2026-08-16), the two two-browser gates
+ * `cfc-group-chat-demo-two-browsers` and `lunch-poll-vote`, red under
+ * the FULL ON posture on an UNATTRIBUTED client-side
+ * `scheduler-non-settling` loop (verification-coverage.md OW32) — and
+ * one `runner` entry, `pattern-and-data-persistence`, red once the
+ * runner integration clients DECLARE the ON posture (the lane was mixed
+ * before; verification-coverage.md OW33) — plus two STEP-level
+ * `runtime-client` entries in `integration/client.test.ts` (the CT-1606
+ * PerUser header render, 3/3 red; the single-navigateTo dispatch, 1/3
+ * red) whose file otherwise runs ON. The ON arm otherwise runs the full
+ * suites; the flip PR lands only once this list is empty again.
  */
+/**
+ * The LOUD reason the two two-browser gates carry (Phase 7 fixer,
+ * 2026-08-16, on the independent review's findings 1 and 2). Named once
+ * so the two entries cannot drift apart; the mechanism is stated AS
+ * CHARACTERIZED by the review's evidence, and NOTHING here attributes it.
+ */
+const TWO_BROWSER_NON_SETTLING_REASON =
+  "Phase 7 (2026-08-16): under the FULL ON posture (toolshed server ON, " +
+  "test process ON, browser shell ON-built) this two-browser gate STALLS " +
+  "its 300 s budget — reproduced 2/2 at the Phase-7 head AND at the " +
+  "unmodified Phase-6 base by the P7 independent review " +
+  "(review-p7-logs/tb-*/lunch-* stats + toolshed logs): the SERVING LOOP " +
+  "IS QUIET (waves 20–26, derivedCommits 19–25, events 2/2 " +
+  "appended/processed, watermarkLag 1–2 — no storm; wavesBudgetExhausted " +
+  "12–16 of those waves, but the single-browser counter gate exhausts " +
+  "2/5 with no client loop, so exhaustion alone is not the discriminator) " +
+  "while BOTH browsers run a CLIENT-SIDE `scheduler-non-settling` loop " +
+  "(every ~6.6 s; 40–56 k client action runs / 5 min at head and base; " +
+  "runner/start/resumeCellSync n=458–644 piece re-starts). The mechanism " +
+  "is UNATTRIBUTED — it is NOT evidenced as OW17 (the SpaceReplica " +
+  "scope-name collapse; the 4,427-wave storm signature exists ONLY on the " +
+  "builder's tree with the reverted OW29 extensions applied) — and its " +
+  "TRIAGE IS OWED FIRST in the flip's ordered gates " +
+  "(verification-coverage.md OW32; discriminating experiment: a " +
+  "`commonfabric.detectNonIdempotent()` capture in one browser plus a " +
+  "debug-level `wave-budget-exhausted` trace naming the non-quiescing " +
+  "server actions). Skipped rather than red-by-design so the explicit-ON " +
+  "lane stays green-with-visible-skips and keeps exercising everything " +
+  "else ON; NOT green-by-vacuity — this file is RED under the full ON " +
+  "posture. Lifts when OW32's triage lands and the gate greens 5/5 " +
+  "fresh-store under the full ON posture; the flip PR needs this list " +
+  "EMPTY.";
+
 export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
   ServerExecutionOnSkip[]
@@ -89,11 +150,14 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     {
       file: "integration/topics-navigation.test.ts",
       phase: "phase-7",
-      reason: "Phase 7 (2026-08-15): the ON shell build now LANDS by the " +
-        "flip (the default lane's binary bakes the shell ON), which " +
+      reason: "Phase 7 (2026-08-15; lane roles re-tensed 2026-08-16 — the " +
+        "flip landed DARK, so this runs in the explicit-true ON lanes on " +
+        "the ON-built binary, not in the default lanes): the ON shell " +
+        "build now RUNS in CI (`build-toolshed-on` bakes the shell ON for " +
+        "the ON lanes), which " +
         "discharges the first of this entry's two lifting conditions — " +
         "the second (the inherited red) does NOT lift: under the full " +
-        "post-flip default posture the file fails FAST at the " +
+        "ON posture the file fails FAST at the " +
         "controller's prop set (`updated result does not match its " +
         "write destination: missing required property myName`, " +
         "PiecePropIo.set → validateWriteDestination), reproduced on the " +
@@ -115,9 +179,99 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "lands in CI (verification-coverage.md OW25) AND the " +
         "inherited red is fixed.",
     },
+    {
+      file: "integration/cfc-group-chat-demo-two-browsers.test.ts",
+      phase: "phase-7",
+      reason: TWO_BROWSER_NON_SETTLING_REASON,
+    },
+    {
+      file: "integration/lunch-poll-vote.test.ts",
+      phase: "phase-7",
+      reason: TWO_BROWSER_NON_SETTLING_REASON +
+        " This gate ADDITIONALLY hits, at step 1, the served `#profile` " +
+        "wish running once identity-less and throwing (`home-space " +
+        "resolution on a serving runtime requires the run's demanding " +
+        "identity`; the OW29 space-root-demander gap is live at FIRST " +
+        "demand, not at the join click) while the flag-ON client — " +
+        "reference-only for the served sidecar since P7's fix (2) — waits " +
+        "forever for a sidecar the server cannot produce (`wish/phase/" +
+        "send-error` ~13.6/s; the review's `lunch-head-default-run{1,2}` " +
+        "logs). Fix (2) without OW29 turned a racy-but-rendering client " +
+        "into a wait-forever client; the P7 build's '(1)+(2)+(3) → join " +
+        "UI renders' narrative did NOT reproduce (0/2 at head).",
+    },
   ],
-  runner: [],
-  "runtime-client": [],
+  runner: [
+    {
+      file: "integration/pattern-and-data-persistence.test.ts",
+      phase: "phase-7",
+      reason: "Phase 7 (2026-08-16, P7 fixer on the independent review's " +
+        "finding 7): the runner integration tests that talk to the lane's " +
+        "toolshed now DECLARE the posture from the env, so under the ON lane " +
+        "this Deno client really runs the ON client arm — and this file is " +
+        "RED there (reproduced locally, uniform ON: 13/14 green, this one " +
+        "red; it was 'green ON' only while the lane ran a MIXED posture, an " +
+        "OFF client against an ON server). Mechanism as observed: Phase 3 " +
+        "starts a NEW piece, `pull()`s its result cell and reads " +
+        "`getAsQueryResult().sum` — 15 under the derive-and-commit client " +
+        "(OFF), `undefined` under ON. The test holds no sink on the result " +
+        "(the sink is the demand — serving-loop.md §1: pull-based laziness), " +
+        "so nothing served the derivation, and the ON client's OWN " +
+        "speculative run did not surface the value through this read path " +
+        "either — UNTRIAGED whether the Deno-client speculation overlay " +
+        "should have (verification-coverage.md OW33; the same family shows " +
+        "as `derive_array_leak`'s own 'Counter value is 0, expected 50' " +
+        "warning under ON — green only because that test asserts memory). " +
+        "The remaining runner integration files that serve toolshed's " +
+        "`app.ts` in-process (no ExecutorHost) are single-process harnesses, " +
+        "OFF by construction in either lane. Skipped rather than red-by-" +
+        "design; lifts when OW33 is triaged and this file greens under the " +
+        "uniform ON posture; the flip PR needs this list EMPTY.",
+    },
+  ],
+  "runtime-client": [
+    // STEP-LEVEL entries (the suite is ONE file with 45 steps; dropping the
+    // file would make the runtime-client ON lane vacuous). The rest of
+    // `client.test.ts` runs ON — the worker DECLARES the posture from the
+    // env since the P7 fixer (finding 7); these two steps are red under the
+    // uniform ON posture, reproduced 3/3 and 1/3 respectively against a
+    // local ON toolshed (2026-08-16).
+    {
+      file: "integration/client.test.ts",
+      step:
+        "renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
+      phase: "phase-7",
+      reason: "Phase 7 (2026-08-16, P7 fixer on the independent review's " +
+        "finding 7): with the worker declaring the ON posture this step " +
+        "never reaches its FIRST render within 15 s (3/3 red under uniform " +
+        "ON; green under the mixed posture the lane ran before) — a page " +
+        "whose header renders a `computed` over a `PerUser<myName>` input " +
+        "(the SAME PerUser shape topics-navigation fails on under the full " +
+        "ON posture). Mechanism UNATTRIBUTED — the Deno-worker client's " +
+        "per-user derivation neither speculates into the render nor " +
+        "arrives served in time; folded into verification-coverage.md OW33 " +
+        "(the ON-posture Deno-client family) beside topics-navigation's " +
+        "inherited red. Skipped at STEP granularity so the other 43 steps " +
+        "keep running ON; lifts when OW33's triage greens it 5/5; the flip " +
+        "PR needs this list EMPTY.",
+    },
+    {
+      file: "integration/client.test.ts",
+      step:
+        "dispatches one navigateTo when a rendered handler changes local state",
+      phase: "phase-7",
+      reason: "Phase 7 (2026-08-16, P7 fixer on the independent review's " +
+        "finding 7): under the uniform ON posture this step is FLAKY (1/3 " +
+        "red: expected ONE navigateTo dispatch, observed TWO — the " +
+        "double-dispatch class the F10 handler-fork contract exists to " +
+        "prevent, here on a Deno-worker client whose handler fire commits " +
+        "the event while the served consequence also navigates). " +
+        "UNATTRIBUTED; folded into verification-coverage.md OW33. Skipped " +
+        "at STEP granularity (the other steps keep running ON) rather than " +
+        "left to flake the lane; lifts when OW33's triage greens it 10/10; " +
+        "the flip PR needs this list EMPTY.",
+    },
+  ],
   shell: [],
 };
 
@@ -125,13 +279,78 @@ export const isServerExecutionSuite = (
   value: string,
 ): value is ServerExecutionSuite => value in SUITE_PACKAGE_DIR;
 
-/** The `--ignore=` flag for a suite's `deno test`, or "" with no skips. */
+/**
+ * The `--ignore=` flag for a suite's `deno test`, or "" with no skips.
+ *
+ * BINDS ONLY WHEN DENO DISCOVERS THE FILES ITSELF (Phase 7 fixer,
+ * 2026-08-16 — found while landing the two-browser entries): `deno test
+ * --ignore=<file>` filters DISCOVERED modules (a directory argument, or a
+ * glob Deno expands because it reached deno QUOTED), and silently ignores
+ * nothing when the same file arrives as an EXPLICIT positional argument —
+ * which is what a shell-expanded `./integration/*.test.ts` and the pattern
+ * shards' `"${TEST_FILES[@]}"` both are. So the package `integration`
+ * tasks (runner, runtime-client, shell) quote their glob, and the pattern
+ * shards go through {@link serverExecutionOnFilterFiles} (`--filter`)
+ * instead of this flag; the pins in the test file spawn deno on both
+ * shapes. Before this fix every "skipped" entry since Phase 4 (topics-
+ * navigation) actually RAN — unnoticed because the ON lanes ran a mixed
+ * posture under which it passed.
+ */
 export const serverExecutionOnIgnoreArg = (
   suite: ServerExecutionSuite,
 ): string => {
-  const skips = SERVER_EXECUTION_ON_SKIPS[suite];
+  const skips = SERVER_EXECUTION_ON_SKIPS[suite].filter((skip) =>
+    skip.step === undefined
+  );
   if (skips.length === 0) return "";
   return `--ignore=${skips.map((skip) => skip.file).join(",")}`;
+};
+
+/**
+ * The step-level guard a test FILE calls (see `ServerExecutionOnSkip.step`):
+ * the entry for `step` in `file`, or undefined when the ON arm runs it.
+ * Callers pass `ignore: serverExecutionOnStepSkip(...) !== undefined` only
+ * when the process actually runs the ON posture (they read
+ * EXPERIMENTAL_SERVER_EXECUTION themselves — the OFF arm never skips), and
+ * log the entry's reason when they skip, so the skip is never silent.
+ */
+export const serverExecutionOnStepSkip = (
+  suite: ServerExecutionSuite,
+  file: string,
+  step: string,
+): ServerExecutionOnSkip | undefined =>
+  SERVER_EXECUTION_ON_SKIPS[suite].find((skip) =>
+    skip.file === file && skip.step === step
+  );
+
+/** A candidate test path as the shard selector or a shell prints it
+ * (`./integration/x.test.ts`, `integration/x.test.ts`), normalized to the
+ * skip entries' package-relative form. */
+const normalizeCandidate = (file: string): string => file.replace(/^\.\//, "");
+
+/**
+ * The EXPLICIT-FILE shape (the pattern shards): the candidate files minus
+ * the suite's skip entries, in the input order, plus the entries that
+ * were actually dropped from THIS list (so the run step can print what it
+ * skipped here, not just the whole list). Files are compared after
+ * normalizing a leading `./`.
+ */
+export const serverExecutionOnFilterFiles = (
+  suite: ServerExecutionSuite,
+  candidates: readonly string[],
+): { files: string[]; skipped: ServerExecutionOnSkip[] } => {
+  const skips = SERVER_EXECUTION_ON_SKIPS[suite].filter((skip) =>
+    skip.step === undefined
+  );
+  const byFile = new Map(skips.map((skip) => [skip.file, skip]));
+  const files: string[] = [];
+  const skipped: ServerExecutionOnSkip[] = [];
+  for (const candidate of candidates) {
+    const skip = byFile.get(normalizeCandidate(candidate));
+    if (skip === undefined) files.push(candidate);
+    else if (!skipped.includes(skip)) skipped.push(skip);
+  }
+  return { files, skipped };
 };
 
 /** Human-readable report of a suite's skips, one line per entry. */
@@ -143,7 +362,9 @@ export const serverExecutionOnSkipReport = (
     return `[server-execution ON arm] ${suite}: no skips — full suite runs.`;
   }
   const lines = skips.map((skip) =>
-    `[server-execution ON arm] ${suite}: SKIP ${skip.file} (until ${skip.phase}) — ${skip.reason}`
+    skip.step === undefined
+      ? `[server-execution ON arm] ${suite}: SKIP ${skip.file} (until ${skip.phase}) — ${skip.reason}`
+      : `[server-execution ON arm] ${suite}: SKIP-STEP ${skip.file} :: ${skip.step} (until ${skip.phase}; the rest of the file runs) — ${skip.reason}`
   );
   return lines.join("\n");
 };
@@ -165,20 +386,44 @@ export const validateServerExecutionOnSkips = async (
   ) {
     const seen = new Set<string>();
     for (const skip of skips) {
-      if (seen.has(skip.file)) {
-        problems.push(`${suite}: duplicate skip entry for ${skip.file}`);
+      const key = skip.step === undefined
+        ? skip.file
+        : `${skip.file}\0${skip.step}`;
+      if (seen.has(key)) {
+        problems.push(
+          `${suite}: duplicate skip entry for ${skip.file}` +
+            (skip.step === undefined ? "" : ` :: ${skip.step}`),
+        );
       }
-      seen.add(skip.file);
+      seen.add(key);
       const path = new URL(
         `${SUITE_PACKAGE_DIR[suite]}/${skip.file}`,
         repoRoot,
       );
+      let contents: string | undefined;
       try {
-        await Deno.stat(path);
+        contents = await Deno.readTextFile(path);
       } catch {
         problems.push(
           `${suite}: skip entry names a missing file: ${skip.file}`,
         );
+      }
+      // A step entry must be BOUND: the file names the step and calls the
+      // guard, else the entry is decoration and the step silently runs (or
+      // a renamed step silently unskips).
+      if (skip.step !== undefined && contents !== undefined) {
+        if (!contents.includes(skip.step)) {
+          problems.push(
+            `${suite}: step skip entry names a step ${skip.file} does not ` +
+              `contain: ${JSON.stringify(skip.step)}`,
+          );
+        }
+        if (!contents.includes("serverExecutionOnStepSkip(")) {
+          problems.push(
+            `${suite}: ${skip.file} carries a step skip entry but never ` +
+              "calls serverExecutionOnStepSkip — the entry would be decoration",
+          );
+        }
       }
     }
   }
@@ -189,7 +434,14 @@ export const validateServerExecutionOnSkips = async (
  * CLI body, split from the `import.meta.main` wrapper so tests can drive it
  * in-process (the same coverage-driven split as `tasks/test.ts`). The skip
  * report goes to `io.error` (stderr) so an `$( )` capture in a CI step picks
- * up only the `--ignore` flag from `io.log` (stdout); the step shows both.
+ * up only the payload from `io.log` (stdout); the step shows both.
+ *
+ * Two shapes:
+ * - `<suite>` — prints the `--ignore=` flag (for a `deno test` that
+ *   DISCOVERS its files: the package `integration` tasks' quoted glob);
+ * - `<suite> --filter <file>...` — prints the candidate files minus the
+ *   skips, one per line (for a `deno test` fed EXPLICIT files: the
+ *   pattern shards), reporting on stderr which entries this list dropped.
  */
 export const main = async (
   args: string[],
@@ -214,6 +466,33 @@ export const main = async (
     return 1;
   }
   io.error(serverExecutionOnSkipReport(suite));
+  if (args[1] === "--filter") {
+    const { files, skipped } = serverExecutionOnFilterFiles(
+      suite,
+      args.slice(2),
+    );
+    for (const skip of skipped) {
+      io.error(
+        `[server-execution ON arm] ${suite}: DROPPED ${skip.file} from this ` +
+          `file list (until ${skip.phase})`,
+      );
+    }
+    if (skipped.length === 0) {
+      io.error(
+        `[server-execution ON arm] ${suite}: no listed skip is in this ` +
+          "file list — every candidate runs.",
+      );
+    }
+    for (const file of files) io.log(file);
+    return 0;
+  }
+  if (args.length > 1) {
+    io.error(
+      `Unexpected arguments ${JSON.stringify(args.slice(1))}; expected ` +
+        "<suite> or <suite> --filter <file>...",
+    );
+    return 1;
+  }
   const arg = serverExecutionOnIgnoreArg(suite);
   if (arg !== "") io.log(arg);
   return 0;

@@ -1,11 +1,13 @@
-import { assertEquals, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertMatch } from "@std/assert";
 import {
   isServerExecutionSuite,
   main,
   SERVER_EXECUTION_ON_SKIPS,
+  serverExecutionOnFilterFiles,
   serverExecutionOnIgnoreArg,
   type ServerExecutionOnSkip,
   serverExecutionOnSkipReport,
+  serverExecutionOnStepSkip,
   validateServerExecutionOnSkips,
 } from "./server-execution-on-skips.ts";
 
@@ -126,23 +128,163 @@ Deno.test("main: no arguments behaves like an unknown suite", async () => {
 });
 
 Deno.test("main: empty lists print the report on stderr and nothing on stdout", async () => {
-  // The runner suite's list is empty (patterns carries stage F's
-  // two-deriver-interim entry).
+  // The shell suite's list is empty (patterns and runner carry the
+  // Phase-7 entries).
   const { out, err, io } = captureIo();
-  assertEquals(await main(["runner"], io), 0);
+  assertEquals(await main(["shell"], io), 0);
   assertEquals(out, []);
-  assertMatch(err[0], /runner: no skips — full suite runs/);
+  assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list holds exactly the topics-navigation entry (Phase 4's mixed-posture entry, re-justified by Phase 7: the ON shell build landed with the flip, the inherited red did not lift) — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list holds exactly THREE phase-7 entries — topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) plus the two two-browser gates the P7 independent review found red under the full ON posture (client-side scheduler-non-settling loop, UNATTRIBUTED — OW32) — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  assertEquals(out, ["--ignore=integration/topics-navigation.test.ts"]);
+  assertEquals(out, [
+    "--ignore=integration/topics-navigation.test.ts," +
+    "integration/cfc-group-chat-demo-two-browsers.test.ts," +
+    "integration/lunch-poll-vote.test.ts",
+  ]);
+  const report = err[0];
   assertMatch(
-    err[0],
+    report,
     /patterns: SKIP integration\/topics-navigation\.test\.ts \(until phase-7\)/,
   );
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
+  assertMatch(
+    report,
+    /patterns: SKIP integration\/cfc-group-chat-demo-two-browsers\.test\.ts \(until phase-7\)/,
+  );
+  assertMatch(
+    report,
+    /patterns: SKIP integration\/lunch-poll-vote\.test\.ts \(until phase-7\)/,
+  );
+  // The reason is LOUD and states the mechanism as characterized, not
+  // as attributed: the client-side non-settling loop, the quiet serving
+  // loop, and the owed triage row.
+  for (const gate of ["cfc-group-chat-demo-two-browsers", "lunch-poll-vote"]) {
+    const entry = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
+      skip.file === `integration/${gate}.test.ts`
+    );
+    if (entry === undefined) throw new Error(`missing ${gate} entry`);
+    assertEquals(entry.phase, "phase-7");
+    assertMatch(entry.reason, /scheduler-non-settling/);
+    assertMatch(entry.reason, /UNATTRIBUTED/);
+    assertMatch(entry.reason, /NOT evidenced as OW17/);
+    assertMatch(entry.reason, /OW32/);
+    assertMatch(entry.reason, /flip PR needs this list EMPTY/);
+  }
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 3);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
+});
+
+Deno.test("main: the runtime-client list holds exactly two STEP-level entries in integration/client.test.ts (the file itself RUNS on the ON arm — no --ignore, no --filter drop; the steps are guarded in-file, bound to these entries) — printed loudly, never silent", async () => {
+  const { out, err, io } = captureIo();
+  assertEquals(await main(["runtime-client"], io), 0);
+  // Step entries never drop the file: no --ignore flag on stdout…
+  assertEquals(out, []);
+  // …and the filter shape keeps the file too.
+  const { files, skipped } = serverExecutionOnFilterFiles("runtime-client", [
+    "./integration/client.test.ts",
+  ]);
+  assertEquals(files, ["./integration/client.test.ts"]);
+  assertEquals(skipped, []);
+  // The report names both steps loudly.
+  const report = err[0];
+  assertMatch(
+    report,
+    /runtime-client: SKIP-STEP integration\/client\.test\.ts :: renders PerUser-derived computed JSX inside cf-screen header slot \(CT-1606\) \(until phase-7; the rest of the file runs\)/,
+  );
+  assertMatch(
+    report,
+    /runtime-client: SKIP-STEP integration\/client\.test\.ts :: dispatches one navigateTo when a rendered handler changes local state \(until phase-7; the rest of the file runs\)/,
+  );
+  const entries = SERVER_EXECUTION_ON_SKIPS["runtime-client"];
+  assertEquals(entries.length, 2);
+  for (const entry of entries) {
+    assertEquals(entry.file, "integration/client.test.ts");
+    assertEquals(entry.phase, "phase-7");
+    assert(entry.step !== undefined);
+    assertMatch(entry.reason, /UNATTRIBUTED/);
+    assertMatch(entry.reason, /OW33/);
+    assertMatch(entry.reason, /flip PR needs this list EMPTY/);
+    // The guard lookup the test file calls resolves exactly this entry.
+    assertEquals(
+      serverExecutionOnStepSkip(
+        "runtime-client",
+        "integration/client.test.ts",
+        entry.step,
+      ),
+      entry,
+    );
+  }
+  assertEquals(
+    serverExecutionOnStepSkip(
+      "runtime-client",
+      "integration/client.test.ts",
+      "some step that is not listed",
+    ),
+    undefined,
+  );
+});
+
+Deno.test("validation binds a step entry: the file must name the step and call the guard", async () => {
+  const lists: Record<string, ServerExecutionOnSkip[]> = {
+    patterns: [],
+    runner: [
+      // A real file that neither names this step nor calls the guard.
+      {
+        file: "integration/basic-persistence.test.ts",
+        step: "a step basic-persistence.test.ts does not contain",
+        phase: "phase-7",
+        reason: "placeholder",
+      },
+    ],
+    "runtime-client": [
+      // Duplicate step entries are flagged like duplicate files.
+      {
+        file: "integration/client.test.ts",
+        step:
+          "renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
+        phase: "phase-7",
+        reason: "placeholder",
+      },
+      {
+        file: "integration/client.test.ts",
+        step:
+          "renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
+        phase: "phase-7",
+        reason: "placeholder",
+      },
+    ],
+    shell: [],
+  };
+  const problems = await validateServerExecutionOnSkips(
+    repoRoot,
+    lists as typeof SERVER_EXECUTION_ON_SKIPS,
+  );
+  assertEquals(problems, [
+    'runner: step skip entry names a step integration/basic-persistence.test.ts does not contain: "a step basic-persistence.test.ts does not contain"',
+    "runner: integration/basic-persistence.test.ts carries a step skip entry but never calls serverExecutionOnStepSkip — the entry would be decoration",
+    "runtime-client: duplicate skip entry for integration/client.test.ts :: renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)",
+  ]);
+});
+
+Deno.test("main: the runner list holds exactly the pattern-and-data-persistence entry — red under the UNIFORM ON posture once the runner integration clients declare it (the lane was MIXED before; OW33) — printed loudly, never silent", async () => {
+  const { out, err, io } = captureIo();
+  assertEquals(await main(["runner"], io), 0);
+  assertEquals(out, [
+    "--ignore=integration/pattern-and-data-persistence.test.ts",
+  ]);
+  assertMatch(
+    err[0],
+    /runner: SKIP integration\/pattern-and-data-persistence\.test\.ts \(until phase-7\)/,
+  );
+  const [entry] = SERVER_EXECUTION_ON_SKIPS.runner;
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.runner.length, 1);
+  assertEquals(entry.phase, "phase-7");
+  assertMatch(entry.reason, /UNIFORM|uniform ON/);
+  assertMatch(entry.reason, /MIXED posture/);
+  assertMatch(entry.reason, /OW33/);
+  assertMatch(entry.reason, /flip PR needs this list EMPTY/);
 });
 
 Deno.test("main: populated lists emit the --ignore flag on stdout", async () => {
@@ -186,5 +328,160 @@ Deno.test("main: a stale entry fails validation before any report", async () => 
     );
   } finally {
     SERVER_EXECUTION_ON_SKIPS.shell = saved;
+  }
+});
+
+Deno.test("--filter: the explicit-file shape drops the suite's skips from a candidate list (normalizing a leading ./), keeps order, and reports only what it dropped from THIS list", () => {
+  const saved = SERVER_EXECUTION_ON_SKIPS.patterns;
+  SERVER_EXECUTION_ON_SKIPS.patterns = [
+    {
+      file: "integration/b.test.ts",
+      phase: "phase-7",
+      reason: "placeholder",
+    },
+    {
+      file: "integration/zzz-elsewhere.test.ts",
+      phase: "phase-7",
+      reason: "in another shard",
+    },
+  ];
+  try {
+    const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
+      "./integration/a.test.ts",
+      "./integration/b.test.ts",
+      "integration/c.test.ts",
+    ]);
+    assertEquals(files, ["./integration/a.test.ts", "integration/c.test.ts"]);
+    assertEquals(skipped.map((skip) => skip.file), ["integration/b.test.ts"]);
+  } finally {
+    SERVER_EXECUTION_ON_SKIPS.patterns = saved;
+  }
+});
+
+Deno.test("main --filter: prints the surviving files on stdout, the report + DROPPED lines on stderr; rejects other extra arguments", async () => {
+  const saved = SERVER_EXECUTION_ON_SKIPS.patterns;
+  SERVER_EXECUTION_ON_SKIPS.patterns = [
+    {
+      file: "integration/counter.test.ts",
+      phase: "phase-7",
+      reason: "placeholder for the filter-shape test",
+    },
+  ];
+  try {
+    const { out, err, io } = captureIo();
+    assertEquals(
+      await main([
+        "patterns",
+        "--filter",
+        "./integration/counter.test.ts",
+        "./integration/other.test.ts",
+      ], io),
+      0,
+    );
+    assertEquals(out, ["./integration/other.test.ts"]);
+    assertMatch(
+      err[0],
+      /SKIP integration\/counter\.test\.ts \(until phase-7\)/,
+    );
+    assertMatch(
+      err[1],
+      /DROPPED integration\/counter\.test\.ts from this file list/,
+    );
+    // Nothing of the list is skip-listed: say so, run everything.
+    const none = captureIo();
+    assertEquals(
+      await main(
+        ["patterns", "--filter", "./integration/other.test.ts"],
+        none.io,
+      ),
+      0,
+    );
+    assertEquals(none.out, ["./integration/other.test.ts"]);
+    assertMatch(none.err[1], /no listed skip is in this file list/);
+    // An unknown extra argument is refused, never silently treated as a file.
+    const bad = captureIo();
+    assertEquals(await main(["patterns", "--bogus"], bad.io), 1);
+    assertMatch(bad.err.at(-1) ?? "", /Unexpected arguments/);
+  } finally {
+    SERVER_EXECUTION_ON_SKIPS.patterns = saved;
+  }
+});
+
+// The mechanism's BINDING, pinned by spawning deno on both shapes (Phase 7
+// fixer, 2026-08-16): `deno test --ignore=<file>` filters only the modules
+// deno DISCOVERS — a glob it expands itself — and silently ignores nothing
+// when the same file arrives as an explicit argument (a shell-expanded glob;
+// the pattern shards' file list). Until this pin, every ON-arm skip since
+// Phase 4 rode a shell-expanded glob and never took effect. If deno's
+// semantics ever change, these two tests say which shape moved.
+async function collectedTestFiles(args: string[], cwd: string) {
+  const command = new Deno.Command(Deno.execPath(), {
+    args: ["test", "--no-lock", "--no-check", ...args],
+    cwd,
+    // Plain output: the "running N tests from <file>" lines are matched
+    // below and must not carry color escapes.
+    env: { NO_COLOR: "1" },
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const output = await command.output();
+  const text = new TextDecoder().decode(output.stdout) +
+    new TextDecoder().decode(output.stderr);
+  const files = [...text.matchAll(/running \d+ tests? from (\S+)/g)]
+    .map((match) => match[1]).sort();
+  return { files, success: output.success, text };
+}
+
+Deno.test("deno test --ignore BINDS to a QUOTED glob deno expands (the package integration tasks' shape) and NOT to explicit file arguments (why the pattern shards filter the list instead)", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "sx-on-skips-ignore-" });
+  try {
+    await Deno.mkdir(`${dir}/integration`);
+    await Deno.writeTextFile(`${dir}/deno.json`, "{}\n");
+    for (const name of ["a", "b"]) {
+      await Deno.writeTextFile(
+        `${dir}/integration/${name}.test.ts`,
+        `Deno.test("${name}", () => {});\n`,
+      );
+    }
+    // Quoted glob (deno expands): the ignore drops b.
+    const quoted = await collectedTestFiles(
+      ["--ignore=integration/b.test.ts", "./integration/*.test.ts"],
+      dir,
+    );
+    assert(quoted.success, quoted.text);
+    assertEquals(quoted.files, ["./integration/a.test.ts"]);
+    // Explicit files (what a shell-expanded glob or a shard list hands
+    // deno): the SAME ignore flag drops nothing — the shape the pattern
+    // shards therefore avoid.
+    const explicit = await collectedTestFiles(
+      [
+        "--ignore=integration/b.test.ts",
+        "./integration/a.test.ts",
+        "./integration/b.test.ts",
+      ],
+      dir,
+    );
+    assert(explicit.success, explicit.text);
+    assertEquals(explicit.files, [
+      "./integration/a.test.ts",
+      "./integration/b.test.ts",
+    ]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("the package integration tasks that carry the ON skip list hand deno a QUOTED glob (so --ignore binds); patterns keeps the shell glob because its test config excludes integration/ and the pattern shards filter explicitly", async () => {
+  const root = new URL("../", import.meta.url);
+  for (const suite of ["runner", "runtime-client", "shell"]) {
+    const config = await Deno.readTextFile(
+      new URL(`packages/${suite}/deno.jsonc`, root),
+    );
+    const task = config.match(/"integration": "([^"\\]|\\.)*"/)?.[0] ?? "";
+    assertMatch(
+      task,
+      /\$INTEGRATION_TEST_FLAGS \\"\.\/integration\/\*\.test\.ts\\"/,
+      `${suite}: the integration task must quote its glob: ${task}`,
+    );
   }
 });

@@ -3,6 +3,7 @@ import env from "@/env.ts";
 import {
   normalize,
   readBuildInfoFrom,
+  readShellServerExecutionDefineFrom,
   resolveGitShaFrom,
 } from "@/lib/build-info.ts";
 
@@ -172,6 +173,81 @@ Deno.test("readBuildInfoFrom", async (t) => {
         builtAt: "now",
       });
     });
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// The shell's baked server-execution posture rides the same COMPILED marker
+// (tasks/build-binaries.ts writes it from the build environment — the value
+// packages/shell/felt.config.ts bakes as the shell's define). CI's
+// server-execution lanes read it back through /api/meta to verify the
+// posture the binary actually carries; a missing/unset value reads null.
+Deno.test("readShellServerExecutionDefineFrom", async (t) => {
+  const tempDir = await Deno.makeTempDir({ prefix: "build-info-sx-test-" });
+  const pathFor = (name: string) => `${tempDir}/${name}`;
+  try {
+    await t.step(
+      "null when the marker is missing, malformed, or non-object",
+      async () => {
+        assertEquals(readShellServerExecutionDefineFrom(pathFor("nope")), null);
+        await Deno.writeTextFile(pathFor("bad"), "{not json");
+        assertEquals(readShellServerExecutionDefineFrom(pathFor("bad")), null);
+        await Deno.writeTextFile(pathFor("str"), '"abc"');
+        assertEquals(readShellServerExecutionDefineFrom(pathFor("str")), null);
+      },
+    );
+    await t.step(
+      "null when the field is absent, null, or blank (define unset — the shell follows the first-party default)",
+      async () => {
+        await Deno.writeTextFile(
+          pathFor("absent"),
+          JSON.stringify({ commitSha: "abc", builtAt: "now" }),
+        );
+        assertEquals(
+          readShellServerExecutionDefineFrom(pathFor("absent")),
+          null,
+        );
+        await Deno.writeTextFile(
+          pathFor("nullish"),
+          JSON.stringify({ shellServerExecutionDefine: null }),
+        );
+        assertEquals(
+          readShellServerExecutionDefineFrom(pathFor("nullish")),
+          null,
+        );
+        await Deno.writeTextFile(
+          pathFor("blank"),
+          JSON.stringify({ shellServerExecutionDefine: "  " }),
+        );
+        assertEquals(
+          readShellServerExecutionDefineFrom(pathFor("blank")),
+          null,
+        );
+      },
+    );
+    await t.step(
+      'returns the raw baked define, trimmed ("true" for an ON-built shell, "false" for OFF-built)',
+      async () => {
+        await Deno.writeTextFile(
+          pathFor("on"),
+          JSON.stringify({
+            commitSha: "abc",
+            builtAt: "now",
+            shellServerExecutionDefine: " true ",
+          }),
+        );
+        assertEquals(readShellServerExecutionDefineFrom(pathFor("on")), "true");
+        await Deno.writeTextFile(
+          pathFor("off"),
+          JSON.stringify({ shellServerExecutionDefine: "false" }),
+        );
+        assertEquals(
+          readShellServerExecutionDefineFrom(pathFor("off")),
+          "false",
+        );
+      },
+    );
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
