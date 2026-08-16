@@ -1,7 +1,7 @@
 # cf-harness Implementation Profile
 
 Status: draft conformance statement\
-Profile date: 2026-07-22
+Profile date: 2026-08-17
 
 This document describes `@commonfabric/cf-harness` against the draft Common
 Fabric
@@ -48,9 +48,13 @@ model turn.
 - CFC authority: Common Fabric runner/runtime evidence and trusted sandbox
   sidecars. Harness-local policy logic is conservative transport/enforcement,
   not the source of label meaning.
-- Host execution: unavailable to parent runs. The browser child profile exposes
-  only a constrained host command/script policy bound to an explicit local CDP
-  lease.
+- Host execution: no parent-run shell reaches the host. Two bounded host-side
+  surfaces exist beside the sandbox: the browser child profile's constrained
+  command/script policy, bound to an explicit local CDP lease, and the
+  `run_pattern` tool, which compiles model-authored pattern source and runs it
+  against the configured Fabric space over a trusted host-side session. Neither
+  admits arbitrary host commands, and `run_pattern` is present only when a
+  fabric session is configured.
 - Network: explicit in configuration but still provisional. Sandboxed `bash`
   applies a direct-`curl` destination guard; `web_fetch` and web child profiles
   have their own bounded request policies.
@@ -61,14 +65,16 @@ model turn.
 
 Current selectable parent tools are `bash`, `read_file`, `view_image`,
 `web_fetch`, `read_skill_resource`, `run_skill_script`, `edit_file`,
-`write_file`, and `delegate_task`. Individual runs receive only their configured
-subset; `web_fetch` and `run_skill_script` are not in the ordinary default
-surface. `bash-no-sandbox` exists only as a built-in used by authorized child
-profiles and cannot be selected as a parent CLI tool.
+`write_file`, `delegate_task`, `describe_handle`, and `run_pattern`. Individual
+runs receive only their configured subset; `web_fetch` and `run_skill_script`
+are not in the ordinary default surface, and `run_pattern` additionally requires
+the three `--fabric-*` session flags. `bash-no-sandbox` exists only as a
+built-in used by authorized child profiles and cannot be selected as a parent
+CLI tool.
 
-Current child profiles are `default`, `browser`, `web_fetch`, and `web_search`.
-Each profile supplies an exact tool/network/skill policy. Parent skills and
-authority do not transfer implicitly.
+Current child profiles are `default`, `browser`, `web_fetch`, `web_search`, and
+`pattern-author`. Each profile supplies an exact tool/network/skill policy.
+Parent skills and authority do not transfer implicitly.
 
 ## Lifecycle and evidence
 

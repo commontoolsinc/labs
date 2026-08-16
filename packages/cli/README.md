@@ -438,6 +438,14 @@ targeted, the scope follows the id as `@user`/`@session` only when it is not the
 default, and the path follows as ordinary segments. No schema is inlined and no
 write-redirect flag rides along.
 
+**Every address this CLI publishes is that one string** — a `$link` marker's
+value, a `--select` suffix's, a `--show-links` entry's, and the Invocation
+JSON's `receipt`. A caller that reaches into an address for an `id`, a `space`,
+or a `scope` reads the string whole instead, and passes it on whole. The failure
+mode is quiet: these values usually arrive inside an `unknown` or a `JSONValue`,
+so code that indexes them merges cleanly, type-checks, and then reads
+`undefined` at runtime against a real fabric.
+
 The address names the deepest stored link crossed on the way to the marked
 position, plus the segments that remain below that link. Marking `title` under
 each element of a `notes` array whose entries are links returns the note's own
