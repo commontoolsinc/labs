@@ -4,6 +4,7 @@ import {
   type Cell,
   encodeJsonPointer,
   type IExtendedStorageTransaction,
+  isLink,
   type MemorySpace,
   type NormalizedFullLink,
 } from "@commonfabric/runner";
@@ -557,6 +558,12 @@ function firstUndeclaredEventField(
   atRoot: boolean,
 ): UndeclaredEventField | undefined {
   if (typeof value !== "object" || value === null) return undefined;
+  // A link is not an object whose fields can be judged. Its `/` key is the
+  // envelope's own structure, not a name the caller chose, and the document it
+  // points at is not read at dispatch — so there is nothing here to compare a
+  // declaration against. Descending anyway reported `/` as an undeclared field
+  // and refused every reference a caller named.
+  if (isLink(value)) return undefined;
   if (!isSchemaObject(schema)) return undefined;
   if (!atRoot && carriesCellMarker(schema)) return undefined;
   const scopeRoot = cfcSchemaChildRoot(schema, root);
@@ -753,10 +760,16 @@ export function verbInputSchemaError(
   if (schema === undefined || schema === true) return undefined;
   const undeclared = undeclaredVerbFieldError(input, schema);
   if (undeclared !== undefined) return undeclared;
-  return validateSchemaValue(
-    relaxDefaultedRequired(schema, schema, new Map()),
-    input,
-  );
+  // The option the dispatch gate has always passed
+  // (`closedWorldEventRejection`, packages/runner/src/runner.ts). Without it
+  // this validator measures the envelope against the schema of the value it
+  // points at, which no link can satisfy. Passing it is what stops the two
+  // gates disagreeing about one payload — the CLI refusing what the runtime
+  // would have accepted and dispatched.
+  const relaxed = relaxDefaultedRequired(schema, schema, new Map());
+  return validateSchemaValue(relaxed, input, relaxed, {
+    acceptOpaqueValue: (value) => isLink(value),
+  });
 }
 
 /**

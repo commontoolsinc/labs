@@ -987,4 +987,71 @@ describe("verb-undeclared-field", () => {
       });
     });
   });
+
+  describe("a reference a caller names", () => {
+    const link = {
+      "/": {
+        "link@1": {
+          id: "of:fid1:target",
+          space: "did:key:zTest",
+          path: [],
+          scope: "space",
+        },
+      },
+    };
+    // The schema the CLI actually holds: the handler's narrowed read of the
+    // event, which carries no `asCell` — so nothing here says the position is
+    // a reference, and nothing needs to.
+    const narrowed: JSONSchema = {
+      type: "object",
+      properties: { on: { $ref: "#/$defs/Item" } },
+      required: ["on"],
+      $defs: {
+        Item: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        },
+      },
+    };
+
+    it("accepts a link at a position carrying no marker at all", () => {
+      // The runtime accepts one anywhere (`acceptOpaqueValue: isCellLink`,
+      // unconditional), so a CLI that refused it was the stricter of two
+      // gates on the same payload.
+      expect(verbInputSchemaError({ on: link }, narrowed)).toBeUndefined();
+    });
+
+    it("does not read the envelope's own key as an undeclared field", () => {
+      // `/` is the envelope's structure, not a name the caller chose. Reading
+      // it as a field is what produced `"/" at <event>.on is not a field this
+      // verb declares` for every reference ever named.
+      expect(verbInputSchemaError({ on: link }, narrowed) ?? "")
+        .not.toMatch(/"\/"/);
+    });
+
+    it("still refuses a field the verb does not declare, beside a link", () => {
+      // Accepting links is not accepting anything.
+      expect(verbInputSchemaError({ on: link, titel: "x" }, narrowed))
+        .toMatch(/"titel" at <event> is not a field this verb declares/);
+    });
+
+    it("still refuses a declared field of the wrong type, beside a link", () => {
+      const both: JSONSchema = {
+        type: "object",
+        properties: { on: { $ref: "#/$defs/Item" }, count: { type: "number" } },
+        required: ["on"],
+        $defs: { Item: { type: "object", properties: {} } },
+      };
+      expect(verbInputSchemaError({ on: link, count: "no" }, both))
+        .toMatch(/count/);
+    });
+
+    it("still refuses a non-link object that does not fit its position", () => {
+      // The link is what is opaque, not the position. A plain object at the
+      // same place is judged exactly as before.
+      expect(verbInputSchemaError({ on: { wrong: 1 } }, narrowed))
+        .toMatch(/is not a field this verb declares|title/);
+    });
+  });
 });
