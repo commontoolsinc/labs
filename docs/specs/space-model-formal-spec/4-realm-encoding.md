@@ -2,9 +2,9 @@
 
 This document specifies the wire format used to carry fabric values between
 realms over a structured-clone transport — `structuredClone()` and
-`postMessage()` — including the envelope and its marker, the tagged form,
-per-type encodings, the ownership contract on decode, and what the format
-refuses.
+`postMessage()` — including the outer envelope and its marker, the tagged
+form, per-type encodings, the ownership contract on decode, and what the
+format refuses.
 
 ## Status
 
@@ -63,7 +63,7 @@ against this contract before use, not something to try and see.
 
 The structured clone algorithm provides all three.
 
-## 2. The Envelope and the Marker
+## 2. The Outer Envelope and the Marker
 
 An encoded value is a two-element array:
 
@@ -77,9 +77,9 @@ The same `marker` object appears at slot zero of every tagged form within
 
 ### 2.1 Detection
 
-A decoder takes the marker from slot zero of the envelope and recognizes every
-tagged form beneath it by **object identity** — `===` against that object.
-Nothing about a tagged form's *shape* distinguishes it from an array the
+A decoder takes the marker from slot zero of the outer envelope and recognizes
+every tagged form beneath it by **object identity** — `===` against that
+object. Nothing about a tagged form's *shape* distinguishes it from an array the
 payload built for itself, and nothing is meant to: an encoded tree contains
 ordinary arrays and ordinary objects, and identity alone separates the
 encoder's from the payload's.
@@ -96,10 +96,10 @@ equality, so a primitive marker would be reproducible by any payload holding
 the same one, and would mark nothing.
 
 The marker **must be minted per encode call**, and **the encoder must not
-retain or reuse one**. It outlives the call inside the envelope, which is the
-point; what it must not do is survive *in the encoder*, available to a later
-call. Two facts together are what make an envelope unforgeable from
-within a payload:
+retain or reuse one**. It outlives the call inside the outer envelope, which is
+the point; what it must not do is survive *in the encoder*, available to a
+later call. Two facts together are what make both forms unforgeable from within
+a payload:
 
 - It is **younger than the value**. It is created after the value exists, so
   nothing already assembled can hold a reference to it — whatever its author
@@ -115,7 +115,7 @@ A marker held across calls fails the first of these. A value may legitimately
 contain a subtree of some *earlier* encoding — the code that assembled it is
 entitled to whatever it has seen — and a copy-on-write walk carries such a
 subtree through unchanged, into a data position. A long-lived marker sitting
-there would be read as an envelope, and user data would decode as a tagged
+there would be read as a tagged form, and user data would decode as a tagged
 value.
 
 The marker must itself be an encodable fabric value, for that same reason: a
@@ -144,12 +144,12 @@ The marker is a frozen one-element array holding the version identifier:
 `fvj1:` prefix. Recognition never reads any of it — identity does all the work
 — so within the walk the contents serve only to be legible in a debugger.
 
-**A decoder must refuse an envelope whose marker is not a one-element array
-holding the version it implements**, and it performs that check before adopting
-the marker. This is the format's answer to a boundary it does not otherwise
-control: `postMessage()` spans tabs, windows and frames, any of which could
-pair two different deployments, and a payload written by a build the decoder
-does not understand is refused rather than walked.
+**A decoder must refuse an outer envelope whose marker is not a one-element
+array holding the version it implements**, and it performs that check before
+adopting the marker. This is the format's answer to a boundary it does not
+otherwise control: `postMessage()` spans tabs, windows and frames, any of which
+could pair two different deployments, and a payload written by a build the
+decoder does not understand is refused rather than walked.
 
 The check earns little in the deployment this format is for, where both ends
 are the same build and the marker always matches. It costs one comparison, and
@@ -176,7 +176,12 @@ Arrays and plain objects are carried directly.
 
 - **Array holes need no representation.** Cloning preserves a sparse array's
   length and its absent indices, so a hole crosses as a hole. There is no
-  counterpart to JSON's `/hole` run-length form.
+  counterpart to JSON's `/hole` run-length form. **A walk that rebuilds a
+  sparse array must leave its holes absent**, on both sides: writing
+  `undefined` into them would satisfy the transport requirement in Section 1.1
+  and still deliver present-`undefined` where the sender had absence, which
+  this system distinguishes. Length is preserved with them, a trailing hole
+  having nothing else to record it.
 - **Keys are visited in their own order**, not sorted. JSON sorts to make its
   text canonical, which is what lets an encoding be hashed and compared as
   bytes; nothing here is compared that way, and sorting would force a rebuild
@@ -200,7 +205,8 @@ state — final for a terminal codec, and itself walked for a nonterminal one.
 
 Three positional slots rather than a container keyed by the tag, because an
 array is the cheapest shape the transport carries: no hash table, and a tag
-string that is the codec's own constant rather than a key built per envelope.
+string that is the codec's own constant rather than a key built per tagged
+form.
 
 ### 3.4 Standard Type Encodings
 
@@ -263,7 +269,7 @@ always distinct.
 ## 5. Ownership
 
 **A caller cedes the tree to `decode()`.** The decoder retains what it likes of
-it and freezes whatever it retains; a caller must not use the tree afterwards.
+it; a caller must not use the tree afterwards.
 
 Two retentions are deliberate:
 
@@ -271,9 +277,23 @@ Two retentions are deliberate:
 2. A byte-carrying value **takes over** the `ArrayBuffer` it arrived in rather
    than copying it.
 
+**Every container a decode returns is frozen**, retained and rebuilt alike.
+Stating it of the result rather than of what is retained is deliberate: an
+implementation that rebuilt everything would retain nothing, and a rule phrased
+around retention would then oblige it to freeze nothing and let it hand back
+mutable values. Which containers a caller sees frozen therefore varies with
+what needed decoding; that any of them is mutable does not.
+
 An `ArrayBuffer` cannot be frozen, which is what makes ceding it a requirement
 rather than a courtesy: sole ownership is the only available defense for a
 value that promises its bytes are immutable.
+
+**A failed decode cedes the tree too.** A refusal can arrive after the walk has
+already detached a buffer and frozen part of what it reached, so a tree is
+spent whether or not the call that consumed it succeeded. A caller cannot
+answer a strict refusal by re-running the same tree through a lenient decoder:
+the second run would find the bytes gone and report a `ProblematicValue` where
+they had been. Choose the disposition before decoding, not after.
 
 **A tree carrying bytes decodes exactly once.** Taking a buffer over detaches
 it, so a second decode of the same tree cannot reconstruct the value the first
@@ -290,9 +310,9 @@ payload keeps the value it decoded, not the tree it decoded from.
 A conforming decoder refuses, reporting each as a malformation settled against
 leniency:
 
-- An envelope that is not a two-element array, or whose slot zero is not a
-  one-element array holding the decoder's own version, per Section 2.4.
-- A `symbol` or a function met in an untagged position. The transport carries
+- An outer envelope that is not a two-element array, or whose slot zero is not
+  a one-element array holding the decoder's own version, per Section 2.4.
+- A `symbol` or a function found in an untagged position. The transport carries
   neither, so neither can arrive across the boundary — but a decoder is
   callable in the realm that built its argument, and what the format never
   emits is refused wherever it is found.
@@ -316,10 +336,10 @@ it becomes an `UnknownValue` and round-trips, exactly as under JSON
 The realm encoding context is responsible for:
 
 - Minting a marker per `encode()` call, per Section 2.2, and building the
-  envelope around the walked tree.
-- Adopting the marker from an envelope's slot zero on decode, after validating
-  the envelope's shape and the marker's version per Section 2.4 — the one place
-  the decoder takes instruction from the data it is reading.
+  outer envelope around the walked tree.
+- Adopting the marker from the outer envelope's slot zero on decode, after
+  validating that envelope's shape and the marker's version per Section 2.4 —
+  the one place the decoder takes instruction from the data it is reading.
 - Owning recursion and tag-wrapping around the shallow per-type codecs, as the
   JSON context does (`3-json-encoding.md` Section 7): tags come from
   `codec.tagForValue(value)` on encode, and decode routes each tag to its
@@ -343,3 +363,9 @@ any other, and never a value built from whatever arrived.
 This is a requirement rather than an observation. An implementation that
 coerced instead would satisfy every other claim in this document while
 producing values a sender never sent.
+
+**A field of a codec's state that the codec does not read is ignored, not
+refused.** A state is matched by what it must carry, so a record arriving with
+more than that decodes as though the extra were absent. Two implementations
+would otherwise be free to disagree — one ignoring, one refusing — over data
+that cloning carries perfectly well and that a peer can send.

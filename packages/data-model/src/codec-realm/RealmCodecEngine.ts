@@ -27,16 +27,16 @@ import {
  * untouched and tagging is reserved for what genuinely needs it.
  *
  * **An encoded value is `[marker, tree]`**, and the marker is what makes every
- * envelope beneath it recognizable. It is a fresh object per `encode()` call,
- * repeated at slot zero of each tagged form, and a receiver takes it from the
- * outer envelope and recognizes the rest by `===` against it. Structured
+ * tagged form beneath it recognizable. It is a fresh object per `encode()`
+ * call, repeated at slot zero of each tagged form, and a receiver takes it from
+ * the outer envelope and recognizes the rest by `===` against it. Structured
  * cloning preserving shared references is what carries that across; the marker
  * being younger than the value it encodes, and confined to the engine until
  * that encode returns, is what keeps a payload from containing one.
  * {@link RealmFormatMarker} states all three.
  *
- * The marker carries a version string, and `decode()` refuses an envelope
- * whose marker is not this build's. That holds the boundary this format exists
+ * The marker carries a version string, and `decode()` refuses an outer
+ * envelope whose marker is not this build's. That holds the boundary it exists
  * for: worker IPC within one process, where both ends are the same build.
  * `postMessage()` also spans tabs, windows and frames, any of which could pair
  * two deployments, and a payload from one this build does not understand is
@@ -47,7 +47,7 @@ import {
  *
  * * **No escaping.** `/quote` and `/object` exist because a JSON object is the
  *   only container JSON has, so a tag and a user's data compete for the same
- *   shape. Here they compete for the same shape too -- an envelope is an
+ *   shape. Here they compete for the same shape too -- a tagged form is an
  *   ordinary three-element array -- and identity settles it instead, which
  *   costs nothing on the wire where escaping costs a rewrite of the object
  *   around it.
@@ -58,7 +58,7 @@ import {
  * by identity rather than rebuilt. A payload holding no `FabricSpecialObject`
  * and no symbol is therefore handed to the transport exactly as it arrived --
  * the same object, not a reconstruction of it -- and copied once by the
- * transport instead of twice. The envelope stops that one layer in -- the
+ * transport instead of twice. The outer envelope stops that one layer in -- the
  * outermost value is always the two-element wrapper -- which costs two
  * allocations per call, the wrapper and the marker, and no rebuild of
  * anything beneath it. That is the ordinary case
@@ -66,16 +66,19 @@ import {
  * needs encoding rather than to the size of the value. `JsonCodecEngine` never
  * faces the choice, having to reach text.
  *
- * **`decode()` cedes its input.** The engine retains what it likes of the tree
- * and freezes whatever it retains, and two retentions are deliberate: a
- * subtree needing no decoding comes back by identity, and a byte-carrying
- * value takes over the `ArrayBuffer` it arrived in rather than copying it. An
- * `ArrayBuffer` cannot be frozen, which is what makes ceding it a requirement
- * rather than a courtesy.
+ * **`decode()` cedes its input.** The engine retains what it likes of the tree,
+ * and two retentions are deliberate: a subtree needing no decoding comes back
+ * by identity, and a byte-carrying value takes over the `ArrayBuffer` it
+ * arrived in rather than copying it. Every container it returns is frozen,
+ * retained and rebuilt alike; an `ArrayBuffer` cannot be, which is what makes
+ * ceding it a requirement rather than a courtesy. A failed decode cedes the
+ * tree too, a refusal being able to arrive after a buffer is already detached.
  *
  * Taking a buffer over detaches it, so **a tree carrying bytes decodes exactly
- * once**: a second `decode()` of the same tree throws where the first
- * succeeded. `FabricBytes` and `FabricHash` are the classes that reach that
+ * once**: a second `decode()` of the same tree cannot reconstruct what the
+ * first did, and is settled against leniency like any other refusal -- strict
+ * raises, lenient yields a `ProblematicValue` where the bytes would have been.
+ * `FabricBytes` and `FabricHash` are the classes that reach that
  * path, directly or nested anywhere beneath. On the boundary this format
  * exists for the restriction costs nothing -- the tree is the receiver's own
  * clone of a value it will not be handed again, which is the whole reason the
@@ -135,15 +138,14 @@ export class RealmCodecEngine
    *
    * Mints this call's marker and returns `[marker, walkedTree]`. The tree
    * inside is still copy-on-write, so a payload needing no encoding is the
-   * caller's own object rather than a reconstruction of it; what the envelope
-   * costs is two allocations per call, the wrapper and the marker, and what it
-   * buys is a receiver
-   * able to tell this form from anything else on the channel, and to tell
-   * which build wrote it.
+   * caller's own object rather than a reconstruction of it; what the outer
+   * envelope costs is two allocations per call, the wrapper and the marker,
+   * and what it buys is a receiver able to tell this form from anything else
+   * on the channel, and to tell which build wrote it.
    *
    * The marker is created here, after `value` exists, which is the whole of
-   * why an envelope cannot be forged from within a payload. See
-   * {@link RealmFormatMarker}.
+   * why neither an outer envelope nor a tagged form can be forged from within
+   * a payload. See {@link RealmFormatMarker}.
    */
   override encode(value: FabricValue): RealmEncodedValue {
     // Saved and restored rather than set and cleared, so that an encode
@@ -162,9 +164,9 @@ export class RealmCodecEngine
   /**
    * @inheritDoc
    *
-   * Takes the marker from the envelope and walks what it wraps. The envelope
-   * is the one place this method takes instruction from the data, so it is
-   * checked in full before anything is read from it: two elements, and a
+   * Takes the marker from the outer envelope and walks what it wraps. That
+   * envelope is the one place this method takes instruction from the data, so
+   * it is checked in full before anything is read from it: two elements, and a
    * one-element array in slot zero holding this format's version. What cloning
    * carries but this format never emits is refused where it is found, by
    * `decodeValue()`.
@@ -186,11 +188,11 @@ export class RealmCodecEngine
    * likes, so a caller must not use it afterwards. Two retentions are
    * deliberate: a subtree needing no decoding comes back by identity rather
    * than rebuilt, and a `FabricBytes` takes over the buffer it arrived in.
-   * Everything retained that can be frozen is frozen before it is returned;
-   * the byte buffer cannot be, which is what makes ceding it a requirement
-   * rather than a courtesy. Taking a buffer over detaches it, so a tree
-   * carrying bytes decodes exactly once and a second call on the same tree
-   * throws.
+   * Every container this returns is frozen, retained and rebuilt alike; the
+   * byte buffer cannot be, which is what makes ceding it a requirement rather
+   * than a courtesy. Taking a buffer over detaches it, so a tree carrying
+   * bytes decodes exactly once, a second call on the same tree raising when
+   * strict and reporting a `ProblematicValue` when lenient.
    *
    * Across the boundary that costs a caller nothing, the tree being the
    * receiver's own clone of a sender's value. Same-realm it is visible:
@@ -242,12 +244,12 @@ export class RealmCodecEngine
   /**
    * @inheritDoc
    *
-   * @throws If there is no marker to build an envelope around, which is the
+   * @throws If there is no marker to build a tagged form around, which is the
    *   case outside an encode and a decode both. Note what it therefore does
    *   *not* catch: during a decode the field holds the sender's marker, so a
    *   tag wrapped there would be wrapped under that one rather than refused.
    *   Nothing reaches it that way -- `decodeTagged()` never encodes -- and the
-   *   guard is here for the case it does cover, an envelope built with no
+   *   guard is here for the case it does cover, a tagged form built with no
    *   marker at all being one nothing could recognize.
    */
   protected override wrapTag(
@@ -359,8 +361,8 @@ export class RealmCodecEngine
    * Every object node goes through the guard, whichever arm then takes it. The
    * tagged form needs it as much as a container does: `decodeTagged()` walks
    * the state again for a nonterminal codec, for a tag no codec claims, and
-   * for a tag that is not one, so a graph of envelopes can close a cycle with
-   * no plain container in it at all, and cloning carries such a graph
+   * for a tag that is not one, so a graph of tagged forms can close a cycle
+   * with no plain container in it at all, and cloning carries such a graph
    * faithfully.
    */
   protected override decodeValue(

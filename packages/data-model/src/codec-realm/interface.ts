@@ -63,13 +63,14 @@ export type RealmCodecValue =
 /**
  * Content of the marker object. Recognition never reads it -- identity does
  * all the work -- so within a decode it serves to be legible in a debugger.
- * `RealmCodecEngine.decode()` reads it once, at the envelope, to refuse a
+ * `RealmCodecEngine.decode()` reads it once, at the outer envelope, to refuse a
  * payload written by a build this one does not understand.
  */
 export const REALM_FORMAT_VERSION = "fvr1";
 
 /**
- * The object whose identity marks this format's envelopes.
+ * The object whose identity marks this format's outer envelope and its tagged
+ * forms.
  *
  * `RealmCodecEngine.encode()` mints one per call and puts it in slot zero of
  * the outer envelope and of every tagged form beneath it. A receiver takes it
@@ -78,15 +79,15 @@ export const REALM_FORMAT_VERSION = "fvr1";
  * That works because structured cloning preserves shared references: one
  * object referenced from many positions arrives as one object referenced from
  * many positions. It is the only property of the transport this format leans
- * on beyond carrying its types, and it is the whole of what makes an envelope
+ * on beyond carrying its types, and it is the whole of what makes either form
  * unmistakable.
  *
  * **It must be an object.** Recognition is `===`, which on a primitive is
  * value equality rather than identity, so a primitive in slot zero would be
  * reproducible by any payload that happened to hold the same one --
- * and the argument below would evaporate. `decode()` refuses an envelope whose
- * slot zero is not a one-element array holding this version, which is that
- * requirement and the version check at once.
+ * and the argument below would evaporate. `decode()` refuses an outer envelope
+ * whose slot zero is not a one-element array holding this version, which is
+ * that requirement and the version check at once.
  *
  * **A payload cannot contain the marker**, and two facts together are what
  * say so.
@@ -96,7 +97,7 @@ export const REALM_FORMAT_VERSION = "fvr1";
  * of some earlier encoding. That is why it is minted per call rather than per
  * engine -- a long-lived one could be embedded in a value by code that had
  * legitimately seen an earlier encoded tree, and the walk would carry it
- * through to a data position where the decoder would read it as an envelope.
+ * through to a data position where the decoder would read it as a tagged form.
  *
  * And it is *confined*: it never leaves the engine until `encode()` returns.
  * It lives in a private field and in the tagged forms the walk is building,
@@ -133,7 +134,7 @@ export type RealmFormatMarker = readonly [typeof REALM_FORMAT_VERSION];
  * Three slots rather than a container keyed by the tag, because an array is
  * the cheapest shape the transport carries: positional slots, no hash table,
  * and a tag string that is the codec's own interned constant rather than a
- * key built per envelope.
+ * key built per tagged form.
  */
 export type RealmTaggedValue = readonly [
   RealmFormatMarker,
@@ -146,9 +147,9 @@ export type RealmTaggedValue = readonly [
  *
  * The outer envelope exists to carry the marker, and carries the version with
  * it. A receiver reads slot zero to learn what to compare against, and
- * `RealmCodecEngine.decode()` refuses an envelope whose marker is not this
- * build's before adopting it, so a payload written by a build this one does
- * not understand is refused rather than walked.
+ * `RealmCodecEngine.decode()` refuses one whose marker is not this build's
+ * before adopting it, so a payload written by a build this one does not
+ * understand is refused rather than walked.
  */
 export type RealmEncodedValue = readonly [RealmFormatMarker, RealmCodecValue];
 

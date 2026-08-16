@@ -42,14 +42,14 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { EchoReport } from "./realm-echo-worker.ts";
 
 /**
- * A marker for hand-built wire data. `decode()` checks an envelope's marker by
- * shape and version rather than by identity, so a test's own marker works
+ * A marker for hand-built wire data. `decode()` checks the outer envelope's
+ * marker by shape and version rather than by identity, so a test's own marker works
  * exactly as the engine's does -- which is itself the property that lets a
  * peer send a well-formed payload.
  */
 const WIRE_MARKER = ["fvr1"] as unknown as RealmFormatMarker;
 
-/** Wraps hand-built wire data in an envelope under {@link WIRE_MARKER}. */
+/** Wraps hand-built wire data in an outer envelope under {@link WIRE_MARKER}. */
 function wire(payload: unknown): RealmEncodedValue {
   return [WIRE_MARKER, payload as RealmCodecValue];
 }
@@ -59,7 +59,7 @@ function tagged(tag: unknown, state: unknown): RealmCodecValue {
   return [WIRE_MARKER, tag, state] as unknown as RealmCodecValue;
 }
 
-/** The walked tree inside an encoded value's envelope. */
+/** The walked tree inside an encoded value's outer envelope. */
 function payloadOf(encoded: RealmEncodedValue): RealmCodecValue {
   return encoded[1];
 }
@@ -204,7 +204,7 @@ describe("RealmCodecEngine", () => {
       expect((payload as unknown as RealmTaggedValue)[2]).toBe("k");
     });
 
-    it("refuses a unique symbol rather than interning one", () => {
+    it("throws when given a unique symbol, rather than interning one", () => {
       // A unique symbol has no key to carry, so there is nothing to encode
       // that would decode back to it. Coercing one to a registry symbol would
       // hand the far side a different symbol wearing its description.
@@ -280,7 +280,7 @@ describe("RealmCodecEngine", () => {
       expect(fabricFromRealmValue(wire({ a: 1 }))).toEqual({ a: 1 });
     });
 
-    it("refuses a form this format never emits", () => {
+    it("throws when given a form this format never emits", () => {
       // Cloning carries a `Date`; this format has no codec that produces one,
       // so it can only have come from something other than an `encode()`.
       expect(() => fabricFromRealmValue(wire(new Date()))).toThrow(
@@ -288,14 +288,31 @@ describe("RealmCodecEngine", () => {
       );
     });
 
-    it("refuses a `Map`, which is no form this format emits", () => {
+    it("throws when given a bare buffer or view, which no tag carries here", () => {
+      // Section 6 names all three, and singles out `ArrayBuffer`: it is the
+      // one such type this format's own value union contains, legitimate only
+      // as the state under a byte-carrying tag and never on its own. Cloning
+      // carries each of these, so a peer can send one.
+      for (
+        const bad of [
+          new Uint8Array([1, 2]).buffer,
+          new Uint8Array([1, 2]),
+          new DataView(new Uint8Array([1, 2]).buffer),
+        ]
+      ) {
+        expect(() => fabricFromRealmValue(wire(bad)))
+          .toThrow(/not a form this format emits/);
+      }
+    });
+
+    it("throws when given a `Map`, which is no form this format emits", () => {
       // Cloning carries one faithfully, so a peer can send one; nothing here
-      // makes one, so meeting one is a malformation like any other.
+      // makes one, so finding one is a malformation like any other.
       expect(() => fabricFromRealmValue(wire(new Map([["a", 1]]))))
         .toThrow(/not a form this format emits/);
     });
 
-    it("refuses an envelope that is not two elements", () => {
+    it("throws when given an outer envelope that is not two elements", () => {
       // The one place this engine takes instruction from the data, so the
       // slot count is checked before slot zero is read as a marker at all.
       // Three of these carry a well-formed marker, which is what gives the
@@ -318,10 +335,10 @@ describe("RealmCodecEngine", () => {
       }
     });
 
-    it("refuses to wrap a tag when there is no marker to wrap it under", () => {
+    it("throws when wrapping a tag with no marker to wrap it under", () => {
       // `wrapTag()` is unreachable outside a walk through this class, so a
       // subclass is what reaches it. The guard is worth having anyway: the
-      // alternative to throwing is emitting an envelope with no marker, which
+      // alternative to throwing is emitting a tagged form with no marker, which
       // nothing could ever recognize, and which would fail far from here.
       class Exposed extends RealmCodecEngine {
         wrapOutsideEncode(): unknown {
@@ -337,7 +354,7 @@ describe("RealmCodecEngine", () => {
         .toThrow(/Cannot wrap a tag outside an encode/);
     });
 
-    it("reports a bad state for every codec that validates one", () => {
+    it("returns a `ProblematicValue` for a bad state, for every codec that validates one", () => {
       // Section 7.1 of `4-realm-encoding.md` requires a codec to reject the
       // state it is handed rather than coerce it, so each of these is a
       // requirement rather than an observation. Lenient, because the report is
@@ -379,7 +396,7 @@ describe("RealmCodecEngine", () => {
       ).toMatch(/Invalid flags/);
     });
 
-    it("refuses a symbol or a function met untagged", () => {
+    it("throws when given a symbol or a function untagged", () => {
       // Cloning carries neither, so neither reaches this across the boundary
       // -- but `decode()` is callable in the realm that built its argument,
       // and passing them through would leave a value in the result that this
@@ -393,7 +410,7 @@ describe("RealmCodecEngine", () => {
         .toThrow(/Cannot decode symbol/);
     });
 
-    it("refuses an envelope whose marker is not this format's", () => {
+    it("throws when given an outer envelope whose marker is not this format's", () => {
       // A primitive at slot zero is the case that would break recognition
       // outright: `===` on one is value equality, so any payload holding the
       // same primitive would reproduce the marker. The rest are refused
@@ -423,7 +440,7 @@ describe("RealmCodecEngine", () => {
       }
     });
 
-    it("decodes an envelope headed by a peer's own equal marker", () => {
+    it("decodes an outer envelope headed by a peer's own equal marker", () => {
       // The control for the case above, and the property that lets a peer
       // send a well-formed payload at all: what is checked is the marker's
       // shape and version, never its identity against one this realm minted.
@@ -444,8 +461,8 @@ describe("RealmCodecEngine", () => {
       expect((decoded.a as FabricValue[])[1]).toBe("EpochDays@1");
     });
 
-    it("refuses an envelope nested as its own payload", () => {
-      // `E = [m, E]`. The walk meets `E` again beneath itself, where the guard
+    it("throws when given an outer envelope nested as its own payload", () => {
+      // `E = [m, E]`. The walk visits `E` again beneath itself, where the guard
       // has it, so this is a cycle rather than an unbounded descent.
       const envelope: unknown[] = [["fvr1"], null];
       envelope[1] = envelope;
@@ -470,7 +487,7 @@ describe("RealmCodecEngine", () => {
       expect((decoded.a as FabricValue[])[0]).toBe(lookalike);
     });
 
-    it("refuses a tagged form whose tag is not a tag", () => {
+    it("throws when given a tagged form whose tag is not a tag", () => {
       // Slot one holds whatever a peer put there, so this format can find a
       // non-string in tag position where JSON never can. The engine hands it
       // over as it found it, and the shared tag check judges it, so what is
@@ -555,7 +572,7 @@ describe("RealmCodecEngine", () => {
       expect((decoded as UnknownValue).wireTypeTag).toBe("Nope@1");
     });
 
-    it("refuses a circular reference", () => {
+    it("throws when given a circular reference", () => {
       // Cloning reproduces a cyclic graph faithfully, so unlike JSON -- whose
       // `JSON.parse()` cannot produce one -- this format can actually be sent
       // a cycle by a peer. Without a guard the walk recurses until the stack
@@ -573,10 +590,10 @@ describe("RealmCodecEngine", () => {
       );
     });
 
-    it("refuses a circular reference closed through tagged values alone", () => {
+    it("throws when given a circular reference closed through tagged values alone", () => {
       // The tagged form is a container too: `decodeTagged()` walks the state
       // again for a nonterminal codec, for a tag no codec claims, and for a
-      // tag that is not one. So a graph of envelopes can close a cycle with no
+      // tag that is not one. So a graph of tagged forms can close a cycle with no
       // plain container in it at all, and cloning carries one faithfully.
       const unknownTag = tagged("Nope@1", null) as unknown as unknown[];
       unknownTag[2] = unknownTag;
@@ -593,7 +610,7 @@ describe("RealmCodecEngine", () => {
       }
     });
 
-    it("refuses a circular reference closed through a mix of the two", () => {
+    it("throws when given a circular reference closed through a mix of the two", () => {
       const object: Record<string, RealmCodecValue> = {};
       object.tagged = tagged("Nope@1", object);
 
@@ -608,7 +625,7 @@ describe("RealmCodecEngine", () => {
       // this is the check that it does not over-refuse.
       //
       // One tagged node at both positions, and not two values that encode
-      // alike: `wrapTag()` builds a fresh envelope per visit, so encoding a
+      // alike: `wrapTag()` builds a fresh tagged form per visit, so encoding a
       // value that holds one instance twice yields two nodes and revisits
       // nothing. A hand-built node is reused directly to get the sharing this
       // needs.
@@ -621,7 +638,7 @@ describe("RealmCodecEngine", () => {
       expect(decoded.y).toBeInstanceOf(FabricEpochDays);
     });
 
-    it("reports a repeated reserved-key object as reserved, not circular", () => {
+    it("returns a reserved-key `ProblematicValue`, not a circular one, for a repeated object", () => {
       // The reserved-key arm returns early, so it has to leave the
       // in-progress set on its way out. Without that, the second position
       // holding the same object would be read as a back-edge and reported as
@@ -642,7 +659,7 @@ describe("RealmCodecEngine", () => {
       expect(decoded.second?.error).toMatch(/reserves/);
     });
 
-    it("reports a circular reference at the cycle when lenient", () => {
+    it("returns a `ProblematicValue` at the cycle when lenient", () => {
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const object: Record<string, RealmCodecValue> = { a: 1 };
       object.self = object;
@@ -657,7 +674,7 @@ describe("RealmCodecEngine", () => {
       expect(decoded.self).toBeInstanceOf(ProblematicValue);
     });
 
-    it("refuses a key this runtime reserves", () => {
+    it("throws when given a key this runtime reserves", () => {
       // The rebuild below assigns, and on a host with the standard
       // `__proto__` accessor that would drop the key and repoint the result's
       // prototype. The key is computed on purpose: in an object literal a
@@ -841,6 +858,29 @@ describe("RealmCodecEngine", () => {
 
       expect(fabricFromRealmValue(encoded)).toBeDefined();
       expect(() => fabricFromRealmValue(encoded)).toThrow(/detached/);
+    });
+
+    it("returns a `ProblematicValue` for a spent byte tree when lenient", () => {
+      // Decoding twice is settled against leniency like every other refusal,
+      // which the two cases above pin only on the strict side. The report
+      // lands where the bytes would have been, the rest of the value
+      // surviving around it.
+      const encoded = realmFromFabricValue({
+        blob: new FabricBytes(new Uint8Array([1, 2, 250])),
+        n: 7,
+      });
+      const engine = newDefaultRealmCodecEngine({ lenient: true });
+
+      expect(engine.decode(encoded, EMPTY_RECONSTRUCTION_CONTEXT))
+        .toBeDefined();
+
+      const second = engine.decode(
+        encoded,
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      ) as Record<string, unknown>;
+
+      expect(second.blob).toBeInstanceOf(ProblematicValue);
+      expect(second.n).toBe(7);
     });
   });
 
