@@ -189,6 +189,12 @@ export class FabricBytes extends BaseFabricPrimitive {
        * throwing -- are equivalent to a caller, the engine settling them
        * against `lenient`, so what decides between them is consistency across
        * the codecs a reader meets together.
+       *
+       * The one exception is a detached buffer, which throws. It is not a
+       * malformed state -- it is a well-formed one this tree already spent --
+       * and it is caught rather than tested for, the constructor being what
+       * discovers it. Reporting it by return would mean asking the same
+       * question twice, once here and once there.
        */
       decode(
         typeTag: string,
@@ -208,7 +214,23 @@ export class FabricBytes extends BaseFabricPrimitive {
         // else's -- or by being transferred, which detaches the sender's.
         // Either way nothing on this side but the wire tree refers to it, and
         // that tree is spent once decoding is done.
-        return new FabricBytes(new Uint8Array(state), true);
+        try {
+          return new FabricBytes(new Uint8Array(state), true);
+        } catch (e) {
+          // The one way an `ArrayBuffer` reaches here and cannot be built
+          // from is by being detached, and it detaches by having been taken
+          // over already -- so this tree was decoded before, and the bytes
+          // went to that call. Said here because the alternative is the
+          // engine reporting the runtime's own phrasing, which names a
+          // detached buffer without saying how it came to be one. The tag is
+          // left out: the report carries it either way, and naming it here
+          // would say it twice.
+          throw new Error(
+            "The state is a detached buffer, this tree having been decoded " +
+              "already.",
+            { cause: e },
+          );
+        }
       }
     })(),
   );

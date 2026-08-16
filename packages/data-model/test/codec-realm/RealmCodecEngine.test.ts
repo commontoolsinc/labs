@@ -878,7 +878,11 @@ describe("RealmCodecEngine", () => {
       );
 
       expect(fabricFromRealmValue(withBytes)).toBeDefined();
-      expect(() => fabricFromRealmValue(withBytes)).toThrow(/detached/);
+      // The message says how the buffer came to be detached, not merely that
+      // it is: the runtime's own phrasing names the state without naming the
+      // cause, and a second decode is the only way a tree reaches it.
+      expect(() => fabricFromRealmValue(withBytes))
+        .toThrow(/detached buffer, this tree having been decoded already/);
 
       const withoutBytes = realmFromFabricValue({
         when: new FabricEpochNsec(7n),
@@ -897,7 +901,8 @@ describe("RealmCodecEngine", () => {
       );
 
       expect(fabricFromRealmValue(encoded)).toBeDefined();
-      expect(() => fabricFromRealmValue(encoded)).toThrow(/detached/);
+      expect(() => fabricFromRealmValue(encoded))
+        .toThrow(/detached, this tree having been decoded already/);
     });
 
     it("returns a `ProblematicValue` for a spent byte tree when lenient", () => {

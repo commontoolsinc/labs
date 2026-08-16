@@ -196,6 +196,12 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
        * throwing -- are equivalent to a caller, the engine settling them
        * against `lenient`, so what decides between them is consistency across
        * the codecs a reader meets together.
+       *
+       * The one exception is a detached buffer, which throws. It is not a
+       * malformed state -- it is a well-formed one this tree already spent --
+       * and it is caught rather than tested for, the constructor being what
+       * discovers it. Reporting it by return would mean asking the same
+       * question twice, once here and once there.
        */
       decode(
         typeTag: string,
@@ -222,7 +228,18 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
         // Taken over rather than copied, as `FabricBytes` does: the buffer
         // arrived either by being cloned, making it this realm's own, or by
         // being transferred, which detached the sender's.
-        return new FabricHash(new Uint8Array(hash), tag, true);
+        try {
+          return new FabricHash(new Uint8Array(hash), tag, true);
+        } catch (e) {
+          // A detached buffer, for the reason `FabricBytes` states: it
+          // detaches by having been taken over, so this tree was decoded
+          // before.
+          throw new Error(
+            "The state's buffer is detached, this tree having been decoded " +
+              "already.",
+            { cause: e },
+          );
+        }
       }
     })(),
   );
