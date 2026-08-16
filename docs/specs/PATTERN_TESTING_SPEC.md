@@ -192,7 +192,7 @@ The `cf test` runner processes the `[TESTS]` array **in order**:
    - If it has `assertion` key: read `.get()`; an `AssertRecord` passes when
      its `ok` is true, any other value passes when it equals `true`
 2. Report pass/fail for each assertion
-3. Handle timeouts (5s default) for stuck tests
+3. Wait for each action and settle step to finish before continuing
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -241,16 +241,13 @@ cf test ./expense-tracker.test.tsx
 # Run all test patterns in a directory
 cf test ./patterns/
 
-# Run with timeout override
-cf test ./slow-test.test.tsx --timeout 10000
 ```
 
 ### Options
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--timeout <ms>` | Timeout per test in milliseconds | 5000 |
-| `--verbose` | Show detailed execution logs | false |
+| Flag        | Description                 | Default |
+| ----------- | --------------------------- | ------- |
+| `--verbose` | Show detailed execution logs | false   |
 
 ### Output
 
@@ -273,16 +270,14 @@ expense-tracker.test.tsx
 
 The runner itself is `packages/cli/lib/test-runner.ts`. The sketch below is a
 reading aid for the shape of the loop, not a second copy of it: it leaves out
-settling, the retry an assertion gets to let the graph settle, timeouts around
-each step, and the multi-user paths. Behavior that matters belongs in the code
-and in the prose above — change one of those and this sketch needs the same
-edit, so keep it short enough to be worth having.
+settling, the retry an assertion gets to let the graph settle, and the
+multi-user paths. Behavior that matters belongs in the code and in the prose
+above — change one of those and this sketch needs the same edit, so keep it
+short enough to be worth having.
 
 ```typescript
 // Shown for illustration only.
 async function runTestPattern(testPath: string, options: TestOptions): Promise<TestResults> {
-  const TIMEOUT = options.timeout ?? 5000;
-
   // 1. Create emulated runtime (same as piece step)
   const identity = await Identity.fromPassphrase("test-runner");
   const storageManager = StorageManager.emulate({ as: identity });
@@ -361,10 +356,7 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       // attach, so a write guarded by a UI contract sees a trusted gesture.
       actionStream.send(buildActionEvent(stepValue.event, stepValue.trustedUi));
 
-      await Promise.race([
-        runtime.idle(),
-        timeout(TIMEOUT, `Action at index ${i} timed out after ${TIMEOUT}ms`)
-      ]);
+      await runtime.idle();
 
     } else if (isAssertion) {
       // It's an assertion - read the value via .key() access. An assert(...)

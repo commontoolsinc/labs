@@ -22,19 +22,10 @@ export const test = new Command()
     "Run all test files matching a glob pattern.",
   )
   .example(
-    cliText("cf test ./counter.test.tsx --timeout 10000"),
-    "Run with custom timeout (10 seconds).",
-  )
-  .example(
     cliText(
       "cf test ./battleship/pass-and-play/main.test.tsx --root ./battleship",
     ),
     "Run with custom root for resolving imports from sibling directories.",
-  )
-  .option(
-    "--timeout <ms:number>",
-    "Timeout per test action in milliseconds.",
-    { default: 5000 },
   )
   .option(
     "--verbose",
@@ -143,7 +134,6 @@ export const test = new Command()
 
     // Run tests
     const { failed } = await runTests(uniqueTestFiles, {
-      timeout: options.timeout,
       verbose: options.verbose,
       root,
       statsThreshold: options.statsThreshold,

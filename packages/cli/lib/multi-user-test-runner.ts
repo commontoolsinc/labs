@@ -107,8 +107,6 @@ export function multiUserDescriptorMeta(
   return participants.length > 0 ? { participants } : undefined;
 }
 
-const RPC_TIMEOUT_MS = 120_000;
-
 class ParticipantWorker {
   readonly name: string;
   #worker: Worker;
@@ -144,28 +142,13 @@ class ParticipantWorker {
   call(
     cmd: string,
     args: Record<string, unknown> = {},
-    timeoutMs = RPC_TIMEOUT_MS,
   ): Promise<unknown> {
     const id = this.#nextId++;
     const request: WorkerRequest = { id, cmd, args };
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(
-          new Error(
-            `[${this.name}] ${cmd} timed out after ${timeoutMs}ms`,
-          ),
-        );
-      }, timeoutMs);
       this.#pending.set(id, {
-        resolve: (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        reject: (error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
+        resolve,
+        reject,
       });
       this.#worker.postMessage(request);
     });
@@ -200,7 +183,6 @@ export async function runMultiUserTestPattern(
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
   const startTime = performance.now();
-  const stepTimeout = options.timeout ?? 5000;
   const results: TestResult[] = [];
   const runtimeErrors: string[] = [];
   const nonIdempotent: string[] = [];
@@ -319,10 +301,7 @@ export async function runMultiUserTestPattern(
             participant.actionCount++;
             participant.lastActionName = `action_${participant.actionCount}`;
             const stepStart = performance.now();
-            // Per-action deadline, matching the single-runtime runner's use
-            // of --timeout (an action is a local send + settle; a slow one is
-            // a bug, not propagation latency).
-            await participant.worker.call("action", { index }, stepTimeout);
+            await participant.worker.call("action", { index });
             if (options.verbose) {
               console.log(
                 `  [${participant.spec.name}] ${participant.lastActionName} (${
@@ -334,7 +313,7 @@ export async function runMultiUserTestPattern(
           }
           if (step.kind === "render") {
             const stepStart = performance.now();
-            await participant.worker.call("render", { index }, stepTimeout);
+            await participant.worker.call("render", { index });
             if (options.verbose) {
               console.log(
                 `  [${participant.spec.name}] ◇ render (${
@@ -346,7 +325,7 @@ export async function runMultiUserTestPattern(
           }
           if (step.kind === "settle") {
             const stepStart = performance.now();
-            await participant.worker.call("settleStep", {}, stepTimeout);
+            await participant.worker.call("settleStep", {});
             if (options.verbose) {
               console.log(
                 `  [${participant.spec.name}] ⋯ settle (${

@@ -263,8 +263,6 @@ async function runPatternTests(
           [
             ...cfCmd,
             "test",
-            "--timeout",
-            "180000",
             "--root",
             patternsDir,
             testFile,

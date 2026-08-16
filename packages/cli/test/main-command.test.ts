@@ -335,6 +335,12 @@ describe("main command", () => {
     expect(errors[0]).toContain("no-such-file.test.tsx");
   });
 
+  it("does not race pattern-test completion against a timeout", () => {
+    const flags = testCommand.getOptions().flatMap((option) => option.flags);
+
+    expect(flags).not.toContain("--timeout");
+  });
+
   it("reports empty pattern test globs", async () => {
     const errors = await withCapturedErrors(async () => {
       const code = await withMockExit(async () => {
