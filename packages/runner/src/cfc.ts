@@ -524,14 +524,10 @@ export class ContextualFlowControl {
     const defs = isObjectOrArray(schema) && schema.$defs
       ? schema.$defs
       : undefined;
-    // The external-closure check keeps a derivation computed while a
-    // referenced schema document was absent out of the cache: the document
-    // can arrive later, and a memoized derivation would not see it.
     const cacheable = extraConfidentiality === undefined &&
       typeof defaultEmptyProperties === "boolean" &&
       typeof defaultMissingProperty === "boolean" &&
-      isObjectOrArray(schema) && isDeepFrozen(schema) &&
-      isExternalClosureComplete(schema);
+      isObjectOrArray(schema) && isDeepFrozen(schema);
     if (!cacheable) {
       return ContextualFlowControl.schemaAtPathInternal(
         schema,
@@ -566,8 +562,14 @@ export class ContextualFlowControl {
         defaultEmptyProperties,
         defaultMissingProperty,
       ));
-      if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
-      byKey.set(key, result);
+      // Populate-only guard (NOT part of `cacheable`, which every call
+      // pays, hits included — measurably hot): a derivation computed while
+      // a referenced schema document was absent must not be memoized; the
+      // document can arrive later.
+      if (isExternalClosureComplete(schema)) {
+        if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
+        byKey.set(key, result);
+      }
     }
     return result;
   }
