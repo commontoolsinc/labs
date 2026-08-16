@@ -1,4 +1,15 @@
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { JSONSchemaObj } from "@commonfabric/api";
+import {
+  decomposeSchema,
+  SchemaNotDecomposableError,
+} from "./schema-decompose.ts";
+import {
+  lookupSchemaDocument,
+  registerSchemaDocument,
+} from "./schema-registry.ts";
+import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
@@ -191,6 +202,31 @@ export function areMaybeLinkAndNormalizedLinkSame(
 // this module through the `export *` above.
 
 /**
+ * Replaces an inline link schema with a reference to content-addressed
+ * schema documents (`docs/specs/content-addressed-schemas.md`, Phase 1;
+ * `contentAddressedSchemas` flag). Decomposition registers the closure in
+ * the realm registry — in-session resolution works immediately — and the
+ * commit pipeline materializes the documents into the destination space in
+ * the same transaction as the write that carries the reference (the
+ * write-side delivery guarantee). Input decomposition refuses stays inline,
+ * exactly as with the flag off.
+ */
+function externalizeLinkSchema(schema: JSONSchemaObj): JSONSchema {
+  try {
+    const { rootRef, documents } = decomposeSchema(schema, {
+      resolveDocument: lookupSchemaDocument,
+    });
+    for (const [hash, document] of documents) {
+      registerSchemaDocument(hash, document);
+    }
+    return internSchema({ $ref: rootRef });
+  } catch (error) {
+    if (error instanceof SchemaNotDecomposableError) return schema;
+    throw error;
+  }
+}
+
+/**
  * Creates a sigil reference (link or alias) with shared logic
  */
 export function createSigilLinkFromParsedLink(
@@ -244,7 +280,11 @@ export function createSigilLinkFromParsedLink(
       link.schema,
       options.keepAsCell ?? KeepAsCell.OnlyStream,
     );
-    if (isNontrivialSchema(schema)) reference.schema = schema;
+    if (isNontrivialSchema(schema)) {
+      reference.schema = getContentAddressedSchemasConfig()
+        ? externalizeLinkSchema(schema as JSONSchemaObj)
+        : schema;
+    }
   }
 
   // Option overrides link value

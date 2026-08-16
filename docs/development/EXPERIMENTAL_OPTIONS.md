@@ -29,6 +29,7 @@ was last checked against the code.
 | Flag                                                                        | Toggle via                                                                                                                                      | Default today                                                                        | Originally added by                                   | Planned end state                                                                                                                                                                                                                 | Status                                                                          |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [`modernCellRep`](#moderncellrep)                                           | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental`                                                                            | off                                                                                  | Dan Bornstein (#3818)                                 | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, off by default                                                     |
+| [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env, or `RuntimeOptions.experimental`                                                                  | off                                                                                  | Robin McCollum (PR #5833)                             | graduate on once Phase 1 soaks (writers emit refs; readers already accept both forms), then continue the spec's phases                                                                                                            | implemented, off by default                                                     |
 | [`persistentSchedulerState`](#persistentschedulerstate)                     | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental`                                                                 | off                                                                                  | Bernhard Seefeld (#3646)                              | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement        |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
@@ -111,6 +112,28 @@ value is ignored with a warning rather than coerced. See
   in the fleet negotiates `modernCellRep` true; then delete the flag, the legacy
   `{ "/" }` serialization branches in `cell-rep.ts`, and the protocol-capability
   negotiation for it.
+
+### `contentAddressedSchemas`
+
+- **Toggle via.** `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` environment variable
+  (through the canonical mapping described in the category note above), or
+  directly through `RuntimeOptions.experimental.contentAddressedSchemas`. The
+  ambient control point is `setContentAddressedSchemasConfig` in
+  [`packages/runner/src/schema-doc-config.ts`](../../packages/runner/src/schema-doc-config.ts).
+- **Added by.** Robin McCollum (PR #5833).
+- **Purpose.** Phase 1 of
+  [content-addressed schemas](../specs/content-addressed-schemas.md): link
+  writers replace inline schemas with `{ "$ref": "cid:<hash>" }` references
+  to content-addressed schema documents, whose closure is installed into the
+  destination space in the same transaction as the reference. Gates writers
+  only — readers accept both link forms unconditionally, which is what makes
+  the flag safe to flip in either direction; a schema decomposition refuses
+  stays inline exactly as with the flag off.
+- **Current default and planned end state.** Off by default. Graduate to on
+  once the writer path has soaked (old inline links keep reading forever and
+  age out through pattern re-instantiation), then proceed to the spec's
+  Phase 2 (references in selectors) and Phase 3 (retiring transport schema
+  compression for link positions).
 
 ### `persistentSchedulerState`
 

@@ -18,6 +18,10 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  getContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "./schema-doc-config.ts";
+import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   resetCommitPreconditionsConfig,
@@ -207,6 +211,13 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
   modernCellRep?: boolean | undefined;
+  /**
+   * Link writers replace inline schemas with references to
+   * content-addressed schema documents
+   * (`docs/specs/content-addressed-schemas.md`, Phase 1). Gates writers
+   * only; readers accept both link forms unconditionally. Defaults to off.
+   */
+  contentAddressedSchemas?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
@@ -1005,6 +1016,11 @@ export class Runtime {
     // `undefined` and probably get very confused).
     setModernCellRepConfig(this.experimental.modernCellRep);
     this.experimental.modernCellRep = getModernCellRepConfig();
+    setContentAddressedSchemasConfig(
+      this.experimental.contentAddressedSchemas,
+    );
+    this.experimental.contentAddressedSchemas =
+      getContentAddressedSchemasConfig();
     setPersistentSchedulerStateConfig(
       this.experimental.persistentSchedulerState,
     );
