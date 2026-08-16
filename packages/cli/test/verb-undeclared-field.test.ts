@@ -654,6 +654,18 @@ describe("verb-undeclared-field", () => {
   // rather than as no refusal coming back. The two are different facts, and
   // only the first one states that a caller can still make the call.
 
+  describe("a schema that forbids undeclared fields", () => {
+    it("refuses the undeclared field rather than letting it be dropped", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { title: { type: "string" } },
+        additionalProperties: false,
+      };
+      expect(undeclaredVerbFieldError({ titel: "x" }, schema))
+        .toMatch(/"titel" at <event> is not a field this verb declares/);
+    });
+  });
+
   describe("eventSchemaJudgesRootFields()", () => {
     // The predicate `cf exec`'s flag door reads to decide whether an
     // unrecognized flag is a misspelling to refuse or a field the schema
@@ -684,6 +696,24 @@ describe("verb-undeclared-field", () => {
         properties: { title: { type: "string" } },
         additionalProperties: true,
       })).toBe(false);
+      // A schema for the extra fields is still permission to send them.
+      expect(eventSchemaJudgesRootFields({
+        type: "object",
+        properties: { title: { type: "string" } },
+        additionalProperties: { type: "string" },
+      })).toBe(false);
+    });
+
+    it("judges a schema that forbids undeclared fields", () => {
+      // `false` is the one value that does NOT welcome them, so reading mere
+      // presence of the keyword as permission turns the strictest spelling
+      // into the most permissive one. A caller's extra field would then be
+      // accepted here, dropped by the runtime, and the call reported settled.
+      expect(eventSchemaJudgesRootFields({
+        type: "object",
+        properties: { title: { type: "string" } },
+        additionalProperties: false,
+      })).toBe(true);
     });
 
     it("does not judge a disjunction", () => {
