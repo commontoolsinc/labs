@@ -23,7 +23,6 @@ import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstruct
 import {
   type RealmCodecValue,
   type RealmEncodedValue,
-  type RealmFormatMarker,
   type RealmTaggedValue,
 } from "@/codec-realm/interface.ts";
 import { RealmCodecEngine } from "@/codec-realm/RealmCodecEngine.ts";
@@ -42,12 +41,17 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { EchoReport } from "./realm-echo-worker.ts";
 
 /**
- * A marker for hand-built wire data. `decode()` checks the outer envelope's
- * marker by shape and version rather than by identity, so a test's own marker
- * works exactly as the engine's does -- which is itself the property that lets
- * a peer send a well-formed payload.
+ * A marker for hand-built wire data, taken from the engine rather than written
+ * out here. What these tests need is one a *peer* could have sent: equal to
+ * what this build mints, and not identical to any particular call's, which is
+ * exactly what one encode's marker is to every other encode.
+ *
+ * Deriving it is what keeps that true. Written out as a literal it would be a
+ * second copy of the format's version, free to drift from the first -- and
+ * drift that `decode()`'s validation happened to move with would leave every
+ * hand-built case below exercising a form the engine no longer emits.
  */
-const WIRE_MARKER = ["fvr1"] as unknown as RealmFormatMarker;
+const WIRE_MARKER = realmFromFabricValue(null)[0];
 
 /** Wraps hand-built wire data in an outer envelope under {@link WIRE_MARKER}. */
 function wire(payload: unknown): RealmEncodedValue {
@@ -94,21 +98,20 @@ async function crossRealm(value: FabricValue): Promise<EchoReport> {
 
 describe("RealmCodecEngine", () => {
   describe("encode()", () => {
-    it("mints a marker equal to the one this file hand-builds", () => {
-      // `WIRE_MARKER` stands in for the engine's own marker everywhere wire
-      // data is assembled by hand here, so every one of those cases rests on
-      // the two agreeing. Pinned in one place rather than assumed: a change
-      // to the minted marker's shape or version would otherwise surface as
-      // a spray of unrelated-looking failures across the file, and one that
-      // moved `decode()`'s validation along with it would surface as none at
-      // all, leaving those cases exercising a form the engine never emits.
-      const minted = realmFromFabricValue(null)[0];
+    it("mints a marker equal to every other call's and identical to none", () => {
+      // Both halves of what `WIRE_MARKER` assumes about the engine, and it is
+      // derived from one of these calls, so the pair is what says the
+      // assumption holds rather than merely that a constant matches itself.
+      // Equal: the shape and version a decoder checks are stable across
+      // calls, which is what lets a peer's payload decode here at all.
+      // Distinct: each call mints its own, which is what makes an earlier
+      // encoding's marker ordinary data when it turns up inside a later one.
+      const first = realmFromFabricValue(null)[0];
+      const second = realmFromFabricValue(null)[0];
 
-      expect(minted).toEqual(WIRE_MARKER);
-      // Equal and deliberately NOT the same object, which is the property
-      // that lets a peer's own marker work: what `decode()` checks at the
-      // envelope is shape and version, never identity against a local one.
-      expect(minted).not.toBe(WIRE_MARKER);
+      expect(first).toEqual(second);
+      expect(first).not.toBe(second);
+      expect(first).toEqual(WIRE_MARKER);
     });
 
     it("wraps the walked tree, which is otherwise the caller's own", () => {
