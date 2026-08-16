@@ -5483,3 +5483,56 @@ Deno.test("local Loom binding conflicts become structured provider mismatches be
   assertEquals(failure.error.code, "provider-mismatch");
   assertStringIncludes(failure.error.message, "provider");
 });
+
+Deno.test("a startup fault is internal, and only bad argv is an invalid request", async () => {
+  const workspace = await Deno.makeTempDir();
+
+  const rejected = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["--model-provider", "unsupported", "hello"], {
+      cwd: workspace,
+      env: {},
+      io: rejected.io,
+      structuredHostFailures: true,
+    }),
+    1,
+  );
+  assertEquals(JSON.parse(rejected.stderr[0]).error.code, "invalid-request");
+
+  // The argv is well-formed and the binding holds; only building the run
+  // fails. A host that retries on `internal-error` and gives up on
+  // `invalid-request` needs this one classified as the transient it is.
+  const startup = createIoBuffers();
+  let promptLoopsCreated = 0;
+  assertEquals(
+    await runCfHarnessCli(
+      [
+        "--workspace",
+        workspace,
+        "--model-provider",
+        "openai-codex",
+        "--cfc-enforcement-mode",
+        "disabled",
+        "hello",
+      ],
+      {
+        cwd: workspace,
+        env: {},
+        io: startup.io,
+        structuredHostFailures: true,
+        createModelClient: () =>
+          Promise.reject(new Error("artifact store unavailable")),
+        createPromptLoop: () => {
+          promptLoopsCreated += 1;
+          throw new Error("must not construct a prompt loop");
+        },
+      },
+    ),
+    1,
+  );
+  assertEquals(promptLoopsCreated, 0);
+  assertEquals(startup.stdout, []);
+  const failure = JSON.parse(startup.stderr[0]);
+  assertEquals(failure.error.code, "internal-error");
+  assertEquals(JSON.stringify(failure).includes("artifact store"), false);
+});

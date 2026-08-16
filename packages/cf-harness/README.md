@@ -348,11 +348,21 @@ binding existed are deliberately not resumable through the local adapter; it
 fails closed instead of guessing which credential home or billing route created
 them.
 
+Batch argv is a prompt run and nothing else. `--help` and
+`--describe-capabilities` answer without reading provider or auth state; every
+other argv is bound and executed, so argv led by a CLI subcommand — `auth`,
+`config`, `models`, `whoami` — is rejected as `invalid-request` rather than
+billed as a prompt whose text happens to read like a command. Run those against
+the cf-harness CLI itself.
+
 Batch startup failures are one `cf-harness.host-failure` JSON object on stderr.
 Interactive startup failures remain on the NDJSON chat protocol so hosts that do
-not consume stderr still receive the stable provider error code. Run state,
-manifests, reports, child manifests, and structured batch results record only
-provider, the non-secret auth-source label, and the fixed owner reference.
+not consume stderr still receive the stable provider error code. A failure is
+`invalid-request` only while the argv and the recorded binding are still being
+checked; once a run starts being built, an infrastructure fault reports
+`internal-error`, so a host can keep a retry policy keyed on the code. Run
+state, manifests, reports, child manifests, and structured batch results record
+only provider, the non-secret auth-source label, and the fixed owner reference.
 
 Hosted or multi-user Loom must not reuse this single-user adapter. A trusted
 multi-user host must instead:

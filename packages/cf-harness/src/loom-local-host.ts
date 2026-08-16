@@ -18,6 +18,7 @@ import {
   resolveHarnessModelProviderPreference,
 } from "./auth/provider-settings.ts";
 import {
+  cfHarnessCliCommandName,
   cfHarnessCliInformationalControl,
   type CfHarnessCliIO,
   type CfHarnessHostFailure,
@@ -498,11 +499,26 @@ export const createLoomLocalCfHarnessHost = async (
           structuredHostFailures: true,
         });
       }
+      const io = options.cliDependencies?.io ?? defaultHostIo();
+      // Batch argv reaches the CLI behind a prepended --model-provider, which
+      // shifts a leading subcommand out of the CLI's own dispatch and into the
+      // prompt text. Reject it here rather than bill a run for it.
+      const command = cfHarnessCliCommandName(argv);
+      if (command !== "prompt") {
+        io.stderr(`${
+          JSON.stringify(createCfHarnessHostFailure(
+            new HarnessControlError(
+              "invalid-request",
+              `the local Loom host runs prompts only; "${command}" is a cf-harness CLI command`,
+            ),
+          ))
+        }\n`);
+        return 1;
+      }
       let resolved;
       try {
         resolved = await resolveBinding(argv);
       } catch (error) {
-        const io = options.cliDependencies?.io ?? defaultHostIo();
         io.stderr(`${JSON.stringify(createCfHarnessHostFailure(error))}\n`);
         return 1;
       }
@@ -622,14 +638,18 @@ const defaultHostIo = (): CfHarnessCliIO => ({
   stderr: (text) => Deno.stderr.writeSync(new TextEncoder().encode(text)),
 });
 
+/**
+ * A startup blocker as the chat protocol states it. The provider codes carry
+ * across by name; `invalid-request` and `operation-canceled` report as
+ * `internal_error`, because a startup blocker precedes any request or turn the
+ * protocol's own `invalid_request` and `turn_canceled` would be about.
+ */
 const chatError = (failure: CfHarnessHostFailure): HarnessChatError => ({
   code: failure.error.code === "provider-configuration-required" ||
       failure.error.code === "provider-auth-required" ||
       failure.error.code === "provider-mismatch" ||
       failure.error.code === "provider-unavailable"
     ? failure.error.code
-    : failure.error.code === "internal-error"
-    ? "internal_error"
     : "internal_error",
   message: failure.error.message,
 });
