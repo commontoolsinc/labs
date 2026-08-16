@@ -1269,11 +1269,15 @@ jobs:
           # dropped from THIS list, on stderr): `deno test --ignore` binds
           # only to files deno discovers itself and silently ignores nothing
           # when the files arrive as explicit arguments, as they do here.
-          mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/server-execution-on-skips.ts patterns --filter "${SHARD_FILES[@]}")
-          if [ "${#TEST_FILES[@]}" -eq 0 ]; then
+          # Command substitution (not a process substitution) so a validation
+          # failure in the script fails this step under `bash -e` instead of
+          # reading as an empty list.
+          FILTERED_FILES=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts patterns --filter "${SHARD_FILES[@]}")
+          if [ -z "$FILTERED_FILES" ]; then
             echo "Every file of this shard is skip-listed for the ON arm; nothing to run."
             exit 0
           fi
+          mapfile -t TEST_FILES <<< "$FILTERED_FILES"
           mkdir -p ../../test-results
           # --no-check: the Check job type-checks packages/patterns/integration
           # (tasks/check.sh).
