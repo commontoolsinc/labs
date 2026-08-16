@@ -1,16 +1,18 @@
-// The refusal a `FabricInstance` gets from a walk that cannot descend one.
-// Several walks share it so that they refuse in one wording; these pin that
-// wording, since a caller asserting on the message has no other guarantee of
-// it -- and pin that reaching for it throws, rather than handing back
-// something a caller could drop.
+/**
+ * The refusal a `FabricInstance` gets from a walk that cannot descend one.
+ * Several walks share it so that they refuse in one wording; these pin that
+ * wording, since a caller asserting on the message has no other guarantee of
+ * it -- and pin that reaching for it throws, rather than handing back
+ * something a caller could drop.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { UnknownValue } from "@commonfabric/data-model/codec-common";
 import {
   FabricError,
   FabricMap,
-  UnknownValue,
 } from "@commonfabric/data-model/fabric-instances";
 
 import type { FabricInstance } from "@commonfabric/data-model/fabric-value";
@@ -59,7 +61,7 @@ describe("fabric-special-object", () => {
         thrownBy("in a pattern binding", value).message;
 
       expect(named(new FabricMap(new Map()))).toContain("`FabricMap`");
-      expect(named(new UnknownValue("zzz@1", { a: 1 }))).toContain(
+      expect(named(new UnknownValue("Zzz@1", { a: 1 }))).toContain(
         "`UnknownValue`",
       );
     });

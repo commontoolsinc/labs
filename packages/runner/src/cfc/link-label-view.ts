@@ -1,13 +1,14 @@
 /**
- * The CFC label view carried on a cell link, and the four operations over it:
- * reading one, setting one, and the two that strip or redact it on the way to
- * a display.
+ * The `cfcLabelView` side-channel that rides on a cell link's inner: the two
+ * accessors for the view on a single link, and the two walks that rewrite
+ * every view in a whole value.
  *
- * It is a side channel rather than part of the link. Producers write it and
- * the flow-control machinery reads it back, but it takes no part in a link's
- * addressing identity, so normalization and equality ignore it — which is why
- * the type lives here, extending the base payload, rather than in the payload
- * itself.
+ * A view is display state rather than part of what a link addresses, and that
+ * is what makes the two directions different rather than symmetric. Outbound,
+ * the view may be shown but the caveat sources behind it may not, so a value
+ * on its way to the main thread is rewritten rather than withheld. Inbound, a
+ * view is an untrusted artifact that must not become worker label state, so it
+ * is removed outright.
  */
 
 import {
@@ -19,7 +20,7 @@ import {
   FabricInstance,
   FabricPrimitive,
 } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import type { CellLinkRefPayload, SigilLink } from "../sigil-types.ts";
 import type { CfcLabelView } from "./label-view-core.ts";
@@ -132,7 +133,7 @@ function transformSigilCfcLabelViews(
     });
     return changed ? out : value;
   }
-  // A `FabricPrimitive` is `isRecord` and leaves ahead of the record branch. It
+  // A `FabricPrimitive` is `isObjectOrArray` and leaves ahead of the record branch. It
   // holds no sigil link, so returning it whole is the answer.
   if (value instanceof FabricPrimitive) return value;
 
@@ -153,7 +154,7 @@ function transformSigilCfcLabelViews(
     refuseFabricInstance(value, "when transforming sigil CFC label views");
   }
 
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     let changed = false;
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {

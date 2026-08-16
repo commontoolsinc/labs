@@ -2,12 +2,28 @@ import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { schemaToTypeString } from "@commonfabric/runner";
 import { cliCommand } from "./cli-name.ts";
+// A value import back to callable.ts, whose own import of this module is
+// type-only and therefore erased — so this creates no runtime cycle.
+import { eventSchemaJudgesRootFields } from "./callable.ts";
+import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 
 export interface ExecCommandSpec {
   callableKind: "handler" | "tool";
   defaultVerb: "invoke" | "run";
   inputSchema: JSONSchema;
   outputSchemaSummary?: JSONSchema;
+  /**
+   * What this callable is FOR, in the author's own words: the doc comment on
+   * the pattern property that declares it.
+   *
+   * Absent where the author wrote none, which is why it is optional rather
+   * than defaulted — a page with no summary line says nothing, while one
+   * carrying a restated property name says something false about where it came
+   * from. It describes the callable and not its input, so it does not ride
+   * `inputSchema`, whose own `description` would be a claim about the event
+   * object a caller sends.
+   */
+  description?: string;
 }
 
 export interface ParsedExecArgs {
@@ -208,6 +224,71 @@ function parseValueForSchema(
   return rawValue;
 }
 
+/**
+ * The flags a verb taking a single non-object value accepts. Fixed rather
+ * than schema-derived, because such a verb declares no fields for a flag to
+ * name — the value is the whole payload.
+ */
+const SCALAR_INPUT_FLAGS = [
+  "value",
+  "value-file",
+  "json",
+  "json-file",
+] as const;
+
+/**
+ * `--help` was given an argument by a verb that declares no `help` field.
+ *
+ * Written once and used at both arrival points, which parse their arguments
+ * separately: two copies of one sentence drift, and this one is long enough
+ * that a drift would not be obvious in a diff.
+ *
+ * `--help` is not unknown — alone it prints the help page. It takes an
+ * argument only where the verb declares a `help` field for it to fill.
+ */
+const HELP_TAKES_NO_ARGUMENTS =
+  "--help takes no arguments — it prints the help page, and this verb " +
+  "declares no help field for it to fill";
+
+/**
+ * The refusal a flag naming no declared field earns.
+ *
+ * The same five elements `undeclaredVerbFieldError` gives the payload door:
+ * the name, the position, the refusal, a near miss, and the accepted
+ * vocabulary. A caller who types `--titel` and a caller who sends
+ * `{"titel": …}` have made one mistake, and the flag spelling is the one the
+ * verb-session walkthrough teaches — so it is the spelling most likely to be
+ * mistyped and was the one answering with the least.
+ *
+ * Two honest differences from the payload door, both forced:
+ *
+ * - The position is always `<event>`, because a flag can only name a root
+ *   field. A payload can nest, so its refusal has a path to report.
+ * - Names are written as flags, because that is what the caller typed and
+ *   what they must retype. `flagNameForKey` is what maps a declared field to
+ *   it, so the vocabulary here is the same event schema the payload door
+ *   validates against, spelled for this door.
+ *
+ * Declaration order, not sorted: it is the order the help page lists the
+ * flags in and the order the payload door names them in, so a caller reading
+ * two of the three sees one vocabulary rather than two arrangements of it.
+ */
+function undeclaredFlagError(
+  rawFlag: string,
+  descriptors: Map<string, FlagDescriptor>,
+): string {
+  const declared = [...descriptors.keys()];
+  const nearest = nearestName(rawFlag, declared);
+  return `"--${rawFlag}" at ${EVENT_ROOT_POSITION} is not a field this verb ` +
+    "declares. " +
+    (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
+    (declared.length === 0
+      ? `${EVENT_ROOT_POSITION} declares no fields at all`
+      : `${EVENT_ROOT_POSITION} takes ${
+        declared.map((name) => `"--${name}"`).join(", ")
+      }`);
+}
+
 function parseObjectInput(
   schema: JSONSchema,
   args: string[],
@@ -293,14 +374,32 @@ function parseObjectInput(
       negated = descriptor !== undefined;
     }
     if (!descriptor) {
-      throw new Error(`Unknown flag --${rawFlag}`);
+      // The question is whether the SCHEMA judges its fields, not whether
+      // this particular name is declared. Asking the second lets a declared
+      // field typed in its schema spelling — `--fooBar` where the flag is
+      // `--foo-bar` — read as undeclared-against-an-open-schema and be
+      // accepted as a silent alias, when what the caller needs is the near
+      // miss naming the spelling that works.
+      if (eventSchemaJudgesRootFields(schema)) {
+        throw new Error(undeclaredFlagError(rawFlag, descriptors));
+      }
+      // A schema judging nothing says nothing about the value either, so the
+      // flag is taken as the string the caller typed: there is no declared
+      // type to read it as, and inventing one would be this door deciding
+      // something the schema deliberately left open.
+      descriptor = { key: rawFlag, flagName: rawFlag, schema: true };
     }
 
     const flagName = `--${descriptor.flagName}`;
     const type = schemaType(descriptor.schema);
     if (negated) {
       if (type !== "boolean") {
-        throw new Error(`Unknown flag --${rawFlag}`);
+        // The field exists, so naming the vocabulary would send the caller
+        // looking for a name they already found. What is wrong is the
+        // negation, and only its own field can say so.
+        throw new Error(
+          `"--${rawFlag}" negates "${flagName}", which is not a boolean field`,
+        );
       }
       input[descriptor.key] = false;
       usedGeneratedFlags = true;
@@ -390,7 +489,18 @@ function parseNonObjectInput(
     flag !== "--value" && flag !== "--json" && flag !== "--value-file" &&
     flag !== "--json-file"
   ) {
-    throw new Error(`Unknown flag ${flag}`);
+    // A verb taking a single non-object value has no fields, so its
+    // vocabulary is this fixed four rather than anything schema-derived, and
+    // there is no position to name — the value IS the payload. The near miss
+    // is owed all the same: a fixed vocabulary is still a vocabulary, and
+    // `--valu` is the same slip here as `--titel` is at the field door.
+    const nearest = nearestName(flag.replace(/^--/, ""), SCALAR_INPUT_FLAGS);
+    throw new Error(
+      `"${flag}" is not a flag this verb takes. ` +
+        (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
+        "This verb takes a single value, so its flags are " +
+        SCALAR_INPUT_FLAGS.map((name) => `"--${name}"`).join(", "),
+    );
   }
   if (flag === "--json" && rawValue === undefined) {
     return {
@@ -568,6 +678,14 @@ async function resolveImplicitPipedHandlerInput(
   deps: ExecInputResolverDeps = {},
 ): Promise<ResolvedExecInvocation | null> {
   if (spec.callableKind !== "handler" || rawArgs.length > 0) {
+    return null;
+  }
+
+  // A schema-less input declares no payload, so no piped input exists to
+  // infer: return before consulting stdin at all. Reading it would hold the
+  // advertised bare spelling open until a non-terminal stdin reaches EOF —
+  // a hang whenever the pipe outlives the call.
+  if (isSchemaLessHandlerInput(spec.inputSchema)) {
     return null;
   }
 
@@ -781,6 +899,55 @@ function outputPropertyLines(schema: JSONSchema): string[] {
   ];
 }
 
+/** A handler's declared result, named at the position a caller reads it from:
+ * the settled Invocation JSON's `result` key, not the command's stdout. An
+ * object result enumerates its fields the way a tool's does; anything else
+ * names its type, because a scalar result still has a shape worth publishing.
+ */
+function invocationResultLines(schema: JSONSchema): string[] {
+  const properties = objectProperties(schema);
+  if (!properties || Object.keys(properties).length === 0) {
+    return [
+      "  The invocation's `result`:",
+      ...schemaShapeString(schema).split("\n").map((line) => `    ${line}`),
+    ];
+  }
+
+  return [
+    "  The invocation's `result`:",
+    ...Object.entries(properties).map(([key, propertySchema]) =>
+      `    ${key} ${valuePlaceholder(propertySchema)}`
+    ),
+  ];
+}
+
+/** The `Output:` section of a help page, or nothing at all.
+ *
+ * A DECLARED result decides it, not the callable kind. A verb declared
+ * `Stream<E, R>` enumerates `R` exactly as a tool enumerates its pattern's
+ * result; a handler that declares nothing keeps no section at all, because an
+ * absent section reports that the page has nothing to say, where a fixed claim
+ * about output would be false for every verb that returns one.
+ *
+ * The two kinds name different positions because a caller collects them from
+ * different places: a tool's result IS the command's stdout, and a handler's
+ * rides the settled Invocation JSON.
+ */
+function outputSectionLines(spec: ExecCommandSpec): string[] {
+  if (spec.outputSchemaSummary === undefined) {
+    return spec.callableKind === "tool"
+      ? ["", "Output:", "  JSON on success."]
+      : [];
+  }
+  return [
+    "",
+    "Output:",
+    ...(spec.callableKind === "handler"
+      ? invocationResultLines(spec.outputSchemaSummary)
+      : outputPropertyLines(spec.outputSchemaSummary)),
+  ];
+}
+
 function usageCommandPrefix(
   mountedFilePath: string,
   invocationStyle: "cf" | "direct",
@@ -900,7 +1067,7 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      throw new Error("Unknown flag --help");
+      throw new Error(HELP_TAKES_NO_ARGUMENTS);
     }
   }
 
@@ -940,7 +1107,7 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      throw new Error("Unknown flag --help");
+      throw new Error(HELP_TAKES_NO_ARGUMENTS);
     }
   }
 
@@ -978,6 +1145,7 @@ export function parseExecArgs(
 export function renderExecHelpJson(spec: ExecCommandSpec): string {
   const value: Record<string, unknown> = {
     callableKind: spec.callableKind,
+    ...(spec.description !== undefined && { description: spec.description }),
     inputSchema: spec.inputSchema,
   };
   if (spec.outputSchemaSummary !== undefined) {
@@ -1012,22 +1180,12 @@ export function renderExecHelp(
 
   if (spec.callableKind === "handler") {
     lines.push("");
-    lines.push("Output:");
-    lines.push("  No output on success.");
-    lines.push("");
     lines.push("Alternatively, write JSON to this file to invoke the handler.");
     if (handlerAllowsInvokeWithoutInputs(spec.inputSchema)) {
       lines.push("Invoke alone will call the handler without any inputs.");
     }
-  } else if (spec.outputSchemaSummary !== undefined) {
-    lines.push("");
-    lines.push("Output:");
-    lines.push(...outputPropertyLines(spec.outputSchemaSummary));
-  } else if (spec.callableKind === "tool") {
-    lines.push("");
-    lines.push("Output:");
-    lines.push("  JSON on success.");
   }
+  lines.push(...outputSectionLines(spec));
 
   return lines.join("\n");
 }
@@ -1098,6 +1256,11 @@ export function renderPieceCallHelp(
   const lines = [
     "Usage:",
     ...pieceUsageLines(commandPrefix, spec),
+    // The verb's own prose, as a paragraph of its own between Usage and the
+    // sections describing the payload. Nothing stands here when the author
+    // wrote no comment: an empty paragraph would read as a summary the page
+    // failed to fill in, rather than as a verb nobody documented.
+    ...(spec.description !== undefined ? ["", spec.description] : []),
     "",
     "JSON input:",
     ...pieceJsonInputLines(spec.inputSchema),
@@ -1109,24 +1272,17 @@ export function renderPieceCallHelp(
     lines.push(...specificFlags);
   }
 
-  if (spec.callableKind === "handler") {
+  // No write-through note here, unlike the mounted-file page above: this
+  // command takes its payload as an argument, and there is no file for a
+  // caller to write JSON to.
+  if (
+    spec.callableKind === "handler" &&
+    handlerAllowsInvokeWithoutInputs(spec.inputSchema)
+  ) {
     lines.push("");
-    lines.push("Output:");
-    lines.push("  No output on success.");
-    lines.push("");
-    lines.push("Alternatively, write JSON to this file to invoke the handler.");
-    if (handlerAllowsInvokeWithoutInputs(spec.inputSchema)) {
-      lines.push("Invoke alone will call the handler without any inputs.");
-    }
-  } else if (spec.outputSchemaSummary !== undefined) {
-    lines.push("");
-    lines.push("Output:");
-    lines.push(...outputPropertyLines(spec.outputSchemaSummary));
-  } else if (spec.callableKind === "tool") {
-    lines.push("");
-    lines.push("Output:");
-    lines.push("  JSON on success.");
+    lines.push("Invoke alone will call the handler without any inputs.");
   }
+  lines.push(...outputSectionLines(spec));
 
   return lines.join("\n");
 }

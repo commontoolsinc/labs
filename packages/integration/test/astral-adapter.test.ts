@@ -1,5 +1,6 @@
 import {
   assert,
+  assertAlmostEquals,
   assertEquals,
   assertRejects,
   assertStringIncludes,
@@ -1378,11 +1379,112 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
         width: "100px",
         height: "30px",
         margin: "0",
+        padding: "0",
+        border: "0",
       });
       button.addEventListener("click", () => {
         document.body.dataset.clicked = "yes";
       });
       document.body.append(button);
+
+      const offsetButton = document.createElement("button");
+      offsetButton.id = "offset-click-target";
+      offsetButton.textContent = "offset click";
+      Object.assign(offsetButton.style, {
+        position: "fixed",
+        left: "260px",
+        top: "90px",
+        width: "100px",
+        height: "30px",
+        margin: "0",
+        padding: "7px 11px 13px 17px",
+        borderStyle: "solid",
+        borderWidth: "3px 5px 9px 11px",
+        boxSizing: "content-box",
+        transform: "rotate(8deg) scale(1.2)",
+        transformOrigin: "13px 9px",
+      });
+      document.body.append(offsetButton);
+
+      const transformedAncestor = document.createElement("section");
+      Object.assign(transformedAncestor.style, {
+        position: "fixed",
+        left: "430px",
+        top: "80px",
+        width: "180px",
+        height: "120px",
+        transform: "rotate(17deg) scale(0.85)",
+        transformOrigin: "20px 30px",
+      });
+      const transformedDescendant = document.createElement("button");
+      transformedDescendant.id = "ancestor-transform-click-target";
+      Object.assign(transformedDescendant.style, {
+        position: "absolute",
+        left: "25px",
+        top: "35px",
+        width: "80px",
+        height: "26px",
+        margin: "0",
+        padding: "5px 7px",
+        border: "3px solid",
+        boxSizing: "content-box",
+      });
+      transformedAncestor.append(transformedDescendant);
+      document.body.append(transformedAncestor);
+
+      const perspectiveAncestor = document.createElement("section");
+      Object.assign(perspectiveAncestor.style, {
+        position: "fixed",
+        left: "100px",
+        top: "250px",
+        width: "180px",
+        height: "120px",
+        perspective: "400px",
+        transformStyle: "preserve-3d",
+      });
+      const threeDimensionalTarget = document.createElement("button");
+      threeDimensionalTarget.id = "three-dimensional-click-target";
+      Object.assign(threeDimensionalTarget.style, {
+        position: "absolute",
+        left: "30px",
+        top: "30px",
+        width: "90px",
+        height: "30px",
+        margin: "0",
+        padding: "4px 9px",
+        border: "2px solid",
+        boxSizing: "content-box",
+        transform: "rotateY(32deg) rotateX(14deg) translateZ(20px)",
+        transformOrigin: "15px 10px",
+      });
+      perspectiveAncestor.append(threeDimensionalTarget);
+      document.body.append(perspectiveAncestor);
+
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      Object.assign(svg.style, {
+        position: "fixed",
+        left: "360px",
+        top: "270px",
+        width: "200px",
+        height: "120px",
+        overflow: "visible",
+        transform: "rotate(-11deg)",
+        transformOrigin: "20px 15px",
+      });
+      const svgTarget = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "rect",
+      );
+      svgTarget.id = "svg-click-target";
+      svgTarget.setAttribute("x", "30");
+      svgTarget.setAttribute("y", "20");
+      svgTarget.setAttribute("width", "80");
+      svgTarget.setAttribute("height", "40");
+      svgTarget.setAttribute("fill", "blue");
+      svgTarget.setAttribute("stroke", "black");
+      svgTarget.setAttribute("stroke-width", "6");
+      svg.append(svgTarget);
+      document.body.append(svg);
 
       const input = document.createElement("input");
       input.id = "type-target";
@@ -1396,9 +1498,9 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       "yes",
     );
 
-    // The click aims at the centre of the control's own rect, and an offset
-    // aims from the rect's top-left corner. Both are measured in the page, so
-    // the numbers come from the pinned control above.
+    // The click aims at the center of the control's own rect, and an offset
+    // aims from its content-box origin. This control has no border or padding,
+    // so both points are direct arithmetic on the pinned rect above.
     let mousePoint: { x: number; y: number } | undefined;
     Object.defineProperty(astralPage.mouse, "click", {
       configurable: true,
@@ -1415,10 +1517,61 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
     assertEquals(mousePoint, { x: 64, y: 66 });
     assertEquals(clickPoints[2], { x: 64, y: 66 });
 
+    // Match published Astral's offset contract: the offset is added to the
+    // content quad's top-left point. A stable DOM-agent box model is the
+    // compatibility oracle for geometry that includes the element's own 2D
+    // transform, a transformed ancestor, a 3D transform, and SVG layout.
+    const offsetCases = [
+      { selector: "#offset-click-target", offset: { x: 4, y: 6 } },
+      {
+        selector: "#ancestor-transform-click-target",
+        offset: { x: 7, y: 3 },
+      },
+      {
+        selector: "#three-dimensional-click-target",
+        offset: { x: 5, y: 8 },
+      },
+      { selector: "#svg-click-target", offset: { x: 9, y: 4 } },
+    ];
+    for (const [index, offsetCase] of offsetCases.entries()) {
+      const offsetOracle = await page.waitForSelector(offsetCase.selector);
+      const offsetModel = await offsetOracle.boxModel();
+      assert(offsetModel);
+      let contentOrigin = offsetModel.content[0];
+      for (const point of offsetModel.content) {
+        if (point.x < contentOrigin.x && point.y < contentOrigin.y) {
+          contentOrigin = point;
+        }
+      }
+
+      const offsetTarget = await page.waitForSelector(offsetCase.selector);
+      await offsetTarget.click({ offset: offsetCase.offset });
+      assert(mousePoint);
+      assertAlmostEquals(
+        mousePoint.x,
+        contentOrigin.x + offsetCase.offset.x,
+        0.01,
+      );
+      assertAlmostEquals(
+        mousePoint.y,
+        contentOrigin.y + offsetCase.offset.y,
+        0.01,
+      );
+      assertEquals(clickPoints[3 + index], mousePoint);
+    }
+
     const typeTarget = await page.waitForSelector("#type-target");
     await typeTarget.type("text");
     assertEquals(keyboardOptions, { delay: 17 });
     assertEquals(interactions, [
+      "beforeClick",
+      "afterClick",
+      "beforeClick",
+      "afterClick",
+      "beforeClick",
+      "afterClick",
+      "beforeClick",
+      "afterClick",
       "beforeClick",
       "afterClick",
       "beforeClick",

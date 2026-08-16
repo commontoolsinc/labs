@@ -1,41 +1,54 @@
 /**
  * Factory function to create builder functions with runtime dependency injection
  */
-import type {
-  BuilderFunctionsAndConstants,
-  ToSchemaFunction,
-} from "./types.ts";
+
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import {
-  AsCell,
-  AsComparableCell,
-  AsOpaqueCell,
-  AsReadonlyCell,
-  AsStream,
-  AsWriteonlyCell,
-  AuthSchema,
-  CHIP_UI,
-  FS,
-  NAME,
-  schema as schemaIdentity,
-  SELF,
-  TILE_UI,
-  TYPE,
-  UI,
-  WebhookConfigSchema,
-} from "./types.ts";
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricBytes,
+  FabricEpochDays,
+  FabricEpochNsec,
+  FabricHash,
+  FabricRegExp,
+} from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
+import {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
-import { pattern } from "./pattern.ts";
 import {
-  action,
-  assert,
-  assertCapture,
-  assertRenderParts,
-  byRef,
-  computed,
-  handler,
-  lift,
-} from "./module.ts";
+  all as rowLabelAll,
+  any as rowLabelAny,
+  authoredBy as rowLabelAuthoredBy,
+  constant as rowLabelConstant,
+  dbOwner as rowLabelDbOwner,
+  endorsedBy as rowLabelEndorsedBy,
+  intersect as rowLabelIntersect,
+  match as rowLabelMatch,
+  principal as rowLabelPrincipal,
+  whenMatches as rowLabelWhenMatches,
+} from "@commonfabric/memory/sqlite/row-label";
+import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
+
+import { cellConstructorFactory } from "../cell.ts";
+import { getEntityId } from "../create-ref.ts";
+import type { RuntimeProgram } from "../harness/types.ts";
+import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
 import {
+  registerUnsafeHostTrustedValue,
+  type UnsafeHostTrust,
+} from "../unsafe-host-trust.ts";
+import {
+  cellFromUrl,
   compileAndRun,
   fetchBinary,
   fetchJson,
@@ -59,51 +72,42 @@ import {
   when,
   wish,
 } from "./built-in.ts";
-import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
-import {
-  all as rowLabelAll,
-  any as rowLabelAny,
-  authoredBy as rowLabelAuthoredBy,
-  constant as rowLabelConstant,
-  dbOwner as rowLabelDbOwner,
-  endorsedBy as rowLabelEndorsedBy,
-  intersect as rowLabelIntersect,
-  match as rowLabelMatch,
-  principal as rowLabelPrincipal,
-  whenMatches as rowLabelWhenMatches,
-} from "@commonfabric/memory/sqlite/row-label";
-import { cellConstructorFactory } from "../cell.ts";
-import { getEntityId } from "../create-ref.ts";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { getPatternEnvironment } from "./env.ts";
-import type { RuntimeProgram } from "../harness/types.ts";
+import {
+  action,
+  assert,
+  assertCapture,
+  assertRenderParts,
+  byRef,
+  computed,
+  handler,
+  lift,
+} from "./module.ts";
 import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
+import { pattern } from "./pattern.ts";
+import type {
+  BuilderFunctionsAndConstants,
+  ToSchemaFunction,
+} from "./types.ts";
 import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
-import {
-  FabricError,
-  FabricLink,
-} from "@commonfabric/data-model/fabric-instances";
-import {
-  FabricBytes,
-  FabricEpochDays,
-  FabricEpochNsec,
-  FabricHash,
-  FabricRegExp,
-} from "@commonfabric/data-model/fabric-primitives";
-import {
-  toCompactDebugString,
-  toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
-import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
-import {
-  registerUnsafeHostTrustedValue,
-  type UnsafeHostTrust,
-} from "../unsafe-host-trust.ts";
+  AsCell,
+  AsComparableCell,
+  AsOpaqueCell,
+  AsReadonlyCell,
+  AsStream,
+  AsWriteonlyCell,
+  AuthSchema,
+  CHIP_UI,
+  FS,
+  NAME,
+  schema as schemaIdentity,
+  SELF,
+  TESTS,
+  TILE_UI,
+  TYPE,
+  UI,
+  WebhookConfigSchema,
+} from "./types.ts";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
@@ -207,6 +211,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     generateObject,
     generateText,
     fetchBinary,
+    cellFromUrl,
     fetchText,
     fetchJson,
     fetchJsonUnchecked,
@@ -278,6 +283,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     TILE_UI,
     CHIP_UI,
     FS,
+    TESTS,
 
     // Schema utilities
     schema: runtimeSchema,

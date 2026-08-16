@@ -1,4 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
+
+import { createSession, type DID } from "@commonfabric/identity";
+import type { Identity, Session } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   compileAndSavePattern,
@@ -7,15 +10,13 @@ import {
   runtimePresets,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type DID } from "@commonfabric/identity";
-import { createSession } from "@commonfabric/identity";
+
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
   BGPieceEntriesSchema,
 } from "./src/schema.ts";
 import { getIdentity } from "./src/utils.ts";
-import type { Identity, Session } from "@commonfabric/identity";
 
 export interface CastAdminDependencies {
   args: string[];

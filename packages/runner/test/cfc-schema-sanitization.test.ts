@@ -1,10 +1,11 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+
 import type { JSONSchema } from "../src/builder/types.ts";
-import { CELL_KINDS } from "../src/scope.ts";
 import {
   cfcObjectSchemaIsClosed,
   INJECTION_SAFE_ATOM,
@@ -18,6 +19,7 @@ import {
   validateSchemaDefinition,
   validateSchemaValue,
 } from "../src/cfc/mod.ts";
+import { CELL_KINDS } from "../src/scope.ts";
 
 const promptRisk = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
@@ -981,6 +983,23 @@ describe("cfc schema sanitization", () => {
       [
         { items: { type: ["number", "number"] } },
         "items",
+      ],
+      // A keyword holding something no schema can be. A stored schema is not
+      // always generator output, and the runner's schema walk defers to this
+      // rule for what a subschema may be.
+      [
+        { properties: { a: null } } as unknown as JSONSchema,
+        "properties.a: schema must be an object or boolean",
+      ],
+      [
+        { additionalProperties: "ab" } as unknown as JSONSchema,
+        "additionalProperties: schema must be an object or boolean",
+      ],
+      // An array is one of those, which is what makes the pre-2019 tuple
+      // spelling of `items` unreadable rather than merely unsupported.
+      [
+        { items: [{ type: "string" }] } as unknown as JSONSchema,
+        "items: schema must be an object or boolean",
       ],
     ];
     for (const [schema, message] of malformed) {

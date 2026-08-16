@@ -10,6 +10,7 @@
  * edit makes the diff stop matching disk, which is exactly why it must not be
  * recomputed from the edited text.
  */
+
 import type { Document, Line, Span, ViewMode } from "./model.ts";
 import { cpLen } from "./ansi.ts";
 import {
@@ -126,7 +127,7 @@ export function diffSource(
   }
 
   // Editability is decided against the current diff structure. Re-parsing the
-  // whole buffer on each edit key is wasteful, so memoise the parse and the
+  // whole buffer on each edit key is wasteful, so memoize the parse and the
   // message scan by the text they came from; the several guard calls within one
   // keystroke reuse them.
   let memoText: string | null = null;
@@ -239,9 +240,9 @@ export function diffSource(
     parse: (text, lineEndings) =>
       reparse(ws, text, cache, completeFiles, "source", lineEndings),
     ...renderedView,
-    // Live highlighting recolours the lines an edit changes and reuses the seed
-    // (buildDiffDocument's colours, including the file/hunk headers and the
-    // workspace-file syntax highlighting) for the rest. Languages whose colour
+    // Live highlighting recolors the lines an edit changes and reuses the seed
+    // (buildDiffDocument's colors, including the file/hunk headers and the
+    // workspace-file syntax highlighting) for the rest. Languages whose color
     // can cross lines re-highlight the complete file. The full parse on
     // pause restores workspace-verified spans across the edit.
     createHighlighter: (text, seed, lineEndings) =>
@@ -783,7 +784,7 @@ function hunkFooting(
   // which an inserted line does not extend), not the display `@@` counts (which
   // an insert grows past the file range). Insertion positions and the global
   // index come from the parse. Clamp how far context may grow by the
-  // neighbouring hunks of the SAME file, so an expansion never overlaps another
+  // neighboring hunks of the SAME file, so an expansion never overlaps another
   // hunk's file range — that would splice the two ranges into each
   // other (silently dropping edits or duplicating lines) and malform the diff.
   const range = hunks[index];
@@ -815,7 +816,7 @@ function hunkFooting(
       up: Math.max(0, rangeStart - prevEnd),
       down: Math.max(0, nextStart - downFrom),
       // Nothing left is the file running out only where the range reaches its
-      // edge; otherwise it is the neighbouring hunk in the way.
+      // edge; otherwise it is the neighboring hunk in the way.
       atFileTop: rangeStart <= 0,
       atFileBottom: downFrom >= fileLen,
     },
@@ -981,7 +982,7 @@ function expandContext(
   // last body line (down), both in current-text coordinates.
   const insertedAt = up ? target.headerLine + 1 : target.endLine + 1;
   const insertedRows = ctx.length;
-  // Those lines may have been the last between this hunk and its neighbour, in
+  // Those lines may have been the last between this hunk and its neighbor, in
   // which case the two now touch and the header between them describes nothing.
   // The header that goes is the one at the join: this hunk's own when the lines
   // came from above it, the next hunk's when they came from below.
@@ -1200,12 +1201,12 @@ function applyExpansion(
 }
 
 /**
- * An incremental highlighter for a diff. It recolours only the lines an edit
+ * An incremental highlighter for a diff. It recolors only the lines an edit
  * changes (found by a common prefix/suffix of the line arrays) and keeps `seed`
- * — the colours {@link buildDiffDocument} produced for the unedited text — for
+ * — the colors {@link buildDiffDocument} produced for the unedited text — for
  * every line the edit leaves alone. Edited removed lines use the complete old
  * file's spans. Other edited body lines use a marker-aware single-line parse.
- * A language can ask to re-highlight complete files when its colours depend on
+ * A language can ask to re-highlight complete files when its colors depend on
  * preceding lines. The headers stay in the unchanged prefix or suffix. When no
  * seed is given, the highlighter renders every line itself.
  */
@@ -1272,7 +1273,7 @@ export function createDiffHighlighter(
         s,
       );
       const model = parseDiff(next);
-      const recoloured = newRaw.slice(p, newRaw.length - s).map((l, i) =>
+      const recolored = newRaw.slice(p, newRaw.length - s).map((l, i) =>
         diffLineRender(
           l,
           diffFileNameAt(newRaw, p + i, model),
@@ -1280,7 +1281,7 @@ export function createDiffHighlighter(
         )
       );
       lines = lines.slice(0, p).concat(
-        recoloured,
+        recolored,
         lines.slice(oldRaw.length - s),
       );
       rehighlightTouchedHunks(
@@ -1738,9 +1739,9 @@ function diffLogicalEnd(
 }
 
 /**
- * Render one edited diff line: the marker keeps its diff colour and row tint and
+ * Render one edited diff line: the marker keeps its diff color and row tint and
  * the code after it is highlighted, shifted one column right. Mirrors how the
- * diff document builder paints a line, so a live edit re-colours correctly
+ * diff document builder paints a line, so a live edit re-colors correctly
  * without rebuilding the whole diff.
  */
 function diffLineRender(
@@ -1749,8 +1750,8 @@ function diffLineRender(
   oldSpans?: readonly Span[],
 ): Line {
   if (lineText.length === 0) return { text: "", spans: [] };
-  // A hunk header carries its own colour and its counts change when an edit
-  // grows or shrinks the hunk, so colour it the way the full parse does rather
+  // A hunk header carries its own color and its counts change when an edit
+  // grows or shrinks the hunk, so color it the way the full parse does rather
   // than as a body line.
   if (/^@@ /.test(lineText)) {
     return {

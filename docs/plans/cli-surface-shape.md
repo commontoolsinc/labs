@@ -19,7 +19,7 @@ itself part of the problem.
 | --- | --- |
 | **Authoring** — work on source files, never touching a live space | `check`, `test`, `view` (pager), `init`, `deps update` |
 | **Identity and access** — who you are, and who may do what | `id` (new/did/derive/from-mnemonic), `acl` (ls/set/remove) |
-| **Live data** — reading and writing running state | `piece get`/`set`/`call`/`apply`/`link`/`step`/`verbs`/`inspect`, `wish` |
+| **Live data** — reading and writing running state | `piece get`/`set`/`call`/`apply`/`link`/`step`/`verbs`/`inspect`/`get-label`/`set-label`, `wish` |
 | **Piece lifecycle** — deploying and managing running programs | `piece new`/`setsrc`/`getsrc`/`rm`/`ls`/`search`/`map`/`set-slug`/`recreate-root`/`set-home` |
 | **Rendering** — turning things into something to look at | `piece view` (terminal), `piece render` (HTML), `view` (source pager) |
 | **Storage forensics** — reading the database directly, mostly offline (`inspect pull` fetches from a remote) | `inspect` (22 subcommands), `space` (clone/verify/reset/fingerprint) |
@@ -106,8 +106,9 @@ with the address suffix (`--select 'topic@,topic.title'`), and leaves "shape"
 free as the word for what a caller asks for — covering both spellings rather
 than competing with one of them.
 
-Timing argues for doing it now: `piece call` does not have either form yet, so
-splitting them costs one deprecation on a flag that is still young.
+Both spellings are carried on every command that reads — `piece get`,
+`piece call`, `wish` and `exec` — and a command naming both is refused rather
+than resolved, because it has not said which shape it wants.
 
 **What a reader may not supply, in either syntax.** `asCell`, `default`,
 `scope`, and `ifc` stay the source's — they decide how a value is treated, not
@@ -166,7 +167,9 @@ removing, listing, searching, slugs, and listing a piece's verbs. Reading and
 writing cells are not piece operations and stop presenting themselves as ones.
 `recreate-root` and `set-home` are space-level operations sitting under `piece`;
 they belong under `space`, and moving them is part of step 7 rather than
-something this shape decides.
+something this shape decides. `get-label` and `set-label` (#5673) postdate this
+accounting: whether CFC labels stay a piece subcommand or become a surface of
+their own is a step-7-class decision this document leaves open.
 
 `--select` and `--schema` everywhere, split per the reasons above.
 
@@ -201,7 +204,7 @@ intermediate state wrong. What each step owes:
 
 | Step | Documentation owed |
 | --- | --- |
-| 2 | The read options gain a second host — `piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs-over-the-cli.md), which is already stale |
+| 2 | The read options gain a second host — `piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs-over-the-cli.md) |
 | 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
 | 4 | `#argument` beside every `--input` example, in the same places |
 | 5 | The new spellings alongside the old ones everywhere both work |

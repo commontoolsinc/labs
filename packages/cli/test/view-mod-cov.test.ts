@@ -4,6 +4,7 @@
  * semantic service only when launching the pager, so these call the returned
  * closure directly to exercise both the diff and source semantics paths.
  */
+
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";

@@ -1,3 +1,21 @@
+/**
+ * Asking whether a value is deep-frozen, and making it so, across the shapes
+ * that complicate both.
+ *
+ * Caching is the part with teeth. A result is remembered by identity, so a
+ * wrong `true` is not one mistake but a permanent one, and several cases exist
+ * to pin when a result may be cached and when it may not. One is kept as a
+ * regression pin against a cycle that was once judged wrongly.
+ *
+ * The stricter of the two checks also asks whether the value is a
+ * `FabricValue` at all, so an accessor-backed property, a symbol key, or an
+ * array whose structure is inadmissible makes it return `false` where a plain
+ * frozen-ness test would have said `true`.
+ *
+ * A fabric instance is reached through its own protocol member rather than by
+ * enumeration, and a primitive short-circuits ahead of all of it.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -232,7 +250,7 @@ describe("deep-freeze", () => {
     // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
     // inputs, including a `FabricInstance` participating in a circular
     // reference. `isDeepFrozen`'s recursion threads an
-    // `inProgress: Set<object>` for cycle-safety and answers a
+    // `inProgress: Set<object>` for cycle-safety and resolves a
     // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member --
     // inspecting its logical contents, not its enumerable own-props -- so
     // values held in non-enumerable slots (such as
@@ -273,11 +291,12 @@ describe("deep-freeze", () => {
       it("returns `false` when an unfrozen value lives in a non-enumerable slot (extras bag)", () => {
         // A `FabricInstance`'s logical contents are not all enumerable
         // own-props: `FabricError` keeps its custom properties in a private
-        // extras `Map`. A generic `Object.values` walk can't see them, so the
-        // frozen-status must be answered via the instance's `[IS_DEEP_FROZEN]`
-        // protocol member, which inspects the extras bag. Here the wrapper is
-        // frozen and every enumerable slot is a frozen primitive, but the
-        // extras bag holds a mutable array -> not deep-frozen.
+        // extras `Map`. A generic `Object.values` walk can't see them, so
+        // frozen-status must be determined via the instance's
+        // `[IS_DEEP_FROZEN]` protocol member, which inspects the extras bag.
+        // Here the wrapper is frozen and every enumerable slot is a frozen
+        // primitive, but the extras bag holds a mutable array -> not
+        // deep-frozen.
         const fe = FabricError.fromNativeError(new Error("has-extras"));
         fe.setExtra("payload", [1, 2, 3]);
         Object.freeze(fe);
@@ -406,8 +425,8 @@ describe("deep-freeze", () => {
   describe("`isDeepFrozenFabricValue()` accessor properties", () => {
     it("returns `false` for a frozen object with a getter", () => {
       // Freezing an object does not make an accessor inert: a read still
-      // executes it and can answer differently every time. Such an object
-      // must not be granted the deep-frozen-fabric-value trust level.
+      // executes it and can return a different value every time. Such an
+      // object must not be granted the deep-frozen-fabric-value trust level.
       const obj = { a: 1 };
       Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
       Object.freeze(obj);

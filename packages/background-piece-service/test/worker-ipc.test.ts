@@ -1,7 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
-import { isWorkerIPCRequest } from "../src/worker-ipc.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
+
+import { isWorkerIPCRequest } from "../src/worker-ipc.ts";
 
 describe("isWorkerIPCRequest", () => {
   it("validates cleanup messages", () => {

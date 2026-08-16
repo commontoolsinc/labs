@@ -837,7 +837,7 @@ Deno.test("session: c cycles the non-printable display mode and reports it", () 
   assertEquals(s.view().displayMode, "pictures", "starts on the first mode");
   press(s, "c");
   assertEquals(s.view().displayMode, "ansi");
-  assert(s.view().message.includes("ANSI colour"), "reports the new mode");
+  assert(s.view().message.includes("ANSI color"), "reports the new mode");
   press(s, "c");
   assertEquals(s.view().displayMode, "hidden");
   press(s, "c");
@@ -990,7 +990,7 @@ Deno.test("session: Enter in the card opens the selected reference's card", () =
   assertEquals(ov.selectedLine, undefined, "selection reset after navigating");
 });
 
-Deno.test("session: z closes the card and centres the main view on the target", () => {
+Deno.test("session: z closes the card and centers the main view on the target", () => {
   const doc = parseDocument(SAMPLE);
   const s = new Session(
     doc,
@@ -1006,7 +1006,7 @@ Deno.test("session: z closes the card and centres the main view on the target", 
   assert(s.view().selected, "a node is selected at the destination");
 });
 
-Deno.test("session: z frames the revealed node (centred when it fits)", () => {
+Deno.test("session: z frames the revealed node (centered when it fits)", () => {
   const doc = parseDocument(SAMPLE);
   const height = 14;
   const s = new Session(

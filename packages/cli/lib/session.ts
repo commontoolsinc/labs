@@ -3,7 +3,10 @@
  * within.
  *
  * `cf piece call --invocation <id>` lets a caller name a dispatch so that a
- * retry settles on the original outcome instead of executing the verb again.
+ * retry settles on the original outcome: the handler body runs again, loses
+ * the race for the create-only receipt, and the caller reads the original
+ * back — nothing commits twice, though effects outside the transaction can
+ * repeat.
  * The id is the caller's own word — `add-comment-1` — and nothing stops a
  * second caller from picking that same word for its own call on the same verb.
  * The id alone therefore does not say whose invocation it is. A session is

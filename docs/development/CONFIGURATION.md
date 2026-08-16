@@ -59,7 +59,7 @@ for the registration logic.
 
 | Var | Default | Notes |
 |---|---|---|
-| `CFTS_AI_GATEWAY_URL` | `https://llm.stage.commontools.dev` | OpenAI-compatible `/v1/models` endpoint. Toolshed probes it at startup; reachable models are registered and `gateway:claude-sonnet-4-6` becomes the default when present. **The default URL is Tailscale-only — external users will not be able to reach it.** That fallback path is supported: an unreachable gateway logs a warning, the startup probe times out in ~3s, and the direct-provider models continue to work. Set to `""` to opt out and skip the probe entirely. |
+| `CFTS_AI_GATEWAY_URL` | `https://llm.stage.commontools.dev` | OpenAI-compatible `/v1/models` endpoint. Toolshed probes it as it starts up, alongside binding its port rather than ahead of it; reachable models are registered and `gateway:claude-sonnet-4-6` becomes the default when present. **The default URL is Tailscale-only — external users will not be able to reach it.** That fallback path is supported: an unreachable gateway logs a warning and the direct-provider models continue to work. A request naming a direct-provider model such as `anthropic:claude-sonnet-4-6` is served while the probe is still out, because that model was registered as toolshed loaded. What waits for the probe is a request naming a model that is not registered yet — a `gateway:` one, the `default` alias, or a name that is no model at all — and `GET /models`, which answers for the whole list. Off Tailscale that wait is however long the connection takes to fail, so set to `""` to skip the probe entirely. |
 
 **Default model resolution order** (defined in `models.ts` as
 `DEFAULT_MODEL_CANDIDATES`):
@@ -149,6 +149,7 @@ The toolshed-embedded memory service has two modes:
 | `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database holding every space, instead of a file per space. Takes precedence over `MEMORY_DIR`. Validated as an absolute path. |
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
+| `RATE_LIMIT_TRUST_FORWARDED_FOR` | `false` | Set to `true` ONLY when a trusted reverse proxy that overwrites `X-Forwarded-For` sits in front of toolshed. Control-plane rate limiting keys on the real TCP peer by default. Enabling it without such a proxy makes the header client-controlled and the limiter a no-op; leaving it off behind a proxy collapses every caller onto one bucket. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
 
 With ACL policy active, a fresh space is read-only until its space identity or a

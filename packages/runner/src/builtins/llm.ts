@@ -1,5 +1,14 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import type { CfcConfClause } from "../cfc/clause.ts";
+import {
+  BuiltInGenerateObjectParams,
+  BuiltInGenerateTextParams,
+  BuiltInLLMMessage,
+  BuiltInLLMParams,
+} from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import type { Schema } from "@commonfabric/api/schema";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
@@ -11,34 +20,29 @@ import {
   LLMRequest,
   LLMResponse,
 } from "@commonfabric/llm";
-import {
-  BuiltInGenerateObjectParams,
-  BuiltInGenerateTextParams,
-  BuiltInLLMMessage,
-  BuiltInLLMParams,
-} from "@commonfabric/api";
-import type { Schema } from "@commonfabric/api/schema";
-import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
-import { mapSubschemas } from "../schema-walk.ts";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
-import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import type { CellScope, JSONSchema, JSONSchemaObj } from "../builder/types.ts";
+import { type Cell, isCell } from "../cell.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import { cfcLabelViewForCellFailClosed } from "../cfc/label-view.ts";
+import { uniqueCfcAtoms } from "../cfc/observation.ts";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import {
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
 } from "../cfc/schema-sanitization.ts";
-import { uniqueCfcAtoms } from "../cfc/observation.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { type Cell, isCell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import { mapSubschemas } from "../schema-walk.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { CellScope } from "../builder/types.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
-import { scopedCell } from "./scope-policy.ts";
 import {
   GenerateObjectParamsSchema,
   GenerateObjectResultSchema,
@@ -49,11 +53,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObject, isRecord } from "@commonfabric/utils/types";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 const logger = getLogger("llm", {
   enabled: true,
@@ -127,11 +127,11 @@ function setStampedModelOutput(
 function mergeLlmDerivedIntoNode(
   node: Record<string, unknown>,
 ): Record<string, unknown> {
-  const ifc = isRecord(node.ifc) ? node.ifc : {};
+  const ifc = isObjectOrArray(node.ifc) ? node.ifc : {};
   const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
   const stamp = cfcAtom.llmDerived();
   const already = addIntegrity.some((atom) =>
-    isRecord(atom) && isRecord(stamp) && atom.type === stamp.type
+    isObjectOrArray(atom) && isObjectOrArray(stamp) && atom.type === stamp.type
   );
   return {
     ...node,
@@ -175,11 +175,11 @@ function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
   const stampNode = (node: Record<string, unknown>): JSONSchema =>
     mapSubschemas(
       mergeLlmDerivedIntoNode(node) as JSONSchemaObj,
-      (child) => (isRecord(child) ? stampNode(child) : child),
+      (child) => (isObjectOrArray(child) ? stampNode(child) : child),
       { includeDefs: true, includeUnused: true },
     );
 
-  const base: Record<string, unknown> = isRecord(schema)
+  const base: Record<string, unknown> = isObjectOrArray(schema)
     ? schema
     : { type: "object" };
   return internSchema(stampNode(base));
@@ -588,7 +588,7 @@ async function pullContextCells(
         ? getCellOrThrow(value).resolveAsCell()
         : isCell(value)
         ? value.resolveAsCell()
-        : isRecord(value) && typeof value.resolveAsCell === "function"
+        : isObjectOrArray(value) && typeof value.resolveAsCell === "function"
         ? value.resolveAsCell()
         : undefined;
       await resolved?.pull?.();
@@ -1359,7 +1359,7 @@ export function generateObject<T extends Record<string, unknown>>(
         observedConfidentiality: [],
       };
     // Determine whether to use the tool-calling path or the direct generateObject path
-    const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const hasTools = isObjectNotArray(tools) && Object.keys(tools).length > 0;
     const validationSchema = schemaSanitizePromptInjection
       ? toDeepFrozenSchema(schema)
       : undefined;

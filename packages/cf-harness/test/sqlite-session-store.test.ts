@@ -12,9 +12,11 @@ import {
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
 import type {
+  CreateHarnessPromptLoopOptions,
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
+import type { LoomLocalHostBinding } from "../src/contracts/run-manifest.ts";
 import { openSqliteHarnessChatSessionStore } from "../src/sqlite-session-store.ts";
 
 const nextIsoNow = () => {
@@ -37,6 +39,24 @@ const makeResult = (
   ],
   modelTurns: 1,
   runState: {} as HarnessPromptLoopResult["runState"],
+});
+
+const localHostPromptLoopOptions = (
+  binding: LoomLocalHostBinding,
+  model?: string,
+): CreateHarnessPromptLoopOptions => ({
+  modelProvider: binding.modelProvider,
+  modelAuthSource: binding.modelAuthSource,
+  credentialOwner: binding.credentialOwner,
+  credentialOwnerKey: binding.credentialOwner.ownerKey,
+  harnessHomeIdentity: binding.harnessHomeIdentity,
+  ...(model !== undefined ? { model } : {}),
+  runManifest: {
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    ...binding,
+    ...(model !== undefined ? { model } : {}),
+  },
 });
 
 Deno.test("sqlite session store rejects unsupported URL schemes", async () => {
@@ -175,6 +195,283 @@ Deno.test("sqlite session store persists chat sessions and replayable events", a
       duplicate.ok === false ? duplicate.error.code : "",
       "session_exists",
     );
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session restart rejects changed or missing local Loom bindings before model traffic", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref",
+    version: 1,
+    ownerKey: "local",
+  } as const;
+  const gatewayBinding: LoomLocalHostBinding = {
+    source: "loom",
+    modelProvider: "openai-compatible-gateway",
+    modelAuthSource: "api-key",
+    credentialOwner,
+    harnessHomeIdentity: "sha256:home-a",
+  };
+  const codexBinding: LoomLocalHostBinding = {
+    ...gatewayBinding,
+    modelProvider: "openai-codex",
+    modelAuthSource: "cf-harness-local-store",
+  };
+  let promptLoopCreations = 0;
+  let modelCalls = 0;
+
+  try {
+    const original = new HarnessInteractiveChatService({
+      basePromptLoopOptions: localHostPromptLoopOptions(gatewayBinding),
+      createPromptLoop: () => {
+        promptLoopCreations += 1;
+        return {
+          runTranscript: (options) =>
+            Promise.resolve(makeResult(options, "Should not run.")),
+        };
+      },
+      sessionStore: store,
+    });
+    const started = await original.startSession("req-start", {
+      sessionId: "session-gateway",
+      workspace: { hostPath: "/workspace" },
+      model: "gpt-session",
+    });
+    assertEquals(started.ok, true);
+    assertEquals(store.getSession("session-gateway")?.session, {
+      ...original.status("session-gateway").sessions[0],
+      model: "gpt-session",
+      loomLocalHostBinding: gatewayBinding,
+    });
+
+    store.saveSession({
+      session: createHarnessChatSessionStatus({
+        sessionId: "session-legacy",
+        workspace: { hostPath: "/workspace" },
+        model: "gpt-session",
+      }),
+      transcript: [],
+    });
+
+    const restored = new HarnessInteractiveChatService({
+      credentialOwner,
+      basePromptLoopOptions: {
+        ...localHostPromptLoopOptions(codexBinding),
+        modelClient: {
+          providerId: "openai-codex",
+          credentialOwner,
+          complete: () => {
+            modelCalls += 1;
+            return Promise.reject(new Error("unexpected model call"));
+          },
+        },
+      },
+      createPromptLoop: () => {
+        promptLoopCreations += 1;
+        return {
+          runTranscript: (options) =>
+            Promise.resolve(makeResult(options, "Should not run.")),
+        };
+      },
+      sessionStore: store,
+    });
+    await restored.initializeFromStore();
+
+    const changedProvider = await restored.startTurn("req-old", {
+      sessionId: "session-gateway",
+      turnId: "turn-old",
+      input: { text: "Do not migrate this transcript" },
+    });
+    assertEquals(changedProvider.ok, false);
+    assertEquals(
+      changedProvider.ok === false ? changedProvider.error.code : undefined,
+      "provider-mismatch",
+    );
+
+    const missingBinding = await restored.startTurn("req-legacy", {
+      sessionId: "session-legacy",
+      turnId: "turn-legacy",
+      input: { text: "Do not use an unbound transcript" },
+    });
+    assertEquals(missingBinding.ok, false);
+    assertEquals(
+      missingBinding.ok === false ? missingBinding.error.code : undefined,
+      "provider-mismatch",
+    );
+
+    const newSession = await restored.startSession("req-new", {
+      sessionId: "session-codex",
+      workspace: { hostPath: "/workspace" },
+      model: "gpt-new-session",
+    });
+    assertEquals(newSession.ok, true);
+    assertEquals(
+      newSession.ok ? newSession.result.loomLocalHostBinding : undefined,
+      codexBinding,
+    );
+    assertEquals(
+      newSession.ok ? newSession.result.model : undefined,
+      "gpt-new-session",
+    );
+    assertEquals(restored.listTurns().turns, []);
+    assertEquals(promptLoopCreations, 0);
+    assertEquals(modelCalls, 0);
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session restart rejects a changed local Loom model before model traffic", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+  const binding: LoomLocalHostBinding = {
+    source: "loom",
+    modelProvider: "openai-compatible-gateway",
+    modelAuthSource: "none",
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "local",
+    },
+    harnessHomeIdentity: "sha256:home-a",
+  };
+  let promptLoopCreations = 0;
+
+  try {
+    const original = new HarnessInteractiveChatService({
+      basePromptLoopOptions: localHostPromptLoopOptions(binding, "gpt-a"),
+      createPromptLoop: () => {
+        promptLoopCreations += 1;
+        return {
+          runTranscript: (options) =>
+            Promise.resolve(makeResult(options, "Should not run.")),
+        };
+      },
+      sessionStore: store,
+    });
+    const started = await original.startSession("req-start", {
+      sessionId: "session-model-a",
+      workspace: { hostPath: "/workspace" },
+    });
+    assertEquals(started.ok ? started.result.model : undefined, "gpt-a");
+
+    const restored = new HarnessInteractiveChatService({
+      basePromptLoopOptions: localHostPromptLoopOptions(binding, "gpt-b"),
+      createPromptLoop: () => {
+        promptLoopCreations += 1;
+        return {
+          runTranscript: (options) =>
+            Promise.resolve(makeResult(options, "Should not run.")),
+        };
+      },
+      sessionStore: store,
+    });
+    await restored.initializeFromStore();
+    const turn = await restored.startTurn("req-turn", {
+      sessionId: "session-model-a",
+      turnId: "turn-model-a",
+      input: { text: "Keep the original model" },
+    });
+
+    assertEquals(turn.ok, false);
+    assertEquals(
+      turn.ok === false ? turn.error.code : undefined,
+      "provider-mismatch",
+    );
+    assertEquals(restored.listTurns().turns, []);
+    assertEquals(promptLoopCreations, 0);
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session restart validates every durable local Loom binding field", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+  const binding: LoomLocalHostBinding = {
+    source: "loom",
+    modelProvider: "openai-compatible-gateway",
+    modelAuthSource: "none",
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "local",
+      tenantKey: "tenant-a",
+    },
+    harnessHomeIdentity: "sha256:home-a",
+  };
+  const cases = [
+    {
+      name: "auth",
+      binding: { ...binding, modelAuthSource: "api-key" as const },
+    },
+    {
+      name: "owner",
+      binding: {
+        ...binding,
+        credentialOwner: { ...binding.credentialOwner, tenantKey: "tenant-b" },
+      },
+    },
+    {
+      name: "home",
+      binding: { ...binding, harnessHomeIdentity: "sha256:home-b" },
+    },
+    { name: "model", binding, model: undefined },
+  ];
+  let promptLoopCreations = 0;
+
+  try {
+    for (const testCase of cases) {
+      store.saveSession({
+        session: createHarnessChatSessionStatus({
+          sessionId: `session-${testCase.name}`,
+          workspace: { hostPath: "/workspace" },
+          ...(testCase.model === undefined && testCase.name === "model"
+            ? {}
+            : { model: "gpt-a" }),
+          loomLocalHostBinding: testCase.binding,
+        }),
+        transcript: [],
+      });
+    }
+
+    const restored = new HarnessInteractiveChatService({
+      basePromptLoopOptions: localHostPromptLoopOptions(binding, "gpt-a"),
+      createPromptLoop: () => {
+        promptLoopCreations += 1;
+        throw new Error("must not create a prompt loop");
+      },
+      sessionStore: store,
+    });
+    await restored.initializeFromStore();
+
+    for (const testCase of cases) {
+      const result = await restored.startTurn(`req-${testCase.name}`, {
+        sessionId: `session-${testCase.name}`,
+        turnId: `turn-${testCase.name}`,
+        input: { text: "Do not cross the durable binding" },
+      });
+      assertEquals(result.ok, false, testCase.name);
+      assertEquals(
+        result.ok === false ? result.error.code : undefined,
+        "provider-mismatch",
+        testCase.name,
+      );
+    }
+    assertEquals(promptLoopCreations, 0);
+    assertEquals(restored.listTurns().turns, []);
   } finally {
     store.close();
     await Deno.remove(path);

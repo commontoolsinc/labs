@@ -1,3 +1,14 @@
+/**
+ * Decides whether a series of measurements is trending, and turns that into
+ * the status and the label a tile shows. A series is read two ways at once:
+ * as a run of flat levels separated by change points, which is what a
+ * regression that lands in one commit looks like, and as a single straight
+ * line, which is what a gradual drift looks like. Whichever describes the
+ * series more closely supplies the change that gets reported. Working in logs
+ * throughout makes the answer a ratio, so a series of milliseconds and a
+ * series of megabytes are judged on the same scale.
+ */
+
 import type { Status } from "./types.ts";
 
 const DAY_MS = 86_400_000;
@@ -9,7 +20,7 @@ const RAPID_PCT = 0.20;
 const LEVEL_SAMPLE_CAP = 64;
 // Samples either side of a change point, so each level rests on three or more.
 const MIN_SEGMENT = 3;
-// How far apart two neighbouring levels must sit, in standard errors of their
+// How far apart two neighboring levels must sit, in standard errors of their
 // difference, for the boundary between them to count as a change point.
 const CHANGE_POINT_SIGMAS = 4;
 // How much smaller the straight line's total deviation must be for it to
@@ -47,7 +58,7 @@ function groupedSamples(values: number[]): number[] {
 }
 
 // The typical size of a sample-to-sample move, read from the differences
-// between neighbours. A level change contributes one difference however large
+// between neighbors. A level change contributes one difference however large
 // it is, so the median of them describes the noise around the levels.
 function noiseScale(logs: number[]): number {
   const steps: number[] = [];
@@ -131,7 +142,7 @@ function medianSlope(logs: number[]): number {
 // Overall change as the fractional difference between the start and the end of
 // a robust fit (+0.2 means the fit ends 20% higher than it starts).
 //
-// Two fits describe the series and the closer one answers. The first is a set
+// Two fits describe the series and the closer one wins. The first is a set
 // of flat levels meeting at change points, which is the shape a series takes
 // when something lands and shifts it. The second is a straight line through the
 // median pairwise slope, which is the shape a series takes when it drifts. Each
@@ -147,7 +158,7 @@ export function trendPct(times: number[], values: number[]): number {
   if (distinctTrendDays(times, values) < MIN_TREND_DAYS) return 0;
   const logs = groupedSamples(values.filter((value) => value > 0))
     .map((value) => Math.log(value));
-  // A scale of zero means most neighbours agree exactly. The search then treats
+  // A scale of zero means most neighbors agree exactly. The search then treats
   // any daylight between two levels as real, and still asks for `MIN_SEGMENT`
   // samples either side of the boundary, so a single stray sample is not one.
   const scale = noiseScale(logs);

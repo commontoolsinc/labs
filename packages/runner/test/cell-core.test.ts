@@ -181,7 +181,7 @@ describe("Cell", () => {
     // `Cell.set` pre-resolves its top-level link, so to exercise
     // `normalizeAndDiff`'s redirect-resolution branch we need the redirect
     // at a nested key — that's the path it actually fires on, during the
-    // per-key recursion in the `isRecord(newValue)` branch.
+    // per-key recursion in the `isObjectOrArray(newValue)` branch.
     const parent = rt.getCell<{ slot: unknown }>(
       space,
       "nested redirect parent",
@@ -320,7 +320,7 @@ describe("Cell", () => {
     const arrWithToJSON = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
     arrWithToJSON.toJSON = () => "custom-array-value";
 
-    // An array is answered by the array rule whatever it carries, and `toJSON`
+    // An array is handled by the array rule whatever it carries, and `toJSON`
     // is a named own property, which that rule rejects. Converting by it would
     // mean storing an array by the very property that disqualifies it.
     expect(() => c.set({ arr: arrWithToJSON })).toThrow(
@@ -1256,7 +1256,7 @@ describe(`Cell result-meta round-trip`, () => {
       // Commit, then start a fresh tx. This forces the `path: ["result"]`
       // read to go through the storage layer (rather than the in-tx
       // novelty cache, which short-circuits serialization), so
-      // `valueFromJson` runs as the actual decode step.
+      // `fabricFromJsonValue()` runs as the actual decode step.
       await tx.commit();
       tx = runtime.edit();
 

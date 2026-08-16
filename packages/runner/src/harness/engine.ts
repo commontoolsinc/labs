@@ -1,49 +1,50 @@
-import { Console } from "./console.ts";
-import {
-  type CacheableModule,
-  type CompiledModuleArtifact,
-  type EvaluateResult,
-  type Exports,
-  type HarnessedFunction,
-  type ResolvedFabricPin,
-  type RuntimeProgram,
-  type TypeScriptHarnessProcessOptions,
-} from "./types.ts";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   MappedPosition,
   Program,
   ProgramResolver,
   Source,
+  SourceMap,
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "@commonfabric/js-compiler";
 import { InMemoryProgram } from "@commonfabric/js-compiler/program";
+import {
+  composeBundleSourceMap,
+  identitySourceMap,
+} from "@commonfabric/js-compiler/source-map";
+import type { StaticCache } from "@commonfabric/static";
 import type { PatternCoverageOptions } from "@commonfabric/ts-transformers";
 import {
   findFirstContentLineIndex,
   PATTERN_COVERAGE_GLOBAL,
   sourceDisablesCfTransform,
 } from "@commonfabric/ts-transformers/runtime-contract";
-import {
-  compilerStack,
-  ensureCompilerStack,
-} from "./deferred-compiler-stack.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import {
-  COMPILE_INTERLEAVES_EVENT_LOOP,
-  interleaveCompileYield,
-} from "./compile-interleave.ts";
+
+import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
+import { popFrame, pushFrame } from "../builder/pattern.ts";
+import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
+import type { PatternCoverageCollector } from "../pattern-coverage.ts";
 import { type MemorySpace, Runtime } from "../runtime.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import type { StaticCache } from "@commonfabric/static";
 import {
-  pretransformProgramForModules,
-  transformInjectHelperModule,
-} from "./pretransform.ts";
+  createModuleCompartmentGlobals,
+  createSafeConsoleGlobal,
+} from "../sandbox/compartment-globals.ts";
 import {
-  type ModuleImportEdges,
-  resolveModuleImports,
-} from "./module-identity.ts";
+  loadModuleGraph,
+  runtimeModuleRecords,
+  type VirtualModuleRecord,
+} from "../sandbox/esm-module-loader.ts";
+import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
+import {
+  ensureSESLockdown,
+  getRuntimeModuleExports,
+  getRuntimeModuleTypes,
+  isRuntimeModuleIdentifier,
+  RuntimeModuleIdentifiers,
+  SESRuntime,
+} from "../sandbox/mod.ts";
 import {
   buildRecordsFromCompiled,
   type CachedCompiledModule,
@@ -56,44 +57,44 @@ import {
   sourceRootSpecifier,
 } from "../sandbox/module-record-compiler.ts";
 import {
-  composeBundleSourceMap,
-  identitySourceMap,
-} from "@commonfabric/js-compiler/source-map";
-import type { SourceMap } from "@commonfabric/js-compiler";
-import {
-  loadModuleGraph,
-  runtimeModuleRecords,
-  type VirtualModuleRecord,
-} from "../sandbox/esm-module-loader.ts";
-import {
   verifyCompiledModuleBody,
   verifyModuleGraph,
 } from "../sandbox/module-record-verifier.ts";
-import { popFrame, pushFrame } from "../builder/pattern.ts";
-import type { PatternCoverageCollector } from "../pattern-coverage.ts";
-import {
-  ensureSESLockdown,
-  getRuntimeModuleExports,
-  getRuntimeModuleTypes,
-  isRuntimeModuleIdentifier,
-  RuntimeModuleIdentifiers,
-  SESRuntime,
-} from "../sandbox/mod.ts";
-import {
-  createModuleCompartmentGlobals,
-  createSafeConsoleGlobal,
-} from "../sandbox/compartment-globals.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
+import {
+  COMPILE_INTERLEAVES_EVENT_LOOP,
+  interleaveCompileYield,
+} from "./compile-interleave.ts";
+import { Console } from "./console.ts";
+import {
+  compilerStack,
+  ensureCompilerStack,
+} from "./deferred-compiler-stack.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
-import { isTrustedBuilderArtifact } from "../builder/pattern-metadata.ts";
+import { FabricAwareResolver } from "./fabric-resolver.ts";
+import {
+  type ModuleImportEdges,
+  resolveModuleImports,
+} from "./module-identity.ts";
+import {
+  pretransformProgramForModules,
+  transformInjectHelperModule,
+} from "./pretransform.ts";
+import {
+  type CacheableModule,
+  type CompiledModuleArtifact,
+  type EvaluateResult,
+  type Exports,
+  type HarnessedFunction,
+  type ResolvedFabricPin,
+  type RuntimeProgram,
+  type TypeScriptHarnessProcessOptions,
+} from "./types.ts";
 import {
   getDefiningModule,
   readBindingIdentity,
   recordVerifiedProvenance,
 } from "./verified-provenance.ts";
-import { FabricAwareResolver } from "./fabric-resolver.ts";
-import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
-import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("engine");
 

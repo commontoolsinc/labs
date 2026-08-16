@@ -1,6 +1,10 @@
-import { Command } from "@cliffy/command";
 import { basename, resolve } from "@std/path";
+
+import { Command } from "@cliffy/command";
 import ports from "@commonfabric/ports" with { type: "json" };
+
+import { parseAttrcacheTimeoutSeconds } from "../../fuse/mount-options.ts";
+import { cliText } from "../lib/cli-name.ts";
 import {
   buildBackgroundSupervisorDenoArgs,
   buildFuseBinaryArgs,
@@ -19,8 +23,6 @@ import {
   removeMountStateFile,
   writeMountState,
 } from "../lib/fuse.ts";
-import { parseAttrcacheTimeoutSeconds } from "../../fuse/mount-options.ts";
-import { cliText } from "../lib/cli-name.ts";
 
 export function isFuseProcessCommand(command: string): boolean {
   return command.includes("packages/fuse/mod.ts") ||

@@ -1,16 +1,20 @@
 import { expect } from "@std/expect";
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { RuntimeProgram } from "../src/harness/types.ts";
-import type { Module } from "../src/builder/types.ts";
-import type { HarnessedFunction } from "../src/harness/types.ts";
-import { Runtime } from "../src/runtime.ts";
+
 import {
   __setSrcAnnotationTransformForTest,
   setEagerSourceAnnotation,
 } from "../src/builder/module.ts";
-import { recordVerifiedProvenance } from "../src/harness/verified-provenance.ts";
+import type { Module } from "../src/builder/types.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import type {
+  HarnessedFunction,
+  RuntimeProgram,
+} from "../src/harness/types.ts";
+import { recordVerifiedProvenance } from "../src/harness/verified-provenance.ts";
+import { Runtime } from "../src/runtime.ts";
 
 // `.src`-garbled identity invariant harness (workstream B — content-addressed
 // action identity).

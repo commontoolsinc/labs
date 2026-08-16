@@ -1,6 +1,4 @@
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import { assessPullWork, type PullSchedulingState } from "./work-oracle.ts";
-import type { SpaceScopeAndURI } from "./types.ts";
 import {
   BACKOFF_BASE_MS,
   BACKOFF_MAX_MS,
@@ -13,7 +11,9 @@ import type {
   ReactivityLog,
   SettleIterationStats,
   SettleStats,
+  SpaceScopeAndURI,
 } from "./types.ts";
+import { assessPullWork, type PullSchedulingState } from "./work-oracle.ts";
 
 export interface SettlingTracker {
   windowStart: number;

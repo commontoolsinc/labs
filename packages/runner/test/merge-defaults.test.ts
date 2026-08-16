@@ -1,17 +1,20 @@
-// Unit tests for mergeDefaults — the internal helper that builds a schema with
-// a merged `.default` property for use by processDefaultValue/createCell.
+/**
+ * Unit tests for mergeDefaults — the internal helper that builds a schema with
+ * a merged `.default` property for use by processDefaultValue/createCell.
+ */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { describe, it } from "@std/testing/bdd";
+
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   internSchema,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
-import { mergeDefaults } from "../src/schema.ts";
+
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import { mergeDefaults } from "../src/schema.ts";
 
 /** Narrow a JSONSchema to JSONSchemaObj or fail the test. */
 function expectNontrivial(schema: JSONSchema): JSONSchemaObj {
@@ -78,7 +81,7 @@ describe("mergeDefaults", () => {
       expect(result.default).toBe(null);
     });
 
-    it("should spread-merge when defaultValue is an array (arrays pass isRecord)", () => {
+    it("should spread-merge when defaultValue is an array (arrays pass isObjectOrArray)", () => {
       // Arrays are records in JS, so they hit the merge path.
       // This is a known quirk — see the TODO in mergeDefaults.
       const schema: JSONSchema = {
@@ -194,7 +197,7 @@ describe("mergeDefaults", () => {
         properties: { a: { type: "number" } },
       };
       const result = expectNontrivial(mergeDefaults(schema, { a: 42 }));
-      // No existing default to merge with, so isRecord(result.default) is
+      // No existing default to merge with, so isObjectOrArray(result.default) is
       // false on the first pass — falls through to simple assignment.
       expect(result.default).toEqual({ a: 42 });
     });

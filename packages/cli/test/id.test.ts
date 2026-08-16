@@ -1,8 +1,10 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { encode } from "@commonfabric/utils/encoding";
-import { cf, checkStderr } from "./utils.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
+import { encode } from "@commonfabric/utils/encoding";
+
+import { cf, checkStderr } from "./utils.ts";
 
 const PKCS8_KEY = `-----BEGIN PRIVATE KEY-----
 MMC4CAQAwBQYDK2VwBCIEICWSvx4QOW+mogjWSsjInQaPpmjErsDBqf2ZOoK+Y4IO

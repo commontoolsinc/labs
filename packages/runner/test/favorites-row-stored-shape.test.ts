@@ -1,12 +1,13 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
 import { fromFileUrl } from "@std/path/from-file-url";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
+
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
 
 // A pattern that maps over durable data must accept the rows its PRODUCER
 // actually writes. Nothing checks that agreement: the row's element schema
@@ -33,7 +34,7 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 // fresh-data test stays green against the bug — which is precisely how the
 // mismatch survived every existing test. The swap is what production does when
 // the auto-update moves a piece to new source, and it is the moment the stored
-// row meets the schema.
+// row is checked against the schema.
 
 const signer = await Identity.fromPassphrase("favorites-row-stored-shape");
 const space = signer.did();

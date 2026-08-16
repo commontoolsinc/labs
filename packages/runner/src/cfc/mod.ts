@@ -1,4 +1,8 @@
-export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
+export type {
+  CfcLabelView,
+  CfcLabelViewEntry,
+  CfcLabelViewStatus,
+} from "./label-view.ts";
 export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
@@ -26,6 +30,7 @@ export {
 export {
   cfcLabelViewForCell,
   cfcLabelViewForCellFailClosed,
+  cfcLabelViewForCellWithStatus,
   cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,
   cfcLabelViewFromMetadata,
@@ -35,6 +40,7 @@ export {
   rebaseCfcLabelView,
   redactCaveatSourcesForDisplay,
 } from "./label-view.ts";
+export { cfcLabelViewFromSchema } from "./schema-label-view.ts";
 export type {
   AttemptedWrite,
   CfcAddress,

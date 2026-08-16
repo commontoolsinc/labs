@@ -18,7 +18,7 @@
  * loop-variable indexing, and helper calls over another runtime's arrays do
  * not resolve before a local write (see scrabble/multi-user.test.tsx).
  */
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, assert, multiUserTest, pattern, TESTS } from "commonfabric";
 import LunchPoll, { type CozyPollOutput } from "./main.tsx";
 
 interface Setup {
@@ -44,7 +44,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   });
 
   // First joiner becomes the host.
-  const assert_joined_as_host = computed(() =>
+  const assert_joined_as_host = assert(() =>
     poll.myName === "Alice" &&
     poll.adminName === "Alice" &&
     poll.isJoined === true &&
@@ -52,17 +52,17 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     (poll.users ?? []).length === 1 &&
     poll.users?.[0]?.name === "Alice"
   );
-  const assert_option_added = computed(() =>
+  const assert_option_added = assert(() =>
     (poll.options ?? []).length === 1 &&
     poll.options?.[0]?.title === "Sushi"
   );
-  const assert_own_vote = computed(() =>
+  const assert_own_vote = assert(() =>
     (poll.votes ?? []).length === 1 &&
     poll.votes?.[0]?.voterName === "Alice" &&
     poll.votes?.[0]?.voteType === "green"
   );
   // Bob joined and voted; his two gated addOption attempts left no trace.
-  const assert_sees_bob = computed(() =>
+  const assert_sees_bob = assert(() =>
     (poll.users ?? []).length === 2 &&
     poll.users?.[1]?.name === "Bob" &&
     (poll.votes ?? []).length === 2 &&
@@ -71,12 +71,12 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     poll.myName === "Alice"
   );
   // Host takeover observed from the deposed host's runtime.
-  const assert_deposed = computed(() =>
+  const assert_deposed = assert(() =>
     poll.adminName === "Bob" && poll.isAdmin === false
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_join },
       { assertion: assert_joined_as_host },
       { action: action_add_sushi },
@@ -113,7 +113,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   });
 
   // Alice's setup propagated from her runtime.
-  const assert_sees_alice_setup = computed(() =>
+  const assert_sees_alice_setup = assert(() =>
     (poll.users ?? []).length === 1 &&
     poll.users?.[0]?.name === "Alice" &&
     poll.adminName === "Alice" &&
@@ -122,10 +122,10 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     (poll.votes ?? []).length === 1
   );
   // PerUser isolation: Alice's join must not leak into Bob's identity.
-  const assert_not_joined_yet = computed(() =>
+  const assert_not_joined_yet = assert(() =>
     poll.myName === "" && poll.isJoined === false
   );
-  const assert_joined_not_host = computed(() =>
+  const assert_joined_not_host = assert(() =>
     poll.myName === "Bob" &&
     poll.isJoined === true &&
     poll.isAdmin === false &&
@@ -134,18 +134,18 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   );
   // Both gated attempts (pre-join AND joined-but-not-host) left no trace —
   // the CT-1598 gap: a real second user is rejected by the host gate.
-  const assert_gating_held = computed(() => (poll.options ?? []).length === 1);
-  const assert_both_votes = computed(() =>
+  const assert_gating_held = assert(() => (poll.options ?? []).length === 1);
+  const assert_both_votes = assert(() =>
     (poll.votes ?? []).length === 2 &&
     poll.votes?.[0]?.voterName === "Alice" &&
     poll.votes?.[1]?.voterName === "Bob"
   );
-  const assert_is_host_now = computed(() =>
+  const assert_is_host_now = assert(() =>
     poll.adminName === "Bob" && poll.isAdmin === true
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "alice-set-up" },
       { assertion: assert_sees_alice_setup },
       { assertion: assert_not_joined_yet },

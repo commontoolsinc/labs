@@ -1,10 +1,14 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import type { CfcConfClause } from "./clause.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
+import {
+  isObjectOrArray,
+  isReadonlyObjectOrArray,
+} from "@commonfabric/utils/types";
+
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
+import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
@@ -35,7 +39,7 @@ const asSchemaObject = (
   if (schema === true) {
     return {};
   }
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     throw new Error(`unsupported schema form at ${path || "/"}`);
   }
   return schema as JSONSchemaObj;
@@ -68,7 +72,7 @@ type WriterIdentityClaim = {
 };
 
 const isWriterIdentityClaim = (value: unknown): value is WriterIdentityClaim =>
-  isRecord(value) && isRecord(value.__ctWriterIdentityOf);
+  isObjectOrArray(value) && isObjectOrArray(value.__ctWriterIdentityOf);
 
 // The per-input provenance fields a verified write may have stamped onto a
 // writer-identity claim. New claims carry only the content-addressed
@@ -305,7 +309,7 @@ const mergeIfc = (
 // descending them (`includeDefs`). This walk does not resolve `$ref`, so a
 // definition referenced but not inlined is only seen through `$defs`.
 const branchContainsIfc = (schema: JSONSchema): boolean => {
-  if (!isRecord(schema)) return false;
+  if (!isObjectOrArray(schema)) return false;
   if ((schema as JSONSchemaObj).ifc !== undefined) return true;
   return forEachSubschema(schema, (child) => branchContainsIfc(child), {
     includeDefs: true,
@@ -316,7 +320,7 @@ const assertNoDivergentIfcBranches = (
   schema: JSONSchema,
   path = "",
 ): void => {
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     return;
   }
   const object = schema as JSONSchemaObj;
@@ -396,7 +400,7 @@ const mergeRequired = (
     if (generatedOutputCovers(options, [...path, name])) {
       continue;
     }
-    if (!isRecord(property) || property.default === undefined) {
+    if (!isObjectOrArray(property) || property.default === undefined) {
       // Typed so the CFC prepare catch can tag this as the recoverable
       // schema-migration class (see migration-reason.ts) without sniffing the
       // message. The message text stays human-readable and unchanged.
@@ -408,7 +412,7 @@ const mergeRequired = (
   return merged;
 };
 
-// TODO(danfuzz): `isReadonlyRecord` admits a `FabricSpecialObject` on either
+// TODO(danfuzz): `isReadonlyObjectOrArray` admits a `FabricSpecialObject` on either
 // side, and the spread copies zero properties from one — so two fabric
 // defaults merge to `{}`, and a plain-record `existing` plus a fabric
 // `candidate` silently drops the candidate's value. Wants a
@@ -423,7 +427,7 @@ const mergeDefaults = (
   if (candidate === undefined) {
     return existing;
   }
-  if (isReadonlyRecord(existing) && isReadonlyRecord(candidate)) {
+  if (isReadonlyObjectOrArray(existing) && isReadonlyObjectOrArray(candidate)) {
     return { ...existing, ...candidate };
   }
   return candidate;

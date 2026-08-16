@@ -46,6 +46,17 @@ discard; undoing it there can stop the work converging at all.
 `storage/rejection.ts` classifies the outcomes, so a callback acts only on the
 ones no re-run follows.
 
+That exception covers the bookkeeping, not the writes. Every outcome that
+delivers an error discards what the transaction staged, a stale basis included,
+so a record saying those writes are in place is wrong however the transaction
+failed. Such a record is not state to discard but a debt to mark: the callback
+says the writes are owed, and the next run issues them again against the
+bookkeeping it kept. A callback that only tears state down, under the outcomes
+with no re-run behind them, leaves the re-run trusting writes that never landed.
+The list coordinators are the case this rule exists for — a per-element pattern
+run and the links that make a result container reachable are both writes the
+coordinator remembers making.
+
 External side effects belong in the post-commit outbox instead, which runs only
 after a successful commit.
 

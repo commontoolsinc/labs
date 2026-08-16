@@ -1,6 +1,9 @@
-// ci spend tests. The tile is a pure collect(ctx) -> TileView over GitHub and
-// Blacksmith billing data. The tests pin the clock and provide fixed responses
-// for both sources.
+/**
+ * ci spend tests. The tile is a pure collect(ctx) -> TileView over GitHub and
+ * Blacksmith billing data. The tests pin the clock and provide fixed responses
+ * for both sources.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";
@@ -47,18 +50,32 @@ const days = (
     (_, i) => item(`${year}-${pad(month)}-${pad(from + i)}`, amount),
   );
 
+// A row that says only that the report is still being written through `date`:
+// usage the org's allowance covered, which bills nothing. Without one, a report
+// whose rows stop days before today has stopped being written for all the tile
+// can tell, and the tile reads no further than the rows reach.
+const stillReporting = (date: string) => item(date, 0);
+
 const usagePath = (year: number, month: number, org = ORG) =>
   `organizations/${org}/settings/billing/usage?year=${year}&month=${month}`;
 const budgetsPath = (org = ORG) =>
   `organizations/${org}/settings/billing/budgets`;
 const classicPath = (org = ORG) => `orgs/${org}/settings/billing/actions`;
 
+// One day of Blacksmith runner cost. A day costing nothing says the feed still
+// covers that day, which is what keeps the days around it readable as zeros.
 const blacksmithDay = (date: string, cost: unknown) => ({
   date,
   jobs: 1,
   cost,
   minutes: 1,
 });
+
+// The row that carries a January feed up to a tile observing it on the 20th:
+// the 19th, costing nothing. Without it the feed's newest row sits far enough
+// back that the tile stops reading Blacksmith rather than charting the days
+// after that row as zeros.
+const blacksmithCurrent = blacksmithDay("2026-01-19", 0);
 
 function blacksmithRouteSet(
   now: string,
@@ -174,13 +191,16 @@ Deno.test("ci spend: a projection with no observed rate window preserves the mea
 Deno.test("ci spend: projects the month from the settled daily rate, against the GitHub budget", async () => {
   // The 20th of a 31-day month. Actions spend of $17/day on the 1st-10th, plus a
   // $10 row the report spells "Actions", is $180 month-to-date; the $500 of Copilot
-  // is a different product and none of the tile's business.
+  // is a different product and none of the tile's business. The report is still
+  // being written through the 18th, so the days after the 10th are days that
+  // cost nothing.
   const v = await view("2026-01-20T09:00:00Z", {
     [usagePath(2026, 1)]: {
       usageItems: [
         ...days(2026, 1, 1, 10, 17),
         item("2026-01-05", 10, "Actions"),
         item("2026-01-05", 500, "Copilot"),
+        stillReporting("2026-01-18"),
       ],
     },
     [usagePath(2025, 12)]: { usageItems: days(2025, 12, 1, 31, 1) },
@@ -234,8 +254,58 @@ Deno.test("ci spend: a 200 without a usageItems array grays out rather than read
   }
 });
 
+Deno.test("ci spend: a report that stopped days ago is unreadable, not a run of $0 days", async () => {
+  // The report's newest row anywhere is the 10th, ten days before the tile
+  // reads it. Reading the 11th onwards as days that cost nothing would take a
+  // report that has stopped for a fortnight of thrift.
+  const v = await view("2026-01-20T09:00:00Z", {
+    [usagePath(2026, 1)]: { usageItems: days(2026, 1, 1, 10, 18) },
+  });
+  assertEquals(v.status, "unknown");
+  assertEquals(v.value, "—"); // no total, rather than the $180 the stale rows add to
+  assertEquals(v.sub, "GitHub billing report 10 days behind");
+  assertStringIncludes(v.extra ?? "", `${themedSwatch("#58a6ff")} GitHub $???`);
+  assertEquals(v.extra?.includes("<polyline"), false);
+  assertEquals(
+    v.href,
+    "https://github.com/organizations/acme/settings/billing",
+  );
+});
+
+Deno.test("ci spend: a quiet Actions week reads as $0 days while the report is written", async () => {
+  // Actions stops on the 10th, but the org's Copilot seats bill through the
+  // 18th. One pipeline writes both, so the report is current and the quiet
+  // Actions days are days Actions cost nothing.
+  const v = await view("2026-01-20T09:00:00Z", {
+    [usagePath(2026, 1)]: {
+      usageItems: [
+        ...days(2026, 1, 1, 10, 18),
+        item("2026-01-18", 500, "Copilot"),
+      ],
+    },
+  });
+  assertEquals(v.status, "good");
+  assertEquals(v.value, "~$310/mo"); // $180 over the 18 settled days, across 31
+  assertEquals(v.aside, '<span class="hmtd">$180 MTD</span>');
+  assertStringIncludes(v.extra ?? "", "<polyline");
+});
+
+Deno.test("ci spend: a report with no row at all is an org that bills nothing here", async () => {
+  // An empty report dates nothing, so there is no day to chart and no gap to
+  // read as silence. It says the org has no billable usage, and the tile says
+  // the same.
+  const v = await view("2026-01-20T09:00:00Z", {
+    [usagePath(2026, 1)]: { usageItems: [] },
+  });
+  assertEquals(v.status, "good");
+  assertEquals(v.value, "~$0/mo");
+  assertStringIncludes(v.extra ?? "", `${themedSwatch("#58a6ff")} GitHub $0`);
+});
+
 Deno.test("ci spend: no Actions budget in GitHub -> the projection stands, uncompared", async () => {
-  const usage = { usageItems: days(2026, 1, 1, 10, 18) };
+  const usage = {
+    usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
+  };
   // The org has no budgets endpoint response at all.
   const none = await view("2026-01-20T09:00:00Z", {
     [usagePath(2026, 1)]: usage,
@@ -244,7 +314,7 @@ Deno.test("ci spend: no Actions budget in GitHub -> the projection stands, uncom
   assertEquals(none.sub, undefined);
   assertStringIncludes(none.extra ?? "", "Budget $???");
   assertEquals(none.status, "good"); // an absent budget never alarms
-  // The org budgets Actions' neighbours but not Actions.
+  // The org budgets Actions' neighbors but not Actions.
   const other = await view("2026-01-20T09:00:00Z", {
     [usagePath(2026, 1)]: usage,
     [budgetsPath()]: {
@@ -258,7 +328,10 @@ Deno.test("ci spend: no Actions budget in GitHub -> the projection stands, uncom
 
 Deno.test("ci spend: a projection over budget goes amber, and well over goes red", async () => {
   const spend = (perDay: number) => ({
-    usageItems: days(2026, 1, 1, 10, perDay),
+    usageItems: [
+      ...days(2026, 1, 1, 10, perDay),
+      stillReporting("2026-01-18"),
+    ],
   });
   const at = (perDay: number, budget: number) =>
     view("2026-01-20T09:00:00Z", {
@@ -294,7 +367,9 @@ Deno.test("ci spend: a prior month we can't read shortens the chart, it doesn't 
   // December 404s. This month has more than a fortnight of settled days, so the
   // projection never needed it; the chart just covers less.
   const v = await view("2026-01-20T09:00:00Z", {
-    [usagePath(2026, 1)]: { usageItems: days(2026, 1, 1, 10, 18) },
+    [usagePath(2026, 1)]: {
+      usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
+    },
   });
   assertEquals(v.status, "good");
   assertEquals(v.value, "~$310/mo");
@@ -330,7 +405,9 @@ Deno.test("ci spend: a prior month that 404s leaves a hole in the chart, not zer
 
 Deno.test("ci spend: one day of data is not a chart, but it is still a projection", async () => {
   const v = await view("2026-01-20T09:00:00Z", {
-    [usagePath(2026, 1)]: { usageItems: [item("2026-01-01", 180)] },
+    [usagePath(2026, 1)]: {
+      usageItems: [item("2026-01-01", 180), stillReporting("2026-01-18")],
+    },
   });
   assertEquals(v.value, "~$310/mo");
   assertStringIncludes(v.extra ?? "", "GitHub $180");
@@ -341,7 +418,11 @@ Deno.test("ci spend: one day of data is not a chart, but it is still a projectio
 Deno.test("ci spend: a row whose date is unreadable leaves the chart out", async () => {
   const v = await view("2026-01-20T09:00:00Z", {
     [usagePath(2026, 1)]: {
-      usageItems: [item("2026-01-01", 180), item("", 20)],
+      usageItems: [
+        item("2026-01-01", 180),
+        item("", 20),
+        stillReporting("2026-01-18"),
+      ],
     },
   });
   assertEquals(v.value, "~$344/mo");
@@ -418,10 +499,13 @@ Deno.test("ci spend: every failed provider retains the combined middle line", as
 
 Deno.test("ci spend: Blacksmith invoice, runner history, and threshold form one provider without storage requests", async () => {
   const now = "2026-01-20T09:00:00Z";
-  const compute = Array.from(
-    { length: 10 },
-    (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 10),
-  );
+  const compute = [
+    ...Array.from(
+      { length: 10 },
+      (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 10),
+    ),
+    blacksmithCurrent,
+  ];
   const routes = blacksmithRouteSet(
     now,
     compute,
@@ -491,6 +575,45 @@ Deno.test("ci spend: a Blacksmith invoice without daily history still supplies M
   assertEquals(ongoing.status, "good");
   assertEquals(ongoing.extra, early.extra);
   assertEquals(ongoing.duration, 0);
+});
+
+Deno.test("ci spend: a Blacksmith feed that has stopped is unreadable, not quiet", async () => {
+  const now = "2026-01-20T09:00:00Z";
+  // Runner cost through the 10th and nothing since. The feed carries a record
+  // for a day it has costs for, so past the 10th a day Blacksmith charged
+  // nothing for and a day it has yet to write read alike.
+  const stalled = blacksmithRouteSet(
+    now,
+    Array.from(
+      { length: 10 },
+      (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 5),
+    ),
+  );
+
+  const alone = await view(now, stalled, BLACKSMITH_ENV);
+  assertEquals(alone.status, "unknown");
+  assertEquals(alone.value, "—");
+  assertEquals(alone.sub, "Blacksmith daily costs 10 days behind");
+
+  // Beside a GitHub report that is still being written, the tile keeps
+  // GitHub's line and total and marks the combined figure a lower bound.
+  const beside = await view(
+    now,
+    {
+      [usagePath(2026, 1)]: {
+        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
+      },
+      ...stalled,
+    },
+    { GH_TOKEN: "gh_pat_x", GH_BILLING_ORG: ORG, ...BLACKSMITH_ENV },
+  );
+  assertEquals(beside.status, "unknown");
+  assertEquals(beside.value, "≥$310/mo");
+  assertEquals(beside.aside, '<span class="hmtd">$180 MTD</span>');
+  assertStringIncludes(
+    beside.extra ?? "",
+    `${themedSwatch("#f59e0b")} Blacksmith $???`,
+  );
 });
 
 Deno.test("ci spend: malformed Blacksmith costs never read as a green zero", async () => {
@@ -581,7 +704,7 @@ Deno.test("ci spend: malformed Blacksmith invoice and threshold payloads are una
   for (const malformed of cases) {
     const routes = blacksmithRouteSet(
       now,
-      [blacksmithDay("2026-01-01", 10)],
+      [blacksmithDay("2026-01-01", 10), blacksmithCurrent],
       ORG,
       malformed.billing,
     );
@@ -596,7 +719,7 @@ Deno.test("ci spend: a null threshold field is an unknown provider budget", asyn
   const now = "2026-01-20T09:00:00Z";
   const routes = blacksmithRouteSet(
     now,
-    [blacksmithDay("2026-01-01", 10)],
+    [blacksmithDay("2026-01-01", 10), blacksmithCurrent],
     ORG,
     { threshold: { threshold: null } },
   );
@@ -667,6 +790,7 @@ Deno.test("ci spend: current Blacksmith billing endpoint failures are not hidden
   ) {
     const routes = blacksmithRouteSet(now, [
       blacksmithDay("2026-01-01", 10),
+      blacksmithCurrent,
     ]);
     routes[`api/${route}`] = new Response(null, { status: 503 });
 
@@ -680,6 +804,7 @@ Deno.test("ci spend: a combined budget avoids the unused Blacksmith threshold", 
   const now = "2026-01-20T09:00:00Z";
   const routes = blacksmithRouteSet(now, [
     blacksmithDay("2026-01-01", 10),
+    blacksmithCurrent,
   ]);
   routes[`api/${blacksmithRoutes.spendingThreshold(ORG)}`] = new Response(
     null,
@@ -702,15 +827,20 @@ Deno.test("ci spend: GitHub and Blacksmith share totals, chart, and combined bud
   const now = "2026-01-20T09:00:00Z";
   const blacksmith = blacksmithRouteSet(
     now,
-    Array.from(
-      { length: 10 },
-      (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 5),
-    ),
+    [
+      ...Array.from(
+        { length: 10 },
+        (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 5),
+      ),
+      blacksmithCurrent,
+    ],
   );
   const v = await view(
     now,
     {
-      [usagePath(2026, 1)]: { usageItems: days(2026, 1, 1, 10, 18) },
+      [usagePath(2026, 1)]: {
+        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
+      },
       [budgetsPath()]: {
         budgets: [
           { budget_product_sku: "actions", budget_amount: 1 },
@@ -743,17 +873,22 @@ Deno.test("ci spend: provider budgets combine when no explicit budget is set", a
   const now = "2026-01-20T09:00:00Z";
   const blacksmith = blacksmithRouteSet(
     now,
-    Array.from(
-      { length: 10 },
-      (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 5),
-    ),
+    [
+      ...Array.from(
+        { length: 10 },
+        (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 5),
+      ),
+      blacksmithCurrent,
+    ],
     ORG,
     { threshold: 100 },
   );
   const v = await view(
     now,
     {
-      [usagePath(2026, 1)]: { usageItems: days(2026, 1, 1, 10, 18) },
+      [usagePath(2026, 1)]: {
+        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
+      },
       [budgetsPath()]: {
         budgets: [{ budget_product_sku: "actions", budget_amount: 300 }],
       },
@@ -776,14 +911,16 @@ Deno.test("ci spend: a partial provider budget is not treated as the combined bu
   const now = "2026-01-20T09:00:00Z";
   const blacksmith = blacksmithRouteSet(
     now,
-    [blacksmithDay("2026-01-01", 50)],
+    [blacksmithDay("2026-01-01", 50), blacksmithCurrent],
     ORG,
     { threshold: 1 },
   );
   const v = await view(
     now,
     {
-      [usagePath(2026, 1)]: { usageItems: days(2026, 1, 1, 10, 18) },
+      [usagePath(2026, 1)]: {
+        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
+      },
       ...blacksmith,
     },
     {
@@ -808,7 +945,9 @@ Deno.test("ci spend: one failed configured source leaves a gray lower bound", as
   const v = await view(
     now,
     {
-      [usagePath(2026, 1)]: { usageItems: days(2026, 1, 1, 10, 18) },
+      [usagePath(2026, 1)]: {
+        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
+      },
       ...blacksmith,
     },
     {
@@ -834,7 +973,11 @@ Deno.test("ci spend: GITHUB_TOKEN works, and the org defaults to the CI tiles' r
   const org = REPO.split("/")[0];
   const v = await view(
     "2026-01-20T09:00:00Z",
-    { [usagePath(2026, 1, org)]: { usageItems: days(2026, 1, 1, 10, 18) } },
+    {
+      [usagePath(2026, 1, org)]: {
+        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
+      },
+    },
     { GITHUB_TOKEN: "gh_pat_x" },
   );
   assertEquals(v.value, "~$310/mo");

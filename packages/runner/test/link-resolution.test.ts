@@ -1,15 +1,20 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import {
+  areNormalizedLinksSame,
+  isSigilLink,
+  parseAliasBinding,
+  parseLink,
+} from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import { areNormalizedLinksSame, isSigilLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { parseAliasBinding, parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

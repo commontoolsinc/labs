@@ -1,6 +1,18 @@
-import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  isFabricPrimitiveSchemaType,
+  type JSONSchemaObj,
+  type SchemaPathSelector,
+} from "@commonfabric/api";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   hashSchema,
   internSchema,
@@ -8,39 +20,28 @@ import {
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import {
-  FABRIC_SPECIAL_OBJECT_BRAND,
-  isFabricPrimitiveSchemaType,
-  type JSONSchemaObj,
-  type SchemaPathSelector,
-} from "@commonfabric/api";
-import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-// TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
-// but rollup has issues
-import {
-  type Immutable,
-  isBoolean,
-  isObject,
-  isRecord,
-  isString,
-} from "../../utils/src/types.ts";
-import { getLogger } from "../../utils/src/logger.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import {
   DEFAULT_SELECTOR,
   internPathSelector,
   internSchemaPairAsKey,
   REJECTING_SELECTOR,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+
+import { getLogger } from "../../utils/src/logger.ts";
+// TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
+// but rollup has issues
+import {
+  type Immutable,
+  isBoolean,
+  isObjectNotArray,
+  isObjectOrArray,
+  isString,
+} from "../../utils/src/types.ts";
 import type {
   CellScope,
   JSONObject,
@@ -48,13 +49,24 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import type { LastNode } from "./link-resolution.ts";
+import {
+  type IMemorySpaceValueAddress,
+  isSigilLink,
+  isWriteRedirectLink,
+  type ValuePath,
+} from "./link-types.ts";
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
+import { type CellLinkRefPayload, SigilLink } from "./sigil-types.ts";
 import type {
   Activity,
   CommitError,
+  IAttestation,
   IExtendedStorageTransaction,
+  IMemoryAddress,
   IMemorySpaceAddress,
   InactiveTransactionError,
   IReadOptions,
@@ -71,16 +83,6 @@ import {
   ignoreReadForScheduling,
 } from "./storage/reactivity-log.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
-import {
-  type IMemorySpaceValueAddress,
-  isSigilLink,
-  isWriteRedirectLink,
-  type ValuePath,
-} from "./link-types.ts";
-import type { LastNode } from "./link-resolution.ts";
-import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
-import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { type CellLinkRefPayload, SigilLink } from "./sigil-types.ts";
 import {
   recordTraverseInvocation,
   wrapTxForTraverseCapture,
@@ -390,7 +392,7 @@ function plainArrayItems(schema: JSONSchemaObj): JSONSchema | undefined {
 function plainObjectProperties(
   schema: JSONSchemaObj,
 ): Record<string, JSONSchema> | undefined {
-  return schema.type === "object" && isRecord(schema.properties) &&
+  return schema.type === "object" && isObjectOrArray(schema.properties) &&
       Object.keys(schema).length === 2
     ? schema.properties as Record<string, JSONSchema>
     : undefined;
@@ -404,7 +406,7 @@ function preparePlainSchemaPlan(
   schema: JSONSchema,
   seen: Set<JSONSchemaObj> = new Set(),
 ): PlainSchemaPlan | undefined {
-  if (!isRecord(schema)) return undefined;
+  if (!isObjectOrArray(schema)) return undefined;
 
   const cacheable = isInternedSchema(schema);
   if (cacheable) {
@@ -431,7 +433,7 @@ function preparePlainSchemaPlan(
     if (items !== undefined) plan = { kind: "array", schema, items };
   } else if (
     keys.length === 2 && schema.type === "object" &&
-    isRecord(schema.properties)
+    isObjectOrArray(schema.properties)
   ) {
     const properties = new Map<string, PlainSchemaPlan>();
     let valid = true;
@@ -1347,14 +1349,14 @@ export function mergeAnyOfMatches<T>(
   if (matches.length > 1) {
     // If all our matches are non-array objects, merge the properties.
     //
-    // TODO(danfuzz): `isObject` admits a `FabricSpecialObject`, whose state
+    // TODO(danfuzz): `isObjectNotArray` admits a `FabricSpecialObject`, whose state
     // lives in private fields, so `Object.assign` copies nothing from it: a
     // `FabricPrimitive` that matches more than one branch (say, an `anyOf` of
     // its specific type name and `"object"`, which the subtype rule also
     // accepts) merges to a plain `{}` and the value is lost. The merge wants
     // a `FabricSpecialObject` test ahead of this point, returning the value
     // whole rather than merging it.
-    if (matches.every((v) => isObject(v))) {
+    if (matches.every((v) => isObjectNotArray(v))) {
       const unified: Record<string, T> = {};
       for (const match of matches) {
         Object.assign(unified, match);
@@ -1479,7 +1481,7 @@ export abstract class BaseObjectTraverser {
       }
       doc.value.forEach((item, index) => {
         const itemDefault =
-          isRecord(defaultValue) && Array.isArray(defaultValue) &&
+          isObjectOrArray(defaultValue) && Array.isArray(defaultValue) &&
             index < defaultValue.length
             ? defaultValue[index]
             : undefined;
@@ -1550,7 +1552,7 @@ export abstract class BaseObjectTraverser {
       // that is read back through here), so unlike the schema-`default`
       // paths it cannot fail loudly yet: the instance leafs through whole.
       return doc.value;
-    } else if (isRecord(doc.value)) {
+    } else if (isObjectOrArray(doc.value)) {
       // First, see if we need special handling
       if (isSigilLink(doc.value)) {
         // Check coverage before getAtPath/followPointer adds this link target
@@ -1615,7 +1617,7 @@ export abstract class BaseObjectTraverser {
           };
           const val = this.traverseDAG(
             itemDoc,
-            isRecord(defaultValue) && !Array.isArray(defaultValue)
+            isObjectNotArray(defaultValue)
               ? (defaultValue as JSONObject)[k]
               : undefined,
           )!;
@@ -1870,8 +1872,8 @@ export function getAtPath(
         },
         value: curDoc.value.length,
       };
-    } else if (isRecord(curDoc.value) && part in curDoc.value) {
-      // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and `in`
+    } else if (isObjectOrArray(curDoc.value) && part in curDoc.value) {
+      // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and `in`
       // consults the prototype chain, so this arm descends a special object
       // by its class surface rather than its codec contents: on a
       // `FabricError` (live traffic — the fetch builtins store one),
@@ -2237,7 +2239,7 @@ function loadMetaLinkedDoc(
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ): MetaLinkedDoc[] {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
-  if (!isRecord(targetObj) || !(meta in targetObj)) return [];
+  if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return [];
   const loaded = [];
   // The internal meta field contains a list of objects with links instead
   if (meta === "internal") {
@@ -2249,7 +2251,7 @@ function loadMetaLinkedDoc(
       return [];
     }
     for (const manifestEntry of targetObj["internal"]) {
-      if (!isRecord(manifestEntry)) {
+      if (!isObjectOrArray(manifestEntry)) {
         logger.warn(
           "traverse",
           () => ["Invalid internal manifest entry in", valueEntry.address],
@@ -2323,7 +2325,7 @@ function loadMetaLinkedDocFromLink(
 }
 
 function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
-  if (isRecord(obj) && "schemaHash" in obj) {
+  if (isObjectOrArray(obj) && "schemaHash" in obj) {
     const schemaHash = obj["schemaHash"];
     if (typeof schemaHash === "string" && schemaHash.length > 0) {
       return linkRefFrom<CellLinkRefPayload>({ id: `cid:${schemaHash}` });
@@ -2347,7 +2349,7 @@ function traverseMetaLinkedDoc(
   ) {
     return;
   }
-  if (!isRecord(doc.value) || !("value" in doc.value)) {
+  if (!isObjectOrArray(doc.value) || !("value" in doc.value)) {
     return;
   }
 
@@ -2430,7 +2432,7 @@ export function loadMetaLinkedDocs(
 // to combine the resulting objects into one.
 // NOTE: I forgot about https://github.com/commontoolsinc/labs/pull/1868,
 // which is a more sophisticated approach.
-function combineOptionalSchema(
+export function combineOptionalSchema(
   parentSchema: JSONSchema | undefined,
   linkSchema: JSONSchema | undefined,
 ): JSONSchema | undefined {
@@ -2459,7 +2461,7 @@ function _mergeSchemaFlagsUncached(
   flagSchema: JSONSchema,
   schema: JSONSchema,
 ) {
-  if (isRecord(flagSchema) && flagSchema.asCell !== undefined) {
+  if (isObjectOrArray(flagSchema) && flagSchema.asCell !== undefined) {
     // we want to preserve asCell -- if set, this will override the value in
     // the schema
     return schemaWithProperties(schema, { asCell: flagSchema.asCell });
@@ -2526,7 +2528,7 @@ function schemaTypesAreDisjoint(
   );
 }
 
-function schemaTypeMatchesValueType(
+export function schemaTypeMatchesValueType(
   schemaType: JSONSchemaTypes,
   valueType: JSONSchemaTypes,
 ): boolean {
@@ -2598,7 +2600,7 @@ function _combineSchemaUncached(
     return mergeSchemaFlags(parentSchema, linkSchema);
   } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
     return mergeSchemaFlags(linkSchema, parentSchema);
-  } else if (isRecord(linkSchema) && isRecord(parentSchema)) {
+  } else if (isObjectOrArray(linkSchema) && isObjectOrArray(parentSchema)) {
     if (
       schemaTypesAreDisjoint(parentSchema.type, linkSchema.type)
     ) return false;
@@ -3231,7 +3233,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // Track both the unresolved version of our schema (possibly with top
     // level $ref) and the resolved version.
     let resolved: JSONSchema | undefined = schema;
-    if (isRecord(schema) && "$ref" in schema) {
+    if (isObjectOrArray(schema) && "$ref" in schema) {
       // Handle any top-level $ref in the schema
       resolved = resolveSchemaRefsCanonical(schema);
       if (resolved === undefined) {
@@ -3242,7 +3244,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         return fail(TRAVERSE_FAILURES.schemaRefResolution);
       }
     }
-    if (isRecord(resolved)) {
+    if (isObjectOrArray(resolved)) {
       if (
         doc.value === undefined && resolved.default !== undefined &&
         (resolved.anyOf || resolved.oneOf || resolved.allOf)
@@ -3310,7 +3312,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const prepared = prepareAnyOf(resolved, resolved.anyOf);
         const valueIsLink = isSigilLink(doc.value);
         const actualType = getJsonType(doc.value);
-        const valueIsRecord = isRecord(doc.value);
+        const valueIsRecord = isObjectOrArray(doc.value);
         for (const branch of prepared) {
           this.anyOfBranches++;
           if (branch.optionIsFalse) {
@@ -3499,7 +3501,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
       ContextualFlowControl.isTrueSchema(resolved) &&
       !SchemaObjectTraverser.hasAsCell(resolved)
     ) {
-      const defaultValue = isRecord(resolved) ? resolved["default"] : undefined;
+      const defaultValue = isObjectOrArray(resolved)
+        ? resolved["default"]
+        : undefined;
       // A value of true or {} means we match anything.
       // Resolve the rest of the doc, and return
       this.tx.read(doc.address, READ_FOR_SCHEDULING); // recursively read this doc
@@ -3526,7 +3530,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     ) {
       // This value rejects all objects - just return
       return fail(TRAVERSE_FAILURES.falseSchema);
-    } else if (!isRecord(resolved)) {
+    } else if (!isObjectOrArray(resolved)) {
       logger.warn(
         "traverse",
         () => ["Invalid schema is not an object", resolved],
@@ -3644,7 +3648,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         `Cannot yet handle \`${doc.value.constructor.name}\` (a ` +
           "`FabricInstance`) in schema traversal.",
       );
-    } else if (isRecord(doc.value)) {
+    } else if (isObjectOrArray(doc.value)) {
       const valid = this.isValidType(schemaObj, "object");
       if (valid === TypeValidity.False) {
         return fail(TRAVERSE_FAILURES.invalidType);
@@ -3808,7 +3812,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           "`FabricInstance`) in plain-schema traversal.",
       );
     }
-    if (!isRecord(doc.value)) return fail(TRAVERSE_FAILURES.invalidType);
+    if (!isObjectOrArray(doc.value)) return fail(TRAVERSE_FAILURES.invalidType);
 
     const newValue: Record<string, FabricValue> = {};
     const newLink = link ?? getNormalizedLink(doc.address, plan.schema);
@@ -4176,7 +4180,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           );
         }
       } else if (
-        isRecord(item) &&
+        isObjectOrArray(item) &&
         !SchemaObjectTraverser.hasAsCell(curSelector.schema)
       ) {
         // We create an element link, but this is just to establish the id if we encounter
@@ -4311,7 +4315,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // cell.get will ignore these properties, while the query system will
       // include their raw value (and will not follow links).
       if (
-        isRecord(propSchema) && (
+        isObjectOrArray(propSchema) && (
           propSchema.$comment === "emptyProperties" ||
           propSchema.$comment === "missingProperty"
         )
@@ -4363,7 +4367,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     }
 
     // Apply defaults from our schema
-    if (isRecord(schema) && schema.properties) {
+    if (isObjectOrArray(schema) && schema.properties) {
       for (const propKey of Object.keys(schema.properties)) {
         // `Object.hasOwn`, not `in`: `propKey` is a schema-declared property
         // NAME and `filteredObj` is data. `in` walks the prototype chain, so a
@@ -4376,11 +4380,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const subSchema = ContextualFlowControl.getSchemaAtPath(schema, [
           propKey,
         ]);
-        if (!isRecord(subSchema)) {
+        if (!isObjectOrArray(subSchema)) {
           continue;
         }
         const propSchema = ContextualFlowControl.resolveSchemaRefs(subSchema);
-        if (!isRecord(propSchema) || propSchema.default == undefined) {
+        if (!isObjectOrArray(propSchema) || propSchema.default == undefined) {
           continue;
         }
         const propAddress = {
@@ -4417,7 +4421,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     }
 
     // Check that all required fields are present
-    if (isRecord(schema) && "required" in schema) {
+    if (isObjectOrArray(schema) && "required" in schema) {
       const required = schema["required"] as string[];
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
@@ -4617,7 +4621,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
   ): FabricValue {
-    if (isRecord(schema) && schema.default !== undefined) {
+    if (isObjectOrArray(schema) && schema.default !== undefined) {
       const link = getNormalizedLink(doc.address, schema);
       return this.objectCreator.applyDefault(link, schema.default);
     }
@@ -4714,7 +4718,7 @@ export function canBranchMatch(
   // For plain object values, check missing required properties.
   // Const/enum checks are omitted — property values may contain unresolved
   // links that would match after link resolution during traversal.
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     if (
       schemaTypeIncludesObject(resolved.type) &&
       Array.isArray(resolved.required)
@@ -4753,13 +4757,16 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * — prototype chain included, the same check the anyOf prefilters apply —
  * so a class accessor such as `FabricBytes.length` satisfies
  * `required: ["length"]` while a key the primitive lacks rejects it. The
- * nominal brand key generated schemas require has no runtime existence and
- * is satisfied by the instance itself; that exemption (here and at the
- * other brand-aware check sites) exists because the schema-generator's
- * object formatter currently emits the brand into `required`, and it can
- * be removed once the generator skips the brand and stored schemas that
- * carry it have cycled out. A fabric-primitive-typed schema is not gated
- * here (its type never includes "object").
+ * nominal brand key that schemas from pre-vocabulary compilations require
+ * has no runtime existence and is satisfied by the instance itself; that
+ * exemption (here and at the other brand-aware check sites) exists for
+ * those stored schemas — current generator emissions carry the brand
+ * nowhere — and it can be removed once they have cycled out. That horizon
+ * is redeploy-gated: pattern update refuses the structural-to-vocabulary
+ * transition (`packages/piece/src/schema-compatibility.ts`), so such a
+ * schema persists until its piece is redeployed. A
+ * fabric-primitive-typed schema is not gated here (its type never
+ * includes "object").
  *
  * Presence is the whole check: property sub-schemas are NOT enforced
  * against a primitive's accessor values, so
@@ -4769,7 +4776,7 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * would only ever act on hand-written schemas; until that is worth the
  * accessor walk, shape errors of this kind pass validation.
  */
-function opaqueLeafMissesRequired(
+export function opaqueLeafMissesRequired(
   schema: JSONSchemaObj,
   value: FabricPrimitive,
 ): boolean {
@@ -4800,7 +4807,7 @@ function getPlainJsonType(
   if (value instanceof FabricPrimitive) {
     return schemaTypeOfFabricPrimitive(value);
   }
-  if (isObject(value)) return "object";
+  if (isObjectNotArray(value)) return "object";
   return null;
 }
 
@@ -4856,7 +4863,7 @@ function _mergeAnyOfBranchSchemasUncached(
   const resolvedBranches: JSONSchemaObj[] = [];
   for (const branch of branches) {
     const merged = mergeSchemaOption(outerSchema, branch);
-    if (!isRecord(merged)) return null;
+    if (!isObjectOrArray(merged)) return null;
     // Must be object type or unspecified (compatible with object)
     // type can be a string or an array of strings
     if (merged.type !== undefined) {
@@ -4874,7 +4881,7 @@ function _mergeAnyOfBranchSchemasUncached(
 
   for (const branch of resolvedBranches) {
     // Collect properties
-    if (isRecord(branch.properties)) {
+    if (isObjectOrArray(branch.properties)) {
       for (const [k, v] of Object.entries(branch.properties)) {
         let arr = allProps.get(k);
         if (!arr) {
@@ -4893,7 +4900,7 @@ function _mergeAnyOfBranchSchemasUncached(
     }
 
     // Merge $defs
-    if (isRecord(branch.$defs)) {
+    if (isObjectOrArray(branch.$defs)) {
       mergedDefs ??= {};
       Object.assign(mergedDefs, branch.$defs);
     }
@@ -4902,7 +4909,7 @@ function _mergeAnyOfBranchSchemasUncached(
     if (
       branch.additionalProperties === undefined ||
       branch.additionalProperties === true ||
-      (isRecord(branch.additionalProperties))
+      (isObjectOrArray(branch.additionalProperties))
     ) {
       anyAllowsAdditional = true;
     }
@@ -5007,7 +5014,7 @@ function schemaTypeValidity(
   valueType: JSONSchemaTypes,
 ): TypeValidity {
   let resolved: JSONSchema | undefined = schema;
-  if (isRecord(schema) && "$ref" in schema) {
+  if (isObjectOrArray(schema) && "$ref" in schema) {
     // Handle any top-level $ref in the schema
     resolved = resolveSchemaRefsCanonical(schema);
     if (resolved === undefined) {
@@ -5163,7 +5170,7 @@ export function schemaAcceptsType(
 
 function schemaWithDefs(parent: JSONSchemaObj, option: JSONSchema): JSONSchema {
   // We need to preserve any parent $defs in the branch
-  if (!parent.$defs || !isRecord(option)) {
+  if (!parent.$defs || !isObjectOrArray(option)) {
     return option;
   }
   return {

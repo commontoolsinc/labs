@@ -19,13 +19,23 @@
  * Reorder them, or delete one, and inference starts picking those returns up
  * silently. These assertions fail if that happens.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { Cell, HandlerFactory, Stream } from "@commonfabric/api";
+import type {
+  Cell,
+  HandlerFactory,
+  HandlerState,
+  Stream,
+} from "@commonfabric/api";
 import { handler } from "../src/builder/module.ts";
 
 type MustBeTrue<T extends true> = T;
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+/** Identity equality — distinguishes readonly modifiers, which assignability
+ * (and therefore `Same`) ignores. */
+type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends
+  (<T>() => T extends Y ? 1 : 2) ? true : false;
 
 interface AddTopic {
   title: string;
@@ -37,6 +47,11 @@ interface TopicRef {
 
 interface BoundState {
   selected: Cell<string>;
+}
+
+interface MixedState {
+  selected: Cell<string>;
+  label: string;
 }
 
 /**
@@ -97,7 +112,38 @@ export function _handlerOverloadTypeProbe() {
     Same<ReturnType<typeof declared>, Stream<AddTopic, TopicRef>>
   >;
 
-  return { concise, declared, declaredProxy, declaredWithSchemas };
+  // Props parity with api's `HandlerFunction` (the other hand-maintained
+  // half): a non-proxy callback sees `HandlerState<T>` — non-handle members
+  // readonly, cell handles passed through whole — while the `{ proxy: true }`
+  // form keeps bare `T`, since a writable proxy's props are exactly the thing
+  // it exists to let the body mutate.
+  const stateTyped = handler<AddTopic, MixedState>((_event, state) => {
+    type _PropsAreHandlerState = MustBeTrue<
+      Equal<typeof state, HandlerState<MixedState>>
+    >;
+    type _PlainMemberIsReadonly = MustBeTrue<
+      Equal<Pick<typeof state, "label">, { readonly label: string }>
+    >;
+    type _CellPassesThroughWhole = MustBeTrue<
+      Same<(typeof state)["selected"], Cell<string>>
+    >;
+    state.selected.set("writable-through-the-handle");
+  });
+  const proxyTyped = handler<AddTopic, MixedState>((_event, state) => {
+    type _ProxyPropsStayBare = MustBeTrue<
+      Equal<Pick<typeof state, "label">, { label: string }>
+    >;
+    state.label = "mutable-under-proxy";
+  }, { proxy: true });
+
+  return {
+    concise,
+    declared,
+    declaredProxy,
+    declaredWithSchemas,
+    stateTyped,
+    proxyTyped,
+  };
 }
 
 describe("handler overload resolution", () => {

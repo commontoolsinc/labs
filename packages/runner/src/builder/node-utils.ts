@@ -1,17 +1,18 @@
-import { isRecord } from "@commonfabric/utils/types";
-import type { CfcConfClause } from "../cfc/clause.ts";
-import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
-import { ContextualFlowControl } from "../cfc.ts";
 import { FabricInstance } from "@commonfabric/data-model/fabric-value";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isCell } from "../cell.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
-import { traverseValue } from "./traverse-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
-import { isCell } from "../cell.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { resolveLocationFromFunctionSource } from "./module.ts";
+import { traverseValue } from "./traverse-utils.ts";
+import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
@@ -19,7 +20,7 @@ export function connectInputAndOutputs(node: NodeRef) {
     if (isCell(value)) {
       const exported = value.export();
       if (exported.frame !== node.frame) {
-        const implementation = isRecord(node.module)
+        const implementation = isObjectOrArray(node.module)
           ? node.module.implementation
           : undefined;
         const sourceLocation = typeof implementation === "function"
@@ -49,7 +50,9 @@ export function connectInputAndOutputs(node: NodeRef) {
 
   // We will also apply ifc tags from inputs to outputs, unless the module has
   // precise built-in flow handling for its result.
-  if (!isRecord(node.module) || node.module.propagateInputIfc !== false) {
+  if (
+    !isObjectOrArray(node.module) || node.module.propagateInputIfc !== false
+  ) {
     applyInputIfcToOutput(node.inputs, node.outputs);
   }
 }
@@ -106,9 +109,10 @@ function attachCfcToOutputs(
     // we may have fields in the output schema, so incorporate those
     const joined = new Set<unknown>(lubConfidentiality);
     ContextualFlowControl.joinSchema(joined, outputSchema);
-    const ifc = (isRecord(outputSchema) && outputSchema.ifc !== undefined)
-      ? { ...outputSchema.ifc }
-      : {};
+    const ifc =
+      (isObjectOrArray(outputSchema) && outputSchema.ifc !== undefined)
+        ? { ...outputSchema.ifc }
+        : {};
     ifc.confidentiality = ContextualFlowControl.lub(joined);
     const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
       ? {}
@@ -126,7 +130,7 @@ function attachCfcToOutputs(
       // set during construction, so we cannot override it here.
     }
     return;
-  } else if (isRecord(outputs)) {
+  } else if (isObjectOrArray(outputs)) {
     // Descend into objects and arrays.
     //
     // A `FabricPrimitive` among them is inert here and correctly so: it has
@@ -135,7 +139,7 @@ function attachCfcToOutputs(
     //
     // A `FabricInstance` is refused. Its codec contents can hold a `Cell`,
     // unreachable by property name, so passing one through leaves that cell
-    // _unlabelled_ while its plain siblings are labelled -- confidentiality
+    // _unlabelled_ while its plain siblings are labeled -- confidentiality
     // silently not applied, which is the unsafe direction, unlike the
     // policy-input walks in `runner.ts` whose equivalent gap fails closed.
     //

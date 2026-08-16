@@ -1,12 +1,25 @@
-import { JSON_CODEC } from "@/interface.ts";
-import { describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
+/**
+ * An immutable byte sequence, and the copying that immutability costs.
+ *
+ * The constructor cannot simply hold the array it was handed, since the caller
+ * still has a reference and could write through it, so the bytes are copied in
+ * -- with an opt-in transfer for a caller willing to give up its own access.
+ * Reads pay the same way round: a slice hands back a copy rather than a view.
+ *
+ * The cases that need stating are where a byte count meets an empty or
+ * exhausted range. Empty bytes encode to the empty string, and a copy whose
+ * offset is at or past the end copies nothing rather than failing.
+ */
 
-import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 
 describe("FabricBytes", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
@@ -69,6 +82,53 @@ describe("FabricBytes", () => {
         const fb = new FabricBytes(new Uint8Array([1, 2, 3, 4, 5]));
         expect(fb.slice(1, 3)).toEqual(new Uint8Array([2, 3]));
         expect(fb.slice(3)).toEqual(new Uint8Array([4, 5]));
+      });
+    });
+
+    describe("sliceBuffer()", () => {
+      it("returns the bytes as a bare `ArrayBuffer`", () => {
+        const fb = new FabricBytes(new Uint8Array([10, 20, 30]));
+        const buffer = fb.sliceBuffer();
+
+        expect(buffer).toBeInstanceOf(ArrayBuffer);
+        expect([...new Uint8Array(buffer)]).toEqual([10, 20, 30]);
+      });
+
+      it("returns a buffer covering exactly the requested range", () => {
+        // What makes the result transferable outright: a transfer hands over
+        // a whole buffer, so any excess would cede bytes not asked for.
+        const fb = new FabricBytes(new Uint8Array([1, 2, 3, 4, 5]));
+
+        expect(fb.sliceBuffer().byteLength).toBe(5);
+        expect(fb.sliceBuffer(1, 3).byteLength).toBe(2);
+      });
+
+      it("returns a copy, leaving the instance intact", () => {
+        const fb = new FabricBytes(new Uint8Array([10, 20, 30]));
+        const view = new Uint8Array(fb.sliceBuffer());
+
+        view[0] = 99;
+
+        expect(fb.slice()[0]).toBe(10);
+      });
+
+      it("resolves `start` and `end` as `slice()` does", () => {
+        const fb = new FabricBytes(new Uint8Array([1, 2, 3, 4, 5]));
+
+        for (const range of [[], [1, 3], [3], [-2], [1, -1], [0, 0]]) {
+          const viaBuffer = new Uint8Array(
+            fb.sliceBuffer(...range as [number?, number?]),
+          );
+
+          expect([...viaBuffer]).toEqual([
+            ...fb.slice(...range as [number?, number?]),
+          ]);
+        }
+      });
+
+      it("returns an empty buffer for empty bytes", () => {
+        expect(new FabricBytes(new Uint8Array()).sliceBuffer().byteLength)
+          .toBe(0);
       });
     });
 

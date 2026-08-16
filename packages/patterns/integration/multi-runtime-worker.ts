@@ -432,6 +432,15 @@ const handlers: Record<
     return {};
   },
 
+  // Force an ordered-after round trip on every open space connection, so any
+  // subscription fan-out the server has already sent has been received and
+  // applied by this runtime before returning. The harness's cross-runtime
+  // delivery barrier (see MultiRuntimeHarness.settle).
+  async barrier() {
+    await controller().runtime.storageManager.pullOpenSpacesToHead();
+    return {};
+  },
+
   async diagnostics() {
     await idle();
     const scheduler = controller().runtime.scheduler;

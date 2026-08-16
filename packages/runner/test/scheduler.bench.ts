@@ -4,17 +4,22 @@
  * For cell layer benchmarks, see cell.bench.ts
  * For storage layer benchmarks, see storage.bench.ts
  */
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import type { Action } from "../src/scheduler.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
+
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   addressesToPathByEntity,
   sortAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
-import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { Action } from "../src/scheduler.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "../src/storage/interface.ts";
+import { benchDiagnostic } from "./bench-diagnostics.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
@@ -651,9 +656,8 @@ Deno.bench(
     await tx.commit();
     const commitTime = performance.now() - start;
 
-    // Log commit time (won't show in bench output but useful for debugging)
     if (commitTime > 100 && Deno.env.get("BENCH_DIAGNOSTICS") === "1") {
-      console.error(`Commit took ${commitTime.toFixed(1)}ms`);
+      benchDiagnostic(`Commit took ${commitTime.toFixed(1)}ms`);
     }
 
     await runtime.dispose();

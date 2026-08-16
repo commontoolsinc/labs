@@ -1,10 +1,33 @@
-import { createSession, isDID, Session } from "@commonfabric/identity";
 import { ensureDir } from "@std/fs";
-import { caseFold } from "unicode-case-folding";
-import { loadIdentity } from "./identity.ts";
+import { common, dirname, join } from "@std/path";
+
+import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { codecOf } from "@commonfabric/data-model/codec-common";
+import {
+  FabricPrimitive,
+  FabricSpecialObject,
+} from "@commonfabric/data-model/fabric-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { createSession, isDID, Session } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { setLLMUrl } from "@commonfabric/llm";
+import {
+  assignSlug,
+  pieceId,
+  resolvePieceAddress as resolveStoredPieceAddress,
+  resolveSlugTargetCell,
+  setSlugLink,
+  SlugResolutionError,
+} from "@commonfabric/piece";
+import {
+  type PatternCompatibilityReport,
+  type PiecePatternRef,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 import {
   Cell,
   deepEqual,
+  encodeJsonPointer,
   entityIdFrom,
   experimentalOptionsFromEnv,
   formatFabricRef,
@@ -23,38 +46,27 @@ import {
   UI,
   VNode,
 } from "@commonfabric/runner";
-import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import type { CellScope, JSONSchema } from "@commonfabric/api";
-import { utf8Compare } from "@commonfabric/utils/utf8";
+import {
+  type CfcLabelView,
+  cfcLabelViewForCellWithStatus,
+  cfcLabelViewFromSchema,
+  cfcSchemaChildRoot,
+  getCarriedCfcLabelView,
+  type IFCLabel,
+  mergeCfcLabelViews,
+  redactCaveatSourcesForDisplay,
+  resolveCfcSchemaRefRoot,
+  resolveCfcSchemaRefs,
+  validateSchemaValue,
+} from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
-import {
-  assignSlug,
-  pieceId,
-  resolvePieceAddress as resolveStoredPieceAddress,
-  resolveSlugTargetCell,
-  setSlugLink,
-  SlugResolutionError,
-} from "@commonfabric/piece";
-import {
-  type PatternCompatibilityReport,
-  type PiecePatternRef,
-  PiecesController,
-} from "@commonfabric/piece/ops";
-import { common, dirname, join } from "@std/path";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { setLLMUrl } from "@commonfabric/llm";
-import {
-  FabricPrimitive,
-  FabricSpecialObject,
-} from "@commonfabric/data-model/fabric-value";
-import { codecOf } from "@commonfabric/data-model/codec-common";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { getCarriedCfcLabelView } from "@commonfabric/runner/cfc";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isPlainObject, isRecord } from "@commonfabric/utils/types";
-import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
+import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+import { caseFold } from "unicode-case-folding";
+
 import { isHandlerCell, isStreamValue } from "../../fuse/callables.ts";
-import { throwOnSpaceAuthorizationError } from "./utils.ts";
+import { executeCallableCommand } from "./callable-command.ts";
 import {
   callableCommandSpec,
   type CallableExecutionDeps,
@@ -67,22 +79,25 @@ import {
   type InvocationOutcome,
   runtimeErrorLog,
 } from "./callable.ts";
-import { executeCallableCommand } from "./callable-command.ts";
+import {
+  type CellSelection,
+  CellSelectionError,
+  deriveSelectedValue,
+} from "./cell-selection.ts";
+import { cliCommand } from "./cli-name.ts";
 import {
   type ExecCommandSpec,
   type ParsedExecArgs,
   renderExecHelpJson,
   renderPieceCallHelp,
 } from "./exec-schema.ts";
-import { cliCommand } from "./cli-name.ts";
-import { deriveDiskHandleId } from "./sqlite-source.ts";
-import { startVersionCheck } from "./version-check.ts";
+import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
+import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
-import {
-  type CellSelection,
-  CellSelectionError,
-  deriveSelectedValue,
-} from "./cell-selection.ts";
+import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
+import { deriveDiskHandleId } from "./sqlite-source.ts";
+import { throwOnSpaceAuthorizationError } from "./utils.ts";
+import { startVersionCheck } from "./version-check.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -99,6 +114,13 @@ export interface SpaceConfig {
   identity: string;
   jsonOutput?: boolean;
   deferSpaceCellSync?: boolean;
+  /**
+   * Space DIDs embedded in LLM-friendly references given to this command,
+   * carried here when `space` is a name rather than a DID. A name only
+   * resolves to a DID once the session opens, so `loadPieces` checks each
+   * of these against the session's resolved space DID.
+   */
+  embeddedSpaces?: string[];
 }
 
 /** Metadata returned for a piece whose stored data matches a search query. */
@@ -111,6 +133,13 @@ export interface PieceSearchResult {
 export interface PieceConfig extends SpaceConfig {
   piece: string;
   pieceScope?: CellScope;
+  /**
+   * Path segments embedded in an LLM-friendly `--piece` reference. A command
+   * that reads or writes at a path prepends these to its positional path
+   * argument; a command whose intake is id-only rejects a reference that
+   * carries them.
+   */
+  piecePath?: (string | number)[];
 }
 
 export interface SetPiecePatternOptions {
@@ -121,6 +150,104 @@ export interface GetCellValueOptions {
   input?: boolean;
   step?: boolean;
   selection?: CellSelection;
+}
+
+/** A declared CFC label update accepted by `cf piece set-label`. */
+export type CellCfcLabelUpdate = IFCLabel & {
+  observes?: LabelObservationClass;
+};
+
+type LabelObservationClass = NonNullable<
+  CfcLabelView["entries"][number]["observes"]
+>;
+
+const CFC_LABEL_OBSERVATION_CLASSES = new Set<LabelObservationClass>([
+  "value",
+  "shape",
+  "enumerate",
+  "followRef",
+]);
+
+/**
+ * Validate the JSON object accepted by `cf piece set-label`.
+ *
+ * The command exposes the two stored label families and their observation
+ * class. Policy claims such as `requiredIntegrity` remain pattern-schema
+ * authoring concerns rather than label metadata.
+ */
+export function parseCellCfcLabelUpdate(
+  input: unknown,
+): CellCfcLabelUpdate {
+  if (!isPlainObject(input)) {
+    throw new Error("CFC label input must be a JSON object.");
+  }
+
+  const supported = new Set(["confidentiality", "integrity", "observes"]);
+  const unsupported = Object.keys(input).filter((key) => !supported.has(key));
+  if (unsupported.length > 0) {
+    throw new Error(
+      `Unknown CFC label field${unsupported.length === 1 ? "" : "s"}: ` +
+        unsupported.join(", ") +
+        ". Expected confidentiality, integrity, or observes.",
+    );
+  }
+
+  const confidentiality = input.confidentiality;
+  const integrity = input.integrity;
+  if (confidentiality === undefined && integrity === undefined) {
+    throw new Error(
+      "CFC label input must include confidentiality or integrity.",
+    );
+  }
+  if (confidentiality !== undefined && !Array.isArray(confidentiality)) {
+    throw new Error("CFC label confidentiality must be a JSON array.");
+  }
+  if (integrity !== undefined && !Array.isArray(integrity)) {
+    throw new Error("CFC label integrity must be a JSON array.");
+  }
+
+  const observes = input.observes;
+  if (
+    observes !== undefined &&
+    !CFC_LABEL_OBSERVATION_CLASSES.has(
+      observes as LabelObservationClass,
+    )
+  ) {
+    throw new Error(
+      "CFC label observes must be value, shape, enumerate, or followRef.",
+    );
+  }
+
+  return {
+    ...(confidentiality !== undefined
+      ? { confidentiality: [...confidentiality] }
+      : {}),
+    ...(integrity !== undefined ? { integrity: [...integrity] } : {}),
+    ...(observes !== undefined
+      ? { observes: observes as LabelObservationClass }
+      : {}),
+  } as CellCfcLabelUpdate;
+}
+
+function cfcLabelViewForCommand(
+  cell: unknown,
+  path: readonly (string | number)[],
+): CfcLabelView | null {
+  const { view, readFailed } = cfcLabelViewForCellWithStatus(cell);
+  if (readFailed) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    throw new Error(`Could not read CFC labels at "${location}".`);
+  }
+  const schema = isObjectOrArray(cell)
+    ? cell.schema as JSONSchema | undefined
+    : undefined;
+  const effectiveView = mergeCfcLabelViews([
+    view,
+    cfcLabelViewFromSchema(schema),
+  ]);
+  return effectiveView === undefined
+    ? null
+    : redactCaveatSourcesForDisplay(effectiveView);
 }
 
 /** A `cf piece get` path that lands ON a verb. Reading a verb returns the
@@ -183,8 +310,26 @@ async function resultProjectionFailedAtPath(
   ) !== undefined;
 }
 
+/**
+ * A resolved piece callable: the shared resolution plus the command spec its
+ * flags and help page are built from.
+ *
+ * `declaredResult` (on {@link CallableResolution}) is attached here for a
+ * handler exposed on the piece's result cell, which is the only place a
+ * declared result can be matched from; a tool's result schema already rides
+ * its callable cell and reaches `commandSpec` directly.
+ */
 export interface ResolvedPieceCallable extends CallableResolution {
   commandSpec: ExecCommandSpec;
+  /**
+   * This verb's documentation, resolved on demand — a thunk for the same
+   * reason `declaredResult` is one, and attached under the same condition:
+   * the pattern declaring the verb is the only document that carries it, and
+   * reaching it costs a load no dispatch should pay.
+   *
+   * Only the help page pulls it. A dispatch needs nothing an author wrote.
+   */
+  declaredProse?: () => Promise<DeclaredVerbProse | undefined>;
 }
 
 export interface PieceCallableDependencies extends CallableExecutionDeps {
@@ -321,6 +466,10 @@ export async function loadPieces(
     "loadPieces.makeSession",
     () => makeSession(config),
   );
+  // A `--space` given as a name has only now resolved to a DID; this is the
+  // deferred half of the embedded-space check `normalizeLLMFriendlyRef`
+  // performs at parse time for a DID-configured space.
+  validateEmbeddedSpaces(config.embeddedSpaces, session.space);
   // Use a const ref object so we can assign later while keeping const binding
   const piecesRef: { current?: PiecesController } = {};
   const runtimeErrors: CliRuntimeErrorRecord[] = [];
@@ -1438,17 +1587,19 @@ async function tryResolvePieceCallableAt(
   };
 }
 
-/** The forced-stream probe: cast `name` on `cell` to a stream and ask the
- * runtime whether it answers as a handler. This is the third resolution path
- * of `cf piece call` (tryResolvePieceHandler) — a handler whose stored schema
- * lost the stream marker still answers this cast — shared with the listing's
- * fallback probe and the read-path guard so all three classify identically.
- * Only meaningful at the piece cell, where every attribute is a
- * schema-carrying link or a genuine handler: for inline values and
- * schema-less links the cast schema itself survives resolution and
- * `Cell.isStream`'s schema branch answers "stream" from it, so probing
- * arbitrary cells would report plain data as handlers. Returns the proven
- * stream cell, or null. */
+/** The forced-stream cast: assert `name` on `cell` is a stream, then ask the
+ * runtime whether it answers as one. The third and last resolution path of
+ * `cf piece call` (tryResolvePieceHandler), where a handler whose stored
+ * schema lost the stream marker still answers.
+ *
+ * It proves nothing, and belongs ONLY here. The cast's stream schema survives
+ * link resolution for an inline value, so `Cell.isStream`'s schema branch
+ * answers from the assertion the caller just made and every name passes.
+ * That is acceptable as a dispatcher's last resort — the caller named this
+ * verb, and a wrong cast fails harmlessly against a value with no handler
+ * behind it. It is not acceptable anywhere that describes what a piece has:
+ * the listing and the read-path guard both classify on definite stored
+ * signals instead. Returns the cast cell, or null. */
 function probeForcedStreamCell(cell: any, name: string): any | null {
   if (
     typeof cell !== "object" || cell === null ||
@@ -1498,9 +1649,12 @@ async function tryResolvePieceHandler(
     callableKind: "handler",
     cellKey: callableName,
     // The link-derived cell still carries whatever payload schema the piece
-    // does publish, which the forced stream cast does not; keep using it for
-    // the command spec so `--help` and input validation are unaffected.
+    // does publish, which the forced stream cast does not: the command spec
+    // reads it for `--help`, and `inputSchema` hands it to the pre-dispatch
+    // gate — the cast's own schema admits any payload, so gating on it would
+    // dispatch a malformed payload and spend the invocation id.
     commandSpec: callableCommandSpec(linkDerivedCell, "handler"),
+    inputSchema: linkDerivedCell.schema,
     pieces,
     space,
   };
@@ -1597,25 +1751,53 @@ async function resolvePieceCallable(
     deps,
   );
 
-  const resolved = (await tryResolvePieceCallableAt(
+  const onResultCell = await tryResolvePieceCallableAt(
     piece,
     pieces,
     space,
     callableName,
     "result",
-  )) ??
-    (await tryResolvePieceCallableAt(
-      piece,
-      pieces,
-      space,
-      callableName,
-      "input",
-    )) ??
+  );
+  // Held apart from the walk only to record WHERE the callable was found: a
+  // declared result is keyed by the PATTERN's result properties, so a
+  // same-named verb reached on the input cell is a different stream that
+  // merely shares its name. The listing draws the same line.
+  const onInputCell = onResultCell ? null : await tryResolvePieceCallableAt(
+    piece,
+    pieces,
+    space,
+    callableName,
+    "input",
+  );
+  const resolved = onResultCell ?? onInputCell ??
     (await tryResolvePieceHandler(piece, pieces, space, callableName));
   if (!resolved) {
     throw new Error(
       `Callable "${callableName}" not found on piece ${config.piece}`,
     );
+  }
+
+  if (
+    resolved.callableKind === "handler" && resolved !== onInputCell &&
+    typeof piece?.getPattern === "function"
+  ) {
+    // The forced-stream fallback dispatches on the result cell too, so it
+    // claims a declared result on the same terms the ordinary result-cell path
+    // does. A piece surface with no pattern to consult carries no thunk at all,
+    // which is the honest statement — the absence says this resolution cannot
+    // describe a result, rather than promising an answer that is always none.
+    //
+    // Both thunks read ONE load. They answer from the same compiled pattern
+    // and a help page pulls both, so a loader per thunk would double what a
+    // page costs — and the reason the result is a thunk at all is that the
+    // load is the expensive part.
+    let patternOnce: Promise<any> | undefined;
+    const loadPattern = () => (patternOnce ??= piece.getPattern());
+    return {
+      ...resolved,
+      declaredResult: () => declaredVerbResult(loadPattern, callableName),
+      declaredProse: () => declaredVerbProseFor(loadPattern, callableName),
+    };
   }
 
   if (resolved.callableKind === "tool") {
@@ -1647,6 +1829,19 @@ export interface PieceCallablesListing {
   /** The deployed pattern's source identity; null when the piece exposes
    * none (e.g. harness doubles). */
   pattern: PiecePatternRef | null;
+  /** Present when the listing is a LOWER BOUND rather than the surface,
+   * naming what it could not read. `verbs` is still every callable the
+   * listing found, and every row in it is still real.
+   *
+   * `"pattern-unavailable"` means the compiled pattern could not be
+   * consulted, so a callable the declared result type omits had no other
+   * source of its name and is missing. Absent means the listing enumerated
+   * from every source it has — which is not the same as a guarantee that
+   * nothing else is callable, because a handler whose stored schema carries
+   * no stream marker is reachable by name and, by design, unlistable: see
+   * `probeForcedStreamCell`, whose cast is the only thing that finds one and
+   * finds every data field with it. */
+  incomplete?: "pattern-unavailable";
   verbs: PieceCallableListing[];
 }
 
@@ -1664,6 +1859,17 @@ export interface PieceCallableListing {
    * declared result. Absent when the verb declares none — the value-less
    * shape, which is the common one. */
   outputSchema?: JSONSchema;
+  /**
+   * What the verb is FOR, in the author's own words: the doc comment on the
+   * pattern property declaring it, the same prose `call <verb> --help` prints
+   * as its summary line.
+   *
+   * Absent where the author documented nothing, and absent where the pattern
+   * could not be read (`incomplete`). Never derived from the name — a listing
+   * that restates `addItem` as "add item" reports the schema back to the
+   * caller who wrote it and calls it documentation.
+   */
+  description?: string;
   /** Listing mark: a UI affordance outside the headless contract (inferred
    * from session-scoped handler bindings at compile time). Hidden from the
    * default listing; always callable. */
@@ -1695,9 +1901,11 @@ function listingMarks(
   rootSchema: unknown,
   name: string,
 ): { tier?: "wrapper"; deprecated?: boolean } {
-  if (!isRecord(rootSchema) || !isRecord(rootSchema.properties)) return {};
+  if (!isObjectOrArray(rootSchema) || !isObjectOrArray(rootSchema.properties)) {
+    return {};
+  }
   const property = (rootSchema.properties as Record<string, unknown>)[name];
-  if (!isRecord(property)) return {};
+  if (!isObjectOrArray(property)) return {};
   return {
     ...(property.tier === "wrapper" ? { tier: "wrapper" as const } : {}),
     ...(property.deprecated === true ? { deprecated: true } : {}),
@@ -1711,10 +1919,10 @@ function listingMarks(
  * of aliases falls back to whole-link equality, which can only miss — and a
  * miss costs a row its `outputSchema`, never gives it the wrong one. */
 function samePatternLink(left: unknown, right: unknown): boolean {
-  if (!isRecord(left) || !isRecord(right)) return false;
+  if (!isObjectOrArray(left) || !isObjectOrArray(right)) return false;
   const leftAlias = left.$alias;
   const rightAlias = right.$alias;
-  if (!isRecord(leftAlias) || !isRecord(rightAlias)) {
+  if (!isObjectOrArray(leftAlias) || !isObjectOrArray(rightAlias)) {
     return deepEqual(left, right);
   }
   return deepEqual(leftAlias.partialCause, rightAlias.partialCause) &&
@@ -1722,8 +1930,40 @@ function samePatternLink(left: unknown, right: unknown): boolean {
     leftAlias.scope === rightAlias.scope;
 }
 
-/** A compiled pattern's declared verb results, keyed by the result property
- * each verb is exposed under.
+/** Every property a compiled pattern hangs off its result — the graph's own
+ * account of what the piece exposes there.
+ *
+ * That account is independent of the pattern's declared result TYPE: a pattern
+ * may return a callable at a property its result type never mentions, and then
+ * no durable schema and no schema-filtered read ever offers the name. The
+ * listing enumerates candidates from here as well as from the result cell for
+ * exactly that case.
+ *
+ * These are CANDIDATE names and nothing more. A key here says the pattern
+ * wires something to the property — a handler's stream, a tool, or ordinary
+ * data — so every name is put to the same classification the result-cell walk
+ * uses, against the same stored signals, before any of it is listed. That is
+ * why the enumeration is deliberately not filtered to the handler-driven
+ * subset `handlerVerbResults` matches: a tool compiles to no node and stores
+ * no stream, so a handler-keyed enumeration cannot propose one however
+ * carefully it is written, and a filter that guesses a candidate's kind is a
+ * classification wearing an enumeration's clothes.
+ *
+ * A compiled pattern is CALLABLE, so it is not a record and must not be tested
+ * as one; only its `result` is read here. */
+function patternResultNames(
+  pattern: { result?: unknown } | null | undefined,
+): string[] {
+  const result = pattern?.result;
+  return isObjectOrArray(result) ? Object.keys(result) : [];
+}
+
+/** The declared result of each verb a compiled pattern drives from a result
+ * property, keyed by that property — or `undefined` where nothing names one.
+ *
+ * Metadata about candidates, never the list of them: a name absent here is a
+ * name with no declared result to report, which is the common case and says
+ * nothing about whether the property is callable.
  *
  * A handler node's `$event` input and the result property exposing that
  * handler's stream are one cell written twice in the pattern's own terms, so
@@ -1731,45 +1971,711 @@ function samePatternLink(left: unknown, right: unknown): boolean {
  * — a structural comparison inside one compiled object, with no live cell to
  * resolve. The declared result rides on that node's module, which is where
  * `Stream<E, R>`'s `R` is lowered (verb contract WS-C). A stream two handler
- * nodes share names no single result and so contributes none.
+ * nodes share is still a verb and still keyed here, but it names no single
+ * result, so it maps to `undefined` rather than to one node's arbitrarily.
  *
- * A compiled pattern is CALLABLE, so it is not a record and must not be tested
- * as one; only its `result` and `nodes` are read here. */
-function declaredVerbResults(
+ * A tool is absent by construction: it is not driven by a node, and its result
+ * schema rides its own callable cell, where `callableCommandSpec` reads it. */
+function handlerVerbResults(
   pattern: { result?: unknown; nodes?: unknown } | null | undefined,
-): Map<string, JSONSchema> {
-  const declared = new Map<string, JSONSchema>();
+): Map<string, JSONSchema | undefined> {
+  const verbs = new Map<string, JSONSchema | undefined>();
   const result = pattern?.result;
-  if (!isRecord(result)) return declared;
+  if (!isObjectOrArray(result)) return verbs;
   const nodes = Array.isArray(pattern?.nodes) ? pattern.nodes : [];
   for (const [name, link] of Object.entries(result)) {
     let resultSchema: JSONSchema | undefined;
     let matched = 0;
     for (const node of nodes) {
-      if (!isRecord(node) || !isRecord(node.inputs)) continue;
+      if (!isObjectOrArray(node) || !isObjectOrArray(node.inputs)) continue;
       if (!samePatternLink(link, node.inputs.$event)) continue;
       matched++;
       const module = node.module;
-      if (isRecord(module) && module.resultSchema !== undefined) {
+      if (isObjectOrArray(module) && module.resultSchema !== undefined) {
         resultSchema = module.resultSchema as JSONSchema;
       }
     }
-    if (matched === 1 && resultSchema !== undefined) {
-      declared.set(name, resultSchema);
+    if (matched === 0) continue;
+    verbs.set(name, matched === 1 ? resultSchema : undefined);
+  }
+  return verbs;
+}
+
+/**
+ * What a pattern's own result schema says a verb is for, and what its event
+ * fields mean — the author's doc comments, as the compiler lowered them.
+ */
+export interface DeclaredVerbProse {
+  /**
+   * The doc comment on the property declaring the verb: what the verb DOES.
+   * A sibling of the property's `$ref`, and never a statement about the event
+   * object, which is why it is held apart from `eventSchema` below rather than
+   * merged into it.
+   */
+  description?: string;
+  /**
+   * The verb's declared event schema with its `$ref` followed against the
+   * result schema's own root, so the field descriptions inside the `$defs`
+   * target are reachable. Read for annotations ONLY — never to decide a shape;
+   * see `withDeclaredFieldProse`.
+   */
+  eventSchema?: JSONSchema;
+}
+
+/**
+ * Every verb's prose, keyed by the result property declaring it.
+ *
+ * A pattern's `resultSchema` is the only place both descriptions survive
+ * compilation. Neither reaches the callable cell a verb dispatches through:
+ * that cell adopts the schema embedded in its resolved link chain
+ * (`Cell.asSchemaFromLinks`), which for a verb is the handler node's `$event`
+ * input — the handler's READ of the event, narrowed to the fields its
+ * implementation touches, rather than a rendering of the declared event type.
+ * A query carries no author's words, so a caller's schema is not the declared
+ * one stripped of prose; reading the declared one here is what recovers it.
+ *
+ * A name absent here is a name the pattern's declared result type does not
+ * mention — the same condition that hides a verb from the result-cell walk —
+ * and says nothing about whether the verb is callable.
+ *
+ * The `$defs` live at the result schema's ROOT while the `$ref` sits on the
+ * property, so the root is passed explicitly. Resolving the property alone
+ * would consult a document that carries no definitions at all.
+ *
+ * Exported for the direct tests in `test/verb-prose-overlay.test.ts`, alongside
+ * `withDeclaredFieldProse`: the two are the pure halves of this feature, and a
+ * result schema holding a boolean property or an unresolvable reference is
+ * reachable by construction and not by compiling a pattern.
+ */
+export function declaredVerbProse(
+  pattern: { resultSchema?: unknown } | null | undefined,
+): Map<string, DeclaredVerbProse> {
+  const prose = new Map<string, DeclaredVerbProse>();
+  const resultSchema = pattern?.resultSchema;
+  if (
+    !isObjectOrArray(resultSchema) || !isObjectOrArray(resultSchema.properties)
+  ) {
+    return prose;
+  }
+  for (const [name, property] of Object.entries(resultSchema.properties)) {
+    if (!isObjectOrArray(property)) continue;
+    const description = typeof property.description === "string"
+      ? property.description
+      : undefined;
+    const eventSchema = typeof property.$ref === "string"
+      ? resolveCfcSchemaRefs(property, resultSchema as JSONSchema)
+      : property as JSONSchema;
+    if (description === undefined && eventSchema === undefined) continue;
+    prose.set(name, {
+      ...(description !== undefined && { description }),
+      ...(eventSchema !== undefined && { eventSchema }),
+    });
+  }
+  return prose;
+}
+
+/**
+ * One `description` to write into the served schema, addressed by its path
+ * within that document.
+ *
+ * Addressed rather than applied in place because a served position may live
+ * inside a shared `$defs` entry, which several positions reach and no
+ * single-pass rebuild of the tree can reach twice. Collecting first and
+ * applying second lets one definition receive edits found from anywhere in the
+ * walk without the walk having to know where it sits.
+ */
+interface DescriptionEdit {
+  /** Keys from the served document's root down to the `description` slot. */
+  readonly path: readonly string[];
+  readonly description: string;
+}
+
+/**
+ * `served` with `description` annotations filled in from `declared` wherever it
+ * has none.
+ *
+ * THE POSITIONS IT WALKS, enumerated rather than summarized, because the
+ * summary is the part a reader would otherwise have to take on trust:
+ *
+ * - `properties`, by key.
+ * - `items` in its single-schema form, and in its positional array form.
+ * - `prefixItems`, by index.
+ * - the members of `allOf`, `anyOf` and `oneOf`.
+ *
+ * It follows a `$ref` on either side to reach any of those. Everything else a
+ * JSON Schema can hold is NOT walked and keeps whatever prose it arrived with:
+ * `additionalProperties`, `patternProperties`, `propertyNames`, `contains`,
+ * `not`, `if`/`then`/`else`, `dependentSchemas`, and `unevaluated*`.
+ *
+ * Three rules govern which declared account answers for a position, and each is
+ * a place a shorter implementation silently loses prose:
+ *
+ * - **Every** account is consulted, not the first one that mentions the
+ *   position. An arm declaring a field without documenting it must not shadow a
+ *   later arm that documents it.
+ * - The first account that actually SAYS something wins, in declaration order.
+ *   Two arms documenting one field differently describe two different values,
+ *   so their sentences are not merged — merging would produce prose no author
+ *   wrote.
+ * - A reference resolves in the scope that declares it. A definition may carry
+ *   `$defs` of its own, and its nested references name those; resolving them at
+ *   the event root finds nothing, or a same-named definition belonging to
+ *   someone else.
+ *
+ * ANNOTATIONS ONLY, and that bound is the point rather than a simplification.
+ * The two schemas disagree about shape by construction, not by accident:
+ * `served` is the handler's read of the event, narrowed to what its body
+ * touches, while `declared` is the event TYPE the pattern's result publishes.
+ * A field declared and never read appears in one and not the other; a union the
+ * declared side spells as `anyOf` can arrive flattened into one object. Copying
+ * a `description` cannot change which payloads pass, so this can never make the
+ * served schema disagree with the dispatch it governs. Copying anything else
+ * could, which is why nothing else is copied and no position is ADDED: a key
+ * absent from `served` stays absent, a `$ref` is never inlined, a combinator is
+ * never flattened, and a page never offers a flag the handler does not read.
+ *
+ * The root description is never taken. It belongs to the verb, not to the
+ * event object, and it travels as the spec's own `description`.
+ *
+ * Two more bounds worth stating. A served `$ref` naming a definition the served
+ * root does not carry stops the descent there, as does a declared `$ref` that
+ * does not resolve. And where the served side spells a combinator the declared
+ * side does not, the branches are offered the declared node as a whole and no
+ * branch takes its description — a disjunction's arms are alternatives, and one
+ * sentence written across all of them would describe each of them wrongly.
+ *
+ * Exported for the direct tests in `test/verb-prose-overlay.test.ts`, which
+ * reach the degenerate schema shapes a compiled pattern does not produce.
+ */
+export function withDeclaredFieldProse(
+  served: JSONSchema | true,
+  declared: JSONSchema | undefined,
+): JSONSchema | true {
+  if (served === true || declared === undefined || !isObjectOrArray(served)) {
+    return served;
+  }
+  const edits: DescriptionEdit[] = [];
+  collectDescriptionEdits(
+    {
+      served,
+      servedRoot: served,
+      declared: [{ schema: declared, root: declared, direct: true }],
+    },
+    [],
+    false,
+    { edits, written: new Set<string>(), openDefinitions: [], openRefs: [] },
+  );
+  return applyDescriptionEdits(served, edits);
+}
+
+/**
+ * One declared node that may describe a position, with the scope its own
+ * references resolve against.
+ *
+ * The scope travels WITH the node because a `$defs` closure is local: a
+ * definition may carry definitions of its own, and its nested references name
+ * those rather than the ones at the event root. Carrying one root for the whole
+ * walk resolves such a reference in the wrong document, which finds either
+ * nothing or — worse — a same-named definition belonging to someone else.
+ *
+ * `direct` separates an account OF the position from an account of one
+ * ALTERNATIVE at it. Both are read when looking a child up; only a direct one
+ * may give the position its own description.
+ */
+interface DeclaredCandidate {
+  readonly schema: JSONSchema;
+  readonly root: JSONSchema;
+  readonly direct: boolean;
+}
+
+/** The served node at one position, with the declared accounts of it. */
+interface ProseWalk {
+  readonly served: JSONSchema;
+  readonly servedRoot: JSONSchema;
+  readonly declared: readonly DeclaredCandidate[];
+}
+
+/**
+ * State threaded through the whole walk: what has been recorded, and what is
+ * currently open on the path.
+ *
+ * Both open lists are STACKS rather than sets of everything ever seen. A set
+ * answers "have I been here before", and a legitimate second visit — two arms
+ * of a union naming one definition, two fields of the same type — is
+ * indistinguishable from a cycle under that question, so the second visit is
+ * dropped along with the prose it would have found. A stack answers "am I
+ * inside this right now", which is the question termination actually asks.
+ */
+interface ProseWalkState {
+  readonly edits: DescriptionEdit[];
+  /** Paths already recorded, so the first account of a position wins. Two
+   * positions sharing one `$defs` target can each reach it now that the guard
+   * is path-scoped, and without this the later one would silently overwrite
+   * the earlier. */
+  readonly written: Set<string>;
+  /** Served `$defs` names open on the current descent. */
+  readonly openDefinitions: string[];
+  /** Declared references open on the current expansion, each with the scope it
+   * was followed in — the same reference in two different scopes is two
+   * different targets. */
+  readonly openRefs: { ref: string; root: JSONSchema }[];
+}
+
+/**
+ * The `$defs` name a served node references, or `undefined` when it references
+ * nothing the served root defines.
+ *
+ * Matched by ENCODING each definition name with the runner's own encoder and
+ * comparing, rather than by decoding the `$ref`. The encoder is the function
+ * that wrote these strings, so round-tripping through it cannot disagree with
+ * them, and no pointer-decoding helper has to be re-exported to get here.
+ */
+function servedDefinitionName(
+  node: JSONSchema,
+  servedRoot: JSONSchema,
+): string | undefined {
+  if (!isObjectOrArray(node) || typeof node.$ref !== "string") return undefined;
+  if (!isObjectOrArray(servedRoot) || !isObjectOrArray(servedRoot.$defs)) {
+    return undefined;
+  }
+  for (const name of Object.keys(servedRoot.$defs)) {
+    if (encodeJsonPointer(["#", "$defs", name]) === node.$ref) return name;
+  }
+  return undefined;
+}
+
+/**
+ * Every declared node that can describe one position: each entry with its
+ * references followed, plus — transitively — the members of any combinator it
+ * carries. Entries and their ref-chains are `direct`; combinator members are
+ * not.
+ *
+ * Flattening the combinator is what lets a served side that spells a union as
+ * one merged object still find each field's prose, which lives in whichever arm
+ * declares it. Nothing here is written back: these are read to look a position
+ * up, and the served document keeps its own shape.
+ *
+ * Scope is threaded rather than assumed. `cfcSchemaChildRoot` opens a new one
+ * wherever a subtree carries its own `$defs`, and `resolveCfcSchemaRefRoot`
+ * reports the scope a ref chain ends in, so a definition's nested references
+ * resolve in the document that declares them.
+ *
+ * Termination is by the open-reference stack, keyed on the pair of reference
+ * and scope, pushed on the way in and popped on the way out. Object identity
+ * is deliberately not used as a backstop: `resolveCfcSchemaRefs` hands back a
+ * fresh object whenever it merges ref-site siblings over a target, so identity
+ * is not stable across resolution and a guard built on it would never fire.
+ */
+function expandDeclared(
+  entries: readonly DeclaredCandidate[],
+  openRefs: { ref: string; root: JSONSchema }[],
+): DeclaredCandidate[] {
+  const candidates: DeclaredCandidate[] = [];
+  const visit = (
+    node: JSONSchema | undefined,
+    root: JSONSchema,
+    direct: boolean,
+  ): void => {
+    if (!isObjectOrArray(node)) return;
+    // A node carrying its own definitions opens a scope before its own `$ref`
+    // is read, because that reference may name one of them.
+    const scope = cfcSchemaChildRoot(node, root);
+    const ref = node.$ref;
+    let resolved: JSONSchema | undefined = node;
+    let childRoot = scope;
+    if (typeof ref === "string") {
+      if (openRefs.some((open) => open.ref === ref && open.root === scope)) {
+        return;
+      }
+      openRefs.push({ ref, root: scope });
+      resolved = resolveCfcSchemaRefs(node, scope);
+      childRoot = isObjectOrArray(resolved)
+        ? cfcSchemaChildRoot(resolved, resolveCfcSchemaRefRoot(node, scope))
+        : scope;
+    }
+    try {
+      if (!isObjectOrArray(resolved)) return;
+      candidates.push({ schema: resolved, root: childRoot, direct });
+      for (const keyword of COMBINATOR_KEYWORDS) {
+        const members = resolved[keyword];
+        if (!Array.isArray(members)) continue;
+        for (const member of members) {
+          visit(member as JSONSchema, childRoot, false);
+        }
+      }
+    } finally {
+      if (typeof ref === "string") openRefs.pop();
+    }
+  };
+  for (const entry of entries) visit(entry.schema, entry.root, entry.direct);
+  return candidates;
+}
+
+/**
+ * Walk both documents in lockstep, recording every `description` the served
+ * side lacks and the declared side supplies.
+ *
+ * `path` addresses `served` within the served document. `fillOwnDescription` is
+ * false only at the root, whose description belongs to the verb rather than to
+ * the event object.
+ *
+ * WHICH ACCOUNT WINS, where several describe one position: the first direct
+ * candidate that actually carries a description, in the order the declared
+ * document lists them. Not the first candidate that merely mentions the
+ * position — an arm declaring a field without documenting it must not shadow a
+ * later arm that documents it. Not a merge of every arm's sentence either: two
+ * arms documenting one field differently are describing two different values,
+ * and concatenating them would produce prose no author wrote. First that says
+ * something, deterministically.
+ *
+ * TERMINATION, which `$ref`-following makes a real question. Descent is over
+ * the SERVED structure, whose inline part is a finite tree, so the only way to
+ * recur forever is through a served `$ref` — and every one of those resolves to
+ * a `$defs` entry. `openDefinitions` holds the ones open on the current path,
+ * pushed on descent and popped after, so a definition that reaches itself stops
+ * while two siblings naming one definition are each still walked. A
+ * self-referential type is the case that needs the first half: an item whose
+ * `children` are items reaches its own definition on the second hop. Two fields
+ * of one type are the case that needs the second.
+ *
+ * `schemaAtPath` would look like the shorter road here and is not: it resolves
+ * refs eagerly and without a cycle guard, so it overflows the stack on exactly
+ * the self-referential type above, before any guard written here could run.
+ */
+function collectDescriptionEdits(
+  walk: ProseWalk,
+  path: readonly string[],
+  fillOwnDescription: boolean,
+  state: ProseWalkState,
+): void {
+  const { served, servedRoot } = walk;
+  if (!isObjectOrArray(served)) return;
+  const candidates = expandDeclared(walk.declared, state.openRefs);
+  if (candidates.length === 0) return;
+
+  if (fillOwnDescription && served.description === undefined) {
+    const described = candidates.find((candidate) =>
+      candidate.direct && isObjectOrArray(candidate.schema) &&
+      typeof candidate.schema.description === "string"
+    );
+    if (described !== undefined) {
+      recordDescription(
+        state,
+        [...path, "description"],
+        (described.schema as Record<string, unknown>).description as string,
+      );
     }
   }
-  return declared;
+
+  // Where the served node's CHILDREN live. For a `$ref` that is the definition
+  // it names, which is left in place: a caller's tooling reads the served
+  // shape, and inlining the target to annotate it would rewrite what it reads.
+  // Definitions are observed to arrive with their own prose intact, so this
+  // descent commonly finds nothing to fill and exists to keep the walk honest
+  // where it does.
+  let target = served;
+  let targetPath = path;
+  let openedDefinition: string | undefined;
+  const definitionName = servedDefinitionName(served, servedRoot);
+  if (definitionName !== undefined) {
+    if (state.openDefinitions.includes(definitionName)) return;
+    const definitions = isObjectOrArray(servedRoot)
+      ? servedRoot.$defs as Record<string, JSONSchema>
+      : {};
+    const definition = definitions[definitionName];
+    if (!isObjectOrArray(definition)) return;
+    state.openDefinitions.push(definitionName);
+    openedDefinition = definitionName;
+    target = definition;
+    targetPath = ["$defs", definitionName];
+  } else if (typeof served.$ref === "string") {
+    // A reference the served root does not define. Nothing here can annotate
+    // what it cannot address, so the subtree is left exactly as served.
+    return;
+  }
+
+  try {
+    descendInto(target, targetPath, candidates, walk, state);
+  } finally {
+    if (openedDefinition !== undefined) state.openDefinitions.pop();
+  }
+}
+
+/** Record one description unless this position already has an account. */
+function recordDescription(
+  state: ProseWalkState,
+  path: readonly string[],
+  description: string,
+): void {
+  // Keyed as JSON rather than by joining on a separator: a path segment is a
+  // property name and may contain any character, so no separator is safe.
+  const key = JSON.stringify(path);
+  if (state.written.has(key)) return;
+  state.written.add(key);
+  state.edits.push({ path, description });
+}
+
+/** The child positions of one served node, each paired with every declared
+ * account of it. Split out so the definition bookkeeping above reads as the one
+ * thing it is. */
+function descendInto(
+  target: Record<string, unknown>,
+  targetPath: readonly string[],
+  candidates: readonly DeclaredCandidate[],
+  walk: ProseWalk,
+  state: ProseWalkState,
+): void {
+  // `target` is either the served node this was reached with or a `$defs`
+  // entry, and the caller has already established that each is a record.
+  const { servedRoot } = walk;
+  const descend = (
+    servedChild: JSONSchema,
+    declared: DeclaredCandidate[],
+    childPath: readonly string[],
+    fillChildDescription: boolean,
+  ): void => {
+    if (declared.length === 0) return;
+    collectDescriptionEdits(
+      { served: servedChild, servedRoot, declared },
+      childPath,
+      fillChildDescription,
+      state,
+    );
+  };
+
+  /** Every candidate's account of one child position, in declaration order. */
+  const accounts = (
+    pick: (candidate: Record<string, unknown>) => JSONSchema | undefined,
+  ): DeclaredCandidate[] =>
+    candidates.flatMap((candidate) => {
+      const found = isObjectOrArray(candidate.schema)
+        ? pick(candidate.schema)
+        : undefined;
+      return found === undefined
+        ? []
+        : [{ schema: found, root: candidate.root, direct: true }];
+    });
+
+  if (isObjectOrArray(target.properties)) {
+    for (
+      const [key, child] of Object.entries(
+        target.properties as Record<string, JSONSchema>,
+      )
+    ) {
+      descend(
+        child,
+        accounts((candidate) =>
+          isObjectOrArray(candidate.properties)
+            ? (candidate.properties as Record<string, JSONSchema>)[key]
+            : undefined
+        ),
+        [...targetPath, "properties", key],
+        true,
+      );
+    }
+  }
+
+  // `items` in its single-schema form: one element schema for the whole array,
+  // so a documented field inside a list of objects keeps its prose.
+  if (target.items !== undefined && !Array.isArray(target.items)) {
+    descend(
+      target.items as JSONSchema,
+      accounts((candidate) =>
+        candidate.items !== undefined && !Array.isArray(candidate.items)
+          ? candidate.items as JSONSchema
+          : undefined
+      ),
+      [...targetPath, "items"],
+      true,
+    );
+  }
+
+  // Positional element schemas: `prefixItems`, and the array form of `items`
+  // that predates it. Paired by index against the same keyword, which is the
+  // only correspondence a tuple has — position IS its identity.
+  for (const keyword of ["prefixItems", "items"] as const) {
+    const servedList = target[keyword];
+    if (!Array.isArray(servedList)) continue;
+    for (let index = 0; index < servedList.length; index++) {
+      descend(
+        servedList[index] as JSONSchema,
+        accounts((candidate) => {
+          const list = candidate[keyword];
+          return Array.isArray(list) && index < list.length
+            ? list[index] as JSONSchema
+            : undefined;
+        }),
+        [...targetPath, keyword, String(index)],
+        true,
+      );
+    }
+  }
+
+  // Combinator members. `allOf` is included deliberately, and the refusal to
+  // prove a container through a conjunction elsewhere in the tree does not
+  // carry here: that refusal is about PROOF, which needs the members combined
+  // the way the specification says, and this is annotation. A value satisfies
+  // every conjunct, so a description on any conjunct describes the value.
+  //
+  // Members pair by index against a candidate spelling the same keyword with
+  // the same arity. Otherwise each served member is offered every candidate
+  // whole, and takes no description of its own from them — a disjunction's arms
+  // are alternatives, and one sentence copied onto all of them describes each
+  // wrongly, while a field nested inside an arm is still worth reaching.
+  for (const keyword of COMBINATOR_KEYWORDS) {
+    const servedMembers = target[keyword];
+    if (!Array.isArray(servedMembers)) continue;
+    const paired = candidates.filter((candidate) =>
+      isObjectOrArray(candidate.schema) &&
+      Array.isArray((candidate.schema as Record<string, unknown>)[keyword]) &&
+      ((candidate.schema as Record<string, unknown>)[keyword] as unknown[])
+          .length === servedMembers.length
+    );
+    for (let index = 0; index < servedMembers.length; index++) {
+      const declared = paired.length > 0
+        ? paired.map((candidate) => ({
+          schema: (candidate.schema as Record<string, unknown>)[
+            keyword
+          ] as JSONSchema[],
+          root: candidate.root,
+          direct: true,
+        })).map((entry) => ({
+          schema: (entry.schema as unknown as JSONSchema[])[index],
+          root: entry.root,
+          direct: true,
+        }))
+        : candidates.map((candidate) => ({ ...candidate, direct: false }));
+      descend(
+        servedMembers[index] as JSONSchema,
+        declared,
+        [...targetPath, keyword, String(index)],
+        paired.length > 0,
+      );
+    }
+  }
+}
+
+/** The combinator keywords the walk descends, in a fixed order. */
+const COMBINATOR_KEYWORDS = ["allOf", "anyOf", "oneOf"] as const;
+
+/**
+ * `root` with every collected description written in, sharing every subtree no
+ * edit touches. Returns `root` itself when there is nothing to write.
+ */
+function applyDescriptionEdits(
+  root: JSONSchema,
+  edits: readonly DescriptionEdit[],
+): JSONSchema {
+  let next = root;
+  for (const edit of edits) {
+    next = writeDescriptionAt(next, edit.path, edit.description);
+  }
+  return next;
+}
+
+/**
+ * `node` with `description` set at `path`, copying only the nodes along it.
+ *
+ * Every path ends at a `description` slot the walk found empty, so this only
+ * ever fills a hole — it cannot overwrite an author's own words, and a path
+ * whose interior has since been rewritten by an earlier edit still lands, since
+ * each edit reads the document the previous one produced.
+ *
+ * An array along the way is copied as an array. A combinator member and a tuple
+ * position are addressed by index, and object-spreading a list to replace one
+ * would hand back `{"0": …, "1": …}` — a served `anyOf` silently turned into
+ * something no reader of it expects.
+ *
+ * It carries no guard against a path that addresses nothing, because there is
+ * no such path to guard against: `collectDescriptionEdits` builds every one by
+ * walking this document, and an edit only ever ADDS a `description` key, which
+ * leaves every other path it recorded still addressing what it addressed. That
+ * invariant is the precondition — a caller assembling a path any other way owes
+ * its own check.
+ */
+function writeDescriptionAt(
+  node: JSONSchema,
+  path: readonly string[],
+  description: string,
+): JSONSchema {
+  const [head, ...rest] = path;
+  const value: unknown = rest.length === 0 ? description : writeDescriptionAt(
+    (node as Record<string, JSONSchema>)[head],
+    rest,
+    description,
+  );
+  if (Array.isArray(node)) {
+    const copy = [...node] as unknown[];
+    copy[Number(head)] = value;
+    return copy as unknown as JSONSchema;
+  }
+  return { ...(node as object), [head]: value } as JSONSchema;
+}
+
+/** One verb's declared result, matched through the piece's compiled pattern.
+ *
+ * The same lookup a listing makes for every row, made for a single name — one
+ * matcher, so the help page and `cf piece verbs` can never describe the same
+ * verb differently. It runs on the help path alone, reached through the thunk
+ * on `ResolvedPieceCallable`, which is why loading the pattern is affordable
+ * here.
+ *
+ * The pattern is advisory exactly as it is in the listing: a piece whose
+ * pattern will not resolve still calls its verbs, it just cannot say what one
+ * hands back. `getPattern` throwing is the whole of that condition here —
+ * whether a piece HAS one is settled before the thunk is attached.
+ */
+async function declaredVerbResult(
+  loadPattern: () => Promise<any>,
+  callableName: string,
+): Promise<JSONSchema | undefined> {
+  try {
+    return handlerVerbResults(await loadPattern()).get(callableName);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * One verb's prose, read through the piece's compiled pattern.
+ *
+ * The listing's `declaredVerbProse` narrowed to a single name, on the same
+ * terms `declaredVerbResult` above states: one reader, so a help page and
+ * `cf piece verbs` cannot describe the same verb differently, and a pattern
+ * that will not load costs the page its prose rather than the whole page.
+ */
+async function declaredVerbProseFor(
+  loadPattern: () => Promise<any>,
+  callableName: string,
+): Promise<DeclaredVerbProse | undefined> {
+  try {
+    return declaredVerbProse(await loadPattern()).get(callableName);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * Enumerate every callable a piece exposes (verb contract: Verb discovery,
- * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
- * listed — hiding is a display default driven by the listing marks
+ * docs/plans/pattern-verb-contract.md). Nothing listed is hidden from a
+ * caller — hiding is a display default driven by the listing marks
  * (`tier: "wrapper"`, `deprecated: true`), never a capability boundary: the
  * rows carry the marks, `partitionVerbListing` decides the default view, and
- * `--all` shows the full surface. Walks result then input with the same classification
- * `cf piece call` resolves through, so the listing and the dispatcher can
- * never disagree about what is callable.
+ * `--all` shows the full surface.
+ *
+ * Candidate names come from the result cell, then the input cell, then the
+ * piece root and the compiled pattern's result properties; every one of them
+ * is put to the same classification `cf piece call` resolves through, so the
+ * listing and the dispatcher can never disagree about what is callable. The
+ * two halves are deliberately asymmetric — enumeration is generous because a
+ * name it never proposes can never be listed, and classification is strict
+ * because a name it wrongly accepts is a verb a caller cannot call.
+ *
+ * The listing degrades rather than fails, and reports the degradation on
+ * `incomplete` rather than absorbing it: the compiled pattern is the only
+ * source for a callable the declared result type omits, so losing it loses
+ * rows, and a shortened list presented as the whole surface is the failure
+ * this command exists to avoid.
  */
 export async function listPieceCallables(
   config: PieceConfig,
@@ -1785,19 +2691,53 @@ export async function listPieceCallables(
     }
   }
 
-  // A tool's result schema rides its callable cell, but a handler's declared
-  // result lives on its node in the compiled graph — so the listing resolves
-  // the pattern once and matches nodes to result properties. Resolution is
-  // cached by identity, so this costs one load per listing, not one per row.
-  let declaredResults = new Map<string, JSONSchema>();
+  // The compiled pattern, read once for three independent jobs. Its result
+  // properties are candidate NAMES for the sweep below — the only source for a
+  // callable the declared result type omits. Its handler nodes carry declared
+  // RESULTS, which are metadata on rows enumerated from anywhere. And its
+  // result SCHEMA carries the author's prose, which no other document does —
+  // a verb's callable cell adopts the handler node's `$event` schema, an
+  // emission with no annotations in it at all. Resolution is cached by
+  // identity, so this costs one load per listing, not one per row.
+  //
+  // Unlike the identity above, this one is not advisory, and the listing says
+  // so when it is missing. `getPattern` throws on a piece carrying no pattern
+  // identity and on one whose pattern source will not load in this space
+  // (PieceController.#loadCurrentPattern) — both states in which every stored
+  // verb still DISPATCHES, because resolution never consults the graph. So the
+  // listing must not fail: it would refuse to describe a piece it can still
+  // drive, to tab-completion and to an agent that could have acted on the
+  // partial answer. What it must not do either is present a shortened list as
+  // the whole surface, which is the difference between losing a row's
+  // `outputSchema` and losing the row.
+  let graphNames: string[] = [];
+  let handlerResults = new Map<string, JSONSchema | undefined>();
+  let verbProse = new Map<string, DeclaredVerbProse>();
+  let graphConsulted = false;
   if (typeof piece.getPattern === "function") {
     try {
-      declaredResults = declaredVerbResults(await piece.getPattern());
+      const compiled = await piece.getPattern();
+      graphNames = patternResultNames(compiled);
+      handlerResults = handlerVerbResults(compiled);
+      verbProse = declaredVerbProse(compiled);
+      graphConsulted = true;
     } catch {
-      // Advisory in the same way the identity above is: a piece with no
-      // reachable pattern still lists every verb it exposes.
+      // Reported as `incomplete` below rather than swallowed.
     }
   }
+
+  /**
+   * The prose row for a callable, on the same terms `handlerResults` is
+   * claimed: the pattern's result properties key it, so only a row reached on
+   * the RESULT cell may claim one. A same-named verb on the input cell is a
+   * different stream that merely shares its name, and handing it another
+   * verb's documentation would be worse than handing it none.
+   */
+  const proseFor = (
+    on: "result" | "input",
+    name: string,
+  ): DeclaredVerbProse | undefined =>
+    on === "result" ? verbProse.get(name) : undefined;
 
   const listings = new Map<string, PieceCallableListing>();
   // Names ordinary detection rejected: candidates for the forced-stream
@@ -1809,10 +2749,11 @@ export async function listPieceCallables(
     if (cellProp === "result") resultRoot = rootCell;
     const value = rootCell.get?.();
     const schema = rootCell.schema;
-    const schemaKeys = isRecord(schema) && isRecord(schema.properties)
-      ? Object.keys(schema.properties)
-      : [];
-    const valueKeys = isRecord(value) ? Object.keys(value) : [];
+    const schemaKeys =
+      isObjectOrArray(schema) && isObjectOrArray(schema.properties)
+        ? Object.keys(schema.properties)
+        : [];
+    const valueKeys = isObjectOrArray(value) ? Object.keys(value) : [];
     for (const name of new Set([...valueKeys, ...schemaKeys])) {
       if (listings.has(name)) continue; // result shadows input, like call
       const callableCell = rootCell.key(name).asSchemaFromLinks();
@@ -1831,44 +2772,155 @@ export async function listPieceCallables(
       // only a result-cell row can claim one: a same-named verb reached on the
       // input cell is a different stream that merely shares its name.
       const outputSchema = spec.outputSchemaSummary ??
-        (cellProp === "result" ? declaredResults.get(name) : undefined);
+        (cellProp === "result" ? handlerResults.get(name) : undefined);
+      const prose = proseFor(cellProp, name);
       listings.set(name, {
         name,
         kind,
         on: cellProp,
-        inputSchema: spec.inputSchema,
+        // The prose is folded into the schema a caller is ALREADY served, not
+        // served in place of it: `--help --json` publishes this same schema,
+        // and the two surfaces must not describe one verb's payload two ways.
+        inputSchema: kind === "handler"
+          ? withDeclaredFieldProse(spec.inputSchema, prose?.eventSchema)
+          : spec.inputSchema,
         ...(outputSchema !== undefined ? { outputSchema } : {}),
+        ...(prose?.description !== undefined
+          ? { description: prose.description }
+          : {}),
         ...marks,
       });
     }
   }
 
-  // Third resolution path, mirrored from resolvePieceCallable: a handler whose
-  // schema lost the stream marker still dispatches via the forced stream cast
-  // (tryResolvePieceHandler). Probe every rejected name the same way so a
-  // callable-by-name verb can never be absent from the listing.
+  // Candidates the walk above could not offer, each still put to the same
+  // classification. Two sources, and they fail in opposite directions.
+  //
+  // The piece root's own keys mirror resolvePieceCallable's third resolution
+  // path: a name the ordinary walk REJECTED can still be dispatched by name.
+  //
+  // The graph's result properties cover the walk never SEEING a name: the
+  // result cell reads through the pattern's declared result type, so a verb
+  // that type omits is absent from the schema-filtered value and from the
+  // durable schema alike, and no amount of classification reaches a name
+  // nothing proposed. `cf piece call` never had this problem — a dispatcher is
+  // handed the name — which is how a piece answers "no verbs" and then accepts
+  // one.
+  //
+  // Both are candidate sources and neither is a verdict. Classification stays
+  // on the two DEFINITE stored signals the read-path guard uses — a
+  // link-derived schema that answers as a stream, or the stored
+  // `{$stream: true}` sentinel — and never on the dispatcher's forced-stream
+  // cast. That cast asserts what it then asks: its stream schema survives link
+  // resolution for an inline value, so `Cell.isStream` answers from the
+  // caller's own assertion and EVERY name passes. Harmless in the dispatcher,
+  // where a wrong cast fails harmlessly on a call the caller asked for; false
+  // in a listing, which is a statement about what exists. A listing that names
+  // every data field costs more than one that misses a marker-less handler,
+  // because it makes the whole surface untrustworthy — and such a handler
+  // stays dispatchable regardless. Widening the enumeration is safe for the
+  // same reason narrowing the classification was necessary: a candidate that
+  // stores no stream is dropped here exactly as a data field is.
+  //
+  // PRECEDENCE, mirrored from resolvePieceCallable rather than invented here.
+  // The dispatcher tries three places in a fixed order:
+  //
+  //   resolved = onResultCell ?? onInputCell ?? tryResolvePieceHandler(...)
+  //
+  // and this sweep's two stored signals are the first and third of them.
+  // `tryResolvePieceCallableAt(piece, ..., "result")` classifies
+  // `resultRoot.key(name).asSchemaFromLinks()` against `resultRoot.get()[name]`
+  // — the sweep's FIRST call, argument for argument — so a name that call
+  // accepts is a name the dispatcher resolves on the result cell, ahead of any
+  // input row. The second call is the piece root's sentinel, which stands in
+  // for `tryResolvePieceHandler`, and the dispatcher reaches that only once the
+  // input cell has declined. Hence: a result-cell signal REPLACES a row the
+  // walk placed on the input cell; a piece-root signal does not; neither
+  // disturbs a row already on the result cell. Which source proposed the name
+  // does not enter into it — rank follows the signal that classified it.
+  //
+  // These guards are the SECOND thing in this change to have been written for
+  // a sweep that only supplied fallbacks for names already seen, and left
+  // alone when the sweep became a source of names. `!listings.has(name)` used
+  // to mean "nothing more to learn about this name"; once the graph proposes
+  // names the result walk cannot see, it means "nothing more to learn unless
+  // the graph proposes it, which outranks an input row". The first was the
+  // `catch {}` around `getPattern` above — honest while the pattern supplied
+  // metadata, silent loss once it supplied names. Both are the same mistake:
+  // the sweep's role changed and its guards did not. If a third candidate
+  // source is ever added here, settle its rank against the list above before
+  // adding it, not after.
   const pieceCell = typeof piece.getCell === "function"
     ? piece.getCell()
     : undefined;
-  if (pieceCell && typeof pieceCell.asSchema === "function") {
-    const pieceValue = pieceCell.get?.();
-    if (isRecord(pieceValue)) {
-      for (const name of Object.keys(pieceValue)) {
-        if (!listings.has(name)) rejected.add(name);
-      }
+  const pieceValue = pieceCell?.get?.();
+  // A row already on the result cell has won rank 1 and has nothing to learn
+  // here; anything else is still open to a result-side classification.
+  const openToResultSide = (name: string) =>
+    listings.get(name)?.on !== "result";
+  if (isObjectOrArray(pieceValue)) {
+    for (const name of Object.keys(pieceValue)) {
+      if (openToResultSide(name)) rejected.add(name);
     }
+  }
+  for (const name of graphNames) {
+    if (openToResultSide(name)) rejected.add(name);
+  }
+  const resultRootValue = resultRoot?.get?.();
+  if (resultRoot) {
     for (const name of rejected) {
-      if (listings.has(name)) continue;
-      if (!probeForcedStreamCell(pieceCell, name)) continue;
+      const existing = listings.get(name);
+      if (existing?.on === "result") continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
-      const spec = callableCommandSpec(callableCell, "handler");
-      const outputSchema = declaredResults.get(name);
+      // `detectCallableKind`, not an assumed "handler": the walk above uses it,
+      // `cf piece call` resolves through it, and a candidate proposed by the
+      // graph arrives with no evidence of its kind at all — a tool sits in the
+      // pattern's result exactly as a handler's stream does. Assuming here
+      // would list a tool as a handler and hand a caller `invoke` and the
+      // wrong input schema for it.
+      //
+      // `rejected` collects names from the result/input walk AND from the piece
+      // root's own value — one cell in a live piece, two objects wherever they
+      // are supplied apart — so the two stored values are two independent
+      // pieces of evidence and each is asked on its own. Coalescing them with
+      // `??` would let any non-null value on the result view, ordinary data
+      // included, hide a stream sentinel stored at the same name on the piece
+      // root.
+      const resultSideKind = detectCallableKind(
+        getCallableValue(resultRootValue, name),
+        callableCell,
+      );
+      const kind = resultSideKind ??
+        detectCallableKind(getCallableValue(pieceValue, name), callableCell);
+      if (!kind) continue;
+      // Rank 3 does not displace rank 2: an input row stands unless the RESULT
+      // cell itself classified the name, whatever the piece root stores at it.
+      if (existing !== undefined && resultSideKind === null) continue;
+      const spec = callableCommandSpec(callableCell, kind);
+      const outputSchema = spec.outputSchemaSummary ?? handlerResults.get(name);
+      // `result`, because that is where the row was reached and where
+      // `cf piece call` reaches it: a graph candidate is a property of the
+      // PATTERN's result, and a piece-root candidate is dispatched on the
+      // result cell too. Neither is on the input cell, whose same-named verb
+      // would be a different stream.
+      //
+      // Which is also why the prose is claimed on the same terms as above: a
+      // row placed here is a result-cell row. The common case is that the
+      // declared result type omits the name entirely — that is what sent it
+      // through this sweep — so there is no prose to claim, and the lookup
+      // simply misses.
+      const prose = proseFor("result", name);
       listings.set(name, {
         name,
-        kind: "handler",
+        kind,
         on: "result",
-        inputSchema: spec.inputSchema,
+        inputSchema: kind === "handler"
+          ? withDeclaredFieldProse(spec.inputSchema, prose?.eventSchema)
+          : spec.inputSchema,
         ...(outputSchema !== undefined ? { outputSchema } : {}),
+        ...(prose?.description !== undefined
+          ? { description: prose.description }
+          : {}),
       });
     }
   }
@@ -1877,7 +2929,44 @@ export async function listPieceCallables(
   // must sort identically on every host (utf8Compare is the repo comparator).
   return {
     pattern,
+    ...(graphConsulted ? {} : { incomplete: "pattern-unavailable" as const }),
     verbs: [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name)),
+  };
+}
+
+/**
+ * The command spec a help page is rendered from: the resolved one, plus what
+ * only the declaring pattern can say — the verb's declared result, its own
+ * prose, and the prose on the event fields the page renders as flags.
+ *
+ * Only a handler's resolution carries the thunks, so a tool's spec passes
+ * through untouched and `callableCommandSpec` keeps deciding what a tool
+ * publishes — its result schema rides its callable cell and is already on the
+ * spec.
+ *
+ * The served `inputSchema` stays the authority on shape. It is the document a
+ * payload is validated against, and only its `description` annotations are
+ * filled in here, so a page can never describe a flag the dispatch would
+ * refuse.
+ */
+async function withDeclaredPatternDocs(
+  spec: ExecCommandSpec,
+  resolved: ResolvedPieceCallable,
+): Promise<ExecCommandSpec> {
+  const [declared, prose] = await Promise.all([
+    resolved.declaredResult?.(),
+    resolved.declaredProse?.(),
+  ]);
+  const inputSchema = withDeclaredFieldProse(
+    spec.inputSchema,
+    prose?.eventSchema,
+  );
+  return {
+    ...spec,
+    ...(declared !== undefined && { outputSchemaSummary: declared }),
+    ...(prose?.description !== undefined && { description: prose.description }),
+    ...(inputSchema !== spec.inputSchema &&
+      { inputSchema: inputSchema as JSONSchema }),
   };
 }
 
@@ -1898,14 +2987,23 @@ export async function executePieceCallable(
     commandSpec: resolved.commandSpec,
     rawArgs,
     deps,
-    renderHelp: (commandSpec, parsed) =>
-      parsed.showHelpJson
-        ? renderExecHelpJson(commandSpec)
+    renderHelp: async (commandSpec, parsed) => {
+      // The pattern is consulted HERE and nowhere earlier: the parse has
+      // established that a page is being rendered, so the load it costs is
+      // spent on a caller who asked what the verb hands back and what it is
+      // for. Both spellings of the page take it — `--help --json` serves the
+      // declared result as `outputSchema` and the prose as `description`, the
+      // text page enumerates the result's fields and prints the prose as its
+      // summary line.
+      const spec = await withDeclaredPatternDocs(commandSpec, resolved);
+      return parsed.showHelpJson
+        ? renderExecHelpJson(spec)
         : renderPieceCallHelp(
           deps.helpCommandPrefix ??
             cliCommand(["piece", "call", "...", callableName]),
-          commandSpec,
-        ),
+          spec,
+        );
+    },
   });
 }
 
@@ -2347,7 +3445,7 @@ async function inspectSlugTargetCell(
   const target = await resolveSlugTargetCell(pieces, slug);
   await target.pull();
   const result = target.get() as Readonly<unknown>;
-  const name = isRecord(result) && typeof result[NAME] === "string"
+  const name = isObjectOrArray(result) && typeof result[NAME] === "string"
     ? result[NAME]
     : undefined;
   const identityRef = getPatternIdentityRef(target);
@@ -2478,6 +3576,147 @@ async function verbReadRefusalOrNull(
     : null;
 }
 
+/**
+ * Return the effective CFC label view at one piece data path.
+ *
+ * Paths in the returned view are relative to the selected cell. The view
+ * includes stored declared, derived, and link-carried labels and uses the same
+ * display redaction as the runtime-client boundary.
+ */
+export async function getCellCfcLabel(
+  config: PieceConfig,
+  path: (string | number)[],
+  options: { input?: boolean } = {},
+  deps: PieceOperationDependencies = {},
+): Promise<CfcLabelView | null> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  const rootCell =
+    await (options.input ? piece.input.getCell() : piece.result.getCell());
+  const targetCell = rootCell.key(...path);
+  await targetCell.pull();
+  return cfcLabelViewForCommand(targetCell, path);
+}
+
+/**
+ * Update the declared CFC label at one piece data path.
+ *
+ * This updates the label through the same checked write path used by ordinary
+ * runtime operations. The stored schema merge and CFC preparation rules
+ * therefore reject changes that weaken confidentiality or strengthen
+ * integrity. Raw label-map metadata is never written by the CLI.
+ */
+export async function setCellCfcLabel(
+  config: PieceConfig,
+  path: (string | number)[],
+  input: unknown,
+  options: { input?: boolean } = {},
+  deps: PieceOperationDependencies = {},
+): Promise<CfcLabelView | null> {
+  const update = parseCellCfcLabelUpdate(input);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  const rootCell =
+    await (options.input ? piece.input.getCell() : piece.result.getCell());
+  const targetCell = rootCell.key(...path);
+  await targetCell.pull();
+  const currentView = cfcLabelViewForCommand(targetCell, path);
+  const value = targetCell.getRaw();
+  if (value === undefined) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    throw new Error(`Cannot set a CFC label on absent path "${location}".`);
+  }
+
+  const { observes: requestedObserves, ...label } = update;
+  const schemaIfc = isObjectOrArray(targetCell.schema) &&
+      isObjectOrArray(targetCell.schema.ifc)
+    ? targetCell.schema.ifc
+    : undefined;
+  const existingObservationClasses = new Set<
+    LabelObservationClass | undefined
+  >(
+    currentView?.entries
+      .filter((entry) => entry.path.length === 0)
+      .map((entry) => entry.observes) ?? [],
+  );
+  if (schemaIfc !== undefined) {
+    existingObservationClasses.add(
+      CFC_LABEL_OBSERVATION_CLASSES.has(
+          schemaIfc.observes as LabelObservationClass,
+        )
+        ? schemaIfc.observes as LabelObservationClass
+        : undefined,
+    );
+  }
+  if (
+    requestedObserves === undefined && existingObservationClasses.size > 1
+  ) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    throw new Error(
+      `Cannot preserve observes at "${location}": ` +
+        "the effective label uses multiple observation classes.",
+    );
+  }
+  const observes = requestedObserves ??
+    (existingObservationClasses.size === 1
+      ? existingObservationClasses.values().next().value
+      : undefined);
+  if (
+    observes !== undefined &&
+    (
+      (schemaIfc !== undefined && schemaIfc.observes !== observes) ||
+      currentView?.entries.some((entry) =>
+        entry.path.length === 0 && entry.observes !== observes
+      )
+    )
+  ) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    throw new Error(
+      `Cannot set observes to "${observes}" at "${location}": ` +
+        "the effective label already uses a different observation class.",
+    );
+  }
+  const tx = pieces.runtime.edit();
+  targetCell.withTx(tx).asSchema({
+    ifc: {
+      ...label,
+      ...(observes !== undefined ? { observes } : {}),
+    },
+  }).applyCfcSchemaToExistingValue();
+  pieces.runtime.prepareTxForCommit(tx);
+  const committed = await tx.commit();
+  if (committed.error !== undefined) {
+    throw new Error(
+      `Could not set the CFC label at ${
+        path.length === 0 ? "<root>" : path.join("/")
+      }: ${committed.error.message}`,
+    );
+  }
+  await pieces.synced();
+
+  return cfcLabelViewForCommand(targetCell, path);
+}
+
 export async function getCellValue(
   config: PieceConfig,
   path: (string | number)[],
@@ -2523,17 +3762,24 @@ export async function getCellValue(
           options.selection,
         );
       } catch (error) {
+        // The verb refusal wins over every selection error, not only the
+        // "Cannot access path" family: a real `--filter` against a handler
+        // fails inside the selector with a shape error that sends the caller
+        // to their schema, when the answer is `cf piece call`. Classification
+        // fails open, so an uncertain path keeps its original error.
+        const verbRefusal = await verbReadRefusalOrNull(
+          piece,
+          prop,
+          path,
+          resolvedConfig.piece,
+        );
+        if (verbRefusal) throw verbRefusal;
         if (
           !options.input && error instanceof Error &&
           error.message.startsWith("Cannot access path") &&
           await resultProjectionFailedAtPath(piece, path)
         ) {
-          throw await verbReadRefusalOrNull(
-            piece,
-            prop,
-            path,
-            resolvedConfig.piece,
-          ) ?? new PieceResultProjectionError(path, shouldStep);
+          throw new PieceResultProjectionError(path, shouldStep);
         }
         throw error;
       }
@@ -2724,7 +3970,7 @@ export async function recreateSpaceRootPattern(
 
 function isVNodeLike(value: unknown): value is VNode {
   const visited = new Set<object>();
-  while (isRecord(value) && UI in value) {
+  while (isObjectOrArray(value) && UI in value) {
     if (visited.has(value)) return false; // Cycle detected
     visited.add(value);
     value = value[UI];

@@ -1,3 +1,24 @@
+/**
+ * The walk that puts a value into the form storage takes, which owes two
+ * things that pull in different directions.
+ *
+ * Structure has to survive. An object reached twice is written once and
+ * aliased afterward, so sharing is preserved rather than duplicated, and the
+ * same bookkeeping is what lets a cycle be caught instead of followed. Where
+ * the walk converts a value in place, the sharing around it still has to
+ * hold.
+ *
+ * And nothing may be laundered. A value that is not inert is refused outright
+ * rather than copied into something that would look inert on the far side, and
+ * a `FabricInstance` is refused rather than flattened into its parts for the
+ * same reason.
+ *
+ * Serializing a module asks a narrower question, about what its encodable form
+ * is allowed to carry: a source fallback that survives a runtime unable to
+ * resolve the implementation reference, and never the implementation behind a
+ * module that is not JavaScript.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -246,7 +267,7 @@ describe("to-encodable-form", () => {
     });
 
     it("throws given an array that is not inert, rather than laundering it", () => {
-      // The array analogue of the plain-object case above, and it matters for
+      // The array analog of the plain-object case above, and it matters for
       // the same reason: `.map()` rebuilds by index, so a named property is
       // dropped and an accessor-backed index is EVALUATED into a data
       // property, each yielding an array that satisfies `isFabricValue()`

@@ -8,7 +8,6 @@ import {
 } from "@commonfabric/integration";
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
-const DEFAULT_CFC_BROWSER_TIMEOUT = 30_000;
 /**
  * Attribute a mark predicate stamps on the element it resolved, so the test can
  * then address exactly that element. Each mark is a unique whitespace-separated
@@ -284,7 +283,7 @@ const fillAndVerify = async (
 /**
  * Which elements a marked click is about to be aimed at.
  *
- * A finder answers with the elements to mark, in the order their tokens were
+ * A finder returns the elements to mark, in the order their tokens were
  * supplied, or `undefined` when the page does not yet present all of them. It
  * decides only which elements qualify — being rendered, surviving a settle, and
  * carrying the mark are {@link settleAndMarkTargets}'s business, and every
@@ -524,6 +523,14 @@ export async function settleView(page: Page): Promise<void> {
   await awaitViewSettled(page);
 }
 
+// Built-in safety net for a genuinely stuck settle, matching
+// `waitForCondition`'s precedent. The loop resolves the instant the text
+// appears and drives a real view settle between checks, so this bound is never
+// the common-case latency; it is generous enough to cover the slowest
+// legitimate effect (cross-browser propagation of an optimistic write) without
+// capping a check that is still making progress.
+const WAIT_FOR_TEXT_WHILE_SETTLING_TIMEOUT = 300_000; // 5 minutes
+
 /**
  * Wait for `selector` to contain `text` after a stimulus has been dispatched,
  * driving the shell to settle between checks and resolving the instant the text
@@ -548,16 +555,16 @@ async function waitForTextWhileSettling(
   page: Page,
   selector: string,
   text: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ): Promise<void> {
-  const deadline = Date.now() + timeout;
+  const deadline = Date.now() + WAIT_FOR_TEXT_WHILE_SETTLING_TIMEOUT;
   if (await textIsPresent(page, selector, text)) return;
   do {
     await awaitViewSettled(page);
     if (await textIsPresent(page, selector, text)) return;
   } while (Date.now() < deadline);
   throw new Error(
-    `"${selector}" did not contain "${text}" within ${timeout}ms`,
+    `"${selector}" did not contain "${text}" within ` +
+      `${WAIT_FOR_TEXT_WHILE_SETTLING_TIMEOUT}ms`,
   );
 }
 
@@ -642,7 +649,6 @@ export async function clickTrustedActionAndWaitForText(
   action: string,
   selector: string,
   text: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   let actionProbe: TrustedActionProbe | undefined;
   let textProbe: TextProbe | undefined;
@@ -677,7 +683,7 @@ export async function clickTrustedActionAndWaitForText(
   // optimistic perUser/perSpace write whose chip trails the commit is caught by
   // the same wait.
   try {
-    await waitForTextWhileSettling(page, selector, text, { timeout });
+    await waitForTextWhileSettling(page, selector, text);
   } catch (cause) {
     actionProbe ??= await readTrustedActionProbe(page, action).catch(() =>
       undefined
@@ -1654,7 +1660,6 @@ export async function clickCfButtonAndWaitForText(
   buttonSelector: string,
   textSelector: string,
   text: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   let textProbe: TextProbe | undefined;
 
@@ -1682,7 +1687,7 @@ export async function clickCfButtonAndWaitForText(
   // few cycles after the click — including an optimistic perUser/perSpace write
   // whose chip trails the commit — is captured without ever re-clicking.
   try {
-    await waitForTextWhileSettling(page, textSelector, text, { timeout });
+    await waitForTextWhileSettling(page, textSelector, text);
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
     throw new Error(

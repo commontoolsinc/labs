@@ -1,15 +1,16 @@
+import type { SchemaPathSelector } from "@commonfabric/api";
 import { hashSchema } from "@commonfabric/data-model/schema-hash";
 import {
   internPathSelector,
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model/schema-utils";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MIME } from "@commonfabric/memory/interface";
 import type { CellScope } from "@commonfabric/memory/v2";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
-import { SelectorTracker } from "./selector-tracker.ts";
-import type { SchemaPathSelector } from "@commonfabric/api";
 import type { PullError, Result, Unit, URI } from "./interface.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
 
 const DOCUMENT_MIME = "application/json" as const;
 type ScopedWatchAddress = { id: URI; type: MIME; scope?: CellScope };

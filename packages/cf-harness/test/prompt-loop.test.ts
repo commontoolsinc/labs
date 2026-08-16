@@ -5,26 +5,34 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import {
-  chatViewOfRequest,
-  responsesBodyFromChatFixture,
-} from "./support/responses-fixture.ts";
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
+
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
-import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
-import { CfHarnessEngine } from "../src/engine.ts";
-import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
-import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
-import { SandboxPathEscapeError } from "../src/sandbox/errors.ts";
-import { createHarnessImageAttachment } from "../src/image-attachments.ts";
-import { discoverHarnessSkills } from "../src/skills/registry.ts";
+import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
+import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
 import {
   CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
   type PromptSlotBinding,
 } from "../src/contracts/prompt-slot.ts";
+import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
+import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
+import {
+  type OpenAIChatCompletionRequest,
+  OpenAICompatibleGatewayClient,
+} from "../src/gateway/openai-client.ts";
+import { createHarnessImageAttachment } from "../src/image-attachments.ts";
+import type { HarnessModelClient } from "../src/model/client.ts";
+import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
+import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import type { HarnessRunState } from "../src/run-state.ts";
+import { SandboxPathEscapeError } from "../src/sandbox/errors.ts";
+import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -37,18 +45,11 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
-import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { discoverHarnessSkills } from "../src/skills/registry.ts";
 import {
-  type OpenAIChatCompletionRequest,
-  OpenAICompatibleGatewayClient,
-} from "../src/gateway/openai-client.ts";
-import type { HarnessRunState } from "../src/run-state.ts";
-import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
-import type { HarnessModelClient } from "../src/model/client.ts";
-import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
-import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
-import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
-import { assertPromptCacheModeSupported } from "../src/model/responses-protocol.ts";
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -555,6 +556,13 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
       model: "gpt-5.4",
       modelProvider: "openai-codex",
       credentialOwnerKey: "loom:user-1",
+      credentialOwner: {
+        type: "cf-harness.credential-owner-ref",
+        version: 1,
+        ownerKey: "loom:user-1",
+      },
+      modelAuthSource: "cf-harness-local-store",
+      harnessHomeIdentity: "sha256:opaque-home",
       cfcEnforcementMode: "disabled",
     }),
   });
@@ -569,6 +577,22 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
   assertEquals(
     result.runState.subagentRuns?.[0]?.manifest.modelProvider,
     "openai-codex",
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.modelAuthSource,
+    "cf-harness-local-store",
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.credentialOwner,
+    {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+    },
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.harnessHomeIdentity,
+    "sha256:opaque-home",
   );
   const serialized = JSON.stringify(result.runState.subagentRuns);
   assertEquals(serialized.includes("initial-refresh-secret"), false);
@@ -645,20 +669,23 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
   );
 });
 
-Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model overrides", async () => {
+Deno.test("CfHarnessPromptLoop keeps provider controls off profile-overridden child models", async () => {
   let parentTurns = 0;
   let childTurns = 0;
   const modelClient: HarnessModelClient = {
     providerId: "test-provider",
     complete: (request) => {
-      assertPromptCacheModeSupported(request.model, request.promptCacheMode);
       if (request.model !== "gpt-5.6-terra") {
         childTurns += 1;
+        assertEquals(request.promptCacheMode, undefined);
+        assertEquals(request.reasoningEffort, undefined);
         return Promise.resolve({
-          assistant: { role: "assistant", content: "unexpected child success" },
+          assistant: { role: "assistant", content: "child search complete" },
         });
       }
       parentTurns += 1;
+      assertEquals(request.promptCacheMode, "explicit");
+      assertEquals(request.reasoningEffort, "low");
       return Promise.resolve({
         assistant: parentTurns === 1
           ? {
@@ -678,7 +705,7 @@ Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model o
           }
           : {
             role: "assistant" as const,
-            content: "Parent handled the unsupported child configuration.",
+            content: "Parent used the child result.",
           },
       });
     },
@@ -686,6 +713,7 @@ Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model o
   const loop = new CfHarnessPromptLoop({
     modelClient,
     promptCacheMode: "explicit",
+    reasoningEffort: "low",
     allowedToolIds: ["delegate_task"],
     allowedSubagentProfiles: ["web_search"],
     engine: new CfHarnessEngine({
@@ -707,15 +735,71 @@ Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model o
 
   assertEquals(
     result.finalAssistantText,
-    "Parent handled the unsupported child configuration.",
+    "Parent used the child result.",
   );
   assertEquals(parentTurns, 2);
-  assertEquals(childTurns, 0);
-  assertEquals(output.subagent.status, "failed");
+  assertEquals(childTurns, 1);
+  assertEquals(output.subagent.status, "completed");
   assertStringIncludes(
     output.subagent.summary,
-    "prompt cache mode explicit requires a GPT-5.6 model",
+    "child search complete",
   );
+});
+
+Deno.test("CfHarnessPromptLoop propagates provider controls to model-inheriting children", async () => {
+  let turns = 0;
+  const modelClient: HarnessModelClient = {
+    providerId: "test-provider",
+    complete: (request) => {
+      turns += 1;
+      assertEquals(request.model, "gpt-5.6-terra");
+      assertEquals(request.promptCacheMode, "explicit");
+      assertEquals(request.reasoningEffort, "low");
+      if (turns === 1) {
+        return Promise.resolve({
+          assistant: {
+            role: "assistant" as const,
+            content: "",
+            toolCalls: [{
+              id: "call-default-provider-controls",
+              type: "function" as const,
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Inspect the inherited-model path.",
+                  profile: "default",
+                }),
+              },
+            }],
+          },
+        });
+      }
+      return Promise.resolve({
+        assistant: {
+          role: "assistant",
+          content: turns === 2 ? "child done" : "parent done",
+        },
+      });
+    },
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    promptCacheMode: "explicit",
+    reasoningEffort: "low",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["default"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-inherited-provider-controls",
+      model: "gpt-5.6-terra",
+      cfcEnforcementMode: "disabled",
+    }),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Delegate and continue." });
+
+  assertEquals(result.finalAssistantText, "parent done");
+  assertEquals(turns, 3);
 });
 
 class FailingArtifactStore implements HarnessArtifactStore {
@@ -1274,6 +1358,51 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to gateway requests", asyn
   assertEquals(seenSignal, controller.signal);
 });
 
+Deno.test("CfHarnessPromptLoop preserves custom abort reasons for local gateway runs", async () => {
+  const reason = new Error("custom cancellation reason");
+  const controller = new AbortController();
+  controller.abort(reason);
+  const modelClient: HarnessModelClient = {
+    providerId: "openai-compatible-gateway",
+    complete: () => Promise.reject(reason),
+  };
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "local",
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-local-gateway-custom-abort",
+      model: "gpt-5.4",
+      modelProvider: "openai-compatible-gateway",
+      modelAuthSource: "none",
+      credentialOwner,
+      harnessHomeIdentity: "sha256:opaque-home",
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        modelProvider: "openai-compatible-gateway",
+        modelAuthSource: "none",
+        credentialOwner,
+        harnessHomeIdentity: "sha256:opaque-home",
+      },
+      cfcEnforcementMode: "disabled",
+    }),
+  });
+
+  let caught: unknown;
+  try {
+    await loop.runPrompt({ prompt: "Say hi.", signal: controller.signal });
+  } catch (error) {
+    caught = error;
+  }
+  assert(caught === reason, "custom abort reason must be rethrown unchanged");
+});
+
 Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loops", async () => {
   const controller = new AbortController();
   const seenSignals: Array<RequestInit["signal"]> = [];
@@ -1802,6 +1931,109 @@ Deno.test("CfHarnessPromptLoop only advertises allowed tools when a tool allowli
         ),
       );
     },
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
+const noToolCallFetch =
+  (fetchCalls: RequestInit[]): typeof fetch => (_input, init) => {
+    fetchCalls.push(init ?? {});
+    return Promise.resolve(
+      new Response(
+        JSON.stringify(responsesBodyFromChatFixture({
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "No tool call needed.",
+            },
+          }],
+        })),
+        { status: 200 },
+      ),
+    );
+  };
+
+Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surface when a fabric session is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-pattern-default-surface",
+      model: "gpt-5.4",
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    [
+      "bash",
+      "read_file",
+      "view_image",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+      "run_pattern",
+    ],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises run_pattern from an explicit allowlist when a fabric session is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "run_pattern"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-pattern-allowlisted",
+      model: "gpt-5.4",
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file", "run_pattern"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops run_pattern from an explicit allowlist when no fabric session is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "run_pattern"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-pattern-no-session",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
   });
 
   await loop.runPrompt({ prompt: "Say hi." });

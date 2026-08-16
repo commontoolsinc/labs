@@ -1,11 +1,9 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import {
-  chatViewOfRequest,
-  responsesBodyFromChatFixture,
-} from "./support/responses-fixture.ts";
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
+
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+
 import {
   createFileSystemHarnessArtifactStore,
   readHarnessRunArtifacts,
@@ -13,8 +11,8 @@ import {
   readHarnessRunState,
   readHarnessTranscript,
 } from "../src/artifacts.ts";
-import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import type { HarnessPolicyTrace } from "../src/contracts/policy-trace.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -26,6 +24,10 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly shellRequests: SandboxShellRequest[] = [];

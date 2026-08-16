@@ -1,5 +1,3 @@
-import { ReactiveController, ReactiveControllerHost } from "lit";
-import type { RuntimeInternals } from "./runtime.ts";
 import type {
   LoggerFlagsData,
   PatternSourceInfo,
@@ -8,6 +6,9 @@ import type {
   SchedulerGraphEdge,
   SchedulerGraphSnapshot,
 } from "@commonfabric/runtime-client";
+import { ReactiveController, ReactiveControllerHost } from "lit";
+
+import type { RuntimeInternals } from "./runtime.ts";
 
 const STORAGE_KEY = "showDebuggerView";
 const TELEMETRY_ENABLED_KEY = "telemetryEnabled";

@@ -1,7 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { SESRuntime } from "../src/sandbox/ses-runtime.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import { identitySourceMap } from "@commonfabric/js-compiler/source-map";
+
+import { SESRuntime } from "../src/sandbox/ses-runtime.ts";
 
 // The runner-facing source-map surface of the SES runtime: the module-graph boot
 // path registers deferred providers (CT-1819), and both coordinate lookup and

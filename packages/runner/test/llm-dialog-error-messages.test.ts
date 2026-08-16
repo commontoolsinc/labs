@@ -1,25 +1,29 @@
-// The dialog's error paths substitute an assistant message when a turn cannot
-// produce a real reply. None of them had end-to-end coverage, so nothing pinned
-// either the message reaching `messages` or its landing in a document of its
-// own -- the latter being what the LlmDerived stamping downstream depends on,
-// and what keeps the array from mixing bare values with links.
+/**
+ * The dialog's error paths substitute an assistant message when a turn cannot
+ * produce a real reply. None of them had end-to-end coverage, so nothing pinned
+ * either the message reaching `messages` or its landing in a document of its
+ * own -- the latter being what the LlmDerived stamping downstream depends on,
+ * and what keeps the array from mixing bare values with links.
+ */
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
   clearMockResponses,
+  LLMClient,
   loadConversationFixture,
 } from "@commonfabric/llm/client";
-import type { BuiltInLLMMessage } from "@commonfabric/api";
-import { LLMClient } from "@commonfabric/llm/client";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { parseLink } from "../src/link-utils.ts";
+
 import { type JSONSchema } from "../src/builder/types.ts";
-import { Runtime } from "../src/runtime.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import { waitForLlmMessages } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("llm dialog error messages");
 

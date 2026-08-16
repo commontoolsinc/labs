@@ -1,3 +1,16 @@
+/**
+ * A schema paired with its hash, held so the two cannot drift apart.
+ *
+ * The pairing is trustworthy only if neither half can change after the hash
+ * was computed, so the constructor refuses a schema that is not already
+ * deep-frozen, and the instance is itself frozen with non-writable accessors.
+ *
+ * A schema may legitimately be absent, or be one of the boolean schemas, and
+ * absence is where the two readers differ on purpose: one throws and the other
+ * returns `undefined`, so a caller states up front which it is prepared for
+ * rather than discovering it.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

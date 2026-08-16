@@ -1,3 +1,15 @@
+/**
+ * `deepEqual()` against the shapes where a plausible implementation quietly
+ * gives the wrong answer rather than throwing.
+ *
+ * The value model treats `-0` and `0` as distinct and `NaN` as equal to
+ * itself, which is the opposite of `===` on both counts, so the special-number
+ * cases are the ones that decide whether this function belongs to the value
+ * model or to JavaScript. A sparse array and an array carrying named
+ * properties are the other two: both compare equal to an ordinary array under
+ * any comparison that walks indices alone.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { deepEqual } from "@commonfabric/utils/deep-equal";

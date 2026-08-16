@@ -35,9 +35,10 @@ gain the second reason they are load-bearing.
 **Amendment (2026-07-30)**, from repointing this document's source citations at
 symbols rather than line numbers. Verifying each one against the tree showed
 that WS-D has landed whole, and the claims below are corrected in place:
-`Cell.send` accepts a caller-supplied event id and scopes it per stream;
-`resolveInvocationId` mints one for every `cf piece call`, so the id is always
-supplied rather than only when a caller passes `--invocation`;
+`Cell.send` accepts a caller-supplied event id and scopes it by the session
+that chose it and the stream it was sent to; `resolveInvocationIdentity` mints
+the id–session pair for every `cf piece call`, so the pair is always supplied
+rather than only when a caller passes `--invocation`;
 `executeResolvedCallable` forwards it, then reads the handling's outcome back
 off `tx.handlingReceiptLink` and returns it as `invocation.result` — including
 on a receipt-exists collision, where the original handling's outcome settles
@@ -162,16 +163,19 @@ plumbing through the callable layer:
 
 1. **No caller-supplied id from the CLI.** *Closed.* Written when `cf piece
    call` sent without an `eventId`, so a client retry minted a fresh event and
-   re-executed rather than colliding on the receipt. `resolveInvocationId`
-   (`packages/cli/commands/piece.ts`) now mints an id whenever `--invocation`
-   is absent, and `executeResolvedCallable`'s handler branch
-   (`packages/cli/lib/callable.ts`) forwards it as `{ eventId: invocationId }`.
+   re-executed rather than colliding on the receipt. `resolveInvocationIdentity`
+   (`packages/cli/commands/piece.ts`) now mints the id–session pair whenever
+   neither is named — refusing an `--invocation` named without its session —
+   and `executeResolvedCallable`'s handler branch
+   (`packages/cli/lib/callable.ts`) forwards it as
+   `{ eventId: invocation.id, session: invocation.session }`.
 2. **No readback.** *Closed.* The same handler branch reads the receipt at
    `tx.handlingReceiptLink` through `runtime.getCellFromLink`, pulls it, and
    returns the value as `invocation.result`, treating a value-less verb's
    empty record as existence-only. A receipt-exists collision reads back the
    ORIGINAL handling's outcome, so a retry settles as a success without
-   re-executing.
+   committing again — the redelivered body still runs, and then loses the
+   race for the receipt.
 3. **Patterns return nothing.** All of `topics` is handlers that return no
    value — `addTopic: Stream<AddTopicEvent>` on the board, and the
    `AgentAuthoredEvent` family (`addComment`, `addLink`, `setBody`) on the
@@ -188,7 +192,7 @@ flag a wrong assumption before it becomes a wrong choice: the redesign keeps
 what is load-bearing and changes only what is not.
 
 **Fire-and-forget streams are essential** — in a narrow sense worth pinning
-down, because the loom FUSE audit calls a neighbouring behaviour a bug.
+down, because the loom FUSE audit calls a neighboring behavior a bug.
 Essential: a handler's *effect* is writes that propagate, not a value returned
 into the stream. *Not* essential, and what the audit flags as a spec violation,
 is *acknowledging a write before its transaction commits*. The runtime's own
@@ -201,8 +205,8 @@ model; it exposes it.
 the result cell are omissions in the callable layer, not properties the system
 relies on. Closing them is safe; what it costs is two commitments:
 
-- **Honouring caller-supplied ids** obliges us to define what a repeated id
-  means and to trust callers not to collide — though the collision behaviour
+- **Honoring caller-supplied ids** obliges us to define what a repeated id
+  means and to trust callers not to collide — though the collision behavior
   itself (create-only receipt) is already the scheduler's invariant, not new
   machinery.
 - **Handing out result-cell addresses** commits the runtime to those addresses
@@ -378,16 +382,27 @@ number of records returned from a large array remains deferred, blocking
 nothing. It is adjacent CLI work for when board scale demands it, not an ask on
 any workstream in this implementation plan.
 
-**A set of verbs wants to be a structural interface, and the machinery for that
-already exists.** Schemas are the type system, so a verb set is a schema
-fragment and conformance is a subset check the repo already computes
-(`schemaSubsetIssue`). Its variance is already correct for the purpose: an
-implementer must accept at least the declared payload and return at most the
-declared result, which is exactly the argument/result direction pair above.
-Interface conformance and schema evolution are the same rule — evolution is
-conformance to one's past self. So no type machinery needs building, and any
-explicit interface mechanism (nominal declaration, discovery *by* interface) is
-deferred until a concrete need appears.
+**A set of verbs is checkable as a structural interface with the machinery that
+exists.** Schemas are the type system, so a verb set is a schema fragment and
+conformance is a subset check the repo already computes (`schemaSubsetIssue`,
+`packages/piece/src/schema-compatibility.ts`). Its variance is already correct
+for the purpose: an implementer must accept at least the declared payload and
+return at most the declared result, which is exactly the argument/result
+direction pair above. Interface conformance and schema evolution are the same
+rule — evolution is conformance to one's past self.
+
+That covers the structural half and stops there.
+[Designing verbs so they can change](verb-evolution.md) is the design of record
+for what a verb's interface is and how it changes, and it puts an explicit
+interface mechanism — **named, versioned interfaces**, with nominal
+declaration and discovery by interface — on the road rather than in reserve,
+because a name is a claim about meaning that no structural demand can make.
+It is also the most machinery of anything in that design: an identity, a
+registry, a place in the shape, a member-to-field mapping, and a
+compatibility rule of its own, where what a version bump means and how a
+declared minimum resolves against what a piece provides are both still to be
+designed. So the subset check is the default and the interim, not an argument
+that the named mechanism is unnecessary.
 
 What is **not** yet true is the premise all of that rests on: that a piece's
 verbs can be identified from its schema. Verb-ness has three independent
@@ -520,12 +535,12 @@ with fan-out.
 This is not a new semantic — it is when the receipt commits today. But the CLI
 waits for far more than that: the handler branch awaits `runtime.idle()` and
 `manager.synced()` — the whole reactive graph quiescing, then full sync — so
-acknowledgement of an already-committed write is held hostage to every derived
+acknowledgment of an already-committed write is held hostage to every derived
 recomputation it triggered. On the live topics board that is `crossrefs`
 re-deriving over the whole board; mutations were observed taking 60–80 s. The
 work is exposure *and narrowing*: await this handling's commit, sync the
 receipt, return — never the graph going quiet. An acceptance test must prove a
-slow derived recomputation cannot delay acknowledgement (implementation plan,
+slow derived recomputation cannot delay acknowledgment (implementation plan,
 WS-D).
 
 Waiting is a caller-side choice — whether to wait at all, and for how long. The
@@ -582,7 +597,7 @@ cells already inherit `resultScope` from the callable cell
 exists; today those
 cells are unlinked and merely unguessable.
 
-Scope is not the whole confidentiality story: a result derived from labelled
+Scope is not the whole confidentiality story: a result derived from labeled
 data carries CFC confidentiality labels of its own, so a stored invocation
 record is subject to the same label rules as any other cell
 (`docs/specs/cfc-label-metadata-confidentiality.md`). Retention and readback
@@ -616,56 +631,72 @@ pattern to follow rather than in the runtime.
 A verb's result schema declares whether it carries a live piece reference or a
 self-contained snapshot — the pattern knows which is meaningful for that verb.
 
-The result schema is part of the piece's public contract, and the repo already
-checks pattern schema evolution: `assertPatternSchemasBackwardCompatible`
+The repo checks **a pattern's own** schema evolution:
+`assertPatternSchemasBackwardCompatible`
 (`packages/piece/src/schema-compatibility.ts`) runs on every `setsrc` unless
 `--dangerously-allow-incompatible-schema` is passed
-(`packages/piece/src/ops/piece-controller.ts`). It checks arguments
-and results in **opposite directions**:
+(`dangerouslyAllowIncompatibleSchema`,
+`packages/piece/src/ops/piece-controller.ts`). It compares four schemas and no
+others — the previous and candidate `Pattern`'s `argumentSchema` and
+`resultSchema` — and it compares the two roles in **opposite directions**:
 
 - **Arguments**: previous ⊆ candidate. Inputs may widen but not narrow; a new
   required field is incompatible.
 - **Results**: candidate ⊆ previous. Results may narrow freely — but *adding* a
   result field is only compatible if the previous schema was open-world.
 
-That second direction matters here: a declared result is easier to shrink than
-to extend, so the result shape wants to be right early, or deliberately
-open-world. The `Invocation` shape is the first schema this applies to — it
-must be authored open-world so protocol fields such as a payload digest or
-retention metadata can be added later.
+That second direction matters here: a pattern's declared result is easier to
+shrink than to extend, so the result shape wants to be right early, or
+deliberately open-world. The `Invocation` shape is the first schema this
+applies to — it must be authored open-world so protocol fields such as a
+payload digest or retention metadata can be added later.
 
 "Results may narrow freely" governs *values*, not *named fields*. Removing a
 named property is rejected outright in either direction — `objectSubsetIssue`
 returns "existing result field was removed" whenever the comparison is an
 evolution, on the stated principle that "pattern evolution preserves named
 fields as part of the public contract, even when the candidate object is
-otherwise open" (`packages/piece/src/schema-compatibility.ts`). A
-verb's `asCell` marker is pinned the same way: it is a semantic extension key
-compared for exact equality, so a field cannot change
-between data and verb across a deploy. Verb names and their verb-ness are
-therefore already a contract with teeth, before this document adds any rule.
+otherwise open" (`objectSubsetIssue`,
+`packages/piece/src/schema-compatibility.ts`). The removed-field check
+recurses, so a nested removal is rejected on a nested path
+(`result.topic.title: existing result field was removed`) exactly as a flat one
+is. Adding a **required** field is rejected at any depth unless it carries a
+default; adding an **optional** one is allowed at any depth; narrowing a
+*value* type is allowed at any depth. Nesting a pattern's result under a single
+key therefore buys it nothing: "results may narrow freely" is true of values
+and never of names, at every depth.
 
-The practical consequence for verb results: **every name a result publishes is
-permanent regardless of depth, and every later addition must be optional.**
+A verb's `asCell` marker is pinned the same way: it is a semantic extension key
+compared for exact equality (`SEMANTIC_EXTENSION_KEYS`,
+`packages/piece/src/schema-compatibility.ts`), so a field cannot change between
+data and verb across a deploy. Verb names and their verb-ness are therefore
+already a contract with teeth, before this document adds any rule.
 
-An earlier revision of this paragraph advised nesting the value under a single
-key so that "only that key is permanent and everything beneath it is free to
-narrow". Measured against `assertPatternSchemasBackwardCompatible`, that is not
-what the checker does. The removed-field check recurses, so a nested removal is
-rejected on a nested path (`result.topic.title: existing result field was
-removed`) exactly as a flat one is. Adding a **required** field is rejected at
-any depth unless it carries a default; adding an **optional** one is allowed at
-any depth; narrowing a *value* type is allowed at any depth. Nesting changes
-none of it.
+**What a verb hands back sits outside all of it.** A verb's declared result
+travels on `module.resultSchema` — the `CELL_RESULT_TYPE` doc comment
+(`packages/api/index.ts`) states this, and `declaredVerbResults`
+(`packages/cli/lib/piece.ts`) is what reads it back off a piece's compiled
+graph — while the comparison above sees only `Pattern.argumentSchema` and
+`Pattern.resultSchema`. There a verb is a property carrying its
+`asCell: ["stream"]` marker and a reference to its event schema, and nothing
+about its output. So no gate compares a verb's result across a deploy:
+renaming a field of what a verb returns passes every check and breaks its
+callers silently.
 
-"Results may narrow freely" is therefore true of values and never of names,
-which is the distinction the earlier wording blurred. Publish as few names as
-the verb can live with, and make every later addition optional. An envelope
-remains a reasonable readability choice — the llm-dialog tool path returns a
-single-key shape from both of its branches, an `@resultLocation` link, the
-value, and its schema together (both `"@resultLocation"` sites in
-`handleInvoke`, `packages/runner/src/builtins/llm-dialog.ts`) — just not for
-the evolution reason previously given.
+The advice stands; its enforcement does not. Publish as few names as the verb
+can live with, and treat **every name a verb's result publishes as permanent
+regardless of depth, with every later addition optional** — a discipline the
+author and review hold, not one the update gate holds for them.
+[Designing verbs so they can change](verb-evolution.md) is the design of record
+for how a verb's interface changes, and it carries the same rule to its
+conclusion: because nothing checks an output, a change to what a verb hands
+back is treated exactly like a rename and gets a new verb name, until
+Fabric-types records outputs in the shape and a check replaces the convention.
+
+An envelope remains a reasonable readability choice — the llm-dialog tool path
+returns a single-key shape from both of its branches, an `@resultLocation`
+link, the value, and its schema together (both `"@resultLocation"` sites in
+`handleInvoke`, `packages/runner/src/builtins/llm-dialog.ts`).
 
 ### Authoring
 
@@ -744,25 +775,33 @@ contract.
 ### Client surface
 
 ```text
+# An invocation id deduplicates only within the session it was chosen in,
+# so a run mints one session and every call of that run shares it.
+$ export CF_INVOCATION_SESSION="$(cf invocation-session new)"
+
 $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
     --title "Verb contract" --body @body.md
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
-# The client mints the id before sending and prints it even when its wait
-# times out. Retrying with it returns the original — no re-execution.
+# The client mints the id before sending and prints it — beside its session —
+# even when its wait times out. Retrying the pair returns the original
+# outcome: the body re-runs and loses the create-only receipt race, so
+# nothing commits twice. An --invocation named without a session is refused.
 $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
     --title "Verb contract" --invocation inv_7f3a
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
-# The caller chooses whether and how long to wait
+# The caller chooses whether to wait: a detached call exits at the commit
+# acknowledgment with the receipt's address, and collecting the outcome
+# later is an ordinary read of that address.
 $ cf piece call --url "$TOPICS_BOARD_URL" summarize \
     --topic fid1:abc --no-wait
-{ "invocation": "inv_9c1b", "status": "pending" }
-$ cf piece invocation --url "$TOPICS_BOARD_URL" inv_9c1b --await
-{ "invocation": "inv_9c1b", "status": "settled",
-  "result": { "summary": "..." } }
+{ "invocation": "inv_9c1b", "status": "committed",
+  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" } }
+$ cf piece get --piece of:fid1:… summary
+"..."
 ```
 
 Client-local `@name` bindings are deferred. They can encode host + space +
@@ -896,7 +935,7 @@ client retry needs.
    without it. Options: a small runtime change writing the validated plain
    return into the receipt instead of `{}`, or a contract rule that results
    carry at least one reactive. The first looks right; it is the one place this
-   design asks the runtime for new behaviour rather than exposure. That change
+   design asks the runtime for new behavior rather than exposure. That change
    now exists behind the `plainResultReceipts` experimental option (WS-C),
    default-on since the three-topic integration proof (#5244), so neither the
    mechanism nor the default remains open — an explicit `false` stays the

@@ -1,19 +1,23 @@
-// Unit tests for resolveSchema — basic resolution behavior.
-// Note: Robin's #3118 removed the filterAsCell parameter from resolveSchema,
-// so these tests only cover the single-argument form.
+/**
+ * Unit tests for resolveSchema — basic resolution behavior.
+ * Note: Robin's #3118 removed the filterAsCell parameter from resolveSchema,
+ * so these tests only cover the single-argument form.
+ */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { resolveSchema, resolveSchemaForValue } from "../src/schema.ts";
-import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
-import {
-  isNontrivialSchema,
-  toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
+import { describe, it } from "@std/testing/bdd";
+
 import {
   internSchema,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
+import {
+  isNontrivialSchema,
+  toDeepFrozenSchema,
+} from "@commonfabric/data-model/schema-utils";
+
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import { resolveSchema, resolveSchemaForValue } from "../src/schema.ts";
 
 /** Narrow a JSONSchema | undefined to JSONSchemaObj or fail the test. */
 function expectNontrivial(

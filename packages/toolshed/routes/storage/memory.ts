@@ -1,8 +1,10 @@
+import * as FS from "@std/fs";
+
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { verifySessionOpenAuthorization } from "@commonfabric/memory/v2/session-open-auth";
-import * as FS from "@std/fs";
-import env from "@/env.ts";
+
 import { memoryEngineStoreUrl } from "./memory-store-url.ts";
+import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
 
 const memoryAudience = identity.did();

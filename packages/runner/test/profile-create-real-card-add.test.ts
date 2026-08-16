@@ -1,12 +1,13 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { fromFileUrl } from "@std/path";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { fromFileUrl } from "@std/path";
 
-import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // GOLD-STANDARD end-to-end repro of the profile card-add flow using the REAL

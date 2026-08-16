@@ -3,6 +3,16 @@
  */
 
 import {
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import { DID } from "@commonfabric/identity";
+import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
+import {
+  cfcLabelViewsEqual,
+  rebaseCfcLabelView,
+} from "@commonfabric/runner/cfc/label-view-core";
+import {
   type Cancel,
   isSigilLink,
   type JSONSchema,
@@ -11,12 +21,10 @@ import {
   linkRefPayloadToString,
   type SigilLink,
 } from "@commonfabric/runner/shared";
-import {
-  cfcLabelViewsEqual,
-  rebaseCfcLabelView,
-} from "@commonfabric/runner/cfc/label-view-core";
-import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
-import { $conn, type RuntimeClient } from "./runtime-client.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { InitializedRuntimeConnection } from "./client/connection.ts";
 import {
   type CellRef,
   type CfcLabelView,
@@ -24,14 +32,7 @@ import {
   RequestType,
   type WireCellValue,
 } from "./protocol/mod.ts";
-import { DID } from "@commonfabric/identity";
-import {
-  FabricSpecialObject,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
-import { InitializedRuntimeConnection } from "./client/connection.ts";
-import { getLogger } from "@commonfabric/utils/logger";
+import { $conn, type RuntimeClient } from "./runtime-client.ts";
 
 // Logger for schema warnings - disabled by default.
 // Enable via: globalThis.commonfabric.logger["cell-handle"].disabled = false
@@ -503,7 +504,7 @@ export class CellHandle<T = unknown> {
       return value.map((item) => CellHandle.deserialize(base, item));
     }
 
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       const reference = parseAsCellRef(
         value as JSONValue | undefined,
         base.ref(),
@@ -553,7 +554,7 @@ export class CellHandle<T = unknown> {
     //
     // TODO(danfuzz): carry the whole `FabricValue` domain across this
     // connection, at which point this becomes a conversion rather than a
-    // refusal. `JsonCodec` is the mechanism, and the gap it closes is the one
+    // refusal. `JsonCodecEngine` is the mechanism, and the gap it closes is the one
     // marked on `WireCellValue` in `protocol/types.ts`.
     if (value instanceof FabricSpecialObject) {
       throw new Error(
@@ -562,7 +563,7 @@ export class CellHandle<T = unknown> {
       );
     }
 
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       return Object.fromEntries(
         Object.entries(value).map((
           [key, member],
@@ -638,8 +639,8 @@ function applyValue(
   }
 
   // For plain objects, recursively apply to each property
-  if (isRecord(current)) {
-    const prevRecord = (isRecord(previous) && !Array.isArray(previous))
+  if (isObjectOrArray(current)) {
+    const prevRecord = (isObjectNotArray(previous))
       ? previous as Record<string, unknown>
       : {};
     const result: Record<string, unknown> = {};

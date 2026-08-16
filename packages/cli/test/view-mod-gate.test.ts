@@ -6,6 +6,7 @@
  * removing the process working directory before invoking that closure forces
  * Deno.cwd() to throw NotFound and runs the fallback.
  */
+
 import { assert } from "@std/assert";
 import { buildView } from "../lib/view/mod.ts";
 

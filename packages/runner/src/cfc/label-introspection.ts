@@ -1,11 +1,12 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import type { CfcConfClause } from "./clause.ts";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
+import type { CfcConfClause } from "./clause.ts";
 import { clauseAlternatives } from "./clause.ts";
 import {
   cfcEntryHasDerivedContainment,
@@ -291,7 +292,7 @@ const atomProjectionLabel = (
         walk(element, contextAtom, [...valuePath, String(index)])
       );
     }
-    if (!isRecord(value)) {
+    if (!isObjectOrArray(value)) {
       return true;
     }
     if (isCfcFieldCommitment(value)) {
@@ -487,7 +488,7 @@ export const evaluateConfLabelQuery = (
         ];
         let matched = true;
         for (const { field, familyTypes, expected } of predicates) {
-          if (!isRecord(atom)) {
+          if (!isObjectOrArray(atom)) {
             // A bare string atom is a type-only atom: its entire content is
             // its (public) type tag, so `atomType` equality applies to the
             // atom itself; every other field is absent (no match, shape-only

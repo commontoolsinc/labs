@@ -24,13 +24,20 @@
  */
 
 import {
+  dataUriFromValue,
+  isFabricDataUri,
+  valueFromDataUri,
+} from "@commonfabric/data-model/data-uri-codec";
+import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import { type Cell, isCell } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,
@@ -38,13 +45,7 @@ import {
   KeepAsCell,
   parseLink,
 } from "./link-utils.ts";
-import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
-import {
-  dataUriFromValue,
-  isFabricDataUri,
-  valueFromDataUri,
-} from "@commonfabric/data-model/data-uri-codec";
 
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id
@@ -85,7 +86,7 @@ export function dataUriFromValueWithResolvedLinks(
     value: FabricValue,
     seen: Set<object>,
   ): FabricValue {
-    if (!isRecord(value)) return value;
+    if (!isObjectOrArray(value)) return value;
     if (seen.has(value)) {
       throw new Error(`Cycle detected when creating data URI`);
     }
@@ -128,7 +129,7 @@ export function dataUriFromValueWithResolvedLinks(
           }
         }
         return next ?? value;
-      } else { // isObject
+      } else { // not an array
         let next: Record<string, FabricValue> | undefined;
         for (const [key, entry] of Object.entries(value)) {
           const rewritten = traverseAndAddBaseIdToRelativeLinks(entry, seen);
@@ -253,7 +254,7 @@ export function findAndInlineDataUriLinks(value: any): any {
     }
     return next ?? value;
   } else if (value instanceof FabricPrimitive) {
-    // A leaf, and `isRecord`, so it leaves ahead of the record branch below.
+    // A leaf, and `isObjectOrArray`, so it leaves ahead of the record branch below.
     // It holds no link to inline, so returning it whole is the answer rather
     // than an omission.
     return value;
@@ -278,7 +279,7 @@ export function findAndInlineDataUriLinks(value: any): any {
     // at which point this becomes a walk rather than a refusal -- the same gap
     // marked at the sibling walk in `dataUriFromValueWithResolvedLinks()`.
     refuseFabricInstance(value, "when inlining `data:` URI links");
-  } else if (isRecord(value)) {
+  } else if (isObjectOrArray(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
       const inlined = findAndInlineDataUriLinks(entry);

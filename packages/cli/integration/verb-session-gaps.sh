@@ -3,18 +3,17 @@
 # not work yet. Its companion `verb-session-demo.sh` shows the session as it is
 # meant to read; this one is the thing that keeps that honest.
 #
-# Four steps assert a GAP rather than a capability. Each fails loudly the day
+# Some steps assert a GAP rather than a capability. Each fails loudly the day
 # the gap closes, so this script is how we find out that a capability arrived
-# rather than discovering it months later in a stale document.
+# rather than discovering it months later in a stale document. How many are
+# open is tallied as they run and printed on the last line, so no prose here
+# can fall out of step with the assertions below.
 #
 # Documented in docs/common/verb-session-walkthrough.md.
 #
 # It deploys pattern/tracker.tsx and nothing else. That fixture belongs to this
 # session alone, so a change to a pattern the product ships can never break a
 # demonstration of what driving one through `cf` looks like.
-#
-# Two steps assert a gap rather than a capability, and say so. When the gap
-# closes they fail, which is the point: this script is how we find out.
 #
 # Run standalone against any host:
 #   API_URL=http://localhost:8000 packages/cli/integration/verb-session-gaps.sh
@@ -33,6 +32,7 @@ fi
 
 PASS=0
 FAIL=0
+GAPS=0
 step() { printf '\n== %s\n' "$1"; }
 ok() { printf '  PASS %s\n' "$1"; PASS=$((PASS + 1)); }
 bad() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL + 1)); }
@@ -46,6 +46,7 @@ gap() {
     bad "GAP CLOSED — $2 now works; update this script and the walkthrough"
   else
     ok "gap still open: $2"
+    GAPS=$((GAPS + 1))
   fi
 }
 
@@ -61,8 +62,11 @@ echo "SPACE=$SPACE"
 START=$(date +%s)
 
 step "1. Arrive by name, not by fid"
-BOARD=$($CF piece new "$FIXTURE" $ARGS 2>&1 |
-  grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
+# --quiet makes the piece id stdout's only line; stderr is dropped and the
+# grep anchored so a compile warning carrying a fid1: token cannot be taken
+# for the deploy's id.
+BOARD=$($CF piece new --quiet "$FIXTURE" $ARGS 2>/dev/null |
+  grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
 if [ -n "$BOARD" ]; then ok "deployed $BOARD"; else
   bad "deploy failed"
   exit 1
@@ -76,17 +80,57 @@ VERBS=$($CF piece verbs --piece board $ARGS --json 2>/dev/null)
 echo "$VERBS" | jq -r '.verbs[]? | "    " + .name + "  (" + .kind + ")"' 2>/dev/null
 echo "$VERBS" | jq -e '[.verbs[]?.name] | index("addItem")' >/dev/null 2>&1 &&
   ok "addItem is listed" || bad "addItem missing from the listing"
+# The other half of a discovery surface, and the half that has no natural
+# witness: what it does NOT name. The board's `items` and `$NAME` are data, and
+# a listing that offers them hands a client operations that do not exist.
+check "addItem" "$(echo "$VERBS" | jq -r '[.verbs[]?.name] | sort | join(",")')" \
+  "the listing names the verb and nothing else"
 
 step "3. Ask what a verb wants — flags and prose, both derived"
 HELP=$($CF piece call --piece board $ARGS addItem -- --help 2>/dev/null)
 echo "$HELP" | grep -q -- "--title" &&
   ok "the flag is derived from the event schema" ||
   bad "no --title flag in the generated help"
-# The author's JSDoc reaches the COMPILED pattern but not the schema this help
-# page reads, so the prose is stripped before a caller can see it. Asserted as
-# a gap so the day it flows, this fails and tells us.
-echo "$HELP" | grep -qi "one line naming the work"
-gap "$?" "JSDoc on an event field reaching its flag description"
+# The author's prose, at both levels it is written on. Each needle is read out
+# of the FIXTURE rather than hard-coded, so rewording a doc comment moves the
+# probe with it — a hard-coded string would turn a reworded comment into a
+# failure and an unchanged one into a check that passes without reading
+# anything.
+FIELD_DOC=$(sed -n '/interface AddItemEvent {/,/^}/p' "$FIXTURE" |
+  sed -n 's/.*\/\*\* *\(.*[^ ]\) *\*\/.*/\1/p' | head -1)
+if [ -z "$FIELD_DOC" ]; then
+  bad "no JSDoc on AddItemEvent's field in the fixture — the probe has no needle"
+else
+  echo "$HELP" | grep -qiF "$FIELD_DOC" &&
+    ok "an event field's JSDoc reaches its flag description" ||
+    bad "the flag carries no description: [$FIELD_DOC]"
+fi
+# The verb's own comment, on the line above its `Stream` property. Its needle
+# comes from BoardOutput rather than from the event interface, because the two
+# travel by different routes — this one is a sibling of the property's `$ref`,
+# the one above lives inside the `$defs` target it names — and a probe that
+# could not tell them apart would report one arriving as both.
+VERB_DOC=$(sed -n '/interface BoardOutput {/,/^}/p' "$FIXTURE" |
+  grep -B 1 'addItem:' | sed -n 's/.*\/\*\* *\(.*[^ ]\) *\*\/.*/\1/p' | head -1)
+if [ -z "$VERB_DOC" ]; then
+  bad "no JSDoc on BoardOutput.addItem in the fixture — the probe has no needle"
+else
+  echo "$HELP" | grep -qiF "$VERB_DOC" &&
+    ok "the verb's own JSDoc reaches its help page" ||
+    bad "the help page has no summary line: [$VERB_DOC]"
+  # And the same words on the discovery surface, where a client reads them.
+  echo "$VERBS" | jq -e --arg d "$VERB_DOC" \
+    '[.verbs[]? | select(.name=="addItem") | .description] | index($d)' \
+    >/dev/null 2>&1 &&
+    ok "the verb's own JSDoc reaches its listing row" ||
+    bad "the listing row carries no description: [$VERB_DOC]"
+fi
+# The third prose level — an event INTERFACE's own comment — is not probed
+# here, and deliberately. It never compiles, so the honest assertion is that it
+# is absent from the page; but `AddItemEvent`'s comment and `addItem`'s are the
+# same sentence in this fixture, and the verb's does arrive. A containment probe
+# would read one level's success as the other's and report a gap closed that is
+# wide open. It is recorded in the walkthrough's table instead, against #5559.
 
 step "4. A create hands back the piece, and the address chains"
 R=$($CF piece call --quiet --show-links --piece board $ARGS \
@@ -97,16 +141,29 @@ EPIC=$(echo "$R" | jq -r '.links["/item"].id // empty' | sed 's/^of://')
 if [ -n "$EPIC" ]; then ok "the result names its document: $EPIC"; else
   bad "no link for /item"
 fi
-# The receiver axis: call the verb ON the thing you were just handed.
+# The receiver axis: call the verb ON the thing you were just handed. The
+# children count below proves the writes landed; each call's exit code is
+# checked too, because the readback runs after the write commits — a readback
+# failure leaves the count intact, and only the exit code shows it.
 $CF piece call --quiet --piece "$EPIC" $ARGS \
-  addChild '{"title":"Session cookies"}' >/dev/null 2>&1
+  addChild '{"title":"Session cookies"}' >/dev/null 2>&1 ||
+  bad "addChild (Session cookies) exited nonzero"
 $CF piece call --quiet --piece "$EPIC" $ARGS \
-  addChild '{"title":"CSRF tokens"}' >/dev/null 2>&1
+  addChild '{"title":"CSRF tokens"}' >/dev/null 2>&1 ||
+  bad "addChild (CSRF tokens) exited nonzero"
 KIDS=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
 check "2" "$(echo "$KIDS" | jq -r 'length')" \
   "both children landed under the address the create returned"
+# Step 2's assertion one level down: an address alone discovers a surface, and
+# the surface it discovers is the item's own rather than the board's. Three
+# places say so in prose — the demo narrates it, and the walkthrough claims it
+# twice — and none of them could go stale without this failing first.
+ITEM_VERBS=$($CF piece verbs --piece "$EPIC" $ARGS --json 2>/dev/null)
+check "addChild,archive,blockOn,finish,recordNote" \
+  "$(echo "$ITEM_VERBS" | jq -r '[.verbs[]?.name] | sort | join(",")')" \
+  "an item lists its own verbs, and not the board's"
 
 step "5. Read addresses instead of contents"
 ADDR=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
@@ -115,12 +172,31 @@ ADDR=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
 check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link") and (.title|length>0)] | all')" \
   "a marker beside a projection returns the address AND the fields"
 KID=$(echo "$ADDR" | jq -r '.[] | select(.title=="Session cookies") | .["$link"].id')
+# The very same read, run a second time. A (source cell, schema) pair is
+# reusable: it answers with what it answered before, which is what a caller
+# reaching for one projection twice depends on. Asserted by equality against
+# the first read rather than against a shape, because the property is that
+# nothing about the answer moved. The check above is what gives it force —
+# were the first read already empty, two empty reads would agree and this
+# would pass saying nothing.
+AGAIN=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
+  --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
+  2>/dev/null)
+check "$ADDR" "$AGAIN" "the same read, run again, answers the same"
 
-step "6. Two mechanisms name the piece, and they do not agree"
+step "6. Two routes hand back an address, and either one addresses the piece"
 # MEASURED, and not what you would guess: the address a call hands back
 # (--show-links) and the address a read projects ($link) are DIFFERENT entity
-# ids for the same piece. Both resolve — each reads back the same title — so
-# either is usable, but a caller cannot compare them for equality.
+# ids for the same piece — one resolves the link chain, the other renders the
+# link as stored. That is the read model working rather than a defect: an
+# address is many-to-one over cells, so a holder of one cannot tell a canonical
+# id from an alias and is never asked to. The property is stated in
+# docs/plans/shaped-reads-and-verb-results.md; #5632 asks whether the two ids
+# should agree and item 11 of docs/plans/verbs-implementation.md rules that
+# they are aliases. So their difference is asserted nowhere here: no day exists
+# on which it "closes", and a gap that can never fire is a gap that reports
+# nothing. What a caller does depend on is asserted instead — either address,
+# fed back to --piece, reads the same piece.
 MADE=$($CF piece call --quiet --show-links --piece board $ARGS \
   addItem '{"title":"Rate limiting"}' 2>/dev/null |
   jq -r '.links["/item"].id // empty' | sed 's/^of://')
@@ -136,11 +212,6 @@ else
   R_T=$($CF piece get --quiet --piece "$VIA_READ" title $ARGS 2>/dev/null | tr -d '"')
   check "Rate limiting" "$M_T" "the address the call returned addresses the piece"
   check "Rate limiting" "$R_T" "the address the read returned addresses the piece too"
-  if [ "$MADE" = "$VIA_READ" ]; then
-    bad "GAP CLOSED — the two routes now agree; simplify this step"
-  else
-    ok "gap still open: the two routes give different ids for one piece"
-  fi
 fi
 
 step "7. A verb returns what only the pattern could compute"
@@ -153,8 +224,10 @@ AT=$(echo "$N" | jq -r '.result.note.at // 0')
   bad "no pattern-stamped time on the note"
 
 step "8. Finishing reports what the caller could not know"
+# Exit code checked for the same reason as step 4's creates.
 $CF piece call --quiet --piece "$KID" $ARGS \
-  addChild '{"title":"Rotate signing key"}' >/dev/null 2>&1
+  addChild '{"title":"Rotate signing key"}' >/dev/null 2>&1 ||
+  bad "addChild (Rotate signing key) exited nonzero"
 # Unshaped: a PROJECTED read of this path fails once `finish` has run, while
 # the same path unshaped resolves fine. Counting is all this step needs.
 DIRECT=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
@@ -178,29 +251,49 @@ check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witne
 step "10. GAP: an address cannot be a verb argument"
 # blockOn declares `on: Writable<ItemOutput>` — a reference. `send()` already
 # resolves a native sigil (measured), so the pre-dispatch gate is the only
-# thing refusing this. Verbs plan item 11 closes it; see
-# docs/plans/references-as-arguments.md.
+# thing refusing this. docs/plans/references-as-arguments.md closes it — that
+# work carries no step number in the verbs plan, which numbers only the read
+# and result layers.
 OTHER=$($CF piece get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
-  jq -r '.[0]["$link"].id')
-$CF piece call --quiet --piece "$KID" $ARGS \
-  blockOn "{\"on\":\"$OTHER\"}" >/dev/null 2>&1
-gap "$?" "blockOn with a bare address"
+  jq -r '.[0]["$link"].id // empty')
+# Guarded, and matched against the SPECIFIC refusal: an empty address, a
+# renamed verb, or a server hiccup would also exit nonzero, and a probe that
+# reads any failure as "gap still open" is a probe that cannot fail.
+if [ -z "$OTHER" ] || [ -z "${KID:-}" ]; then
+  bad "no address to probe blockOn with (item=$OTHER target=${KID:-})"
+else
+  BLOCK_ERR=$($CF piece call --quiet --piece "$KID" $ARGS \
+    blockOn "{\"on\":\"$OTHER\"}" 2>&1 >/dev/null)
+  BLOCK_RC=$?
+  if [ "$BLOCK_RC" = "0" ]; then
+    gap 0 "blockOn with a bare address"
+  elif printf '%s' "$BLOCK_ERR" | grep -q "does not match type object"; then
+    gap 1 "blockOn with a bare address (the pre-dispatch gate refuses it)"
+  else
+    bad "blockOn failed for a reason that is not the known refusal: $BLOCK_ERR"
+  fi
+fi
 
-step "11. GAP: a verb returning a child piece crashes readback"
-# The returned item carries `parent`, which points back at its container, so
-# the result is cyclic and rendering it fails — issue #5577. The write lands
-# regardless, which is the property worth not losing.
+step "11. a verb returning a child piece renders the circle as an address"
+# The returned item carries `parent`, which points back at its container. The
+# readback bounds the result with the verb's own declared result and renders
+# the position where the declared type re-enters itself as an address, so the
+# whole outcome is JSON and the write it reports stays legible.
 BEFORE=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
-$CF piece call --quiet --piece "$EPIC" $ARGS \
-  addChild '{"title":"Cycle probe"}' >/dev/null 2>&1
-gap "$?" "addChild readback on a doubly-linked tree"
+CALLED=$($CF piece call --quiet --piece "$EPIC" $ARGS \
+  addChild '{"title":"Cycle probe"}' 2>/dev/null)
+RC=$?
+check "0" "$RC" "addChild readback on a doubly-linked tree"
+BACKREF=$(printf '%s' "$CALLED" | jq -r '.result.item.parent["$link"].id // ""')
+check "of:" "${BACKREF:0:3}" \
+  "the position that closes the circle returns an address"
 AFTER=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
-check "$((BEFORE + 1))" "$AFTER" \
-  "the write landed anyway — an absent result is not a failed mutation"
+check "$((BEFORE + 1))" "$AFTER" "the write the result describes landed"
 
 ELAPSED=$(($(date +%s) - START))
-printf '\n== %d passed, %d failed — %ds wall clock\n' "$PASS" "$FAIL" "$ELAPSED"
+printf '\n== %d passed, %d failed, %d gaps open — %ds wall clock\n' \
+  "$PASS" "$FAIL" "$GAPS" "$ELAPSED"
 [ "$FAIL" -eq 0 ]

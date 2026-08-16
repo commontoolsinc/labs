@@ -71,35 +71,34 @@ A test pattern is a regular pattern file with `.test.tsx` extension that:
 2. **Instantiates it with test data**
 3. **Defines test actions using `action()`** (for triggering events on the pattern)
 4. **Defines assertions as `assert(() => boolean)`** computed from pattern state
-5. **Returns a `tests` array** of discriminated union objects
+5. **Returns a `[TESTS]` array** of discriminated union objects
 
 ### Test Step Format (Discriminated Union)
 
-The `tests` array uses a discriminated union to avoid TypeScript declaration emit issues:
+The `[TESTS]` array is a discriminated union — each step is exactly one of the
+shapes below. Keeping an assertion's `Cell` and an action's `Stream` in
+separate members, rather than mixing the two in one array element, is what
+avoids the declaration-emit errors TypeScript raises for such a mix:
 
 ```typescript
 // Shown at module scope.
 import type { AssertRecord } from "commonfabric";
 
 type TestStep =
-  // from assert(() => condition), or computed(() => condition)
-  | { assertion: Reactive<boolean> | Reactive<AssertRecord> }
+  | { assertion: Reactive<AssertRecord> }  // from assert(() => condition)
   | { action: Stream<void> }           // from action(() => handler.send())
   | { render: VNode }                  // one headless VDOM demand window
   | { settle: true };                  // wait for full async settlement
 ```
 
-This format keeps `action()` streams and assertion cells separate in the type
-system.
-
-An `assert(...)` assertion carries an `AssertRecord` — `{ ok, source, parts }` —
-rather than a bare boolean. The transformer rewrites its body to record each
-operand as it is computed, so a failure can report the operands and their
-values instead of only `false`. A `computed(...)` assertion carries the boolean
-and reports `Expected true, got false`. See
+An assertion is an `AssertRecord` — `{ ok, source, parts }` — which `assert()`
+is the only way to write; a bare `Reactive<boolean>` is a compile error. The
+transformer rewrites the `assert` body to record each operand as it is
+computed, so a failure can report the operands and their values instead of
+only `false`. See
 [Assertion diagnostics](../../packages/ts-transformers/README.md#assertion-diagnostics)
 for the rewrite, and
-[Pattern Testing](../common/workflows/pattern-testing.md#prefer-assert-over-computed)
+[Pattern Testing](../common/workflows/pattern-testing.md#write-assertions-with-assert)
 for the authoring side.
 
 `cf test` does not mount a renderer by default. Under the pull scheduler, a
@@ -153,9 +152,9 @@ export default pattern(() => {
     return byCategory.food === 5 && byCategory.transport === 40;
   });
 
-  // 4. Return tests array using discriminated union format
+  // 4. Return the test steps under the [TESTS] key
   return {
-    tests: [
+    [TESTS]: [
       { action: action_add_expense },       // Runner calls .send()
       { assertion: assert_has_one_expense }, // Runner checks its `ok`
       { action: action_add_another },
@@ -170,9 +169,9 @@ export default pattern(() => {
 
 ### Test Execution Flow
 
-The `cf test` runner processes the `tests` array **in order**:
+The `cf test` runner processes the `[TESTS]` array **in order**:
 
-1. For each item in `tests`:
+1. For each item in `[TESTS]`:
    - If it has `action` key: call `.send()`, then `await runtime.idle()`
    - If it has `assertion` key: read `.get()`; an `AssertRecord` passes when
      its `ok` is true, any other value passes when it equals `true`
@@ -181,12 +180,12 @@ The `cf test` runner processes the `tests` array **in order**:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  tests: [                                                     │
-│    { action: action1 },                                       │
-│    { assertion: assert1 },                                    │
-│    { action: action2 },                                       │
-│    { assertion: assert2 },                                    │
-│  ]                                                            │
+│  [TESTS]: [                                                  │
+│    { action: action1 },                                      │
+│    { assertion: assert1 },                                   │
+│    { action: action2 },                                      │
+│    { assertion: assert2 },                                   │
+│  ]                                                           │
 └──────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -297,11 +296,11 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
   // No renderer is mounted by default. Values run only when a test step
   // explicitly demands them.
 
-  // 4. Get the tests array from pattern output
-  const testsCell = patternResult.key("tests") as Cell<unknown>;
+  // 4. Get the [TESTS] array from pattern output
+  const testsCell = patternResult.key(TESTS) as Cell<unknown>;
   const testsValue = testsCell.get();
   if (!Array.isArray(testsValue)) {
-    throw new Error("Test pattern must return { tests: TestStep[] }");
+    throw new Error("Test pattern must return { [TESTS]: TestStep[] }");
   }
 
   // 5. Process tests in order using discriminated union format
@@ -439,7 +438,7 @@ Wrap actions and assertions in their respective object format:
 // Shown inside a pattern body.
 // ✅ Good - discriminated union format
 return {
-  tests: [
+  [TESTS]: [
     { action: action_add_item },
     { assertion: assert_has_one_item },
     { action: action_remove_item },
@@ -449,7 +448,7 @@ return {
 
 // ❌ Bad - flat array (causes TypeScript declaration emit issues)
 return {
-  tests: [action_add_item, assert_has_one_item, action_remove_item, assert_empty],
+  [TESTS]: [action_add_item, assert_has_one_item, action_remove_item, assert_empty],
 };
 ```
 
@@ -460,7 +459,7 @@ Put actions before the assertions that depend on them:
 ```tsx
 // Shown inside a pattern body.
 return {
-  tests: [
+  [TESTS]: [
     { action: action_add_item },     // First, add an item
     { assertion: assert_has_one_item }, // Then, verify it was added
     { action: action_remove_item },  // Then, remove it
@@ -628,7 +627,7 @@ export default pattern(() => {
   const assert_is_two = assert(() => counter.value === 2);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_starts_at_zero },  // Initial state check
       { action: action_increment },
       { assertion: assert_is_one },          // After 1 increment

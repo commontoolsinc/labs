@@ -1,5 +1,8 @@
-// Cloud spend tile tests. The clock and BigQuery REST responses are fixed, so
-// projections and highlighted chart windows are deterministic.
+/**
+ * Cloud spend tile tests. The clock and BigQuery REST responses are fixed, so
+ * projections and highlighted chart windows are deterministic.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx } from "../types.ts";
 import { METADATA_TOKEN_URL } from "../gcp.ts";

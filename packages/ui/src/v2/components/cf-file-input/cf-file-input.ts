@@ -1,23 +1,25 @@
-import { css, html, type TemplateResult } from "lit";
-import { property, state } from "lit/decorators.js";
-import { BaseElement } from "../../core/base-element.ts";
-import type { ButtonSize, ButtonVariant } from "../cf-button/cf-button.ts";
+import type { DID } from "@commonfabric/identity";
 import type { RuntimeClient } from "@commonfabric/runtime-client";
 import { consume } from "@lit/context";
+import { css, html, type TemplateResult } from "lit";
+import { property, state } from "lit/decorators.js";
+
+import { BaseElement } from "../../core/base-element.ts";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import {
+  type StoredFile,
+  type StoreFileOptions,
+  uploadFile,
+} from "../../utils/file-cell-storage.ts";
+import { formatFileSize } from "../../utils/image-compression.ts";
+import type { ButtonSize, ButtonVariant } from "../cf-button/cf-button.ts";
 import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
-import { formatFileSize } from "../../utils/image-compression.ts";
-import { runtimeContext, spaceContext } from "../../runtime-context.ts";
-import type { DID } from "@commonfabric/identity";
-import {
-  type StoredFile,
-  type StoreFileOptions,
-  uploadFile,
-} from "../../utils/file-cell-storage.ts";
+
 import "../cf-button/index.ts";
 
 export type FileData = StoredFile;

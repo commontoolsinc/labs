@@ -1,3 +1,14 @@
+/**
+ * `utf8Compare()` exists because JavaScript's own string comparison is not
+ * UTF-8 order, and these cases are where the two disagree.
+ *
+ * Ordinary strings and prefixes are the easy half. The astral-plane cases are
+ * the reason the function is not `a < b`: those characters are stored as
+ * surrogate pairs, whose UTF-16 code units sort differently from the UTF-8
+ * bytes any other implementation would compare, so a sort that crosses a
+ * process boundary needs this one to agree with itself on both sides.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { utf8Compare, utf8SortedKeysOf } from "@commonfabric/utils/utf8";

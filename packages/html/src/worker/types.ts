@@ -5,10 +5,10 @@
  * where cells are accessed synchronously via cell.get() and cell.sink().
  */
 
-import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
-import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcAtom } from "@commonfabric/api/cfc";
+import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
 import type {
+  CfcConfClause,
   RenderConfidentialityResolver,
   SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
@@ -181,6 +181,24 @@ export interface NodeState {
 
   /** Original authored props, used to recompute child render policy. */
   sourceProps?: WorkerVNode["props"];
+
+  /**
+   * Whether this node is the `span` the reconciler wraps a child position's
+   * array in, rather than an element the author wrote. (The `cf-fragment` an
+   * array renders as at a node position of its own does not carry this.) Only
+   * a wrapper may be reused for a new array: an authored element that happens
+   * to share the wrapper's tag holds the author's props and children, not a
+   * list.
+   */
+  isArrayWrapper?: boolean;
+
+  /**
+   * The space this node's descendants inherit — the one stamped on this node
+   * if it stamped one, and otherwise whatever it inherited itself. Rendering
+   * more children into an existing node has to restore this, or they re-stamp
+   * a space their parent already carries.
+   */
+  childEmittedSpace?: string;
 
   /** Text-integrity boundaries that blocked this whole rendered node. */
   textIntegrityBlockedFor?: ReadonlySet<number>;

@@ -1,5 +1,43 @@
-import type { Pattern } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import type { Pattern } from "../builder/types.ts";
+import type { AddCancel } from "../cancel.ts";
+import type { Cell } from "../cell.ts";
+import { resolveLink } from "../link-resolution.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import type { RawBuiltinReturnType } from "../module.ts";
+import { setPatternCell } from "../result-utils.ts";
+import type { Runtime } from "../runtime.ts";
+import type { Action } from "../scheduler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../storage/reactivity-log.ts";
+import {
+  listElementKeys,
+  releaseRemovedElements,
+} from "./list-element-keys.ts";
+import { listElementLink } from "./list-element-link.ts";
+import {
+  type ElementRun,
+  type SetupRecord,
+  trackListSetupRollback,
+} from "./list-element-rollback.ts";
+import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { issueResultContainerSetup } from "./list-result-container.ts";
+import { listResultSchema } from "./list-result-schema.ts";
+import { resolveOpPattern } from "./op-pattern-ref.ts";
+import {
+  createResumeRepublisher,
+  type ElementContribution,
+} from "./resume-republish.ts";
+import {
+  narrowestCellScope,
+  outputSpotFromBinding,
+  scopedCell,
+} from "./scope-policy.ts";
 
 // Presence probe for the result container: slots resolve as cells, so the
 // coordinator can ask "is the container initialized?" without materializing
@@ -20,42 +58,6 @@ const FLATMAP_INPUT_SCHEMA = internSchema({
   },
   required: ["op"],
 });
-
-import type { Cell } from "../cell.ts";
-import type { Action } from "../scheduler.ts";
-import type { AddCancel } from "../cancel.ts";
-import type { Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { RawBuiltinReturnType } from "../module.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
-import { listResultSchema } from "./list-result-schema.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
-import {
-  narrowestCellScope,
-  outputSpotFromBinding,
-  scopedCell,
-} from "./scope-policy.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
-import {
-  type ElementRun,
-  trackListSetupRollback,
-} from "./list-element-rollback.ts";
-import {
-  listElementKeys,
-  releaseRemovedElements,
-} from "./list-element-keys.ts";
-import {
-  createResumeRepublisher,
-  type ElementContribution,
-} from "./resume-republish.ts";
-import {
-  linkResolutionProbe,
-  machineryRead,
-} from "../storage/reactivity-log.ts";
-import { resolveLink } from "../link-resolution.ts";
-import { listElementLink } from "./list-element-link.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
 
@@ -109,6 +111,20 @@ export function flatMap(
   awaitSync?: boolean,
 ): RawBuiltinReturnType {
   let result: Cell<any[]> | undefined;
+
+  // Whether the writes that make `result` reachable are owed. The coordinator
+  // keeps the container across reconciles, so one that stages those writes and
+  // then does not commit leaves it holding a container nothing links to; the
+  // next reconcile issues them again. See list-element-rollback.ts.
+  const containerSetup: SetupRecord = { needsSetup: false };
+
+  // An element's link naming the pattern this coordinator runs, written when
+  // the parent carries a pattern to name. It is a setup write like the
+  // element's own run: issued when the element is created, and again when the
+  // transaction carrying it did not commit.
+  const linkElementCell = (cell: Cell<any>): void => {
+    setPatternCell(cell, parentCell.key("pattern"));
+  };
 
   // Identity-based tracking: maps element address key → element run.
   // resultCell holds the per-element result array.
@@ -233,11 +249,11 @@ export function flatMap(
       argumentUsage.usesParams ? inputsCell.key("params") : undefined,
     ]);
 
+    // Whether this reconcile issues the container's links: a container it
+    // mints needs them, and one whose last issuance did not commit owes them.
+    let issueLinks = containerSetup.needsSetup;
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
       const previousResult = result;
-      rollback.resultReplaced(() => {
-        result = previousResult;
-      });
       const resultSchema = listResultSchema();
       // CT-1623: identify the result container by the reserved output spot
       // (stable, program-independent). See map.ts for rationale.
@@ -254,15 +270,30 @@ export function flatMap(
         tx,
       );
       const boundResult = scopedCell(runtime, tx, baseResult, outputScope);
-      // Link this cell to the parent cell
-      setResultCell(boundResult, parentCell);
-      // Link the new result cells to the pattern cell too
-      setPatternCell(boundResult, parentCell.key("pattern"));
-      sendResult(tx, boundResult);
       // The container outlives this reconcile's transaction; a cell bound to
       // it would pin the settled transaction and its journal for the life of
       // the coordinator. Rebind per use instead.
       result = boundResult.withTx();
+      const installedResult = result;
+      // Give back only what this reconcile installed. An overlapping reconcile
+      // that has already replaced the container owns it, and its bookkeeping
+      // matches durable writes of its own.
+      rollback.resultReplaced(() => {
+        if (result === installedResult) result = previousResult;
+      });
+      issueLinks = true;
+    }
+    // A container this coordinator holds is reachable only through the links
+    // below, and the reconcile that last issued them may not have committed.
+    if (issueLinks) {
+      issueResultContainerSetup(
+        tx,
+        result.withTx(tx),
+        parentCell,
+        sendResult,
+        rollback,
+        containerSetup,
+      );
     }
     // The coordinator's view of the result container is links-only
     // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
@@ -431,6 +462,13 @@ export function flatMap(
                 awaitSyncBeforeInitialRun: elementAwaitSync,
               },
             );
+            // The whole setup, every time, because issuing it takes the debt
+            // for it: an overlapping reconcile that wrote the links and has
+            // not settled hands them to this one, and a partial issuance would
+            // leave nobody owing them. Links already durable cost a
+            // comparison, since a write of the value a leaf already holds does
+            // not reach storage.
+            linkElementCell(existing.resultCell.withTx(tx));
             rollback.setupIssued(existing);
           }
         }
@@ -458,8 +496,7 @@ export function flatMap(
             awaitSyncBeforeInitialRun: elementAwaitSync,
           },
         );
-        // Link the new result cells to the pattern cell too
-        setPatternCell(boundResultCell, parentCell.key("pattern"));
+        linkElementCell(boundResultCell);
         const entry = { resultCell, lastIndex: i, needsSetup: false };
         elementRuns.set(elementKey, entry);
         rollback.created(elementKey, entry);

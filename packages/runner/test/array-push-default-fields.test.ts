@@ -4,13 +4,16 @@
  * This test specifically checks whether objects with many Default<>-like
  * fields maintain their values correctly when pushed to arrays.
  */
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
-import { Runtime } from "../src/runtime.ts";
-import { createQueryResultProxy } from "../src/query-result-proxy.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { createQueryResultProxy } from "../src/query-result-proxy.ts";
+import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

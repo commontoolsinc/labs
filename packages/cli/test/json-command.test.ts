@@ -1,18 +1,20 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { ConsoleMethod } from "@commonfabric/runner";
+
 import {
   handlePieceRenderNoUi,
   pieceCallRawArgs,
   writePieceRenderStatus,
 } from "../commands/piece.ts";
-import { cf, stripAnsi } from "./utils.ts";
-import { ConsoleMethod } from "@commonfabric/runner";
 import {
   hasJsonArgument,
   reservesStdoutForCommandOutput,
   stderrConsoleHandler,
 } from "../lib/json-output.ts";
 import { safeStringify } from "../lib/render.ts";
+import { cf, stripAnsi } from "./utils.ts";
 
 describe("JSON command contracts", () => {
   it("redirects runtime consoles without changing the console method", () => {
@@ -40,6 +42,10 @@ describe("JSON command contracts", () => {
       ]),
     ).toBe(true);
     expect(reservesStdoutForCommandOutput(["piece", "get", "path"]))
+      .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "get-label", "path"]))
+      .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "set-label", "path"]))
       .toBe(true);
     expect(
       reservesStdoutForCommandOutput([
@@ -106,6 +112,8 @@ describe("JSON command contracts", () => {
       const command of [
         "check --pattern-json --bogus fixtures/pow-5.tsx",
         "piece get --bogus",
+        "piece get-label --bogus",
+        "piece set-label --bogus",
         "piece --bogus get",
         "piece --bogus call",
         "wish --bogus #profile",
@@ -183,9 +191,9 @@ describe("JSON command contracts", () => {
     const wish = await cf("wish --help");
 
     expect(pieceGet.code).toBe(0);
-    expect(pieceGet.stdout.join("\n")).toContain("--json");
+    expect(stripAnsi(pieceGet.stdout.join("\n"))).toContain("--json");
     expect(wish.code).toBe(0);
-    expect(wish.stdout.join("\n")).toContain("--json");
+    expect(stripAnsi(wish.stdout.join("\n"))).toContain("--json");
   });
 
   it("rejects --json forwarded to fuse-daemon", async () => {

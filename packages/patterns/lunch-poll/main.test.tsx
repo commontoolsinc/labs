@@ -11,7 +11,15 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, assert, computed, pattern, UI, wish } from "commonfabric";
+import {
+  action,
+  assert,
+  computed,
+  pattern,
+  TESTS,
+  UI,
+  wish,
+} from "commonfabric";
 import {
   findNodeByProp,
   hasExactText,
@@ -685,7 +693,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       // Admin-gated handlers are no-ops before anyone joins (myName empty).
       // The handler bails on `if (!me || me !== admin) return`. No
       // separate assertion here — downstream assertions (e.g. only

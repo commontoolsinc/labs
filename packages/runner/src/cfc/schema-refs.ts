@@ -1,11 +1,16 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
-import { getLogger } from "@commonfabric/utils/logger";
-import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+
+import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 import {
   forEachSubschema,
+  isSubschema,
   mapSubschemas,
   type SchemaWalkOptions,
 } from "../schema-walk.ts";
@@ -16,9 +21,6 @@ import {
 // everywhere in this module. (`$defs` bodies stay dormant — reached through the
 // definition-scope logic, not this flag.)
 const ALL_SUBSCHEMAS: SchemaWalkOptions = { includeUnused: true };
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
-import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 
 const logger = getLogger("cfc");
 
@@ -93,8 +95,8 @@ export const cfcSchemaChildRoot = (
   schema: JSONSchema,
   inheritedRoot: JSONSchema,
 ): JSONSchema =>
-  isRecord(schema) && isRecord(schema.$defs) &&
-    !(isRecord(inheritedRoot) && schema.$defs === inheritedRoot.$defs)
+  isObjectOrArray(schema) && isObjectOrArray(schema.$defs) &&
+    !(isObjectOrArray(inheritedRoot) && schema.$defs === inheritedRoot.$defs)
     ? schema
     : inheritedRoot;
 
@@ -106,7 +108,7 @@ export const cfcSchemaIsTrue = (schema: JSONSchema): boolean => {
   if (schema === true) {
     return true;
   }
-  return isRecord(schema) &&
+  return isObjectOrArray(schema) &&
     Object.keys(schema).every((key) =>
       cfcSchemaIsInternalKey(key) || key === "default" || key === "$defs"
     );
@@ -114,7 +116,7 @@ export const cfcSchemaIsTrue = (schema: JSONSchema): boolean => {
 
 export const cfcSchemaIsFalse = (schema: JSONSchema): boolean =>
   schema === false ||
-  (isRecord(schema) && Object.hasOwn(schema, "not") &&
+  (isObjectOrArray(schema) && Object.hasOwn(schema, "not") &&
     cfcSchemaIsTrue(schema["not"]!));
 
 const localDefinitionName = (schemaRef: string): string | undefined => {
@@ -132,14 +134,14 @@ const localDefinitionNamesInScope = (
 ): Set<string> => {
   const names = new Set(Object.keys(definitions));
   const collect = (fragment: JSONSchema): void => {
-    if (typeof fragment === "boolean") return;
+    if (!isObjectOrArray(fragment)) return;
     if (typeof fragment.$ref === "string") {
       const name = localDefinitionName(fragment.$ref);
       if (name !== undefined) names.add(name);
     }
     forEachSubschema(fragment, (child) => {
       if (
-        isRecord(child) && isRecord(child.$defs) &&
+        isObjectOrArray(child) && isObjectOrArray(child.$defs) &&
         child.$defs !== definitions
       ) return;
       collect(child);
@@ -148,7 +150,7 @@ const localDefinitionNamesInScope = (
   collect(schema);
   for (const definition of Object.values(definitions)) {
     if (
-      isRecord(definition) && isRecord(definition.$defs) &&
+      isObjectOrArray(definition) && isObjectOrArray(definition.$defs) &&
       definition.$defs !== definitions
     ) continue;
     collect(definition);
@@ -180,7 +182,7 @@ const namespaceLocalDefinitionScope = (
   }
 
   const rewrite = (fragment: JSONSchema): JSONSchema => {
-    if (typeof fragment === "boolean") return fragment;
+    if (!isObjectOrArray(fragment)) return fragment;
     let result = fragment;
     if (typeof fragment.$ref === "string") {
       const name = localDefinitionName(fragment.$ref);
@@ -192,7 +194,8 @@ const namespaceLocalDefinitionScope = (
     return mapSubschemas(
       result,
       (child) =>
-        isRecord(child) && isRecord(child.$defs) && child.$defs !== definitions
+        isObjectOrArray(child) && isObjectOrArray(child.$defs) &&
+          child.$defs !== definitions
           ? child
           : rewrite(child),
       ALL_SUBSCHEMAS,
@@ -203,7 +206,7 @@ const namespaceLocalDefinitionScope = (
   const rewrittenDefinitions = Object.fromEntries(
     Object.entries(definitions).map(([name, definition]) => [
       renamed.get(name)!,
-      isRecord(definition) && isRecord(definition.$defs) &&
+      isObjectOrArray(definition) && isObjectOrArray(definition.$defs) &&
         definition.$defs !== definitions
         ? definition
         : rewrite(definition),
@@ -217,7 +220,7 @@ const addRefs = (target: Set<string>, source: ReadonlySet<string>): void => {
 };
 
 const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
-  if (typeof schema === "boolean") return EMPTY_REF_SUMMARY;
+  if (!isObjectOrArray(schema)) return EMPTY_REF_SUMMARY;
   const cached = schemaRefSummaryCache.get(schema);
   if (cached !== undefined) return cached;
 
@@ -234,7 +237,7 @@ const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
     // A child carrying its own `$defs` starts a new local-ref scope. Its refs
     // still count for the public findRefs() walk, but must not retain names in
     // the parent's definition map.
-    if (!(isRecord(child) && child.$defs !== undefined)) {
+    if (!(isObjectOrArray(child) && child.$defs !== undefined)) {
       addRefs(localDefinitions, childSummary.localDefinitions);
     }
   }, ALL_SUBSCHEMAS);
@@ -310,8 +313,10 @@ export const selectReferencedCfcSchemaDefs = (
   schema: JSONSchema,
   inheritedDefinitions?: SchemaDefinitions,
 ): SchemaDefinitions | undefined => {
-  if (typeof schema === "boolean") return undefined;
-  const definitions = schema.$defs ?? inheritedDefinitions;
+  if (!isObjectOrArray(schema)) return undefined;
+  const definitions = isObjectOrArray(schema.$defs)
+    ? schema.$defs
+    : inheritedDefinitions;
   if (definitions === undefined) return undefined;
 
   const initial = summarizeCfcSchemaRefs(schema).localDefinitions;
@@ -360,7 +365,9 @@ const pruneCfcSchemaDefinitionsInternal = (
   schema: JSONSchema,
   preserveScopeBoundary: boolean,
 ): JSONSchema => {
-  if (typeof schema === "boolean") return schema;
+  // A boolean schema, and anything a schema cannot be, has no definitions to
+  // prune and is returned as it arrived.
+  if (!isObjectOrArray(schema)) return schema;
   const cacheable = isDeepFrozen(schema);
   const cache = preserveScopeBoundary
     ? prunedScopedSchemaCache
@@ -375,7 +382,9 @@ const pruneCfcSchemaDefinitionsInternal = (
     (child) => pruneCfcSchemaDefinitionsInternal(child, true),
     ALL_SUBSCHEMAS,
   );
-  if (schema.$defs !== undefined) {
+  // Only a `$defs` that is a definition map is pruned, the same test
+  // `cfcSchemaChildRoot` uses to decide whether one opens a definition scope.
+  if (isObjectOrArray(schema.$defs)) {
     const selected = selectReferencedCfcSchemaDefs(schema);
     let definitions = selected ??
       (preserveScopeBoundary ? EMPTY_DEFINITIONS : undefined);
@@ -415,7 +424,7 @@ export const resolveCfcSchemaRef = (
   if (Object.hasOwn(embeddedSchemas, schemaRef)) {
     return embeddedSchemas[schemaRef];
   }
-  const cacheable = isRecord(fullSchema) && isDeepFrozen(fullSchema);
+  const cacheable = isObjectOrArray(fullSchema) && isDeepFrozen(fullSchema);
   if (cacheable) {
     const byRef = resolvedRefCache.get(fullSchema);
     if (byRef !== undefined && byRef.has(schemaRef)) {
@@ -442,7 +451,7 @@ export const resolveCfcSchemaRefRoot = (
   let current = schema;
   let root = fullSchema;
   const seenRefs = new Map<JSONSchema, Set<string>>();
-  while (isRecord(current) && typeof current.$ref === "string") {
+  while (isObjectOrArray(current) && typeof current.$ref === "string") {
     const ref = current.$ref;
     let refsForRoot = seenRefs.get(root);
     if (refsForRoot?.has(ref)) break;
@@ -486,7 +495,7 @@ const resolveCfcSchemaRefUncached = (
   let schemaCursor: unknown = fullSchema;
   for (let i = 1; i < pathToDef.length; i++) {
     if (
-      !isRecord(schemaCursor) ||
+      !isObjectOrArray(schemaCursor) ||
       !Object.hasOwn(schemaCursor, pathToDef[i])
     ) {
       logger.warn("cfc", () => [
@@ -498,13 +507,23 @@ const resolveCfcSchemaRefUncached = (
     }
     schemaCursor = schemaCursor[pathToDef[i]];
   }
-  if (isRecord(schemaCursor)) {
+  if (!isSubschema(schemaCursor)) {
+    // A definition holding something a schema cannot be resolves no better than
+    // a name the document does not carry.
+    logger.warn("cfc", () => [
+      "Non-schema target for $ref in schema: ",
+      schemaRef,
+      fullSchema,
+    ]);
+    return undefined;
+  }
+  if (isObjectOrArray(schemaCursor)) {
     const schemaRefs = new Set<string>();
     findCfcSchemaRefs(schemaCursor, schemaRefs);
     if (schemaRefs.size > 0 && schemaCursor.$defs === undefined) {
       schemaCursor = {
         ...schemaCursor,
-        ...(isRecord(fullSchema) && fullSchema.$defs &&
+        ...(isObjectOrArray(fullSchema) && fullSchema.$defs &&
           { $defs: fullSchema.$defs }),
       };
     }
@@ -530,7 +549,7 @@ export const resolveCfcSchemaRefs = (
 ): JSONSchema | undefined => {
   const cacheable = isDeepFrozen(schemaObj) &&
     (fullSchema === schemaObj ||
-      (isRecord(fullSchema) && isDeepFrozen(fullSchema)));
+      (isObjectOrArray(fullSchema) && isDeepFrozen(fullSchema)));
   let byFull: WeakMap<object, JSONSchema | typeof RESOLVED_UNDEFINED>;
   if (cacheable) {
     const fullKey = fullSchema as object;
@@ -572,11 +591,11 @@ const resolveCfcSchemaRefsUncached = (
     let resolvedRoot = initialRoot;
     while (pendingSiblings.length > 0) {
       const { schema: siblings, root: siblingRoot } = pendingSiblings.pop()!;
-      if (isRecord(resolved)) {
+      if (isObjectOrArray(resolved)) {
         const resolvedDefinitions = resolved.$defs ??
-          (isRecord(resolvedRoot) ? resolvedRoot.$defs : undefined);
+          (isObjectOrArray(resolvedRoot) ? resolvedRoot.$defs : undefined);
         let scopedSiblings = siblings;
-        let siblingDefinitions = isRecord(siblingRoot)
+        let siblingDefinitions = isObjectOrArray(siblingRoot)
           ? siblingRoot.$defs
           : undefined;
         if (siblingRoot !== resolvedRoot) {
@@ -584,10 +603,10 @@ const resolveCfcSchemaRefsUncached = (
           // scopes. Namespace even an empty ref-site definition map: its
           // unresolved local refs must not begin resolving against target defs
           // merely because the two scopes are flattened into one object.
-          const targetDefinitions = isRecord(resolvedDefinitions)
+          const targetDefinitions = isObjectOrArray(resolvedDefinitions)
             ? resolvedDefinitions
             : {};
-          const refSiteDefinitions = isRecord(siblingDefinitions)
+          const refSiteDefinitions = isObjectOrArray(siblingDefinitions)
             ? siblingDefinitions
             : {};
           scopedSiblings = namespaceLocalDefinitionScope(
@@ -601,8 +620,8 @@ const resolveCfcSchemaRefsUncached = (
         // the target and in its ref-site siblings originate in different
         // document scopes. Ref-site names are namespaced above, leaving the
         // target's existing names authoritative.
-        const definitions = isRecord(resolvedDefinitions) &&
-            isRecord(siblingDefinitions) &&
+        const definitions = isObjectOrArray(resolvedDefinitions) &&
+            isObjectOrArray(siblingDefinitions) &&
             resolvedDefinitions !== siblingDefinitions
           ? { ...siblingDefinitions, ...resolvedDefinitions }
           : resolvedDefinitions ?? siblingDefinitions;
@@ -665,7 +684,7 @@ export const resolveCfcSchemaRefsOrThrow = (
   schemaObj: JSONSchemaObj,
   fullSchema: JSONSchema = schemaObj,
 ): JSONSchema => {
-  if (!isRecord(fullSchema)) {
+  if (!isObjectOrArray(fullSchema)) {
     throw new Error("Found $ref without fullSchema object");
   }
   const resolved = resolveCfcSchemaRefs(schemaObj, fullSchema);

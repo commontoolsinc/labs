@@ -159,6 +159,8 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
       const text of [
         "cf piece call --piece x ",
         "cf piece get --piece x ",
+        "cf piece get-label --piece x ",
+        "cf piece set-label --piece x ",
         "cf piece link ",
         "cf piece ls --piece ",
       ]
@@ -287,7 +289,7 @@ Deno.test("command: a deno line that is not ours is reported as such", async () 
   assertEquals(out, ":cf:notmine");
 });
 
-Deno.test("shaping: a piece is labelled by name, falling back to its pattern", () => {
+Deno.test("shaping: a piece is labeled by name, falling back to its pattern", () => {
   assertEquals(
     shapePieceCandidates([
       { id: "fid1:a", name: "Todo List" },

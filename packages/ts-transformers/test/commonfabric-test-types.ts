@@ -4,6 +4,7 @@
  * Loads types from the same source as production: types/commonfabric.d.ts
  * via the static cache (which is a symlink to packages/api/index.ts).
  */
+
 import { StaticCache } from "@commonfabric/static";
 
 const staticCache = StaticCache.fromFileSystem();

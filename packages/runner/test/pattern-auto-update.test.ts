@@ -20,7 +20,7 @@ import {
 
 const signer = await Identity.fromPassphrase("lazy system pattern updates");
 const PARENT_PATH = "/api/patterns/system/lazy-update-parent.tsx";
-// The `system:` ref that route path spells — what a checked piece is stamped
+// The `system:` ref that route path denotes — what a checked piece is stamped
 // with, whichever legacy spelling it started from.
 const PARENT_SOURCE = systemPatternSource("system/lazy-update-parent.tsx");
 const SOURCE_PATH = "/api/patterns/system/lazy-update-test.tsx";

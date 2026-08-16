@@ -5,26 +5,27 @@
 // or becoming `{}`. Both are the at-rest shapes a real DB can produce.
 
 import { assert, assertEquals } from "@std/assert";
+
+import {
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 import {
   FabricError,
   FabricLink,
 } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { jsonFromValue } from "@commonfabric/data-model/codecs";
-import {
-  resetModernCellRepConfig,
-  setModernCellRepConfig,
-} from "@commonfabric/data-model/cell-rep";
 
 import {
   annotate,
   collectLinks,
   decodedLinkOf,
+  decodeStored,
   stringifyInspectorJson,
   summarize,
   summarizeLink,
 } from "../decode.ts";
-import { decodeStored } from "../decode.ts";
 
 Deno.test("decode: modern FabricLink is recognized as a link", () => {
   const link = new FabricLink({ id: "of:target", path: [] });
@@ -44,7 +45,9 @@ Deno.test("decode: a modern encoded link round-trips to a recognized link", () =
   setModernCellRepConfig(true);
   let encoded: string;
   try {
-    encoded = jsonFromValue({ value: { ref: new FabricLink({ id: "of:x" }) } });
+    encoded = jsonFromFabricValue({
+      value: { ref: new FabricLink({ id: "of:x" }) },
+    });
   } finally {
     resetModernCellRepConfig();
   }

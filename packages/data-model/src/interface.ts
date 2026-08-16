@@ -16,29 +16,6 @@
 //
 
 /**
- * Well-known symbol for binding the static getter
- * `FabricClassWithJsonCodec[JSON_CODEC]` on a `FabricPrimitive` class.
- *
- * A `FabricPrimitive`'s codec is bound per wire format, not once for all of
- * them, because such a codec _terminates_ an encoding rather than decomposing
- * a value for someone else to finish: `FabricBytes` encodes to a base64url
- * string, which is JSON's answer and nobody else's. A format that carries
- * bytes natively wants a different codec, or none, and says so by looking up
- * a different symbol.
- *
- * That is what separates these from a `FabricInstance`'s codec, bound to the
- * generic `[CODEC]`: an instance's codec only decomposes an instance into
- * other `FabricValue`s and leaves every terminal decision to whatever walks
- * the result, so one binding serves every format.
- *
- * It lives here, with the type universe, rather than beside either the classes
- * that bind it or the format that reads it. Both of those have importers in
- * the other direction, and this module imports nothing, so a symbol here is
- * reachable from anywhere without closing a cycle.
- */
-export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodec");
-
-/**
  * Abstract base class for all fabric-system value types. This is the common
  * superclass of `FabricInstance` (object-like protocol types) and
  * `FabricPrimitive` (immutable special primitives). It enables a single
@@ -128,9 +105,8 @@ export abstract class FabricInstance extends FabricSpecialObject {
  * class instances for type safety and dispatch. Covers temporal types,
  * content IDs, byte sequences, and similar.
  *
- * Analogous to `ExplicitTagValue`, this class enables a single
- * `instanceof` check where code needs to handle any special primitive
- * uniformly.
+ * This class enables a single `instanceof` check where code needs to handle
+ * any special primitive uniformly.
  *
  * Instances are always frozen (like true primitives, they are immutable).
  * Each leaf subclass must call `Object.freeze(this)` at the end of its

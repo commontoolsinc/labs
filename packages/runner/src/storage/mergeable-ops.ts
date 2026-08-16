@@ -91,7 +91,7 @@ export interface MergeableBuildContext {
  *
  * In today's reachable cases the reshaping write also leaves an unmarked read at
  * the path, which keeps it in the conflict set anyway — so this is belt and
- * braces rather than a demonstrated behaviour change. It is kept because the
+ * braces rather than a demonstrated behavior change. It is kept because the
  * guarantee should not rest on that coincidence: nothing makes a reshape
  * obliged to read what it overwrites.
  */
@@ -110,7 +110,7 @@ export interface MergeableBuildResult {
 //   target is even resolved (an empty tail op). Absent means "always record".
 // - `fold` — how a delta combines into the path's accumulated intent.
 // - `build` — how an accumulated intent becomes wire ops and diff-suppression,
-//   or is abandoned in favour of the plain diff (see `abandon` above).
+//   or is abandoned in favor of the plain diff (see `abandon` above).
 // - `payloadContains` — whether a path lies inside the live values this op sends
 //   (see {@link mergeableOpPayloadContains}). Absent means "carries no live
 //   subtree", which is the answer for every op but the tail ops.
@@ -411,7 +411,7 @@ export const foldMergeableIntent = (
  * payload is `array.slice(tailStart)`, so it holds whatever those elements
  * contain, however deep. An `increment` sends a number and a `remove-by-value`
  * sends the element it removes, neither of which contains another intent's
- * target, so both answer `false`.
+ * target, so both return `false`.
  *
  * This is what makes two intents on one document mutually exclusive. An intent
  * inside another op's payload has ALREADY had its change applied by that op — the

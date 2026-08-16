@@ -1,4 +1,4 @@
-import { assert, pattern } from "commonfabric";
+import { assert, pattern, TESTS } from "commonfabric";
 import Clock from "./clock.tsx";
 
 // The clock's labels derive from the reactive #now clock. They read the
@@ -14,7 +14,7 @@ export default pattern(() => {
   const assert_date_is_non_empty = assert(() => clock.date.length > 0);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_time_is_clock_shaped },
       { assertion: assert_date_is_non_empty },
     ],

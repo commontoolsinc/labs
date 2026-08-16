@@ -1,6 +1,4 @@
 /**
- * Byte-Ownership Performance Benchmarks
- *
  * `toOwnedUint8Array()` is how a value that promises an immutable byte
  * sequence gets bytes it can rely on, so its cost is paid once per such value
  * constructed. Each size runs three arms side by side, and it is the spread

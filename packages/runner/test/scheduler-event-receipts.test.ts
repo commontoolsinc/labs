@@ -1,3 +1,11 @@
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import { Identity } from "@commonfabric/identity";
+
+import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
+import { resolveLink } from "../src/link-resolution.ts";
+import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
+import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   afterEach,
   beforeEach,
@@ -9,7 +17,6 @@ import {
   Runtime,
   space,
 } from "./scheduler-test-utils.ts";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import type {
   Cell,
   IExtendedStorageTransaction,
@@ -18,12 +25,6 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
-import { resolveLink } from "../src/link-resolution.ts";
-import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
-import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
 
 // The session a caller-supplied id is chosen within, for the sends whose
 // subject is something else: the pair is what a stream send accepts, and one
@@ -105,21 +106,21 @@ function delayNextServerTransact(
   };
 }
 
+/**
+ * Await a signal the test itself resolves — a gate's deferred, a commit
+ * callback. Deliberately no deadline: the package clock preload freezes
+ * test-armed positive-delay timers, so a `setTimeout(reject, …)` race here
+ * could never fire and would backstop nothing
+ * (`docs/development/waiting-in-tests.md`). A signal that never arrives lets
+ * the event loop quiesce, and Deno fails the pending wait at once, naming
+ * the test; the label keeps the call site readable for whoever reads that
+ * failure.
+ */
 async function waitForSignal(
   signal: Promise<void>,
-  message: string,
+  _label: string,
 ): Promise<void> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      signal,
-      new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(message)), 1_000);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
+  await signal;
 }
 
 async function waitForSchedulerCondition(
@@ -127,13 +128,18 @@ async function waitForSchedulerCondition(
   condition: () => boolean,
   message: string,
 ): Promise<void> {
-  const deadline = performance.now() + 1_000;
-  while (!condition() && performance.now() < deadline) {
+  // Iteration-bounded, not wall-clock-bounded: zero-delay yields do not
+  // advance the fake clock, so a time deadline could never expire and an
+  // unreachable condition would spin forever — hanging the suite to the CI
+  // job timeout with no test name. Each round drains the scheduler and
+  // yields one real timer turn — transport pumps and the emulated server's
+  // fan-out flush (which resolves awaited commits at marker coverage,
+  // CT-1950) ride zero-delay timers, which are exempt from the fake clock's
+  // test-armed freeze — so a condition the system will ever reach is reached
+  // within a bounded number of rounds, and one it never reaches throws
+  // `message` instead of hanging.
+  for (let round = 0; round < 200 && !condition(); round++) {
     await runtime.idle();
-    // Yield a zero-delay timer turn: an idle() that resolves through
-    // microtasks alone would otherwise starve the timer queue, and the
-    // emulated server's fan-out flush — which resolves awaited commits at
-    // marker coverage (CT-1950) — rides a zero-delay timer.
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {

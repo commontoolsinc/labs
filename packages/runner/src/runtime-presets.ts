@@ -200,6 +200,7 @@ export const EXPERIMENTAL_ENV_VARS = {
   plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
+  lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**

@@ -1,5 +1,9 @@
-// Uniform rendering: every tile becomes the same markup from its TileView, and
-// the shell wraps the grid + wide tiles in the dark page with the SSE client.
+/**
+ * Renders every tile the same way, turning each one's `TileView` into the same
+ * markup whatever produced it. The shell around them wraps the grid and the
+ * wide tiles in the page, together with the client that listens for updates.
+ */
+
 import type { Status, TileView } from "./types.ts";
 import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
 import {
@@ -52,7 +56,7 @@ const TEXTURE_HEIGHT = 24;
 
 /**
  * A tiling mask of one stroked path, for the texture that sits behind a tile's
- * flat colour wash. The mask lets CSS paint the path with the active theme's
+ * flat color wash. The mask lets CSS paint the path with the active theme's
  * status color. The path is drawn in a `period` by `TEXTURE_HEIGHT` space, and
  * its corners come to a point.
  *
@@ -89,7 +93,7 @@ const ZIGZAG_TEXTURE = strokeTexture(
   48,
 ) + `;background-color:${statusLayer("bad", TEXTURE_ALPHA)}`;
 // Two copies of the same dot grid make a triangular lattice, where each dot has
-// six neighbours at one distance rather than a square lattice's four near ones
+// six neighbors at one distance rather than a square lattice's four near ones
 // and four far ones. The copies are one dot spacing apart across, one spacing
 // times the square root of three apart down, and the second copy is shifted by
 // half of each. That puts its dots above the midpoint of the gap between two
@@ -117,7 +121,7 @@ const MAX_TILE_ASPECT = 1.5;
 
 // The side of the square texture layer, as a percentage of the tile's width.
 // Turning the layer sweeps its corners inward, so half its side has to reach
-// the tile's corner from the tile's centre — the tile's half-diagonal — at
+// the tile's corner from the tile's center — the tile's half-diagonal — at
 // whatever angle the texture is turned to.
 const TEXTURE_LAYER_PCT = Math.ceil(Math.hypot(1, MAX_TILE_ASPECT) * 100);
 
@@ -254,16 +258,16 @@ ${DASHBOARD_THEME_STYLES}
   .tile.wide{margin-bottom:12px}
 ${TILE_RULES}
   .tile.unknown,.tile.wide.unknown{border-color:var(--border-strong)}
-  /* Each status carries a texture as well as a colour, so the wall reads at a
-     glance and without relying on colour alone: dots for gray, waves for
+  /* Each status carries a texture as well as a color, so the wall reads at a
+     glance and without relying on color alone: dots for gray, waves for
      amber, zig-zags for red. The waves run across the zig-zags, a quarter turn
      from the angle the others take. The texture layer covers the tile and sits
-     above the colour wash and below the content. It carries the fade: whole
+     above the color wash and below the content. It carries the fade: whole
      for the top seventh of the tile, thinning from there, and gone seven
      tenths of the way down. Inside it the texture is turned on an angle, on a
-     square layer centred on the tile and measured from the tile's width.
+     square layer centered on the tile and measured from the tile's width.
      Turning a box sweeps its corners inward, so the layer only still covers
-     the tile if half its side reaches the tile's corner from the centre. That
+     the tile if half its side reaches the tile's corner from the center. That
      distance is the tile's half-diagonal, which ${TEXTURE_LAYER_PCT}% of the
      width clears for a tile up to ${MAX_TILE_ASPECT} times as tall as it is
      wide. The fade is measured against the tile and the texture is drawn in

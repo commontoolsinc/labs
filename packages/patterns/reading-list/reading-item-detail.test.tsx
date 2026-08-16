@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/reading-list/reading-item-detail.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import ReadingItemDetail from "./reading-item-detail.tsx";
 
 export default pattern(() => {
@@ -113,7 +113,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state ===
       { assertion: assert_initial_title },
       { assertion: assert_initial_author },

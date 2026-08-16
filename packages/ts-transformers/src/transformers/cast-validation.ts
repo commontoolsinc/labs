@@ -6,6 +6,7 @@
  * - `as Reactive<...>`: ERROR - framework handles Reactive wrapping automatically
  * - `as Cell<...>` and other cell-like types: ERROR - prefer proper type annotations
  */
+
 import ts from "typescript";
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import {

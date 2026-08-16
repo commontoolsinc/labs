@@ -1,8 +1,11 @@
-// Tests for the generic runtime: the ticker, the SSE fan-out, the routes, and
-// the page. Importing server.ts neither serves nor collects, so nothing here
-// binds a port or reaches a source; the tiles are stand-ins with a canned
-// collect(), registered under the ids the real registry uses so their views
-// reach the page.
+/**
+ * Tests for the generic runtime: the ticker, the SSE fan-out, the routes, and
+ * the page. Importing server.ts neither serves nor collects, so nothing here
+ * binds a port or reaches a source; the tiles are stand-ins with a canned
+ * collect(), registered under the ids the real registry uses so their views
+ * reach the page.
+ */
+
 import {
   assert,
   assertEquals,
@@ -116,7 +119,7 @@ function updateFromEvent(event: string): TestUpdate {
 function tileHtml(label: string, html = page()): string {
   const parts = html.split(`<div class="tile `);
   const hit = parts.filter((p) => p.includes(`</span> ${label}<span class="spacer">`));
-  assertEquals(hit.length, 1, `expected exactly one tile labelled "${label}"`);
+  assertEquals(hit.length, 1, `expected exactly one tile labeled "${label}"`);
   return hit[0];
 }
 

@@ -1,8 +1,10 @@
-// What the CFC output-labelling walk does with a `FabricSpecialObject`. Such a
-// value has zero enumerable own properties, so the walk's `Object.entries()`
-// descent ends at it. That costs a `FabricPrimitive` nothing -- a leaf holds no
-// cell to label -- but for a `FabricInstance` it means a cell in its codec
-// contents goes _unlabelled_, so the walk refuses one instead.
+/**
+ * What the CFC output-labeling walk does with a `FabricSpecialObject`. Such a
+ * value has zero enumerable own properties, so the walk's `Object.entries()`
+ * descent ends at it. That costs a `FabricPrimitive` nothing -- a leaf holds no
+ * cell to label -- but for a `FabricInstance` it means a cell in its codec
+ * contents goes _unlabelled_, so the walk refuses one instead.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -92,7 +94,7 @@ describe("node-utils", () => {
 
     it("throws for a `FabricError` holding a cell rather than skipping it", () => {
       withinHandler(() => {
-        // The control is the point: the same cell _is_ labelled when it sits in
+        // The control is the point: the same cell _is_ labeled when it sits in
         // a plain record, so what changes the outcome is the wrapper.
         const input = new Cell("classified", {
           type: "string",

@@ -464,7 +464,7 @@ const useIt = beta;`;
   );
 });
 
-Deno.test("card: surfaces an external definition; fileLines colours it (bounded)", () => {
+Deno.test("card: surfaces an external definition; fileLines colors it (bounded)", () => {
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(
@@ -490,7 +490,7 @@ const flag = ext();`;
       ext!.filePath!.endsWith("ext.ts"),
       `points at ext.ts: ${ext!.filePath}`,
     );
-    // fileLines reads and colours the external file...
+    // fileLines reads and colors the external file...
     const lines = sem.fileLines(ext!.filePath!);
     assert(lines && lines.length >= 3, "reads the file lines");
     assert(

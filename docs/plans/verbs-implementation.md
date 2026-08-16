@@ -10,6 +10,8 @@ and
 
 **The designs are unchanged and are not restated here.**
 [The pattern verb contract](pattern-verb-contract.md) says what a verb is.
+[Designing verbs so they can change](verb-evolution.md) is the design of record
+for how a verb's interface changes once pieces are deployed against it.
 [Reading Fabric data](fabric-read-model.md) and the two documents it points at
 say how a caller reads. Read those for reasoning; read this for order.
 
@@ -46,11 +48,11 @@ without reconstructing it.
 | 9a. listing marks | on main (#5309) |
 | 10. listing rows carry a handler's declared result | on main (#5629) |
 | 9b. closed-world event emission | **ruled against** (#5589); does not land |
-| 12. `cf` refuses an undeclared field on a call | not started — where the ruling puts this capability |
-| 4. `receipt` as a top-level envelope field | not started — and its precondition now holds |
-| 2. an unrecognized projection key is refused | not started |
-| 3. a rejection propagates up through what holds it | not started |
-| 5. `cf wish` and `cf exec` take the read options | not started |
+| 12. `cf` refuses an undeclared field on a call | on main (#5835) — where the ruling puts this capability |
+| 4. `receipt` as a top-level envelope field | on main (#5694) |
+| 2. an unrecognized projection key is refused | on main (#5817); design landed (#5753) |
+| 3. a rejection propagates up through what holds it | on main (#5701) |
+| 5. `cf wish` and `cf exec` take the read options | on main (#5844) |
 | 11. a caller may name a reference | not started; sequenced, gated on one measurement |
 
 Item 9 is split because its two halves have different fates: the marks landed,
@@ -61,7 +63,7 @@ a driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
-| #5307 | closed-world verb event schemas | **ruled against** on #5589 and in review. Retreating leaves nothing to land — the emission and the goldens and baselines recording it are the whole branch — so this closes rather than merges |
+| #5746 | the `Demand<T>` marker and the foreign-output embedding warning, prototyping the demand substrate in [designing verbs so they can change](verb-evolution.md) | open. It edits `packages/ts-transformers/src/transformers/schema-injection.ts`, which is the file item 11's fourth part edits, so the one-file rule queues the two rather than running them in parallel — a driver picking up item 11 schedules against this branch before starting. It also adds `demand` to `ANNOTATION_KEYS` (`packages/piece/src/schema-compatibility.ts`), the set item 2 derives its tolerated tier from |
 
 **Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
 #5500 are on main. #5458 is closed rather than merged because its rename was
@@ -102,80 +104,141 @@ Both halves satisfy it. The producer is on main (#5501). The consumer, item 10,
 is the lookup the condition was aimed at — a handler's module lives in the
 compiled graph rather than sitting in reach the way a tool's pattern does — and
 it cost one structural match and no change to `callableCommandSpec`'s
-signature. What it did not reach is the command surface: `cf piece call <verb>
---help --json` still shows a handler no output, because serving it there needs
-the graph at `resolvePieceCallable` too. That is raised rather than absorbed,
-which is what the condition asks for.
+signature. The command surface followed: #5680 stopped the help page's false
+no-output claim, and #5717 serves the declared result at
+`cf piece call <verb> --help` — text and `--json` alike — through the
+resolution's `declaredResult` thunk, so the pattern load is priced onto
+exactly the callers that ask (help, and a readback bounding a cycle), never
+onto an ordinary dispatch.
 
 *What this unblocks.* Items 8 and 10 stop being provisional, and verb discovery
 closes — `cf piece verbs` can answer both halves of its question.
 
 *A correction owed to this document.* It priced the decision as "narrower than
 first claimed", naming only narrowing on field selection and the pre-call check.
-That is right about the value path and omits the command surface: the derivable
-default, completion, and a help page that currently tells a caller the opposite
-of the truth. A reader weighing the revisit condition will check it against this
-pricing, so the pricing needs to be the honest one.
+That is right about the value path and omits the command surface: the
+derivable default (since landed with the cycle bound, #5740), completion, and
+the help page (since closed by #5680 and #5717). A reader weighing the revisit
+condition will check it against this pricing, so the pricing needs to be the
+honest one.
 
 ## Ready to build
 
-Unblocked and independent of the decision above. Not all small — items 2 and
-11 are both (M); what these share is that nothing gates them.
+Unblocked and independent of the decision above. Item 2 is (M). Item 11 was
+listed here as its equal and is no longer: its CLI half reduces to a
+documentation correction. What remains of it — whether a rendered address
+should declare itself indirect — is answered no in #5760: indirectness is a
+property of what a target holds when a reader looks, not of a reference. What
+that leaves is provenance, whether an address can say it names a spot rather
+than a canonical cell, which is a different question and gates nothing either.
 
-**2. An unrecognized projection key is refused.** *(M)* Two denylists are
-consulted and every key in neither is accepted and ignored, so a typo selects
-nothing and says nothing, and any keyword given a meaning later changes
-behavior no error ever warned about. Three tiers replace them: honored,
-tolerated (the annotation and validation keywords, which a lifted source schema
-carries), and refused by name.
+**2. An unrecognized projection key is refused.** *(M)* **On main as #5817.**
+The design is the thing to read before picking any of this up. The failure it
+removes: two denylists were consulted and every key in neither was accepted and
+carried onward. The design is
+[projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md),
+which carries the tiers, the measured blast radius, and the reasoning; read it
+before picking this up. What follows is what a driver needs to sequence the
+item.
 
 This is the general form of a failure already fixed twice as instances — a
 missing `type` and an untyped `items` root each returned an empty result and
 reported nothing.
 
-*Reservation records a class, not a spelling.* An allowlist that says only
-"allowed" loses why, and a key admitted without its kind has its treatment
-decided by whatever the checker happens to default to — the original trap, one
-level up. So each reservation carries what it is: honored, tolerated because it
-is an annotation, tolerated because it is a validation keyword. A later change
-wanting to honor a tolerated key then knows it was deliberately ignored rather
-than overlooked.
+*A typo widens as readily as it narrows.* Without `type`, a misspelled
+`properties` names no container and the position reads as empty. **With `type`
+stated, the same misspelling sets `additionalProperties: true` and returns the
+whole object** — every field, including the ones the caller deliberately did not
+name. Both exit 0. The second is disclosure-shaped and is the stronger
+motivation for this item.
 
-The same discipline, on a different registry, is what classifies keys for the
-pattern compatibility checker — where the class decides whether adding and
-removing a key are both free, and where getting it wrong is what withdrew the
-July result-schema work. Sibling registries, not one: a projection is supplied
-per read and never compared across versions, so it has no add-and-remove
-semantics to get wrong. What transfers is classify-before-you-accept.
+*The general rule is bigger than the refusal.* **The projection reader must
+never hand the read boundary a schema it did not construct itself.** Refusing
+unknown keys does not reach it: `required` is recognized, legal, never reasoned
+about by the CLI beyond container inference, and acted on by the runner, so
+tolerating it forwards it. #5734 is that failure — an unsatisfiable `required`
+empties the whole read at the read boundary, and the command layer then
+refuses the empty materialization with a message that names neither `required`
+nor the position — and it belongs to this item. The rule its fix
+needs already exists one call site over: `selectSourceSchema` derives the
+constructed schema's `required` from the *source*, with a comment giving exactly
+this reason. **Its filter needs the survival test that comment describes**,
+though. As written the filter asks only whether the caller projected the
+position, so a property the caller projected under a type its value fails stays
+required, is then dropped by traversal, and empties the read — #5734 again,
+over a key no caller wrote. Ceasing to carry the caller's `required` without
+that does not fix #5734; it relocates it. The design works the rule out, and
+the two containers do not answer it alike: a rejected object property is
+omitted and the object survives, while a rejected array element voids the
+array, so a caller's element type takes down the whole property and everything
+that required it.
 
-*The two registries meet at lifted schemas, and this item is what couples
-them.* Today a projection ignores every key it does not recognize, so the
-durable dialect can grow freely. Refusing unrecognized keys ends that: a caller
-is told to lift a source schema and prune it, a lifted schema carries every
-keyword the generator emits, and a keyword admitted to the compat dialect
-without also reaching projection tolerance turns a projection over a marked
-schema into a refusal — on exactly the keys made deliberately free elsewhere.
+*Four tiers, not three.* Honored (`type`, `properties`, `items`,
+`additionalProperties`, `$link`); **consulted** (`required`, `minProperties`,
+`maxProperties`, `minItems`, `maxItems`, `uniqueItems` — read for container
+inference, so they change behavior, and the caller's copy goes no further);
+tolerated; refused. Calling the consulted tier "tolerated" would be dishonest
+about what it does. What stops is the caller's constraint, not the keyword: the
+reader keeps deriving `required` from the source schema, and that derivation
+must survive the item intact.
 
-So the tolerated-as-annotation set is **derived from the compat checker's
-annotation keys rather than restating them**. One edit admits a key to both, and
-the vocabulary cannot fork. Where derivation is not possible, the fallback is a
-test asserting every annotation key the checker knows is non-refused by the
-projection reader — which converts a forgotten second list from a silent
-projection failure into a red test naming both registries.
+*Three things the coupling to the compatibility checker has to respect.*
+**Derivation is not one-to-one:** three members of `ANNOTATION_KEYS` —
+`default`, `$defs`, `definitions` — are refused by projection on purpose, so
+the relation is `ANNOTATION_KEYS` minus a stated exception set, whatever that
+set grows to, and a fallback test asserting plain non-refusal of every
+annotation key would be red the day it is written. It asserts the exception
+relation in both directions instead.
+**The validation half must not derive:** the checker's `handled` set is a union
+including `allOf`, `if`/`then`/`else`, `patternProperties`, `asCell`, `ifc` and
+`scope`, every one of which projection refuses deliberately — so derive the
+annotation tier and write the validation tier by hand. **A refusal cannot point
+at a lifted schema:** no CLI surface prints the read-side source schema, so
+there is nothing to lift. That advice is sound one surface over, for item 12,
+where `cf piece verbs --json` carries `inputSchema`. A read-side refusal names
+the key, its position, and the accepted vocabulary.
 
 `tier` and `deprecated` are the newest annotation-class keys and the likeliest
 to be missing from a set drafted out of the standard JSON Schema vocabulary.
 They belong in the tolerated set on day one.
 
+**Deriving the tolerated tier gives you candidates, not a proof that carrying
+one is inert.** That proof is owed per key and is discharged against the
+runner, not against the checker's registry. `$comment` fails it: the runner
+reserves three of its values as control markers, so a caller's `$comment` is
+forgeable control flow reaching the read boundary — a projection setting one
+on a property drops that property, and one on a source-required property
+empties the read the way #5734 does. It is accepted and dropped, alongside `$id`
+and `$schema`.
+
+*Measured: nothing in the tree breaks.* Four JSON Schema keywords appear in
+keyword position across every `--schema` argument in the repository — `type`,
+`properties`, `items`, `$link` — all honored.
+
+*Out of scope:* `--select`, whose grammar is field paths and whose projection
+the CLI already builds itself.
+
 *Exit:* an unrecognized key is refused and the message names it; a tolerated
-keyword is accepted and ignored. A command that ran only because a key was
-silently dropped now fails loudly, which is the point rather than a regression.
+keyword is accepted and ignored; a consulted keyword is read for inference and
+the caller's copy goes no further, while the source-derived `required` the
+reader builds still reaches the read boundary — asserted against the output
+schema itself, which the selector handed to the storage provider is not; a
+projection naming a `required` field it does not project reads the fields it
+does; a caller's scalar `type` still filters the leaf it is written on, at
+depth as well as at an array item; and a source-required array narrowed by a
+caller's item type reads its siblings rather than emptying the object, which
+the scalar cases do not cover because the array's failure escalates from an
+element rather than occurring where the caller wrote it. A command that ran
+only because a key was silently dropped now fails loudly, which is the point
+rather than a regression.
 
 **3. A rejection propagates up through what holds it.** *(S)* The projection
-mask reduces an array whose items reject to `false`, but leaves an object whose
-every property rejects as a live selector. So marking a field below a link loads
-every element document — measured at four reads where one would do. The fix is
-the symmetric reduction, which then cascades to the array above it.
+mask reduces either container whose whole selection rejects — an array whose
+items reject, and an object whose every named property rejects — to `false`. A
+rejection below a link therefore cascades up to the position holding that link,
+which is where a rejecting selector suppresses the fetch, so marking a field
+below a link costs the read that document already needed rather than one per
+element.
 
 *Exit:* a marked collection is one document read whether the marker sits on the
 link or below it.
@@ -200,6 +263,16 @@ Two constraints carry from the design: a wish's selection runs *before* the walk
 that strips handles, because a marker needs a live cell to read an address from;
 and `exec` already prints its result cell as prose on stderr, in a spelling no
 other command accepts, which this is the occasion to make the declared shape.
+
+*A handler reached through `cf exec` had no outcome to shape.* The dispatch
+named no invocation, so the handling filed under no receipt and the command
+printed nothing at all — a read option there could only ever have answered
+nothing, which is the silence this item exists to remove. `cf exec` now mints
+an invocation per call, the same pair `resolveInvocationIdentity` mints for a
+`cf piece call` that names neither, and prints the Invocation JSON that call
+declares. A tool's stdout is unchanged; its result cell's address moves to the
+address-argument spelling, which is what removes the third spelling rather than
+adding a fourth.
 
 *Exit:* the same cell, reached four ways, renders identically under the same
 selection.
@@ -243,11 +316,20 @@ Four parts. Two are independent of everything:
   pair in `packages/runner/src/link-utils.ts`. This is what admits the *other*
   spellings — the `$link` shape a read emits, and the LLM-friendly form — so it
   serves composition rather than basic capability.
-- **Fix event-schema emission.** An inline `Writable<{…}>` disappears from the
-  emitted properties entirely. That half is independent and needed under any
-  road, doubly once event schemas close, since a field the schema does not name
-  cannot be supplied at all. Only the `asCell` marker hangs on the decision
-  below.
+- **Fix event-schema emission.** The handler-side stream schema is a usage
+  summary: `applyCapabilitySummaryToArgument`
+  (`packages/ts-transformers/src/transformers/schema-injection.ts`) shrinks
+  the event parameter to what the body uses, so a declared reference field
+  the body never reads — named and inline spellings alike — disappears from
+  the emitted properties and `required`, while the pattern's durable `$defs`
+  keeps the full declared event. That half is independent and needed under
+  any road, doubly once anything refuses on the stream schema, since a field
+  it does not name cannot be supplied at all. Which of the two schemas is a
+  verb's input contract is the open question
+  [references as arguments](references-as-arguments.md) records; only the
+  `asCell` marker hangs on the decision below — and today's emitted marker
+  records the body's usage (`["readonly"]` for a read-only body), not the
+  author's `Writable`.
 
 *One decision inside the item:* schema-blind or schema-directed resolution.
 Schema-blind is proven twice — `traverseAndCellify` and the dispatch gate;
@@ -265,25 +347,46 @@ the piece — the root pattern's own verb, reachable today by `pieces.add` from
 inside the runtime and by a model through the dialog builtin, and by no other
 caller.
 
-**12. `cf` refuses an undeclared field on a call.** *(S)* A payload carrying a
-field the verb does not declare is accepted, the field is dropped on the way in,
-and the caller is told the call settled — the silent-strip failure, which is
-what a caller writing JSON by hand or by model hits and a TypeScript author
-never does.
+**12. `cf` refuses an undeclared field on a call.** *(S)* **On main as
+#5835.** The failure it removes: a payload carrying a field the verb does not
+declare was accepted, the field dropped on the way in, and the caller told the
+call settled — the silent-strip failure, which is what a caller writing JSON by hand or by
+model hits and a TypeScript author never does.
 
 *This is item 2's shape, one surface over.* There a projection key in neither
 denylist is accepted and ignored; here an event field the schema does not
-declare is accepted and ignored. Both are the CLI declining to refuse what it
-cannot honour, and both are fixed by the CLI refusing it — not by a schema
-forbidding it, which is the distinction #5589 turns on. Worth building the two
-with the same vocabulary for what a refusal says, since a caller meets both
-through the same command.
+declare is accepted and ignored. Both were the CLI declining to refuse what it
+cannot honor, and both are fixed by the CLI refusing it — not by a schema
+forbidding it, which is the distinction #5589 turns on. They share one
+vocabulary for what a refusal says, since a caller meets both through the same
+command, and #5850 carried it to the flag door as well.
 
 *The check has a home already.* `verbInputSchemaError`
 (`packages/cli/lib/callable.ts`) validates a payload against the verb's declared
 event schema before dispatch. What it does not do is treat an undeclared field
 as a reason to refuse — and the schema it validates against names exactly the
 fields the verb declares, so the comparison needs no new source of truth.
+
+*The refusal is derived from where a field actually goes missing*, not from a
+rule about schemas. A position drops what it does not name exactly when it
+reaches a `properties` map with no `additionalProperties` beside it — measured
+against the read a handler's event goes through, and true of every spelling of
+an object-shaped position: a stated `type: "object"`, a bare map, a type union
+admitting an object, and a conjunction, whose declared fields are the union
+across its members. A position reaching no map at all delivers the whole
+payload, so a verb that declares nothing THAT way takes anything; a position
+spelling `properties: {}` delivers nothing, so every field written there is
+refused. Which spellings describe an object is `schemaIsObjectShaped`'s
+question, asked rather than answered a second time. Everywhere else the check
+fails open — a disjunction, an `asCell` position below the root, a container the
+payload does not match — because a refusal can be retried and a call wrongly
+refused cannot be made at all.
+
+*What a caller reads names fewer fields than the TypeScript does.* The emitted
+event schema names the fields the handler body READS, so a field declared in
+the event interface and never touched is one the runtime would have dropped and
+this now refuses. That is the same failure surfacing, and `--help` prints the
+same vocabulary the refusal does.
 
 *Exit:* a call naming a field the verb does not declare is refused, the message
 names the field, and the invocation id is not spent.
@@ -358,21 +461,60 @@ its own track.
 
 | # | Step | Delivers | After | Why here |
 | --- | --- | --- | --- | --- |
-| 1 | The doubly-linked tracker fixture and its walkthrough | **on main** (#5639, #5631) — repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none could be demonstrated until one existed. `verb-session-gaps.sh` is where they are asserted, and four of its assertions expect a gap and fail loudly the day it closes — so a capability arriving announces itself instead of quietly turning a check green |
-| 2 | A projected read survives a handler | #5633 | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
+| 1 | The doubly-linked tracker fixture and its walkthrough | **on main** (#5639, #5631) — repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none could be demonstrated until one existed. `verb-session-gaps.sh` is where they are asserted, and several of its assertions expect a gap and fail loudly the day it closes — so a capability arriving announces itself instead of quietly turning a check green. The script states its own count; repeating it here only creates a second place to be wrong |
+| 2 | A projected read survives a handler | **on main** (#5764) — #5633 | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
 | 3 | Listing rows carry a handler's declared result | **on main** (#5629) — item 10, #5619 | — | The consumer half of item 1 |
-| 4 | The forced-stream fallback stops inventing verbs | #5576 | 3 | Same file as step 3, which has landed, so this is the front of the queue. It narrows the listing, so sweep the open branches for writers first |
-| 5 | The help page stops claiming a verb returns nothing | #5558 (the false claim) | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
-| 5a | An author's prose reaches the caller | #5637 | 1 | Separate lane — what is missing is not in the CLI. See the measurement below: two of the three symptoms are emitted correctly and lost afterwards, so a fix aimed at the emitter would miss them |
-| 6 | Help enumerates what a verb returns | #5558 (the missing fields) | 3, 5 | Step 3 builds the declared-result lookup; this is its second consumer, at the call path rather than the listing |
-| 7 | A returned piece reads back through its own cycle | #5577 | 6 | The derived default selection bounds the readback, which is what turns the crash into a result |
-| 8 | `receipt` as a top-level envelope field | item 4 | — | Its precondition is met, it touches the call envelope alone, and it is what gives items 8 and 9 a consumer. Runs beside steps 5-7 |
-| 9 | A rejection propagates up through what holds it | item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
-| 10 | Two identical projections stop colliding | #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
-| 11 | One piece, one address | #5632, #5498 | — | Trace where each id is minted; the outcome is a fix or a statement that they are aliases. Must precede step 13, which spreads the address vocabulary to two more commands |
-| 12 | An unrecognized projection key is refused | item 2 | 9 | The largest remaining step and the only one with design surface, since it couples the projection reader to the compatibility checker's annotation keys |
-| 12a | `cf` refuses an undeclared field on a call | item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says |
-| 13 | `cf wish` and `cf exec` take the read options | item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving |
+| 4 | The forced-stream fallback stops inventing verbs | **on main** (#5683) — #5576, #5662 | 3 | Same file as step 3, which has landed, so this is the front of the queue. It narrows the listing, so sweep the open branches for writers first |
+| 5 | The help page stops claiming a verb returns nothing | **on main** (#5680) — #5558, first half | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
+| 5a | An author's prose reaches the caller | **on main** (#5825) — #5637 | 1 | Separate lane — what is missing is not in the CLI. See the measurement below: two of the three symptoms are emitted correctly and lost afterwards, so a fix aimed at the emitter would miss them |
+| 6 | Help enumerates what a verb returns | **on main** (#5717) — #5558, second half | 3, 5 | Step 3 builds the declared-result lookup; this is its second consumer, at the call path rather than the listing |
+| 7 | A returned piece reads back through its own cycle | **on main** (#5740) — #5577 | 6 | The derived default selection bounds the readback, which is what turns the crash into a result |
+| 8 | `receipt` as a top-level envelope field | **on main** (#5694) — item 4 | — | Its precondition is met, it touches the call envelope alone, and it is what gives items 8 and 9 a consumer. Runs beside steps 5-7 |
+| 9 | A rejection propagates up through what holds it | **on main** (#5701) — item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
+| 10 | Two identical projections stop colliding | **on main** (#5757) — #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
+| 11 | One piece, one address | **decided — they are aliases**; the documentation half is #5754 | — | Measured: the two routes differ because one resolves the link chain and the other renders the link as stored. That is the read model working, not a defect, so the outcome is the statement rather than the fix. What remains is a doc correction and closing #5632 — no code changes, and step 13 is not gated on it |
+| 12 | An unrecognized projection key is refused | **on main** (#5817) — item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md) |
+| 12a | `cf` refuses an undeclared field on a call | **on main** (#5835) — item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says. Built against #5817's wording rather than its code, since that branch is unmerged |
+| 13 | `cf wish` and `cf exec` take the read options | **on main** (#5844) — item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
+| 14 | A caller may name a reference | item 11, #5560 | — | Item 11 has carried this since the State table was written and the ordering never gave it a step, so nothing scheduled it. Sequenced last only because it is unstarted, not because anything gates it — and it is the most consequential thing open: the shape-matching payload the CLI does accept **stores a detached copy and reports success**, so a caller relating two pieces is told it worked |
+
+**`--show-links` is not redundant, and nothing should schedule its removal
+yet.** [Verb result selection](verb-result-selection.md) prices it as a stopgap
+that in-band rendering makes unnecessary. That is right about *addressing* — a
+caller wanting something to compose with reaches for a marker, which is the
+shorter road — and wrong about the job the flag has since acquired.
+
+A marker renders the link **as stored**; `--show-links` **resolves** the chain.
+`renderedLinkAddress` reshapes the link it is handed and follows nothing, so no
+in-band spelling can produce a resolved address at any position. That makes
+`--show-links` the only way to resolve a whole result in one pass, and an
+in-band address cannot replace what it does not do.
+
+**A caller does not ask for resolution, and the projection grammar is closed.**
+Resolution is a fixed point over the locally materialized subgraph — the same
+link answers differently as documents load, and `resolveAsCell` fires an
+un-awaited sync of its own, so it both depends on and causes loading. That is
+the runtime's eventual consistency rather than a defect: a reactive holder
+re-runs as data arrives, and interim states are rarely acted on. A marker
+offering resolution over it would ship nondeterminism under a name promising
+determinism, so none is planned and the vocabulary has stopped moving.
+
+Two things follow, and both belong to #5760 rather than here. A rendered
+address does not declare itself indirect, and cannot: replacing a cell's
+contents with a link to another cell is an ordinary write, and it turns every
+reference that named that cell directly into an indirect one with no holder
+changing. `resolveLink` re-probes for the sigil at the address on each
+resolution, which is why the answer is read from the target rather than carried
+on the reference — a marker would freeze a render-time observation into a value
+that outlives it. Provenance is the durable thing an address can carry instead,
+and whether it should is the question that survives. And a **non-reactive
+reader** is where eventual consistency
+stops paying, since `cf` exits before convergence on purpose rather than hold a
+committed write hostage to every recomputation it triggered.
+
+Keep `--show-links` meanwhile; retire it when a replacement exists or the need
+is confirmed dead. Note that `cf piece get` has never had an equivalent, so
+bulk resolution on a *read* is a gap that predates all of this.
 
 **Running beside all of the above.** A caller naming a reference (item 11, #5560) waits on confirming
 that a sigil resolves through a *declared* event field rather than an untyped
@@ -538,19 +680,32 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 
 | Issue | What | Attaches at |
 | --- | --- | --- |
-| #5633 | a projected read fails after an unrelated handler runs, while the same path unshaped succeeds | step 2 |
-| #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | step 4 |
-| #5558 | `piece call --help` claims every handler returns nothing, including one that declares a result | steps 5 and 6 — the false claim needs nothing, enumerating the fields needs the lookup |
+| #5633 | a projected read fails on the SECOND read of the same source and schema; the handler is a red herring | **fixed** by #5764 — a list coordinator owed the setup writes a lost commit discarded, its result container's links among them, and the fix makes those writes a debt rather than a flag. #5706, which is why it reproduced every time, stands |
+| #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | **fixed** by #5683, with #5662 — and the other direction by #5794 |
+| #5698 | `cf piece verbs` returns nothing for a piece whose declared result type omits its verbs, though they are callable | the other direction of the same surface, and **fixed** by #5794: the listing enumerates candidates from the compiled graph as well as the result cell, and classifies each one on the stored signal that closed the first direction |
+| #5706 | a shaped read permanently writes to the user's space — per-element sub-patterns land at space scope | runner-owned, beside #5633 |
+| #5722 | a verb's help shows its usage twice, and shows no way to copy it | found by driving the surface by hand, which no test does |
+| #5558 | `piece call --help` claims every handler returns nothing, including one that declares a result | **fixed** by #5680 (the false claim) and #5717 (the enumerated fields) |
 | #5637 | an author's prose does not reach a caller: on a verb, on an event field, and on the event interface | step 5a — it absorbed #5559, which described one symptom and had its cause backwards |
-| #5577 | a verb returning a child piece in a doubly-linked tree crashes readback on a cycle | step 7 |
-| #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | step 10 |
-| #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 |
-| #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | step 11, if it proves to be the same root |
+| #5577 | a verb returning a child piece in a doubly-linked tree crashes readback on a cycle | **fixed** by #5740 |
+| #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | **fixed** by #5757 |
+| #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 — **working as designed**; closes once #5754 lands the documentation |
+| #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | unscheduled. It rode ordering step 11 while that step was a question about identity; the answer there was that the two routes are aliases by design, which says nothing about a scheme the id itself drops. Independent, and still open |
 | #5589 | a click's `detail` and a `cf-select`'s `target.value` reach a handler as types no pattern declares | carried alongside — it belongs to whoever next touches `packages/html`. The ruling that closed item 9b also removed the only thing that ever compared the renderer's output against an author's declared type, so this has no detector left |
-| #5560 | an address a call returns cannot be passed back as a verb argument | item 11 |
+| #5560 | an address a call returns cannot be passed back as a verb argument | item 11, and **row 14** — it had no ordering row until one was added. Not to be confused with ordering step 11, "one piece, one address", which is #5632 and decided |
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
+| #5685 | no CI job runs any verb integration script, and one of them says it does | **unscheduled, and the sharpest of these.** `verbs-over-the-cli.sh` and `verb-session-gaps.sh` are the arc's honesty checks and gate nothing; a claim that one runs is worse than the gap, because it is why nobody looked |
+| #5663 | the compat checker admits a newly required verb event field, breaking every existing caller | **unscheduled.** It sits in `packages/piece/src/schema-compatibility.ts`, the set item 2 derives its tolerated tier from, so a change there meets this |
+| #5689 | `cf piece call` accepts any name into dispatch; a non-verb fails with no diagnostic | unscheduled. The listing now refuses to offer a non-verb (#5683, #5794); the dispatcher still accepts one |
+| #5684 | `cf piece get --select` returns `{}` for a field path that cannot match | unscheduled. Item 2's shape on the concise path, which item 2 puts out of scope — a projection that answers nothing rather than refusing |
+| #5686 | design rule 1 says input schemas are closed-world; after the #5589 ruling the runtime does the opposite | unscheduled and unowned. Not settled by [designing verbs so they can change](verb-evolution.md), which says nothing about closed-world inputs — searched, not assumed |
+| #5756 | `ensureKeylessPatternIdentity`'s doc comment claims a structural-dedup property the code does not have | runner-owned. Measured: two structurally identical patterns get different keyless identities |
+| #5758 | a call's readback traverses the reference graph with no work budget | memory-owned. `maxDepth` and `maxEntities` are in `docs/specs/memory-v2/05-queries.md` and not on the wire |
+| #5759 | `Cell.equals()` is cache-dependent | runner-owned. The answer on record is that this is the runtime's eventual consistency rather than a defect — given by @seefeldb in review and reported here rather than cited, so it wants his statement on the issue before either issue closes on that basis. `Cell.equalLinks` is the non-resolving comparison and has no call sites outside its own tests, which is the other half of what a confirmation should settle |
+| #5760 | an indirect reference has no contract | runner-owned. A rendered address cannot declare itself indirect: replacing a cell's contents with a link is an ordinary write, so indirectness is a property of what the target holds at read time rather than of the reference. What survives is provenance — whether an address can say it names a spot rather than a canonical cell. The other two answers are @seefeldb's, given in review and reported here rather than cited, so they want his statement on the issue before it closes on that basis |
+| #5761 | the projection derivation cannot express conjunction; `allOf` refuses | filed out of item 2 and **relied on by it**: `sourceProvesContainer` refuses to prove a container through `allOf` for this reason |
 
-**Filed against neighbouring subsystems, and not sequenced here.** `{ proxy:
+**Filed against neighboring subsystems, and not sequenced here.** `{ proxy:
 true }` never reaching `module.writableProxy` for a transformed pattern
 (#5502), an unnormalized external piece id upserting twice (#5499), and a
 create that drops its navigation (#5530). Each is real and none is about the

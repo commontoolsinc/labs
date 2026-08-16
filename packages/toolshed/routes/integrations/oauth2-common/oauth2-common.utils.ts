@@ -1,18 +1,19 @@
 import { OAuth2Client, type Tokens } from "@cmd-johnson/oauth2-client";
-import type { Context } from "@hono/hono";
-import { getLogger } from "@commonfabric/utils/logger";
-import { runtime } from "@/index.ts";
 import type { JSONSchema } from "@commonfabric/runner";
-import {
-  custodyIngest,
-  durableSet,
-  type VouchedChannel,
-} from "@/lib/custody-ingest.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import type { Context } from "@hono/hono";
+
 import type {
   OAuth2ProviderConfig,
   OAuth2Tokens,
   UserInfo,
 } from "./oauth2-common.types.ts";
+import { runtime } from "@/index.ts";
+import {
+  custodyIngest,
+  durableSet,
+  type VouchedChannel,
+} from "@/lib/custody-ingest.ts";
 
 const logger = getLogger("oauth2-common");
 

@@ -2,7 +2,7 @@
  * Candidates derivable from the Cliffy command tree alone — subcommands,
  * option names, and the enumerable value sets the tree cannot express.
  *
- * No I/O: every function here answers from the `Command` object graph, so it
+ * No I/O: every function here works from the `Command` object graph, so it
  * stays correct offline and costs nothing beyond process start.
  */
 

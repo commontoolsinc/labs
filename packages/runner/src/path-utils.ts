@@ -1,11 +1,11 @@
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * Read one path segment out of a data container WITHOUT falling through to the
  * container's prototype.
  *
- * A path segment names data. Plain indexing answers with `Object.prototype`'s
+ * A path segment names data. Plain indexing returns `Object.prototype`'s
  * member when the segment is absent and happens to be named after one —
  * `toString`, `valueOf`, `hasOwnProperty` and the rest are ordinary, legal
  * keys. That turned "absent" into a function: `getValueAtPath({}, ["toString"])`
@@ -17,9 +17,9 @@ import { isRecord } from "@commonfabric/utils/types";
  * draws between record presence and sparse slots.
  *
  * Primitives need none either, and must not be excluded. `Object.hasOwn()`
- * coerces with `ToObject`, so it answers `true` for a string's `length` and its
+ * coerces with `ToObject`, so it returns `true` for a string's `length` and its
  * indices — genuinely own — and `false` for `toUpperCase`/`toString`, which
- * live on `String.prototype`. Bailing out on everything non-`isRecord` would
+ * live on `String.prototype`. Bailing out on everything non-`isObjectOrArray` would
  * lose `getValueAtPath("abc", ["length"])`, which callers rely on to
  * reconstruct write details over primitive subtrees; indexing unconditionally,
  * as this did before, would hand back the prototype methods. `Object.hasOwn`
@@ -52,7 +52,7 @@ export function setValueAtPath(
     // its empty own surface, and the assignment writes the intermediate
     // onto the special object itself: a `TypeError` on a frozen value, a
     // codec-invisible graft on an unfrozen instance. (`getValueAtPath` and
-    // `hasValueAtPath` below answer `undefined`/`false` for any path into
+    // `hasValueAtPath` below return `undefined`/`false` for any path into
     // a `FabricInstance`'s codec contents.)
     if (typeof ownSegment(parent, key) !== "object") {
       parent[key] = typeof path[i + 1] === "number" ? [] : {};
@@ -87,7 +87,7 @@ export function getValueAtPath(obj: any, path: readonly PropertyKey[]): any {
 export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
   let current = obj;
   for (const key of path) {
-    if (!isRecord(current) || !Object.hasOwn(current, key as string)) {
+    if (!isObjectOrArray(current) || !Object.hasOwn(current, key as string)) {
       return false;
     }
     current = (current as Record<PropertyKey, unknown>)[key];

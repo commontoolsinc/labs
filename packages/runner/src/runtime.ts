@@ -1,23 +1,14 @@
-import { StaticCache } from "@commonfabric/static";
-import { RuntimeTelemetry } from "@commonfabric/runner";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
-import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import type { NonIdempotentReport } from "./telemetry.ts";
-import type {
-  AnyCell,
-  JSONSchema,
-  Module,
-  NodeFactory,
-  Pattern,
-  Schema,
-} from "./builder/types.ts";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { createSession, Identity } from "@commonfabric/identity";
 import {
+  commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   resetCommitPreconditionsConfig,
@@ -25,22 +16,31 @@ import {
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
+import { RuntimeTelemetry } from "@commonfabric/runner";
+import { StaticCache } from "@commonfabric/static";
+import {
+  type AsyncLocalStore,
+  FallbackAsyncLocalStore,
+} from "@commonfabric/utils/async-local-store";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isDeno } from "@commonfabric/utils/env";
+
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import {
   isEagerSourceAnnotationEnabled,
   setEagerSourceAnnotation,
 } from "./builder/module.ts";
-import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
-import type { PatternCoverageCollector } from "./pattern-coverage.ts";
+import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type {
-  ChangeGroup,
-  CommitError,
-  DID,
-  IExtendedStorageTransaction,
-  IStorageManager,
-  MemorySpace,
-  URI,
-} from "./storage/interface.ts";
+  AnyCell,
+  Frame,
+  JSONSchema,
+  Module,
+  NodeFactory,
+  Pattern,
+  Schema,
+} from "./builder/types.ts";
+import { registerBuiltins } from "./builtins/index.ts";
 import {
   type Cell,
   createCell,
@@ -48,25 +48,6 @@ import {
   isCell,
   schemaCellScope,
 } from "./cell.ts";
-import { createRef, EntityId } from "./create-ref.ts";
-import { createSession, Identity } from "@commonfabric/identity";
-import { Action, Scheduler } from "./scheduler.ts";
-import {
-  type CommitBackpressurePolicy,
-  resolveCommitBackpressure,
-} from "./scheduler/backpressure.ts";
-import { Engine } from "./harness/index.ts";
-import {
-  CellLink,
-  isCellLink,
-  isNormalizedFullLink,
-  isSigilLink,
-  type NormalizedFullLink,
-  NormalizedLink,
-  parseLink,
-} from "./link-utils.ts";
-import { addressKey } from "./link-types.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
@@ -96,28 +77,47 @@ import {
   type PolicyArtifactManifestV1,
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
-import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { createRef, EntityId } from "./create-ref.ts";
+import type { ConsoleMethod } from "./harness/console.ts";
+import { Engine } from "./harness/index.ts";
+import type { CompiledModuleArtifact } from "./harness/types.ts";
+import type { ConsoleMessage } from "./interface.ts";
+import { addressKey } from "./link-types.ts";
+import {
+  CellLink,
+  isCellLink,
+  isNormalizedFullLink,
+  isSigilLink,
+  type NormalizedFullLink,
+  NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
+import { ModuleRegistry } from "./module.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { PatternUpdater } from "./pattern-updater.ts";
-import type { CompiledModuleArtifact } from "./harness/types.ts";
-import { ModuleRegistry } from "./module.ts";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
-import { registerBuiltins } from "./builtins/index.ts";
-import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
-import { isRetryableCommitRejection } from "./storage/rejection.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
-import { toURI } from "./uri-utils.ts";
-import { isDeno } from "@commonfabric/utils/env";
+import { Action, Scheduler } from "./scheduler.ts";
 import {
-  type AsyncLocalStore,
-  FallbackAsyncLocalStore,
-} from "@commonfabric/utils/async-local-store";
-import { popFrame, pushFrame } from "./builder/pattern.ts";
-import type { Frame } from "./builder/types.ts";
-import type { ConsoleMessage } from "./interface.ts";
-import type { ConsoleMethod } from "./harness/console.ts";
+  type CommitBackpressurePolicy,
+  resolveCommitBackpressure,
+} from "./scheduler/backpressure.ts";
+import { isCellScope, normalizeCellScope } from "./scope.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import type {
+  ChangeGroup,
+  CommitError,
+  DID,
+  IExtendedStorageTransaction,
+  IStorageManager,
+  MemorySpace,
+  URI,
+} from "./storage/interface.ts";
+import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
@@ -126,12 +126,13 @@ import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
 } from "./storage/write-stack-trace.ts";
+import type { NonIdempotentReport } from "./telemetry.ts";
 import {
   createUnsafeHostTrustToken,
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
-import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
+import { toURI } from "./uri-utils.ts";
 
 const isFullNormalizedLinkShape = (
   value: unknown,
@@ -232,6 +233,15 @@ export interface ExperimentalOptions {
    * `docs/specs/computed-cell-identity.md`.
    */
   computedCellIds?: boolean | undefined;
+  /**
+   * Materialize a lift's argument lazily: the body reads the paths it touches
+   * and nothing else, instead of the whole of what its schema selects. A
+   * reader that touches data the schema no longer describes refuses, and the
+   * run is disposed of as an argument that did not resolve. On by default; pass
+   * `false` as a temporary rollback override. See
+   * `docs/plans/lazy-cell-materialization.md`.
+   */
+  lazyMaterialization?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
@@ -957,6 +967,7 @@ export class Runtime {
       commitPreconditions: undefined,
       plainResultReceipts: undefined,
       computedCellIds: undefined,
+      lazyMaterialization: undefined,
       eagerSourceAnnotation: undefined,
       ...options.experimental,
     };
@@ -986,6 +997,7 @@ export class Runtime {
     // `true` override.
     this.experimental.computedCellIds ??= true;
     this.experimental.plainResultReceipts ??= true;
+    this.experimental.lazyMaterialization ??= true;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -2092,7 +2104,7 @@ export class Runtime {
    * NOTE(#1): The derivation is intentionally name-based for now — `createSession`
    * derives the space key from the name alone (the identity is ignored on the
    * `spaceName` path), so equal names map to the same shared space across users.
-   * This is the deliberate "shared profile space" behaviour today; revisit once
+   * This is the deliberate "shared profile space" behavior today; revisit once
    * we can derive unique space DIDs from a string.
    */
   async resolveSpaceName(name: string): Promise<MemorySpace> {
@@ -2221,7 +2233,7 @@ export class Runtime {
   /**
    * The host that serves a space's space-bound work (LLM, fetch, blob).
    * A mapped space resolves to its host; everything else to the
-   * default `apiUrl`. The single compute-side analogue of the storage
+   * default `apiUrl`. The single compute-side analog of the storage
    * layer's per-space address resolver.
    */
   hostForSpace(space: MemorySpace): URL {

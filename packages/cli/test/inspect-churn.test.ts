@@ -8,10 +8,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
-import { cf } from "./utils.ts";
+import { cf, stripAnsi } from "./utils.ts";
 
-/** `CliResult` streams are line arrays; join before substring assertions. */
-const text = (lines: string[]): string => lines.join("\n");
+/**
+ * `CliResult` streams are line arrays; join before substring assertions.
+ *
+ * The escapes go too: the CLI colors help and error output whenever the
+ * environment asks for color, so an assertion on raw text passes or fails by
+ * where the developer ran it.
+ */
+const text = (lines: string[]): string => stripAnsi(lines.join("\n"));
 
 const SESSION = "session:did%3Akey%3AzAlice:s1";
 

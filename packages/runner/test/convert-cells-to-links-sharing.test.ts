@@ -1,7 +1,9 @@
-// A value reachable twice by different paths is SHARED, not circular. The
-// conversion answers an ancestor with a back-link -- that is what makes a cycle
-// representable -- and must not answer a sibling the same way, which would
-// rewrite one of the two positions into a pointer at the other.
+/**
+ * A value reachable twice by different paths is SHARED, not circular. The
+ * conversion returns a back-link for an ancestor -- that is what makes a cycle
+ * representable -- and must not do the same for a sibling, which would
+ * rewrite one of the two positions into a pointer at the other.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -46,7 +48,7 @@ describe("convert-cells-to-links-sharing", () => {
   });
 
   it("converts a twice-reachable value that converts to a primitive", () => {
-    // A `Date` becomes a `FabricEpochNsec`, which the walk answers without
+    // A `Date` becomes a `FabricEpochNsec`, which the walk returns without
     // descending. Every exit has to leave the ancestor set as it found it, or
     // the second position sees an ancestor that is really a sibling.
     const shared = new Date(1234);

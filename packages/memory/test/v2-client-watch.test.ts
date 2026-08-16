@@ -1,6 +1,12 @@
 import { assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
-import { connect, loopback, WatchView } from "../v2/client.ts";
+import {
+  connect,
+  loopback,
+  type SpaceSession,
+  type Transport,
+  WatchView,
+} from "../v2/client.ts";
 import type { EntitySnapshot } from "../v2.ts";
 import {
   testSessionOpenAuthFactory,
@@ -162,6 +168,86 @@ Deno.test("memory v2 client installs a watch set and receives live updates", asy
   } finally {
     await writerClient.close();
     await watcherClient.close();
+    await server.close();
+  }
+});
+
+/**
+ * `runWatchMutation()` checks that the session is open when the call is made
+ * and then awaits the response, so the `apply` step that acks that response
+ * can run after the session has closed. A closed session must arm no new
+ * work: `close()` drains the background tasks it knows about and returns, so
+ * anything queued afterwards is work that nothing awaits.
+ *
+ * The armed timer is the observation, because the wire cannot tell the two
+ * cases apart. `flushScheduledAcks()` independently declines to speak for a
+ * closed session, so no `session.ack` frame is sent either way, and a test
+ * that watched the wire would pass whether or not the session still schedules
+ * the ack.
+ */
+Deno.test("memory v2 session closed mid-watch-set arms no ack timer", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://watch-set-close-before-apply"),
+    subscriptionRefreshDelayMs: 0,
+  });
+  const inner = loopback(server);
+
+  let setRequestId: string | null = null;
+  let closing: Promise<void> | null = null;
+  let session: SpaceSession | null = null;
+  let countTimers = false;
+  let timersArmed = 0;
+
+  const transport: Transport = {
+    send(payload: string) {
+      // Frames carry the `fvj1:` fabric-value encoding, not bare JSON, so this
+      // reads the payload as text.
+      if (payload.includes('"session.watch.set"')) {
+        setRequestId = /"requestId":"([^"]+)"/.exec(payload)?.[1] ?? null;
+      }
+      return inner.send(payload);
+    },
+    close: () => inner.close(),
+    setReceiver(receiver: (payload: string) => void) {
+      inner.setReceiver((payload: string) => {
+        if ((setRequestId !== null) && payload.includes(setRequestId)) {
+          setRequestId = null;
+          // The close lands between the response frame and the `apply` that
+          // frame resolves, so the session is already closed when `apply`
+          // reaches its ack.
+          closing = session?.close() ?? null;
+          countTimers = true;
+        }
+        receiver(payload);
+      });
+    },
+    setCloseReceiver: (r) => inner.setCloseReceiver?.(r),
+  };
+
+  const client = await connect({ transport });
+  const space = "did:key:z6Mk-watch-set-close-before-apply";
+  session = await client.mount(space, {}, testSessionOpenAuthFactory);
+
+  // Counted rather than faked: the timer is armed for real, and only the
+  // count is observed. Saved and restored rather than assumed native, since a
+  // package preload may already own this property.
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+    if (countTimers) timersArmed++;
+    return realSetTimeout(...args);
+  }) as typeof setTimeout;
+
+  try {
+    await session.watchSetSync([]);
+    // `apply` has run by now: the mutation resolves on its return value.
+    countTimers = false;
+    assertEquals(closing !== null, true, "the close raced the apply");
+    await closing;
+    assertEquals(timersArmed, 0, "a closed session arms no ack timer");
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    await client.close();
     await server.close();
   }
 });

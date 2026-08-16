@@ -1,11 +1,12 @@
 // Inline scheduler idempotency check tests.
 
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+
 import {
   captureTransactionWrites,
   findDifferingWriteKeys,
   makeAddressKey,
 } from "../src/scheduler/diagnosis.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   afterEach,
   beforeEach,
@@ -80,6 +81,66 @@ describe("inline idempotency check mode", () => {
     expect(runtime.scheduler.getIdempotencyViolations().length).toBeGreaterThan(
       0,
     );
+  });
+
+  it("records one violation for an action caught twice", async () => {
+    runtime.scheduler.enableIdempotencyCheck();
+
+    const input = runtime.getCell<number>(
+      space,
+      "inline-dedup-input",
+      undefined,
+      tx,
+    );
+    input.set(0);
+    const output = runtime.getCell<number>(
+      space,
+      "inline-dedup-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Writes a different value on every invocation, so the recheck's second
+    // run always differs from the run it verifies. Counting the invocations
+    // rather than drawing a random number tells the two detections apart: the
+    // first records writes of 1 and 2, the second of 3 and 4.
+    let invocations = 0;
+    const counter: Action = (actionTx) => {
+      input.withTx(actionTx).get();
+      output.withTx(actionTx).send(++invocations);
+    };
+    (
+      counter as Action & {
+        writes: ReturnType<typeof output.getAsNormalizedFullLink>[];
+      }
+    ).writes = [output.getAsNormalizedFullLink()];
+    runtime.scheduler.subscribe(
+      counter,
+      logFor(
+        [toMemorySpaceAddress(input.getAsNormalizedFullLink())],
+        [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      ),
+      {},
+    );
+    await output.pull();
+
+    // Moving the input runs the action a second time, which the recheck flags
+    // a second time.
+    const external = runtime.edit();
+    input.withTx(external).set(1);
+    await external.commit();
+    await output.pull();
+
+    // Two runs and two rechecks.
+    expect(invocations).toBe(4);
+
+    const violations = runtime.scheduler.getIdempotencyViolations();
+    expect(violations.length).toBe(1);
+    expect(Object.values(violations[0].runs[0].writes)).toEqual([1]);
+    expect(Object.values(violations[0].runs[1].writes)).toEqual([2]);
   });
 
   it("does not flag idempotent computations in inline mode", async () => {

@@ -1,7 +1,17 @@
-import type { FabricPlainObject } from "@commonfabric/api";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
-import { resolveSpaceStoreUrl } from "./storage-path.ts";
+
+import type { FabricPlainObject } from "@commonfabric/api";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
+
+import {
+  aclDocId,
+  ANYONE_USER,
+  type Capability,
+  hasConcreteOwner,
+  isACL,
+  isCapable,
+} from "../acl.ts";
 import {
   type CellScope,
   type ClientCommit,
@@ -56,29 +66,7 @@ import {
 } from "../v2.ts";
 import { classifyCommitTelemetry } from "./commit-telemetry.ts";
 import * as Engine from "./engine.ts";
-import {
-  aclDocId,
-  ANYONE_USER,
-  type Capability,
-  hasConcreteOwner,
-  isACL,
-  isCapable,
-} from "../acl.ts";
-import {
-  aliasForDbId,
-  attachDatabase,
-  detachDatabase,
-  ensureTables,
-} from "./sqlite/exec.ts";
-import { assertReadOnly } from "./sqlite/guard.ts";
-import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
-import type { TableSchema } from "./sqlite/schema.ts";
-import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
-import { ReadConnectionPool } from "./sqlite/read-pool.ts";
-import {
-  columnOriginUnavailableReason,
-  ensureColumnOriginAvailable,
-} from "./sqlite/column-origin.ts";
+import { respondToHello } from "./handshake.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -90,8 +78,6 @@ import {
   type TrackedGraphState,
   trackGraph,
 } from "./query.ts";
-import { respondToHello } from "./handshake.ts";
-import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
   buildDiffSync,
   buildFullSync,
@@ -105,9 +91,26 @@ import {
   toCacheEntry,
   trackedIdsFromEntries,
 } from "./server-sync.ts";
-import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { SessionRegistry, type SessionState } from "./session-registry.ts";
+import {
+  columnOriginUnavailableReason,
+  ensureColumnOriginAvailable,
+} from "./sqlite/column-origin.ts";
+import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
+import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
+import {
+  aliasForDbId,
+  attachDatabase,
+  detachDatabase,
+  ensureTables,
+} from "./sqlite/exec.ts";
+import { assertReadOnly } from "./sqlite/guard.ts";
+import { ReadConnectionPool } from "./sqlite/read-pool.ts";
+import type { TableSchema } from "./sqlite/schema.ts";
+import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import { compressServerMessageSchemas } from "./sync-schema-table.ts";
+import { type ArmedTurn, armTurn } from "./turn.ts";
 
 export { SessionRegistry } from "./session-registry.ts";
 
@@ -937,7 +940,7 @@ export class Server {
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
-  #refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #refreshTurn: ArmedTurn | null = null;
   #refreshing: Promise<void> | null = null;
   // Transactions and fan-out share one publication turn per space. A verdict
   // is sent while its transaction owns the turn, so a sync frame cannot expose
@@ -1422,7 +1425,7 @@ export class Server {
     // flushSessions(), so it drains them rather than returning with
     // pending work — "manual" gates the TIMER, not the explicit calls.
     if (
-      this.#refreshTimer !== null || this.#refreshing !== null ||
+      this.#refreshTurn !== null || this.#refreshing !== null ||
       this.#dirtySpaces.size > 0
     ) {
       await this.flushSessions();
@@ -3638,13 +3641,13 @@ export class Server {
   private scheduleRefresh(): void {
     if (
       this.options.subscriptionRefreshDelayMs === "manual" ||
-      this.#dirtySpaces.size === 0 || this.#refreshTimer !== null
+      this.#dirtySpaces.size === 0 || this.#refreshTurn !== null
     ) {
       return;
     }
-    this.#refreshTimer = setTimeout(
+    this.#refreshTurn = armTurn(
       () => {
-        this.#refreshTimer = null;
+        this.#refreshTurn = null;
         void this.flushScheduledSessions();
       },
       this.options.subscriptionRefreshDelayMs ?? SUBSCRIPTION_REFRESH_DELAY_MS,
@@ -3697,9 +3700,9 @@ export class Server {
   }
 
   private cancelScheduledRefresh(): void {
-    if (this.#refreshTimer !== null) {
-      clearTimeout(this.#refreshTimer);
-      this.#refreshTimer = null;
+    if (this.#refreshTurn !== null) {
+      this.#refreshTurn.cancel();
+      this.#refreshTurn = null;
     }
     if (this.#connections.size === 0) {
       this.#dirtySpaces.clear();

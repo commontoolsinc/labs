@@ -1,3 +1,19 @@
+/**
+ * The walk that replaces artifacts, and the two single-value questions
+ * underneath it.
+ *
+ * A serializing member may be accessor-backed, so reading it twice can produce
+ * two different answers; several cases here assert a single read rather than a
+ * particular result. Structure is the other recurring subject: what the walk
+ * did not have to rebuild comes back by identity, a shared artifact stays
+ * shared, and a hole in an array is still a hole afterward.
+ *
+ * A cell and the reactive standing for it are the interesting non-artifacts.
+ * They carry the member the walk looks for, so the single-value questions
+ * answer for them, while the walk itself leaves them alone -- they are no
+ * builder's artifact, and what they encode to is the link naming the cell.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -270,7 +286,7 @@ describe("encodable-form", () => {
 
     describe("values the conversion decides for itself", () => {
       it("leaves an array carrying an own serializer alone", () => {
-        // An array is answered by the array rule whatever it carries.
+        // An array is handled by the array rule whatever it carries.
         const value = Object.assign([1, 2], {
           toEncodableForm: () => "replaced",
         });
@@ -455,7 +471,7 @@ describe("encodable-form", () => {
       });
 
       it("is _not_ told about a value that came back unchanged", () => {
-        // Answered by identity, so there is no copy and nothing to carry.
+        // Returned by identity, so there is no copy and nothing to carry.
         const { seen } = copies({ a: 1, b: { c: [1, 2, 3] } });
         expect(seen).toEqual([]);
       });
@@ -483,7 +499,7 @@ describe("encodable-form", () => {
     it("returns false for a value carrying only `toJSON`", () => {
       // The JSON protocol's name gets no standing here. A cell carries it too,
       // for `JSON.stringify`, and reading storage's answer off it would mean
-      // every value bearing the protocol's member answered as well.
+      // every value bearing the protocol's member counted as well.
       expect(hasEncodableForm({ toJSON: () => ({}) })).toBe(false);
     });
 
@@ -574,7 +590,7 @@ describe("encodable-form", () => {
 
     it("tells an explicit `undefined` `ifNone` from an omitted one", () => {
       // The distinction is what lets a caller stand a computed fallback behind
-      // a `??`: omitting it answers the value, which is never nullish for an
+      // a `??`: omitting it returns the value, which is never nullish for an
       // object, so a `??` would never reach the fallback.
       const value = { a: 1 };
       expect(encodableFormOf(value)).toBe(value);

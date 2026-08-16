@@ -18,11 +18,15 @@
  * pure parser remains the authoritative, dependency-free path for everything
  * else.
  */
-import ts from "typescript";
-import { dirname, fromFileUrl, isAbsolute, join, relative } from "@std/path";
+
 import { parse as parseJsonc } from "@std/jsonc";
-import type { Line } from "../../model.ts";
+import { dirname, fromFileUrl, isAbsolute, join, relative } from "@std/path";
+
+import ts from "typescript";
+
+import { cpLen } from "../../ansi.ts";
 import type { DiffMaps } from "../../diffdoc.ts";
+import type { Line } from "../../model.ts";
 import type {
   DefTarget,
   Semantics,
@@ -33,7 +37,6 @@ import {
   languageForFile,
   readOnlyReasonFor,
 } from "../language.ts";
-import { cpLen } from "../../ansi.ts";
 
 interface SectionFile {
   /** Virtual file name (the section header path, or `fileName`). */
@@ -77,7 +80,7 @@ export function createSemantics(
     sections.find((s) => offset >= s.start && offset < s.end);
   const sectionByVfile = new Map(sections.map((s) => [s.name, s] as const));
 
-  // Memoise resolutions and real-file reads: the info card resolves the same
+  // Memoize resolutions and real-file reads: the info card resolves the same
   // offsets repeatedly (a symbol appears in both "depends on" and "defined
   // elsewhere"), and many external defs land in the same large file.
   const defCache = new Map<number, DefTarget[]>();
@@ -640,7 +643,7 @@ function lexicallyWithin(child: string, parent: string): boolean {
 }
 
 /**
- * True if `child` sits beneath `parent` PHYSICALLY: the check canonicalises
+ * True if `child` sits beneath `parent` PHYSICALLY: the check canonicalizes
  * both sides, so an in-workspace symlink pointing outside the workspace does
  * not pass. `child` must exist (a nonexistent path cannot be read anyway).
  */

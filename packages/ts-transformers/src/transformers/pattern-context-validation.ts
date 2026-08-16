@@ -28,12 +28,15 @@
  *   - optional property/element access is allowed in supported lowerable
  *     expression sites
  *   - non-lowerable optional access still errors
- * - Calling .get() on cells: ERROR (must wrap in computed())
+ * - Calling .get() on a cell with no lowerable expression site to carry the
+ *   read: ERROR (must wrap in computed()); a read at a lowerable site is
+ *   auto-wrapped into a lift instead
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
  * - Local computed()/lift() aliases used as plain values in the same
  *   callback: ERROR (use a nested computed()/lift())
  */
+
 import ts from "typescript";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
@@ -260,17 +263,21 @@ export class PatternContextValidationTransformer
           unsupportedCallRoot === "restricted-get-call" &&
           !findLowerableExpressionSite(node, context, analyze)
         ) {
-          // A bare terminal `.get()` (no enclosing lowerable expression site)
-          // can't be auto-wrapped, so it stays an error. But a `.get()` that
-          // feeds a computation at a lowerable site (variable initializer, JSX,
-          // return, …) is auto-wrapped into a lift by the rewriter — so don't
-          // reject it here.
+          // A cell read needs a lowerable expression site to carry it: the
+          // rewriter turns that site into a lift, which is what keeps the read
+          // live. A read with no such site — statement position, or inside an
+          // array-method callback — has nothing to lower into, so it errors.
+          // A read that does have one (variable initializer, JSX, return, …)
+          // is auto-wrapped, so don't reject it here.
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:get-call",
             message:
-              `Calling .get() on a cell is not allowed in reactive context. ` +
-              `Wrap the computation in computed(() => myCell.get()) instead.`,
+              `This .get() read has no expression site that can carry it, so ` +
+              `it cannot be lowered into a lift and would freeze to a ` +
+              `one-time snapshot. Move it into computed(() => myCell.get()), ` +
+              `or read it at a site that lowers — a binding, a return, an ` +
+              `object property, or a JSX expression.`,
             node,
           });
         }

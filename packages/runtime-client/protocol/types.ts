@@ -1,3 +1,8 @@
+import type { MetaField } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { DID, KeyPairRaw } from "@commonfabric/identity";
+import { type Program } from "@commonfabric/js-compiler/interface";
+import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type {
   ActionRunTraceEntry,
   JSONSchema,
@@ -12,12 +17,7 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
-import type { DID, KeyPairRaw } from "@commonfabric/identity";
-import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
-import type { MetaField } from "@commonfabric/api";
 export type { JSONSchema, JSONValue, Program };
 
 export type { CfcLabelView };
@@ -275,7 +275,7 @@ export interface CellGetRequest extends BaseRequest {
  * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
  * is `postMessage` rather than JSON, so that is a gap rather than a limit --
  * though structured clone alone does not close it, a class instance arriving
- * with its prototype and private fields gone. `JsonCodec`
+ * with its prototype and private fields gone. `JsonCodecEngine`
  * (`@commonfabric/data-model/codec-json`) is the mechanism, already used for
  * blob-upload bodies in `backends/runtime-processor.ts`. Until then
  * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw

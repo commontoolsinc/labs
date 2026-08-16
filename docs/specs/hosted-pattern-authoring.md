@@ -24,7 +24,7 @@ authored-program manifest still required by the piece source lifecycle.
 
 ## Last updated
 
-2026-08-11
+2026-08-13
 
 ## Goal
 
@@ -381,8 +381,9 @@ workspace. Resume continues the same harness session when its access labels and
 credentials still permit it. It does not create a second session that lacks
 the first session's observed-information record.
 
-Workspace files, request text, transcripts, tool payloads, and model responses
-are retained while a session can resume. After a terminal result they are
+Workspace files, request text, transcripts, tool payloads, model responses,
+and the harness run-state handle table are retained while a session can
+resume. After a terminal result they are
 deleted at the end of a configured finite retention window. The creating
 principal can request earlier deletion, subject to the ordinary audit policy.
 A minimal result record may remain, but it contains no request text, source,
@@ -390,6 +391,53 @@ transcript, or tool payload. Production start is disabled until a default
 window and storage collection mechanism are configured. The shared
 [retention and execution provenance plan](../plans/retention-and-provenance.md)
 owns the unresolved default duration and CFC review.
+
+## Relationship to the cf-harness fabric tooling
+
+`cf-harness` carries fabric-facing tooling of its own: a host-side fabric
+session, a `run_pattern` tool, session-scoped handles for fabric addresses,
+and LLM-friendly address intake in the CLI. These components overlap with
+parts of this specification. This section records where a component satisfies
+a requirement here, where it must not be mistaken for one, and what it adds to
+the retention and identifier obligations above.
+
+- **The fabric session is an available isolated runtime target.** The harness
+  fabric session (`packages/cf-harness/src/fabric-session.ts`) constructs an
+  authorization-verified `PiecesController` on the host side, so no fabric
+  credential exists inside the sandbox. The isolated-runtime-target
+  requirement in the authoring session stands as written; this component
+  satisfies its credential-absence prerequisite by construction.
+
+- **`run_pattern` is not this specification's verification gate.** The harness
+  `run_pattern` tool is an exploration and smoke capability. It takes
+  single-string, test-less pattern source and produces an unlisted piece.
+  Publication here requires `cf check`, retained test files in the
+  authored-program manifest, and trusted publication. A pattern that ran under
+  `run_pattern` has passed none of those gates.
+
+- **Spaces may contain unlisted pieces.** Harness-created pieces are durable,
+  absent from the piece list, and their source-history revisions are
+  storage-retention roots. Root validation, retention, and space-clone
+  reasoning over "the pieces in a space" must not assume the piece list is
+  exhaustive.
+
+- **Handles redact at the model boundary; the progress surface is separate.**
+  Session handles (`cfh:` tokens,
+  `packages/cf-harness/src/handle-table.ts`) replace fabric identifiers at the
+  model boundary. This specification's exclusion of identifiers from progress
+  events is a separate, person-facing projection and remains required. The
+  identifier scrubber for compile diagnostics — bare tagged hashes, DIDs,
+  `data:` URIs — covers the identifier class that handles cannot reach.
+
+- **The handle table is retained session state.** The retention window
+  enumerated under failure and cancellation includes the harness run-state
+  handle table alongside transcripts and tool payloads, because it is a
+  durable address-to-token map of every fabric address a run touched.
+
+- **Address intake.** The CLI's LLM-friendly reference normalization
+  (`packages/cli/lib/llm-friendly-ref.ts`) provides the client-side shape for
+  this specification's piece-address syntax. The authenticated server remains
+  the resolution authority.
 
 ## Relationship to nearby systems
 

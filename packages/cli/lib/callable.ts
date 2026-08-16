@@ -7,21 +7,25 @@ import {
   type MemorySpace,
   type NormalizedFullLink,
 } from "@commonfabric/runner";
-import { isInstance } from "@commonfabric/utils/types";
+import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
 import {
   localRefTarget,
   relaxDefaultedRequired,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc/schema-sanitization";
+import { isInstance } from "@commonfabric/utils/types";
+
 import {
   type CallableKind,
   classifyCallableEntry,
 } from "../../fuse/callables.ts";
 import {
+  boundReadValue,
   type CellSelection,
   CellSelectionError,
   deriveSelectedValue,
 } from "./cell-selection.ts";
+import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -41,6 +45,29 @@ export interface CallableResolution {
   cellKey: string;
   pieces: PiecesController;
   space: MemorySpace;
+  /** This verb's declared result, resolved on demand.
+   *
+   * A THUNK rather than a value, because reaching it costs a pattern load and
+   * almost no call needs it. Two callers do: `--help`, which enumerates what a
+   * verb hands back, and a readback whose value closes a circle, which bounds
+   * itself with the declaration rather than failing. A readback that renders
+   * asks nothing of it, so an ordinary dispatch still loads no pattern.
+   *
+   * Absent where the resolution cannot match a declaration to the verb — a
+   * handler reached on the piece's input cell, a piece surface with no pattern
+   * to consult — which says this resolution cannot describe a result rather
+   * than promising there is none. */
+  declaredResult?: () => Promise<JSONSchema | undefined>;
+  /** The verb's published event schema, when the resolution knows a richer
+   * one than the dispatch cell carries.
+   *
+   * The forced-stream fallback dispatches through a cast cell whose schema is
+   * only `{asCell: ["stream"]}` — a shape every payload satisfies — while the
+   * link-derived cell still carries whatever payload schema the piece
+   * publishes. The pre-dispatch gate validates against this when present, so
+   * a malformed payload on that path is refused before the invocation id is
+   * spent, exactly as on the ordinary paths. */
+  inputSchema?: JSONSchema;
 }
 
 /** The phases a handler invocation passes through, reported on early exit so
@@ -84,15 +111,16 @@ export interface CallableExecutionDeps {
   /** Phase observer for early-exit reporting. */
   onPhase?: (phase: InvocationPhase) => void;
   /** `--no-wait`: await this handling's transaction-local commit
-   * acknowledgement, then return WITHOUT the receipt readback (sync + read).
-   * The commit acknowledgement cannot be skipped: the handler executes in
+   * acknowledgment, then return WITHOUT the receipt readback (sync + read).
+   * The commit acknowledgment cannot be skipped: the handler executes in
    * THIS process's runtime, so exiting before the commit is acknowledged
    * would abandon the invocation un-executed — nothing durable would have
    * happened — not leave it settling elsewhere. What CAN be skipped is
-   * fetching the outcome back, because a caller-supplied id keeps that
-   * fetch available forever: a later same-id call deduplicates against the
-   * create-only receipt and returns the original outcome (verb contract
-   * D1/D3). Requires an `invocationId` — without one there is no receipt to
+   * fetching the outcome back, because the exit publishes the receipt's
+   * address (`InvocationOutcome.receipt`), so collecting it later is an
+   * ordinary read; a same-id replay recovers it too, deduplicating against
+   * the create-only receipt (verb contract D1/D3), but re-runs the handler
+   * body. Requires an `invocationId` — without one there is no receipt to
    * come back for — and only the handler send path supports it (a tool's
    * result is delivered by this process, not read back from a receipt). */
   skipReadback?: boolean;
@@ -110,9 +138,15 @@ export interface CallableExecutionDeps {
    *
    * It shapes a result that exists rather than deciding what is fetched: the
    * readback has already materialized the whole receipt by the time this
-   * applies, and a receipt declares no schema for a selector to narrow
-   * against. A verb that returns nothing keeps returning nothing — there is
-   * no value for a selection to be about. */
+   * applies. (A plain result's receipt does carry a descriptive schema of
+   * what it holds — a reactive result's carries none — but either way the
+   * fetch has happened first.) The shared step also awaits the runtime's
+   * global idle plus storage sync, so a shaped call result can wait on
+   * derived recomputation the plain call's transaction-local acknowledgment
+   * does not — a documented cost of shaping at the call
+   * (`deriveSelectedValue`, cell-selection.ts). A verb that returns nothing
+   * keeps returning nothing — there is no value for a selection to be
+   * about. */
   selection?: CellSelection;
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
   deriveSelectedValue?: typeof deriveSelectedValue;
@@ -134,6 +168,29 @@ export interface InvocationOutcome {
    * (commit acknowledged, readback skipped), and a caller-bounded wait
    * reports the phase its bound expired in. */
   status: "settled" | InvocationPhase;
+  /** Durable address of this handling's receipt — the cell the outcome is
+   * written to, and the one `result` is read from.
+   *
+   * Published from the transaction's handling receipt link, which the commit
+   * callback carries, so the address is known BEFORE the outcome is read.
+   * That is what makes it available under `--no-wait`: a caller that chose
+   * not to wait still holds the address to collect from, and reads it back
+   * with `cf piece get --piece <id>` rather than re-invoking the verb. The
+   * receipt is a COMMIT witness, not an execution witness — a same-id replay
+   * runs the handler body again and then loses the race, so effects outside
+   * the transaction repeat.
+   *
+   * On a create-only collision this addresses the ORIGINAL handling's
+   * receipt: the loser's commit callback carries the winner's address. That
+   * is the runner's guarantee, asserted where it is implemented
+   * (`packages/runner/test/scheduler-event-receipts.test.ts`, "cell.send
+   * carries a caller-supplied eventId and exposes the receipt link") — the
+   * CLI's own tests drive a single address and cannot witness it.
+   *
+   * Absent when the runtime published no link: with `commitPreconditions`
+   * off nothing writes a receipt, and an address naming a cell that does not
+   * exist is worse than no address. */
+  receipt?: InvocationResultLink;
   /** The verb's result read back from the handling's receipt, when the
    * receipt carried one (a reactive-bearing return, or a plain return under
    * the plainResultReceipts flag). Absent for value-less verbs. */
@@ -157,6 +214,25 @@ export interface CallableResultRef {
   space: string;
   id: string;
   scope: CellScope;
+}
+
+/**
+ * `ref` written the way an address argument is written, so a command that
+ * prints one and a command that takes one agree on the spelling.
+ *
+ * `parseScopedIdSegment` reads `<id>@<scope>` and reads a bare id as the space
+ * scope, so the bare form is what a space-scoped address renders as — spelling
+ * `@space` out would be a second way to write an address that already has one.
+ * Every other scope carries its suffix, because reopening a user- or
+ * session-scoped cell without it resolves the space-scoped instance, which is
+ * a different cell.
+ *
+ * The space is not part of it: an address argument is read against the space
+ * the command is connected to, and a caller carrying one across spaces names
+ * the other with `--space` rather than inside the id.
+ */
+export function addressArgument(ref: CallableResultRef): string {
+  return ref.scope === "space" ? ref.id : `${ref.id}@${ref.scope}`;
 }
 
 export interface ExecutedCallable {
@@ -197,6 +273,16 @@ export function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
 }
 
 function errorMessage(error: unknown): string {
+  if (
+    typeof error === "object" && error !== null && "reason" in error &&
+    (error as { reason?: unknown }).reason != null
+  ) {
+    // A StorageTransactionAborted carries the abort's cause as `reason`, and
+    // its own message is the generic "Transaction was aborted". Prefer the
+    // cause: for a pre-dispatch drop — a send refused at the backlog cap, a
+    // piece that failed to load — the reason is the whole signal.
+    return errorMessage((error as { reason: unknown }).reason);
+  }
   if (error instanceof Error) {
     return error.message;
   }
@@ -297,6 +383,331 @@ export function schemaIsObjectShaped(
   return false;
 }
 
+/** A field a payload carries at a position whose schema does not declare it,
+ * with what that position does declare. */
+interface UndeclaredEventField {
+  key: string;
+  position: string;
+  declared: string[];
+}
+
+/** One property map an object-shaped position reaches, with the local-ref
+ * scope the schemas inside it resolve against. */
+interface DeclaredFieldSource {
+  properties: Record<string, JSONSchema>;
+  root: JSONSchema;
+}
+
+/** What a position declares, and whether anything there honors a field none of
+ * its maps name. */
+interface DeclaredFields {
+  sources: DeclaredFieldSource[];
+  honorsUndeclared: boolean;
+}
+
+/**
+ * Every property map an object-shaped position reaches, and whether it honors a
+ * field none of them name.
+ *
+ * A conjunction constrains one value from several members at once, so the
+ * fields it declares are the UNION across its members: a payload satisfying an
+ * `allOf` satisfies every member, and a field one member names is a field the
+ * position names. Taking the union is also the safe direction — the cost of
+ * missing a member is refusing a field that was declared, and the cost of an
+ * extra member is accepting one that would have been dropped.
+ *
+ * A disjunction anywhere inside makes the whole position honor everything: a
+ * branch a payload was meant for may name a field the others do not, and
+ * choosing among branches is the caller's, not this gate's.
+ *
+ * `followed` breaks reference cycles, and it records the REFERENCE rather than
+ * the schema it resolved to — the same key `localRefTarget` cycles on, and the
+ * only one that works here: resolution hands back a fresh view of a definition
+ * each time, so a recursive `$ref` reaches an object this walk has never seen
+ * and descends forever. A member is skipped once its reference has been
+ * followed in the scope it was written in; a definition contributes its fields
+ * once, and a schema naming itself terminates.
+ */
+function declaredFieldsAt(
+  node: Record<string, unknown>,
+  root: JSONSchema,
+  into: DeclaredFields = { sources: [], honorsUndeclared: false },
+  followed: Map<JSONSchema, Set<string>> = new Map(),
+): DeclaredFields {
+  if (isSchemaObject(node.properties as JSONSchema)) {
+    into.sources.push({
+      properties: node.properties as Record<string, JSONSchema>,
+      root,
+    });
+  }
+  if (node.additionalProperties !== undefined) into.honorsUndeclared = true;
+  if (!Array.isArray(node.allOf)) return into;
+  for (const member of node.allOf as JSONSchema[]) {
+    const memberRoot = cfcSchemaChildRoot(member, root);
+    if (isSchemaObject(member) && typeof member.$ref === "string") {
+      let inScope = followed.get(memberRoot);
+      if (inScope?.has(member.$ref)) continue;
+      if (inScope === undefined) {
+        inScope = new Set();
+        followed.set(memberRoot, inScope);
+      }
+      inScope.add(member.$ref);
+    }
+    const resolved = localRefTarget(member, memberRoot);
+    if (!isSchemaObject(resolved)) continue;
+    if (resolved.anyOf !== undefined || resolved.oneOf !== undefined) {
+      into.honorsUndeclared = true;
+      continue;
+    }
+    declaredFieldsAt(
+      resolved,
+      cfcSchemaChildRoot(resolved, memberRoot),
+      into,
+      followed,
+    );
+  }
+  return into;
+}
+
+/** The vocabulary a refusal names: every field the position's maps declare, in
+ * the order they were reached, each named once. */
+function declaredFieldNames(sources: DeclaredFieldSource[]): string[] {
+  const names: string[] = [];
+  for (const source of sources) {
+    for (const key of Object.keys(source.properties)) {
+      if (!names.includes(key)) names.push(key);
+    }
+  }
+  return names;
+}
+
+/**
+ * Whether a position describes the array a payload holds there.
+ *
+ * The array counterpart of {@link schemaIsObjectShaped}, and it answers the
+ * question the same way: a stated `type` says so, and otherwise the container
+ * keyword being present does. An untyped position naming `items` is an array
+ * to everything except schema traversal's own descent, which requires the
+ * stated type and empties the position without it — the same asymmetry the
+ * object side has, one container over.
+ */
+function schemaIsArrayShaped(node: Record<string, unknown>): boolean {
+  const declaredType = node.type;
+  if (declaredType === "array") return true;
+  if (Array.isArray(declaredType)) return declaredType.includes("array");
+  if (declaredType !== undefined) return false;
+  return node.items !== undefined || node.prefixItems !== undefined;
+}
+
+/** Whether a schema node marks its position as a cell or a stream, which is
+ * where a caller may write a link in place of a value. */
+function carriesCellMarker(node: Record<string, unknown>): boolean {
+  return node.asCell !== undefined || node.asStream !== undefined;
+}
+
+/**
+ * The first field the payload carries that the schema at its position does not
+ * declare, walking the PAYLOAD (finite JSON the caller supplied, so the walk
+ * terminates on its own) and consulting the schema beside it.
+ *
+ * Whether a position describes the object a payload holds there is
+ * {@link schemaIsObjectShaped}'s question, asked here rather than answered
+ * again: a stated `type: "object"`, a `properties` map with no type beside it,
+ * a type union admitting an object, and a conjunction with an object-shaped
+ * member all describe one. Every one of them drops what it does not name, so
+ * every one of them is judged.
+ *
+ * Three positions are passed over, each because the schema stops proving what
+ * the runtime will do with what sits under it:
+ *
+ * - a disjunction (`anyOf`/`oneOf`), here or inside a conjunction, where a
+ *   payload need satisfy only one branch and a field missing from the branch
+ *   this walk inspected may be named by another. Choosing among branches is
+ *   the caller's, not this gate's;
+ * - a position marked `asCell`/`asStream` below the root, where the value may
+ *   be a link (whose `"/"` is not a field anybody declared) and an inline value
+ *   is carried across the boundary rather than filtered at dispatch. The ROOT's
+ *   own marker is ignored, because the stream marker is what makes the schema a
+ *   verb's in the first place and the payload under it is the event;
+ * - a position describing neither the object nor the array the payload holds
+ *   there.
+ *
+ * A key several members of a conjunction constrain is passed over too, one
+ * level down: the walk cannot say which member's schema governs beneath it.
+ *
+ * Every one of them fails open. A refusal spends nothing and can be retried,
+ * but a call this gate wrongly refuses cannot be made at all, so the direction
+ * to be wrong in is the permissive one.
+ */
+function firstUndeclaredEventField(
+  value: unknown,
+  schema: JSONSchema | undefined,
+  root: JSONSchema,
+  position: string,
+  atRoot: boolean,
+): UndeclaredEventField | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  if (!isSchemaObject(schema)) return undefined;
+  if (!atRoot && carriesCellMarker(schema)) return undefined;
+  const scopeRoot = cfcSchemaChildRoot(schema, root);
+  const node = localRefTarget(schema, scopeRoot);
+  if (!isSchemaObject(node)) return undefined;
+  if (!atRoot && carriesCellMarker(node)) return undefined;
+  if (node.anyOf !== undefined || node.oneOf !== undefined) return undefined;
+  const nodeRoot = cfcSchemaChildRoot(node, scopeRoot);
+
+  if (Array.isArray(value)) {
+    if (!schemaIsArrayShaped(node)) return undefined;
+    const prefixItems = Array.isArray(node.prefixItems)
+      ? node.prefixItems as JSONSchema[]
+      : undefined;
+    for (let index = 0; index < value.length; index++) {
+      const child = prefixItems !== undefined && index < prefixItems.length
+        ? prefixItems[index]
+        : node.items as JSONSchema | undefined;
+      const found = firstUndeclaredEventField(
+        value[index],
+        child,
+        nodeRoot,
+        `${position}[${index}]`,
+        false,
+      );
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
+  if (!schemaIsObjectShaped(node, nodeRoot)) return undefined;
+  const declared = declaredFieldsAt(node, nodeRoot);
+  if (declared.sources.length === 0) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>);
+  const declaringSources = (key: string) =>
+    declared.sources.filter((source) => Object.hasOwn(source.properties, key));
+  if (!declared.honorsUndeclared) {
+    for (const [key] of entries) {
+      if (declaringSources(key).length === 0) {
+        return {
+          key,
+          position,
+          declared: declaredFieldNames(declared.sources),
+        };
+      }
+    }
+  }
+  for (const [key, child] of entries) {
+    const matches = declaringSources(key);
+    const childSchema = matches.length === 1
+      ? matches[0].properties[key]
+      : matches.length === 0
+      ? node.additionalProperties as JSONSchema | undefined
+      : undefined;
+    const found = firstUndeclaredEventField(
+      child,
+      childSchema,
+      matches.length === 1 ? matches[0].root : nodeRoot,
+      `${position}.${key}`,
+      false,
+    );
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Whether this event schema judges the fields a payload names at its root.
+ *
+ * It does when it names fields somewhere — directly or through a conjunction —
+ * and does not also say extra ones are welcome. A schema naming none judges
+ * none, so every field passes; one carrying `additionalProperties` has said
+ * undeclared fields are fine.
+ *
+ * Exported for the flag door, which needs the same answer about the same
+ * schema and must not derive it a second way. It asks whether the SCHEMA
+ * judges, not whether a given NAME is declared — those differ, and conflating
+ * them makes a declared field spelled the wrong way look undeclared-and-open
+ * rather than misspelled, which is the difference between a near miss and a
+ * silent alias.
+ */
+export function eventSchemaJudgesRootFields(
+  schema: JSONSchema | undefined,
+): boolean {
+  if (!isSchemaObject(schema)) return false;
+  const scopeRoot = cfcSchemaChildRoot(schema, schema);
+  const target = localRefTarget(schema, scopeRoot);
+  if (!isSchemaObject(target)) return false;
+  if (target.anyOf !== undefined || target.oneOf !== undefined) return false;
+  const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
+  if (!schemaIsObjectShaped(target, targetRoot)) return false;
+  const declared = declaredFieldsAt(target, targetRoot);
+  return declared.sources.length > 0 && !declared.honorsUndeclared;
+}
+
+/**
+ * Refuse a payload carrying a field the verb does not declare, naming the
+ * field, the position it sat at, the vocabulary that position takes, and the
+ * declared name it is one edit from.
+ *
+ * The comparison needs no source of truth beyond the schema already in hand:
+ * the verb's event schema names exactly the fields the verb declares. What it
+ * adds is treating an undeclared one as a reason to refuse, which nothing else
+ * on this path does — the runtime's own read drops the field and delivers the
+ * rest, so the handler runs, the receipt is written, and the caller is told the
+ * call settled with a field it wrote never having arrived. A TypeScript author
+ * never meets that; a caller writing JSON by hand or by model meets it first.
+ *
+ * Which positions drop, measured against the read a handler's event goes
+ * through (`SchemaObjectTraverser.traverseObjectWithSchema`, runner
+ * traverse.ts, whose `addOptionalProperty` is a no-op on the
+ * `validateAndTransform` path), for an object holding one declared and one
+ * undeclared field:
+ *
+ * | The schema at a position | What the handler receives |
+ * | --- | --- |
+ * | `{type: "object"}` | both fields |
+ * | `{type: "object", properties: {declared}}` | the declared field |
+ * | `{type: ["object", "null"], properties: {declared}}` | the declared field |
+ * | `{allOf: [{type: "object", properties: {declared}}]}` | the declared field |
+ * | `{properties: {declared}}` | nothing |
+ * | `{type: "object", properties: {}}` | nothing |
+ * | `{anyOf: [...]}` | both fields |
+ * | any of those plus `additionalProperties` | both fields |
+ *
+ * So a position with no property map is open by construction and refuses
+ * nothing — a verb declaring no fields THAT way takes anything. Every position
+ * that has one drops what none of its maps name, whether or not it also states
+ * a type and whether it reaches the map directly or through a conjunction.
+ *
+ * The two rows delivering NOTHING are two readings of "declares no fields", and
+ * both refuse every field written there. A bare `properties` map drops the
+ * fields it declares as well, which is a defect of its own and not one a gate
+ * over undeclared fields can speak to.
+ *
+ * @internal Exported for the tests that pin the refusal's wording.
+ */
+export function undeclaredVerbFieldError(
+  input: unknown,
+  schema: JSONSchema | undefined,
+): string | undefined {
+  if (schema === undefined || schema === true) return undefined;
+  const found = firstUndeclaredEventField(
+    input,
+    schema,
+    schema,
+    EVENT_ROOT_POSITION,
+    true,
+  );
+  if (found === undefined) return undefined;
+  const nearest = nearestName(found.key, found.declared);
+  return `"${found.key}" at ${found.position} is not a field this verb ` +
+    "declares. " +
+    (nearest === undefined ? "" : `Did you mean "${nearest}"? `) +
+    (found.declared.length === 0
+      ? `${found.position} declares no fields at all`
+      : `${found.position} takes ${
+        found.declared.map((key) => `"${key}"`).join(", ")
+      }`);
+}
+
 /**
  * Reject a payload that cannot satisfy the verb's event schema, before it is
  * sent.
@@ -315,6 +726,13 @@ export function schemaIsObjectShaped(
  * and is judged like any supplied payload; against everything else it stays
  * `undefined` and passes — `$event` is genuinely optional in the generated
  * handler schema, and value-less verbs are a supported shape.
+ *
+ * A field the verb does not declare is judged FIRST, ahead of the schema
+ * validation. Both can hold at once — a misspelled required field is missing
+ * and undeclared in one stroke — and of the two answers only one names
+ * something the caller actually wrote. "`titel` is not a field, did you mean
+ * `title`" sends them to the character they typed; "`title` is missing" sends
+ * them looking for a field that is already there.
  */
 export function verbInputSchemaError(
   input: unknown,
@@ -322,6 +740,8 @@ export function verbInputSchemaError(
 ): string | undefined {
   if (input === undefined) return undefined;
   if (schema === undefined || schema === true) return undefined;
+  const undeclared = undeclaredVerbFieldError(input, schema);
+  if (undeclared !== undefined) return undeclared;
   return validateSchemaValue(
     relaxDefaultedRequired(schema, schema, new Map()),
     input,
@@ -628,6 +1048,165 @@ async function selectCallResult(
   return selected;
 }
 
+/**
+ * A result that cannot be written as JSON because it closes a circle, and that
+ * nothing in reach bounds: the verb declared no result, or the declaration it
+ * did make leaves the closing position unbounded.
+ *
+ * A distinct type because the condition is a rendering failure over a handling
+ * that COMMITTED, which is the one thing the message has to carry — the caller
+ * is holding a nonzero exit for a mutation that landed.
+ */
+export class CyclicResultError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CyclicResultError";
+  }
+}
+
+/**
+ * Helper for {@link circularResultPath}: the position, as a JSON pointer, that
+ * is reachable from inside itself.
+ *
+ * Ancestors, not visits: a value reachable by two paths is written twice and
+ * renders fine, while a value reachable from inside itself has no rendering at
+ * all. Own enumerable keys and nothing else, which is what a serializer reads.
+ *
+ * A node carrying `toJSON` is a leaf here, because it is a leaf to the
+ * serializer too: what gets written is whatever that method returns, and the
+ * properties underneath are never visited. The runtime objects a readback
+ * surfaces — a stream on a returned piece — are exactly that case, and their
+ * internals do refer back to themselves.
+ */
+function locateResultCycle(value: unknown): string | undefined {
+  const ancestors = new Set<object>();
+  const walk = (node: unknown, path: string[]): string | undefined => {
+    if (typeof node !== "object" || node === null) return undefined;
+    if (ancestors.has(node)) return encodeJsonPointer(["", ...path]);
+    if (typeof (node as { toJSON?: unknown }).toJSON === "function") {
+      return undefined;
+    }
+    ancestors.add(node);
+    try {
+      const keys = Array.isArray(node)
+        ? node.map((_, index) => String(index))
+        : Object.keys(node);
+      for (const key of keys) {
+        const found = walk(
+          (node as Record<string, unknown>)[key],
+          [...path, key],
+        );
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    } finally {
+      ancestors.delete(node);
+    }
+  };
+  return walk(value, []);
+}
+
+/**
+ * The JSON pointer of the position where `value` closes a circle, or
+ * `undefined` where `value` can be written as JSON.
+ *
+ * Two witnesses have to agree before this reports one. The serializer decides
+ * whether the value renders at all — it is the thing whose failure is being
+ * prevented, so nothing else gets to overrule it — and the walk beside it
+ * decides where. A value the serializer writes is left alone whatever the walk
+ * thinks, and a serializer failure the walk cannot place is left alone too:
+ * `JSON.stringify` refuses more than circles, and a refusal that is not one is
+ * not this path's to answer.
+ */
+function circularResultPath(value: unknown): string | undefined {
+  try {
+    JSON.stringify(value);
+    return undefined;
+  } catch {
+    return locateResultCycle(value);
+  }
+}
+
+/**
+ * Bound a readback that closes a circle with the verb's own declared result,
+ * and hand back the value that bounds to.
+ *
+ * The declaration is the boundary the AUTHOR drew: the position where the
+ * declared type re-enters itself is the position that closes the circle, so
+ * rendering an address there cuts exactly where the shape says it should, and
+ * leaves every other position reading as it already did. The addresses are
+ * written by the same walk `--select`/`--schema` compose theirs with, so a
+ * derived bound and a hand-written one name the same position the same way.
+ *
+ * The cut is applied to `value` — the result already in hand — and never reads
+ * a second one. That is what lets it bound a result a caller ALREADY shaped
+ * without widening it: a projection can name the re-entering subtree whole,
+ * which selects the circle rather than cutting past it, and the cut then
+ * removes the closing position from what they selected rather than answering
+ * with the declaration's whole shape in its place. Where a caller's own shape
+ * renders, this is never reached at all.
+ *
+ * Refuses where nothing in reach bounds it: no declaration at all, a
+ * declaration whose recursion does not reach the closing position, or a
+ * `--filter` beside it — a filtered array's elements no longer say which
+ * positions they came from, and the bound is written in addresses, which name
+ * positions. A refusal names where the circle closes and how to collect the
+ * outcome, which beats a stack trace for a handling that already committed.
+ */
+async function boundCyclicResult(
+  resolved: CallableResolution,
+  receiptCell: Cell<any>,
+  value: unknown,
+  cycle: string,
+  receiptId: string | undefined,
+  deps: CallableExecutionDeps,
+): Promise<unknown> {
+  // Each wording is its own statement, so a reader of the coverage report can
+  // tell which of them a test has ever produced. Inside one expression they
+  // could not: a ternary is a single statement, and its untaken arm is
+  // credited with the count of the statement holding it, so a wording nothing
+  // has ever emitted reads exactly like one every call emits.
+  let whyUnbounded: string;
+  if (deps.selection?.filter !== undefined) {
+    // Decided before the declaration is reached for, because reaching for it
+    // costs a pattern load and no derivation from it can be applied here: the
+    // selection step refuses a `$link` beside a `--filter` on the same grounds
+    // this refusal names, and every derived bound is `$link`s.
+    whyUnbounded = "This call's --filter is answered with the elements " +
+      "themselves, which no longer say which positions they came from, so " +
+      "the addresses a bound is written in cannot be composed beside it.";
+  } else {
+    const declared = await resolved.declaredResult?.();
+    const bounded = await boundReadValue(receiptCell, declared, value);
+    // The bound is only as good as the declaration: a position the declaration
+    // left wide can still expand into the circle, and answering with a value
+    // that cannot be written would move the same failure one step later.
+    if (bounded !== undefined && circularResultPath(bounded) === undefined) {
+      return bounded;
+    }
+    if (declared === undefined) {
+      whyUnbounded = "This verb declares no result for `cf` to bound the " +
+        "readback with.";
+    } else {
+      whyUnbounded = "This verb's declared result leaves the closing " +
+        "position unbounded.";
+    }
+  }
+  throw new CyclicResultError(
+    `Cannot render the result of "${resolved.cellKey}": it closes a circle at ` +
+      `"${cycle}", and JSON has no way to write one. The handling ` +
+      "COMMITTED — the write landed, and only this rendering failed. " +
+      whyUnbounded +
+      " Collect the outcome with a shape that bounds it: " +
+      (receiptId === undefined
+        ? "read the receipt with --select or --schema."
+        : `cf piece get --piece ${receiptId} ` +
+          `--schema '{"properties":{"<field>":{"$link":true}}}'.`) +
+      " Calling the verb again under --select or --schema shapes it at the " +
+      "call, but runs the handler body a second time.",
+  );
+}
+
 export async function executeResolvedCallable(
   resolved: CallableResolution,
   input: unknown,
@@ -637,11 +1216,13 @@ export async function executeResolvedCallable(
     // Before anything is dispatched, and so before the invocation id can be
     // spent on a handling that would run with no event. An absent payload
     // is normalized to `{}` against an object schema (D5), so what goes out
-    // is what the gate judged.
+    // is what the gate judged. A resolution carrying a richer published
+    // schema than its dispatch cell (the forced-stream fallback) is judged
+    // against that one.
     const dispatchInput = assertVerbInputSatisfiesSchema(
       resolved.cellKey,
       input,
-      resolved.callableCell.schema,
+      resolved.inputSchema ?? resolved.callableCell.schema,
     );
     const runtimeErrors = runtimeErrorLog(resolved.pieces.runtime);
     const errorCountBefore = runtimeErrors.length;
@@ -695,48 +1276,91 @@ export async function executeResolvedCallable(
 
     if (invocationId === undefined) return {};
 
+    // The handling's receipt address, taken off the transaction the commit
+    // callback handed back (verb contract WS-D). It is known HERE — at
+    // commit, before anything is read — which is what lets the detached exit
+    // below publish an address for an outcome nobody waited for.
+    const link = tx.handlingReceiptLink;
+    const receiptAddress = link === undefined
+      ? undefined
+      : toInvocationResultLink(link);
+
     if (deps.skipReadback) {
       // --no-wait's exit point: the commit is acknowledged, so the
       // handling — and on a collision, the original one — is durable on
       // the server and survives this process. Only the readback
-      // (sync + read of the outcome) is skipped; a later same-id call
-      // retrieves it by deduplicating against the create-only receipt.
+      // (sync + read of the outcome) is skipped; the address of the outcome
+      // rides out regardless, so collecting it later is an ordinary read
+      // rather than a same-id replay that re-runs the handler body.
       return {
         invocation: {
           id: invocationId,
           status: "committed",
           ...(deduplicated ? { deduplicated: true } : {}),
+          ...(receiptAddress !== undefined ? { receipt: receiptAddress } : {}),
         },
       };
     }
 
     // Read the handling's outcome back off its receipt. On a receipt-exists
     // collision this is the ORIGINAL handling's receipt — same id, same
-    // outcome, no re-execution — so a retry settles as a success.
+    // outcome — so a retry settles as a success. The receipt is a COMMIT
+    // witness, not an execution witness: the redelivered event still ran the
+    // handler body and then lost the race, so nothing committed twice while
+    // effects outside the transaction repeated.
     deps.onPhase?.("readback");
     let result: unknown;
     let links: Record<string, InvocationResultLink> | undefined;
-    const link = tx.handlingReceiptLink;
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
       const value = await receipt.pull();
       // A value-less verb's receipt is an empty record — existence-only.
-      if (
-        value !== undefined &&
-        !(isRecord(value) && Object.keys(value).length === 0)
-      ) {
+      // Presence is decided on the receipt's STORED value, never on the
+      // materialized one: a `FabricInstance` crossing the cell read arrives
+      // as a query-result proxy over an empty ordinary stub (the
+      // `getPrototypeOf` note in packages/runner/src/query-result-proxy.ts),
+      // so prototype and key enumeration on `value` cannot tell a real
+      // instance result from the witness. The witness is stored as exactly
+      // the plain empty record; every other stored shape — plain JSON, the
+      // link a launched or chained-cell result converts to, an instance's
+      // codec form, a keyless raw primitive — is a result.
+      const raw = receipt.getRaw();
+      const valueLess = isRecord(raw) && !isInstance(raw) &&
+        Object.keys(raw).length === 0;
+      if (value !== undefined && !valueLess) {
         result = value;
       }
-      if (deps.selection !== undefined && result !== undefined) {
-        // Only where a result exists. Shaping the empty witness would report
-        // `{}` for a verb whose whole answer is that it returned nothing, and
-        // that omission is the distinction the empty receipt exists to draw.
-        result = await selectCallResult(
-          resolved,
-          receipt,
-          deps.selection,
-          deps,
-        );
+      if (result !== undefined) {
+        // Both steps run only where a result exists. Shaping the empty witness
+        // would report `{}` for a verb whose whole answer is that it returned
+        // nothing, and that omission is the distinction the empty receipt
+        // exists to draw.
+        if (deps.selection !== undefined) {
+          result = await selectCallResult(
+            resolved,
+            receipt,
+            deps.selection,
+            deps,
+          );
+        }
+        // Whatever the value in hand came from — the whole receipt, or the
+        // caller's own shape over it — what goes out is written as JSON, and a
+        // circle has no JSON writing at all. A selection is no exemption: a
+        // projection that names the re-entering subtree whole keeps the circle
+        // it selected. The check reads a value already in hand and touches no
+        // storage, so a result that renders reaches stdout exactly as it always
+        // has, and the bound below engages only where one does not.
+        const cycle = circularResultPath(result);
+        if (cycle !== undefined) {
+          result = await boundCyclicResult(
+            resolved,
+            receipt,
+            result,
+            cycle,
+            receiptAddress?.id,
+            deps,
+          );
+        }
       }
       if (deps.showLinks) {
         // After readback and after the selection, off the same receipt the
@@ -754,6 +1378,7 @@ export async function executeResolvedCallable(
         id: invocationId,
         status: "settled",
         ...(deduplicated ? { deduplicated: true } : {}),
+        ...(receiptAddress !== undefined ? { receipt: receiptAddress } : {}),
         ...(result !== undefined ? { result } : {}),
         ...(links !== undefined ? { links } : {}),
       },

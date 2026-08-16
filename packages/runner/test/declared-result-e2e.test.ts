@@ -1,20 +1,23 @@
-// A CTS-authored `action<Event, Result>` verb, compiled through the real
-// pipeline (`patternManager.compilePattern` → js-compiler → CTS transformers →
-// SES evaluation), delivers its returned value into the event receipt under
-// the `plainResultReceipts` experimental flag (default-on since the flip) —
-// the composition of this
-// package's plain-return projection (scheduler-event-receipts.test.ts, which
-// exercises only the raw trusted-builder `handler`) with the api's declared-
-// result authoring surface. This is the readback half of WS-C's exit
-// criterion, pinned at the runner in addition to the end-to-end fixture
-// (docs/history/plans/pattern-verb-contract-implementation.md, D4).
-//
-// The incidental-cell-return case pins the receipt write's conversion: `set()`
-// returns its cell for chaining, so an expression-body
-// `action(() => cell.set(...))` returns a live Cell. The receipt write goes
-// through the cell's standard write flow, so that return is recorded as a LINK
-// to the mutated cell — receipts reflect what was returned (a raw write fails
-// the whole handling on the live object instead).
+/**
+ * A CTS-authored `action<Event, Result>` verb, compiled through the real
+ * pipeline (`patternManager.compilePattern` → js-compiler → CTS transformers →
+ * SES evaluation), delivers its returned value into the event receipt under
+ * the `plainResultReceipts` experimental flag (default-on since the flip) —
+ * the composition of this
+ * package's plain-return projection (scheduler-event-receipts.test.ts, which
+ * exercises only the raw trusted-builder `handler`) with the api's declared-
+ * result authoring surface. This is the readback half of WS-C's exit
+ * criterion, pinned at the runner in addition to the end-to-end fixture
+ * (docs/history/plans/pattern-verb-contract-implementation.md, D4).
+ *
+ * The incidental-cell-return case pins the receipt write's conversion: `set()`
+ * returns its cell for chaining, so an expression-body
+ * `action(() => cell.set(...))` returns a live Cell. The receipt write goes
+ * through the cell's standard write flow, so that return is recorded as a LINK
+ * to the mutated cell — receipts reflect what was returned (a raw write fails
+ * the whole handling on the live object instead).
+ */
+
 import {
   afterEach,
   beforeEach,
@@ -152,13 +155,18 @@ async function waitForSchedulerCondition(
   condition: () => boolean,
   message: string,
 ): Promise<void> {
-  const deadline = performance.now() + 5_000;
-  while (!condition() && performance.now() < deadline) {
+  // Iteration-bounded, not wall-clock-bounded: zero-delay yields do not
+  // advance the fake clock, so a time deadline could never expire and an
+  // unreachable condition would spin forever — hanging the suite to the CI
+  // job timeout with no test name. Each round drains the scheduler and
+  // yields one real timer turn — transport pumps and the emulated server's
+  // fan-out flush (which resolves awaited commits at marker coverage,
+  // CT-1950) ride zero-delay timers, which are exempt from the fake clock's
+  // test-armed freeze — so a condition the system will ever reach is reached
+  // within a bounded number of rounds, and one it never reaches throws
+  // `message` instead of hanging.
+  for (let round = 0; round < 200 && !condition(); round++) {
     await runtime.idle();
-    // Yield a zero-delay timer turn: an idle() that resolves through
-    // microtasks alone would otherwise starve the timer queue, and the
-    // emulated server's fan-out flush — which resolves awaited commits at
-    // marker coverage (CT-1950) — rides a zero-delay timer.
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {

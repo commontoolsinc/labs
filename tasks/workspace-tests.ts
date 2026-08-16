@@ -1,7 +1,10 @@
-// Implementation of the root `deno task test` runner. The entry point is
-// tasks/test.ts; the logic lives here because `deno coverage` skips files
-// whose names end in test.ts, and the coverage-debt metric scores an
-// unmeasured file as fully uncovered.
+/**
+ * Implementation of the root `deno task test` runner. The entry point is
+ * tasks/test.ts; the logic lives here because `deno coverage` skips files
+ * whose names end in test.ts, and the coverage-debt metric scores an
+ * unmeasured file as fully uncovered.
+ */
+
 import * as path from "@std/path";
 import { parse as parseJsonc } from "@std/jsonc";
 import { decode, encode } from "@commonfabric/utils/encoding";

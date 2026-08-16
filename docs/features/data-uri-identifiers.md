@@ -101,6 +101,11 @@ Representative places that mint one:
   `data:` identifier and keeps the rest of the path.
 - Query traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
   document for an array element it needs to read recursively.
+- The lazy schema view in `packages/runner/src/schema-view.ts` does the same for
+  an array element that is an inline object, when the reader touches it. The
+  element's value is already in hand, so the identifier costs no read. Without
+  it `toCell` on such an element would name the array's INDEX, and writing that
+  link anywhere else would follow whatever landed at that index next.
 
 ## Reading one
 

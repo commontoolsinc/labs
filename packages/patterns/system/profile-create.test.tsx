@@ -26,7 +26,7 @@
  *
  * Run: deno task cf test packages/patterns/system/profile-create.test.tsx --verbose
  */
-import { assert, pattern, UI, Writable } from "commonfabric";
+import { assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import ProfileCreate, {
   TRUSTED_PROFILE_CREATE_ACTION,
 } from "./profile-create.tsx";
@@ -137,7 +137,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       // No defaultName → no prefill, wiring unchanged
       { assertion: assert_no_default_has_no_initial_value },
       { assertion: assert_no_default_action_wired },

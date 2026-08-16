@@ -1,8 +1,9 @@
-import type ts from "typescript";
-import { getLogger } from "@commonfabric/utils/logger";
 import type { Source, SourceMap } from "@commonfabric/js-compiler";
-import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
 import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
+import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import { getLogger } from "@commonfabric/utils/logger";
+import type ts from "typescript";
+
 import { compilerStack } from "../harness/deferred-compiler-stack.ts";
 import {
   computeModuleHashes,

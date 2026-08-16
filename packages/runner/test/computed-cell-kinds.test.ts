@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type Frame, type JSONSchema } from "../src/builder/types.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+
+import {
+  REPLAYABLE_BUILTIN_REFS,
+  SUBPATTERN_ARGUMENT_BUILTIN_REFS,
+} from "../src/builder/builtin-replayability.ts";
 import {
   byRef,
   createNodeFactory,
@@ -9,17 +15,13 @@ import {
 } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { reactive } from "../src/builder/reactive.ts";
-import {
-  REPLAYABLE_BUILTIN_REFS,
-  SUBPATTERN_ARGUMENT_BUILTIN_REFS,
-} from "../src/builder/builtin-replayability.ts";
+import { type Frame, type JSONSchema } from "../src/builder/types.ts";
 import { registerBuiltins } from "../src/builtins/index.ts";
 import { createRef } from "../src/create-ref.ts";
-import { toURI } from "../src/uri-utils.ts";
 import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Identity } from "@commonfabric/identity";
+import { toURI } from "../src/uri-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -905,6 +907,7 @@ describe("computed cell kinds", () => {
         "wish",
         "sqliteQuery",
         "inspectConfLabel",
+        "cellFromUrl",
       ]);
 
       // Every registered builtin must be recorded in the replayability

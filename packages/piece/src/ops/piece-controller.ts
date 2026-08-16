@@ -1,3 +1,5 @@
+import type { CellKind, LinkScope } from "@commonfabric/api";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   applyPieceSourceTransition,
   Cell,
@@ -35,7 +37,6 @@ import {
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
-import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
   cfcSchemaChildRoot,
   cfcSchemaMergeIssue,
@@ -45,20 +46,13 @@ import {
   storedSchemaCoversCandidateEnvelope,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import { pieceId } from "../piece-id.ts";
-import type { PiecesController } from "./pieces-controller.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
-import { compileProgram } from "./utils.ts";
+
+import { pieceId } from "../piece-id.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
 } from "../schema-compatibility.ts";
-import {
-  qualifyFabricOrigin,
-  readPieceOrigin,
-  resolvePieceOriginSource,
-} from "./piece-origin.ts";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   cloneInternalManifest,
   pinCloneSnapshotCells,
@@ -67,6 +61,13 @@ import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "./clone-data-snapshot.ts";
+import {
+  qualifyFabricOrigin,
+  readPieceOrigin,
+  resolvePieceOriginSource,
+} from "./piece-origin.ts";
+import type { PiecesController } from "./pieces-controller.ts";
+import { compileProgram } from "./utils.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;

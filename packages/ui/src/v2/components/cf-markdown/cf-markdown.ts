@@ -1,20 +1,24 @@
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { classMap } from "lit/directives/class-map.js";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { marked } from "marked";
-import { HeadingIdRenderer } from "./heading-id.ts";
+
 import { BaseElement } from "../../core/base-element.ts";
+import { HeadingIdRenderer } from "./heading-id.ts";
+
 import "../cf-copy-button/index.ts";
 import "../cf-cell-link/index.ts";
+
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+
 import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
-import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
 export type MarkdownVariant = "default" | "inverse";
 
@@ -481,10 +485,13 @@ export class CFMarkdown extends BaseElement {
   }
 
   private _replaceCellLinks(html: string): string {
-    // Matches <a href="/of:...">Name</a>
-    // Supports LLM-friendly links starting with /of: or similar schemes
+    // Matches <a href="/of:...">Name</a>, and the cross-space form the
+    // LLM-friendly link writes as /@did:key:.../of:... — a link whose space
+    // differs from the reader's leads with `@space`, and a matcher requiring
+    // an alphanumeric first character would leave it an ordinary relative
+    // anchor pointing at a path the shell does not serve.
     return html.replace(
-      /<a href="(\/[a-zA-Z0-9]+:[^"]+)">([^<]*)<\/a>/g,
+      /<a href="(\/@?[a-zA-Z0-9]+:[^"]+)">([^<]*)<\/a>/g,
       (_match, link, text) => {
         return `<cf-cell-link link="${link}" label="${
           this._escapeForAttribute(text)

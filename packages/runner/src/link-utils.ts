@@ -1,7 +1,10 @@
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { isRecord } from "@commonfabric/utils/types";
-import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+import { MetaLinkField } from "@commonfabric/api";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -15,23 +18,11 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
-import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { toURI } from "./uri-utils.ts";
-import { arrayEqual } from "./path-utils.ts";
-import {
-  CellResultInternals,
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-} from "./storage/interface.ts";
-import type { Runtime } from "./runtime.ts";
-import {
+  areNormalizedLinksSame,
   isNormalizedFullLink,
   isNormalizedLink,
   isPrimitiveCellLink,
@@ -40,9 +31,19 @@ import {
   parseLinkPrimitive,
   PrimitiveCellLink,
 } from "./link-types.ts";
-import { MetaLinkField } from "@commonfabric/api";
+import {
+  CellResultInternals,
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import type { Runtime } from "./runtime.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
-import { createRef } from "./create-ref.ts";
+import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
+import {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "./storage/interface.ts";
+import { toURI } from "./uri-utils.ts";
 
 export * from "./link-types.ts";
 
@@ -186,17 +187,9 @@ export function areMaybeLinkAndNormalizedLinkSame(
   return areNormalizedLinksSame(normalizedLink, normalizedLink2);
 }
 
-/**
- * Compare two normalized links for equality
- */
-export function areNormalizedLinksSame(
-  link1: NormalizedLink,
-  link2: NormalizedLink,
-): boolean {
-  return link1.id === link2.id && link1.space === link2.space &&
-    (link1.scope ?? "space") === (link2.scope ?? "space") &&
-    arrayEqual(link1.path, link2.path);
-}
+// Link identity (`areNormalizedLinksSame` and neighbors) lives in
+// ./link-types.ts — one canonical implementation — and reaches importers of
+// this module through the `export *` above.
 
 /**
  * Creates a sigil reference (link or alias) with shared logic
@@ -555,7 +548,7 @@ function schemaLosesStreamCellMarker(
   schema: unknown,
   context: SanitizeContext,
 ): boolean {
-  if (context.keepAsCell === KeepAsCell.All || !isRecord(schema)) {
+  if (context.keepAsCell === KeepAsCell.All || !isObjectOrArray(schema)) {
     return false;
   }
 
@@ -576,9 +569,9 @@ function removeStrippedStreamPropertiesFromRequired(
   result: unknown,
   context: SanitizeContext,
 ): void {
-  if (!isRecord(originalSchema) || !isRecord(result)) return;
+  if (!isObjectOrArray(originalSchema) || !isObjectOrArray(result)) return;
   const properties = originalSchema.properties;
-  if (!isRecord(properties)) return;
+  if (!isObjectOrArray(properties)) return;
   if (!Array.isArray(result.required)) return;
 
   const required = result.required.filter((property) =>
@@ -655,7 +648,7 @@ export function getStableInternalPathSegment(
   }
 
   if (cause !== undefined) {
-    if (isRecord(cause) && "stream" in cause) {
+    if (isObjectOrArray(cause) && "stream" in cause) {
       return `stream:${formatStableCauseSegment(cause.stream as JSONValue)}`;
     }
     return formatStableCauseSegment(cause as JSONValue);

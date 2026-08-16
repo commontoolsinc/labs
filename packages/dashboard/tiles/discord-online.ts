@@ -1,14 +1,17 @@
-// discord online: a one-shot Discord gateway snapshot of currently-online guild
-// members, split into the "Team" and "Team Member" roles and everyone else
-// ("Visitors").
-// Each poll opens a fresh gateway connection, identifies, waits for the initial
-// GUILD_CREATE, tallies presences against members, then tears the socket and
-// heartbeat down. Successive polls accumulate a rolling history (persisted to
-// disk) that is charted as two lines (team and visitors over time).
-//
-// The bot must have the "Server Members Intent" and "Presence Intent" enabled in
-// the Discord developer portal (privileged intents); without them the gateway
-// closes with 4014.
+/**
+ * Takes a one-shot snapshot over the Discord gateway of which guild members
+ * are online, split into the "Team" and "Team Member" roles on one side and
+ * everyone else, the visitors, on the other. Each poll opens a fresh gateway
+ * connection, identifies, waits for the initial GUILD_CREATE, tallies
+ * presences against members, then tears the socket and its heartbeat down.
+ * Successive polls accumulate a rolling history, kept on disk, that is charted
+ * as one line for the team and one for the visitors.
+ *
+ * The bot needs the privileged "Server Members Intent" and "Presence Intent"
+ * enabled in the Discord developer portal; without them the gateway closes
+ * with 4014.
+ */
+
 import type { Status, Tile, TileView } from "../types.ts";
 import { escapeHtml, multiSparkline, SPARK_FADE, thin } from "../lib.ts";
 import { dashboardCacheFile } from "../history-files.ts";
@@ -104,7 +107,7 @@ interface Snapshot {
 }
 
 // A role's swatch color: decimal Discord color -> "#rrggbb"; the 0 sentinel
-// (Discord's "no color") maps to the neutral grey used elsewhere in the shell.
+// (Discord's "no color") maps to the neutral gray used elsewhere in the shell.
 function roleColor(color: number): string {
   if (!Number.isInteger(color) || color <= 0) return VISITOR_COLOR;
   return "#" + (color & 0xffffff).toString(16).padStart(6, "0");

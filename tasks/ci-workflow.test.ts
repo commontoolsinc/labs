@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { phaseOf } from "./ci-step-phases.ts";
 import { EXPECTED_COVERAGE_ARTIFACT_NAMES } from "./coverage-check.ts";
 import { PATTERN_INTEGRATION_SHARD_COUNT } from "./select-pattern-integration-files.ts";
 
@@ -39,6 +40,34 @@ function stepBlock(job: string, stepName: string): string {
   return job.slice(start, end);
 }
 
+function stepBlocks(job: string): { name: string; body: string }[] {
+  return job.split(/^ {6}- name: /m).slice(1).map((step) => {
+    const nameEnd = step.indexOf("\n");
+    return { name: step.slice(0, nameEnd), body: step.slice(nameEnd + 1) };
+  });
+}
+
+// The minutes each YAML anchor in the workflow stands for, by anchor name.
+function anchoredMinutes(contents: string): Map<string, number> {
+  return new Map(
+    [...contents.matchAll(/^ +[A-Za-z_]+: &([a-z][a-z0-9-]*) (\d+)$/gm)].map((
+      match,
+    ) => [match[1], Number(match[2])]),
+  );
+}
+
+// A `timeout-minutes` value is an alias to one of those anchors, so that the
+// minutes themselves are written once. A value that is anything else — a number
+// written in place, or an expression, whose arithmetic GitHub does not document
+// anyway — has no minutes to give back and fails the check that asked.
+function boundMinutes(
+  anchors: Map<string, number>,
+  value: string,
+): number | null {
+  const alias = value.match(/^\*([a-z][a-z0-9-]*)$/);
+  return alias ? anchors.get(alias[1]) ?? null : null;
+}
+
 function neededJobIds(job: string): string[] {
   const marker = "\n    needs:\n";
   const needsStart = job.indexOf(marker);
@@ -64,6 +93,25 @@ async function workflowNames(): Promise<string[]> {
     if (entry.isFile && /\.ya?ml$/.test(entry.name)) names.push(entry.name);
   }
   return names.sort();
+}
+
+// Every YAML file under .github, so the composite actions are read alongside
+// the workflows that use them.
+async function* githubYamlPaths(
+  directory: URL = new URL("../.github/", import.meta.url),
+): AsyncGenerator<URL> {
+  for await (const entry of Deno.readDir(directory)) {
+    const path = new URL(
+      `${entry.name}${entry.isDirectory ? "/" : ""}`,
+      directory,
+    );
+    if (entry.isDirectory) yield* githubYamlPaths(path);
+    else if (/\.ya?ml$/.test(entry.name)) yield path;
+  }
+}
+
+function stepNames(contents: string): string[] {
+  return [...contents.matchAll(/^ *- name: (.+)$/gm)].map((match) => match[1]);
 }
 
 // Drops YAML comments. A `#` after whitespace ends a plain scalar, so what is
@@ -125,6 +173,84 @@ Deno.test("Status waits for every pull request validation job", async () => {
   const triggers = workflowTriggers(contents);
   assertStringIncludes(triggers, "  pull_request:\n");
   assertEquals(triggers.includes("\n    paths:"), false);
+});
+
+Deno.test("every step we name carries a phase marker", async () => {
+  // A step whose name starts with no marker in `PHASE_MARKERS` is charted as
+  // "other", which is how a job's setup time goes missing from the timings
+  // people read when deciding what to make faster. The classifier reads the
+  // marker rather than the wording, so the check is the classifier itself.
+  const unmarked: string[] = [];
+  let steps = 0;
+  for await (const path of githubYamlPaths()) {
+    for (const name of stepNames(await Deno.readTextFile(path))) {
+      steps++;
+      if (phaseOf(name) !== "other") continue;
+      unmarked.push(`${path.pathname.split("/.github/")[1]}: ${name}`);
+    }
+  }
+
+  assert(steps > 100, `only ${steps} steps found; the search read nothing`);
+  assertEquals(
+    unmarked,
+    [],
+    "these steps start with no marker from docs/development/CI_PERFORMANCE.md",
+  );
+});
+
+Deno.test("every work step is bounded before its job is", async () => {
+  // GitHub ends a job that runs past the job's own `timeout-minutes` by
+  // cancelling it, so the job's conclusion is `cancelled` — the same conclusion
+  // a run stopped by hand or superseded by a newer push carries, and one that
+  // reads as nobody's fault. A step that runs past the step's own bound fails
+  // instead, and its job fails with it. So each work step carries a bound of
+  // its own, below the bound on the job by the headroom the setup and upload
+  // steps around it need, and a wedged test is reported as a failure. Both
+  // bounds are aliases to an anchor, so each is a name here rather than a
+  // number, and the minutes behind the names are written once.
+  const headroom = 10;
+  const contents = await workflow("deno.yml");
+  const anchors = anchoredMinutes(contents);
+  // The deploy jobs hand the work to a script that lives elsewhere — one on the
+  // bastion, one in Cloud Storage — and how long that takes is not this
+  // workflow's to say. They carry no bound, so none is asked of them here.
+  const unboundedJobs = new Set(["deploy-rapids", "deploy-shell-staging"]);
+
+  for (const jobId of jobIds(contents)) {
+    if (unboundedJobs.has(jobId)) continue;
+    const job = jobBlock(contents, jobId);
+    const jobValue = job.match(/^ {4}timeout-minutes: (.+)$/m);
+    assert(jobValue, `${jobId}: job has no timeout-minutes`);
+    const jobBound = boundMinutes(anchors, jobValue[1]);
+    assert(
+      jobBound,
+      `${jobId}: timeout-minutes ${jobValue[1]} is not an anchored bound`,
+    );
+
+    const work = stepBlocks(job).filter((step) =>
+      phaseOf(step.name) === "work"
+    );
+    // Every job here does work of its own, so an empty list means the steps
+    // went unread rather than that this job had none to bound.
+    assert(work.length > 0, `${jobId}: no work step found`);
+
+    for (const step of work) {
+      const stepValue = step.body.match(/^ {8}timeout-minutes: (.+)$/m);
+      assert(stepValue, `${jobId}: "${step.name}" has no timeout-minutes`);
+      const stepBound = boundMinutes(anchors, stepValue[1]);
+      assert(
+        stepBound,
+        `${jobId}: "${step.name}" timeout-minutes ${stepValue[1]} is not an ` +
+          `anchored bound`,
+      );
+      assert(
+        jobBound - stepBound >= headroom,
+        `${jobId}: "${step.name}" is bounded at ${stepBound} minutes within a ` +
+          `job bounded at ${jobBound}, leaving under ${headroom} minutes ` +
+          `between them, so the job's bound can be the one a wedge hits first`,
+      );
+    }
+  }
 });
 
 Deno.test("Coverage Comment follows the CI workflow by name", async () => {
@@ -240,7 +366,7 @@ Deno.test("Dashboard publishes only from main, never from a pull request", async
   // branch move the `latest` tag.
   const tests = jobBlock(dashboard, "tests");
   assertEquals(tests.includes("id-token: write"), false);
-  const guard = stepBlock(tests, "Verify the run is on main");
+  const guard = stepBlock(tests, "🔎 Verify the run is on main");
   assertStringIncludes(guard, "if: ${{ github.ref != 'refs/heads/main' }}");
   assertStringIncludes(guard, "\n          exit 1\n");
 
@@ -254,7 +380,7 @@ Deno.test("Dashboard publishes only from main, never from a pull request", async
 
   // Both tags go up in the one push: the immutable commit tag the infra
   // overlay pins, and the `latest` the deployment follows.
-  const build = stepBlock(publish, "Build and push dashboard image");
+  const build = stepBlock(publish, "🏗️ Build and push dashboard image");
   assertStringIncludes(build, "\n          push: true\n");
   assertStringIncludes(
     build,

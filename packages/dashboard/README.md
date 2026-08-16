@@ -56,7 +56,7 @@ dashboard/
 collects each tile that is due (respecting its `intervalMs`), renders the
 results uniformly, mounts any drill-down routes a tile declares, and pushes new
 tile markup as each independent collection completes. Every registered tile has
-a gray placeholder labelled with its id in its registered position until its
+a gray placeholder labeled with its id in its registered position until its
 first collection completes, so slow collectors do not leave holes in the board.
 A later ticker pass skips a tile or shared workflow fetch that is still
 updating. It starts every other due collection, so pending work does not pause
@@ -295,14 +295,14 @@ surveillance tool.
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
-| production | synthetic HTTP checks of `/_health` on estuary and rapids, plus A and AAAA DNS checks for estuary, rapids, the bastion, the production and staging shells, the LLM gateway, and the sandbox service. The healthy headline reports every tracked host up; otherwise it reports the worst observed condition, such as a response time, HTTP status, or DNS failure. The tile keeps healthy estuary and rapids response times beside orange conditions for context, but hides every green host when any condition is red. It always hides other hostnames that resolve. It turns red when a hostname has no A or AAAA record, for a non-200 response, or for a health response over 500 ms. It turns orange for a health response over 275 ms or a check that cannot yet confirm the host is up, including resolver failures. The tailnet health requests can use `PROD_PROXY`; DNS always reports what the dashboard host resolves itself | optional `ESTUARY_URL`, `RAPIDS_URL`, `BASTION_HOST`, `PROD_PROXY`; `PROD_URL` remains an alias for `ESTUARY_URL` |
+| production | synthetic HTTP checks of `/_health` on estuary and rapids, plus a name or reachability check for those two, the bastion, the production and staging shells, the LLM gateway, and the sandbox service. When every host is well the headline counts them up. When a host has nothing behind it at all, the headline names that host, as in `bastion down`, and counts them when there is more than one, as in `2 hosts down`. Otherwise it names the worst condition seen, such as a response time or an HTTP status. Estuary and rapids keep their response times in the body while the tile is green or orange. Every other host stays out of the body for as long as it answers, and a red tile drops all the green hosts. Red means the tile found nothing at the other end — a name with no A or AAAA record, a tailnet host the proxy cannot reach, or a health request that never connected — and it also means a non-200 response or a health response over 1000 ms. Orange means a health response over 500 ms, or a resolver that failed, which leaves the tile unable to say either way. Hosts outside the tailnet are looked up by the dashboard itself. Tailnet hosts go through `PROD_PROXY`, because a dashboard that needs that proxy has no view of Tailscale's MagicDNS. Estuary and rapids are covered there by their health requests. The bastion has no health endpoint, so it gets a SOCKS5 connect that leaves the name for the proxy to resolve. The bastion records that connect in its own logs, so a bastion that answers is left alone for an hour and counts as reachable in between. One that does not answer is asked again on the next refresh, since a connect that reaches nothing leaves nothing behind. With no `PROD_PROXY` set, every host is looked up locally | optional `ESTUARY_URL`, `RAPIDS_URL`, `BASTION_HOST`, `PROD_PROXY`; `PROD_URL` remains an alias for `ESTUARY_URL` |
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
-| ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond. A month whose usage report cannot be read breaks that source's line across those days rather than charting them as $0 | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
-| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
+| ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond. A source whose feed stopped being written more than four days ago counts as one that cannot be read, rather than charting the days since as $0. A month whose usage report cannot be read breaks that source's line across those days rather than charting them as $0 | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
+| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
-| model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
+| model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total; a provider whose cost report stopped being written more than four days ago is one of those | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
 | dau | distinct identities active per UTC day on one named service, counted from the `user.did` attribute on the `memory.transact` and `memory.subscriber.sync` spans in SigNoz. The headline is the last day that ran to the end (today is still filling, and a part-day always reads as a drop); the sparkline is the retained history. Gray while the named service has no such spans — which is the resting state until a deployment's tracing is switched on. It counts keypairs rather than people; see [dau](#dau) below | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `DAU_EXCLUDE_DIDS`, `SIGNOZ_UI_URL` |
 | github users | organization members plus outside collaborators, with each roster's size charted over about two months. The headline counts unique users across both rosters | `GH_TOKEN` (with org Members read) |
@@ -564,8 +564,8 @@ it.
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. The projected month is compared with this daily rate multiplied by the number of days in the month. |
 | `ESTUARY_URL` | production | the estuary server as an origin. The tile checks `/_health` on it and links to it. Defaults to `https://estuary.saga-castor.ts.net`. `PROD_URL` remains an alias when `ESTUARY_URL` is unset. |
 | `RAPIDS_URL` | production | the rapids server as an origin. The tile checks `/_health` on it and links to it. Defaults to `https://rapids.saga-castor.ts.net`. |
-| `BASTION_HOST` | production | the hostname whose A and AAAA records represent the deployment bastion. A URL is also accepted; only its hostname is resolved. Defaults to `bastion.saga-castor.ts.net`. |
-| `PROD_PROXY` | production | optional proxy used for the estuary and rapids health checks. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy. Also accepts `socks5://`, `http://`, and `https://`; invalid values and URLs containing credentials fail closed instead of fetching directly. DNS checks always use the dashboard host's resolver. |
+| `BASTION_HOST` | production | the deployment bastion's hostname. A URL is also accepted; its hostname is used, along with its port when it carries one, which otherwise is 22. A tailnet name is checked hourly by connecting through `PROD_PROXY`, and any other name by an A and AAAA lookup on every refresh. Defaults to `bastion.saga-castor.ts.net`. |
+| `PROD_PROXY` | production | optional proxy for reaching tailnet hosts. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy. Also accepts `socks5://`, `http://`, and `https://`; invalid values and URLs containing credentials fail closed instead of fetching directly. Setting it also moves the tailnet name checks onto the proxy, since a dashboard that needs a proxy cannot resolve MagicDNS names itself. The bastion check needs a SOCKS5 proxy to do that, and stays gray over an `http://` or `https://` one. |
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commontoolsinc/labs`). |
 | `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory). |
@@ -619,6 +619,13 @@ Notes:
   only when both exist. Blacksmith's budget is its monthly spending-alert
   threshold. A failed configured source turns the tile gray and shows `$???`
   for that source. The values from responding sources remain as a lower bound.
+  A source that has stopped reporting fails the same way. Both feeds report a
+  day or two after a day ends, and a settled day neither has a row for is a day
+  that cost nothing — which holds only while the feed is still being written.
+  Each is read no further than its own newest row reaches: GitHub's report is
+  one pipeline across every product the org uses, so any product's row dates it,
+  and Blacksmith's daily endpoint dates itself. Four days without a row is a
+  stopped feed rather than a slow one.
   A GitHub classic-plan setup still falls back to minutes when Blacksmith is not
   configured.
 - **`benchmarks`** trends one **scale-invariant index per CPU** on the
@@ -630,11 +637,12 @@ Notes:
   `bench-results` artifact with 90-day retention. There is no committed
   history. Each CPU's index compares a run with the previous run on the same
   CPU. It multiplies the previous index by the **geometric mean of the
-  per-benchmark changes**. Every benchmark weighs the same regardless of size.
+  per-benchmark changes**, then **divides out the machine**. Every benchmark
+  weighs the same regardless of size.
   **Only a broad, across-the-board move shifts an index.** A regression in one
   benchmark barely registers, however slow that benchmark is. The drill-down
   covers individual benchmarks. A summed total would instead be dominated by
-  the few slowest benchmarks. Each CPU has its own coloured line. The headline
+  the few slowest benchmarks. Each CPU has its own colored line. The headline
   shows the largest established CPU trend. A second line names how many
   benchmarks the latest run measured and the highlighted window when applicable.
   **Red** marks the **most recent run failing outright, or finishing green on CI
@@ -653,7 +661,7 @@ Notes:
   with nothing readable reads **no benchmark data**. A **running** badge sits in
   the header while a run is under way, wherever in the list it sits — a rerun
   keeps its original place instead of moving to the head. The badge says the
-  colour may be about to move; the runs that have finished still set it. The red
+  color may be about to move; the runs that have finished still set it. The red
   state reads the workflow-run list and the latest run's cached result. It
   therefore fires when the artifacts cannot be read. **Orange** means at least
   one CPU index is **trending up** past 5%. Each CPU trend uses the runs in the
@@ -676,7 +684,23 @@ Notes:
   absent from one side of that adjacent comparison, so it drops out of the
   geometric mean.
   A CPU change starts another line instead of connecting measurements from
-  unlike machines. A gap longer than one fifth of the chart width breaks a
+  unlike machines. A CPU model is not a machine, though. The runner group has
+  served six processor models over a forty-five day stretch, and two runs on
+  one model have measured a fifth apart on work that touches no repository code
+  at all, because a run gets whatever share of a shared host the other tenants
+  leave it. So the workflow also runs
+  `packages/dashboard/machine-calibration.bench.ts`, whose benchmarks call no
+  repository code, and each step divides their geometric mean out of the
+  product benchmarks' one. What is left is what the repository did. Those
+  calibration benchmarks are the tile's ruler rather than one of the things it
+  measures: they are absent from the index, from the benchmark count, and from
+  the drill-down. A run from before the calibration landed carries none, and
+  the step into or out of it is left uncorrected rather than guessed at. The
+  index also reads **one run per `BENCH_TREND_BUCKET_MS`**, matching the
+  workflow's four-hourly cron, so a rerun or a manual dispatch minutes from a
+  scheduled run does not put two samples of one moment into the fit. The
+  drill-down keeps every run. A gap longer than one fifth of the chart width
+  breaks a
   CPU's line. Any sample isolated by those breaks appears as a point. A CPU
   with one sample also appears as a point until another sample can form a line.
   A large rise reads as a fold multiplier (`▲44×`) once it passes 4x. This
@@ -690,7 +714,7 @@ Notes:
   their difference apart, with at least 3 samples supporting each — so noise
   produces no levels, and one stray sample is not a level. The second fit is a
   **straight line** through the median of the pairwise log-slopes, which is the
-  shape a series takes when it drifts, and it answers when its total deviation
+  shape a series takes when it drifts, and it wins when its total deviation
   is at least a tenth smaller. Reporting the difference across the fit rather
   than a slope extended over the window means a shift reads at its true size
   wherever in the window it sits: a shift in the newest samples is the one worth
@@ -711,24 +735,34 @@ Notes:
     to download.
   - The tile drills through to the per-benchmark history behind `/bench`, which the
     tile's collection keeps warm in the background. The collection lists
-    benchmark runs on main. It samples one run per shortest-view bucket,
-    downloads that artifact, and unzips it in the process. It then reads each
-    benchmark's timings and CPU. A report without a CPU identity is cached as
-    unusable instead of being pooled with measurements from unknown machines.
+    benchmark runs on main. It samples one completed run per shortest-view
+    bucket, whatever color it finished, downloads that artifact, and unzips it
+    in the process. It then reads each benchmark's timings and CPU. A run's
+    color does not say whether it measured anything: `deno bench` exits
+    non-zero when one benchmark throws, having already written a complete report
+    of the rest, and dropping those runs cost about a seventh of the history in
+    blocks a dozen runs long. The artifact decides instead. A report without a
+    CPU identity, or one that will not parse, is cached as unusable instead of
+    being pooled with measurements from unknown machines; because a run
+    attempt's artifact never changes, that verdict is kept rather than retried,
+    while a read that failed outright is retried.
     Cache entries written before CPU identity was stored are fetched again.
     Each completed artifact check is persisted before it is counted as
     finished. Only new runs and attempts are fetched after the first fill or a
     server restart. The shortest-view buckets are about 8 minutes wide. The
     first cache fill can therefore download more artifacts.
-  - Its **runtime benchmarks** view at `/bench?view=runtime` shows one coloured
+  - Its **runtime benchmarks** view at `/bench?view=runtime` shows one colored
     line per CPU for **every** benchmark. The lines share a calendar-time axis.
     A late-starting CPU line sits at the right. A single sample appears as a
     point. A stale line visibly ends short of the current date. The dashboard
     tile leaves out the CPU legend to keep the compact chart readable.
-    Selectors choose which measurement to plot (a percentile ladder — **p0** =
-    min, **p50** = the mean, **p75**, **p99**, **p99.5**, **p99.9**, **p100** =
-    max) and whether to group by source **file** or sort by latest **duration**
-    or **trend**. A "hide green" checkbox drops the steady ones. A slider from 1
+    Selectors choose which measurement to plot (**p0** = the fastest sample,
+    **mean** = the arithmetic mean, **p75**, **p99**, **p99.5**, **p99.9**,
+    **p100** = the slowest) and whether to group by source **file** or sort by
+    latest **duration** or **trend**. The mean selector was once labeled
+    `p50`, and `?stat=p50` still opens it so that a saved link does not quietly
+    fall back to the default column.
+    A "hide green" checkbox drops the steady ones. A slider from 1
     through 45 days changes the visible calendar range. The displayed samples
     are spread across at most 200 time buckets, so a shorter window uses more of
     the collected samples per day. Each graph chooses its vertical scale after
@@ -741,9 +775,9 @@ Notes:
     directly. Each row shows one latest value and trend from the CPU with the
     most benchmark samples in the selected window. A tie uses the CPU with the
     newest sample, then its name for a stable result. That representative CPU
-    also sets the row colour and sorting. A numbered CPU key identifies the
+    also sets the row color and sorting. A numbered CPU key identifies the
     representative series and links to its definition. The same key and a
-    colour swatch appear in one CPU legend after all benchmark graphs instead
+    color swatch appear in one CPU legend after all benchmark graphs instead
     of repeating processor names in every row. It includes the full processor
     identity reported by the artifacts, the number of benchmark graphs and runs
     shown for that CPU, and the observed date range. The page reads from the
@@ -893,8 +927,8 @@ Env knobs for the dev loop:
   organization for GitHub users.
 - `ESTUARY_URL` and `RAPIDS_URL` — point either production-tile health check at
   a local server. `PROD_URL` remains an alias for `ESTUARY_URL`.
-- `BASTION_HOST` — replace the default bastion hostname in the production
-  tile's DNS checks.
+- `BASTION_HOST` — replace the default bastion hostname the production tile
+  checks.
 - `PROD_PROXY` — route the estuary and rapids health checks through a proxy, for
   example `socks5h://127.0.0.1:1055` with a local Tailscale userspace proxy.
 - The other credential envs (see **Credentials** above — `SIGNOZ_*`, `GCP_*`,
@@ -931,8 +965,9 @@ gray-out contract. These ordinary unit tests are hermetic and need only
 verifies that Resvg reproduces the embedded PNGs and runs the favicon
 behavior in the local browser test runner. The package tasks grant the additional
 permissions those two checks need. `tiles/prod-uptime.test.ts` exercises the
-production tile with canned HTTP responses, an injected DNS resolver, and an
-injected proxy client factory, so its unit tests never reach the network. This is
+production tile with canned HTTP responses, an injected DNS resolver, an
+injected proxy client factory, and a fake SOCKS5 proxy, so its unit tests never
+reach the network. This is
 a workspace package, so its ordinary unit tests also run as part of the repo-wide
 `deno task test`.
 

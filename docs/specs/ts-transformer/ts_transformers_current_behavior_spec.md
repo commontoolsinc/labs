@@ -220,7 +220,7 @@ list — is the authoritative source. As of this writing it recognizes:
   `llm`, `llmDialog`, the fetch family from the #4206 split — `fetchJson`
   (which additionally gets dedicated type-argument schema injection, §10.5),
   `fetchJsonUnchecked`, `fetchText`, `fetchBinary` — `fetchProgram`,
-  `streamData`,
+  `streamData`, `cellFromUrl`,
   `compileAndRun`, `navigateTo`, and the SQLite builtins `sqliteDatabase` /
   `sqliteQuery` (`sqliteQuery<Row>` additionally gets dedicated type-argument
   schema injection)
@@ -431,16 +431,30 @@ Compute wrappers override restrictions:
 Diagnostics emitted in all modes:
 
 - **Error** `pattern-context:get-call`
-  - a **terminal** `.get()` read in restricted reactive context — one whose
-    value is used directly (`{ value: count.get() }`,
-    `const v = count.get()`, `input.key("count").get()` at a return site)
-  - since #3725 (2026-05-28), a **computation-feeding** read at a lowerable
-    site (`{ value: count.get() * 2 }`) is NOT rejected: the containing
-    expression is auto-wrapped into a lift-applied computation
-    (`test/validation.test.ts:3179`; goldens `cell-get-binding-autowrap`,
-    `with-reactive`). This is an unratified delta from the target-language
-    matrix's unconditional "Unsupported" — see the design-deltas 2026-07-10
-    record
+  - a `.get()` read in restricted reactive context with no lowerable
+    expression site to carry it: a statement-position read (`count.get();`),
+    a read inside a reactive array-method callback
+    (`rows.map((row) => row.cell.get())`), a read inside a plain
+    (non-reactive) array-method callback
+    (`["-", "+"].map((sep) => rows.get().join(sep))`, which is not an eligible
+    pattern-owned wrapper site), or a read whose receiver is not a
+    `Cell`/`Writable`/`Stream` (`items.get()` on a plain pattern input, which
+    also draws `opaque-get:invalid-call`)
+  - a cell read that DOES sit at a lowerable site is not rejected: the site is
+    auto-wrapped into a lift-applied computation. That covers the read itself
+    (`const v = count.get()`, `{ value: count.get() }`,
+    `input.key("count").get()` at a return site), a computation over it
+    (`{ value: count.get() * 2 }`), and a call whose receiver chain reaches it
+    (`rows.get().join(",")`, `rows.get().filter(...)`, which lowers through
+    `filterWithPattern`). Parentheses around the site and the computed-key
+    spelling of the read (`layout["get"]()`) do not change the decision, and
+    neither does optionality — `layout?.get()` and `layout?.get?.()` on a cell
+    lower like their non-optional spellings, per the 2026-07-23
+    optionality-orthogonality resolution. Each lift's input schema shrinks to
+    what its body reads (`test/validation.test.ts:3179`; goldens
+    `cell-get-binding-autowrap`, `cell-get-terminal-binding-autowrap`,
+    `with-reactive`). This is the ratified has-a-lowerable-site rule —
+    target-language spec §5.7 and its matrix rows are normative for it
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks
@@ -1083,6 +1097,17 @@ structurally representable top-level result:
   - prepends event/state schemas
   - unresolved generic helper-definition-site type parameters degrade to
     `{ type: "unknown" }`
+- the schema-first authored form `handler<Event, State[, Result]>(eventSchema,
+  stateSchema, callback[, options])` — recognized when arguments 0 and 1 are
+  not callable and argument 2 is, with callable-ness taken from the checker's
+  call signatures rather than from the expression's spelling, so an arrow, a
+  reference, a function declaration, and a property access all recognize the
+  form — keeps its authored arguments: nothing is prepended, since generated
+  schemas on top would displace the callback out of the positions the runtime
+  dispatch and the sandbox verifier accept (argument 0 or 2). A declared
+  `Result` still lowers onto the trailing options object exactly as below;
+  without one the call passes through unchanged. Fixture:
+  `handler-schema/schema-first-declared-result`.
 - with single function arg:
   - infers event/state schemas from parameters
   - event absent -> `never`; untyped params -> `unknown`
@@ -1197,6 +1222,20 @@ adjustments:
 - array-like roots whose observed paths only touch non-item properties
   (`length`, `get`, `set`, `key`, `update`) keep array shape but shrink their
   item type to `unknown`
+- reads inside an inline array-method callback count as reads of the enclosing
+  builder's parameter: the element parameter is bound to the receiver's item
+  path, so `table.find((row) => equals(self, row.topic))` records
+  `table[].topic` and, through the capture, `self`. The left operand of a `??`
+  / `||` fallback resolves to a single source ref, which reaches a root through
+  a member/call spine and consumes nothing else; an operand whose spine passes
+  through a call is therefore walked as well, covering that call's callback and
+  arguments and any call nested in them (`memberSpineContainsCall` in
+  `policy/capability-analysis.ts`;
+  `test/policy/capability-analysis-array-callbacks.test.ts`). An operand whose
+  ref resolves dynamically instead — a computed element-access key, as in
+  `table[indexes.findIndex(...)]?.mentionedBy ?? []` — marks the root wildcard,
+  which disables shrinking for the whole parameter: its declared shape is
+  emitted intact, without the capability wrappers a walked operand would derive
 - node-driven shrinking can still shrink the inner type of cell-like wrappers
   when `.get()` contributes an empty path but coexists with more specific
   non-empty paths
@@ -1502,7 +1541,10 @@ first then module scope) to an applied handler factory that:
    doing its job, not wrapping a UI.
 
 Every hop that does not match leaves the property unmarked — the mark fails
-open. The companion mark `deprecated: true` is produced in the schema
+open. Property names are read statically throughout — identifier and
+string-literal spellings alike, in the inference and the schema mutation both
+— and a computed name is never inferred. The companion mark
+`deprecated: true` is produced in the schema
 generator itself (`@deprecated` JSDoc on a stream-valued property,
 `packages/schema-generator/src/doc-utils.ts`), and both keys are classified
 annotation-class in the piece compat checker so they add and remove freely
@@ -1893,7 +1935,7 @@ contract, analogous to §11.4's `__cfReg` pairing:
   (`packages/runner/test/security.test.ts`, "does not expose loader machinery on
   the module compartment globals").
 - **Tooling consumer** — `cf view` classifies the three names as "module
-  scaffolding" for syntax colouring via its own hard-coded copy of the list
+  scaffolding" for syntax coloring via its own hard-coded copy of the list
   (`packages/cli/lib/view/languages/typescript/vocab.ts`, `SCAFFOLDING_NAMES`), which can drift from
   `SHADOWED_FACTORY_BINDINGS` since it does not import it.
 

@@ -62,7 +62,7 @@ unsupported. Both restrictions hold whichever syntax the reader writes in.
 
 ### What a shape can say today
 
-There are two syntaxes, and today both ride `--schema`
+There are two syntaxes, each on its own flag
 (`packages/cli/README.md`, "Output Conventions"):
 
 ```bash
@@ -72,12 +72,10 @@ There are two syntaxes, and today both ride `--schema`
 ```
 
 The concise form is sugar for the flat case; the full form is a JSON Schema
-object and is what expresses nested structure.
-[CLI surface shape](cli-surface-shape.md) proposes giving them separate flags —
-`--select` for the concise syntax, `--schema` for full schemas — and this
-document writes them that way throughout. The measured facts at the end use
-`--schema` for both, because that is the flag the measurements were taken
-against.
+object and is what expresses nested structure. [CLI surface
+shape](cli-surface-shape.md) is where the split between them is reasoned out.
+The measured facts at the end write `--schema` for both, because that is the
+flag the measurements were taken against.
 
 **`--filter` is the other axis.** A shape names paths; it cannot say "only the
 elements where `status == "open"`". That is `--filter`, a predicate over array
@@ -96,7 +94,7 @@ than each item.
 
 There are two kinds of thing a reader's schema may **not** contain, for two
 different reasons (`FORBIDDEN_PROJECTION_KEYS` and
-`UNSUPPORTED_PROJECTION_KEYS`, `packages/cli/lib/piece-get-transform.ts`). Both
+`UNSUPPORTED_PROJECTION_KEYS`, `packages/cli/lib/cell-selection.ts`). Both
 are checked when a full schema is parsed — the inline and `@file` forms. The
 concise form reaches neither check; what keeps it from expressing them is its
 identifier grammar, which has no way to write a keyword at all. So the two
@@ -353,25 +351,25 @@ second one.
 
 ### Receipts carry a descriptive schema
 
-A receipt is an ordinary cell, and like any other it should say what it holds.
-Today it does not: receipts are created with no schema argument
-(`handleJavaScriptHandlerResult`, `packages/runner/src/runner.ts`), so the
-stored document carries an empty `schema` field. Two consequences follow, and
-both are the read layer's mechanisms failing to engage rather than anything
-special about receipts:
+A receipt is an ordinary cell, and like any other it says what it holds — for
+a plain result. `handleJavaScriptHandlerResult`
+(`packages/runner/src/runner.ts`) derives a structural description from the
+value it has just written and stores it in the durable schema metadata —
+`setMetaRaw("schema", …)`, the field `piece get` reads back through
+`asSchema`, not the schema argument to `getCell`, which seeds the link scope
+and the in-memory cell only. The receipt is minted before the handler runs,
+so there is no shape at that moment; the schema is written at result-write
+time, in the same create-only transaction, from the value the runtime is
+already holding. A verb returning anything reactive gets no schema at all —
+deriving a shape needs a settled value, and a launched result has none when
+the receipt is written — so for exactly those receipts the read layer's
+mechanisms still fail to engage:
 
 - The fetch narrowing above cannot engage, so a shape is applied after
   everything has been loaded.
 - A caller's shape is matched against the runtime value rather than against a
-  declaration — field names that happen to coincide, rather than a subtree of a
-  declared structure.
-
-Giving the receipt cell a schema addresses both. It goes in the durable schema
-metadata — `setMetaRaw("schema", …)`, the field `piece get` reads back through
-`asSchema` — not the schema argument to `getCell`, which seeds the link scope
-and the in-memory cell only. The receipt is minted before the handler runs, so
-there is no shape at that moment; it is written at result-write time, in the
-same create-only transaction, from the value the runtime is already holding.
+  declaration — field names that happen to coincide, rather than a subtree of
+  a declared structure.
 
 What is recorded is **descriptive**: what this receipt holds, never a contract
 constraining anything later. That is a safe thing for a write-once document,
@@ -469,12 +467,13 @@ result holding anything reactive does not have one at the moment the receipt is
 written. So a verb returning a child piece — the case this design exists to
 serve — gets a receipt with no schema, and a selection over it matches a runtime
 value rather than a declaration. What that costs is bounded: a `$link` marker
-*on a link position* still renders an address and still suppresses the fetch,
-because a rejecting selector short-circuits before a source schema is consulted.
-A marker below a link is a separate matter — the rejection has to propagate up
-through the containers holding it, which is its own piece of work. What is lost is
-narrowing on field selection, and any check of a selection before the call. The
-open question below is how that gap closes.
+renders an address and suppresses the fetch wherever it sits, because a
+rejecting selector short-circuits before a source schema is consulted, and a
+container whose every position rejects rejects in turn — so a marker below a
+link carries its rejection up to the position holding that link and costs the
+same one read as a marker on it. What is lost is narrowing on field selection,
+and any check of a selection before the call. The open question below is how
+that gap closes.
 
 It records nothing about which positions hold links. A link position in a source
 schema is spelled `asCell`, and `["cell"]` asserts a writable handle; writing

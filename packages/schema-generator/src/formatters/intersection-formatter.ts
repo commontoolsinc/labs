@@ -1,14 +1,15 @@
-import ts from "typescript";
 import type {
   MutableJSONSchema,
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
+import { attachDocTags, extractDocFromType } from "../doc-utils.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
-import { attachDocTags, extractDocFromType } from "../doc-utils.ts";
 import { isCellType } from "../typescript/cell-brand.ts";
 
 const logger = getLogger("schema-generator.intersection");
@@ -183,7 +184,7 @@ export class IntersectionFormatter implements TypeFormatter {
         for (const [key, value] of Object.entries(objSchema.properties)) {
           const existing = mergedProps[key];
           if (existing) {
-            if (isRecord(existing) && isRecord(value)) {
+            if (isObjectOrArray(existing) && isObjectOrArray(value)) {
               const aDesc = typeof existing.description === "string"
                 ? existing.description as string
                 : undefined;
@@ -271,7 +272,7 @@ export class IntersectionFormatter implements TypeFormatter {
     },
   ): MutableJSONSchemaObj {
     const { schema, docTexts, documentedSources, missingSources } = data;
-    if (!isRecord(schema)) return schema;
+    if (!isObjectOrArray(schema)) return schema;
 
     const uniqueDocTexts = docTexts.filter((doc, index, arr) =>
       arr.indexOf(doc) === index

@@ -269,6 +269,51 @@ the one-line and the braced form of the same guard, and it changed between deno
 condition's own count. See
 [deno coverage: one-line guard reported uncovered when its branch is not taken](deno-coverage-guard-line-artifact.md).
 
+### Paths reached only when something happens twice
+
+The other common shape is a line that runs only on the second occurrence of
+something within one process: a cache that is populated the second time it is
+asked, a guard that turns away a duplicate, a retry that only a second failure
+reaches. Whether a suite produces that second occurrence is often decided by
+scheduling rather than by anything a test asserts, so the line is covered on
+some runs and not on others.
+
+Write a test that produces the second occurrence itself rather than one that
+performs an operation and hopes the suite repeats it. The
+`records one violation for an action caught twice` case in
+`packages/runner/test/scheduler-pull-idempotency.test.ts` is the worked
+example. It reaches the deduplication guard in `runIdempotencyRecheck()` by
+running one action twice over an input it moves, and it distinguishes a
+deduplicated second detection from a single detection by having the action
+write an incrementing count, so the recorded violation says which detection it
+came from.
+
+An assertion that only counts the outcome would pass either way and would leave
+the line's coverage exactly as environment-dependent as it was.
+[The August 2026 record](../history/development/coverage-flake-idempotency-dedup-2026-08-12.md)
+follows one such line from a group-level `+2` down to the guard and the test.
+
+### What the check says when the regression is not the pull request's
+
+The gate compares whole-group counts, so a flapping line fails whichever pull
+request is measured against a run that happened to cover it, however unrelated
+the diff. The check recognizes that case and says so: when a gated group is over
+its baseline and none of the lines the pull request added are uncovered, it
+reads the coverage reports of the `main` run its baseline came from and names
+every line this run leaves uncovered that the baseline run covered.
+
+The comment lists those lines file by file, gives the `ACCEPT_COVERAGE_DEBT`
+line that lets the pull request through, and carries a prompt for a fresh agent
+session to make the lines cover the same way every time. The author's pull
+request is not the place to fix them, and it is not held up waiting for someone
+to.
+
+Only files the pull request left alone are compared. A file it changed has
+different content in the two checkouts, so the same line number means a
+different line in each report and no comparison is possible. When the baseline
+run's coverage artifacts cannot be read — expired, or the download failed — the
+check falls back to the ordinary regression comment.
+
 ## Ratchet baselines and accepting debt
 
 The ratchet applies per source group and only to the groups a PR changes: for
@@ -331,6 +376,31 @@ script separately checks the expected artifact names
 coverage files. A manual run without the environment variable uses the GitHub API
 download path instead.
 
+### Measuring a before/after locally
+
+The gate reports a group total rather than a per-line diff, so localizing a rise
+means measuring the same group twice: once with the branch's tree, once with the
+tree it will merge onto. Set `DENO_COVERAGE_DIR` for each run and convert with
+`tasks/write-coverage-lcov.ts`, exactly as the CI jobs do, then compare the two
+LCOV reports' zero-hit lines across the files the branch changed.
+
+Take both measurements from the same base. Rebasing between them straddles two
+trees and the delta stops meaning anything, so rebase first and measure after.
+
+A local total will not match CI's. CI sums a group over every job that loads its
+files and one local suite loads a subset, so the absolute numbers differ. The
+offset is constant between two runs of the same suite, which is what leaves the
+delta comparable when the totals are not.
+
+The baseline half checks the merge base out over the packages being measured, so
+for the length of that run the worktree holds the base's code rather than the
+branch's. A tree sampled during it reads as though the branch had been reverted.
+It has not been: the branch's work is in its commits, and anything uncommitted is
+in the stash the measurement pushed. `git stash list` and
+`git grep <symbol> <branch-sha> -- <paths>` settle that from outside the run,
+without waiting for it to finish. Restore with `git checkout HEAD -- <paths>`
+followed by `git stash pop`.
+
 ## Compile cache state and cold runs
 
 The pattern test jobs restore a compile byte cache keyed on a fingerprint hash
@@ -358,16 +428,22 @@ current. The ratchet skips a cold sample when choosing among the
 base-branch commit and its ancestors, so a cold `main` run cannot lower the
 baseline that warm PRs are held to.
 
-A run without a recorded cache state — an artifact carrying no stamp, or a run
-whose cache-state artifact failed to upload — is retro-classified from the
-compile fingerprint (`tasks/compile-cache-state.ts` mirrors the `cc-*` key globs,
-drift-guarded by a test that parses the workflow): if the fingerprint paths
-changed against the run's predecessor, every family is treated as cold; if
-unchanged, warm. The same fingerprint inference backstops the current run when
-its cache-state artifact is missing. Fingerprint inference cannot see
-non-fingerprint cold causes (cache eviction, cache-service outages): a run cold
-for those reasons and lacking a recorded state stays unknown, so it is treated
-as not-cold and may still be used as a baseline.
+Every run stamps its own `perf-metrics.json`, so a baseline run's coldness is
+read straight off the artifact that run published. Before writing the stamp, a
+run fills in any family whose cache-state artifact did not arrive, using the
+compile fingerprint: `tasks/compile-cache-state.ts` mirrors the `cc-*` key globs
+(drift-guarded by a test that parses the workflow) and compares the run's commit
+against the commit whose cache it would have restored — the pull request's own
+changed files, or the previous `main` run for a push. A family with no recorded
+state is filled cold when those paths changed. Recorded states are ground truth
+and always win. The rate-limit skip path writes the same stamped artifact, so a
+run cut short still tells later runs whether it was cold.
+
+Neither source is complete. Fingerprint inference cannot see non-fingerprint
+cold causes (cache eviction, cache-service outages), and a run whose cache-state
+artifacts and fingerprint comparison both failed publishes no stamp at all. A
+run with no recorded state is treated as not-cold and may still be used as a
+baseline.
 
 ## Which `main` run the ratchet compares against
 
@@ -422,7 +498,7 @@ The merged file carries line coverage only. LCOV identifies a function by its
 name, and `deno coverage --lcov` can emit several functions with the same name
 in one file (a free function and a method, for example), so function and branch
 records cannot be merged back together reliably from the fragments alone. Line
-coverage is what an IDE uses to colour the gutter, which is what this file is
+coverage is what an IDE uses to color the gutter, which is what this file is
 for.
 
 To download the report for a given commit:

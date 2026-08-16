@@ -31,7 +31,7 @@ mainline path, `shell/src/views/BodyView.ts`, and `html/src/in-process.ts` when
 the reconciler runs in the caller's own process), while every read of the
 *value* comes back empty.
 
-Two transformer diagnostics cover neighbouring cases and neither catches this
+Two transformer diagnostics cover neighboring cases and neither catches this
 one: `reactive-capture:unknown-type` reports a closure capture whose inferred
 type is `unknown`, and `schema:unknown-type-access` reports a property typed
 `unknown` accessed directly on a lift or handler parameter

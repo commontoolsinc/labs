@@ -6,7 +6,14 @@
  *
  * Run: deno task cf test packages/patterns/auth/ready-auth.test.tsx --verbose
  */
-import { action, assert, computed, pattern, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  computed,
+  pattern,
+  TESTS,
+  Writable,
+} from "commonfabric";
 import {
   type AuthAvailability,
   authIsReady,
@@ -81,8 +88,8 @@ export default pattern(() => {
     authState.set("loading");
   });
 
-  const assert_auth_unavailable = authReady ? false : true;
-  const assert_auth_available = authReady ? true : false;
+  const assert_auth_unavailable = assert(() => !authReady);
+  const assert_auth_available = assert(() => authReady);
   const assert_ready_reads_current_token = assert(() =>
     availability.state === "ready" &&
     availability.auth?.get?.()?.token === "initial"
@@ -94,7 +101,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_auth_unavailable },
       { action: mark_needs_login },
       { assertion: assert_auth_unavailable },

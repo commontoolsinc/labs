@@ -1,9 +1,10 @@
+import type { ReadonlyCell } from "@commonfabric/api";
+import { MetaField } from "@commonfabric/api";
 import {
-  type Immutable,
-  isFunction,
-  isPlainContainer,
-  isRecord,
-} from "@commonfabric/utils/types";
+  type EntityRef,
+  entityRefFromString,
+  linkRefFrom,
+} from "@commonfabric/data-model/cell-rep";
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
@@ -18,33 +19,29 @@ import {
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import {
-  type EntityRef,
-  entityRefFromString,
-  linkRefFrom,
-} from "@commonfabric/data-model/cell-rep";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { ReadonlyCell } from "@commonfabric/api";
-import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
-import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
-import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
-import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
-import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
-import { scopeCallerEventId } from "./scheduler/event-identity.ts";
-import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
-import { cfcLabelViewForCell } from "./cfc/label-view.ts";
-import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
-import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
+import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  type Immutable,
+  isFunction,
+  isObjectNotArray,
+  isObjectOrArray,
+  isPlainContainer,
+} from "@commonfabric/utils/types";
+
+import { toCell } from "./back-to-cell.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
+import { assertNoReservedCauseKeys, getTopFrame } from "./builder/pattern.ts";
 import {
   type AnyCell,
   type AnyCellWrapping,
@@ -57,6 +54,7 @@ import {
   type Frame,
   type HKT,
   type ICell,
+  isReactiveMarker,
   isStreamValue,
   type IsThisObject,
   type IStreamable,
@@ -72,72 +70,12 @@ import {
   type Stream,
   type StripDefaultBrand,
 } from "./builder/types.ts";
-import { toCell } from "./back-to-cell.ts";
-import { isReactiveMarker } from "./builder/types.ts";
-import {
-  type CellResult,
-  createQueryResultProxy,
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { diffAndUpdate } from "./data-updating.ts";
-import { type LastNode, resolveLink } from "./link-resolution.ts";
-import {
-  type Action,
-  ignoreReadForScheduling,
-  txToReactivityLog,
-} from "./scheduler.ts";
-import {
-  internalVerifierRead,
-  mergeableOpRead,
-} from "./storage/reactivity-log.ts";
+import { listResultSchema } from "./builtins/list-result-schema.ts";
+import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
+import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
+import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
+import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
-import {
-  type CellViewRef,
-  processDefaultValue,
-  resolveSchema,
-  schemaHasIfc,
-  validateAndTransform,
-} from "./schema.ts";
-import {
-  readStoredCfcMetadata,
-  storedCfcMetadataAppliesToPath,
-} from "./cfc/metadata.ts";
-import { toURI } from "./uri-utils.ts";
-import { createRef } from "./create-ref.ts";
-import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import {
-  type SigilLink,
-  type SigilWriteRedirectLink,
-  type URI,
-} from "./sigil-types.ts";
-import type { Runtime } from "./runtime.ts";
-import {
-  dataUriFromValueWithResolvedLinks,
-  findAndInlineDataUriLinks,
-} from "./data-uri.ts";
-import {
-  areLinksSame,
-  createSigilLinkFromParsedLink,
-  isCellLink,
-  KeepAsCell,
-  type NormalizedFullLink,
-  type NormalizedLink,
-  parseLink,
-  toMemorySpaceAddress,
-} from "./link-utils.ts";
-import { isCellScope, narrowerScopeCap, normalizeCellScope } from "./scope.ts";
-import type {
-  ChangeGroup,
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-  IReadOptions,
-} from "./storage/interface.ts";
-import {
-  createChildCellTransaction,
-  createNonReactiveTransaction,
-} from "./storage/extended-storage-transaction.ts";
-import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
   type CfcLabelView,
@@ -148,12 +86,77 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
+import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { setLinkCfcLabelView } from "./cfc/link-label-view.ts";
-import { listResultSchema } from "./builtins/list-result-schema.ts";
+import {
+  readStoredCfcMetadata,
+  storedCfcMetadataAppliesToPath,
+} from "./cfc/metadata.ts";
+import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
+import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { MetaField } from "@commonfabric/api";
+import { createRef } from "./create-ref.ts";
+import { diffAndUpdate } from "./data-updating.ts";
+import {
+  dataUriFromValueWithResolvedLinks,
+  findAndInlineDataUriLinks,
+} from "./data-uri.ts";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
+import { type LastNode, resolveLink } from "./link-resolution.ts";
+import {
+  areLinksSame,
+  createSigilLinkFromParsedLink,
+  isCellLink,
+  KeepAsCell,
+  type NormalizedFullLink,
+  type NormalizedLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "./link-utils.ts";
+import {
+  type CellResult,
+  createQueryResultProxy,
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import type { Runtime } from "./runtime.ts";
+import {
+  type Action,
+  ignoreReadForScheduling,
+  txToReactivityLog,
+} from "./scheduler.ts";
+import { scopeCallerEventId } from "./scheduler/event-identity.ts";
+import {
+  type CellViewRef,
+  processDefaultValue,
+  resolveSchema,
+  schemaHasIfc,
+  validateAndTransform,
+} from "./schema.ts";
+import { isCellScope, narrowerScopeCap, normalizeCellScope } from "./scope.ts";
+import {
+  type SigilLink,
+  type SigilWriteRedirectLink,
+  type URI,
+} from "./sigil-types.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import {
+  createChildCellTransaction,
+  createNonReactiveTransaction,
+} from "./storage/extended-storage-transaction.ts";
+import type {
+  ChangeGroup,
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  IReadOptions,
+} from "./storage/interface.ts";
+import {
+  allowMutableTransactionRead,
+  internalVerifierRead,
+  markReadAsAttemptedWrite,
+  mergeableOpRead,
+} from "./storage/reactivity-log.ts";
+import { fromURI, toURI } from "./uri-utils.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -248,7 +251,7 @@ const storedSchemaForWritePolicyInput = (
   }, {
     meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
   });
-  if (!isRecord(stored) || stored.value === undefined) {
+  if (!isObjectOrArray(stored) || stored.value === undefined) {
     return undefined;
   }
   return ContextualFlowControl.getSchemaAtPath(
@@ -479,6 +482,11 @@ declare module "@commonfabric/api" {
       onlyIfDifferent?: boolean,
       schemaRole?: "output",
     ): void;
+    /**
+     * Applies this cell's CFC schema to its existing stored value without
+     * rewriting that value.
+     */
+    applyCfcSchemaToExistingValue(): void;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -627,7 +635,7 @@ export function elementSchemaFor(
   arraySchema: JSONSchema | undefined,
   index?: number,
 ): JSONSchema | undefined {
-  if (!isRecord(arraySchema)) return undefined;
+  if (!isObjectOrArray(arraySchema)) return undefined;
   const prefixItems = Array.isArray(arraySchema.prefixItems)
     ? arraySchema.prefixItems as JSONSchema[]
     : undefined;
@@ -635,7 +643,7 @@ export function elementSchemaFor(
       index < prefixItems.length
     ? prefixItems[index]
     : arraySchema.items;
-  if (!isRecord(covering) || Array.isArray(covering)) {
+  if (!isObjectNotArray(covering)) {
     return covering as JSONSchema | undefined;
   }
   const defs = arraySchema.$defs;
@@ -1196,16 +1204,14 @@ export class CellImpl<T extends FabricValue>
       ContextualFlowControl.isTrueSchema(schema);
 
     return new Promise((resolve) => {
-      let result: Readonly<T>;
-
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
-        result = validateAndTransform(this.runtime, tx, this.viewRef);
+        const value = validateAndTransform(this.runtime, tx, this.viewRef);
 
         // If no schema or TrueSchema, traverse the result to register all
         // nested values as read dependencies.
-        if (needsTraversal && result !== undefined && result !== null) {
-          deepTraverse(result);
+        if (needsTraversal && value !== undefined && value !== null) {
+          deepTraverse(value);
         }
       };
       // Name the action for debugging
@@ -1249,7 +1255,18 @@ export class CellImpl<T extends FabricValue>
           ]);
         }
         cancel?.();
-        resolve(result);
+        // The effect above exists to drive the scheduler: it reads inside its
+        // own transaction so the dependencies get registered and the
+        // computations they gate run. That transaction has committed by the
+        // time this resolves, so the value the caller keeps is read here
+        // instead — a schemaless cell materializes as a view, and a view
+        // pinned to a finished transaction refuses every access.
+        //
+        // Read against a fresh transaction rather than this cell's. A caller
+        // holding a long-lived open transaction has snapshots in it from
+        // before the computations this pull just drove, so reading through it
+        // would hand back exactly the stale values pull() exists to avoid.
+        resolve(validateAndTransform(this.runtime, undefined, this.viewRef));
       });
     });
   }
@@ -1630,7 +1647,7 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers for partial updates, or .set() for non-object values",
       );
     }
-    if (!isRecord(values)) {
+    if (!isObjectOrArray(values)) {
       throw new Error(
         "Cell.update() requires transaction and object value\n" +
           "help: use in handlers for partial updates, or .set() for non-object values",
@@ -1659,7 +1676,7 @@ export class CellImpl<T extends FabricValue>
       // just wants to know whether the value could be an object.
       const allowsObject = resolvedSchema === undefined ||
         ContextualFlowControl.isTrueSchema(resolvedSchema) ||
-        (isRecord(resolvedSchema) &&
+        (isObjectOrArray(resolvedSchema) &&
           (resolvedSchema.type === "object" ||
             (Array.isArray(resolvedSchema.type) &&
               resolvedSchema.type.includes("object")) ||
@@ -1735,11 +1752,11 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      // Annotated rather than inferred: `processDefaultValue()` answers `any`,
+      // Annotated rather than inferred: `processDefaultValue()` returns `any`,
       // and assigning that back to `currentValue` would discard the narrowing
       // this block exists to establish.
       const created: FabricValue[] =
-        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+        isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
             this.runtime,
             this.tx,
@@ -1818,9 +1835,9 @@ export class CellImpl<T extends FabricValue>
       diffAndUpdate(this.runtime, this.tx, resolvedLink, [], cause);
       const resolvedSchema = resolveSchema(this.schema);
       // Annotated for the same reason as in `push()`: `processDefaultValue()`
-      // answers `any`, which would discard the narrowing on assignment.
+      // returns `any`, which would discard the narrowing on assignment.
       const created: FabricValue[] =
-        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+        isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
             this.runtime,
             this.tx,
@@ -2057,7 +2074,7 @@ export class CellImpl<T extends FabricValue>
     const array = got as ElemT[];
     // TODO(danfuzz): `typeof ref === "object"` routes a `FabricPrimitive`
     // (or `FabricInstance`) ref to `areLinksSame`, which parses both
-    // operands as links and answers `false` when either is not one — so a
+    // operands as links and returns `false` when either is not one — so a
     // fabric-valued ref matches only by reference identity, never by value,
     // and the call otherwise silently no-ops. The sibling `removeByValue`
     // has the right shape: link comparison for cells, `valueEqual` (which
@@ -2208,7 +2225,7 @@ export class CellImpl<T extends FabricValue>
 
     // Determine the kind based on schema flags
     let kind: CellKind = this._kind;
-    if (isRecord(childSchema)) {
+    if (isObjectOrArray(childSchema)) {
       const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
       // we can override the kind of cell we use for a key
       if (asCellValues.length > 0) {
@@ -2550,6 +2567,33 @@ export class CellImpl<T extends FabricValue>
     // ever recorded, so this is inert; it is here so the rule stays true if that
     // changes.
     this.tx.poisonMergeableOp?.(this.link);
+  }
+
+  applyCfcSchemaToExistingValue(): void {
+    if (!this.tx) {
+      throw new Error(
+        "Transaction required for applyCfcSchemaToExistingValue",
+      );
+    }
+    if (!this.synced) this.sync();
+
+    const writeLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "writeRedirect",
+    );
+    const value = this.tx.readValueOrThrow(writeLink, {
+      meta: { ...markReadAsAttemptedWrite, ...allowMutableTransactionRead },
+    });
+    if (value === undefined) {
+      throw new Error("Cannot apply a CFC schema to an absent value");
+    }
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      writeLink,
+      this.schema,
+    );
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {
@@ -3204,7 +3248,7 @@ function maybeConvertArrayPathToDataURILink(
     | undefined;
 
   for (let i = 0; i < link.path.length; i++) {
-    if (!isRecord(current)) {
+    if (!isObjectOrArray(current)) {
       break;
     }
 
@@ -3216,7 +3260,7 @@ function maybeConvertArrayPathToDataURILink(
         break;
       }
       next = (current as unknown as Record<string, FabricValue>)[segment];
-      if (isRecord(next) && !isCellLink(next)) {
+      if (isObjectOrArray(next) && !isCellLink(next)) {
         candidate = {
           value: next,
           path: [...prefix, segment],
@@ -3432,8 +3476,9 @@ function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
  *
  * `ancestors` holds the ancestors of the value being converted, so what it
  * recognizes is a cycle. A value reachable twice by different paths is not one:
- * it is shared, and each position gets its own conversion. Answering a shared
- * reference with a back-link would rewrite one of its positions into a pointer
+ * it is shared, and each position gets its own conversion. Returning a
+ * back-link for a shared reference would rewrite one of its positions into a
+ * pointer
  * at the other -- and a graph holds plenty of shared structure that is nobody's
  * cycle, an empty `path: []` array reachable from every alias in it being the
  * common case.
@@ -3447,7 +3492,7 @@ export function convertCellsToLinks(
   path: readonly string[] = [],
   ancestors: Map<object, readonly string[]> = new Map(),
 ): FabricValue {
-  if (isRecord(value) && ancestors.has(value)) {
+  if (isObjectOrArray(value) && ancestors.has(value)) {
     return linkRefFrom({ path: ancestors.get(value) });
   }
 
@@ -3456,7 +3501,7 @@ export function convertCellsToLinks(
     return linkToCell(getCellOrThrow(value), options);
   } else if (isCell(value)) {
     return linkToCell(value, options);
-  } else if (!(isRecord(value) || isFunction(value))) {
+  } else if (!(isObjectOrArray(value) || isFunction(value))) {
     return value as FabricValue;
   }
 
@@ -3469,10 +3514,10 @@ export function convertCellsToLinks(
   ancestors.set(original, path); // ...which needs to be tracked for circularity.
 
   // Everything past the line above runs inside this `try`, so that EVERY way
-  // out clears the ancestor just recorded -- the exits that answer a value
+  // out clears the ancestor just recorded -- the exits that return a value
   // without descending into it as much as the ones that recur. An exit that
   // skipped the clearing would leave the value an ancestor of all the rest of
-  // the walk, and the next position holding it would be answered as a cycle.
+  // the walk, and the next position holding it would be taken for a cycle.
   try {
     // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
     // arrays it returns. That symbol is machinery, not content, and an array
@@ -3498,13 +3543,13 @@ export function convertCellsToLinks(
     //
     // TODO(danfuzz): Both container branches below build a fresh container,
     // throwing away the copy just made above. One copy could serve both.
-    if (!isRecord(converted)) {
+    if (!isObjectOrArray(converted)) {
       // `shallowFabricFromNativeValue()` converted this into a primitive value
       // of some sort.
       //
       // `FabricValueLayer` is looser than `FabricValue` -- its containers hold
       // `unknown`, being unconverted until the recursion reaches them -- and
-      // `isRecord()` does not narrow an array out of the union. The cast is
+      // `isObjectOrArray()` does not narrow an array out of the union. The cast is
       // that gap, not a claim about the value.
       return converted as FabricValue;
     } else if (converted instanceof FabricPrimitive) {
@@ -3654,7 +3699,7 @@ function schemaWithDefaultAndScope<T>(
 export function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
-  return isRecord(schema) && isCellScope(schema.scope)
+  return isObjectOrArray(schema) && isCellScope(schema.scope)
     ? schema.scope
     : undefined;
 }

@@ -26,12 +26,188 @@ about one aspect of the runtime, are indexed in
 
 ### Imports
 
-- Group imports by source: standard library, external, then internal.
+- Group imports by source: standard library, external, then internal, with a
+  blank line between the groups.
 - Prefer named exports over default exports.
 - Use package names for internal imports.
 - Destructure when importing multiple names from the same module.
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
+- Collate a package's imports. Every specifier naming the same top-level
+  package, or the same namespace-and-package pair, sits in one contiguous run:
+  `@commonfabric/utils/base64url` next to `@commonfabric/utils/types`,
+  `@std/testing/bdd` next to `@std/testing/time`. A package that appears in two
+  places in the list reads as two dependencies, and the second appearance hides
+  from anyone scanning for what the file rests on.
+- Alpha-sorting each run is strongly suggested. Sorting is what makes a list
+  scannable rather than merely grouped, and it answers by rule the question of
+  where a new import goes. Sort on the specifier, comparing without regard to
+  case, so that `codec-type-tags.ts` precedes `EmptyReconstructionContext.ts`
+  the way a reader expects. Where sorting and the grouping above disagree, the
+  grouping wins: sort within the standard-library, external, and internal
+  blocks, not across them.
+- A bare `import "x";` is there for its side effect, so where it sits is part of
+  what it does. A polyfill, or a setup module that installs globals, running
+  after the code relying on it has already run is a different program, and
+  nothing type-checks that. So grouping, collation and sorting all yield to this
+  one: leave a bare import where it is, and move no other import across it. They
+  then apply to each run of imports between bare ones rather than to the file as
+  a whole — a file with a bare import in the middle has two groupings, two
+  collations and two sorts, and a checker that reads it as one will call correct
+  code wrong. A bare import of a module the file also imports by name is a
+  separate matter, and which way it goes turns on the kind of that named import.
+  Against a value import the bare one adds nothing, since the value import
+  evaluates the module, side effects included: drop it, and put what it was
+  there for in a comment on the surviving statement. Against nothing but an
+  `import type`, it stays — a type-only import is erased and evaluates nothing,
+  so the bare import is the only thing producing the effect.
+- Import a given module in exactly one or two statements. Two shapes are
+  allowed:
+  - One unified statement, marking any type-only names inline:
+    `import { type Foo, bar } from "x";`.
+  - One statement of each kind, kept adjacent:
+    `import type { Foo } from "x";` above `import { bar } from "x";`.
+
+  A file uses whichever reads better; neither is preferred. What neither shape
+  allows is a second statement of the same kind — two value imports from one
+  module, or two `import type`s from it. Those represent one dependency as
+  though it were two, and the second is easy to miss when the first is being
+  edited or removed, so merge their specifier lists. A bare `import "x";` counts
+  toward the total.
+- Within a package that defines the `@/` import alias, address the aliased tree
+  as `@/...` rather than by a `../` path that climbs out of the current
+  directory to reach it. The alias exists so that a module's address does not
+  depend on where the importing file sits, and a `../` path spends that. The
+  rule is about `../` and nothing else: a `./` path addresses the importing
+  file's own directory or something under it, and so never states how two
+  directories sit relative to each other. `./` and `@/` are both fine, and a
+  file may use each where it reads better. A `../` path whose target lies
+  outside the aliased tree has no `@/` form at all, and stays as it is — a
+  `bench/` or `test/` file reaching a fixture in its own tree, in a package
+  whose alias covers `src/`.
+
+### Classes
+
+- Use JavaScript `#privateName` fields and methods rather than TypeScript's
+  `private` modifier. `protected` has no such counterpart, and stays a
+  TypeScript modifier.
+- A class exposes no enumerable properties, instance or static. Hold the
+  value in a `#privateName` field and expose a getter, and a setter when the
+  value is meant to be settable. This holds for a constructor parameter
+  property too, which is a field declaration in disguise. Depart from it only
+  for a strong and compelling reason. A module-internal class — one its module
+  does not export, whose instances therefore never reach a stranger — is
+  exempt: the confusion the rule prevents is between an instance and a plain
+  object, and there is no one there to be confused. Two things follow from
+  it:
+  - An instance stops looking like a plain object. Enumerating one, spreading
+    it, or serializing it yields nothing, so code that mistakes an instance
+    for data fails where it stands instead of quietly half-working. A `#`
+    field is not an own property at all, whereas a field declared `private` or
+    `protected` is: those modifiers are erased, and the property they describe
+    is as enumerable as any other.
+  - A whole class of bug becomes unreachable rather than merely discouraged. A
+    `readonly` field is only a compile-time promise, so a cast can strip it and
+    write through; a getter with no setter refuses the write at runtime.
+- The default order of items within a class is:
+  1. The exposed instance properties, which an exempt class is the only kind
+     to have, ordered from least to most protection: public, then protected.
+     A constructor parameter property is not one of these; it stays in the
+     constructor.
+  2. Private instance variables.
+  3. The constructor.
+  4. The abstract members, public and protected alike.
+  5. The remaining instance members, ordered from most to least access: public,
+     then protected, then private. Getters and setters come before methods.
+  6. The exposed static properties, ordered as the exposed instance properties
+     are.
+  7. Private static variables.
+  8. The remaining static members, ordered as the instance members are.
+- Three of those groups take a
+  [section marker](code-comment-style.md#section-markers), when the class has
+  meaningful sections to delineate or is large enough for one to earn its
+  keep: `Subclass contract` ahead of the abstract members, `Instance members`
+  ahead of the remaining instance members, and `Static members` ahead of the
+  exposed static properties.
+- Depart from that order when there is a compelling reason to, not by default.
+
+A class with every group filled, in order:
+
+```ts
+// Shown at module scope.
+
+/**
+ * Fryer of donuts. Being module-internal is what lets this one expose
+ * properties directly; an exported class holds them in `#` fields behind
+ * accessors.
+ */
+abstract class Fryer {
+  /** How many batches have been fried. */
+  batches = 0;
+
+  /** Oil temperature, which subclasses consult. */
+  protected temperature = 190;
+
+  #basket: string[];
+
+  /** Constructs an instance which fries the contents of `basket`. */
+  constructor(basket: string[]) {
+    this.#basket = basket;
+  }
+
+  //
+  // Subclass contract
+  //
+
+  /** Fries one item, however this fryer does it. */
+  abstract fry(item: string): string;
+
+  /** Drains the oil, however this fryer does it. */
+  protected abstract drain(): void;
+
+  //
+  // Instance members
+  //
+
+  /** What is waiting to be fried. */
+  get basket(): readonly string[] {
+    return this.#basket;
+  }
+
+  /** Fries everything waiting, and empties the basket. */
+  fryAll(): string[] {
+    const result = this.#basket.map((item) => this.fry(item));
+    this.#empty();
+    this.batches++;
+    return result;
+  }
+
+  /** Reports the oil temperature, for a subclass's diagnostics. */
+  protected report(): string {
+    return `${this.temperature}C`;
+  }
+
+  /** Helper for `fryAll()`, which drains the oil and clears the basket. */
+  #empty(): void {
+    this.drain();
+    this.#basket = [];
+  }
+
+  //
+  // Static members
+  //
+
+  /** Temperature a fryer runs at unless told otherwise. */
+  static defaultTemperature = 190;
+
+  static #built = 0;
+
+  /** How many fryers have been built. */
+  static get built(): number {
+    return Fryer.#built;
+  }
+}
+```
 
 ### Comments
 
@@ -41,6 +217,67 @@ about one aspect of the runtime, are indexed in
 - [`code-comment-style.md`](code-comment-style.md) is the guide to both kinds,
   and to the Markdown markup that comments, error messages, and log messages
   all use.
+
+### Word choice
+
+Prose written in this repository — comments, documents, error and log messages,
+test descriptions — standardizes on one spelling per word and one word per
+concept. Both halves buy the same thing: a search for a word finds all of it,
+and two files stating the same kind of fact read as though they do.
+
+The rule is forward-looking. New prose follows it, an edit conforms the prose it
+touches, and converting a whole file or package is its own change rather than a
+side effect of another one.
+
+#### Spelling
+
+American spellings: `behavior`, `color`, `center`, `serialize`, `analyze`,
+`gray`. This is standardization rather than a claim about which English is
+better, and it is the variety already in overwhelming use in these files.
+
+Two carve-outs. Material quoted from outside — a dependency's name, a message
+relayed from another system, a specification's wording, a data file's contents —
+keeps whatever spelling it arrived with. And an identifier vocabulary already
+established in the codebase, `cancelled` among them, is a rename rather than a
+spelling fix: match the surrounding code, and treat a change to it as the code
+change it is.
+
+#### One word per concept
+
+Where two words would do, this repository picks one. The list grows as the pairs
+come up.
+
+- **`returns`**, not `answers`, for what a call evaluates to. A call is not a
+  question put to the code, and the metaphor stands in for a word that is
+  already exact and already shorter.
+  [`unit-test-coding-style.md`](unit-test-coding-style.md#writing-the-description-strings)
+  states this for an `it()` description, which is where it comes up most often;
+  it holds everywhere else too.
+- **`represents`**, `denotes`, or `is written as` — not `spells` — for the
+  relation between a construct and what it means. A path fragment denotes a ref
+  that cannot resolve, and a non-positive bound means "don't wait". The verb
+  belongs to orthography, and borrowing it dresses a semantic relation in
+  orthographic clothes. Three uses survive: the noun names a surface form ("the
+  same spelling the root span uses"), the verb is exact when the claim is about
+  the form itself ("the string that spells the number"), and "spell out" is
+  ordinary English for writing something at length. `spell` is additionally an
+  identifier here — the retired name for a pattern, still read by the state
+  inspector — so prose that borrows the word costs a search as well.
+- **`visits`**, `reads`, `encounters`, `finds` — the list is open — not `meets`,
+  for coming across something during a walk or on a channel. It is the word that
+  is wrong here and not the sense, so pick what the site wants rather than one
+  substitute throughout: a walk visits every node it descends through, a decoder
+  reads what arrives, a format carrying no marker encounters data it never emits.
+  Often the cleanest sentence names where the thing arrived and wants no such
+  verb at all — "a cycle *here* arrived from a channel". What rules `meets` out
+  is that two other senses are already at work in these files, and both stay.
+  `meet` a requirement — `meet the condition`, `must meet the threshold` — is
+  ordinary and exact, with the caveat that the verb takes the requirement itself
+  as its object and not the artifact stating one: a value **satisfies** a schema,
+  or meets the schema's *requirements*, where "meets the schema" reaches past
+  what the verb selects for. And `meet` is the lattice operation the Contextual
+  Flow Control code is built on, a technical term with test files named after it,
+  where a stray prose use costs a search.
 
 ## Code Design & Principles
 
@@ -156,12 +393,12 @@ validated types.
 
 ```ts
 class Data {
-  private inner: any;
+  #inner: any;
   constructor(inner: any) {
-    this.inner = inner;
+    this.#inner = inner;
   }
   process() {
-    // if (typeof this.inner === "object")
+    // if (typeof this.#inner === "object")
   }
 }
 
@@ -349,12 +586,12 @@ In both cases, we can maintain multiple caches, or instances of cache consumers.
 
 ```ts
 export class Cache {
-  private map: Map<string, string> = new Map();
+  #map: Map<string, string> = new Map();
   get(key: string): string | undefined {
-    return this.map.get(key);
+    return this.#map.get(key);
   }
   set(key: string, value: string) {
-    this.map.set(key, value);
+    this.#map.set(key, value);
   }
 }
 ```

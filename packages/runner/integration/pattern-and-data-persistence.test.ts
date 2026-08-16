@@ -13,18 +13,17 @@
  */
 
 import { assert, assertEquals } from "@std/assert";
-import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
+
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { env } from "@commonfabric/integration";
+import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
 import type { Cell, JSONSchema, MemorySpace } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 /** A content-addressed pattern pointer. */
 type PatternRef = { identity: string; symbol: string };
-import { env } from "@commonfabric/integration";
 
 const API_URL = new URL(env.API_URL);
-
-const TIMEOUT_MS = 180000; // 3 minutes timeout
 
 const keyConfig: IdentityCreateConfig = {
   implementation: "noble",
@@ -435,20 +434,7 @@ async function testPatternAndDataPersistence() {
 
 Deno.test({
   name: "pattern and data persistence - full reactive cycle",
-  fn: async () => {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([testPatternAndDataPersistence(), timeoutPromise]);
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-  },
+  fn: testPatternAndDataPersistence,
   sanitizeResources: false,
   sanitizeOps: false,
 });

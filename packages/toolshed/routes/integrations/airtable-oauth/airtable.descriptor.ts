@@ -20,8 +20,9 @@
  * Note: Airtable uses HTTP Basic auth for the token endpoint (client_id:client_secret
  * base64-encoded in the Authorization header), hence tokenAuthMethod: "basic".
  */
+
 import env from "@/env.ts";
-import type { ProviderDescriptor } from "../oauth2-common/oauth2-common.types.ts";
+import type { ProviderDescriptor } from "@/routes/integrations/oauth2-common/oauth2-common.types.ts";
 
 export const AirtableDescriptor: ProviderDescriptor = {
   name: "airtable",

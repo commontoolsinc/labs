@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { JSONSchema } from "../src/builder/types.ts";
+import { createRef } from "../src/create-ref.ts";
 import {
   applyChangeSet,
   type ChangeSet,
@@ -9,10 +15,6 @@ import {
   normalizeAndDiff,
   schemaIfcOverlapsPath,
 } from "../src/data-updating.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { createRef } from "../src/create-ref.ts";
-import { toURI } from "../src/uri-utils.ts";
-import { Runtime } from "../src/runtime.ts";
 import {
   areLinksSame,
   areNormalizedLinksSame,
@@ -21,9 +23,9 @@ import {
   isSigilLink,
   parseLink,
 } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toURI } from "../src/uri-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1766,11 +1768,11 @@ describe("data-updating", () => {
       expect(long.reads).toBeLessThan(50);
     });
 
-    it("stores a value answering `toCell` as the link it names", () => {
+    it("stores a value carrying `toCell` as the link it names", () => {
       // What the walk stops at, the diff replaces with a link -- which is
       // what makes an unchanged element of a read-back list cost nothing to
       // write, and is the property the walk stopping must not disturb. Both
-      // kinds of value answer `toCell` and both land the same way: the live
+      // kinds of value carry `toCell` and both land the same way: the live
       // view a schemaless read hands out, and the frozen result a read
       // through a schema annotates.
       const source = runtime.getCell<{ inner: { deep: number } }>(

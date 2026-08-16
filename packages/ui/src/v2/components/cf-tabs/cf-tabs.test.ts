@@ -137,14 +137,16 @@ g.cancelAnimationFrame = () => {};
 
 // ---------------------------------------------------------------------------
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { stringSchema } from "@commonfabric/runner/schemas";
+import type { CellHandle } from "@commonfabric/runtime-client";
+
 import {
   createMockCellHandle,
   pushUpdate,
 } from "../../test-utils/mock-cell-handle.ts";
-import type { CellHandle } from "@commonfabric/runtime-client";
 import { CFTabs } from "./index.ts";
 
 /**

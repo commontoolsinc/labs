@@ -1,17 +1,16 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertRejects } from "@std/assert";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import { defer } from "@commonfabric/utils/defer";
+import type { MIME, URI } from "@commonfabric/memory/interface";
+import type { SessionSync } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import {
-  type SessionFactory,
-  setConflictAdmissionEnabled,
-  StorageManager as V2StorageManager,
-} from "../src/storage/v2.ts";
+import { defer } from "@commonfabric/utils/defer";
+
 import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import type {
   IExtendedStorageTransaction,
   IReadActivity,
@@ -19,8 +18,11 @@ import type {
   StorageNotification,
   StorageTransactionRejected,
 } from "../src/storage/interface.ts";
-import type { MIME, URI } from "@commonfabric/memory/interface";
-import type { SessionSync } from "@commonfabric/memory/v2";
+import {
+  type SessionFactory,
+  setConflictAdmissionEnabled,
+  StorageManager as V2StorageManager,
+} from "../src/storage/v2.ts";
 import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
 import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
 

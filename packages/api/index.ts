@@ -352,6 +352,7 @@ export declare const UI: "$UI";
 export declare const TILE_UI: "$TILE_UI";
 export declare const CHIP_UI: "$CHIP_UI";
 export declare const FS: "$FS";
+export declare const TESTS: "$TESTS";
 
 /**
  * The size/representation spectrum a piece can be rendered at (CT-1321):
@@ -2398,10 +2399,12 @@ export interface BuiltInCompileAndRunState<T> {
 /**
  * The reserved output fields the runtime reads off a pattern's result, each
  * typed so a value of the wrong shape under a reserved key is a compile error.
- * `[NAME]` names the piece; `[UI]`, `[TILE_UI]` and `[CHIP_UI]` are its
- * renderings; `[FS]` is its filesystem projection. Each is `FactoryInput`-
- * wrapped so a reactive value (a `computed()`, a cell) is accepted alongside a
- * plain one.
+ * `[NAME]` and `[TYPE]` label the piece; `[UI]`, `[TILE_UI]` and `[CHIP_UI]`
+ * are its renderings; `[FS]` is its filesystem projection. Those are each
+ * `FactoryInput`-wrapped, so a reactive value (a `computed()`, a cell) is
+ * accepted alongside a plain one. `[TESTS]` is the exception: it holds a
+ * `TestStep[]` written out at build time, not a reactive value, so it is not
+ * wrapped.
  */
 type ReservedOutput = {
   [NAME]?: FactoryInput<string>;
@@ -2410,6 +2413,7 @@ type ReservedOutput = {
   [TILE_UI]?: FactoryInput<VNode> | JSXElement;
   [CHIP_UI]?: FactoryInput<VNode> | JSXElement;
   [FS]?: FactoryInput<FsProjection>;
+  [TESTS]?: TestStep[];
 };
 
 /**
@@ -2703,6 +2707,62 @@ export type AssertRenderPartsFunction = (
   parts: AssertRawPart[],
 ) => AssertPart[];
 
+/**
+ * The discriminant keys of a {@link TestStep} — the property that selects
+ * which kind of step it is. Exactly one is present on a well-formed step.
+ */
+type TestStepKey =
+  | "assertion"
+  | "action"
+  | "render"
+  | "settle"
+  | "label"
+  | "await";
+
+/**
+ * One step shape made exclusive. It carries its own fields and the shared
+ * optional `skip`, and bars every other step's discriminant key with
+ * `?: never`. A step that names two kinds at once — `{ assertion, action }` —
+ * is then a compile error rather than being resolved by runtime precedence.
+ */
+type OnlyTestStep<Own extends TestStepKey, Fields> =
+  & Fields
+  & { skip?: boolean }
+  & { [Other in Exclude<TestStepKey, Own>]?: never };
+
+/**
+ * One step of a pattern's test, addressed under the reserved `[TESTS]` key.
+ * The shapes are mutually exclusive:
+ *
+ * - `{ assertion }` evaluates a condition. It is the record an `assert(...)`
+ *   call produces, which carries the operands read while the condition ran,
+ *   so a failure names them and their values rather than reporting only the
+ *   verdict. A bare `Reactive<boolean>` is not accepted: `assert()` is the
+ *   way to write an assertion.
+ * - `{ action }` sends an event into a stream. `event` is the payload;
+ *   `trustedUi` names a trusted UI surface and the control inside it when the
+ *   action must originate from rendered UI under enforcement.
+ * - `{ render }` materializes a VDOM subtree.
+ * - `{ settle: true }` waits for full settlement (scheduler, storage, and
+ *   in-flight async builtin I/O) before the next step.
+ * - `{ label }` and `{ await }` synchronize a multi-user test: a participant
+ *   announces reaching `label`, and another participant blocks on `await`
+ *   until that marker is announced. They are inert in a single-user test.
+ *
+ * `skip` omits the step.
+ */
+export type TestStep =
+  | OnlyTestStep<"assertion", { assertion: Reactive<AssertRecord> }>
+  | OnlyTestStep<"action", {
+    action: Stream<unknown>;
+    event?: unknown;
+    trustedUi?: { surface: string; action: string };
+  }>
+  | OnlyTestStep<"render", { render: unknown }>
+  | OnlyTestStep<"settle", { settle: true }>
+  | OnlyTestStep<"label", { label: string }>
+  | OnlyTestStep<"await", { await: string }>;
+
 export type StrFunction = (
   strings: TemplateStringsArray,
   ...values: any[]
@@ -2826,6 +2886,21 @@ export type FetchJsonUncheckedFunction = (
     options?: FetchOptions;
   }>,
 ) => Reactive<{ pending: boolean; result: any; error?: any }>;
+
+/**
+ * The cell a URL names, if it names one.
+ *
+ * Resolves with no `cell` when the URL addresses no cell — most URLs are web
+ * pages, and being told no is an answer rather than a failure. `hosts` names
+ * the hosts whose page URLs address cells; a page URL from anywhere else is a
+ * link to a web page.
+ */
+export type CellFromUrlFunction = (
+  params: FactoryInput<{
+    url: string;
+    hosts?: string[];
+  }>,
+) => Reactive<{ pending: boolean; cell?: ReadonlyCell<{ [NAME]: string }> }>;
 
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,
@@ -3416,6 +3491,7 @@ export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
 export declare const generateText: GenerateTextFunction;
+export declare const cellFromUrl: CellFromUrlFunction;
 export declare const fetchBinary: FetchBinaryFunction;
 export declare const fetchText: FetchTextFunction;
 export declare const fetchJson: FetchJsonFunction;

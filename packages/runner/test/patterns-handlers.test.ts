@@ -1,20 +1,21 @@
 // Event handlers: defining and invoking handlers, handler metadata,
 // handler-produced side effects, schema-annotated handlers, and handler errors.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { spy } from "@std/testing/mock";
 
 import { Identity } from "@commonfabric/identity";
+import { getPatternIdentityRef } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Cell } from "../src/builder/types.ts";
+
 import { createBuilder } from "../src/builder/factory.ts";
 import { setEagerSourceAnnotation } from "../src/builder/module.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { type Cell } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { getPatternIdentityRef } from "@commonfabric/runner";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

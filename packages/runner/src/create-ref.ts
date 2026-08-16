@@ -1,28 +1,27 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { encodableFormOf } from "./encodable-form.ts";
-import {
-  hasEntityUriScheme,
-  hashStringForEntityAddress,
-} from "./entity-kind.ts";
-import {
-  BaseFabricPrimitive,
-  FabricHash,
-} from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,
   entityRefFrom,
   entityRefFromString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { isRecord } from "@commonfabric/utils/types";
+import { BaseFabricPrimitive } from "@commonfabric/data-model/codec-common";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import { isReactive } from "./builder/types.ts";
+import { isCell } from "./cell.ts";
+import { encodableFormOf } from "./encodable-form.ts";
+import {
+  hasEntityUriScheme,
+  hashStringForEntityAddress,
+} from "./entity-kind.ts";
+import { isSigilLink, parseLink } from "./link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { isCell } from "./cell.ts";
 import { fromURI } from "./uri-utils.ts";
-import { isSigilLink, parseLink } from "./link-utils.ts";
 
 declare const ENTITY_ID_BRAND: unique symbol;
 
@@ -139,7 +138,7 @@ export function createRef(
     // A _nullish_ form leaves the value in place, which is what the `??` is
     // for -- a value carrying no form at all needs no fallback, since that
     // answer is the value already. `CellImpl` is the one implementation that
-    // answers nullish, doing so for a cell whose link is not built yet, and the
+    // returns nullish, doing so for a cell whose link is not built yet, and the
     // branches below need that cell rather than the `null`: one of them builds
     // the link.
     obj = encodableFormOf(obj) ?? obj;
@@ -182,13 +181,13 @@ export function createRef(
       // answer. Two cells of one document derive two ids.
       return traverse(encodableFormOf(obj));
     } else if (Array.isArray(obj)) return obj.map(traverse);
-    else if (isRecord(obj)) {
+    else if (isObjectOrArray(obj)) {
       return Object.fromEntries(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
       );
     } else if (typeof obj === "function") return obj.toString();
     // A primitive reaches here only as an encodable FORM, the reassignment above
-    // having replaced the value it came from -- a primitive INPUT is answered at
+    // having replaced the value it came from -- a primitive INPUT is handled at
     // the top of the walk. A form is its own preimage, and stringifying one
     // would make the form `7` and the form `"7"` name a single document.
     else return obj;

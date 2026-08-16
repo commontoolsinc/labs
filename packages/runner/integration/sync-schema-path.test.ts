@@ -1,12 +1,14 @@
 #!/usr/bin/env -S deno run -A
 
 import { assertEquals } from "@std/assert/equals";
-import { type NormalizedLink, Runtime } from "@commonfabric/runner";
+
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { JSONSchema, MemorySpace, URI } from "@commonfabric/runner";
-import { parseLink } from "../src/link-utils.ts";
 import { env } from "@commonfabric/integration";
+import { type NormalizedLink, Runtime } from "@commonfabric/runner";
+import type { JSONSchema, MemorySpace, URI } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { parseLink } from "../src/link-utils.ts";
 import { IStorageManager } from "../src/storage/interface.ts";
 const { API_URL } = env;
 
@@ -17,8 +19,6 @@ const keyConfig: IdentityCreateConfig = {
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Sync Schema uses Path ===");
-
-const TIMEOUT_MS = 180000; // 3 minutes timeout
 
 function read(
   storageManager: IStorageManager,
@@ -154,20 +154,7 @@ async function runTest() {
 
 Deno.test({
   name: "sync schema path test",
-  fn: async () => {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([runTest(), timeoutPromise]);
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-  },
+  fn: runTest,
   sanitizeResources: false,
   sanitizeOps: false,
 });

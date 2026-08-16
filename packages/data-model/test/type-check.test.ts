@@ -1,3 +1,15 @@
+/**
+ * Membership in the `FabricValue` type, asked one level deep and asked all the
+ * way down, plus the narrowing to its plain-record arm.
+ *
+ * The two depths ask the same question at different scopes, and the cases are
+ * arranged around where that difference tells.
+ *
+ * Frozen-ness is deliberately not part of membership, and a group here says so
+ * outright -- the two are easy to conflate when nearly every fabric value in
+ * circulation happens to be frozen. Cycles are handled rather than refused.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -128,8 +140,8 @@ describe("type-check", () => {
       });
 
       it("returns `false` for an accessor-backed property", () => {
-        // An accessor is live code, not inert data: a read executes it and
-        // can answer differently every time. Freezing does not change that.
+        // An accessor is live code, not inert data: a read executes it and can
+        // return a different value every time. Freezing does not change that.
         const obj = { a: 1 };
         Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
         expect(isFabricValueLayer(obj)).toBe(false);
@@ -182,8 +194,8 @@ describe("type-check", () => {
       });
 
       it("returns `false` for an array with an accessor-backed index", () => {
-        // An accessor is live code, not inert data: a read executes it and
-        // can answer differently every time. Freezing does not change that.
+        // An accessor is live code, not inert data: a read executes it and can
+        // return a different value every time. Freezing does not change that.
         const arr = [1, 2, 3];
         Object.defineProperty(arr, 1, {
           get: () => 22,
@@ -409,8 +421,8 @@ describe("type-check", () => {
       });
 
       it("returns `false` for an accessor-backed property, at any depth", () => {
-        // An accessor is live code, not inert data: a read executes it and
-        // can answer differently every time. Freezing does not change that.
+        // An accessor is live code, not inert data: a read executes it and can
+        // return a different value every time. Freezing does not change that.
         const top = { a: 1 };
         Object.defineProperty(top, "g", { get: () => 2, enumerable: true });
         expect(isFabricValue(top)).toBe(false);
@@ -472,7 +484,7 @@ describe("type-check", () => {
 
       it("returns `false` for an indirect `Array` instance, at any depth", () => {
         // A subclass prototype is live code no matter the container: an
-        // overridden `Symbol.iterator` makes iteration answer content the
+        // overridden `Symbol.iterator` makes iteration yield content the
         // indices never show, and freezing does not reach the prototype.
         class Sub extends Array {}
         const top = new Sub();

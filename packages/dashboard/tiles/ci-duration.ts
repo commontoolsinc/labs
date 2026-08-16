@@ -1,8 +1,11 @@
-// ci duration: median wall-clock of recent completed runs, with a trend
-// sparkline. One factory builds both the labs and loom instances against their
-// own repo + workflow. Both instances drill down to their repository's history
-// on /bench. The labs instance owns the Gantt image route. The Gantt view
-// exposes scripts/ci-gantt.ts controls for both repositories.
+/**
+ * Reports the median wall-clock time of recent completed CI runs, with a trend
+ * sparkline. One factory builds both the labs and loom instances against their
+ * own repository and workflow, and both drill down to that repository's
+ * history on /bench. The labs instance owns the Gantt image route, whose view
+ * exposes the scripts/ci-gantt.ts controls for both repositories.
+ */
+
 import { fromFileUrl } from "@std/path";
 import {
   type Route,

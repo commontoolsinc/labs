@@ -1,17 +1,18 @@
 import {
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+
+import {
   type EntityKind,
   entityUriSchemePrefix,
   hasEntityUriScheme,
   uriSchemeForEntityKind,
 } from "./entity-kind.ts";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import {
-  entityRefToString,
-  isEntityRef,
-} from "@commonfabric/data-model/cell-rep";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import type { URI } from "./sigil-types.ts";
 
 /**

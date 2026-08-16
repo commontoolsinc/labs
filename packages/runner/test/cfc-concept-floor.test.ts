@@ -1,11 +1,15 @@
-import { describe, it } from "@std/testing/bdd";
-import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { describe, it } from "@std/testing/bdd";
+
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
 import { enableMockMode } from "@commonfabric/llm/client";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
+import { conceptGuard } from "../src/cfc/atom-pattern.ts";
+import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import {
   cfcIntegritySatisfiesFloor,
   cfcIntegritySatisfiesFloorCoherently,
@@ -16,13 +20,11 @@ import {
   type CfcTrustConfigInput,
   createTrustResolver,
 } from "../src/cfc/trust.ts";
-import { conceptGuard } from "../src/cfc/atom-pattern.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
-import { createLLMFriendlyLink } from "../src/link-types.ts";
-import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import type { CfcEnforcementMode } from "../src/cfc/types.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import { createLLMFriendlyLink } from "../src/link-types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-concept-floor");
 enableMockMode();
@@ -205,7 +207,7 @@ describe("CFC concept-level integrity floors (D5)", () => {
     });
 
     it("does not treat a Concept-shaped ARRAY as a concept guard (cubic P2)", () => {
-      // `isRecord` admits arrays (`typeof [] === "object"`), so an array
+      // `isObjectOrArray` admits arrays (`typeof [] === "object"`), so an array
       // carrying own `type`/`uri` properties previously routed to trust-closure
       // satisfaction. The canonical Concept atom is an OBJECT; a Concept-shaped
       // array is not the canonical shape and must fail closed to ordinary

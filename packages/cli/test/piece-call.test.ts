@@ -1,32 +1,19 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { ValidationError } from "@cliffy/command";
 import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
   type Cell,
+  entityIdFrom,
+  type MemorySpace,
   type NormalizedFullLink,
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  type CallableResolution,
-  CF_RUNTIME_ERROR_LOG,
-  collectInvocationResultLinks,
-  executeResolvedCallable,
-  normalizeAbsentVerbPayload,
-  runtimeErrorLog,
-  schemaIsObjectShaped,
-  verbInputSchemaError,
-  VerbInputValidationError,
-} from "../lib/callable.ts";
-import {
-  executePieceCallable,
-  PieceResultProjectionError,
-  PieceVerbReadError,
-} from "../lib/piece.ts";
-import type { ExecutedPieceCallable } from "../lib/piece.ts";
-import { ValidationError } from "@cliffy/command";
+
 import {
   boundedSettlement,
   exitPieceCallFailure,
@@ -47,14 +34,40 @@ import {
   verbInputErrorReport,
   WaitBoundExpired,
 } from "../commands/piece.ts";
-import { LinkValidationError } from "../lib/piece.ts";
+import {
+  type CallableResolution,
+  CF_RUNTIME_ERROR_LOG,
+  collectInvocationResultLinks,
+  executeResolvedCallable,
+  normalizeAbsentVerbPayload,
+  runtimeErrorLog,
+  schemaIsObjectShaped,
+  verbInputSchemaError,
+  VerbInputValidationError,
+} from "../lib/callable.ts";
 import {
   type CellSelection,
   CellSelectionError,
   type deriveSelectedValue,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
+import {
+  executePieceCallable,
+  LinkValidationError,
+  PieceResultProjectionError,
+  PieceVerbReadError,
+} from "../lib/piece.ts";
+import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import { cf, stripAnsi } from "./utils.ts";
+
+/**
+ * The runner's own stream-send options, derived from `Cell["send"]` rather
+ * than restated by hand — so a runner-side rename (`session`, `eventId`)
+ * fails `deno task check` on this file instead of leaving these doubles
+ * green while production breaks: the #5505/#5582 drift class, one layer
+ * down.
+ */
+type CellSendOptions = NonNullable<Parameters<Cell<unknown>["send"]>[2]>;
 
 // The session an invocation id is chosen within, for the calls whose subject
 // is something else: a call names the pair or it names no invocation.
@@ -63,7 +76,7 @@ const callerSession = "ses:piece-call-test";
 describe("executePieceCallable", () => {
   it("reports not-found when the piece cell has no schema-cast surface", async () => {
     // The forced-stream probe's type guard: a piece cell without asSchema
-    // cannot take the cast, so the third resolution path answers null and
+    // cannot take the cast, so the third resolution path returns null and
     // the resolver reports not-found instead of crashing on the probe.
     const emptyChild: Record<string, unknown> = {
       schema: undefined,
@@ -333,6 +346,54 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
+  // The $ref-carrying stream shape is schema-less to the arg parser, so a
+  // bare call skips the implicit-pipe read and the absence gate above
+  // decides — with stdin untouched. A rejecting reader pins the "untouched"
+  // half: piped bytes cannot reach a verb through this shape, they can only
+  // be spelled explicitly (`--json`, `--json-file -`).
+  it("refuses a bare $ref-stream verb call without reading piped stdin", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        $ref: "#/$defs/RecordMessageEvent",
+        asCell: ["stream"],
+        $defs: {
+          RecordMessageEvent: {
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+          },
+        },
+      } as JSONSchema,
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        [],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.reject(new Error("stdin was read")),
+        },
+      ),
+    ).rejects.toThrow(
+      /Invalid input for "recordMessage": no payload was supplied/,
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
   it("normalizes an absent payload to {} so an all-defaulted verb receives its defaults", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -384,6 +445,7 @@ describe("executePieceCallable", () => {
     expect(result.invocation).toEqual({
       id: "inv-defaulted",
       status: "settled",
+      receipt: harnessReceipt,
     });
   });
 
@@ -753,6 +815,42 @@ describe("executePieceCallable", () => {
     ]);
   });
 
+  it("invokes a schema-less verb bare without reading piped stdin", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "archive",
+      inputSchema: { asCell: ["stream"] } as JSONSchema,
+    });
+
+    // A rejecting reader proves stdin stays untouched: the verb declares no
+    // input, so the bare spelling dispatches immediately instead of waiting
+    // for a pipe to reach EOF.
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "archive",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.reject(new Error("stdin was read")),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["archive"],
+        value: undefined,
+      },
+    ]);
+  });
+
   it("refuses implicit piped JSON that cannot satisfy an object handler", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -924,6 +1022,41 @@ describe("executePieceCallable", () => {
     ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
   });
 
+  it("surfaces a pre-dispatch drop's reason from the aborted transaction", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      abortedWithReason: "Event backlog for this stream is full " +
+        "(256 pending), so this send was refused before dispatch",
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        ["--message", "milk"],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+        },
+      ),
+    ).rejects.toThrow(
+      /Handler "recordMessage" failed: Event backlog for this stream is full/,
+    );
+  });
+
   it("threads the invocation id to send and settles with receipt readback, without awaiting graph quiescence", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -962,6 +1095,7 @@ describe("executePieceCallable", () => {
     expect(result.invocation).toEqual({
       id: "inv-123",
       status: "settled",
+      receipt: harnessReceipt,
       result: { commentId: "c-1" },
     });
     expect(phases).toEqual(["dispatched", "committed", "readback"]);
@@ -1013,6 +1147,7 @@ describe("executePieceCallable", () => {
     expect(result.invocation).toEqual({
       id: "inv-123",
       status: "settled",
+      receipt: harnessReceipt,
       result: { commentId: "c-1" },
     });
   });
@@ -1083,12 +1218,56 @@ describe("executePieceCallable", () => {
       },
     );
 
+    // The `receipt` here says only that the address survives a collision.
+    // That it is the WINNER's address is the runner's guarantee and needs
+    // two competing handlings to witness, which this harness does not have —
+    // see "cell.send carries a caller-supplied eventId and exposes the
+    // receipt link" in packages/runner/test/scheduler-event-receipts.test.ts.
     expect(result.invocation).toEqual({
       id: "inv-dup",
       status: "settled",
       deduplicated: true,
+      receipt: harnessReceipt,
       result: { commentId: "c-original" },
     });
+  });
+
+  it("names the receipt the settled result was read out of", async () => {
+    // One envelope shape whether or not the caller waited: the address is
+    // published on both exits, and on the settled one it is demonstrably the
+    // document the readback opened — not a second address for the same
+    // outcome.
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: { message: { type: "string" } },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-settled-address", session: callerSession },
+      },
+    );
+
+    expect(result.invocation?.receipt).toEqual(harnessReceipt);
+    expect(harness.tracker.receiptLinkRequested?.id).toBe(
+      result.invocation?.receipt?.id,
+    );
   });
 
   it("settles a value-less verb with no result key (existence-only receipt)", async () => {
@@ -1116,7 +1295,87 @@ describe("executePieceCallable", () => {
       },
     );
 
-    expect(result.invocation).toEqual({ id: "inv-empty", status: "settled" });
+    expect(result.invocation).toEqual({
+      id: "inv-empty",
+      status: "settled",
+      receipt: harnessReceipt,
+    });
+  });
+
+  it("returns a keyless instance result instead of reading it as value-less", async () => {
+    // The value-less witness is a PLAIN empty record. A fabric primitive
+    // whose slots are private — FabricBytes — has no enumerable keys, and a
+    // key-count test alone would swallow it as "no result".
+    class FakeBytes {
+      #bytes = "private";
+      describe(): string {
+        return this.#bytes;
+      }
+    }
+    const bytes = new FakeBytes();
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "exportBytes",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: bytes,
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "exportBytes",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocation: { id: "inv-bytes", session: callerSession },
+      },
+    );
+
+    expect(result.invocation?.status).toBe("settled");
+    expect(result.invocation?.result).toBe(bytes);
+  });
+
+  it("keeps a result whose stored form is non-empty when it materializes keyless", async () => {
+    // The stored-vs-materialized divergence the presence check exists for: a
+    // FabricInstance materializes as a query-result proxy over an empty
+    // ordinary stub — plain-looking, keyless — while its STORED form is the
+    // non-empty codec shape. Presence reads the stored form, so the result
+    // survives. (The live suite pins the same seam through a real runtime;
+    // this is the harness-level mirror, and what `receiptRaw` models.)
+    const proxyLikeStub = {};
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "exportLink",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: proxyLikeStub,
+      receiptRaw: { "link@1": { id: "of:fid1:target", path: [] } },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "exportLink",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocation: { id: "inv-stored-form", session: callerSession },
+      },
+    );
+
+    expect(result.invocation?.status).toBe("settled");
+    expect(result.invocation?.result).toBe(proxyLikeStub);
   });
 
   it("sends without options and returns no invocation when no id is supplied", async () => {
@@ -1149,6 +1408,17 @@ describe("executePieceCallable", () => {
   });
 });
 
+/** The address the harness's handling files its receipt under: the link its
+ * `send` hands the commit callback, in the serialized form the envelope
+ * publishes. Every settled or committed invocation the harness produces
+ * carries it, because the runtime hands the address over at commit rather
+ * than at readback. */
+const harnessReceipt = {
+  space: "did:key:test-home",
+  id: "of:receipt-1",
+  scope: "space",
+};
+
 function createPieceCallableHarness(options: {
   callableKind: "handler" | "tool";
   cellKey: string;
@@ -1160,19 +1430,35 @@ function createPieceCallableHarness(options: {
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   handlerFailureMessage?: string;
+  /** Commit settles as an aborted transaction whose error wraps the drop
+   * reason (`StorageTransactionAborted.reason`) — the shape a pre-dispatch
+   * drop hands the commit callback (a send refused at the event-backlog
+   * cap, a piece that failed to load). Unlike `handlerFailureMessage`,
+   * nothing reaches the runtime error log: the reason on the transaction is
+   * the whole signal. */
+  abortedWithReason?: string;
   callableScope?: "space" | "user" | "session";
   /** Value the handling's receipt cell reads back ({} = value-less verb). */
   receiptValue?: unknown;
+  /** The receipt's STORED form, when it differs from the materialized
+   * `receiptValue` — a proxied instance's codec shape, most usefully.
+   * Presence is decided on this, mirroring the production readback. */
+  receiptRaw?: unknown;
   /** Simulate the create-only receipt collision: commit fails with
    * precondition "receipt-exists" while the link addresses the winner's
    * original receipt. */
   receiptExists?: boolean;
   /** Hold settlement open: `send` records the dispatch but never invokes the
-   * commit callback, so anything awaiting acknowledgement waits forever.
+   * commit callback, so anything awaiting acknowledgment waits forever.
    * This is how a test proves a path does NOT await the commit — the path
    * completes anyway — or exercises a wait bound against a call that can
    * never beat it. */
   neverCommit?: boolean;
+  /** Commit with no `handlingReceiptLink` on the transaction, which is what
+   * the runner leaves behind when receipts are not being written
+   * (`commitPreconditions` off): it stashes the link only when it will
+   * create the cell. */
+  noReceiptLink?: boolean;
   /** Replace the readback receipt cell wholesale — for --show-links tests,
    * whose receipt must support key()/resolveAsCell link traversal. */
   receiptCell?: Cell<any>;
@@ -1183,9 +1469,7 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
-    sendOptions: [] as Array<
-      { eventId?: string; session?: string } | undefined
-    >,
+    sendOptions: [] as Array<CellSendOptions | undefined>,
     receiptLinkRequested: undefined as { id?: string } | undefined,
     idleCalls: 0,
     syncedCalls: 0,
@@ -1231,7 +1515,7 @@ function createPieceCallableHarness(options: {
                 handlingReceiptLink?: NormalizedFullLink;
               },
             ) => void,
-            sendOptions?: { eventId?: string; session?: string },
+            sendOptions?: CellSendOptions,
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",
@@ -1245,7 +1529,15 @@ function createPieceCallableHarness(options: {
             if (options.neverCommit) return;
             onCommit?.({
               status: () =>
-                options.handlerFailureMessage
+                options.abortedWithReason
+                  ? {
+                    status: "error",
+                    error: Object.assign(
+                      new Error("Transaction was aborted"),
+                      { reason: new Error(options.abortedWithReason) },
+                    ),
+                  }
+                  : options.handlerFailureMessage
                   ? {
                     status: "error",
                     error: new Error(options.handlerFailureMessage),
@@ -1259,9 +1551,11 @@ function createPieceCallableHarness(options: {
                     ),
                   }
                   : { status: "done" },
-              handlingReceiptLink: mockLink({
-                id: "of:receipt-1",
-                space: "did:key:test-home",
+              ...(options.noReceiptLink ? {} : {
+                handlingReceiptLink: mockLink({
+                  id: "of:receipt-1",
+                  space: "did:key:test-home",
+                }),
               }),
             });
           },
@@ -1324,6 +1618,11 @@ function createPieceCallableHarness(options: {
   const defaultReceiptCell = {
     get: () => options.receiptValue,
     pull: () => Promise.resolve(options.receiptValue),
+    // The stored form presence is decided on. Defaults to the materialized
+    // value — faithful for plain JSON; a test modeling a proxied instance
+    // sets `receiptRaw` to the stored shape the runtime would hold.
+    getRaw: () =>
+      "receiptRaw" in options ? options.receiptRaw : options.receiptValue,
     key: (_key: string) => defaultReceiptCell,
   };
 
@@ -1874,6 +2173,39 @@ describe("piece call stdin payloads", () => {
     expect(printed).toEqual([]);
   });
 
+  it("writes the Invocation JSON to stdout when the wait bound expires", () => {
+    // A wait expiry is the one failure that still owes stdout a machine
+    // surface: the same Invocation JSON shape as a settled call, carrying
+    // the furthest observed phase as its status, so a script parses one
+    // shape either way. The stderr lines stay exactly the ordinary failure
+    // contract.
+    const printed: string[] = [];
+    const rendered: string[] = [];
+    const exited: number[] = [];
+    const observer = pieceCallPhaseObserver(false, () => {}, () => {}, () => 0);
+    expect(() =>
+      exitPieceCallFailure(
+        observer,
+        new WaitBoundExpired(5),
+        "inv-9",
+        "dispatched",
+        {
+          printError: (message) => printed.push(message),
+          render: (text) => rendered.push(text),
+          exit: (code): never => {
+            exited.push(code);
+            throw new Error("exit-sentinel");
+          },
+        },
+      )
+    ).toThrow("exit-sentinel");
+    expect(printed[1]).toBe("invocation: inv-9 phase: dispatched");
+    expect(rendered).toEqual([
+      JSON.stringify({ invocation: "inv-9", status: "dispatched" }, null, 2),
+    ]);
+    expect(exited).toEqual([1]);
+  });
+
   it("closes the verbose span on the pre-dispatch payload-rejection exit", () => {
     // reportVerbInputErrorOrRethrow terminates the process from inside the
     // promise chain, bypassing the action's catch — without the observer
@@ -2010,6 +2342,34 @@ describe("piece call stdin payloads", () => {
     expect(
       invocationJson({ id: "inv-1", status: "settled", result: undefined }),
     ).not.toHaveProperty("result");
+  });
+
+  it("carries the receipt address as a top-level envelope key", () => {
+    // Beside the id and the status, not inside the result: it addresses the
+    // outcome rather than being part of one, and a value-less verb has an
+    // address just the same.
+    const receipt = {
+      space: "did:key:s",
+      id: "of:receipt-1",
+      scope: "space" as const,
+    };
+    expect(
+      invocationJson({
+        id: "inv-1",
+        status: "settled",
+        receipt,
+        result: { commentId: "c-1" },
+      }),
+    ).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+      receipt,
+      result: { commentId: "c-1" },
+    });
+    expect(invocationJson({ id: "inv-1", status: "committed", receipt }))
+      .toEqual({ invocation: "inv-1", status: "committed", receipt });
+    expect(invocationJson({ id: "inv-1", status: "settled" }))
+      .not.toHaveProperty("receipt");
   });
 
   it('maps a bare "-" payload onto the --json-file stdin path', () => {
@@ -2200,7 +2560,7 @@ describe("piece call wait control", () => {
     });
   });
 
-  it('refuses a bound that spells "don\'t wait"', () => {
+  it('refuses a bound that means "don\'t wait"', () => {
     expect(() => resolveWaitControl({ wait: 0 })).toThrow(/positive/);
     expect(() => resolveWaitControl({ wait: -1 })).toThrow(/positive/);
     expect(() => resolveWaitControl({ wait: Number.NaN })).toThrow(/positive/);
@@ -2283,6 +2643,7 @@ describe("piece call wait control", () => {
     expect(result.invocation).toEqual({
       id: "inv-no-readback",
       status: "committed",
+      receipt: harnessReceipt,
     });
     expect(phases).toEqual(["dispatched", "committed"]);
     expect(harness.tracker.sendOptions).toEqual([
@@ -2295,7 +2656,96 @@ describe("piece call wait control", () => {
     expect(harness.tracker.syncedCalls).toBe(0);
   });
 
-  it("still awaits the commit acknowledgement under --no-wait", async () => {
+  it("publishes the receipt address a detached call has to collect with", async () => {
+    // Without it --no-wait is a dead end: the caller holds an id whose only
+    // use is re-invoking the verb. The address is known at commit, so it
+    // costs nothing the mode skips — and it reaches stdout as a top-level
+    // envelope key, beside the id rather than inside the result.
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: { message: { type: "string" } },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-detached-address", session: callerSession },
+        skipReadback: true,
+      },
+    );
+
+    expect(result.invocation?.receipt).toEqual(harnessReceipt);
+    // Published from the commit, not from a readback: the receipt cell is
+    // never opened on this path.
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+    expect(invocationJson(result.invocation!)).toEqual({
+      invocation: "inv-detached-address",
+      status: "committed",
+      receipt: harnessReceipt,
+    });
+  });
+
+  it("omits the receipt when the runtime published no address", async () => {
+    // With receipts off nothing is created for the link to name. An address
+    // that resolves to no cell would invite a readback against a document
+    // that does not exist, so absent beats fabricated.
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: { message: { type: "string" } },
+        required: ["message"],
+      },
+      noReceiptLink: true,
+    });
+
+    const detached = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-no-receipt", session: callerSession },
+        skipReadback: true,
+      },
+    );
+
+    expect(detached.invocation).toEqual({
+      id: "inv-no-receipt",
+      status: "committed",
+    });
+    expect(invocationJson(detached.invocation!)).not.toHaveProperty("receipt");
+
+    const settled = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-no-receipt-settled", session: callerSession },
+      },
+    );
+
+    expect(settled.invocation).toEqual({
+      id: "inv-no-receipt-settled",
+      status: "settled",
+    });
+  });
+
+  it("still awaits the commit acknowledgment under --no-wait", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "addComment",
@@ -2307,7 +2757,7 @@ describe("piece call wait control", () => {
         required: ["message"],
       },
       // The commit callback never fires. --no-wait must NOT return: exiting
-      // before the acknowledgement would abandon the invocation un-executed
+      // before the acknowledgment would abandon the invocation un-executed
       // (the handler runs in this process), not leave it settling elsewhere.
       neverCommit: true,
     });
@@ -2325,7 +2775,7 @@ describe("piece call wait control", () => {
     ).catch((e) => e);
 
     // Only the deadline got us out — the skip-readback path was still
-    // parked on the commit acknowledgement, exactly where it must wait.
+    // parked on the commit acknowledgment, exactly where it must wait.
     expect(error).toBeInstanceOf(WaitBoundExpired);
     expect(phases).toEqual(["dispatched"]);
     expect(harness.tracker.receiptLinkRequested).toBeUndefined();
@@ -2359,12 +2809,15 @@ describe("piece call wait control", () => {
     );
 
     // The collision is still a success — the ORIGINAL commit stands and is
-    // durable — but the original outcome is not fetched; a later same-id
-    // call reads it back.
+    // durable — but the original outcome is not fetched; the address it
+    // published is what reads it back. Which handling's address that is, on
+    // a real collision, is the runner's guarantee rather than this harness's
+    // (see the settled collision case above).
     expect(result.invocation).toEqual({
       id: "inv-dup-no-readback",
       status: "committed",
       deduplicated: true,
+      receipt: harnessReceipt,
     });
     expect(harness.tracker.receiptLinkRequested).toBeUndefined();
   });
@@ -2516,7 +2969,7 @@ describe("piece call wait control", () => {
     observer.finish("detached");
     // "settled" would be a lie here — the readback was skipped, so nobody
     // observed a settlement. The span sequence also documents where
-    // --no-wait stops: after the commit acknowledgement, never before it.
+    // --no-wait stops: after the commit acknowledgment, never before it.
     expect(lines).toEqual([
       "timing: initial_sync → dispatched 20.0ms",
       "timing: dispatched → committed 30.0ms",
@@ -2622,6 +3075,9 @@ function linkedReceiptCell(
   return mockCell({
     get: () => value,
     pull: () => Promise.resolve(value),
+    // These receipts hold plain JSON, whose stored form is the value itself;
+    // presence is decided on this, mirroring the production readback.
+    getRaw: () => value,
     key: () => barren,
     resolveAsCell: () => resolvedRoot,
     getAsNormalizedFullLink: () => mockLink(receiptDoc),
@@ -2992,6 +3448,7 @@ describe("piece call --show-links", () => {
     expect(result.invocation).toEqual({
       id: "inv-links",
       status: "settled",
+      receipt: harnessReceipt,
       result: commentValue,
       links: {
         "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
@@ -3008,6 +3465,7 @@ describe("piece call --show-links", () => {
     expect(Object.keys(json)).toEqual([
       "invocation",
       "status",
+      "receipt",
       "result",
       "links",
     ]);
@@ -3033,6 +3491,7 @@ describe("piece call --show-links", () => {
     expect(result.invocation).toEqual({
       id: "inv-no-links",
       status: "settled",
+      receipt: harnessReceipt,
       result: commentValue,
     });
     expect(invocationJson(result.invocation!)).not.toHaveProperty("links");
@@ -3063,6 +3522,7 @@ describe("piece call --show-links", () => {
     expect(result.invocation).toEqual({
       id: "inv-void-links",
       status: "settled",
+      receipt: harnessReceipt,
       links: {
         "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
       },
@@ -3177,6 +3637,7 @@ describe("piece call selection", () => {
     const receiptCell = {
       get: () => topicResult,
       pull: () => Promise.resolve(topicResult),
+      getRaw: () => topicResult,
       key: () => receiptCell,
     } as unknown as Cell<any>;
     const harness = createPieceCallableHarness({ ...addTopic, receiptCell });
@@ -3201,6 +3662,7 @@ describe("piece call selection", () => {
     expect(result.invocation).toEqual({
       id: "inv-select",
       status: "settled",
+      receipt: harnessReceipt,
       result: { topic: { title: "Ship it" } },
     });
     expect(selector.calls).toHaveLength(1);
@@ -3231,6 +3693,7 @@ describe("piece call selection", () => {
     expect(result.invocation).toEqual({
       id: "inv-plain",
       status: "settled",
+      receipt: harnessReceipt,
       result: topicResult,
     });
     expect(selector.calls).toEqual([]);
@@ -3260,6 +3723,7 @@ describe("piece call selection", () => {
     expect(result.invocation).toEqual({
       id: "inv-void-select",
       status: "settled",
+      receipt: harnessReceipt,
     });
     expect(invocationJson(result.invocation!)).not.toHaveProperty("result");
     expect(selector.calls).toEqual([]);
@@ -3368,6 +3832,7 @@ describe("piece call selection", () => {
     expect(result.invocation).toEqual({
       id: "inv-select-links",
       status: "settled",
+      receipt: harnessReceipt,
       result: { count: 1 },
       links: {
         "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
@@ -3465,7 +3930,7 @@ const selectionSigner = await Identity.fromPassphrase(
   "cf-piece-call-selection",
 );
 
-describe("piece call selection over a live runtime", () => {
+describe("piece call over a live runtime", () => {
   const signer = selectionSigner;
   const space = signer.did();
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -3530,6 +3995,16 @@ describe("piece call selection over a live runtime", () => {
     };
   }
 
+  /** The serialized address of the receipt `settleWith` commits — what the
+   * envelope publishes, read off the same real cell the handling hands the
+   * commit callback. */
+  function receiptAddress(): Record<string, unknown> {
+    const link = runtime
+      .getCell(space, "handling-receipt")
+      .getAsNormalizedFullLink();
+    return { space: link.space, id: link.id, scope: link.scope };
+  }
+
   it("projects a settled result through the real selection step", async () => {
     const resolved = await settleWith({
       topics: [
@@ -3550,6 +4025,7 @@ describe("piece call selection over a live runtime", () => {
     expect(executed.invocation).toEqual({
       id: "inv-live",
       status: "settled",
+      receipt: receiptAddress(),
       result: { topics: [{ title: "First" }, { title: "Second" }] },
     });
   });
@@ -3628,6 +4104,47 @@ describe("piece call selection over a live runtime", () => {
     ).rejects.toThrow(
       /Cannot shape the result of "addTopic".*did not materialize/s,
     );
+  });
+
+  it("hands a detached call an address that reads the outcome back", async () => {
+    // The whole of `receipt`: a caller that skipped the readback holds an
+    // address, and that address resolves to the outcome it named. Reading it
+    // is an ordinary read — no second dispatch, so a verb whose body has
+    // effects outside its transaction does not repeat them.
+    const outcome = { topic: { title: "Ship it", body: "the document" } };
+    const resolved = await settleWith(outcome);
+
+    const executed = await executeResolvedCallable(
+      resolved,
+      { title: "Ship it" },
+      {
+        invocation: { id: "inv-live-detached", session: callerSession },
+        skipReadback: true,
+      },
+    );
+
+    // Nothing was read back — the envelope carries no result — and the
+    // address is still there to collect with.
+    expect(executed.invocation).toEqual({
+      id: "inv-live-detached",
+      status: "committed",
+      receipt: receiptAddress(),
+    });
+
+    // Resolve the published id through the entity-URI intake `--piece` runs
+    // it through, and read the cell it names. This covers the address and
+    // the intake; it stops short of the whole `cf piece get` route, which
+    // also runs slug resolution (a pass-through for a token carrying a
+    // colon) and the read-path guards before reaching the same cell.
+    const published = executed.invocation!.receipt!;
+    const collected = runtime.getCellFromEntityId(
+      published.space as MemorySpace,
+      entityIdFrom(published.id),
+      [],
+      undefined,
+    );
+    await collected.sync();
+    expect(collected.get()).toEqual(outcome);
   });
 });
 
@@ -3851,9 +4368,12 @@ describe("verbInputSchemaError", () => {
       .toBeUndefined();
   });
 
+  // `{}` rather than a misspelling, so this reaches the schema validation
+  // rather than the undeclared-field refusal that now precedes it — a
+  // misspelled required property is BOTH, and it is refused as the undeclared
+  // field it is (verb-undeclared-field.test.ts).
   it("rejects a missing required property", () => {
-    expect(verbInputSchemaError({ mesage: "milk" }, objectSchema))
-      .toMatch(/message/);
+    expect(verbInputSchemaError({}, objectSchema)).toMatch(/message/);
   });
 
   it("rejects a payload of the wrong type", () => {
@@ -4085,7 +4605,7 @@ describe("reportVerbInputErrorOrRethrow", () => {
     expect(printed[1]).toMatch(/<piece>/);
   });
 
-  // Anything that is not an input rejection has to keep travelling: a network
+  // Anything that is not an input rejection has to keep traveling: a network
   // failure reported as a payload problem would send an agent to fix a payload
   // that was fine.
   it("re-throws an unrelated failure untouched", () => {
@@ -4099,6 +4619,55 @@ describe("reportVerbInputErrorOrRethrow", () => {
 
     expect(printed).toEqual([]);
     expect(exited).toEqual([]);
+  });
+});
+
+describe("the pre-dispatch gate on the forced-stream path", () => {
+  // A handler resolved through the forced-stream fallback dispatches on a
+  // cast cell whose schema is only { asCell: ["stream"] } — a shape every
+  // payload satisfies. The resolution carries the piece's published payload
+  // schema as `inputSchema`, and the gate judges against THAT, so a
+  // malformed payload is refused before the invocation id is spent instead
+  // of dispatching a handling that runs with no event.
+  const forcedStreamResolution = (sends: unknown[]) =>
+    ({
+      callableCell: createMockCell({ $stream: true }, { asCell: ["stream"] }, {
+        send: (value, onCommit) => {
+          sends.push(value);
+          onCommit?.({ status: () => ({ status: "done" }) });
+        },
+      }),
+      callableKind: "handler",
+      cellKey: "addNote",
+      pieces: { runtime: {} },
+      space: "did:key:test-home",
+      inputSchema: {
+        type: "object",
+        properties: { title: { type: "string" } },
+        required: ["title"],
+      },
+    }) as unknown as CallableResolution;
+
+  it("refuses a payload the published schema rejects, before dispatch", async () => {
+    const sends: unknown[] = [];
+    const resolved = forcedStreamResolution(sends);
+
+    await expect(
+      executeResolvedCallable(resolved, { titel: "typo" }),
+    ).rejects.toThrow(VerbInputValidationError);
+    expect(sends).toEqual([]);
+  });
+
+  it("dispatches a payload the published schema accepts", async () => {
+    const sends: unknown[] = [];
+    const resolved = forcedStreamResolution(sends);
+
+    const executed = await executeResolvedCallable(resolved, {
+      title: "Ship it",
+    });
+
+    expect(sends).toEqual([{ title: "Ship it" }]);
+    expect(executed).toEqual({});
   });
 });
 
@@ -4210,6 +4779,32 @@ describe("renderPieceCallOutcome", () => {
     assertEquals(rendered, ["{}"]);
     assertEquals(hinted.length, 1);
     assertStringIncludes(hinted[0], "of:x");
+    // The address argument the next command takes, not the three-part prose
+    // that named the same cell in a spelling nothing parses. `cf exec` prints
+    // the same shape for the same cell.
+    assertStringIncludes(hinted[0], "cf piece get --piece of:x");
+    expect(hinted[0]).not.toContain("(space did:key:s");
+  });
+
+  it("spells a non-space-scoped tool result cell with its scope", () => {
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        outputText: "{}",
+        resultRef: { id: "of:x", space: "did:key:s", scope: "user" },
+      } as ExecutedPieceCallable,
+      "tool",
+      "fid1:piece",
+      deps,
+    );
+    // Reopening a user-scoped cell without its scope resolves the
+    // space-scoped instance, which is a different cell — so the suffix rides
+    // the address rather than sitting in a parenthetical the way the prose
+    // form's did.
+    assertStringIncludes(hinted[0], "cf piece get --piece of:x@user");
   });
 
   it("handler invocations render the Invocation JSON with next steps", () => {
@@ -4237,14 +4832,18 @@ describe("renderPieceCallOutcome", () => {
       observer,
       {
         ...base,
-        invocation: { id: "inv-1", status: "committed" },
+        invocation: {
+          id: "inv-1",
+          status: "committed",
+          receipt: { space: "did:key:s", id: "of:receipt-1", scope: "space" },
+        },
       } as unknown as ExecutedPieceCallable,
       "addTopic",
       "fid1:piece",
       deps,
       { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
     );
-    // The hint is a command the caller runs to collect the outcome it chose
+    // The replay is a command the caller runs against the outcome it chose
     // not to wait for, and an id reaches that outcome only within the
     // session it was chosen in — so the hint has to carry both. The session
     // travels in the environment because it is what makes that outcome's
@@ -4254,6 +4853,101 @@ describe("renderPieceCallOutcome", () => {
       "CF_INVOCATION_SESSION=ses-7 cf piece call",
     );
     assertStringIncludes(hinted[0], "--invocation inv-1");
+    // And it says what the replay costs: the receipt witnesses the commit,
+    // not the execution, so the body runs a second time.
+    assertStringIncludes(hinted[0], "RUNS AGAIN");
+  });
+
+  it("offers no replay in the detached step that published no address", () => {
+    // No receipt means receipts are not being written, and that is exactly
+    // when a same-pair call does NOT deduplicate: it executes and commits
+    // again ("allows redelivered events to commit twice while receipts are
+    // disabled", packages/runner/test/scheduler-event-receipts.test.ts).
+    // Offering the replay here would be offering a duplicate.
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: { id: "inv-1", status: "committed" },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+      { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
+    );
+    expect(hinted[0]).not.toContain("CF_INVOCATION_SESSION");
+    assertStringIncludes(hinted[0], "executes and commits AGAIN");
+    // And no dangling alternative: there is nothing for an "Or" to be or to.
+    expect(hinted[0]).not.toContain("Or replay");
+    assertStringIncludes(hinted[0], "cf piece get --piece fid1:piece");
+  });
+
+  it("leads the detached next steps with the address it published", () => {
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: {
+          id: "inv-1",
+          status: "committed",
+          receipt: {
+            space: "did:key:s",
+            id: "of:receipt-1",
+            scope: "space",
+          },
+        },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+      { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
+    );
+    // Collecting the outcome is a read of the address this call published,
+    // and it comes first because it does not run the verb again. The replay
+    // stays on offer below it, for a caller that lost the address.
+    assertStringIncludes(hinted[0], "cf piece get --piece of:receipt-1");
+    assertStringIncludes(
+      hinted[0],
+      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+    );
+    expect(hinted[0].indexOf("cf piece get --piece of:receipt-1"))
+      .toBeLessThan(hinted[0].indexOf("CF_INVOCATION_SESSION"));
+  });
+
+  it("writes a non-space receipt scope into the collect address", () => {
+    // The scope is part of the address: reopening a session-scoped cell
+    // without it resolves the space-scoped instance — a different cell — so
+    // the hint carries the id@scope form parseScopedId accepts. The bare
+    // form stays bare for space scope, which it already means.
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: {
+          id: "inv-1",
+          status: "committed",
+          receipt: {
+            space: "did:key:s",
+            id: "of:receipt-1",
+            scope: "session",
+          },
+        },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+      { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
+    );
+    assertStringIncludes(
+      hinted[0],
+      "cf piece get --piece of:receipt-1@session",
+    );
   });
 
   it("confirmations route to stderr under JSON input, stdout otherwise", () => {

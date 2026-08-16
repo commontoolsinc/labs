@@ -4,6 +4,7 @@
  * the actual disk so every branch — successful reads, the catch arms when a
  * path does not exist, and the symlink-resolving directory check — runs.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
@@ -432,7 +433,7 @@ Deno.test("realFileGateway.open: returns null when the file cannot be read", () 
   assertEquals(gw.open(missing), null);
 });
 
-Deno.test("realFileGateway.join: joins and normalises a directory and segment", () => {
+Deno.test("realFileGateway.join: joins and normalizes a directory and segment", () => {
   const gw = realFileGateway();
   assertEquals(gw.join("/work", "a.ts"), join("/work", "a.ts"));
   assertEquals(gw.join("/work/sub", ".."), join("/work/sub", ".."));

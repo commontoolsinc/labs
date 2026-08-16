@@ -10,10 +10,16 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
 import { clonePaths } from "@commonfabric/state-inspector";
-import { cf } from "./utils.ts";
+import { cf, stripAnsi } from "./utils.ts";
 
-/** `CliResult` streams are line arrays; join before substring assertions. */
-const text = (lines: string[]): string => lines.join("\n");
+/**
+ * `CliResult` streams are line arrays; join before substring assertions.
+ *
+ * The escapes go too: the CLI colors help and error output whenever the
+ * environment asks for color, so an assertion on raw text passes or fails by
+ * where the developer ran it.
+ */
+const text = (lines: string[]): string => stripAnsi(lines.join("\n"));
 
 /**
  * Staging directories `--from <url>` may have created, by name.
@@ -388,7 +394,7 @@ describe("cf space", () => {
 
   it("refuses to pull a whole-space snapshot over plaintext http", async () => {
     // A snapshot is the entire contents of a space — the same confidentiality
-    // judgement that keeps the dump endpoint off in production. Loopback is
+    // judgment that keeps the dump endpoint off in production. Loopback is
     // exempt (it never leaves the machine) and the tests above rely on that.
     await withFixture(async ({ clone }) => {
       const result = await cf(

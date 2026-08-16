@@ -1,7 +1,10 @@
-import { css, html, nothing, type TemplateResult } from "lit";
-import { state } from "lit/decorators.js";
-import { live } from "lit/directives/live.js";
-import { BaseElement } from "../../core/base-element.ts";
+import {
+  getPieceBoundary,
+  subscribePieceBoundary,
+} from "@commonfabric/html/client";
+import type { DID } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity";
+import { parseFabricRef } from "@commonfabric/runner/shared";
 import {
   $conn,
   CellHandle,
@@ -17,9 +20,6 @@ import type {
   SpaceAclCapability,
   SpaceAclView,
 } from "@commonfabric/runtime-client";
-import type { DID } from "@commonfabric/identity";
-import { isDID } from "@commonfabric/identity";
-import { parseFabricRef } from "@commonfabric/runner/shared";
 import {
   appViewToUrlPath,
   navigate,
@@ -28,10 +28,11 @@ import {
   preserveAppViewMode,
   urlToAppView,
 } from "@commonfabric/shell/shared";
-import {
-  getPieceBoundary,
-  subscribePieceBoundary,
-} from "@commonfabric/html/client";
+import { css, html, nothing, type TemplateResult } from "lit";
+import { state } from "lit/decorators.js";
+import { live } from "lit/directives/live.js";
+
+import { BaseElement } from "../../core/base-element.ts";
 import {
   describeOrigin,
   formatTimestamp,

@@ -29,6 +29,7 @@
  * syntax family but require separate ownership classification; consumers
  * should use `classifyArrayMethodCallSite(...)` when that distinction matters.
  */
+
 import ts from "typescript";
 
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
@@ -468,7 +469,7 @@ export function getCapabilitySummaryCallbackArgument(
  * if `call` doesn't have the lift-applied shape (no inner call expression).
  *
  * Uses `stripWrappers` so a parenthesized or as-cast callee is still
- * recognised, matching how `getLiftAppliedInputAndCallback` reads the same
+ * recognized, matching how `getLiftAppliedInputAndCallback` reads the same
  * shape. Use this in preference to bare `ts.isCallExpression(call.expression)`
  * at all sites that need the inner call — TS rarely emits parens around
  * synthesized calls today, but routing through one helper makes any future
@@ -491,7 +492,7 @@ export function getLiftAppliedInnerCall(
  * handler-applied call continues to classify as `{ kind: "builder",
  * builderName: "handler" }` so handler-specific dispatchers (stream causes in
  * ReactiveVariableFor, capture-schema injection, write-authorization, etc.) are
- * unaffected. This predicate exists solely so the hoisting stage can recognise
+ * unaffected. This predicate exists solely so the hoisting stage can recognize
  * the unit to relocate without minting a new kind or widening the lift-applied
  * gate.
  *
@@ -659,7 +660,15 @@ function isCallbackFunctionExpression(
   return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
 }
 
-function resolveCallbackFunctionExpression(
+/**
+ * The function-like expression `expression` resolves to, following wrapper
+ * strips, the hardening helper, and — unlike schema-injection's local
+ * direct-only resolver — an identifier to its variable initializer through
+ * the checker. The resolver a caller wants when "is this argument the
+ * callback?" must answer the same for `handler(es, ss, cb)` and
+ * `handler(es, ss, myCb)`.
+ */
+export function resolveCallbackFunctionExpression(
   expression: ts.Expression,
   checker: ts.TypeChecker,
   seen = new Set<ts.Node>(),

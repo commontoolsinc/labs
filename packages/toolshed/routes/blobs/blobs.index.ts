@@ -1,19 +1,20 @@
+import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
+import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isDID } from "@commonfabric/identity";
+import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import type { Context } from "@hono/hono";
+
 // Blob routes are intentionally unauthenticated for the MVP. Anyone can POST a
 // blob into any space DID; content addressing prevents overwriting a different
 // payload, but callers can inject blobs and consume storage. Anyone with a hash
 // can GET the blob. Revisit this before any production exposure.
 import { createRouter } from "@/lib/create-app.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
-import { isDID } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { newDefaultJsonCodec } from "@commonfabric/data-model/codecs";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
-import type { Context } from "@hono/hono";
 
 const router = createRouter();
-const blobUploadCodec = newDefaultJsonCodec();
+const blobUploadCodec = newDefaultJsonCodecEngine();
 const blobReconstructionContext = new EmptyReconstructionContext(
   true,
   "blob upload payloads cannot contain cell references",

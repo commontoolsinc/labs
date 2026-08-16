@@ -1,5 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import {
   createSinkRequestPolicyInput,
@@ -7,8 +11,6 @@ import {
   verifySinkRequestRelease,
 } from "../src/cfc/sink-request.ts";
 import { Runtime } from "../src/runtime.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test cfc sink request policy");
 describe("CFC sink request policy", () => {

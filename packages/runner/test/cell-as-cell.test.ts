@@ -1,19 +1,24 @@
 // asCell tests: converting values to cells with and without schemas,
 // link resolution, and schema-driven cell creation.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { isCell } from "../src/cell.ts";
-import { JSONSchema } from "../src/builder/types.ts";
+
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { JSONSchema } from "../src/builder/types.ts";
+import { isCell } from "../src/cell.ts";
+import {
+  areNormalizedLinksSame,
+  isPrimitiveCellLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
-import { isPrimitiveCellLink, parseLink } from "../src/link-utils.ts";
-import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

@@ -1,7 +1,10 @@
-// Tests for the model-spend tile: three provider billing APIs, read through a
-// stubbed fetch. Nothing here touches the network. The day keys are built from the
-// real current UTC date, because the tile reads the clock to decide which days are
-// this month and how far back to ask.
+/**
+ * Tests for the model-spend tile: three provider billing APIs, read through a
+ * stubbed fetch. Nothing here touches the network. The day keys are built from the
+ * real current UTC date, because the tile reads the clock to decide which days are
+ * this month and how far back to ask.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx } from "../types.ts";
 import { themedChartSeries } from "../theme.ts";
@@ -125,7 +128,7 @@ Deno.test("model spend: all three providers read -> green, combined MTD, a line 
         `<p class="sub">${themedSwatch("#10a37f")} OpenAI • ` +
           `${themedSwatch("#d97757")} Anthropic • OR $5</p>`,
       );
-      // Each line is drawn in its provider's color and labelled with its own MTD.
+      // Each line is drawn in its provider's color and labeled with its own MTD.
       assertStringIncludes(v.extra ?? "", `pointer-events:none">$${DOM}</span>`);
       assertStringIncludes(v.extra ?? "", `pointer-events:none">$${2 * DOM}</span>`);
       assertStringIncludes(v.extra ?? "", "#10a37f");
@@ -167,6 +170,54 @@ Deno.test("model spend: a provider that errors -> $??? and gray, the rest still 
       assertStringIncludes(v.extra ?? "", "#10a37f");
     },
   );
+});
+
+// OpenAI's cost report stops six days back: the days after it have no bucket,
+// so the provider has written nothing about them.
+const openaiStalled: Handler = () =>
+  json({ data: WINDOW.slice(0, WINDOW.length - 6).map((d) => oaBucket(d, 1)), has_more: false, next_page: null });
+// A bucket for a day the org spent nothing. The endpoint carries one for every
+// day in the range it covers, so a day with no figures is a reported $0.
+const oaEmptyBucket = (day: string) => ({ start_time: Date.parse(`${day}T00:00:00Z`) / 1000, results: [] });
+// $1/day until the last ten days, which are reported and empty.
+const openaiQuiet: Handler = () =>
+  json({
+    data: WINDOW.map((d, i) => i < WINDOW.length - 10 ? oaBucket(d, 1) : oaEmptyBucket(d)),
+    has_more: false,
+    next_page: null,
+  });
+
+Deno.test("model spend: a provider whose report stopped -> $??? and gray, never days of $0", async () => {
+  await withFetch({ "api.openai.com": openaiStalled, "openrouter.ai": openrouterFive }, async () => {
+    const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa", OPENROUTER_KEY: "or" }));
+    assertEquals(v.status, "unknown"); // OpenAI's recent days are unknown, not quiet
+    assert(v.value?.startsWith("≥"), `the total is a lower bound, got ${v.value}`);
+    assertEquals(v.extra, `<p class="sub">OpenAI $??? • OR $5</p>`); // no line, no total
+  });
+});
+
+Deno.test("model spend: a provider reporting empty days is quiet, and still reads", async () => {
+  await withFetch({ "api.openai.com": openaiQuiet }, async () => {
+    const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa" }));
+    assertEquals(v.status, "good");
+    assert(v.value?.startsWith("~"), `nothing configured is missing, got ${v.value}`);
+    assertEquals((v.extra ?? "").includes("OpenAI $???"), false);
+    assertStringIncludes(v.extra ?? "", `${themedSwatch("#10a37f")} OpenAI`);
+  });
+});
+
+Deno.test("model spend: a provider with no bucket at all draws no line of $0", async () => {
+  // OpenAI answers with an empty report. Anthropic's days supply the chart's
+  // day axis, but they are Anthropic's days: OpenAI reported on none of them,
+  // so its total is $0 and its line is absent rather than flat along the floor.
+  await withFetch({ "api.openai.com": () => json({ data: [] }), "api.anthropic.com": anthropicPaged }, async () => {
+    const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa", ANTHROPIC_ADMIN_KEY: "an" }));
+    assertEquals(v.status, "good");
+    assertEquals(v.aside, `<span class="hmtd">$${2 * DOM} MTD</span>`); // Anthropic's $2/day alone
+    // OpenAI's color survives in the key's swatch and nowhere in the chart.
+    assertEquals((v.extra ?? "").match(/#10a37f/gi)?.length, 1);
+    assertStringIncludes(v.extra ?? "", "#d97757");
+  });
 });
 
 Deno.test("model spend: a one-key deployment still turns green (an unset key doesn't gate the budget)", async () => {

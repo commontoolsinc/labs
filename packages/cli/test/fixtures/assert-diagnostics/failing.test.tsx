@@ -3,7 +3,8 @@
  * `assert(...)` can be checked. Run by assert-diagnostics.test.ts, which
  * expects the failures; it is not a pattern under test.
  */
-import { assert, cell, pattern } from "commonfabric";
+
+import { assert, cell, pattern, TESTS } from "commonfabric";
 
 function inRange(value: number, low: number, high: number): boolean {
   return value >= low && value <= high;
@@ -15,7 +16,7 @@ export default pattern(() => {
   const c = cell<number>(2);
 
   return {
-    tests: [
+    [TESTS]: [
       // 1 + 2 is 3, which is not <= 2.
       { assertion: assert(() => a.get() + b.get() <= c.get()) },
       // 5 is outside 2..2.

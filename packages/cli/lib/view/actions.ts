@@ -3,6 +3,7 @@
  * navigation, and scroll clamping. Kept free of terminal I/O so the navigation
  * model can be unit-tested without a TTY.
  */
+
 import type { Document, StructureNode } from "./model.ts";
 import type { Match } from "./render.ts";
 import { cpLen } from "./ansi.ts";
@@ -238,7 +239,7 @@ export function nodeAtLine(
 }
 
 /**
- * Frame a node's source range nicely: if the whole node fits on screen, centre
+ * Frame a node's source range nicely: if the whole node fits on screen, center
  * it vertically; otherwise put its top line about a tenth of the way down so
  * there is a little lead-in but most of the screen shows the node. Used by `z`.
  */

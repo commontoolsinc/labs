@@ -133,7 +133,7 @@ step we control — in `.github/workflows/*` and in the composite actions under
 each emoji belongs to exactly one phase. When you add a step, pick an emoji whose
 phase matches what the step does. When you add a genuinely new kind of step,
 choose a new emoji, then add it to both this table and the `PHASE_MARKERS` array
-in `scripts/ci-gantt.ts`, keeping the one-emoji-one-phase rule.
+in `tasks/ci-step-phases.ts`, keeping the one-emoji-one-phase rule.
 
 **setup** — fetch code, install tools and dependencies, restore caches,
 authenticate, and bring test servers and devices up before the real work:
@@ -152,6 +152,7 @@ authenticate, and bring test servers and devices up before the real work:
 | 🔌 | start a local server for tests |
 | ⏳ | wait for a service to be ready |
 | 💾 | restore or save a cache |
+| 🗃️ | restore a cached native library |
 | 🧮 | compute a cache identity |
 
 **work** — the job's actual purpose:
@@ -203,6 +204,51 @@ alongside them. The two set-up steps count as setup and the rest as shutdown.
 Any other step that reaches the chart without a recognized marker is counted as
 "other", drawn in gray, and listed on standard error when the script runs, so a
 missing marker is easy to find and fix.
+
+## Step And Job Timeouts
+
+Every work step in `.github/workflows/deno.yml` carries its own
+`timeout-minutes`, and the `timeout-minutes` on the job around it is ten minutes
+larger. The two bounds do different things when they are reached. GitHub ends a
+job that runs past the bound on the job by cancelling it, so the job's
+conclusion is `cancelled` — the conclusion that a run stopped by hand or
+superseded by a newer push also carries, and one that reads as nobody's fault. A
+step that runs past the bound on the step fails, and its job fails with it. The
+ten minutes between the two bounds are what the setup and upload steps around
+the work need, and they mean a wedged test reaches the bound on its step first
+and is reported as a failure.
+
+The minutes are written once. The top of the workflow declares them as YAML
+anchors, which GitHub Actions has accepted since September 2025:
+
+```yaml
+env:
+  WORK_TIMEOUT_MINUTES: &work-timeout 30
+  JOB_TIMEOUT_MINUTES: &job-timeout 40
+```
+
+Every job then reads `timeout-minutes: *job-timeout` and every work step
+`timeout-minutes: *work-timeout`. Changing either bound is one edit. The
+environment variables are how a workflow declares a value an anchor can name;
+nothing reads them, and merge keys (`<<:`) remain unsupported, so an anchor
+cannot carry a block that a job then overrides.
+
+The CLI integration suites take a second set of anchors, `cli-work-timeout` at
+ten minutes, `cli-fuse-work-timeout` at fifteen, and `cli-job-timeout` at
+twenty-five. Those suites were bounded against a wedge in the FUSE work when
+they were first split up, and the tighter numbers are what that sizing produced.
+A job needing its own bound adds a pair of anchors alongside these rather than a
+number next to the step.
+
+The deploy jobs carry no bound at all. A deploy hands the work to a script that
+lives outside this repository, and a bound here would cancel a deploy this
+workflow has no way to size. `tasks/ci-workflow.test.ts` names those jobs and
+asks nothing of them.
+
+For every other job, that test fails the `Check` job when a work step has no
+bound, when a job has none, when a bound is written as anything but an alias to
+an anchor, or when fewer than ten minutes separate the step's anchor from its
+job's.
 
 ## Root Test Job Shape
 

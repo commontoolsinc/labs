@@ -8,11 +8,13 @@
  * This transformer provides a clear, actionable error message before TypeScript
  * produces its complex type error about the missing .get() method.
  */
-import ts from "typescript";
-import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+
 import { getCellKind } from "@commonfabric/schema-generator/cell-brand";
+import ts from "typescript";
+
 import { detectCallKind, isReactiveOriginCall } from "../ast/call-kind.ts";
 import { getNodeText } from "../ast/mod.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 
 export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {

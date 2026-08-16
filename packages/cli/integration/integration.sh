@@ -615,7 +615,7 @@ run_piece_call_retry() {
   assert_message_count "$RETRY_PIECE_ID" 1 \
     "A fresh-id retry after a pre-dispatch failure should record exactly one message"
 
-  # --- 2. Dispatched, then the caller died before acknowledgement. ----------
+  # --- 2. Dispatched, then the caller died before acknowledgment. ----------
   # The riskiest window: the event is on its way and the caller cannot know
   # whether it committed. The kill is triggered by the CLI's own dispatch
   # announcement, so this lands in the window deterministically rather than
@@ -952,7 +952,7 @@ run_three_topic_fixture() {
 
   # --- 6. Exactly three topics; references, reciprocals, attribution. -------
   # One step so the derived views (topicCount, referencedBy) recompute from
-  # the committed writes: acknowledgement is transaction-local (D2), so the
+  # the committed writes: acknowledgment is transaction-local (D2), so the
   # calls above deliberately never waited for derived recomputation.
   cf piece step $SPACE_ARGS --piece "$TOPIC_PIECE_ID"
 
@@ -987,7 +987,7 @@ run_three_topic_fixture() {
      .references == [$u]' > /dev/null ||
     error "Child B's returned reference should open the dropped create's canonical child, got: $CHILD_B_FINAL"
 
-  # The reciprocal derived references (this fixture's crossrefs analogue):
+  # The reciprocal derived references (this fixture's crossrefs analog):
   # children point up at the umbrella, the revised umbrella points down at
   # both children, derived — never persisted.
   RECIPROCAL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" referencedBy)
@@ -1035,6 +1035,18 @@ run_verbs_walkthrough() {
   API_URL="$API_URL" bash "$SCRIPT_DIR/verbs-over-the-cli.sh" ||
     error "The verb-result walkthrough failed."
   echo "Successfully ran the verb-result walkthrough for ${API_URL}."
+}
+
+# The gap harness beside the walkthrough: what does NOT work yet, asserted so
+# it fails the day a capability arrives — its own header says what and why.
+# Running it here is what makes that announcement automatic: a gap script
+# nobody runs announces nothing. Same delegation rationale as above; it
+# deploys its own fixture and takes its own space.
+run_verb_session_gaps() {
+  echo "Running the verb-session gap harness..."
+  API_URL="$API_URL" bash "$SCRIPT_DIR/verb-session-gaps.sh" ||
+    error "The verb-session gap harness failed."
+  echo "Successfully ran the verb-session gap harness for ${API_URL}."
 }
 
 run_wish() {
@@ -1089,6 +1101,7 @@ case "$SECTION" in
     run_piece_call_retry
     run_three_topic_fixture
     run_verbs_walkthrough
+    run_verb_session_gaps
     ;;
   piece-call-retry)
     run_piece_call_retry
@@ -1101,6 +1114,9 @@ case "$SECTION" in
     ;;
   verbs)
     run_verbs_walkthrough
+    ;;
+  verb-gaps)
+    run_verb_session_gaps
     ;;
   *)
     error "Unknown CLI integration section: $SECTION"

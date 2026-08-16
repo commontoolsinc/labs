@@ -1,23 +1,26 @@
-// pull() must await its own first sync — the root-doc half of the
-// fresh-replica story (fresh-replica-read-asymmetry.test.ts covers the
-// link-target half).
-//
-// pull() used to KICK the cell's first sync without registering it anywhere
-// ("No await, just kicking this off"), then wait only on scheduler idle plus
-// the cross-space load pool. The root doc's own round-trip was in neither, so
-// pull resolved whenever the scheduler quiesced — which over a low-latency
-// link is AFTER the doc arrives, and over a real network is BEFORE. Measured
-// in production shape: a same-id retry's receipt readback (`cf piece call
-// --invocation`, the WS-D collision path reading the winner's receipt via
-// getCellFromLink → pull) returned the original result against a local
-// toolshed and `undefined` against a remote host, every time. sync()'s own
-// doc comment names the trap: code gating on idle() alone can race the
-// deferred sync; register it with trackUntilSettled so pull() awaits it.
-//
-// The gate below makes the race deterministic instead of latency-shaped: the
-// reader's syncCell for the target doc is held until the test has SEEN the
-// reader's scheduler go idle — the exact moment the unregistered kick used to
-// lose — and only then lets the "network" answer.
+/**
+ * pull() must await its own first sync — the root-doc half of the
+ * fresh-replica story (fresh-replica-read-asymmetry.test.ts covers the
+ * link-target half).
+ *
+ * pull() used to KICK the cell's first sync without registering it anywhere
+ * ("No await, just kicking this off"), then wait only on scheduler idle plus
+ * the cross-space load pool. The root doc's own round-trip was in neither, so
+ * pull resolved whenever the scheduler quiesced — which over a low-latency
+ * link is AFTER the doc arrives, and over a real network is BEFORE. Measured
+ * in production shape: a same-id retry's receipt readback (`cf piece call
+ * --invocation`, the WS-D collision path reading the winner's receipt via
+ * getCellFromLink → pull) returned the original result against a local
+ * toolshed and `undefined` against a remote host, every time. sync()'s own
+ * doc comment names the trap: code gating on idle() alone can race the
+ * deferred sync; register it with trackUntilSettled so pull() awaits it.
+ *
+ * The gate below makes the race deterministic instead of latency-shaped: the
+ * reader's syncCell for the target doc is held until the test has SEEN the
+ * reader's scheduler go idle — the exact moment the unregistered kick used to
+ * lose — and only then lets the "network" answer.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";

@@ -17,6 +17,7 @@
  * - Every mutating verb throws on an unusable payload, so the walkthrough can
  *   show that a refusal does not spend the caller's invocation id.
  */
+
 import {
   action,
   computed,
@@ -28,7 +29,7 @@ import {
 } from "commonfabric";
 
 /** One note. Deliberately small: this fixture is about what a verb hands back,
- * not about modelling notes. */
+ * not about modeling notes. */
 export interface NoteOutput {
   [NAME]: string;
   title: string;

@@ -31,26 +31,28 @@
  * here.
  */
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  clearMockResponses,
-  enableMockMode,
-  loadConversationFixture,
-} from "@commonfabric/llm/client";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import type {
   BuiltInLLMMessage,
   BuiltInLLMTool,
   JSONSchema,
 } from "@commonfabric/api";
-import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import {
+  clearMockResponses,
+  enableMockMode,
+  loadConversationFixture,
+} from "@commonfabric/llm/client";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { createBuilder } from "../src/builder/factory.ts";
+import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

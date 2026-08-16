@@ -6,7 +6,7 @@ import {
   cloneIfNecessary,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isInstance, isObject } from "@commonfabric/utils/types";
+import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
 import { type EntityDocument, isEntityDocument, type PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
@@ -21,7 +21,7 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * `structuredClone()` MUST NOT be used here: it silently demotes class
  * instances to plain objects. A demoted `FabricError` then fails the
  * `value instanceof FabricInstance` check in the wire/persistence codec
- * (`jsonFromValue`/`FabricInstanceHandler`), so it is serialized
+ * (`jsonFromFabricValue()`/`FabricInstanceHandler`), so it is serialized
  * generically and its wrapped native `Error` -- whose `message`/`stack`
  * are non-enumerable -- collapses to `{}`, losing the error entirely.
  *
@@ -495,7 +495,7 @@ const isArraySegment = (segment: string): boolean =>
   /^(0|[1-9]\d*)$/.test(segment);
 
 const isPatchObject = (value: FabricValue): value is PatchObject =>
-  isObject(value) && !isInstance(value);
+  isObjectNotArray(value) && !isInstance(value);
 
 const isContainer = (value: FabricValue): value is PatchContainer =>
   Array.isArray(value) || isPatchObject(value);

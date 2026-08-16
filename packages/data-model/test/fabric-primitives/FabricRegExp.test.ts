@@ -1,23 +1,40 @@
-import { JSON_CODEC } from "@/interface.ts";
-import { describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
+/**
+ * A regular expression stored as data -- source, flags, and the flavor saying
+ * whose dialect they are written in -- rather than as a live `RegExp`.
+ *
+ * The flavor is what makes this more than a wrapper. A pattern in the dialect
+ * this runtime understands is validated and can be handed back as a native
+ * `RegExp`; one in any other flavor is stored faithfully and not parsed at
+ * all, so a pattern JS would reject survives a round trip instead of becoming
+ * a `ProblematicValue`. What fails is asking such a value for a native form,
+ * and it fails at that point rather than when the value was stored.
+ *
+ * Nothing is aliased in either direction: the constructor does not keep the
+ * `RegExp` it was given, and each read builds a fresh one, so mutating what
+ * comes back cannot reach the stored value. The flavor counts toward identity
+ * as well -- two values differing only in it hash differently.
+ */
 
-import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { isConvertibleNativeInstance } from "@/native-conversion.ts";
 import {
   isFabricCompatible,
   shallowFabricFromNativeValue,
 } from "@/fabric-value.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { isConvertibleNativeInstance } from "@/native-conversion.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
 } from "@/native-type-tags.ts";
-import { jsonFromValue, valueFromJson } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {
@@ -159,6 +176,44 @@ describe("FabricRegExp", () => {
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
+        it("decodes a non-string field to `ProblematicValue`", () => {
+          // Only the `es2025` flavor is validated for syntax, so under any
+          // other one these values reach the constructor untouched -- and
+          // `source` and `flags` are exposed by getters typed `string`. An
+          // unchecked object here would put one behind such a getter, and take
+          // an unfrozen reference into a frozen instance with it.
+          for (
+            const state of [
+              { flavor: "future", source: { mutable: true }, flags: "g" },
+              { flavor: "future", source: "a", flags: ["g"] },
+              { flavor: ["future"], source: "a", flags: "g" },
+              // Present as `undefined` is present, not absent. A peer can
+              // reach this through the nonterminal walk by encoding the field
+              // as `{"/Undefined@1": null}`, and defaulting it would answer a
+              // question the wire did ask -- with `flavor`, by naming a
+              // dialect the sender did not.
+              { flavor: undefined, source: "a", flags: "g" },
+            ]
+          ) {
+            expect(codec.decode(expectedTag, state as never, context))
+              .toBeInstanceOf(ProblematicValue);
+          }
+        });
+
+        it("decodes a state omitting a field, taking that field's default", () => {
+          // Absent is not the same as present-and-wrong: a narrower encoder
+          // may leave a field out, and the default stands in for it.
+          const decoded = codec.decode(
+            expectedTag,
+            {},
+            context,
+          ) as FabricRegExp;
+
+          expect(decoded).toBeInstanceOf(FabricRegExp);
+          expect(decoded.source).toBe("");
+          expect(decoded.flags).toBe("");
+        });
+
         it("decodes an unparseable `es2025` pattern to `ProblematicValue`", () => {
           const decoded = codec.decode(
             expectedTag,
@@ -222,10 +277,12 @@ describe("FabricRegExp", () => {
   // The following exercise free functions' handling of `FabricRegExp` /
   // `RegExp` rather than members of the class itself, so they live directly
   // under the class `describe()` (the cross-cutting carve-out).
-  describe("round-trip via `jsonFromValue()` / `valueFromJson()`", () => {
+  describe("round-trip via `jsonFromFabricValue()` / `fabricFromJsonValue()`", () => {
     it("round-trips a `FabricRegExp`", () => {
       const original = new FabricRegExp(/hello\s+world/gim);
-      const restored = valueFromJson(jsonFromValue(original)) as FabricRegExp;
+      const restored = fabricFromJsonValue(
+        jsonFromFabricValue(original),
+      ) as FabricRegExp;
       expect(restored).toBeInstanceOf(FabricRegExp);
       expect(restored.source).toBe(original.source);
       expect(restored.flags).toBe(original.flags);
@@ -236,7 +293,9 @@ describe("FabricRegExp", () => {
       const flagSets = ["", "g", "i", "m", "s", "u", "y", "d", "gi", "gims"];
       for (const flags of flagSets) {
         const original = new FabricRegExp(new RegExp("test", flags));
-        const restored = valueFromJson(jsonFromValue(original)) as FabricRegExp;
+        const restored = fabricFromJsonValue(
+          jsonFromFabricValue(original),
+        ) as FabricRegExp;
         expect(restored.flags).toBe(original.flags);
         expect(restored.flavor).toBe("es2025");
       }
@@ -244,7 +303,9 @@ describe("FabricRegExp", () => {
 
     it("round-trips a non-`es2025` flavor faithfully (source/flags/flavor)", () => {
       const original = new FabricRegExp("pcre2", "ab+c", "g");
-      const restored = valueFromJson(jsonFromValue(original)) as FabricRegExp;
+      const restored = fabricFromJsonValue(
+        jsonFromFabricValue(original),
+      ) as FabricRegExp;
       expect(restored.source).toBe("ab+c");
       expect(restored.flags).toBe("g");
       expect(restored.flavor).toBe("pcre2");

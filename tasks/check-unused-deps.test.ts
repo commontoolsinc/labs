@@ -88,7 +88,7 @@ Deno.test("importsAlias matches a @deno-types companion comment", () => {
 });
 
 // `@ts-types` is Deno's current spelling of the companion-type comment; the
-// older `@deno-types` above still works and both must be recognised, or an
+// older `@deno-types` above still works and both must be recognized, or an
 // `@types/*` alias reached through the current form would be reported unused.
 
 Deno.test("importsAlias matches a @ts-types companion comment", () => {
@@ -201,7 +201,7 @@ Deno.test("parseImportMap tolerates a missing imports block", () => {
   assertEquals(parseImportMap(`{ "name": "x" }`), {});
 });
 
-Deno.test("parseWorkspaceMembers normalises leading ./ and trailing /", () => {
+Deno.test("parseWorkspaceMembers normalizes leading ./ and trailing /", () => {
   const text = `{ "workspace": ["./packages/a", "packages/b/"] }`;
   assertEquals(parseWorkspaceMembers(text), ["packages/a", "packages/b"]);
 });

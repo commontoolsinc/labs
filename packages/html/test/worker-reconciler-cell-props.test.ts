@@ -1,13 +1,14 @@
 import { assertEquals } from "@std/assert";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { WorkerVNode } from "../src/worker/types.ts";
+
+import { Identity } from "@commonfabric/identity";
+import { KeepAsCell, Runtime } from "@commonfabric/runner";
+import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { KeepAsCell, Runtime } from "@commonfabric/runner";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
+import type { WorkerVNode } from "../src/worker/types.ts";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -750,7 +751,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     );
 
     await t.step(
-      "Cell<Props> event handler is removed after unmount acknowledgement",
+      "Cell<Props> event handler is removed after unmount acknowledgment",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({

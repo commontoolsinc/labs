@@ -39,7 +39,7 @@ explicit selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped
 source is not guessed from its syntax.
 
 A diff shows its whole-diff change totals at the top right corner of its first
-line: the added line count and the removed line count, coloured like additions
+line: the added line count and the removed line count, colored like additions
 and removals.
 
 Markdown files can switch between the source and a rendered terminal view with
@@ -62,13 +62,28 @@ rendered view returns to source first.
 ```bash
 cf check pattern.tsx --show-transformed --no-run | cf view
 cf view .github/workflows/deno.yml
-cf view scripts/analyse.py
+cf view scripts/analyze.py
 git diff upstream/main | cf view
 cf view --rendered README.md
 generate-source | cf view --filename generated.py
 generate-markdown | cf view --language markdown --rendered
 generate-bytes | cf view --language binary
 ```
+
+## Piece references
+
+Commands that take a piece accept two textual reference forms:
+
+- The canonical fabric reference: the LLM-friendly link form,
+  `/[@did:.../]of:fid1:<id>[@scope][/path]`. This is the one reference syntax of
+  the fabric — the same string names the same cell in patterns, in the shell,
+  and here. A path embedded in a canonical `--piece` reference prefixes the
+  command's positional path argument.
+- The CLI's bare form: `pieceId[@scope]`, `pieceId[@scope]/path` at link
+  endpoints, and slugs. This is a convenience alias for interactive use.
+
+New reference-syntax capabilities land in the canonical form first; the alias
+does not grow a capability the canonical form lacks.
 
 ## Piece discovery
 
@@ -115,6 +130,39 @@ as `cf piece ls`. Human-readable output uses the same columns as `piece ls`.
 matches. If part of a piece cannot be read, the command reports a warning on
 standard error and continues searching that piece and the rest of the space.
 
+## Piece CFC labels
+
+`cf piece get-label` returns the effective CFC label view for a result path.
+Pass `--input` to select the input cell. The paths in the returned view are
+relative to the selected path, and the view includes declared, derived, and
+link-carried labels. An unlabeled value returns JSON `null`.
+
+```bash
+cf piece get-label --piece ID messages/0/body
+cf piece get-label --piece ID credentials --input
+```
+
+`cf piece set-label` reads a declared label update from standard input and
+returns the updated effective view. The input is an object with a
+`confidentiality` array, an `integrity` array, or both. An optional `observes`
+field selects `value`, `shape`, `enumerate`, or `followRef` consumption.
+
+```bash
+echo '{"confidentiality":["team"]}' \
+  | cf piece set-label --piece ID notes
+echo '{"integrity":[],"observes":"value"}' \
+  | cf piece set-label --piece ID draft --input
+```
+
+The command updates the label through the same checked write path used by
+ordinary runtime operations. It does not edit raw CFC metadata. The
+stored-schema rules reject a confidentiality update that would make data less
+restricted and an integrity update that would silently make data more trusted.
+An absent path is also rejected rather than creating policy metadata without a
+value. An `observes` update is rejected when it would combine with an existing
+observation class instead of preserving the requested class. Omitting `observes`
+from a later update preserves an existing unambiguous class.
+
 ## Output Conventions
 
 - stdout carries command output only; hints and diagnostics go to stderr.
@@ -139,10 +187,74 @@ standard error and continues searching that piece and the rest of the space.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 
-### Transforming `piece get` and `piece call` output
+### What a call refuses before it dispatches
 
-`piece get` can filter an array before it reaches stdout and project the result
-to a smaller shape:
+`piece call` judges the payload against the verb's declared event schema before
+anything is sent, so a refusal costs nothing: the invocation id was never spent
+and the corrected retry can reuse it.
+
+A field the verb does not declare is one of the things it refuses. The runtime
+hands a handler the fields its event schema names and drops the rest, so a
+payload carrying a field nobody declared would otherwise run the handler without
+it and report the call settled. The refusal names the field, the position it sat
+at, the vocabulary that position takes, and the declared name it is one edit
+from:
+
+```console
+$ cf piece call --piece ID addItem '{"titel":"Milk","done":false}'
+Invalid input for "addItem": "titel" at <event> is not a field this verb
+declares. Did you mean "title"? <event> takes "title", "done"
+```
+
+Positions below the root are spelled the way a `--schema` position is —
+`<event>.item`, `<event>.tags[1]` — so one vocabulary covers both refusals.
+
+`cf exec` refuses the same mistake in the same words when it arrives as a flag,
+which is how the mounted-file door spells a field. Only the spelling differs,
+because that is what the caller typed and must retype; the position is always
+`<event>`, since a flag can name nothing below the root:
+
+```console
+$ cf exec /tmp/cf/home/pieces/notes/result/addItem.handler invoke --titel Milk
+"--titel" at <event> is not a field this verb declares. Did you mean
+"--title"? <event> takes "--title", "--done"
+```
+
+What the two doors LET THROUGH matches as well, which is the half worth relying
+on: a flag naming an undeclared field is accepted exactly where the same field
+would be accepted in a payload, and refused exactly where it would be refused.
+Both doors read that from one place, so neither can drift into its own opinion
+of what a schema permits.
+
+Every position that names its fields is judged, whether it states
+`type: "object"`, carries a `properties` map with no type beside it, states a
+type union admitting an object, or reaches its map through a conjunction, whose
+fields are the union across its members. A **disjunction** (`anyOf`, `oneOf`) is
+passed over — a payload need satisfy only one branch — and so is a position
+marked as a cell or a stream, which may hold a link rather than a value. A call
+reaching either goes out rather than being refused on a guess.
+
+The declared vocabulary is what `cf piece call --piece ID <verb> --help` prints,
+which is the list to check when a field comes back refused. It names the fields
+the verb's handler READS, which can be fewer than its TypeScript event type
+declares: a field the body never touches is one the runtime would have dropped,
+and the refusal says so rather than accepting it and losing it.
+
+A verb that publishes **no event schema at all**, or one whose schema carries no
+`properties` key, takes any payload: with nothing declared, nothing is dropped
+either. That is not the same as a schema whose `properties` is empty — that one
+declares that there are no fields, so the runtime delivers none and every field
+a caller sends is refused.
+
+### Transforming command output
+
+Reading is one operation reached from four starting points, and every one of
+them takes the same three flags — `--filter`, `--select` and `--schema` — with
+the same grammar, the same conflict rule and the same error messages. The
+vocabulary is learned once and written wherever you arrived from.
+
+`piece get` filters an array before it reaches stdout and projects the result to
+a smaller shape:
 
 ```bash
 cf piece get --piece ID items --filter '.status == "open"'
@@ -151,20 +263,52 @@ cf piece get --piece ID items \
   --select id,title,author.name
 ```
 
-`piece call` takes the same three flags, with the same grammar, the same
-conflict rule, and the same error messages, written before the callable name:
+`piece call` writes them before the callable name:
 
 ```bash
 cf piece call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
 cf piece call --piece ID --filter '.status == "open"' listTopics
 ```
 
-Everything below describes both commands. The one difference is what the
-selection is about: `piece get` shapes a cell's value, and `piece call` shapes
-the **result of the call** — a handler's `result` inside the Invocation JSON, or
-a tool's JSON on stdout. See
-[what a selection means for a call](#what-a-selection-means-for-a-call) for the
-three cases where that difference shows.
+`wish` writes them beside the target it resolves:
+
+```bash
+cf wish '#profile' -i ./claude.key --select name,avatar
+cf wish '#mentionable' -i ./claude.key -s my-space --filter '.status == "open"'
+```
+
+`exec` writes them **before the mounted file**, because everything after the
+file belongs to the callable's own schema-derived interface:
+
+```bash
+cf exec --select id,title /tmp/cf/…/result/search.tool --query milk
+cf exec --select 'entry@' /tmp/cf/…/result/add.handler --title Milk
+```
+
+A mounted callable run through its own shebang — `./search.tool --query milk` —
+cannot carry them, because the shim appends its arguments after the file. Reach
+for the `cf exec` spelling when you want to shape what comes back.
+
+Everything below describes all four. What differs is only what the selection is
+about:
+
+| Command      | What the selection shapes                                                                                |
+| ------------ | -------------------------------------------------------------------------------------------------------- |
+| `piece get`  | the value at the cell its address and path name                                                          |
+| `piece call` | the **result of the call** — a handler's `result` inside the Invocation JSON, or a tool's JSON on stdout |
+| `wish`       | the cell the query resolved to, before the walk that strips handles                                      |
+| `exec`       | the same result `piece call` shapes, for the verb the mounted file names                                 |
+
+See [what a selection means for a call](#what-a-selection-means-for-a-call) for
+the cases where the call's difference shows. `exec` is the same invocation
+reached through a mount, so it meets the value-less verb and the
+graph-quiescence coupling described there; it has neither `--no-wait` nor
+`--show-links`, so the two cases about those flags do not arise. `wish` adds one
+of its own: a query that matched nothing is an ordinary outcome rather than an
+error, so the selection is never reached and the empty result comes back as it
+always did. A selection that keeps nothing over a target that DID resolve is
+refused, because "the wish matched nothing" and "your projection kept nothing"
+are different facts.
 
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
 arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
@@ -193,21 +337,21 @@ schemas. A position that names an object keyword (`properties`,
 `items` projects an array, at every level of nesting and whether or not it also
 states `type` — `{"properties":{"topic":{"properties":{"title":true}}}}` returns
 `topic.title`. Neither `true` nor `{}` names a container, and both keep
-everything at the position they sit at. In an array-item projection, a scalar
-leaf whose declared type does not match the stored value is omitted by the
-runtime rather than reported as an error; prefer `true` leaves unless that type
-filtering is intentional. Schema combinators and references are rejected in
-caller-supplied projection schemas. Concise dotted paths follow the declared
-source schema through nested arrays, so `comments.body` selects `body` from
-every comment without retaining comment siblings. The projection preserves
-source-declared nullable items and properties, including `type` arrays and
-`anyOf` unions. When the source schema does not identify a nested container, the
-concise form applies the same field mask across arrays encountered in the value
-so siblings still cannot leak; use an explicit JSON Schema when the output
-schema itself must be fixed. If a present source value cannot materialize the
-transform, the command exits nonzero and states that the failure is not JSON
-`null`. An absent optional source remains the ordinary successful `null` CLI
-response, as does a valid projected null.
+everything at the position they sit at. A scalar leaf whose declared type does
+not match the stored value is omitted by the runtime rather than reported as an
+error, at any position; prefer `true` leaves unless that type filtering is
+intentional. Schema combinators and references are rejected in caller-supplied
+projection schemas. Concise dotted paths follow the declared source schema
+through nested arrays, so `comments.body` selects `body` from every comment
+without retaining comment siblings. The projection preserves source-declared
+nullable items and properties, including `type` arrays and `anyOf` unions. When
+the source schema does not identify a nested container, the concise form applies
+the same field mask across arrays encountered in the value so siblings still
+cannot leak; use an explicit JSON Schema when the output schema itself must be
+fixed. If a present source value cannot materialize the transform, the command
+exits nonzero and states that the failure is not JSON `null`. An absent optional
+source remains the ordinary successful `null` CLI response, as does a valid
+projected null.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 When the declared source schema fixes the root container shape, the pattern
@@ -227,6 +371,50 @@ Nested non-stream Cell handles are materialized before the predicate/projection
 JavaScript runs; stream handles remain capabilities. The source cell's schema
 remains authoritative for Common Fabric metadata. A caller cannot introduce or
 override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
+
+#### Which keywords a `--schema` projection may contain
+
+**The reader constructs the schema it applies rather than forwarding the one a
+caller typed**, keyword by keyword. Four things can happen to a keyword.
+
+- **Honored** — `type`, `properties`, `items`, `additionalProperties`, `$link`.
+  These drive the projection and are what the constructed schema is built from.
+- **Consulted** — `required`, `minProperties`, `maxProperties`, `minItems`,
+  `maxItems`, `uniqueItems`. Each names a container, so writing one at an
+  untyped position says which container that position describes. The constraint
+  itself goes no further: nothing a caller writes in one reaches the read.
+  `{"required":["id"]}` therefore projects an object without requiring `id` of
+  it, and `{"minItems":2}` projects an array without imposing a length.
+- **Tolerated** — the annotation keywords, `title`, `description`, `examples`,
+  `deprecated`, `tags`, `tier`, `$id`, `$schema`, `$comment`. Accepted, and a
+  read through a projection carrying one returns what the same projection
+  returns without it.
+- **Refused** — everything else, by name and with the position it sat at, plus
+  the keyword it is nearest to. A misspelled `properties` is refused rather than
+  silently returning the whole object or nothing at all.
+
+The `required` a projected read applies comes from the **source** schema rather
+than from the caller, restricted to the projected properties whose narrowing
+cannot reject the property itself: a property the caller narrows to a scalar
+type the value does not match drops out, and so does an array whose `items` the
+caller narrows the same way, because one rejected element rejects the array
+holding it. A narrowed position is then simply omitted from what comes back
+instead of emptying the read around it.
+
+A property the caller projects as a container keeps its derived `required` only
+where the source declares that container and nothing else. `{"type":"array"}`
+qualifies; `{"type":["array","string"]}` does not, nor does an `anyOf` whose
+branches disagree, nor an undeclared position, nor an `allOf` — each of those
+can hold something a container projection rejects, and the whole point of
+deriving the key this way is that a rejected position is omitted rather than
+emptying the object holding it.
+
+A source that spells its shape as `{"$ref": "#/$defs/Thing"}` is followed to
+what it names, at the document root and at any depth below it, so a named
+interface carries the same `required` an inline one does. A reference that does
+not resolve, or one that closes a circle, proves nothing and derives nothing —
+the conservative direction, since the cost of declining is a key that would have
+survived and the cost of guessing is the whole read.
 
 #### Asking for an address instead of contents
 
@@ -251,8 +439,11 @@ cf piece get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
 All four fields are always present, so a caller indexes them without branching:
 `id` keeps its scheme, `space` and `scope` are filled in even when they match
 the reader's own, and `path` is `[]` at a document's root. No schema is inlined
-and no write-redirect flag rides along. The rendered `id`, minus its `of:`
-prefix, is what `cf piece call --piece` and `cf piece get --piece` accept.
+and no write-redirect flag rides along. The rendered `id` is what
+`cf piece call --piece` and `cf piece get --piece` accept, scheme included, and
+`space` is what their `--space` takes. Both travel together or neither does: the
+`id` alone names a cell in whichever space the reading command already has
+configured, which is the emitting one only by coincidence.
 
 The address names the deepest stored link crossed on the way to the marked
 position, plus the segments that remain below that link. Marking `title` under
@@ -337,10 +528,20 @@ no longer say which positions they came from, and an address names a position.
 
 A selection shapes a result that already exists. It does not narrow what the
 call fetches: the readback materializes the whole receipt before the selection
-runs, and a handling's receipt declares no schema for a selector to narrow
-against. The same holds for a tool, whose result is read off the cell the tool
-wrote. Use a selection to control what reaches stdout, not to control what
-travels.
+runs. (A plain result's receipt does carry a descriptive schema of what it holds
+— a receipt holding anything reactive carries none — but either way the fetch
+has happened before the selection applies.) The same holds for a tool, whose
+result is read off the cell the tool wrote. Use a selection to control what
+reaches stdout, not to control what travels.
+
+A selection also couples the call to graph quiescence. The shaped readback runs
+through the same shared read step as `cf piece get`, and that step awaits the
+CLI runtime's global idle plus storage sync before answering — while the plain
+call acknowledges at its own handling's commit. On a piece with heavy derived
+state, a shaped call can therefore wait on unrelated recomputation the handler
+triggered elsewhere in the graph. When that wait matters, shape the collect
+instead: call plain (or `--no-wait`), then
+`cf piece get --piece <receipt id> --select …`.
 
 Three cases follow from that:
 
@@ -353,7 +554,9 @@ Three cases follow from that:
 - **`--no-wait` refuses all three flags.** That mode exits once the commit is
   acknowledged and skips the receipt readback, so there is no result to shape.
   The refusal names the flags that need the readback, alongside `--show-links`
-  for the same reason.
+  for the same reason. What it still returns is the envelope's `receipt` — the
+  address of the cell holding the outcome, known at commit — so the shaping
+  flags apply to the `cf piece get` that collects it.
 - **`--show-links` composes with a projection, not with `--filter`.** Links are
   collected after the selection, over exactly the value the caller is holding: a
   projection leaves every surviving path where it was, so each address still
@@ -361,6 +564,66 @@ Three cases follow from that:
   no entry. A predicate does not — the elements it keeps land at positions that
   are no longer the ones they came from — so `--filter --show-links` is refused,
   the same refusal a `$link` marker meets for the same reason.
+
+#### A result that points back at itself
+
+A verb returning the piece it created hands back a value that can be reached
+from inside itself, whenever that piece carries a back-reference — `parent`
+beside `children`, the shape
+[self-reference](../../docs/common/concepts/self-reference.md) documents. A
+circle has no JSON rendering at all, so a readback that follows one has nothing
+to write.
+
+Where the caller named no shape, `cf` derives one from the verb's declared
+result. The declaration is the boundary the author drew: the position where the
+declared type re-enters itself is the position that closes the circle, so that
+position renders its address and everything else reads as it always did.
+
+```json
+{
+  "item": {
+    "title": "Rotate signing key",
+    "status": "open",
+    "children": [],
+    "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+  }
+}
+```
+
+Three things follow:
+
+- **It is the same `$link` a caller writes by hand.** The derived bound composes
+  its addresses through the same walk the selection step above composes a
+  written `$link` with, so `--schema` over the same position produces the same
+  address.
+- **A caller's own shape wins wherever it renders.** `--filter`, `--select` and
+  `--schema` are applied to the receipt first, and a projection that narrows
+  past the circle — `--select item.title` — is answered exactly as written, with
+  nothing derived added to it. A projection that names the re-entering subtree
+  whole — `--select item` — keeps the circle it selected and is bounded on the
+  way out, but the bound is a cut into what was selected rather than a shape
+  that replaces it: the closing position renders its address, and no position
+  the caller did not name comes back beside it. `--select item.parent` names the
+  closing position itself, and is answered with that one address alone.
+- **Nothing else pays for it.** A result that renders is written out exactly as
+  it was read, and the compiled pattern a declared result is matched through is
+  loaded only where a readback cannot render. The bound itself is a cut into the
+  value already in hand — no pattern graph and no transaction — leaving the
+  address walk a written `$link` is composed through as the only work beside it.
+
+Where nothing bounds the circle — the verb declares no result, the declaration
+it made leaves the closing position wide, or a `--filter` is in play — the call
+reports the position the circle closes at, states that the handling committed,
+and names the receipt to collect the outcome from. It exits nonzero: the outcome
+could not be rendered. The write still landed, which is the property the message
+leads with.
+
+A `--filter` is the case with no bound to reach for rather than one that failed:
+the predicate hands back the elements themselves, which no longer say which
+positions they came from, and a bound is written in addresses, which name
+positions — the refusal `--filter --show-links` earns above, for the same
+reason. Narrowing past the circle with a projection beside the predicate —
+`--filter '.status == "open"' --select title` — renders.
 
 ## Built Binary
 
@@ -470,7 +733,9 @@ output with later errors.
 
 For `cf exec`, `--json` belongs after the mounted callable path. For
 `cf piece call`, it belongs after the callable name. In both commands, it
-selects complete JSON input:
+selects complete JSON input — and in both, that is the opposite side of the
+callable from where the read options go, which shape what comes back rather than
+what goes in:
 
 ```bash
 cf exec /tmp/cf/home/pieces/notes/result/search.tool --json '{"query":"milk"}'

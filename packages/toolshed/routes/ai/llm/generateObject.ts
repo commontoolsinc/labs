@@ -1,20 +1,36 @@
+import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commonfabric/llm";
 import {
   type LLMGenerateObjectRequest,
   type LLMGenerateObjectResponse,
 } from "@commonfabric/llm/types";
-import { LLMRequestError } from "./errors.ts";
-import { findModel } from "./models.ts";
+import { trace } from "@opentelemetry/api";
 import {
   generateObject as generateObjectCore,
   jsonSchema,
   type ModelMessage,
 } from "ai";
 import { Ajv } from "ajv";
-import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commonfabric/llm";
-import { trace } from "@opentelemetry/api";
-import { normalizeSchemaForProvider } from "./schema.ts";
 
-export async function generateObject(
+import { LLMRequestError } from "./errors.ts";
+import { resolveModel } from "./models.ts";
+import { normalizeSchemaForProvider } from "./schema.ts";
+import { withGatewayOperation } from "@/lib/gateway-provenance.ts";
+
+/**
+ * A gateway-bound request reports the route it came from. The whole call is in
+ * scope, and the response is complete when it returns, so every request it
+ * makes is covered.
+ */
+export function generateObject(
+  params: LLMGenerateObjectRequest,
+): Promise<LLMGenerateObjectResponse> {
+  return withGatewayOperation(
+    "generate-object",
+    () => generateObjectCall(params),
+  );
+}
+
+async function generateObjectCall(
   params: LLMGenerateObjectRequest,
 ): Promise<LLMGenerateObjectResponse> {
   try {
@@ -23,7 +39,7 @@ export async function generateObject(
       unknown
     >;
     const modelName = params.model ?? DEFAULT_GENERATE_OBJECT_MODELS;
-    const modelConfig = findModel(modelName);
+    const modelConfig = await resolveModel(modelName);
     if (!modelConfig) {
       throw new LLMRequestError(`Unsupported model: ${modelName}`);
     }

@@ -276,6 +276,15 @@ export class MultiRuntimeSession {
     await this.#client.call("idle");
   }
 
+  /**
+   * Force an ordered-after round trip on this runtime's open space connections,
+   * so any subscription fan-out the server has already sent has landed here.
+   * See `MultiRuntimeHarness.settle`.
+   */
+  async barrier(): Promise<void> {
+    await this.#client.call("barrier");
+  }
+
   /** Capture scheduler graph, settle stats history, and action run trace. */
   async diagnostics(): Promise<RuntimeDiagnosticsSnapshot> {
     return await this.#client.call("diagnostics") as RuntimeDiagnosticsSnapshot;
@@ -404,12 +413,32 @@ export class MultiRuntimeHarness {
     return session;
   }
 
-  /** Let all runtimes finish local work and exchange pending sync traffic. */
+  /**
+   * Let all runtimes finish local work and exchange pending sync traffic. Each
+   * round is one full cross-runtime hop, driven by real completion signals
+   * rather than a timer:
+   *
+   * 1. Every runtime settles its own reactivity and flushes its pending commits
+   *    to the server (`session.idle`).
+   * 2. The in-process server drains: it applies every commit it has received
+   *    and sends all pending subscription fan-out (`server.idle`).
+   * 3. Every runtime forces an ordered-after round trip on its open space
+   *    connections (`session.barrier`). Because a WebSocket delivers a
+   *    connection's frames in order, the fan-out the server just sent has been
+   *    received and applied by the time each round trip's response returns.
+   * 4. Every runtime settles again, so a foreign write that just arrived and
+   *    re-derives local cells has its recompute run before this round ends.
+   *
+   * With a running toolshed (when `apiUrl` was passed) there is no in-process
+   * server handle for step 2; the barrier in step 3 still pulls in whatever the
+   * toolshed has sent, and successive rounds converge.
+   */
   async settle(rounds = 2): Promise<void> {
     for (let i = 0; i < rounds; i++) {
       await Promise.all(this.sessions.map((session) => session.idle()));
-      // Give subscription pushes a macrotask to land before the next round.
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await this.#server?.idle();
+      await Promise.all(this.sessions.map((session) => session.barrier()));
+      await Promise.all(this.sessions.map((session) => session.idle()));
     }
   }
 

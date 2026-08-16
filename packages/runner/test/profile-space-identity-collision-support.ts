@@ -1,10 +1,11 @@
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
 import { fromFileUrl } from "@std/path";
 
-import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 
 // CT-1650: two DIFFERENT users who create a profile with the SAME display name
 // must end up in DISTINCT profile spaces. Before the fix, profile-create seeded

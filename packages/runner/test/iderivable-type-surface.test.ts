@@ -4,6 +4,7 @@
  * The runtime assertions are trivial; this file fails if Cell or OpaqueCell
  * stop exposing typed reactive array helpers.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Cell, OpaqueCell, Reactive } from "@commonfabric/api";

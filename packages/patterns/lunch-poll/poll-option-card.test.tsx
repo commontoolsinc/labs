@@ -5,6 +5,7 @@ import {
   handler,
   pattern,
   type Stream,
+  TESTS,
   UI,
   Writable,
 } from "commonfabric";
@@ -254,7 +255,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_my_green_vote_label_renders },
       { assertion: assert_unset_rank_renders_placeholder },
       { action: action_resolve_rank },

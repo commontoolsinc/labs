@@ -5,7 +5,7 @@ narrow: it explains how that piece behaves, what invariants it holds, and what
 you need to know before you change it. Read one when you are working on the
 thing it describes. None of them is general orientation.
 
-The neighbouring trees answer different questions.
+The neighboring trees answer different questions.
 [`../development/`](../development/README.md) is how to work in this
 repository — style, dependencies, testing, debugging, continuous integration.
 [`../specs/`](../specs/README.md) is what the system is required to do.
@@ -36,6 +36,9 @@ Add a line for each new document to the index below.
 - [`authorization-failure-surfacing.md`](authorization-failure-surfacing.md) —
   how an authorization failure during storage sync reaches the caller as a
   typed error instead of a silent absent read or an endless wait
+- [`lazy-cell-materialization.md`](lazy-cell-materialization.md) — the
+  schema-observing view a marked transaction hands back from a read, what it
+  checks and when, and the rules that keep it agreeing with an eager read
 - [`data-uri-identifiers.md`](data-uri-identifiers.md) — the cell identifiers
   that carry their own frozen value rather than naming a document in a space,
   why the runtime keeps both a broad and a narrow test for one, and what
@@ -64,6 +67,10 @@ Add a line for each new document to the index below.
 - [`vouched-ingest-channel-mint.md`](vouched-ingest-channel-mint.md) — the
   split-mint seam that lets an outside source deposit data carrying a trusted
   provenance mark, without ever authoring that mark itself
+- [`self-serve-ingest-channels.md`](self-serve-ingest-channels.md) — how a user
+  mints an ingest channel for their own space without an operator: the
+  space-ACL authorization model, why the two obvious designs are unsound, and
+  the procedure for retiring channels when the trust conditions change
 - [`gateway-request-provenance.md`](gateway-request-provenance.md) — how a
   request to the LLM gateway says which workload produced it, what a value is
   allowed to contain given that it reaches the provider, and why the machine

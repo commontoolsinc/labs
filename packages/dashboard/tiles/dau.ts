@@ -1,29 +1,37 @@
-// dau: how many distinct identities were active per day, counted from the memory
-// spans SigNoz already holds. Env-gated on SIGNOZ_URL + SIGNOZ_API_KEY.
-//
-// A memory session's principal is the signature-checked session.open issuer, and the
-// server exports it as the user.did attribute on the memory.transact and
-// memory.subscriber.sync spans. Counting the distinct values per UTC day therefore
-// needs no new instrumentation. docs/features/active-user-counting.md records what
-// the number means: an identity is a keypair rather than a person, so this counts
-// active identities and leans on the assumption that one identity stands for one
-// human. That assumption is the tile's, not the system's.
-//
-// Four properties of the signal decide what the number is worth:
-//   - Opening a session emits no span of its own, so someone who only reads is never
-//     attributed, and a day of purely read-only traffic reports zero.
-//   - Service principals — the server's own identity, MEMORY_SERVICE_DIDS, background
-//     services — are principals in the same way a person is. DAU_EXCLUDE_DIDS removes
-//     them by hand; until it is set the count is an upper bound.
-//   - Trace retention bounds the lookback to roughly a fortnight, and that retention
-//     is a live setting on the database rather than anything a repository holds.
-//   - Head sampling below 1.0 does not scale a distinct count down, it drops
-//     identities out of it, and no arithmetic afterwards puts them back.
-//
-// The tile names its service explicitly (PROD_SERVICE) rather than counting whatever
-// reports. A service that sends nothing comes back with no aggregations at all, which
-// reads here as gray, so this can sit on the wall against a deployment whose tracing
-// is still switched off and light up on its own when it is turned on.
+/**
+ * Counts how many distinct identities were active per day, from the memory
+ * spans SigNoz already holds. The tile only runs when SIGNOZ_URL and
+ * SIGNOZ_API_KEY are both set.
+ *
+ * A memory session's principal is the signature-checked session.open issuer,
+ * and the server exports it as the user.did attribute on the memory.transact
+ * and memory.subscriber.sync spans. Counting the distinct values per UTC day
+ * therefore needs no new instrumentation.
+ * docs/features/active-user-counting.md records what the number means: an
+ * identity is a keypair rather than a person, so this counts active identities
+ * and leans on the assumption that one identity stands for one human. That
+ * assumption is the tile's, not the system's.
+ *
+ * Four properties of the signal decide what the number is worth:
+ *   - Opening a session emits no span of its own, so someone who only reads is
+ *     never attributed, and a day of purely read-only traffic reports zero.
+ *   - Service principals — the server's own identity, MEMORY_SERVICE_DIDS,
+ *     background services — are principals in the same way a person is.
+ *     DAU_EXCLUDE_DIDS removes them by hand; until it is set the count is an
+ *     upper bound.
+ *   - Trace retention bounds the lookback to roughly a fortnight, and that
+ *     retention is a live setting on the database rather than anything a
+ *     repository holds.
+ *   - Head sampling below 1.0 does not scale a distinct count down, it drops
+ *     identities out of it, and no arithmetic afterwards puts them back.
+ *
+ * The tile names its service explicitly, through PROD_SERVICE, rather than
+ * counting whatever reports. A service that sends nothing comes back with no
+ * aggregations at all, which reads here as gray, so this can sit on the wall
+ * against a deployment whose tracing is still switched off and light up on its
+ * own when it is turned on.
+ */
+
 import type { Status, Tile, TileView } from "../types.ts";
 import { serviceName, SPARK_FADE, sparkline } from "../lib.ts";
 import { CHART_LINE } from "../theme.ts";

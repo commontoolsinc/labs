@@ -258,11 +258,11 @@ hop and the rebuild must design it deliberately:
 Exactly two states, one flag: `EXPERIMENTAL_SERVER_EXECUTION`
 (RuntimeOptions key `serverExecution`), named deliberately unlike
 v1's `SERVER_PRIMARY_EXECUTION` so the archived docs never alias it.
-OFF is today's behaviour byte-for-byte; ON is
+OFF is today's behavior byte-for-byte; ON is
 the full v2 posture. **No shippable intermediate states** — partial flag
 combinations exist only as debugging affordances during bring-up, and the
 v1 dial set (eight interlocking dials) is the cautionary tale. Both halves
-of any coupled behaviour (e.g. "client suppresses egress" and "server
+of any coupled behavior (e.g. "client suppresses egress" and "server
 performs egress") move on the same flag — v1 shipped one half unconditional
 and silently dropped side effects in the OFF arm.
 
@@ -476,7 +476,7 @@ Still open:
 - [`docs/development/EXPERIMENTAL_OPTIONS.md`](../../development/EXPERIMENTAL_OPTIONS.md)
   documents the v1 dials as they exist on the archived branches; the
   entries retire when v2 lands its single flag.
-- The pre-arc, still-live behaviour specs this document leans on:
+- The pre-arc, still-live behavior specs this document leans on:
   [`scheduler-v2/`](../scheduler-v2/), [`memory-v2/`](../memory-v2/).
 - [`persistent-scheduler-state.md`](../persistent-scheduler-state.md)
   does NOT return to its pre-arc scope, as an earlier draft of this

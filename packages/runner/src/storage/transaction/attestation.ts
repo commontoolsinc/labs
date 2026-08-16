@@ -1,10 +1,20 @@
-import { isRecord } from "@commonfabric/utils/types";
+import {
+  extractDataUriPayloadText,
+  isDataUriMediaType,
+  isFabricDataUri,
+  valueFromDataUriPayloadText,
+} from "@commonfabric/data-model/data-uri-codec";
 import {
   type FabricPlainObject,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { unclaimed } from "@commonfabric/memory/fact";
+import { LRUCache } from "@commonfabric/utils/cache";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -19,16 +29,7 @@ import type {
   Result,
   State,
 } from "../interface.ts";
-import { unclaimed } from "@commonfabric/memory/fact";
-import { getLogger } from "@commonfabric/utils/logger";
-import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
-import {
-  extractDataUriPayloadText,
-  isDataUriMediaType,
-  isFabricDataUri,
-  valueFromDataUriPayloadText,
-} from "@commonfabric/data-model/data-uri-codec";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -194,13 +195,13 @@ export const resolve = (
 
   while (++at < path.length) {
     const key = path[at];
-    // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, so descending
+    // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, so descending
     // into one lands in this arm and reads `undefined` instead of reaching
     // the `TypeMismatchError` arm below the way a scalar does. The caller
     // then treats the slot as absent-but-writable, and a path into a
     // `FabricInstance`'s codec contents reads as missing rather than being
     // refused or resolved.
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       const record = value as FabricPlainObject;
       value = Object.hasOwn(record, key) ? record[key] : undefined;
     } else {

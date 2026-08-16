@@ -1,19 +1,57 @@
-import { describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
+/**
+ * Converting between native JS values and fabric values, in both directions
+ * and at both depths, plus the predicate saying in advance whether a value
+ * will make it across.
+ *
+ * Refusal is central here rather than incidental: conversion is a vetting
+ * boundary, and a value that cannot be represented has to be rejected rather
+ * than approximated into something that merely looks representable. A
+ * function, a class instance, an array carrying non-index properties, an
+ * `Array` subclass, a cycle -- each is refused, and refused at whatever depth
+ * it turns up.
+ *
+ * One group appears three times over, once per entry point, to pin something
+ * the conversion deliberately does not do: `toJSON()` is never consulted. A
+ * value does not get to nominate its own fabric form, because a method is code
+ * and the decision has to rest on what the value is.
+ *
+ * The remainder is the structure that has to survive the trip: an object
+ * reached twice stays shared, sparse holes and `undefined` elements are
+ * preserved rather than filled in, and an `Error` carries its cause and its
+ * own properties across.
+ */
 
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
+
+import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
 import {
-  FabricInstance,
-  type FabricOrConvertibleNativeValue,
-  type FabricValue,
-} from "@/interface.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+  BaseFabricInstance,
+  DEEP_CLONE_CORE,
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "@/codec-common/BaseFabricInstance.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { CODEC } from "@/codec-interface/interface.ts";
+import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
+import {
+  FabricInstance,
+  type FabricOrConvertibleNativeValue,
+  type FabricValue,
+} from "@/interface.ts";
 import {
   fabricFromNativeValue,
   isConvertibleNativeInstance,
@@ -23,20 +61,6 @@ import {
   shallowCleanPlainObject,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
-import { isInertPlainObject } from "@commonfabric/utils/objects";
-import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import {
-  BaseFabricInstance,
-  DEEP_CLONE_CORE,
-  DEEP_FREEZE,
-  IS_DEEP_FROZEN,
-  SHALLOW_UNFROZEN_CLONE,
-} from "@/fabric-instances/BaseFabricInstance.ts";
-import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
-import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
 
 /**
  * Helper for the round-trip tests, which encodes a value to fabric form via
@@ -763,7 +787,7 @@ describe("native-conversion", () => {
       });
 
       it("throws for an array carrying `toJSON()`", () => {
-        // An array is answered by the array rule whatever it carries, and that
+        // An array is handled by the array rule whatever it carries, and that
         // rule rejects the named own property `toJSON` is.
         const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
         arr.toJSON = () => "custom array";
@@ -1164,7 +1188,7 @@ describe("native-conversion", () => {
         const obj: any = { a: 1 };
         obj.self = obj;
         expect(() => fabricFromNativeValue(obj)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
 
@@ -1172,7 +1196,7 @@ describe("native-conversion", () => {
         const arr: any[] = [1, 2];
         arr.push(arr);
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
 
@@ -1182,7 +1206,7 @@ describe("native-conversion", () => {
         a.b = b;
         b.a = a;
         expect(() => fabricFromNativeValue(a)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
 
@@ -1191,7 +1215,7 @@ describe("native-conversion", () => {
         arr[0] = 1;
         arr[2] = arr; // sparse array with circular reference at index 2
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
 
@@ -1199,7 +1223,7 @@ describe("native-conversion", () => {
         const arr: any[] = [1, undefined, null];
         arr[3] = arr; // array with undefined element + circular reference
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
     });
@@ -1633,7 +1657,7 @@ describe("native-conversion", () => {
 
       it("throws even for an already-frozen subclass instance", () => {
         // The case the deep-frozen identity short-circuit would otherwise wave
-        // through unconverted, prototype and all: iteration answers content
+        // through unconverted, prototype and all: iteration yields content
         // that the indices never show, and freezing the instance does nothing
         // about the prototype that does it.
         class Smuggler extends Array {

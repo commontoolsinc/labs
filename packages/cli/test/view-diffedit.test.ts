@@ -4,6 +4,7 @@
  * resurrected, and saving splices the edited lines back into the underlying
  * files. A diff matching no file on disk is read-only.
  */
+
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { parseDiff } from "../lib/view/diff.ts";
@@ -250,7 +251,7 @@ Deno.test("diffedit: a context line is editable and writes its file line", () =>
   }
 });
 
-Deno.test("diffedit: the incremental highlighter recolours only edited lines", () => {
+Deno.test("diffedit: the incremental highlighter recolors only edited lines", () => {
   const { ws, done } = tempWorkspace();
   try {
     const model = parseDiff(DIFF)!;
@@ -262,7 +263,7 @@ Deno.test("diffedit: the incremental highlighter recolours only edited lines", (
     const out = hl.update(raw.join("\n"));
     assertEquals(out[5].text, raw[5], "edited line reflects the new text");
     // Every other line — the file/hunk headers especially — is byte-identical
-    // to the seed, so nothing reflows or flickers colour between keystrokes.
+    // to the seed, so nothing reflows or flickers color between keystrokes.
     for (let i = 0; i < doc.lines.length; i++) {
       if (i === 5) continue;
       assertEquals(
@@ -340,7 +341,7 @@ export const shown = 2;
   }
 });
 
-Deno.test("diffedit: stateful languages keep complete-file colours after edits", () => {
+Deno.test("diffedit: stateful languages keep complete-file colors after edits", () => {
   const root = Deno.makeTempDirSync();
   try {
     const cases = [
@@ -391,7 +392,7 @@ Deno.test("diffedit: stateful languages keep complete-file colours after edits",
       assertEquals(
         editedLine.spans.find((span) => span.text === "after")?.cls,
         testCase.cls,
-        `${testCase.path} live colour`,
+        `${testCase.path} live color`,
       );
 
       const editedAgainText = editedText.replace("+after", "+again");
@@ -402,7 +403,7 @@ Deno.test("diffedit: stateful languages keep complete-file colours after edits",
       assertEquals(
         editedAgainLine.spans.find((span) => span.text === "again")?.cls,
         testCase.cls,
-        `${testCase.path} repeated live colour`,
+        `${testCase.path} repeated live color`,
       );
 
       const reparsed = source.parse(editedAgainText);
@@ -412,7 +413,7 @@ Deno.test("diffedit: stateful languages keep complete-file colours after edits",
       assertEquals(
         parsedLine.spans.find((span) => span.text === "again")?.cls,
         testCase.cls,
-        `${testCase.path} deferred colour`,
+        `${testCase.path} deferred color`,
       );
     }
   } finally {
@@ -468,7 +469,7 @@ Deno.test("diffedit: a local string edit leaves surrounding template state intac
   }
 });
 
-Deno.test("diffedit: a local string edit retains same-line contextual colours", () => {
+Deno.test("diffedit: a local string edit retains same-line contextual colors", () => {
   const root = Deno.makeTempDirSync();
   try {
     const file = [

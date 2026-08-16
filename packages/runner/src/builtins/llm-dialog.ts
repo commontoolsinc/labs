@@ -1,17 +1,33 @@
+import type { CfcAtom } from "@commonfabric/api/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import type { Schema } from "@commonfabric/api/schema";
+import {
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
-import type { CfcConfClause } from "../cfc/clause.ts";
-import type { CfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  isNontrivialSchema,
+  toDeepFrozenSchema,
+} from "@commonfabric/data-model/schema-utils";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
   LLMRequest,
   LLMToolCall,
 } from "@commonfabric/llm";
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  isBoolean,
+  isObjectNotArray,
+  isObjectOrArray,
+} from "@commonfabric/utils/types";
 import type {
   BuiltInLLMMessage,
   BuiltInLLMParams,
@@ -20,37 +36,9 @@ import type {
   BuiltInLLMToolCallPart,
   JSONSchema,
 } from "commonfabric";
-import type { Schema } from "@commonfabric/api/schema";
-import {
-  isNontrivialSchema,
-  toDeepFrozenSchema,
-} from "@commonfabric/data-model/schema-utils";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import {
-  LLMDialogResultSchema,
-  LLMMessageSchema,
-  LLMParamsSchema,
-  LLMToolSchema,
-} from "./llm-schemas.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
-import type { JSONSchemaObj } from "../builder/types.ts";
-import {
-  ARRAY_SUBSCHEMA_KEYS,
-  mapSubschemas,
-  RECORD_SUBSCHEMA_KEYS,
-  SINGLE_SUBSCHEMA_KEYS,
-} from "../schema-walk.ts";
 
-// Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
-// Recorded as the schema write-policy input for each model-produced message's
-// own entity doc, so the CFC persist pass stamps a labelMap integrity entry on
-// exactly that message — see `pushModelMessages`.
-const LLM_DERIVED_MESSAGE_SCHEMA = internSchema({
-  ...LLMMessageSchema,
-  ifc: { addIntegrity: [cfcAtom.llmDerived()] },
-} as JSONSchema);
+import type { JSONSchemaObj } from "../builder/types.ts";
+import { type CellScope, NAME, type Pattern } from "../builder/types.ts";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import {
   isCell,
@@ -58,45 +46,12 @@ import {
   markRuntimeInjectedEventKeys,
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
-import { resolveLinkScope } from "../scope.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
-import { type CellScope, NAME, type Pattern } from "../builder/types.ts";
-import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
-import { getEntityId } from "../create-ref.ts";
-import {
-  entityRefToString,
-  isEntityRef,
-} from "@commonfabric/data-model/cell-rep";
-import { entityUriSchemePrefix } from "../entity-kind.ts";
-import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
-import { Runtime } from "../runtime.ts";
-import { spaceCellSchema } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { getResultCellWithSourceSchema } from "../piece-helpers.ts";
-import { schemaToTypeString } from "../schema-format.ts";
-import { formatTransactionSummary } from "../storage/transaction-summary.ts";
-import {
-  createLLMFriendlyLink,
-  getMetaLink,
-  matchLLMFriendlyLink,
-  type NormalizedFullLink,
-  parseLink,
-  parseLLMFriendlyLink,
-  sanitizeSchemaForLinks,
-} from "../link-utils.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForCellFailClosed,
 } from "../cfc/label-view.ts";
-import {
-  CFC_ENFORCING_STRICTNESS,
-  cfcEnforcementStrictness,
-} from "../cfc/types.ts";
 import {
   cfcConfidentialityForObservationNode,
   type CfcFloorTrustContext,
@@ -107,14 +62,63 @@ import {
   meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "../cfc/observation.ts";
-import { createTrustResolver } from "../cfc/trust.ts";
-import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { createTrustResolver } from "../cfc/trust.ts";
+import {
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
+} from "../cfc/types.ts";
+import { getEntityId } from "../create-ref.ts";
+import { entityUriSchemePrefix } from "../entity-kind.ts";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { resolveLink } from "../link-resolution.ts";
-import { internalVerifierRead } from "../storage/reactivity-log.ts";
+import {
+  createLLMFriendlyLink,
+  getMetaLink,
+  matchLLMFriendlyLink,
+  type NormalizedFullLink,
+  parseLink,
+  parseLLMFriendlyLink,
+  sanitizeSchemaForLinks,
+} from "../link-utils.ts";
 import type { RawBuiltinResult } from "../module.ts";
+import { getResultCellWithSourceSchema } from "../piece-helpers.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+import { Runtime, spaceCellSchema } from "../runtime.ts";
+import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
+import { schemaToTypeString } from "../schema-format.ts";
+import {
+  ARRAY_SUBSCHEMA_KEYS,
+  mapSubschemas,
+  RECORD_SUBSCHEMA_KEYS,
+  SINGLE_SUBSCHEMA_KEYS,
+} from "../schema-walk.ts";
+import { resolveLinkScope } from "../scope.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { internalVerifierRead } from "../storage/reactivity-log.ts";
+import { formatTransactionSummary } from "../storage/transaction-summary.ts";
+import {
+  LLMDialogResultSchema,
+  LLMMessageSchema,
+  LLMParamsSchema,
+  LLMToolSchema,
+} from "./llm-schemas.ts";
+import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { scopedCell } from "./scope-policy.ts";
+
+// Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
+// Recorded as the schema write-policy input for each model-produced message's
+// own entity doc, so the CFC persist pass stamps a labelMap integrity entry on
+// exactly that message — see `pushModelMessages`.
+const LLM_DERIVED_MESSAGE_SCHEMA = internSchema({
+  ...LLMMessageSchema,
+  ifc: { addIntegrity: [cfcAtom.llmDerived()] },
+} as JSONSchema);
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
@@ -184,7 +188,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
       additionalProperties: inputSchema,
     };
   }
-  if (!isObject(inputSchema)) inputSchema = { type: "object" };
+  if (!isObjectNotArray(inputSchema)) inputSchema = { type: "object" };
   const stripped = stripInjectedResult(inputSchema);
   return prepareSchemaForLLM(stripped);
 }
@@ -406,7 +410,7 @@ function simplifySchemaForContext(
   depth: number = 0,
   maxDepth: number = 3,
 ): JSONSchema {
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     return schema;
   }
 
@@ -445,7 +449,7 @@ function simplifySchemaForContext(
 
     // Keep properties, dropping $-prefixed ones ($UI, $TYPE, etc. are
     // internal/VDOM); their values are simplified by the walk below
-    if (key === "properties" && isRecord(value)) {
+    if (key === "properties" && isObjectOrArray(value)) {
       simplified[key] = Object.fromEntries(
         Object.entries(value).filter(([name]) => !name.startsWith("$")),
       );
@@ -607,7 +611,7 @@ function serializeForLLMObservation(
     }
   }
 
-  if (!isRecord(value)) {
+  if (!isObjectOrArray(value)) {
     return {
       value,
       observedConfidentiality: nodeConfidentiality,
@@ -717,7 +721,7 @@ function serializeForLLMObservation(
       });
       observedParts.push(child.observedConfidentiality);
 
-      if (isRecord(child.value) && isCellResultForDereferencing(v)) {
+      if (isObjectOrArray(child.value) && isCellResultForDereferencing(v)) {
         const link = getCellOrThrow(v).resolveAsCell()
           .getAsNormalizedFullLink();
         if (!hasDataUriScheme(link.id)) {
@@ -816,7 +820,7 @@ function traverseAndCellify(
       try {
         const parsed = JSON.parse(trimmed);
         if (
-          isRecord(parsed) && typeof parsed["@link"] === "string" &&
+          isObjectOrArray(parsed) && typeof parsed["@link"] === "string" &&
           Object.keys(parsed).length === 1 &&
           matchLLMFriendlyLink.test(parsed["@link"])
         ) {
@@ -833,7 +837,7 @@ function traverseAndCellify(
   // - it's a record with a single key "/"
   // - the value of the "/" key is a string that matches the URI pattern
   if (
-    isRecord(value) && typeof value["@link"] === "string" &&
+    isObjectOrArray(value) && typeof value["@link"] === "string" &&
     Object.keys(value).length === 1 && matchLLMFriendlyLink.test(value["@link"])
   ) {
     const link = parseLLMFriendlyLink(value["@link"], space);
@@ -868,7 +872,7 @@ function traverseAndCellify(
     );
   }
 
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     return Object.fromEntries(
       Object.entries(value).map((
         [key, value],
@@ -938,7 +942,7 @@ function resolveDirectContextCellRef(cell: unknown): Cell<any> | undefined {
     ? getCellOrThrow(cell).resolveAsCell()
     : isCell(cell)
     ? cell.resolveAsCell()
-    : isRecord(cell) && typeof cell.resolveAsCell === "function"
+    : isObjectOrArray(cell) && typeof cell.resolveAsCell === "function"
     ? cell.resolveAsCell()
     : undefined;
 }
@@ -1168,7 +1172,7 @@ function ensureString(
   field: string,
   example: string,
 ): string {
-  if (isRecord(value) && typeof value["@link"] === "string") {
+  if (isObjectOrArray(value) && typeof value["@link"] === "string") {
     return ensureString(value["@link"], field, example);
   }
   if (typeof value === "string") {
@@ -1613,7 +1617,7 @@ function buildAvailableCellsDocumentationWithObservation(
         : concreteCell.get() ?? concreteCell.getRaw();
       if (
         value === undefined &&
-        isRecord(schemaInfo) &&
+        isObjectOrArray(schemaInfo) &&
         Object.hasOwn(schemaInfo, "default")
       ) {
         value = (schemaInfo as Record<string, unknown>).default;
@@ -2091,9 +2095,10 @@ function toolAllowsObservedConfidentiality(
   }
 
   const toolSchema = toolCatalog.llmTools[toolName]?.inputSchema;
-  const maxConfidentiality = isRecord(toolSchema) && isRecord(toolSchema.ifc)
-    ? toolSchema.ifc.maxConfidentiality
-    : undefined;
+  const maxConfidentiality =
+    isObjectOrArray(toolSchema) && isObjectOrArray(toolSchema.ifc)
+      ? toolSchema.ifc.maxConfidentiality
+      : undefined;
   // A non-array ceiling means none was declared. A declared (even empty) ceiling
   // is enforced: an empty array is "public only". Delegate to
   // cfcObservationFitsCeiling rather than special-casing empty as allow-all,
@@ -2139,11 +2144,11 @@ function toolInputRequiredIntegrityFailure(
   path: string,
   trust: CfcFloorTrustContext,
 ): string | undefined {
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     return undefined;
   }
   const ifc = schema.ifc;
-  if (isRecord(ifc) && Array.isArray(ifc.requiredIntegrity)) {
+  if (isObjectOrArray(ifc) && Array.isArray(ifc.requiredIntegrity)) {
     const required = ifc.requiredIntegrity;
     if (required.length > 0) {
       const integrity = toolInputValueIntegrity(runtime, space, value);
@@ -2163,14 +2168,14 @@ function toolInputRequiredIntegrityFailure(
       }
     }
   }
-  if (isRecord(schema.properties)) {
+  if (isObjectOrArray(schema.properties)) {
     for (const [key, childSchema] of Object.entries(schema.properties)) {
       // Only gate fields the model actually supplied. An absent (e.g. optional)
       // field carries no value to gate; treating it as `undefined` would fail
       // an optional field's floor and over-block the call. A required field the
       // model omitted is a structural error handled by ordinary input
       // validation, not a floor bypass — there is no injected value to gate.
-      if (!isRecord(value) || !Object.hasOwn(value, key)) {
+      if (!isObjectOrArray(value) || !Object.hasOwn(value, key)) {
         continue;
       }
       const failure = toolInputRequiredIntegrityFailure(
@@ -2200,7 +2205,7 @@ function toolInputRequiredIntegrityFailure(
       const slotSchema = prefixItems !== undefined && index < prefixItems.length
         ? prefixItems[index]
         : schema.items;
-      if (!isRecord(slotSchema)) continue;
+      if (!isObjectOrArray(slotSchema)) continue;
       const failure = toolInputRequiredIntegrityFailure(
         runtime,
         space,
@@ -2640,7 +2645,7 @@ function handleUpdateArgument(
   // Apply updates to argument fields
   runtime.editWithRetry((tx) => {
     if (
-      isRecord(cellifiedValue) && !Array.isArray(cellifiedValue) &&
+      isObjectNotArray(cellifiedValue) &&
       !isCell(cellifiedValue)
     ) {
       argumentCell.withTx(tx).update(cellifiedValue);
@@ -2813,7 +2818,8 @@ async function handleInvoke(
       // the caller's ordinary field. The advertised schema hides `result`
       // (stripInjectedResult), so a well-behaved caller never sends one and
       // always gets the injected cell.
-      const injectResult = !(isRecord(input) && Object.hasOwn(input, "result"));
+      const injectResult =
+        !(isObjectOrArray(input) && Object.hasOwn(input, "result"));
       handler.withTx(tx).send(
         injectResult
           ? {
@@ -4059,7 +4065,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
 function getSchemaTypeString(schema: JSONSchema): string {
   let defs;
-  if (isRecord(schema)) {
+  if (isObjectOrArray(schema)) {
     // Convert schema to TypeScript-like string for readability
     defs = (schema as Record<string, unknown>).$defs as
       | Record<string, JSONSchema>

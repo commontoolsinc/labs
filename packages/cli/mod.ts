@@ -1,12 +1,13 @@
-import { parse } from "./commands/mod.ts";
-import { main as rootCommand } from "./commands/main.ts";
-import { CompilerError, TransformerError } from "@commonfabric/js-compiler";
 import { ValidationError } from "@cliffy/command";
+import { CompilerError, TransformerError } from "@commonfabric/js-compiler";
+
+import { main as rootCommand } from "./commands/main.ts";
+import { parse } from "./commands/mod.ts";
 import { VerbInputValidationError } from "./lib/callable.ts";
 import { cliName } from "./lib/cli-name.ts";
-import { applyLogLevel } from "./lib/log-level.ts";
 import { applyColorMode } from "./lib/color-mode.ts";
 import { reservesStdoutForCommandOutput } from "./lib/json-output.ts";
+import { applyLogLevel } from "./lib/log-level.ts";
 
 /**
  * The value to print for a top-level CLI failure. Validation, transformer,

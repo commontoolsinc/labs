@@ -1,7 +1,10 @@
-// ci trust: share of recent completed runs that passed on the first attempt (a
-// flakiness signal), with a history strip for every run in the fetched window.
-// One factory builds both the labs and loom instances against their own repo +
-// workflow.
+/**
+ * Reports the share of recent completed runs that passed on the first attempt,
+ * which is the wall's signal for flakiness, with a history strip carrying
+ * every run in the fetched window. One factory builds both the labs and loom
+ * instances against their own repository and workflow.
+ */
+
 import {
   runSource,
   type Run,
@@ -12,11 +15,11 @@ import {
 import { strip } from "../lib.ts";
 import { CI_RUNS_MAX, CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_COLS, TRUST_GOOD, TRUST_WARN } from "../config.ts";
 
-type TrustOutcome = "green" | "red" | "run" | "grey";
+type TrustOutcome = "green" | "red" | "run" | "gray";
 
 function trustOutcome(run: Run): TrustOutcome {
   if (run.status === "in_progress") return "run";
-  if (run.status !== "completed" || !run.conclusion) return "grey";
+  if (run.status !== "completed" || !run.conclusion) return "gray";
   return run.conclusion === "success" && run.run_attempt === 1 ? "green" : "red";
 }
 

@@ -1,10 +1,12 @@
 import { exists } from "@std/fs";
-import ports from "@commonfabric/ports" with { type: "json" };
 import * as path from "@std/path";
-import { createRouter } from "@/lib/create-app.ts";
+
+import ports from "@commonfabric/ports" with { type: "json" };
 import { cors } from "@hono/hono/cors";
+
 import env from "@/env.ts";
 import { buildInfo } from "@/lib/build-info.ts";
+import { createRouter } from "@/lib/create-app.ts";
 import {
   createShellStaticRouter,
   StaticResponse,

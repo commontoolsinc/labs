@@ -4,7 +4,8 @@
  * only unfinished participant and nothing left to release him, which the
  * orchestrator reports as a deadlock.
  */
-import { assert, multiUserTest, pattern, Writable } from "commonfabric";
+
+import { assert, multiUserTest, pattern, TESTS, Writable } from "commonfabric";
 
 export interface MarkerSetup {
   note: Writable<string>;
@@ -15,11 +16,11 @@ export const setup = pattern<Record<string, never>, MarkerSetup>(() => ({
 }));
 
 export const alice = pattern<{ setup: MarkerSetup }>(({ setup }) => ({
-  tests: [{ assertion: assert(() => setup.note.get() === "") }],
+  [TESTS]: [{ assertion: assert(() => setup.note.get() === "") }],
 }));
 
 export const bob = pattern<{ setup: MarkerSetup }>(({ setup }) => ({
-  tests: [
+  [TESTS]: [
     { await: "never-announced" },
     { assertion: assert(() => setup.note.get() === "") },
   ],

@@ -181,6 +181,15 @@ export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
   /**
+   * Whether `id` was supplied by the caller rather than minted at enqueue. A
+   * caller-supplied id is a durable delivery id: the handling's receipt
+   * address derives from it, so the entry is excluded from the backlog-cap
+   * last-wins merge in both directions — never collapsed away, and never
+   * chosen as a collapse survivor whose payload a later send rewrites
+   * (spec §7.6, the backlog-cap exclusions).
+   */
+  readonly callerSuppliedId?: boolean;
+  /**
    * Monotonic stamp minted at first enqueue and carried unchanged across
    * requeues (backoff, name-resolution). Commits are not awaited, so several
    * dispatched events can fail together and requeue in whatever order their

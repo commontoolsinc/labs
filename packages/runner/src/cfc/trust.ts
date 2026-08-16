@@ -1,7 +1,8 @@
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { CfcAtom } from "@commonfabric/api/cfc";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import { type AtomPattern, matchAtomPattern } from "./atom-pattern.ts";
 
 /**
@@ -124,7 +125,7 @@ const requireEntryRecord = (
   value: unknown,
   where: string,
 ): Record<string, unknown> => {
-  if (!isRecord(value) || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     throw new Error(`cfcTrustConfig: ${where} must be an object`);
   }
   return value as Record<string, unknown>;

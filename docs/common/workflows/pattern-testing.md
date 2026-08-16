@@ -31,7 +31,7 @@ Test patterns are patterns that test other patterns. They:
 - Import and instantiate the pattern under test
 - Define test actions using `action()`
 - Define assertions using `assert(() => boolean)`
-- Return a `tests` array that the runner executes sequentially
+- Return a `[TESTS]` array that the runner executes sequentially
 
 Test files end in `.test.tsx` and are run with `deno task cf test`.
 
@@ -55,9 +55,9 @@ export default pattern(() => {
   const assert_is_zero = assert(() => counter.value === 0);
   const assert_is_one = assert(() => counter.value === 1);
 
-  // 4. Return tests array
+  // 4. Return the test steps under the [TESTS] key
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_is_zero },
       { action: action_increment },
       { assertion: assert_is_one },
@@ -88,14 +88,16 @@ Tests use a **discriminated union** format:
 ```tsx
 // Shown inside a pattern body.
 return {
-  tests: [
+  [TESTS]: [
     { action: action_do_something },     // Runner calls .send()
-    { assertion: assert_something },     // Runner checks === true
+    { assertion: assert_something },     // Runner reads the assert() record
   ],
 };
 ```
 
-Each step is either `{ action: Stream<void> }` or `{ assertion: boolean }`.
+Each step is either `{ action: Stream<void> }` or `{ assertion }`, where the
+assertion is the record `assert()` produces — see
+[Write assertions with `assert()`](#write-assertions-with-assert) below.
 
 ## Walking the Rendered Tree
 
@@ -161,7 +163,7 @@ const action_setup_game = action(() => {
 ### Firing a handler the pattern does not export
 
 A handler bound only in JSX can still be fired, so a pattern that keeps its
-behaviour behind a button does not have to change to be tested. The prop carries
+behavior behind a button does not have to change to be tested. The prop carries
 a stream whether the handler was written inline or bound from module scope. Walk
 the rendered tree to the node, read the prop, and send it an event:
 
@@ -182,7 +184,7 @@ export default pattern(() => {
     }
   });
 
-  return { tests: [{ action: action_add_area }], subject };
+  return { [TESTS]: [{ action: action_add_area }], subject };
 });
 ```
 
@@ -213,21 +215,21 @@ const assert_game_ready = assert(() => {
 });
 ```
 
-### Prefer `assert()` over `computed()`
+### Write assertions with `assert()`
 
-Write new assertions with `assert()`. Most test patterns in the repository
-use `assert()` for their assertions; a step also accepts a `computed()` boolean,
-but a failing `computed()` assertion can only ever report the boolean it
-produced:
+A test step's `assertion` is the record `assert()` produces; a bare
+`Reactive<boolean>` — a `computed()` or a plain cell — is a compile error.
+This is what `assert()` buys. A bare boolean could only ever report the value
+it produced, because the comparison ran inside a closure and its operands were
+gone before the runner saw anything:
 
 ```
 ✗ assertion_1
     Expected true, got false
 ```
 
-The comparison ran inside your own closure, so its operands were gone before
-the runner saw anything. `assert()` records them as the assertion runs and
-reports them on failure:
+`assert()` records those operands as the assertion runs and reports them on
+failure:
 
 ```
 ✗ assertion_1
@@ -236,7 +238,7 @@ reports them on failure:
       budget = 30
 ```
 
-Each operand is labelled with the source text you wrote. `assert()` reports:
+Each operand is labeled with the source text you wrote. `assert()` reports:
 
 - the operands of the top-level operator — `total` and `budget` above
 - the arguments of a call — `assert(() => inRange(value, low, high))` reports
@@ -312,7 +314,7 @@ Put actions before the assertions that depend on them:
 ```tsx
 // Shown inside a pattern body.
 return {
-  tests: [
+  [TESTS]: [
     // Initial state
     { assertion: assert_starts_empty },
 
@@ -359,10 +361,11 @@ deno task cf piece inspect --piece <PIECE_ID>
 # Get specific values
 deno task cf piece get subject/items --piece <PIECE_ID>
 
-# Step through manually
-deno task cf piece call tests/0/action --piece <PIECE_ID>
+# Step through manually (the reserved key is the literal `$TESTS`, quoted so
+# the shell does not expand it)
+deno task cf piece call '$TESTS/0/action' --piece <PIECE_ID>
 deno task cf piece step --piece <PIECE_ID>
-deno task cf piece get tests/1/assertion --piece <PIECE_ID>
+deno task cf piece get '$TESTS/1/assertion' --piece <PIECE_ID>
 ```
 
 This diagnostic command deliberately deploys the test pattern as the executable
@@ -377,7 +380,7 @@ Add extra fields to your test pattern for debugging:
 ```tsx
 // Shown for illustration only.
 return {
-  tests: [...],
+  [TESTS]: [...],
   // Expose internals for debugging
   subject,
   debugState: computed(() => ({
@@ -399,7 +402,7 @@ const assert_initial_count = assert(() => counter.value === 0);
 const assert_initial_empty = assert(() => list.items.length === 0);
 
 return {
-  tests: [
+  [TESTS]: [
     { assertion: assert_initial_count },
     { assertion: assert_initial_empty },
     // ... actions and more assertions
@@ -419,7 +422,7 @@ const assert_playing = assert(() => game.phase === "playing");
 const assert_paused = assert(() => game.phase === "paused");
 
 return {
-  tests: [
+  [TESTS]: [
     { action: action_start },
     { assertion: assert_playing },
     { action: action_pause },

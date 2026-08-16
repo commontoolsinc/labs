@@ -1,20 +1,21 @@
 // Lifted functions: pure transformations via lift(), error and recovery behavior,
 // cell creation inside lifts, reactivity control (sample), and evaluation timing.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import { getPatternIdentityRef } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Cell, type JSONSchema } from "../src/builder/types.ts";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type ErrorWithContext } from "../src/scheduler.ts";
+import { type Cell, type JSONSchema } from "../src/builder/types.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import { Runtime } from "../src/runtime.ts";
+import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { getPatternIdentityRef } from "@commonfabric/runner";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -165,9 +166,17 @@ describe("Pattern Runner - Lift", () => {
 
     value = await result.pull();
 
+    // `multiplyGenerator` FORWARDS `args` into `multiply(args)` without ever
+    // reading through it, so under lazy materialization it takes no dependency
+    // on the values inside and does not re-run when `x` changes. That is the
+    // point of the mode, and it is safe here because what forwarding passes is
+    // a LINK: the inner `multiply` node re-reads through it and re-runs, which
+    // is why `multiply` still counts 4 and the result below is still 9.
+    // `multiplyGenerator2` destructures `{ x, y }`, so it reads both and keeps
+    // its dependency in either mode.
     expect(runCounts).toMatchObject({
       multiply: 4,
-      multiplyGenerator: 2,
+      multiplyGenerator: runtime.experimental.lazyMaterialization ? 1 : 2,
       multiplyGenerator2: 2,
     });
 

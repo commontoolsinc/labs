@@ -1,6 +1,30 @@
-import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
-import { VerbInputValidationError } from "../lib/callable.ts";
+import { Table } from "@cliffy/table";
+import type { CellScope } from "@commonfabric/api";
+import type {
+  PatternCompatibilityReport,
+  PiecePatternRef,
+} from "@commonfabric/piece/ops";
+import ports from "@commonfabric/ports" with { type: "json" };
+import { parseCellPath, UI } from "@commonfabric/runner";
+import { parseScopedIdSegment } from "@commonfabric/runner/shared";
+import { decode } from "@commonfabric/utils/encoding";
+
+import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
+import type {
+  InvocationIdentity,
+  InvocationOutcome,
+  InvocationPhase,
+} from "../lib/callable.ts";
+import {
+  type CellSelection,
+  CellSelectionError,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
+import { cliText } from "../lib/cli-name.ts";
+import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
+import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
+import { renderPiece } from "../lib/piece-render.ts";
 import {
   applyPieceInput,
   checkPiecePattern,
@@ -8,6 +32,7 @@ import {
   executePieceCallable,
   formatViewTree,
   generateSpaceMap,
+  getCellCfcLabel,
   getCellValue,
   getPieceView,
   inspectPiece,
@@ -27,6 +52,7 @@ import {
   resetHomePattern,
   savePiecePattern,
   searchPieces,
+  setCellCfcLabel,
   setCellValue,
   setHomePattern,
   setPiecePattern,
@@ -34,31 +60,14 @@ import {
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
-import type { ExecutedPieceCallable } from "../lib/piece.ts";
-import type { PatternCompatibilityReport } from "@commonfabric/piece/ops";
 import type {
-  InvocationIdentity,
-  InvocationOutcome,
-  InvocationPhase,
-} from "../lib/callable.ts";
-import { newSessionId } from "../lib/session.ts";
-import { renderPiece } from "../lib/piece-render.ts";
-import { parseSqliteSource } from "../lib/sqlite-source.ts";
+  ExecutedPieceCallable,
+  PieceCallablesListing,
+} from "../lib/piece.ts";
 import { render, safeStringify } from "../lib/render.ts";
-import { decode } from "@commonfabric/utils/encoding";
-import { cliText } from "../lib/cli-name.ts";
+import { newSessionId } from "../lib/session.ts";
+import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { absPath } from "../lib/utils.ts";
-import type { CellScope } from "@commonfabric/api";
-import { parseCellPath } from "@commonfabric/runner";
-import { UI } from "@commonfabric/runner";
-import ports from "@commonfabric/ports" with { type: "json" };
-import type { PiecePatternRef } from "@commonfabric/piece/ops";
-import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
-import {
-  type CellSelection,
-  CellSelectionError,
-  parseCellSelectionOptions,
-} from "../lib/cell-selection.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -120,6 +129,105 @@ export function formatPatternIdentity(
   return patternRef === undefined
     ? "<unknown>"
     : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
+}
+
+/** The parenthesised notes under a `cf piece verbs` listing, in print order.
+ *
+ * A listing can be short in two ways, and neither may be silent — the hidden
+ * counts always print, and so does the report that the compiled pattern could
+ * not be read. The second is not recoverable with `--all`: nothing in this
+ * command can name a verb the pattern would have named.
+ *
+ * Held apart from the command action so the exact text a caller sees is
+ * assertable without driving cliffy. */
+export function verbListingNotes(
+  listing: PieceCallablesListing,
+  partition: { wrapper: number; deprecated: number },
+  all: boolean,
+): string[] {
+  const notes: string[] = [];
+  if (partition.wrapper + partition.deprecated > 0 && !all) {
+    notes.push(
+      `${partition.wrapper} wrapper, ${partition.deprecated} deprecated hidden; --all lists them`,
+    );
+  }
+  if (listing.incomplete === "pattern-unavailable") {
+    notes.push(
+      "the pattern could not be read, so verbs its result type omits are missing; the verbs listed are still callable",
+    );
+  }
+  return notes;
+}
+
+/** Every line `cf piece verbs` prints for the human-readable view, in order.
+ *
+ * The whole view, not a fragment of it: a caller reads the omission notes
+ * against the rows above them, so a test that cannot see both together cannot
+ * tell a listing that admits it is short from one that does not. */
+export function verbListingLines(
+  listing: PieceCallablesListing,
+  all: boolean,
+): string[] {
+  const partition = partitionVerbListing(listing.verbs);
+  const shown = all ? listing.verbs : partition.shown;
+  const notes = verbListingNotes(listing, partition, all);
+  // The hidden-count note rides the placeholder when there is no table to
+  // hang it under; anything else would print a bare "(...)" with nothing
+  // above it to qualify.
+  if (shown.length === 0) {
+    const hiddenNote = partition.wrapper + partition.deprecated > 0 && !all
+      ? notes[0]
+      : undefined;
+    return [
+      hiddenNote !== undefined
+        ? `<no callable verbs shown> (${hiddenNote})`
+        : "<no callable verbs>",
+      ...notes.filter((note) => note !== hiddenNote).map((note) => `(${note})`),
+    ];
+  }
+  return [
+    ...(listing.pattern
+      ? [`PATTERN ${formatPatternIdentity(listing.pattern)}`]
+      : []),
+    Table.from([
+      ["NAME", "KIND", "ON", "MARKS"],
+      ...shown.map((v) => [
+        v.name,
+        v.kind,
+        v.on,
+        [
+          ...(v.tier === "wrapper" ? ["wrapper"] : []),
+          ...(v.deprecated ? ["deprecated"] : []),
+        ].join(","),
+      ]),
+    ]).toString(),
+    ...notes.map((note) => `(${note})`),
+  ];
+}
+
+/** The `--json` payload for `cf piece verbs`: the listing as
+ * `listPieceCallables` returned it, narrowed to the rows actually shown, plus
+ * the hidden counts when any row was withheld. `incomplete` rides through
+ * untouched — a machine reader needs the lower-bound flag more than a human
+ * does, because it has no listing text to read it off. */
+export function verbListingJson(
+  listing: PieceCallablesListing,
+  all: boolean,
+): Record<string, unknown> {
+  const partition = partitionVerbListing(listing.verbs);
+  const hiddenCount = partition.wrapper + partition.deprecated;
+  return {
+    ...listing,
+    verbs: all ? listing.verbs : partition.shown,
+    ...(hiddenCount > 0 && !all
+      ? {
+        hidden: {
+          wrapper: partition.wrapper,
+          deprecated: partition.deprecated,
+        },
+      }
+      : {}),
+  };
 }
 
 export function renderPieceSummaries(
@@ -317,9 +425,13 @@ export function reportVerbInputErrorOrRethrow(
  * rethrows Cliffy validation errors so usage failures still render the usage
  * screen — with their span closed first — and reports everything else as the
  * failure message plus the invocation id beside the furthest observed phase,
- * the retry key, before exiting 1. A named export rather than catch-block
- * prose because the action body only runs under Cliffy and is unreachable
- * from a unit test; the seams let a test observe the exact exit contract.
+ * the retry key, before exiting 1. A wait-bound expiry additionally writes
+ * the Invocation JSON with that phase as its `status` to stdout — the same
+ * machine surface as a settled call, so a script parses one shape either
+ * way. A named export rather than catch-block prose because the action body
+ * only runs under Cliffy and is unreachable from a unit test; the seams let
+ * a test observe the exact exit contract, and the action's catch calls THIS
+ * function, so what the tests observe is what a user gets.
  */
 export function exitPieceCallFailure(
   observer: { finish: (end?: "settled" | "failed") => void },
@@ -328,6 +440,7 @@ export function exitPieceCallFailure(
   phase: InvocationPhase,
   deps?: {
     printError?: (message: string) => void;
+    render?: (text: string) => void;
     exit?: (code: number) => never;
   },
 ): never {
@@ -339,9 +452,25 @@ export function exitPieceCallFailure(
   const exit = deps?.exit ?? Deno.exit;
   printError(error instanceof Error ? error.message : String(error));
   // Where the invocation stopped decides retry semantics: anything at or
-  // past "dispatched" retries SAFELY ONLY with this same id (same-id
-  // retries deduplicate; a fresh id would re-execute).
+  // past "dispatched" retries SAFELY ONLY with this same id. At-most-once
+  // is per COMMIT, not per execution: a same-id retry runs the handler
+  // body again and then loses the race for the receipt, so nothing
+  // commits twice but effects outside the transaction repeat. A fresh id
+  // loses nothing and commits a second time.
   printError(`invocation: ${invocationId} phase: ${phase}`);
+  if (error instanceof WaitBoundExpired) {
+    // The caller's patience expired. The handler runs in this process, so
+    // the invocation may not have executed or committed — the recovery is a
+    // same-id re-invoke, which the stderr message names. stdout still
+    // carries the Invocation JSON with the furthest observed phase.
+    (deps?.render ?? render)(
+      JSON.stringify(
+        invocationJson({ id: invocationId, status: phase }),
+        null,
+        2,
+      ),
+    );
+  }
   return exit(1);
 }
 
@@ -480,8 +609,10 @@ export function resolveInvocationIdentity(
  * Build the phase observer for a handler invocation. Its whole job is to put
  * the invocation id on stderr at the moment the event is about to dispatch —
  * BEFORE any network work — so a caller whose process dies past that line
- * still holds the exact id to retry with, and the retry deduplicates instead
- * of executing a second time. Announcing once matters: a caller scraping
+ * still holds the exact id to retry with. At-most-once is per COMMIT, not per
+ * execution: the retry runs the handler body again and loses the race for the
+ * receipt, so nothing commits twice while effects outside the transaction
+ * repeat. Announcing once matters: a caller scraping
  * stderr for its id should not have to decide which of several to trust.
  *
  * The id is half of what a retry names: it deduplicates only under the session
@@ -529,7 +660,7 @@ export function invocationPhaseReporter(
  * wall-clock span per observed phase transition (verb contract WS-D, phase
  * timings). Spans are bounded by the phases the `onPhase` callback already
  * observes — initial sync up to dispatch, the dispatched handler run up to
- * its transaction-local commit acknowledgement, the receipt classification,
+ * its transaction-local commit acknowledgment, the receipt classification,
  * and the receipt readback up to settlement — because those boundaries are
  * what the invocation actually reports; nothing new is instrumented inside
  * the runner. Every line goes to stderr so stdout stays exactly the settled
@@ -537,7 +668,7 @@ export function invocationPhaseReporter(
  * a failure exit keeps every span observed before the failure — `finish`
  * closes the in-flight span with the outcome that ended it: `settled`,
  * `failed`, or `detached` for a `--no-wait` exit that stopped at the commit
- * acknowledgement and skipped the readback.
+ * acknowledgment and skipped the readback.
  */
 export function pieceCallPhaseObserver(
   verbose: boolean,
@@ -607,9 +738,15 @@ export function renderPieceCallOutcome(
       // it is advisory until the invocation protocol carries it in the
       // stdout Invocation JSON (verb contract WS-D), and --quiet callers
       // asked for the bare result.
-      const ref = result.resultRef;
+      //
+      // Written as an address argument, which is the same spelling the
+      // receipt hint below uses and the same one `cf exec` prints: a caller
+      // reads the address off one command and passes it to the next without
+      // taking it apart first.
+      const ref = addressArgument(result.resultRef);
       hintOut(
-        `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
+        `Tool result cell: ${ref} (read it back with ` +
+          `\`cf piece get --piece ${ref}\`)`,
         false,
       );
     }
@@ -623,20 +760,39 @@ export function renderPieceCallOutcome(
     // Invocation JSON — settled, or stopped at "committed" under --no-wait —
     // prose stays on stderr via hint().
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
+    // The address the envelope published, when the runtime wrote a receipt.
+    // It leads the detached next steps because it collects the outcome
+    // without running the verb again, and it is written as an address
+    // argument so it composes into the command named beside it.
+    const receipt = result.invocation.receipt;
+    const receiptId = receipt === undefined
+      ? undefined
+      : addressArgument(receipt);
     hintOut(
-      // The readback names its session through the environment rather than
-      // `--invocation-session`, because a session is what keeps an outcome's
-      // address out of reach of anyone who can guess a piece, a verb and an
-      // id — and an argument is readable in a process listing where an
-      // environment variable is not.
       opts.detached
-        ? cliText(`NEXT STEPS:
-  → Read the outcome: CF_INVOCATION_SESSION=${
-          opts.invocation?.session ?? "<session>"
-        } cf piece call --piece ${piece} --invocation ${
-          opts.invocation?.id ?? "<id>"
-        } ${callableName} ... (the commit is durable; a call naming this same pair deduplicates and returns the settled outcome)
-  → Verify state:     cf piece get --piece ${piece} <path> ...`)
+        ? cliText(
+          receiptId === undefined
+            // No receipt means receipts are not being written here, and that
+            // is exactly the configuration in which a same-id call does NOT
+            // deduplicate — it executes AND commits a second time. Offering
+            // the replay as a recovery would be offering a duplicate.
+            ? `NEXT STEPS:
+  → Nothing to collect: this handling wrote no receipt, so the outcome has no address and a call naming the same pair executes and commits AGAIN rather than deduplicating.
+  → Verify state:     cf piece get --piece ${piece} <path> ...`
+            // The replay names its session through the environment rather
+            // than `--invocation-session`, because a session is what keeps an
+            // outcome's address out of reach of anyone who can guess a piece,
+            // a verb and an id — and an argument is readable in a process
+            // listing where an environment variable is not.
+            : `NEXT STEPS:
+  → Read the outcome: cf piece get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
+  → Or replay it:     CF_INVOCATION_SESSION=${
+              opts.invocation?.session ?? "<session>"
+            } cf piece call --piece ${piece} --invocation ${
+              opts.invocation?.id ?? "<id>"
+            } ${callableName} ... (the commit is durable and the replay loses the race for the receipt, so nothing commits twice — but the handler body RUNS AGAIN, repeating effects outside its transaction, and any write it made into another space)
+  → Verify state:     cf piece get --piece ${piece} <path> ...`,
+        )
         : nextSteps,
     );
     return;
@@ -658,6 +814,11 @@ export function renderPieceCallOutcome(
  * `null`, which would be indistinguishable from a verb that returned null.
  * `links` appears only under --show-links: provenance beside the value,
  * never inline in it.
+ *
+ * `receipt` is the one key that does not depend on a readback or a flag: it
+ * is the address of the cell holding this outcome, known at commit, so it
+ * rides a `--no-wait` envelope as well as a settled one. It is absent only
+ * where the runtime wrote no receipt to address.
  */
 export function invocationJson(
   outcome: InvocationOutcome,
@@ -666,6 +827,7 @@ export function invocationJson(
     invocation: outcome.id,
     status: outcome.status,
     ...(outcome.deduplicated ? { deduplicated: true } : {}),
+    ...(outcome.receipt !== undefined ? { receipt: outcome.receipt } : {}),
     ...("result" in outcome && outcome.result !== undefined
       ? { result: outcome.result }
       : {}),
@@ -675,10 +837,10 @@ export function invocationJson(
 
 /** How long `cf piece call` waits for a handler invocation (verb contract
  * WS-F, F3). `settle` is the default: await this handling's commit
- * acknowledgement plus receipt readback, optionally bounded by the caller's
+ * acknowledgment plus receipt readback, optionally bounded by the caller's
  * patience (`--wait <seconds>`). `commit` (`--no-wait`) awaits the
- * transaction-local commit acknowledgement — the durable point; the handler
- * runs in THIS process, so the acknowledgement is not skippable — and skips
+ * transaction-local commit acknowledgment — the durable point; the handler
+ * runs in THIS process, so the acknowledgment is not skippable — and skips
  * only the receipt readback. */
 export interface PieceCallWaitControl {
   mode: "settle" | "commit";
@@ -713,7 +875,7 @@ const READBACK_FLAGS: ReadonlyArray<
  * of the default (flag parity, so a script can state its intent), which makes
  * `--await --no-wait` a contradiction rather than a precedence puzzle — it is
  * refused. `--await --wait <s>` is fine: both mean "wait", the bound just
- * names the patience. A non-positive bound is refused: it would spell
+ * names the patience. A non-positive bound is refused: it would mean
  * "don't wait" while claiming to be a wait.
  *
  * `--no-wait` also refuses every flag that shapes or annotates the outcome —
@@ -883,6 +1045,11 @@ const EX_ID = `--identity ./my.key`;
 const EX_URL = `--url ${RAW_EX_URL}`;
 const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
+const PIECE_OPTION_HELP =
+  "The target piece: an id, slug, or canonical LLM-friendly reference " +
+  "(/of:fid1:.../).";
+const PIECE_OPTION_PATH_HELP = `${PIECE_OPTION_HELP} A path embedded in ` +
+  `the reference prefixes the positional path.`;
 const PIECE_REGISTRY_LINK_EXAMPLE = [
   cliText(
     `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/pieceRegistry`,
@@ -1058,7 +1225,8 @@ export const piece = new Command()
   .action(async (options, slug, sourceRef) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
-    const source = parseLink(sourceRef);
+    const source = parseLink(sourceRef, { space: spaceConfig.space });
+    collectEmbeddedSpace(spaceConfig, source);
     await setPieceSlug(
       spaceConfig,
       slug,
@@ -1080,7 +1248,7 @@ export const piece = new Command()
     cliText(`cf piece step ${EX_ID} ${EX_COMP_PIECE}`),
     `Start, wait for idle+synced, then stop piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     await stepPiece(pieceConfig);
@@ -1097,7 +1265,7 @@ export const piece = new Command()
     cliText(`echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_URL}`),
     `Applies the input '{"foo":5}' to piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .action(async (options) =>
     applyPieceInput(parsePieceOptions(options), await drainStdin())
   )
@@ -1112,7 +1280,7 @@ export const piece = new Command()
     cliText(`cf piece getsrc ${EX_ID} ${EX_URL} ./out`),
     `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .arguments("<outpath:string>")
   .action((options, outPath) =>
     savePiecePattern(parsePieceOptions(options), absPath(outPath))
@@ -1128,7 +1296,7 @@ export const piece = new Command()
     cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option(
     "--main-export <export:string>",
     'Named export from entry for pattern definition. Defaults to "default".',
@@ -1188,7 +1356,7 @@ export const piece = new Command()
     cliText(`cf piece inspect ${EX_ID} ${EX_URL}`),
     `Inspect detailed information about piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output raw JSON data")
   .option(
     "--summary",
@@ -1283,7 +1451,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     cliText(`cf piece view ${EX_ID} ${EX_URL}`),
     `Display the view for piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output raw JSON data")
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
@@ -1314,7 +1482,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     cliText(`cf piece render ${EX_ID} ${EX_COMP_PIECE} --watch`),
     `Watch and re-render piece "${RAW_EX_COMP.piece!}" when UI changes.`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output HTML as JSON")
   .option("-w,--watch", "Watch for changes and re-render")
   .option(
@@ -1432,7 +1600,8 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     // BEFORE parseLink (the sqlite: scheme is not a piece ref).
     const sqliteSource = parseSqliteSource(sourceRef);
     if (sqliteSource) {
-      const target = parseLink(targetRef);
+      const target = parseLink(targetRef, { space: spaceConfig.space });
+      collectEmbeddedSpace(spaceConfig, target);
       if (!target.path) {
         throw new ValidationError(
           `Target reference must include a path. Expected: pieceId/path/to/field`,
@@ -1453,8 +1622,13 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     }
 
     // Parse source and target references - handle both pieceId/path and well-known IDs
-    const source = parseLink(sourceRef, { allowWellKnown: true });
-    const target = parseLink(targetRef);
+    const source = parseLink(sourceRef, {
+      allowWellKnown: true,
+      space: spaceConfig.space,
+    });
+    const target = parseLink(targetRef, { space: spaceConfig.space });
+    collectEmbeddedSpace(spaceConfig, source);
+    collectEmbeddedSpace(spaceConfig, target);
 
     // For linking, sources can be either:
     // 1. pieceId (links entire result cell)
@@ -1559,7 +1733,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     ),
     "Return each item's address instead of its contents.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
   .option("--input", "Read from the piece's input cell instead of result cell")
   .option(
     "--step",
@@ -1590,10 +1764,10 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = {
-      ...parsePieceOptions(options),
+      ...parsePieceOptions(options, { acceptsPath: true }),
       jsonOutput: true,
     };
-    const pathSegments = pathString ? parseCellPath(pathString) : [];
+    const pathSegments = mergePiecePath(pieceConfig, pathString);
     try {
       const selection = await parseCellSelectionOptions(options);
       const value = await getCellValue(pieceConfig, pathSegments, {
@@ -1615,6 +1789,67 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
       throw error;
     }
   })
+  /* piece get-label */
+  .command(
+    "get-label",
+    `Get the effective CFC label view for a piece data path.
+
+The returned paths are relative to the selected path. The view includes
+declared, derived, and link-carried labels. Omit path to inspect the root.`,
+  )
+  .usage(`${pieceUsage} [path]`)
+  .example(
+    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} messages/0/body`),
+    "Get the effective label on a nested result value.",
+  )
+  .example(
+    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} secret --input`),
+    "Get the effective label on an input value.",
+  )
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
+  .option("--input", "Read from the piece's input cell instead of result cell")
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
+  .arguments("[path:string]")
+  .action(getCellCfcLabelFromCommand)
+  /* piece set-label */
+  .command(
+    "set-label",
+    cliText(`Set the declared CFC label at a piece data path from JSON on stdin.
+
+INPUT: An object with confidentiality and/or integrity arrays, plus an optional
+observes value: value, shape, enumerate, or followRef.
+
+The command records the label through the same checked write operation used for
+piece data. It never changes raw CFC metadata. Confidentiality may only become
+more restrictive. An integrity update may keep or remove existing claims, but
+cannot add trust. Conflicting observation classes are rejected. If observes is
+omitted, an existing unambiguous class is preserved. The command returns the
+updated effective label view.`),
+  )
+  .usage(`${pieceUsage} [path]`)
+  .example(
+    cliText(
+      `echo '{"confidentiality":["team"]}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} notes`,
+    ),
+    "Add a confidentiality requirement to a result value.",
+  )
+  .example(
+    cliText(
+      `echo '{"integrity":[],"observes":"value"}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} draft --input`,
+    ),
+    "Remove declared integrity claims from an input value.",
+  )
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
+  .option("--input", "Write to the piece's input cell instead of result cell")
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
+  .arguments("[path:string]")
+  .action(setCellCfcLabelFromCommand)
   /* piece set */
   .command(
     "set",
@@ -1636,18 +1871,18 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     ),
     `Set a nested object value in piece input "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
   .option("--input", "Write to the piece's input cell instead of result cell")
   .arguments("<path:string>")
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
-    const pathSegments = parseCellPath(pathString);
+    const pieceConfig = parsePieceOptions(options, { acceptsPath: true });
+    const pathSegments = mergePiecePath(pieceConfig, pathString);
     const value = await drainStdin();
     await setCellValue(pieceConfig, pathSegments, value, {
       input: options.input,
     });
-    render(`Set value at path: ${pathString}`);
+    render(`Set value at path: ${pathSegments.join("/")}`);
     hint(
       cliText(
         `TIP: Computed values may be stale. Run 'cf piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
@@ -1732,7 +1967,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
     ),
     "Return the address of what the verb returned instead of its contents.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option(
     "--invocation <id:string>",
     "Idempotency key for a handler call (before the callable name), and " +
@@ -1775,17 +2010,20 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "Bound the settlement wait by a chosen patience, in seconds (before " +
       "the callable name). On expiry the exit is nonzero with the " +
       "invocation id and furthest phase on stderr; the invocation may not " +
-      "have executed or committed, and re-invoking under the same id and " +
-      "session is safe in every phase — it finishes the work or reads the " +
-      "outcome back.",
+      "have executed or committed. Re-invoking under the same id and " +
+      "session cannot commit twice — but it runs the handler body again, " +
+      "so effects outside the transaction repeat. An expiry is exactly the " +
+      "case where you cannot tell whether it committed.",
   )
   .option(
     "--no-wait",
     "Exit once this handling's commit is acknowledged (before the callable " +
       "name), skipping only the receipt readback: stdout reports status " +
-      '"committed", and a later call naming the same invocation session and ' +
-      "--invocation reads the outcome back. The handler still executes here " +
-      "and its commit is durable. Handler invocations only.",
+      '"committed" plus the receipt address, so `cf piece get --piece <that ' +
+      "id>` collects the outcome later without re-running the handler; a " +
+      "call naming the same session and --invocation recovers it too, but " +
+      "runs the handler body again. The handler still executes here and its " +
+      "commit is durable. Handler invocations only.",
   )
   .option(
     "--show-links",
@@ -1891,33 +2129,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
         { detached: waitControl.mode === "commit", invocation: identity },
       );
     } catch (error) {
-      if (error instanceof ValidationError) {
-        observer.finish("failed");
-        throw error;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(message);
-      observer.finish("failed");
-      // Where the invocation stopped decides retry semantics: anything at or
-      // past "dispatched" retries SAFELY ONLY with this same id (same-id
-      // retries deduplicate; a fresh id would re-execute).
-      console.error(`invocation: ${invocationId} phase: ${phase}`);
-      if (error instanceof WaitBoundExpired) {
-        // The caller's patience expired. The handler runs in this process,
-        // so the invocation may not have executed or committed — the
-        // recovery is a same-id re-invoke, which the stderr message names.
-        // stdout still carries the Invocation JSON with the furthest
-        // observed phase — the same machine surface as a settled call, so a
-        // script parses one shape either way.
-        render(
-          JSON.stringify(
-            invocationJson({ id: invocationId, status: phase }),
-            null,
-            2,
-          ),
-        );
-      }
-      Deno.exit(1);
+      exitPieceCallFailure(observer, error, invocationId, phase);
     }
   })
   /* piece verbs */
@@ -1934,7 +2146,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
     cliText(`cf piece verbs ${EX_ID} ${EX_URL} --json`),
     "Machine-readable listing: name, kind, and input schema per verb.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output machine-readable JSON.")
   .option(
     "--all",
@@ -1948,54 +2160,18 @@ after --. Handlers interpret piped input when no input argument is present.`,
     // Default view: wrapper-tier (session-UI affordances) and deprecated
     // verbs are omitted, LOUDLY — the hidden counts always print, so nothing
     // is silently invisible. Rows carry their marks in both views, and
-    // `cf piece call` never consults them.
-    const partition = partitionVerbListing(listing.verbs);
-    const hiddenCount = partition.wrapper + partition.deprecated;
-    const shown = options.all ? listing.verbs : partition.shown;
-    const omission = hiddenCount > 0 && !options.all
-      ? `${partition.wrapper} wrapper, ${partition.deprecated} deprecated hidden; --all lists them`
-      : undefined;
+    // `cf piece call` never consults them. The same rule covers the other way
+    // this listing can be short, which `verbListingNotes` prints beside them.
     if (options.json) {
-      render({
-        ...listing,
-        verbs: shown,
-        ...(omission !== undefined
-          ? {
-            hidden: {
-              wrapper: partition.wrapper,
-              deprecated: partition.deprecated,
-            },
-          }
-          : {}),
-      }, { json: true });
+      render(verbListingJson(listing, !!options.all), { json: true });
       return;
     }
-    if (shown.length === 0) {
-      render(
-        omission !== undefined
-          ? `<no callable verbs shown> (${omission})`
-          : "<no callable verbs>",
-      );
-      return;
-    }
-    if (listing.pattern) {
-      render(`PATTERN ${formatPatternIdentity(listing.pattern)}`);
-    }
-    render(
-      Table.from([
-        ["NAME", "KIND", "ON", "MARKS"],
-        ...shown.map((v) => [
-          v.name,
-          v.kind,
-          v.on,
-          [
-            ...(v.tier === "wrapper" ? ["wrapper"] : []),
-            ...(v.deprecated ? ["deprecated"] : []),
-          ].join(","),
-        ]),
-      ]).toString(),
-    );
-    if (omission !== undefined) render(`(${omission})`);
+    for (const line of verbListingLines(listing, !!options.all)) render(line);
+    const shown = options.all
+      ? listing.verbs
+      : partitionVerbListing(listing.verbs).shown;
+    // No rows means no per-verb help to point at.
+    if (shown.length === 0) return;
     hint(
       cliText(
         `TIP: --json includes each verb's input schema; 'cf piece call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,
@@ -2014,7 +2190,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
     cliText(`cf piece rm ${EX_ID} ${EX_URL}`),
     `Remove piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     await removePiece(pieceConfig);
@@ -2141,6 +2317,58 @@ export interface PieceSummaryCLIOptions extends PieceCLIOptions {
   json?: boolean;
 }
 
+export interface PieceLabelCLIOptions extends PieceCLIOptions {
+  input?: boolean;
+  quiet?: boolean;
+}
+
+export interface PieceLabelCommandDependencies {
+  getCellCfcLabel?: typeof getCellCfcLabel;
+  setCellCfcLabel?: typeof setCellCfcLabel;
+  drainStdin?: typeof drainStdin;
+  render?: typeof render;
+}
+
+export async function getCellCfcLabelFromCommand(
+  options: PieceLabelCLIOptions,
+  pathString?: string,
+  deps: PieceLabelCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = {
+    ...parsePieceOptions(options, { acceptsPath: true }),
+    jsonOutput: true,
+  };
+  const pathSegments = mergePiecePath(pieceConfig, pathString);
+  const label = await (deps.getCellCfcLabel ?? getCellCfcLabel)(
+    pieceConfig,
+    pathSegments,
+    { input: options.input },
+  );
+  (deps.render ?? render)(label, { json: true });
+}
+
+export async function setCellCfcLabelFromCommand(
+  options: PieceLabelCLIOptions,
+  pathString?: string,
+  deps: PieceLabelCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = {
+    ...parsePieceOptions(options, { acceptsPath: true }),
+    jsonOutput: true,
+  };
+  const pathSegments = mergePiecePath(pieceConfig, pathString);
+  const update = await (deps.drainStdin ?? drainStdin)();
+  const label = await (deps.setCellCfcLabel ?? setCellCfcLabel)(
+    pieceConfig,
+    pathSegments,
+    update,
+    { input: options.input },
+  );
+  (deps.render ?? render)(label, { json: true });
+}
+
 export interface PieceListCommandDependencies {
   listPieces?: typeof listPieces;
   renderPieceSummaries?: typeof renderPieceSummaries;
@@ -2246,25 +2474,19 @@ export async function setPieceSourceFromCommand(
   return pieceConfig;
 }
 
-const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);
-
-function parseScopedIdSegment(id: string): {
-  id: string;
-  scope?: CellScope;
-} {
-  const scopeSeparator = id.lastIndexOf("@");
-  if (scopeSeparator === -1) return { id };
-
-  const scope = id.slice(scopeSeparator + 1);
-  const scopedId = id.slice(0, scopeSeparator);
-  if (!scopedId || !CELL_SCOPE_VALUES.has(scope)) {
+/**
+ * Like `parseScopedIdSegment`, except a rejected `@scope` suffix is raised
+ * as a usage error, the suffix being something the user typed.
+ */
+function parseScopedId(id: string): { id: string; scope?: CellScope } {
+  try {
+    return parseScopedIdSegment(id);
+  } catch (error) {
     throw new ValidationError(
-      `Invalid scope suffix "@${scope}". Expected @space, @user, or @session.`,
+      error instanceof Error ? error.message : String(error),
       { exitCode: 1 },
     );
   }
-
-  return { id: scopedId, scope: scope as CellScope };
 }
 
 function parseSetHomeOptions(
@@ -2286,7 +2508,10 @@ function parseSetHomeOptions(
   return { identity: absPath(input.identity), apiUrl };
 }
 
-export function parsePieceOptions(input: PieceCLIOptions): PieceConfig {
+export function parsePieceOptions(
+  input: PieceCLIOptions,
+  parseOptions?: { acceptsPath?: boolean },
+): PieceConfig {
   const options = parseSpaceOptions(input);
   if (!("piece" in options) || !options.piece) {
     throw new ValidationError(
@@ -2294,7 +2519,16 @@ export function parsePieceOptions(input: PieceCLIOptions): PieceConfig {
       { exitCode: 1 },
     );
   }
-  return options as PieceConfig;
+  const config = options as PieceConfig;
+  if (config.piecePath?.length && !parseOptions?.acceptsPath) {
+    throw new ValidationError(
+      `The piece reference embeds a path ("${
+        config.piecePath.join("/")
+      }") but this command takes a piece id only.`,
+      { exitCode: 1 },
+    );
+  }
+  return config;
 }
 
 // With args and env vars shadowing each other, and multiple
@@ -2348,9 +2582,19 @@ export function parseSpaceOptions(
   if (input.piece) {
     // Do not validate here -- piece is only
     // required via `parsePieceOptions`
-    const parsedPiece = parseScopedIdSegment(input.piece);
-    output.piece = parsedPiece.id;
-    if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
+    const llmRef = normalizeLLMFriendlyRef(input.piece, {
+      space: input.space,
+    });
+    if (llmRef) {
+      output.piece = llmRef.pieceId;
+      if (llmRef.scope) output.pieceScope = llmRef.scope;
+      if (llmRef.path.length > 0) output.piecePath = llmRef.path;
+      if (llmRef.embeddedSpace) output.embeddedSpaces = [llmRef.embeddedSpace];
+    } else {
+      const parsedPiece = parseScopedId(input.piece);
+      output.piece = parsedPiece.id;
+      if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
+    }
   }
 
   output.apiUrl = normalizeApiUrl(input.apiUrl);
@@ -2365,10 +2609,55 @@ export function parseSpaceOptions(
   return output as PieceConfig;
 }
 
+/**
+ * Fold the space DID embedded in a parsed link reference into the command's
+ * config, for the deferred check `loadPieces` runs once the session has
+ * resolved the target space to a DID.
+ */
+function collectEmbeddedSpace(
+  config: SpaceConfig,
+  ref: { embeddedSpace?: string },
+): void {
+  if (ref.embeddedSpace === undefined) return;
+  config.embeddedSpaces = [
+    ...(config.embeddedSpaces ?? []),
+    ref.embeddedSpace,
+  ];
+}
+
+/**
+ * The full path a piece data command addresses: any path embedded in an
+ * LLM-friendly `--piece` reference, followed by the positional path argument.
+ */
+export function mergePiecePath(
+  pieceConfig: PieceConfig,
+  pathString?: string,
+): (string | number)[] {
+  return [
+    ...(pieceConfig.piecePath ?? []),
+    ...(pathString ? parseCellPath(pathString) : []),
+  ];
+}
+
 export function parseLink(
   ref: string,
-  _options?: { allowWellKnown?: boolean },
-): { pieceId: string; scope?: CellScope; path?: (string | number)[] } {
+  options?: { allowWellKnown?: boolean; space?: string },
+): {
+  pieceId: string;
+  scope?: CellScope;
+  path?: (string | number)[];
+  embeddedSpace?: string;
+} {
+  const llmRef = normalizeLLMFriendlyRef(ref, { space: options?.space });
+  if (llmRef) {
+    return {
+      pieceId: llmRef.pieceId,
+      ...(llmRef.scope && { scope: llmRef.scope }),
+      ...(llmRef.embeddedSpace && { embeddedSpace: llmRef.embeddedSpace }),
+      ...(llmRef.path.length > 0 && { path: llmRef.path }),
+    };
+  }
+
   const parts = ref.split("/");
   if (parts.length < 1) {
     throw new ValidationError(
@@ -2377,7 +2666,7 @@ export function parseLink(
     );
   }
 
-  const parsedPiece = parseScopedIdSegment(parts[0]);
+  const parsedPiece = parseScopedId(parts[0]);
   const pieceId = parsedPiece.id;
 
   if (parts.length === 1) {
@@ -2415,7 +2704,7 @@ function parseUrl(
     );
   }
   if (!piece) return { apiUrl, space };
-  const parsedPiece = parseScopedIdSegment(piece);
+  const parsedPiece = parseScopedId(piece);
   return {
     apiUrl,
     space,

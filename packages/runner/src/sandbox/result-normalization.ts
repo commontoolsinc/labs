@@ -1,17 +1,17 @@
-import {
-  fabricFromNativeValue,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { hasEncodableForm } from "../encodable-form.ts";
 import {
   FabricBytes,
   FabricEpochNsec,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
+import {
+  fabricFromNativeValue,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { isNativeError } from "@commonfabric/data-model/native-type-tags";
 
 import { isReactive } from "../builder/types.ts";
+import { hasEncodableForm } from "../encodable-form.ts";
 import { isCellLink } from "../link-utils.ts";
 
 export interface NormalizedSandboxResult {
@@ -181,7 +181,7 @@ function adaptSandboxResult(
   const existing = adapted.get(value);
   if (existing !== undefined) return existing;
 
-  // This boundary answers in canonical shapes: a fresh `Array` for anything
+  // This boundary returns canonical shapes: a fresh `Array` for anything
   // array-shaped, and an `Object.prototype`-rooted record for anything else.
   // A prototype is not part of what a value says as data, and a fabric value
   // has exactly one shape for a record, so a pattern that builds a result with

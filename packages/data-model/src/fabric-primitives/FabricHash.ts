@@ -1,4 +1,3 @@
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import type {
   FabricHash as ApiFabricHash,
   FabricHashConstructor as ApiFabricHashConstructor,
@@ -8,18 +7,19 @@ import {
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
 import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import type { FabricValue } from "@/interface.ts";
-import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
-  type FabricCodec,
+  JSON_CODEC,
+  type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+} from "@/codec-interface/interface.ts";
+import type { FabricValue } from "@/interface.ts";
 
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.
@@ -36,7 +36,11 @@ import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
  * repeated `toString()` calls are O(1).
  */
 export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
-  readonly #hash: Uint8Array;
+  /**
+   * Private byte storage. Guaranteed to be backed by an exact-sized and
+   * unshared `ArrayBuffer`.
+   */
+  readonly #hash: Uint8Array<ArrayBuffer>;
   readonly #tag: string;
   readonly #justHashString: string;
   readonly #fullStringForm: string;
@@ -111,32 +115,12 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     return this.#fullStringForm;
   }
 
-  /**
-   * Parses an instance from its string representation
-   * (`<tag>:<base64urlHash>`), which contains exactly one colon: a tag has
-   * none, and neither does base64url. Splitting at the first colon therefore
-   * rejects any source bearing a second one, since the colon then falls in the
-   * hash segment, where it is not valid base64url.
-   *
-   * That rejection is a feature. A string with an extra colon is not a tagged
-   * hash, and the only alternative to refusing it is to guess which colon was
-   * meant -- silently returning a `FabricHash` with a tag its author never
-   * wrote, which renders back as the string it came from and so looks correct.
-   */
-  static fromString(source: string): FabricHash {
-    const colonIndex = source.indexOf(":");
-    if (colonIndex === -1) {
-      throw new ReferenceError(
-        `Invalid content hash string: ${backtickQuote(source)}`,
-      );
-    }
-    const tag = source.substring(0, colonIndex);
-    const hashBase64url = source.substring(colonIndex + 1);
-    return new FabricHash(fromBase64url(hashBase64url), tag, true);
-  }
+  //
+  // Static members
+  //
 
-  static #codec = Object.freeze(
-    new (class HashCodec extends BaseFabricCodec {
+  static #jsonCodec = Object.freeze(
+    new (class HashCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Hash, FabricHash);
@@ -182,8 +166,32 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   );
 
   /** The codec for instances of this class. */
-  static get [JSON_CODEC](): FabricCodec {
-    return this.#codec;
+  static get [JSON_CODEC](): NonterminalCodec {
+    return this.#jsonCodec;
+  }
+
+  /**
+   * Parses an instance from its string representation
+   * (`<tag>:<base64urlHash>`), which contains exactly one colon: a tag has
+   * none, and neither does base64url. Splitting at the first colon therefore
+   * rejects any source bearing a second one, since the colon then falls in the
+   * hash segment, where it is not valid base64url.
+   *
+   * That rejection is a feature. A string with an extra colon is not a tagged
+   * hash, and the only alternative to refusing it is to guess which colon was
+   * meant -- silently returning a `FabricHash` with a tag its author never
+   * wrote, which renders back as the string it came from and so looks correct.
+   */
+  static fromString(source: string): FabricHash {
+    const colonIndex = source.indexOf(":");
+    if (colonIndex === -1) {
+      throw new ReferenceError(
+        `Invalid content hash string: ${backtickQuote(source)}`,
+      );
+    }
+    const tag = source.substring(0, colonIndex);
+    const hashBase64url = source.substring(colonIndex + 1);
+    return new FabricHash(fromBase64url(hashBase64url), tag, true);
   }
 }
 

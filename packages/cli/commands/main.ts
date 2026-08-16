@@ -1,26 +1,28 @@
 import { Command, ValidationError } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
-import { acl } from "./acl.ts";
-import { check } from "./dev.ts";
-import { completion } from "./completion.ts";
-import { deps } from "./deps.ts";
-import { exec } from "./exec.ts";
-import { fuse } from "./fuse.ts";
-import { init } from "./init.ts";
-import { inspect } from "./inspect.ts";
-import { invocationSession } from "./invocation-session.ts";
-import { piece } from "./piece.ts";
-import { space } from "./space.ts";
-import { identity } from "./identity.ts";
-import { test } from "./test-command.ts";
-import { view } from "./view.ts";
-import { wish } from "./wish.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
+
 import { cliName, cliText } from "../lib/cli-name.ts";
 import {
   hasJsonArgument,
   reservesStdoutForCommandOutput,
 } from "../lib/json-output.ts";
+import { acl } from "./acl.ts";
+import { completion } from "./completion.ts";
+import { deps } from "./deps.ts";
+import { check } from "./dev.ts";
+import { exec } from "./exec.ts";
+import { fuse } from "./fuse.ts";
+import { identity } from "./identity.ts";
+import { ingest } from "./ingest.ts";
+import { init } from "./init.ts";
+import { inspect } from "./inspect.ts";
+import { invocationSession } from "./invocation-session.ts";
+import { piece } from "./piece.ts";
+import { space } from "./space.ts";
+import { test } from "./test-command.ts";
+import { view } from "./view.ts";
+import { wish } from "./wish.ts";
 
 function envStatus(): string {
   const identity = Deno.env.get("CF_IDENTITY");
@@ -95,6 +97,7 @@ export const main = new Command()
   .reset()
   // @ts-ignore for the above type issue
   .command("acl", acl)
+  .command("ingest", ingest)
   // @ts-ignore for the above type issue
   .command("piece", piece)
   .command("check", check)

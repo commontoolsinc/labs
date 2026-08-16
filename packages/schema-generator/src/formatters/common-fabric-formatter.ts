@@ -1,21 +1,16 @@
-import ts from "typescript";
-import { isRecord } from "@commonfabric/utils/types";
-import {
-  type CellWrapperKind,
-  getCellBrand,
-  getCellWrapperInfo,
-  isCellBrand,
-  wrapperKindToBrand,
-} from "../typescript/cell-brand.ts";
-import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
-import { numberFromExpression } from "../typescript/numeric-expression.ts";
-import { dedupeByValueEqual } from "../value-equality.ts";
 import type {
   AsCellEntry,
   MutableJSONSchema,
   MutableJSONSchemaObj,
   SchemaScope,
 } from "@commonfabric/api";
+import {
+  CFC_ATOM_TYPE,
+  CFC_CANONICAL_ALIAS_NAMES,
+} from "@commonfabric/api/cfc";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -27,9 +22,15 @@ import {
   type TypeWithInternals,
 } from "../type-utils.ts";
 import {
-  CFC_ATOM_TYPE,
-  CFC_CANONICAL_ALIAS_NAMES,
-} from "@commonfabric/api/cfc";
+  type CellWrapperKind,
+  getCellBrand,
+  getCellWrapperInfo,
+  isCellBrand,
+  wrapperKindToBrand,
+} from "../typescript/cell-brand.ts";
+import { numberFromExpression } from "../typescript/numeric-expression.ts";
+import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
+import { dedupeByValueEqual } from "../value-equality.ts";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
@@ -103,7 +104,7 @@ const applyScopeToAsCellEntry = (
   if (typeof entry === "string") {
     return { kind: entry, scope };
   }
-  if (isRecord(entry)) {
+  if (isObjectOrArray(entry)) {
     return { ...entry, scope };
   }
   return entry;
@@ -1327,7 +1328,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     switch (aliasName) {
       case "Cfc": {
         const payload = readValue(1);
-        return isRecord(payload) ? { ...payload } : undefined;
+        return isObjectOrArray(payload) ? { ...payload } : undefined;
       }
       case "Confidential":
         return { confidentiality: readValue(1) };
@@ -1586,7 +1587,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       return schema === false ? { not: true, ifc } : { ifc };
     }
 
-    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+    const existingIfc = isObjectOrArray(schema.ifc) ? schema.ifc : {};
     return {
       ...schema,
       ifc: {

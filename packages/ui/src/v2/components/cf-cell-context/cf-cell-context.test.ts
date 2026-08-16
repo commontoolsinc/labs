@@ -36,7 +36,7 @@ describe("CFCellContext (retired)", () => {
     const element = new CFCellContext();
     const rendered = element.render();
     // A lit template whose only content is the default slot: children survive,
-    // the retired behaviour does not come back.
+    // the retired behavior does not come back.
     const strings = (rendered as { strings?: readonly string[] }).strings;
     expect(strings).toBeDefined();
     expect(strings!.join("")).toContain("<slot></slot>");

@@ -1,6 +1,9 @@
-// Tile tests: each tile is a pure collect(ctx) -> TileView, exercised with a
-// hand-made Ctx. No server, no network, no subprocess — the CI tiles get canned
-// runs and the token-gated tiles get an empty env (their gray-out contract).
+/**
+ * Tile tests: each tile is a pure collect(ctx) -> TileView, exercised with a
+ * hand-made Ctx. No server, no network, no subprocess — the CI tiles get canned
+ * runs and the token-gated tiles get an empty env (their gray-out contract).
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { runSource, type Ctx, type Run } from "./types.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "./config.ts";

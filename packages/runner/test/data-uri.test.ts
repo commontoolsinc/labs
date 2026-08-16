@@ -1,25 +1,43 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+/**
+ * Minting a `data:` URI from a value, which has to do two things at once.
+ *
+ * The URI carries its own bytes, so nothing the value names can stay
+ * relative: a link is resolved against a base before it is written, and one
+ * that was already absolute is left as it is. And the URI stands in for the
+ * value wherever an id would, so what comes back has to be what went in --
+ * key insertion order cannot show through, and the cases usually rounded off
+ * on the way (a negative zero, a non-finite number, a hole in a sparse array,
+ * an `undefined`) survive rather than being normalized away.
+ *
+ * A cycle is refused rather than encoded. A value merely reached twice is not
+ * a cycle and is not refused, which is the distinction the shared-object cases
+ * hold in place.
+ */
+
 import { expect } from "@std/expect";
-import { fromBase64url } from "@commonfabric/utils/base64url";
-import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import {
   linkRefFrom,
   linkRefPayload,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { UnknownValue } from "@commonfabric/data-model/codec-common";
+import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
 import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
-import { isSigilLink, type NormalizedLink } from "../src/link-utils.ts";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { fromBase64url } from "@commonfabric/utils/base64url";
+
 import { createCell } from "../src/cell.ts";
+import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { isSigilLink, type NormalizedLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -339,12 +357,12 @@ describe("data-uri", () => {
     // behavior (see the `TODO` in the walk) coincide, so this pins only the
     // codec round-trip, not the pass-through itself.
     it("represents a link-free `FabricInstance` via its codec", () => {
-      const inst = new UnknownValue("zzz@1", { a: 1 });
+      const inst = new UnknownValue("Zzz@1", { a: 1 });
       const parsed = valueFromDataUri(
         dataUriFromValueWithResolvedLinks({ inst }),
       );
       expect(parsed.inst).toBeInstanceOf(UnknownValue);
-      expect(parsed.inst.wireTypeTag).toBe("zzz@1");
+      expect(parsed.inst.wireTypeTag).toBe("Zzz@1");
       expect(parsed.inst.state).toEqual({ a: 1 });
     });
 

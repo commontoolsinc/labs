@@ -1,8 +1,30 @@
+/**
+ * Which symbol a value's codec is found under, and what happens when the
+ * answer is absent or ambiguous.
+ *
+ * An instance binds one format-agnostic `[CODEC]`, while a primitive's codec
+ * terminates an encoding and so is bound per wire format under that format's
+ * own symbol. Asking without naming a format therefore succeeds for the one
+ * and fails for the other, which is most of what these cases pin.
+ *
+ * The precedence case is built on a double rather than a real class, because
+ * nothing in the tree binds both symbols. With a real class the two could not
+ * disagree, and the case would pass whichever way the lookup happened to be
+ * written.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricSpecialObject, JSON_CODEC } from "@/interface.ts";
-import { CODEC, codecOf, type FabricCodec } from "@/codec-common/index.ts";
+import { FabricSpecialObject } from "@/interface.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import {
+  CODEC,
+  codecOf,
+  type NonterminalCodec,
+  type TerminalCodec,
+} from "@/codec-common/index.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
@@ -37,11 +59,11 @@ describe("codecOf()", () => {
       // real class the two symbols cannot disagree, and the case would pass
       // whichever one the implementation preferred.
       class BothCodecs extends FabricSpecialObject {
-        static get [CODEC](): FabricCodec {
+        static get [CODEC](): NonterminalCodec {
           return FabricError[CODEC];
         }
 
-        static get [JSON_CODEC](): FabricCodec {
+        static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
           return FabricBytes[JSON_CODEC];
         }
       }

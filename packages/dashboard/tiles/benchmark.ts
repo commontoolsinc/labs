@@ -1,46 +1,64 @@
-// benchmark: trends one scale-invariant index of benchmark performance per
-// processor on main. Each index changes by the geometric mean of the benchmark
-// changes between consecutive runs on that processor. Every benchmark has the
-// same weight regardless of size. Only a broad move shifts an index. One slow
-// benchmark barely registers. The drill-down shows individual benchmarks.
-// Each processor has its own coloured line. The headline shows the largest
-// established trend. Orange means at least one processor trends up. Green means
-// every established processor stays flat or falls. Red means the most recent
-// run failed, or finished successfully without readable benchmark data. A tile
-// in the failed state drops its benchmark count and window span and names the
-// failure in their place: how long ago the benchmarks last worked, and how many
-// runs have failed since. A run under way puts a "running" badge in the header.
-// Deno
-// bench samples each benchmark to a fixed time budget. Performance changes the
-// per-operation times without materially changing the run's wall-clock time.
-//
-// A benchmark added or removed is absent from one side of an adjacent
-// comparison, so it does not move the index. A processor change starts another
-// line instead of connecting unlike machines. Each line's recent window
-// contains the runs in the last BENCH_TREND_MAX_AGE_DAYS or the newest
-// BENCH_TREND_MIN_RUNS, whichever is larger. The full line spans about 45 days.
-// The failed state reads the workflow-run list and the latest run's cached
-// result. It therefore works when artifacts cannot be read. Without usable
-// data, the dashboard keeps the last completed color and values while a fetch
-// runs. It reads "benchmark data unavailable" after an empty fetch. A failed
-// fetch keeps the last-known processor lines gray and names the reason.
-//
-// Every collection pages the run list, once a minute, which is the cadence the
-// run state needs. The artifact history behind the tile moves with the runs
-// instead: a collection whose sampled runs match the last refresh downloads
-// nothing.
-//
-// The /bench drill-down keeps the deeper picture, and closes with a link that
-// hands a rerun to GitHub: this token reads, so GitHub is where a run starts.
-// The benchmarks.yml job runs `deno bench --json` and uploads the output as a
-// `bench-results` artifact with 90-day retention. There is no committed history. The drill-down lists recent
-// main runs and keeps one artifact per shortest-view time bucket. It unzips
-// each artifact in the process and reads every benchmark's timings and
-// processor identity. Results for a run attempt are immutable and persisted.
-// Later collections fetch only new runs and attempts. The drill-down overlays
-// one coloured line per processor for each benchmark. The CI duration and
-// Gantt views also live behind /bench. The tile's collection keeps this
-// history warm.
+/**
+ * Trends one scale-invariant index of benchmark performance per processor on
+ * main. Each index changes by the geometric mean of the benchmark changes
+ * between consecutive runs on that processor. Every benchmark carries the same
+ * weight regardless of size, so only a broad move shifts an index and one slow
+ * benchmark barely registers. `deno bench` samples each benchmark to a fixed
+ * time budget, so a performance change moves the per-operation times without
+ * materially changing the run's wall-clock time.
+ *
+ * Each processor has its own colored line, and the headline shows the largest
+ * established trend. Orange means at least one processor trends up. Green
+ * means every established processor stays flat or falls. Red means the most
+ * recent run failed, or finished successfully without readable benchmark data.
+ * A tile in the failed state drops its benchmark count and window span and
+ * names the failure in their place: how long ago the benchmarks last worked,
+ * and how many runs have failed since. A run under way puts a "running" badge
+ * in the header.
+ *
+ * A benchmark added or removed is absent from one side of an adjacent
+ * comparison, so it does not move the index. A processor change starts another
+ * line instead of connecting unlike machines. A processor model is not a
+ * machine, though: the runner group hands a run whatever share of a shared host
+ * the other tenants leave it, and hosts under one model have measured a fifth
+ * apart on work that touches no repository code. So each step also divides out
+ * the machine, read from the calibration benchmarks the same run carries, and a
+ * run that landed on a busy host reads as the busy host it was. The index takes
+ * one run per BENCH_TREND_BUCKET_MS, matching the benchmarks.yml cadence, so a
+ * re-run or a manual dispatch does not put two samples of one moment into the
+ * fit. Each line's recent window contains the runs in the last
+ * BENCH_TREND_MAX_AGE_DAYS or the newest BENCH_TREND_MIN_RUNS, whichever is
+ * larger, and the full line spans about 45 days.
+ *
+ * A red run is read like any other: `deno bench` exits non-zero when one
+ * benchmark throws, having written a complete report of the rest, so a run's
+ * color says nothing about whether it measured anything. What decides that is
+ * the artifact, which has to parse, name a processor, and carry benchmarks the
+ * tile trends. The failed state reads the workflow-run list and the latest
+ * run's cached result, so it is unaffected by which runs the trend samples, and
+ * it works when artifacts cannot be read. Without usable data, the dashboard
+ * keeps the last completed color and values while a fetch runs, and reads
+ * "benchmark data unavailable" after an empty fetch. A failed fetch keeps the
+ * last-known processor lines gray and names the reason.
+ *
+ * Every collection pages the run list, once a minute, which is the cadence the
+ * run state needs. The artifact history behind the tile moves with the runs
+ * instead: a collection whose sampled runs match the last refresh downloads
+ * nothing.
+ *
+ * The /bench drill-down keeps the deeper picture, and closes with a link that
+ * hands a rerun to GitHub: this token reads, so GitHub is where a run starts.
+ * The benchmarks.yml job runs `deno bench --json` and uploads the output as a
+ * `bench-results` artifact with 90-day retention, and there is no committed
+ * history. The drill-down lists recent main runs and keeps one artifact per
+ * shortest-view time bucket. It unzips each artifact in the process and reads
+ * every benchmark's timings and processor identity. Results for a run attempt
+ * are immutable and persisted, so later collections fetch only new runs and
+ * attempts. The drill-down overlays one colored line per processor for each
+ * benchmark. The CI duration and Gantt views also live behind /bench, and this
+ * tile's collection keeps their history warm.
+ */
+
 import type { Ctx, Route, Status, Tile, TileView } from "../types.ts";
 import {
   BenchmarkHistoryStore,
@@ -74,6 +92,7 @@ import {
   SPARK_FADE,
 } from "../lib.ts";
 import {
+  BENCH_TREND_BUCKET_MS,
   BENCH_TREND_MAX_AGE_DAYS,
   BENCH_TREND_MIN_RUNS,
   REPO,
@@ -136,11 +155,11 @@ const performanceBenchmarkGitHub: BenchmarkGitHub = {
 
 // deno bench reports these seven timings per benchmark (all nanoseconds).
 type Stats = BenchmarkStats;
-// Shown as one percentile ladder: min is p0, the average stands in for p50, max is
-// p100. (avg is the mean, not a true median, but reads consistently here.)
+// Shown as a ladder from the fastest sample to the slowest. Each label names
+// the timing it plots: six percentiles and the mean.
 const STATS: { label: string; field: keyof Stats }[] = [
   { label: "p0", field: "min" },
-  { label: "p50", field: "avg" },
+  { label: "mean", field: "avg" },
   { label: "p75", field: "p75" },
   { label: "p99", field: "p99" },
   { label: "p99.5", field: "p995" },
@@ -341,6 +360,27 @@ const benchKey = (b: Bench): string =>
     b.group ? b.group + "/" : ""
   }${b.name}`;
 
+// The benchmarks that measure the machine rather than the repository. The
+// Benchmarks workflow runs this file alongside the product benchmarks and its
+// bodies call no repository code, so what moves them between two runs on one
+// processor is the host. They are the tile's ruler, not one of the things it
+// measures: they set each run's machine factor and take no other part, so they
+// are absent from the index, from the benchmark count, and from the
+// drill-down. Runs from before the calibration landed carry none, and read
+// uncorrected.
+export const CALIBRATION_FILE =
+  "packages/dashboard/machine-calibration.bench.ts";
+const isCalibrationKey = (key: string): boolean =>
+  key.startsWith(`${CALIBRATION_FILE} > `);
+
+// How many of a run's benchmarks are the repository's. Zero means the run
+// measured nothing the tile trends, whatever else its artifact holds.
+const productMetricCount = (run: { metrics: Map<string, Stats> }): number => {
+  let count = 0;
+  for (const key of run.metrics.keys()) if (!isCalibrationKey(key)) count++;
+  return count;
+};
+
 const UNKNOWN_CPU = "Unknown CPU";
 
 // Wall-clock span of a series (first to last point), in milliseconds.
@@ -493,6 +533,7 @@ async function loadRun(
 ): Promise<{ cached: boolean; error?: unknown }> {
   let cpu = UNKNOWN_CPU;
   let metrics = new Map<string, Stats>();
+  let zip: Uint8Array<ArrayBuffer> | undefined;
   try {
     const arts = await github.json<{ artifacts?: Artifact[] }>(
       `repos/${REPO}/actions/runs/${run.id}/artifacts`,
@@ -501,16 +542,7 @@ async function loadRun(
     const art = (arts.artifacts ?? []).find((a) =>
       a.name === ARTIFACT && !a.expired
     );
-    if (art) {
-      const json = await jsonFromZip(await fetchZip(art.id, token, github));
-      if (json) {
-        const report = parseBenchmarkReport(json);
-        if (report.cpu !== undefined) {
-          cpu = report.cpu;
-          metrics = report.metrics;
-        }
-      }
-    }
+    if (art) zip = await fetchZip(art.id, token, github);
   } catch (error) {
     // The read failed, so whether this run has usable results is still unknown.
     // Caching the empty map here would answer that question with "no" and never ask
@@ -518,6 +550,24 @@ async function loadRun(
     // from the trend for the life of the process. Record nothing and retry on the
     // next refresh.
     return { cached: false, error };
+  }
+  if (zip !== undefined) {
+    try {
+      const json = await jsonFromZip(zip);
+      const report = json === null ? undefined : parseBenchmarkReport(json);
+      if (report?.cpu !== undefined) {
+        cpu = report.cpu;
+        metrics = report.metrics;
+      }
+    } catch {
+      // Reading bytes already in hand is deterministic, and a run attempt's
+      // artifact never changes, so an artifact that will not parse now will not
+      // parse later either. That is the same answer as a run with no artifact
+      // at all, and it is recorded the same way: an empty map, which reads as
+      // no benchmark data. Reporting it instead would gray the whole tile on
+      // one bad artifact and hold back the refresh marker for as long as that
+      // artifact stayed in the window.
+    }
   }
   benchmarkStore.set({
     runId: run.id,
@@ -560,6 +610,7 @@ function assembleBenchmarkSeries(
   for (const run of [...runs].sort((a, b) => a.at - b.at)) {
     if (run.cpu === undefined) continue;
     for (const [key, stats] of run.metrics) {
+      if (isCalibrationKey(key)) continue;
       let byCpu = byKey.get(key);
       if (!byCpu) {
         byCpu = new Map();
@@ -594,7 +645,7 @@ function assembleBenchmarkSnapshot(runs: Run[]): BenchmarkSeries[] {
   return assembleBenchmarkSeries(
     runs.flatMap((run) => {
       const cached = currentBenchmarkRun(run);
-      return cached?.cpu !== undefined && cached.metrics.size > 0
+      return cached?.cpu !== undefined && productMetricCount(cached) > 0
         ? [cached]
         : [];
     }),
@@ -656,13 +707,24 @@ async function markBenchmarkRefreshed(
   benchmarkRefreshedAt = benchmarkStore.refreshedAt;
 }
 
+// Every completed run in the window, thinned to one per collection bucket. A
+// run's color does not decide whether it measured anything: `deno bench` exits
+// non-zero when any one benchmark throws, having already written a complete
+// report of the rest, and the workflow uploads that report either way. Over one
+// recent 45-day stretch, 26 of the 30 red runs carried an artifact
+// indistinguishable from a green run's, and they arrived in blocks of a dozen
+// or more consecutive runs — so the runs the tile lost were concentrated
+// exactly where a thinned line does the most damage. What makes a run usable is
+// the artifact, and every reader below already checks that: a report has to
+// parse, name a processor, and carry benchmarks the tile trends. The tile's red
+// state is unaffected, because it reads the run list rather than this sample.
 export function sampleBenchmarkRuns<
   T extends { created_at: string; conclusion: string | null },
 >(runs: T[], cutoff: number): T[] {
   const perBucket = new Map<number, T>();
   for (const run of runs) {
     const at = Date.parse(run.created_at);
-    if (run.conclusion !== "success" || at < cutoff) continue;
+    if (run.conclusion === null || at < cutoff) continue;
     const bucket = Math.floor(at / COLLECTION_BUCKET_MS);
     const current = perBucket.get(bucket);
     if (!current || at > Date.parse(current.created_at)) {
@@ -694,24 +756,79 @@ const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 // The geometric mean of the per-benchmark ratios between two runs on the same
-// processor, over the benchmarks they share (each with a positive average).
-// Geometric, not arithmetic, so a benchmark that doubles and one that halves
-// cancel to no change. A benchmark in only one of the two runs is not in the
-// ratio, so adding or removing one is not a change. 1 when the runs share
-// nothing.
-function benchmarkStepRatio(
+// processor, over the benchmarks they share that match `select` (each with a
+// positive 75th percentile). Geometric, not arithmetic, so a benchmark that
+// doubles and one that halves cancel to no change. A benchmark in only one of
+// the two runs is not in the ratio, so adding or removing one is not a change.
+// 1 when the runs share nothing selected.
+//
+// The ratio compares the 75th percentile of each benchmark rather than its
+// average. `deno bench` measures each benchmark for a fixed wall-clock budget,
+// so one stalled sample raises the reported average by the stall divided by
+// that budget, whatever the sample count. A stall of a fifth of a second
+// against a budget of half a second is a quarter added to the average, which is
+// the size of the moves the trend is meant to detect. The runners stall that
+// long often enough that reading the average reports steps no commit caused.
+//
+// The 75th percentile is far enough up the distribution to move when a change
+// makes some but not all of an operation's runs slower, and far enough down
+// that a handful of stalled samples cannot reach it. The fastest sample
+// survives a stall equally well but is the floor of the distribution, so it is
+// blind to a change that leaves the floor alone and widens everything above it
+// — a slow path taken only sometimes moves nothing it can see.
+//
+// Both the product ratio and the calibration ratio read this one statistic, and
+// have to: an index step divides the second out of the first, and two different
+// statistics would not cancel.
+//
+// A change confined above the 75th percentile is still invisible here, and on
+// user-facing timings that tail is what a person actually notices. Reading it
+// from these runs would need the stalls told apart from the tail the code
+// produces, which the current sample counts do not allow: on the busiest
+// processor, `p99` puts 11% of neighboring run pairs more than a quarter
+// apart with no change behind them, against 2% for the 75th percentile. The
+// drill-down plots the whole ladder from `min` to `max` in the meantime.
+function sharedBenchmarkRatio(
   previous: CachedBenchmarkRun,
   current: CachedBenchmarkRun,
+  select: (key: string) => boolean,
 ): number {
   let logSum = 0, count = 0;
   for (const [key, stats] of current.metrics) {
+    if (!select(key)) continue;
     const before = previous.metrics.get(key);
-    if (before && before.avg > 0 && stats.avg > 0) {
-      logSum += Math.log(stats.avg / before.avg);
+    if (before && before.p75 > 0 && stats.p75 > 0) {
+      logSum += Math.log(stats.p75 / before.p75);
       count++;
     }
   }
   return count ? Math.exp(logSum / count) : 1;
+}
+
+// How the repository's benchmarks moved between two runs on the same processor.
+function benchmarkStepRatio(
+  previous: CachedBenchmarkRun,
+  current: CachedBenchmarkRun,
+): number {
+  return sharedBenchmarkRatio(
+    previous,
+    current,
+    (key) => !isCalibrationKey(key),
+  );
+}
+
+// How the machine moved between two runs on the same processor, read from the
+// calibration benchmarks. Two runs on one processor model are not two runs on
+// one machine: a run gets whatever share of a shared host is left to it, and
+// hosts under a single model have measured a fifth apart on work that touches
+// no repository code. Dividing this out of the step leaves what the repository
+// did. 1 when either run predates the calibration, which leaves that step
+// uncorrected rather than guessing at it.
+function machineStepRatio(
+  previous: CachedBenchmarkRun,
+  current: CachedBenchmarkRun,
+): number {
+  return sharedBenchmarkRatio(previous, current, isCalibrationKey);
 }
 
 const CPU_COLORS = [
@@ -808,6 +925,23 @@ interface BenchmarkCpuIndex {
 
 type CpuBenchmarkRun = CachedBenchmarkRun & { cpu: string };
 
+// One run per trend bucket on one processor, newest kept, oldest first. The
+// collection keeps far finer resolution than this, because the drill-down's
+// shortest view needs it, and the trend does not: the benchmarks run four-
+// hourly, so runs closer together than that are a re-run, a manual dispatch or
+// a schedule catching up. Counted as separate samples they let one stretch of
+// wall clock supply the whole of a level, and a level the headline is read off
+// rests on as few as three samples.
+export function benchmarkTrendRuns<T extends { at: number }>(runs: T[]): T[] {
+  const perBucket = new Map<number, T>();
+  for (const run of runs) {
+    const bucket = Math.floor(run.at / BENCH_TREND_BUCKET_MS);
+    const current = perBucket.get(bucket);
+    if (!current || run.at > current.at) perBucket.set(bucket, run);
+  }
+  return [...perBucket.values()].sort((a, b) => a.at - b.at);
+}
+
 function benchmarkCpuIndices(
   cached: CpuBenchmarkRun[],
   now: number,
@@ -822,12 +956,15 @@ function benchmarkCpuIndices(
   const colors = cpuColors(byCpu.keys());
   return [...byCpu]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([cpu, runs]) => {
-      runs.sort((a, b) => a.at - b.at);
+    .map(([cpu, sampled]) => {
+      const runs = benchmarkTrendRuns(sampled);
       const points: { at: number; index: number }[] = [];
       let index = 1;
       for (let run = 0; run < runs.length; run++) {
-        if (run > 0) index *= benchmarkStepRatio(runs[run - 1], runs[run]);
+        if (run > 0) {
+          index *= benchmarkStepRatio(runs[run - 1], runs[run]) /
+            machineStepRatio(runs[run - 1], runs[run]);
+        }
         points.push({ at: runs[run].at, index });
       }
       const inWindow = points.filter((point) =>
@@ -958,7 +1095,7 @@ function benchmarkIndexView(
   const latestCompleted = latestCompletedRun(runs);
   const failedCi = latestCompleted !== undefined && runFailed(latestCompleted);
   // A run under way is a header badge, and leaves the verdict to the runs that
-  // have finished. The badge is what says the tile's colour may be about to move.
+  // have finished. The badge is what says the tile's color may be about to move.
   const aside = runInFlight(runs) ? RUNNING_BADGE : undefined;
   // A run that finished green on CI but whose artifact resolved to no readable
   // benchmark data is as good as failed: it ran and produced nothing usable. Only
@@ -967,16 +1104,17 @@ function benchmarkIndexView(
   const latestResult = latestCompleted?.conclusion === "success"
     ? benchmarkStore.get(latestCompleted.id)
     : undefined;
-  const noData = latestResult !== undefined && latestResult.metrics.size === 0;
+  const noData = latestResult !== undefined &&
+    productMetricCount(latestResult) === 0;
   const failed = failedCi || noData;
   const failSub = failedCi
     ? benchmarkFailureLabel(runs, now)
     : "no benchmark data";
-  // The successful runs with processor identities and readable artifacts in the
-  // window, oldest -> newest.
+  // The runs with processor identities and readable artifacts in the window,
+  // oldest -> newest. The artifact decides, not the run's color.
   const cached = (benchmarkStore.refreshedRuns() ?? benchmarkStore.list(cutoff))
     .filter((run): run is CpuBenchmarkRun =>
-      run.at >= cutoff && run.cpu !== undefined && run.metrics.size > 0
+      run.at >= cutoff && run.cpu !== undefined && productMetricCount(run) > 0
     )
     .sort((a, b) => a.at - b.at);
   const indices = benchmarkCpuIndices(cached, now);
@@ -1020,7 +1158,7 @@ function benchmarkIndexView(
   // Headline: the window's trend.
   const value = escapeHtml(headline.trend.label);
   const latest = cached[cached.length - 1];
-  const count = latest.metrics.size;
+  const count = productMetricCount(latest);
   // Name the highlighted window's span beside the count, like CI duration names its
   // median window — in days (via humanSpan), not "runs", so it does not read as the
   // main-CI run count. Only when a window is actually highlighted; otherwise the
@@ -1606,7 +1744,10 @@ export function benchPage(
   repo: CiHistorySourceKey = "labs",
   options: BenchmarkPageOptions = {},
 ): string {
-  const stat = STATS.find((s) => s.label === statLabel) ??
+  // "p50" is what the mean column used to be called, so a link saved under the
+  // old name still opens the column it named.
+  const requested = statLabel === "p50" ? "mean" : statLabel;
+  const stat = STATS.find((s) => s.label === requested) ??
     STATS.find((s) => s.label === DEFAULT_LABEL)!;
   const sort = sortMode === "trend" || sortMode === "duration"
     ? sortMode
@@ -1893,7 +2034,7 @@ export function benchPage(
 
   const rangeContent = `<div id="range-content">
     ${progressHtml}${refreshNotice}
-    <p class="legend">Percentile of per-op time across a run's samples — p0 = min, p50 = mean, p100 = max. Lower is faster. Each CPU has its own coloured line. The value, trend, and row colour use the CPU with the most benchmark samples in the selected ${days}-day window; a tie uses the CPU with the newest sample. Fewer than seven distinct days are marked new. Duration and trend sorting use the displayed value and trend.</p>
+    <p class="legend">Per-op time across a run's samples — p0 = the fastest, p100 = the slowest, mean = the arithmetic mean. Lower is faster. Each CPU has its own colored line. The value, trend, and row color use the CPU with the most benchmark samples in the selected ${days}-day window; a tie uses the CPU with the newest sample. Fewer than seven distinct days are marked new. Duration and trend sorting use the displayed value and trend.</p>
     ${body}
     ${cpuLegend}
     <p class="note">Successful main runs come from the <a href="https://github.com/${REPO}/actions/workflows/${WORKFLOW}" target="_blank" rel="noopener">${WORKFLOW} runs ↗</a> (deno bench artifacts). Collection keeps enough samples for the shortest window, and charts reduce longer windows to about ${CI_HISTORY_POINT_TARGET} evenly spaced points.</p>

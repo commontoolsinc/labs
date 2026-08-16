@@ -1,10 +1,20 @@
-import ts from "typescript";
 import {
   FABRIC_SPECIAL_OBJECT_BRAND,
   type MutableJSONSchema,
   type MutableJSONSchemaObj,
 } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
+import {
+  attachDocTags,
+  extractDocFromSymbolAndDecls,
+  getDeclDocs,
+  symbolHasDeprecatedTag,
+} from "../doc-utils.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
+import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   cloneSchemaDefinition,
   getNativeTypeSchema,
@@ -20,16 +30,7 @@ import {
   isDefaultNodeWithUndefined,
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
-import type { SchemaGenerator } from "../schema-generator.ts";
 import { attachUiContract, getUiContractHint } from "../ui-contract.ts";
-import {
-  attachDocTags,
-  extractDocFromSymbolAndDecls,
-  getDeclDocs,
-  symbolHasDeprecatedTag,
-} from "../doc-utils.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
 
 const logger = getLogger("schema-generator.object", {
   enabled: true,
@@ -67,6 +68,39 @@ function getWrapperSchemaFromCallable(
   }
 
   return undefined;
+}
+
+/**
+ * Attach a property's JSDoc description (and its lowered tags) to the schema
+ * about to be emitted for it. Both emission paths go through this — the
+ * ordinary delegated path and the callable-wrapper early return — so a doc
+ * written on a factory-typed verb property survives exactly like one on a
+ * data property.
+ */
+function attachPropertyDoc(
+  schema: Record<string, unknown>,
+  prop: ts.Symbol,
+  propName: string,
+  checker: ts.TypeChecker,
+): void {
+  const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
+  if (!text) return;
+  const conflicts = all.filter((s) => s && s !== text);
+  schema.description = text;
+  attachDocTags(schema, text);
+  if (conflicts.length > 0) {
+    const comment = typeof schema.$comment === "string"
+      ? (schema.$comment as string)
+      : undefined;
+    schema.$comment = comment
+      ? comment
+      : "Conflicting docs across declarations; using first";
+    // Warning only
+    logger.warn(
+      "schema-gen",
+      () => `JSDoc conflict for property '${propName}'; using first doc`,
+    );
+  }
 }
 
 function typeNodeExplicitlyDeclaresProperty(
@@ -312,6 +346,12 @@ export class ObjectFormatter implements TypeFormatter {
             required.push(propName);
           }
           attachDeprecatedStreamMark(wrapperSchema, prop, checker);
+          attachPropertyDoc(
+            wrapperSchema as Record<string, unknown>,
+            prop,
+            propName,
+            checker,
+          );
           properties[propName] = wrapperSchema;
         }
         continue;
@@ -330,7 +370,7 @@ export class ObjectFormatter implements TypeFormatter {
         context,
         propTypeNode,
       );
-      if (isRecord(generated)) {
+      if (isObjectOrArray(generated)) {
         attachDeprecatedStreamMark(
           generated as Record<string, unknown>,
           prop,
@@ -338,24 +378,13 @@ export class ObjectFormatter implements TypeFormatter {
         );
       }
       // Attach property description from JSDoc (if any)
-      const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
-      if (text && isRecord(generated)) {
-        const conflicts = all.filter((s) => s && s !== text);
-        (generated as Record<string, unknown>).description = text;
-        attachDocTags(generated as Record<string, unknown>, text);
-        if (conflicts.length > 0) {
-          const comment = typeof generated.$comment === "string"
-            ? (generated.$comment as string)
-            : undefined;
-          (generated as Record<string, unknown>).$comment = comment
-            ? comment
-            : "Conflicting docs across declarations; using first";
-          // Warning only
-          logger.warn(
-            "schema-gen",
-            () => `JSDoc conflict for property '${propName}'; using first doc`,
-          );
-        }
+      if (isObjectOrArray(generated)) {
+        attachPropertyDoc(
+          generated as Record<string, unknown>,
+          prop,
+          propName,
+          checker,
+        );
       }
       if (propName === "$UI") {
         const uiContract = getUiContractHint(context, propTypeNode);
@@ -398,7 +427,7 @@ export class ObjectFormatter implements TypeFormatter {
           }
         }
       }
-      if (foundDocs.length > 0 && isRecord(apSchema)) {
+      if (foundDocs.length > 0 && isObjectOrArray(apSchema)) {
         (apSchema as Record<string, unknown>).description = foundDocs[0]!;
         attachDocTags(apSchema as Record<string, unknown>, foundDocs[0]!);
         if (foundDocs.length > 1) {

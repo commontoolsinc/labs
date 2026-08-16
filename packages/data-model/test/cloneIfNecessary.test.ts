@@ -1,3 +1,23 @@
+/**
+ * Cloning to a requested frozenness, and which option combinations mean
+ * anything together.
+ *
+ * Two of them are errors rather than choices, having no coherent answer to
+ * give: forcing a copy of a value that will be immutable anyway, and
+ * shallow-thawing a tree whose frozenness is mixed. Refusing those is what
+ * keeps each remaining combination meaning exactly one thing.
+ *
+ * The rest is what may be shared and what must be rebuilt. A value already in
+ * the requested state comes back as it is unless a copy was forced,
+ * inherently immutable values are never copied at all, and a null prototype is
+ * canonicalized rather than carried through, not being a shape the value type
+ * admits.
+ *
+ * Cycles are detected on the deep paths, and the subclass matrix asks the same
+ * questions of every concrete class rather than trusting one to stand in for
+ * the others.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -16,8 +36,8 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
 
 describe("cloneIfNecessary()", () => {
@@ -396,9 +416,9 @@ describe("cloneIfNecessary()", () => {
 
   describe(`indirect \`Array\` instances`, () => {
     // An `Array` subclass is not a `FabricValue`, so the deep-frozen identity
-    // optimization must not answer for one: returning it as-is would carry a
+    // optimization must not apply to one: returning it as-is would carry a
     // live prototype into stored state, where an overridden `Symbol.iterator`
-    // answers content that the indices never show.
+    // yields content that the indices never show.
     class Smuggler extends Array<unknown> {
       override *[Symbol.iterator](): Generator<unknown> {
         yield "smuggled";

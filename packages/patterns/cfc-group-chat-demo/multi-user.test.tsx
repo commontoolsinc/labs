@@ -13,10 +13,11 @@
  */
 import {
   action,
-  computed,
+  assert,
   type Default,
   multiUserTest,
   pattern,
+  TESTS,
   type Writable,
 } from "commonfabric";
 import {
@@ -75,22 +76,20 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     chat.setMessageDraft.send("Hello from Alice");
   });
 
-  const assert_named_alice = computed(() =>
-    chat.currentProfileName === "Alice"
-  );
-  const assert_sees_both_profiles = computed(() =>
+  const assert_named_alice = assert(() => chat.currentProfileName === "Alice");
+  const assert_sees_both_profiles = assert(() =>
     profileNames(chat).join(",") === "Alice,Bob"
   );
-  const assert_sees_bobs_message = computed(() =>
+  const assert_sees_bobs_message = assert(() =>
     messageBodies(chat).includes("Hi from Bob")
   );
-  const assert_sees_bobs_lockdown_message = computed(() =>
+  const assert_sees_bobs_lockdown_message = assert(() =>
     messageBodies(chat).includes("Bob posts after lockdown")
   );
-  const assert_is_admin = computed(() => chat.currentUserIsAdmin === true);
+  const assert_is_admin = assert(() => chat.currentUserIsAdmin === true);
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_set_name },
       { action: chat.saveProfile, trustedUi: profileGesture },
       { assertion: assert_named_alice },
@@ -134,21 +133,21 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
 
   // PerUser draft: Alice's typing must never show up in Bob's runtime.
   const profileDraft: Writable<string | Default<"">> = chat.profileDraft;
-  const assert_draft_empty = computed(() => (profileDraft.get() ?? "") === "");
-  const assert_unnamed = computed(() =>
+  const assert_draft_empty = assert(() => (profileDraft.get() ?? "") === "");
+  const assert_unnamed = assert(() =>
     chat.currentProfileName === "Name not set"
   );
-  const assert_named_bob = computed(() => chat.currentProfileName === "Bob");
-  const assert_sees_alice_profile = computed(() =>
+  const assert_named_bob = assert(() => chat.currentProfileName === "Bob");
+  const assert_sees_alice_profile = assert(() =>
     profileNames(chat).includes("Alice")
   );
-  const assert_sees_alices_message = computed(() =>
+  const assert_sees_alices_message = assert(() =>
     messageBodies(chat).includes("Hello from Alice")
   );
-  const assert_not_admin = computed(() => chat.currentUserIsAdmin === false);
+  const assert_not_admin = assert(() => chat.currentUserIsAdmin === false);
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "alice-saved" },
       { assertion: assert_draft_empty },
       { assertion: assert_unnamed },

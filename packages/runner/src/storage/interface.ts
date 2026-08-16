@@ -1,26 +1,8 @@
-import type { Immutable } from "@commonfabric/utils/types";
 import type {
   CellScope,
   FabricValue,
   SchemaPathSelector,
 } from "@commonfabric/api";
-import type {
-  CommitPrecondition,
-  EntityDocument,
-  EntityIdListOptions,
-  EntityIdListResult,
-  PatchOp,
-  SchedulerActionSnapshotQuery,
-  SchedulerExecutionContextKey,
-  SchedulerSnapshotListResult,
-  SqliteDbRef,
-  SqliteOperation,
-  SqliteParamsWire,
-  SqliteQueryResult,
-  SqliteRegisterDiskSourceResult,
-} from "@commonfabric/memory/v2";
-import type { EntityId } from "../create-ref.ts";
-import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
@@ -37,7 +19,24 @@ import {
   type URI,
   type Variant,
 } from "@commonfabric/memory/interface";
+import type {
+  CommitPrecondition,
+  EntityDocument,
+  EntityIdListOptions,
+  EntityIdListResult,
+  PatchOp,
+  SchedulerActionSnapshotQuery,
+  SchedulerExecutionContextKey,
+  SchedulerSnapshotListResult,
+  SqliteDbRef,
+  SqliteOperation,
+  SqliteParamsWire,
+  SqliteQueryResult,
+  SqliteRegisterDiskSourceResult,
+} from "@commonfabric/memory/v2";
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
+import type { Immutable } from "@commonfabric/utils/types";
+
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
@@ -60,7 +59,9 @@ import type {
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
+import type { EntityId } from "../create-ref.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
 
 export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
 export type ChangeGroup = unknown;
@@ -165,6 +166,20 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+
+  /**
+   * Issue an ordered-after round trip on every open space connection, so that
+   * any subscription fan-out the server has already sent has been received and
+   * applied before this resolves. Unlike `synced()`, which waits only on this
+   * replica's own pending syncs and commits, this waits on the delivery of a
+   * peer's committed writes that the server has begun fanning out. A WebSocket
+   * delivers a connection's frames in order, so a fresh round trip on that
+   * connection cannot resolve ahead of fan-out the server sent earlier on it.
+   * Multi-runtime test harnesses use it to make one runtime observe another's
+   * committed state deterministically; a manager with no open remote
+   * connection resolves immediately.
+   */
+  pullOpenSpacesToHead(): Promise<void>;
 
   /**
    * A throwable `AuthorizationError` when `space` is under a permanent
@@ -1203,6 +1218,56 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   getNarrowestReadScope(): CellScope;
   resetNarrowestReadScope(scope?: CellScope): void;
+
+  /**
+   * Turn lazy materialization on (or off) for this transaction.
+   *
+   * A marked transaction hands a reader views that resolve each path as it is
+   * touched, rather than a value built in one pass before the reader looks at
+   * any of it. A view also keeps the transaction it was created with, so the
+   * value it describes stays the value that was there when it was taken, and
+   * reading after the transaction finishes throws rather than quietly
+   * reading from committed state.
+   *
+   * Unmarked, every read behaves exactly as it did before lazy materialization
+   * existed — including the standing-handle semantics that long-lived
+   * consumers rely on, where a query-result proxy keeps tracking current state
+   * after the transaction it was made against has finished.
+   */
+  markLazyMaterialize(enabled?: boolean): void;
+  isLazyMaterialize(): boolean;
+
+  /**
+   * Whether this transaction has written anything yet.
+   *
+   * Lazy materialization reads it to decide whether a view can still describe
+   * one instant: a view resolves each path when it is touched, so once the
+   * transaction has written, a view taken earlier would report the new value
+   * where an eager read hands back a detached one taken before the write.
+   */
+  hasWrites(): boolean;
+
+  /**
+   * Record that a reader touched data its schema does not describe.
+   *
+   * Recorded on the transaction rather than left to the throw alone, because a
+   * reader can catch a `SchemaMismatchError` and carry on. Whoever dispatched
+   * the read checks `takeSchemaRefusal()` after the body returns and disposes
+   * of the run the same way either way.
+   */
+  noteSchemaRefusal(refusal: unknown): void;
+  takeSchemaRefusal(): unknown;
+
+  /**
+   * Withdraw a refusal that never reached the reader.
+   *
+   * A view refuses at the property it is reading and decides at the property
+   * above whether that refusal escapes: one the schema does not require reads
+   * as `undefined` instead, which is what an eager read leaves behind. The
+   * record has to go with the throw it belonged to. Clears only if this exact
+   * refusal is the one held.
+   */
+  clearSchemaRefusal(refusal: unknown): void;
 
   //
   // CFC recording / ownership-transfer API

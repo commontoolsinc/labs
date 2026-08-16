@@ -1,9 +1,11 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { defer } from "@commonfabric/utils/defer";
-import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import type { CellHandle } from "@commonfabric/runtime-client";
+import { defer } from "@commonfabric/utils/defer";
+
 import { providePieceBoundary } from "../../../../../html/src/main/space-context.ts";
+import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import {
   CFRender,
   hasVariantValue,

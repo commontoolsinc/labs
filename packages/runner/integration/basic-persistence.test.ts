@@ -1,10 +1,9 @@
 #!/usr/bin/env -S deno run -A
 
-import { deepEqual, Runtime } from "@commonfabric/runner";
 import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type JSONSchema } from "@commonfabric/runner";
 import { env } from "@commonfabric/integration";
+import { deepEqual, type JSONSchema, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 const { API_URL } = env;
 
 // Create test identity
@@ -14,8 +13,6 @@ const keyConfig: IdentityCreateConfig = {
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Simple object persistence ===");
-
-const TIMEOUT_MS = 180000; // 3 minutes timeout
 
 async function test() {
   // First runtime - save data
@@ -86,20 +83,7 @@ async function runTest() {
 
 Deno.test({
   name: "basic persistence test",
-  fn: async () => {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([runTest(), timeoutPromise]);
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-  },
+  fn: runTest,
   sanitizeResources: false,
   sanitizeOps: false,
 });

@@ -4,7 +4,7 @@
  * Test patterns (.test.tsx) are patterns that:
  * 1. Import and instantiate the pattern under test
  * 2. Define test steps as an array of { assertion } or { action } objects
- * 3. Return { tests: TestStep[] }
+ * 3. Return { [TESTS]: TestStep[] } under the reserved `[TESTS]` output key
  *
  * TestStep is a discriminated union:
  * - { assertion: Reactive<boolean> } from computed(() => condition)
@@ -14,7 +14,7 @@
  * that occur when mixing Cell and Stream types in the same array.
  *
  * Example:
- * tests: [
+ * [TESTS]: [
  *   { assertion: computed(() => game.phase === "playing") },
  *   { action: action(() => game.start.send(undefined)) },
  *   { assertion: computed(() => game.phase === "started") },
@@ -25,7 +25,12 @@
  * use the --root option to specify a common ancestor directory.
  */
 
+import { basename } from "@std/path";
+
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
@@ -36,6 +41,7 @@ import {
   Runtime,
   type RuntimeOptions,
   runtimePresets,
+  TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
 import type {
@@ -48,32 +54,6 @@ import type {
   Stream,
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
-import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
-import type { AssertRecord, Reactive } from "@commonfabric/api";
-import { asAssertRecord, formatAssertRecord } from "./assert-record.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { basename } from "@std/path";
-import { timeout } from "@commonfabric/utils/sleep";
-import {
-  appendLoggerDeltaMessages,
-  snapshotLoggerErrorWarnCounts,
-} from "./console-capture.ts";
-import {
-  buildActionEvent,
-  type TrustedUiDescriptor,
-} from "./trusted-test-event.ts";
-import {
-  multiUserDescriptorMeta,
-  runMultiUserTestPattern,
-} from "./multi-user-test-runner.ts";
-import {
-  type FetchMockEntry,
-  makeMockFetch,
-  readFetchMocks,
-} from "./fetch-mock.ts";
-import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import {
   type CDFPoint,
   getLogger,
@@ -84,6 +64,25 @@ import {
   resetAllTimingBaselines,
   resetAllTimingStats,
 } from "@commonfabric/utils/logger";
+import { timeout } from "@commonfabric/utils/sleep";
+
+import { assertionOutcome } from "./assert-record.ts";
+import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
+import {
+  appendLoggerDeltaMessages,
+  snapshotLoggerErrorWarnCounts,
+} from "./console-capture.ts";
+import {
+  type FetchMockEntry,
+  makeMockFetch,
+  readFetchMocks,
+} from "./fetch-mock.ts";
+import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
+import {
+  multiUserDescriptorMeta,
+  runMultiUserTestPattern,
+} from "./multi-user-test-runner.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 
 const phaseLogger = getLogger("test-runner-phase", {
   enabled: false,
@@ -134,34 +133,11 @@ function indentLines(text: string, indent: string): string {
 }
 
 /**
- * A test step is an object with an 'assertion', 'action', 'render', or 'settle'
- * property.
- * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
- * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
- *
- * Action steps may carry an `event` payload (sent instead of `undefined`) and
- * a `trustedUi` descriptor. With `trustedUi`, the runner sends the event with
- * renderer-trusted DOM provenance for that surface/action — the headless
- * equivalent of the user clicking the trusted surface — which CFC
- * `TrustedActionWrite` policies require under enforcement.
- *
- * A `{ settle: true }` step waits for FULL settlement (the scheduler, storage,
- * and every in-flight async builtin operation — a `db.query` RPC + writeback, a
- * fetch / llm call) via `runtime.settled()`. The light per-action settle returns
- * before that I/O lands, so insert `{ settle: true }` before an assertion that
- * reads an async-builtin result to keep the read deterministic under load.
+ * The loose shape the runner reads a step cell as, to classify it by which
+ * field is present. The authored `TestStep` union (in the api) is already
+ * type-checked at the pattern's return; here the fields arrive from storage as
+ * `unknown`, so this is deliberately permissive.
  */
-export type TestStep =
-  | { assertion: Reactive<boolean> | Reactive<AssertRecord>; skip?: boolean }
-  | {
-    action: Stream<unknown>;
-    event?: unknown;
-    trustedUi?: TrustedUiDescriptor;
-    skip?: boolean;
-  }
-  | { render: unknown; skip?: boolean }
-  | { settle: true; skip?: boolean };
-
 type HarnessTestStepMeta = {
   action?: unknown;
   assertion?: unknown;
@@ -1228,10 +1204,10 @@ export async function runTestPattern(
       await runtime.idle();
     });
 
-    // 4. Get the tests array from pattern output
+    // 4. Get the tests array from pattern output (the reserved [TESTS] key)
     const testsCell = await withPhase(
       ["runTestPattern", "testsCell"],
-      () => patternResult.key("tests") as Cell<unknown>,
+      () => patternResult.key(TESTS) as Cell<unknown>,
     );
     const testSteps = await withPhase(
       ["runTestPattern", "testsValue"],
@@ -1241,7 +1217,7 @@ export async function runTestPattern(
     // Validate it's an array
     if (!Array.isArray(testSteps)) {
       throw new Error(
-        "Test pattern must return { tests: TestStep[] }. Got: " +
+        "Test pattern must return { [TESTS]: TestStep[] }. Got: " +
           toCompactDebugString(typeof testSteps),
       );
     }
@@ -1664,21 +1640,9 @@ export async function runTestPattern(
           try {
             const assertCell = stepCell.key("assertion") as Cell<unknown>;
             const value = await assertCell.pull();
-            if (value === true) {
-              return { passed: true };
-            }
-            // An `assert(...)` assertion carries the operands recorded by the
-            // evaluation that produced this value, so report them.
-            const record = asAssertRecord(value);
-            if (record) {
-              return record.ok
-                ? { passed: true }
-                : { passed: false, error: formatAssertRecord(record) };
-            }
-            return {
-              passed: false,
-              error: `Expected true, got ${toCompactDebugString(value)}`,
-            };
+            // An `assert(...)` assertion carries the operands recorded while
+            // the condition ran, so a failure names them and their values.
+            return assertionOutcome(value);
           } catch (err) {
             return {
               passed: false,

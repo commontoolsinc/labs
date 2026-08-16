@@ -192,7 +192,7 @@ describe("pattern update validates the stored argument", () => {
     // The refusal must be CLASSIFIABLE, not just readable. A boot repair keys
     // its recovery on this: re-running the same identity refuses identically,
     // so `PiecesController` escalates to the roll-forward backstop instead of
-    // retrying, and a failure it cannot classify is discarded in favour of the
+    // retrying, and a failure it cannot classify is discarded in favor of the
     // original start error. Assert against the error the runner ACTUALLY threw
     // rather than a hand-written string, so the thrower and the classifier
     // cannot drift apart.
@@ -225,7 +225,7 @@ describe("pattern update validates the stored argument", () => {
     expect(
       getPatternIdentityRef(cell as Cell<unknown>)?.identity,
       "a refused roll-forward rolled the pointer back. That is a deliberate " +
-        "behaviour change, not a cleanup: the repair reaches this path BECAUSE " +
+        "behavior change, not a cleanup: the repair reaches this path BECAUSE " +
         "the previously pinned pattern could not be set up either",
     ).toBe(rejectedIdentity);
     expect(

@@ -12,10 +12,11 @@
  * bundles.
  */
 
+import { Identity } from "@commonfabric/identity";
+
 import { encodeMemoryBoundary } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
-import { Identity } from "@commonfabric/identity";
 
 const standaloneMemoryAudience = (await Identity.fromPassphrase(
   "common tools standalone memory audience",
@@ -97,6 +98,18 @@ export class StandaloneMemoryServer {
       return response;
     });
     return new StandaloneMemoryServer(memory, http);
+  }
+
+  /**
+   * Drain the underlying memory server: apply every received commit, run
+   * post-commit scheduler bookkeeping, and flush all pending subscription
+   * fan-out so every frame the server owes its subscribers has been sent.
+   * A passthrough to `MemoryServer.Server.idle()`; multi-runtime test harnesses
+   * call it as the deterministic "the server has published everything" barrier
+   * in place of a fixed delay.
+   */
+  async idle(): Promise<void> {
+    await this.#memory.idle();
   }
 
   async close(): Promise<void> {

@@ -1,7 +1,13 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import {
+  entityRefToString,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { createSession, Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   type Cell,
   getPatternIdentityRef,
@@ -17,20 +23,16 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import {
-  entityRefToString,
-  linkRefPayload,
-} from "@commonfabric/data-model/cell-rep";
-import { defer } from "@commonfabric/utils/defer";
+  validateAgainstSchema,
+  validateSchemaValue,
+} from "@commonfabric/runner/cfc";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import {
-  validateAgainstSchema,
-  validateSchemaValue,
-} from "@commonfabric/runner/cfc";
+import { defer } from "@commonfabric/utils/defer";
+
 import {
   assertSuppliedLinkSchemasCompatible,
   assertWritablePiecePath,

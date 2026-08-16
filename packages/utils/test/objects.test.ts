@@ -1,3 +1,14 @@
+/**
+ * What `isInertPlainObject()` accepts, and the accepting cases are the
+ * surprising ones. A frozen object qualifies, and so does a key whose value is
+ * `undefined` and one whose name is index-shaped -- none of those disturbs the
+ * property that the predicate is actually about.
+ *
+ * Inertness is about how the properties are defined rather than what they
+ * hold, which is the distinction a caller has to get right before trusting the
+ * answer to bound anything.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
@@ -206,7 +217,7 @@ describe("objects", () => {
 
     it("returns `false` for a `Proxy` that disowns a key it reported", () => {
       // A proxy whose `ownKeys()` names a key its `getOwnPropertyDescriptor()`
-      // then answers `undefined` for. Inertness cannot be established, so the
+      // then returns `undefined` for. Inertness cannot be established, so the
       // answer is `false`; only a trap that throws on its own account takes
       // this check off its "answers rather than throws" contract.
       const ghosted = new Proxy({ a: 1 }, {

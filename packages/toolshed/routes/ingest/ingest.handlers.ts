@@ -1,12 +1,16 @@
-// The `journal`-sink ingest handler — a thin transport wrapper. It pulls the
-// bearer token and JSON body off the request, then delegates to processIngest
-// (ingest.utils.ts), whose full auth + validation contract is unit-tested
-// against a real runtime. Auth mirrors the webhook ingest path.
-//
-// Iteration 1: ingest only. There is no self-serve create/list/delete endpoint,
-// so the confused-deputy risk of an unauthed create (registering a channel that
-// targets someone else's space) does not exist here — channels are provisioned
-// out-of-band by an operator. See the design proposal.
+/**
+ * The `journal`-sink ingest handler — a thin transport wrapper. It pulls the
+ * bearer token and JSON body off the request, then delegates to processIngest
+ * (ingest.utils.ts), whose full auth + validation contract is unit-tested
+ * against a real runtime. Auth mirrors the webhook ingest path.
+ *
+ * This is the DATA plane only. Channel lifecycle lives at /api/ingest-channels
+ * (a separate prefix, separate auth model), where the confused-deputy risk of a
+ * create that names someone else's space is closed by requiring an explicit
+ * OWNER grant on that space's ACL. See
+ * docs/features/self-serve-ingest-channels.md.
+ */
+
 import type { AppRouteHandler } from "@/lib/types.ts";
 import { runtime } from "@/index.ts";
 import { identity } from "@/lib/identity.ts";

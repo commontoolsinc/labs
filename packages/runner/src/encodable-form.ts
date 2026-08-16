@@ -1,12 +1,14 @@
 /**
- * The `toEncodableForm` protocol: whether a value has one, what it yields, and
- * the walk that replaces every artifact in a tree with the result.
+ * The encodable form of a value -- what it becomes on the way to storage --
+ * asked for three ways: whether a value has one, what a single value's is, and
+ * a walk that replaces every artifact inside a larger value with its own.
  *
- * The encodable form is what a value becomes on the way to being encoded, and
- * it reaches storage without ever being stringified — which is the property
- * that makes this a protocol rather than a serializer. `replaceArtifacts()`
- * takes hooks, so a caller that needs to know where each replacement came from
- * can be told, since nothing in the replaced value records it.
+ * The walk is the part whose contract is worth stating up front. It rebuilds
+ * only what it must, so a subtree holding no artifact comes back by identity,
+ * and it reports what it rebuilt rather than leaving a caller to work that out
+ * by comparison. What it will not do is decide anything on a value's behalf: a
+ * value that already knows how to represent itself is left alone, and a cycle
+ * is left for the encoder to reject rather than being broken here.
  */
 
 import { isPlainObject } from "@commonfabric/utils/types";
@@ -413,7 +415,7 @@ function ownEncodableFormMethod(
   const method = (value as { toEncodableForm: unknown }).toEncodableForm;
 
   // The `typeof` gate is what settles a value carrying a user-data key of the
-  // name -- a query-result proxy answers `Object.hasOwn()` for any key its
+  // name -- a query-result proxy satisfies `Object.hasOwn()` for any key its
   // record holds -- since a fabric record has no function-valued member to
   // find.
   return typeof method === "function" ? method as () => unknown : undefined;

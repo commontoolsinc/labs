@@ -8,15 +8,16 @@ import {
 } from "@commonfabric/utils/bigint";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import {
-  type FabricCodec,
+  JSON_CODEC,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+  type TerminalCodec,
+} from "@/codec-interface/interface.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch
@@ -50,22 +51,22 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   // Static members
   //
 
-  static #codec = Object.freeze(
-    new (class EpochNsecCodec extends BaseFabricCodec {
+  static #jsonCodec = Object.freeze(
+    new (class EpochNsecCodec extends BaseTerminalCodec<JsonCodecValue> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.EpochNsec, FabricEpochNsec);
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochNsec): FabricValue {
+      encode(value: FabricEpochNsec): JsonCodecValue {
         return bigintToUnpaddedBase64url(value.#value);
       }
 
       /** @inheritDoc */
       decode(
         typeTag: string,
-        state: FabricValue,
+        state: JsonCodecValue,
         _context: ReconstructionContext,
       ): FabricValue {
         if (typeof state !== "string") {
@@ -89,8 +90,8 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   );
 
   /** The codec for instances of this class. */
-  static get [JSON_CODEC](): FabricCodec {
-    return this.#codec;
+  static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
+    return this.#jsonCodec;
   }
 }
 

@@ -1,8 +1,5 @@
-import { css, html, PropertyValues } from "lit";
-import { createRef, type Ref, ref } from "lit/directives/ref.js";
-import { state } from "lit/decorators.js";
-import { BaseElement } from "../../core/base-element.ts";
 import { getPieceBoundary, render } from "@commonfabric/html/client";
+import type { DID } from "@commonfabric/identity";
 import {
   type CellHandle,
   CHIP_UI,
@@ -11,10 +8,16 @@ import {
   type VNode,
 } from "@commonfabric/runtime-client";
 import { navigate, openInNewTab } from "@commonfabric/shell/shared";
-import type { DID } from "@commonfabric/identity";
+import { css, html, PropertyValues } from "lit";
+import { state } from "lit/decorators.js";
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+
+import { BaseElement } from "../../core/base-element.ts";
+
 import "../cf-loader/index.ts";
 import "../cf-cell-link/index.ts";
 import "../cf-piece-menu/index.ts";
+
 import {
   closePieceMenuFor,
   openPieceMenu,

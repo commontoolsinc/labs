@@ -1,3 +1,7 @@
+import { defer } from "@commonfabric/utils/defer";
+
+import { resolveLink } from "../src/link-resolution.ts";
+import { parseLink } from "../src/link-utils.ts";
 // The durable `schema` metadata a settled handler dispatch records on its
 // receipt cell alongside the value (`handleJavaScriptHandlerResult`,
 // `src/runner.ts`). It is descriptive — the root container kind, plus the
@@ -23,9 +27,6 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { defer } from "@commonfabric/utils/defer";
-import { parseLink } from "../src/link-utils.ts";
-import { resolveLink } from "../src/link-resolution.ts";
 
 // The session a caller-supplied id is chosen within, for the sends whose
 // subject is something else: the pair is what a stream send accepts, and one

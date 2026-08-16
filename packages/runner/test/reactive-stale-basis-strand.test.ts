@@ -3,12 +3,12 @@
 // (StorageTransactionInconsistent) must converge, not exhaust a bounded retry
 // budget and strand at its stale value.
 //
-// This is the reactive-path analogue of the event-handler residual closed in
+// This is the reactive-path analog of the event-handler residual closed in
 // mergeable-append-multispace-conflict.test.ts. StorageTransactionInconsistent
 // is a stale-basis rejection: a value the transaction read changed on this
 // replica between the read and the commit, which re-running against the settled
 // replica resolves (see packages/runner/src/storage/rejection.ts). A conflict —
-// the upstream stale-read analogue — has always been retried off the reactive
+// the upstream stale-read analog — has always been retried off the reactive
 // budget (a WAIT for catch-up, not a failure). The local same-replica race was
 // not: it fell into the bounded MAX_RETRIES_FOR_REACTIVE path alongside genuinely
 // terminal transport/malformed errors, so a burst longer than the budget left the

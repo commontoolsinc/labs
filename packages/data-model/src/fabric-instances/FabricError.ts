@@ -1,28 +1,43 @@
+/**
+ * `Error` as a fabric value: the wrapper class, and the shape it is built
+ * from.
+ *
+ * A native error is the wild west -- any property, any prototype -- while the
+ * fabric layer needs a value whose observable state is entirely typed. The
+ * useful parts therefore become fixed slots and everything else goes to an
+ * extras bag reached by map-like methods, with the slot names reserved so that
+ * an extra cannot shadow one. The native form is not retained at all; it is
+ * rebuilt on demand.
+ *
+ * Mutability follows the usual instance rule: writable until the instance is
+ * frozen, and every mutator refuses from then on.
+ */
+
 import type {
   FabricError as ApiFabricError,
   FabricErrorConstructor as ApiFabricErrorConstructor,
 } from "@commonfabric/api";
+import { isUnsafeObjectKey } from "@commonfabric/utils/types";
 
-import type { FabricValue } from "@/interface.ts";
+import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 import {
   DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
 import {
   CODEC,
-  type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+} from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
-import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
-import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
+import type { FabricValue } from "@/interface.ts";
 import { errorClassFromType } from "@/native-conversion.ts";
-import { isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 /**
  * Reserved key set for `FabricError`'s extras bag: these names belong to the
@@ -222,33 +237,9 @@ export class FabricError extends FabricNativeWrapper<Error>
     this.#cause = value;
   }
 
-  /**
-   * Shallow conversion from a native `Error`. Used by the shallow conversion
-   * layer (`shallowFabricFromNativeValueModern`). The error's `.cause` and
-   * custom properties are stored as-is (cast to `FabricValue`); the deep
-   * conversion path is responsible for converting them when needed.
-   */
-  static fromNativeError(error: Error): FabricError {
-    const type = error.constructor.name;
-    const name = error.name === type ? null : error.name;
-    const extras: Array<[string, FabricValue]> = [];
-    for (const key of Object.keys(error)) {
-      if (isUnsafeObjectKey(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
-        continue;
-      }
-      extras.push([
-        key,
-        (error as unknown as Record<string, FabricValue>)[key],
-      ]);
-    }
-    return new FabricError({
-      type,
-      name,
-      message: error.message,
-      stack: error.stack,
-      cause: error.cause as FabricValue | undefined,
-      extras,
-    });
+  /** Returns the number of entries in the extras bag. */
+  get extraSize(): number {
+    return this.#extras.size;
   }
 
   /** Returns the value associated with `key`, or `undefined`. */
@@ -288,11 +279,6 @@ export class FabricError extends FabricNativeWrapper<Error>
   deleteExtra(key: string): boolean {
     this.#assertNotFrozen();
     return this.#extras.delete(key);
-  }
-
-  /** Returns the number of entries in the extras bag. */
-  get extraSize(): number {
-    return this.#extras.size;
   }
 
   /** Returns the keys present in the extras bag. */
@@ -344,18 +330,6 @@ export class FabricError extends FabricNativeWrapper<Error>
     return true;
   }
 
-  /** @inheritDoc */
-  protected [SHALLOW_UNFROZEN_CLONE](): FabricError {
-    return new FabricError({
-      type: this.#type,
-      name: this.#name,
-      message: this.#message,
-      stack: this.#stack,
-      cause: this.#cause,
-      extras: this.#extras,
-    });
-  }
-
   /**
    * Returns the frozen native projection. Once this instance is frozen the
    * projection is cached (state can no longer change, so the cache is always
@@ -374,6 +348,18 @@ export class FabricError extends FabricNativeWrapper<Error>
   }
 
   /** @inheritDoc */
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricError {
+    return new FabricError({
+      type: this.#type,
+      name: this.#name,
+      message: this.#message,
+      stack: this.#stack,
+      cause: this.#cause,
+      extras: this.#extras,
+    });
+  }
+
+  /** @inheritDoc */
   protected toNativeFrozen(): Error {
     return this.wrappedValue;
   }
@@ -381,6 +367,31 @@ export class FabricError extends FabricNativeWrapper<Error>
   /** @inheritDoc */
   protected toNativeThawed(): Error {
     return this.#buildNativeError(false);
+  }
+
+  /**
+   * @inheritDoc
+   *
+   * Round-trips through the codec, matching the codec's `shouldDeepFreeze` to
+   * this clone's `frozen` intent (the `deepClone()` template owns the final
+   * top-level freeze).
+   *
+   * Known gap: `encode()` passes `cause` and the extras through by reference,
+   * so an unfrozen clone still _shares_ those nested values with the original,
+   * and is to that extent not deeply independent. Pinned by a test in
+   * `FabricError.test.ts`.
+   */
+  protected override [DEEP_CLONE_CORE](frozen: boolean): FabricError {
+    const codec = FabricError[CODEC];
+    const reconstructContext = new EmptyReconstructionContext(
+      frozen,
+      "no runtime context (FabricError deep-clone path).",
+    );
+    return codec.decode(
+      CODEC_TYPE_TAGS.Error,
+      codec.encode(this),
+      reconstructContext,
+    ) as FabricError;
   }
 
   /**
@@ -411,33 +422,12 @@ export class FabricError extends FabricNativeWrapper<Error>
     }
   }
 
-  /**
-   * @inheritDoc
-   *
-   * Round-trips through the codec, matching the codec's `shouldDeepFreeze` to
-   * this clone's `frozen` intent (the `deepClone()` template owns the final
-   * top-level freeze).
-   *
-   * Known gap: `encode()` passes `cause` and the extras through by reference,
-   * so an unfrozen clone still _shares_ those nested values with the original,
-   * and is to that extent not deeply independent. Pinned by a test in
-   * `FabricError.test.ts`.
-   */
-  protected override [DEEP_CLONE_CORE](frozen: boolean): FabricError {
-    const codec = FabricError[CODEC];
-    const reconstructContext = new EmptyReconstructionContext(
-      frozen,
-      "no runtime context (FabricError deep-clone path).",
-    );
-    return codec.decode(
-      CODEC_TYPE_TAGS.Error,
-      codec.encode(this),
-      reconstructContext,
-    ) as FabricError;
-  }
+  //
+  // Static members
+  //
 
   static #codec = Object.freeze(
-    new (class FabricErrorCodec extends BaseFabricCodec {
+    new (class FabricErrorCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Error, FabricError);
@@ -500,8 +490,37 @@ export class FabricError extends FabricNativeWrapper<Error>
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
+  }
+
+  /**
+   * Shallow conversion from a native `Error`. Used by the shallow conversion
+   * layer (`shallowFabricFromNativeValueModern`). The error's `.cause` and
+   * custom properties are stored as-is (cast to `FabricValue`); the deep
+   * conversion path is responsible for converting them when needed.
+   */
+  static fromNativeError(error: Error): FabricError {
+    const type = error.constructor.name;
+    const name = error.name === type ? null : error.name;
+    const extras: Array<[string, FabricValue]> = [];
+    for (const key of Object.keys(error)) {
+      if (isUnsafeObjectKey(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
+        continue;
+      }
+      extras.push([
+        key,
+        (error as unknown as Record<string, FabricValue>)[key],
+      ]);
+    }
+    return new FabricError({
+      type,
+      name,
+      message: error.message,
+      stack: error.stack,
+      cause: error.cause as FabricValue | undefined,
+      extras,
+    });
   }
 }
 

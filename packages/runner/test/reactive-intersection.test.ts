@@ -16,6 +16,7 @@
  * NOTE: This is a type-level test. The assertions at runtime are trivial;
  * the real test is that this file compiles successfully.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { OpaqueCell, Reactive } from "@commonfabric/api";

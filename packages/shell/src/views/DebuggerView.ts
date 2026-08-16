@@ -1,14 +1,17 @@
-import { css, html, LitElement, TemplateResult } from "lit";
-import { property, state } from "lit/decorators.js";
-import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
 import type {
   LoggerMetadata,
   RuntimeTelemetryMarkerResult,
   TimingStats,
 } from "@commonfabric/runtime-client";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import { css, html, LitElement, TemplateResult } from "lit";
+import { property, state } from "lit/decorators.js";
+
 import type { DebuggerController } from "../lib/debugger-controller.ts";
-import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component
+import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
+
+import "./SchedulerGraphView.ts";
+
 import type { Logger, LoggerBreakdown } from "@commonfabric/utils/logger";
 
 /**
@@ -1127,9 +1130,9 @@ export class XDebuggerView extends LitElement {
       const handlerId = typeof eventData.handlerId === "string"
         ? eventData.handlerId
         : undefined;
-      const info = isRecord(eventData.actionInfo)
+      const info = isObjectOrArray(eventData.actionInfo)
         ? eventData.actionInfo
-        : isRecord(eventData.handlerInfo)
+        : isObjectOrArray(eventData.handlerInfo)
         ? eventData.handlerInfo
         : undefined;
 
@@ -1193,8 +1196,8 @@ export class XDebuggerView extends LitElement {
       }
     } else if (type === "cell.update") {
       const change = (rest as Record<string, unknown>).change;
-      if (isRecord(change)) {
-        if (isRecord(change.address)) {
+      if (isObjectOrArray(change)) {
+        if (isObjectOrArray(change.address)) {
           if (change.address?.id) {
             details.push(html`
               <div class="event-detail">

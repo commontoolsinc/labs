@@ -1,11 +1,12 @@
 /**
- * The Markdown language for the pager. Colouring and structure live in {@link
+ * The Markdown language for the pager. Coloring and structure live in {@link
  * ./markdown.ts}; this module adapts them to the {@link Language} contract.
  *
  * Markdown has no semantic layer (no `createSemantics`/`createDiffSemantics`),
  * and its diff-hunk navigation is heading-based rather than the generic node
  * remap, so {@link hunkStructure} routes to {@link markdownHeadingNodes}.
  */
+
 import type { StructureNode } from "../../model.ts";
 import type { HunkStructureContext, Language } from "../language.ts";
 import { utf8Decoder } from "../decoder.ts";

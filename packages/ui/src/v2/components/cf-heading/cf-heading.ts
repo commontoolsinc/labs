@@ -1,7 +1,8 @@
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { consume } from "@lit/context";
 import {
   applyThemeToElement,
   type CFTheme,

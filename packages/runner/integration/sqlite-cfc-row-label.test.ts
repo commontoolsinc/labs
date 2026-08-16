@@ -10,13 +10,13 @@
  * rule-bearing table fails closed, and a declared output ceiling with
  * onExceed:"skip" returns exactly the fitting rows.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
+
+import app from "../../toolshed/app.ts";
+import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 import { Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
-
-const TIMEOUT_MS = 180000;
 
 async function runTest(base: URL) {
   const account = await Identity.fromPassphrase(
@@ -265,17 +265,9 @@ Deno.test({
   fn: async () => {
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`)),
-        TIMEOUT_MS,
-      );
-    });
     try {
-      await Promise.race([runTest(base), timeoutPromise]);
+      await runTest(base);
     } finally {
-      clearTimeout(timeoutHandle!);
       await server.shutdown();
     }
   },

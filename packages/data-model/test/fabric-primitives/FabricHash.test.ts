@@ -1,11 +1,24 @@
-import { JSON_CODEC } from "@/interface.ts";
-import { describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
+/**
+ * A hash as a fabric primitive: bytes, plus the tag naming the algorithm that
+ * produced them.
+ *
+ * The tag is part of the value rather than decoration on it, which is why the
+ * string form carries it, why parsing rejects a string with no tag or with
+ * more than one separator, and why a tag other than the usual one has to
+ * survive a round trip rather than being normalized away.
+ *
+ * It hands out copies rather than views, and takes ownership of its input only
+ * when a caller explicitly transfers it.
+ */
 
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);

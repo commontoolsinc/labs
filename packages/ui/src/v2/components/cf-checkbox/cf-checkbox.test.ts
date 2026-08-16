@@ -1,6 +1,7 @@
 /**
  * Tests for CFCheckbox component
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { CFCheckbox } from "./index.ts";

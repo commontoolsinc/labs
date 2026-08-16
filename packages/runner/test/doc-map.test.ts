@@ -1,17 +1,19 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createRef, entityIdFrom, getEntityId } from "../src/create-ref.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import {
   entityRefToString,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { Runtime } from "../src/runtime.ts";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { createRef, entityIdFrom, getEntityId } from "../src/create-ref.ts";
+import { Runtime } from "../src/runtime.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

@@ -33,6 +33,7 @@
  * types as plain `boolean` — syntax is the only honest signal. Conservative
  * and documented beats clever and silent.
  */
+
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import {

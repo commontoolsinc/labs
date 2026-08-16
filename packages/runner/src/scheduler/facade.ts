@@ -1,18 +1,21 @@
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { getLogger } from "@commonfabric/utils/logger";
-import type { Cancel } from "../cancel.ts";
+
 import { getTopFrame } from "../builder/pattern.ts";
+import type { Cancel } from "../cancel.ts";
 import { ConsoleEvent } from "../harness/console.ts";
+import {
+  areNormalizedLinksSame,
+  type NormalizedFullLink,
+} from "../link-utils.ts";
 import type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext,
   Runtime,
 } from "../runtime.ts";
-import {
-  areNormalizedLinksSame,
-  type NormalizedFullLink,
-} from "../link-utils.ts";
+import { getCommitLocalSeq } from "../storage/commit-identity.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -39,6 +42,25 @@ import {
   MAX_ACTION_STATS,
   MAX_SETTLE_STATS_HISTORY,
 } from "./constants.ts";
+import type { ExecuteContinuationState } from "./continuation.ts";
+import { applyPullExecuteContinuation } from "./continuation.ts";
+import {
+  type DependencyGraphState,
+  isLive,
+  notifyNodeLivenessChange,
+  registerDependentsForWriterSurface,
+  setNodeProvisionalDemand,
+  updateDependentEdgesForLog,
+} from "./dependency-graph.ts";
+import { type DependencyUpdateState } from "./dependency-updates.ts";
+import {
+  type DiagnosisRecord,
+  runSchedulerDiagnosis,
+  runSchedulerIdempotencyCheck,
+  type SchedulerDiagnosisControlState,
+  startSchedulerDiagnosis,
+  stopSchedulerDiagnosis,
+} from "./diagnosis.ts";
 import {
   getPieceMetadataFromFrame,
   getSchedulerActionId,
@@ -49,51 +71,20 @@ import {
   type SchedulerActionIdentityState,
 } from "./diagnostics.ts";
 import {
-  type DiagnosisRecord,
-  runSchedulerDiagnosis,
-  runSchedulerIdempotencyCheck,
-  type SchedulerDiagnosisControlState,
-  startSchedulerDiagnosis,
-  stopSchedulerDiagnosis,
-} from "./diagnosis.ts";
-import {
-  type DependencyGraphState,
-  isLive,
-  notifyNodeLivenessChange,
-  registerDependentsForWriterSurface,
-  setNodeProvisionalDemand,
-  updateDependentEdgesForLog,
-} from "./dependency-graph.ts";
-import { SchedulerMaterializers } from "./materializers.ts";
-import {
-  CELL_GROUP_PREFIX,
-  type DeliverFn,
-  holdShapedCell,
-  holdShapedEvent,
-  shaperInstanceGroupKey,
-  shouldShapeDelivery,
-  WakeShaper,
-} from "./wake-shaping.ts";
-import { type DependencyUpdateState } from "./dependency-updates.ts";
-import { SchedulerWriteIndex } from "./scheduling-writes.ts";
-import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
-import {
-  SchedulerTriggerIndex,
-  SchedulerTriggerSubscriptions,
-  type TriggerSubscriptionState,
-} from "./trigger-index.ts";
-import {
   collectInvalidUpstreamForLog as collectInvalidUpstreamForLogState,
   collectPendingLoadParkKeys as collectPendingLoadParkKeysState,
   type EventPreflightDependencyState,
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
 import {
-  runSchedulerAction,
-  type SchedulerActionRunState,
-  schedulerImplementationFingerprint,
-  schedulerRuntimeFingerprint,
-} from "./run.ts";
+  addSchedulerEventHandler,
+  dropQueuedEvent,
+  isHeadEventParked as isHeadEventParkedState,
+  processPullQueuedEventDuringExecute,
+  queueSchedulerEvent,
+  type SchedulerEventExecutionState,
+  type SchedulerEventQueueState,
+} from "./events.ts";
 import {
   buildPullInitialSeeds,
   createSettlingTracker,
@@ -105,59 +96,54 @@ import {
   type SchedulerSettleResult,
   type SettlingTracker,
 } from "./execution.ts";
-import { runPullSchedulerSettleLoop } from "./settle.ts";
+import { SchedulerGates } from "./gates.ts";
+import {
+  buildSchedulerGraphSnapshot,
+  type SchedulerGraphSnapshotState,
+} from "./graph-snapshot.ts";
+import {
+  markInvalid as markInvalidRecord,
+  processStorageNotification,
+  type StorageNotificationState,
+} from "./invalidation.ts";
+import { entityKey } from "./keys.ts";
+import { SpeculationLineage } from "./lineage.ts";
+import { SchedulerMaterializers } from "./materializers.ts";
+import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
 import {
   isSchedulerActionObservation,
   type PersistedSchedulerObservationSnapshot,
   type SchedulerActionObservation,
 } from "./persistent-observation.ts";
-import { collectPullIterationSeeds as collectPullIterationSeedsState } from "./settle.ts";
-import {
-  type DirtyPullRunnableState,
-  type DirtyPullRunnableStateWithDebounce,
-  hasIdleBlockingDeferredPullWork as hasIdleBlockingDeferredPullWorkState,
-  hasRunnablePullWork as hasRunnablePullWorkState,
-  type PendingPullRunnableState,
-  type PullSchedulingState,
-} from "./work-oracle.ts";
-import type { ExecuteContinuationState } from "./continuation.ts";
-import { applyPullExecuteContinuation } from "./continuation.ts";
-import { SchedulerGates } from "./gates.ts";
-import {
-  markInvalid as markInvalidRecord,
-  type StorageNotificationState,
-} from "./invalidation.ts";
-import { processStorageNotification } from "./invalidation.ts";
-import {
-  type SchedulerSubscribeActionState,
-  type SchedulerSubscriptionState,
-  type SchedulerUnsubscribeActionState,
-  unsubscribeSchedulerAction,
-} from "./registration.ts";
 import {
   resolveRegistrationSurface,
   resubscribePullSchedulerAction,
+  type SchedulerSubscribeActionState,
+  type SchedulerSubscriptionState,
+  type SchedulerUnsubscribeActionState,
   subscribePullSchedulerAction,
+  unsubscribeSchedulerAction,
 } from "./registration.ts";
+import {
+  runSchedulerAction,
+  type SchedulerActionRunState,
+  schedulerImplementationFingerprint,
+  schedulerRuntimeFingerprint,
+} from "./run.ts";
+import { SchedulerWriteIndex } from "./scheduling-writes.ts";
+import {
+  collectPullIterationSeeds as collectPullIterationSeedsState,
+  runPullSchedulerSettleLoop,
+} from "./settle.ts";
 import {
   type ActionTimingState,
   getActionStats as getActionStatsFromState,
 } from "./timing.ts";
-import { getCommitLocalSeq } from "../storage/commit-identity.ts";
 import {
-  addSchedulerEventHandler,
-  dropQueuedEvent,
-  isHeadEventParked as isHeadEventParkedState,
-  queueSchedulerEvent,
-  type SchedulerEventExecutionState,
-  type SchedulerEventQueueState,
-} from "./events.ts";
-import { SpeculationLineage } from "./lineage.ts";
-import { processPullQueuedEventDuringExecute } from "./events.ts";
-import {
-  buildSchedulerGraphSnapshot,
-  type SchedulerGraphSnapshotState,
-} from "./graph-snapshot.ts";
+  SchedulerTriggerIndex,
+  SchedulerTriggerSubscriptions,
+  type TriggerSubscriptionState,
+} from "./trigger-index.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -171,8 +157,23 @@ import type {
   TelemetryAnnotations,
   TriggerTraceEntry,
 } from "./types.ts";
-import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { entityKey } from "./keys.ts";
+import {
+  CELL_GROUP_PREFIX,
+  type DeliverFn,
+  holdShapedCell,
+  holdShapedEvent,
+  shaperInstanceGroupKey,
+  shouldShapeDelivery,
+  WakeShaper,
+} from "./wake-shaping.ts";
+import {
+  type DirtyPullRunnableState,
+  type DirtyPullRunnableStateWithDebounce,
+  hasIdleBlockingDeferredPullWork as hasIdleBlockingDeferredPullWorkState,
+  hasRunnablePullWork as hasRunnablePullWorkState,
+  type PendingPullRunnableState,
+  type PullSchedulingState,
+} from "./work-oracle.ts";
 
 ensureNotRenderThread();
 
@@ -1210,7 +1211,7 @@ export class Scheduler {
   // Client-facing quiescence: reactive quiescence AND durability of in-flight
   // commits. Commits are issued fire-and-forget (event handlers, direct cell
   // writes over IPC, reactive recomputation write-backs), so plain idle()
-  // reports quiescence while a commit is still travelling to the server; a
+  // reports quiescence while a commit is still traveling to the server; a
   // client that reads idle as a safe point to navigate or reload would then
   // drop that write when the page and its worker are torn down. The pending
   // set is sourced from the storage manager — the single chokepoint every

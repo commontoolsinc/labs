@@ -11,7 +11,7 @@ import { Database } from "@db/sqlite";
 import { ValidationError } from "@cliffy/command";
 import { Identity } from "@commonfabric/identity";
 import { defaultCacheDir } from "@commonfabric/state-inspector";
-import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { inspect } from "../commands/inspect.ts";
 
@@ -66,7 +66,7 @@ async function buildDbBytes(): Promise<Uint8Array> {
   db.prepare(
     `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
      VALUES ('of:a', 1, 0, 'set', ?, 1)`,
-  ).run(jsonFromValue({
+  ).run(jsonFromFabricValue({
     value: {
       n: 1,
       deep,
@@ -84,7 +84,7 @@ async function buildDbBytes(): Promise<Uint8Array> {
     `INSERT INTO revision
        (id, scope_key, seq, op_index, op, data, commit_seq)
      VALUES ('of:a', 'user:did%3Akey%3AzInspector', 1, 0, 'set', ?, 1)`,
-  ).run(jsonFromValue({
+  ).run(jsonFromFabricValue({
     value: {
       n: 2,
       deep,
@@ -107,7 +107,7 @@ async function buildDbBytes(): Promise<Uint8Array> {
   db.prepare(
     `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
      VALUES ('of:a', 2, 0, 'set', ?, 2)`,
-  ).run(jsonFromValue({
+  ).run(jsonFromFabricValue({
     value: {
       n: 1,
       deep,

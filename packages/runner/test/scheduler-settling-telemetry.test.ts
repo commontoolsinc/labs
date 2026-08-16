@@ -1,9 +1,12 @@
-// The scheduler's non-settling telemetry (facade recordExecuteEndTelemetry)
-// sits behind a wall-clock heuristic: it fires only when a busy window
-// crosses 5s. Integration runs cover it only when a CI machine happens to run
-// slow enough, which made the runner coverage gate flap. This test drives the
-// path deterministically by backdating the private settling tracker — no
-// sleeping, no real busy-looping.
+/**
+ * The scheduler's non-settling telemetry (facade recordExecuteEndTelemetry)
+ * sits behind a wall-clock heuristic: it fires only when a busy window
+ * crosses 5s. Integration runs cover it only when a CI machine happens to run
+ * slow enough, which made the runner coverage gate flap. This test drives the
+ * path deterministically by backdating the private settling tracker — no
+ * sleeping, no real busy-looping.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";

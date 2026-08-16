@@ -8,6 +8,7 @@
  * - Configurable week start (`week-start` attribute): grid leading-day math
  *   and weekday header labels, Sunday-first by default.
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { CFCalendar } from "./index.ts";

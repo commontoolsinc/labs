@@ -1,4 +1,11 @@
-// Shared helpers used across tiles and the core.
+/**
+ * Collects the helpers the tiles and the dashboard core share: the wrappers
+ * that call the GitHub REST API and spend its rate-limit budget, the service
+ * name a SigNoz query is scoped to, the small formatting routines that turn a
+ * number or a span into the text a tile shows, and the sparkline and strip
+ * drawing the tiles chart their history with.
+ */
+
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
 import { CHART_HIGHLIGHT } from "./theme.ts";
@@ -146,7 +153,7 @@ export function memo<T>(ttlMs: number, fn: () => Promise<T>): () => Promise<T> {
 }
 
 // good/warn/bad/unknown -> the dot color class the renderer uses.
-export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber", bad: "red", unknown: "grey" };
+export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber", bad: "red", unknown: "gray" };
 
 export const escapeHtml = (s: string) =>
   s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
@@ -224,9 +231,9 @@ export function usd(n: number): string {
 
 // A completed run's dot color: only genuine failures are red.
 export function concDot(conclusion: string | null, attempt: number): string {
-  if (conclusion === "success") return attempt > 1 ? "grey" : "green";
+  if (conclusion === "success") return attempt > 1 ? "gray" : "green";
   if (conclusion === "failure" || conclusion === "timed_out" || conclusion === "startup_failure") return "red";
-  return "grey";
+  return "gray";
 }
 
 // A lighter tint of a "#rrggbb" color, blended toward white. Sparklines mark the

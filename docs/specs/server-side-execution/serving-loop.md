@@ -54,7 +54,7 @@ inputs current (D-v2-2). Undemanded derivations stay
 dirty-unmaterialized indefinitely — `idle()` already excludes them
 (§3b's pull-based laziness). Per-piece start/stop, root-piece
 bootstrap, and auto-start-on-event are client-era framings with no
-server analogue (runtime-mapping.md N22/N31).
+server analog (runtime-mapping.md N22/N31).
 
 Activation mechanics: the memory server notifies the ExecutorHost on
 any AUTHORED admission into a space with no live lease — an

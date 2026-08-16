@@ -1,6 +1,7 @@
 /**
  * Contract tests for explicit, per-step VDOM materialization in `cf test`.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";

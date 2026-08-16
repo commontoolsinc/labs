@@ -1,3 +1,14 @@
+import type { CellScope } from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import {
+  type EntityRef,
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { homeSchema } from "@commonfabric/home-schemas";
+import { createSession, Identity, type Session } from "@commonfabric/identity";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import {
   applyPieceSourceTransition,
   type Cell,
@@ -36,36 +47,24 @@ import {
   setPatternSource,
   type SpaceCellContents,
 } from "@commonfabric/runner";
+import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
-import type { CellScope } from "@commonfabric/api";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   type NameSchema,
   nameSchema,
   pieceListSchema,
 } from "@commonfabric/runner/schemas";
-import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
-import {
-  type EntityRef,
-  entityRefToString,
-  isEntityRef,
-} from "@commonfabric/data-model/cell-rep";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { createSession, Identity, type Session } from "@commonfabric/identity";
-import { isRecord } from "@commonfabric/utils/types";
-import { getLogger } from "@commonfabric/utils/logger";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
-import { homeSchema } from "@commonfabric/home-schemas";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
 import {
   getResultCellWithSourceSchema,
   isLegacyPieceRegistryRoot,
 } from "../../../runner/src/piece-helpers.ts";
-import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
 import { pieceId } from "../piece-id.ts";
-import { PieceController } from "./piece-controller.ts";
-import { compileProgram } from "./utils.ts";
 // System space-root pattern refs, their derivation, and the source→URL
 // resolution live in ../system-pattern-url.ts; re-exported here for existing
 // importers.
@@ -75,6 +74,8 @@ import {
   HOME_PATTERN_SOURCE,
   patternSourceUrl,
 } from "../system-pattern-url.ts";
+import { PieceController } from "./piece-controller.ts";
+import { compileProgram } from "./utils.ts";
 export {
   DEFAULT_APP_PATTERN_SOURCE,
   deriveSystemPatternSource,
@@ -742,7 +743,7 @@ export class PiecesController<T = unknown> {
         // fire is worse than a marker that says so, because it reads as a guard
         // while being incapable of acting as one. Refusing here needs that
         // error handling changed first.
-        if (!isRecord(value) || depth > maxDepth) return;
+        if (!isObjectOrArray(value) || depth > maxDepth) return;
 
         // Prevent cycles in our traversal by tracking object references directly
         if (visited.has(value)) return;
@@ -882,7 +883,7 @@ export class PiecesController<T = unknown> {
       //
       // TODO(danfuzz): refusing one here waits on the same thing -- this walk's
       // `catch` swallows, so a throw would not surface.
-      if (!isRecord(value) || depth > maxDepth) return false;
+      if (!isObjectOrArray(value) || depth > maxDepth) return false;
 
       // Prevent cycles in our traversal by tracking object references directly
       if (visited.has(value)) return false;
@@ -934,7 +935,7 @@ export class PiecesController<T = unknown> {
               );
             }
           }
-        } else if (isRecord(value)) {
+        } else if (isObjectOrArray(value)) {
           // Process regular object properties
           const keys = Object.keys(value);
           for (let i = 0; i < keys.length; i++) {

@@ -200,6 +200,73 @@ export function isUiInputBlindWriteTx(tx: object): boolean {
   return uiInputBlindWriteTxs.has(tx);
 }
 
+// Lazy materialization: a marked transaction hands a reader views that resolve
+// each path as it is touched, rather than a value built in one pass before the
+// reader looks at any of it.
+//
+// The mark also decides how a view treats the transaction it was made against.
+// Unmarked, a query-result proxy is a standing handle: it resolves the
+// transaction on every access, so a holder keeps reading current state after
+// that transaction has finished — which long-lived consumers depend on, an LLM
+// tool call dispatched later and a SQLite result flushed post-commit among
+// them. Marked, a view keeps the transaction it was created with, so the value
+// it describes stays the value that was there when it was taken, and reading
+// after that transaction finishes throws rather than quietly reading from
+// committed state.
+//
+// Nothing outside the mark changes, so an unmarked transaction reads exactly as
+// it did before lazy materialization existed. Marked on the same wrapper chain
+// as the marks above, so a wrapper and the transaction it wraps read alike.
+const lazyMaterializationTxs = new WeakSet<object>();
+
+export function markLazyMaterializationTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) lazyMaterializationTxs.add(layer);
+}
+export function unmarkLazyMaterializationTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    lazyMaterializationTxs.delete(layer);
+  }
+}
+// A refusal recorded on the transaction, so it survives being caught. A reader
+// can swallow a `SchemaMismatchError` — its own `try`/`catch`, or an `await`
+// that discards the rejection — and still hand back a plausible-looking result.
+// The runner reads the mark after the body returns and disposes of the run as
+// an argument that did not resolve either way.
+const schemaRefusals = new WeakMap<object, unknown>();
+
+export function noteSchemaRefusalTx(tx: object, refusal: unknown): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    if (!schemaRefusals.has(layer)) schemaRefusals.set(layer, refusal);
+  }
+}
+
+export function takeSchemaRefusalTx(tx: object): unknown {
+  for (const layer of blindWriteTxChain(tx)) {
+    const refusal = schemaRefusals.get(layer);
+    if (refusal !== undefined) return refusal;
+  }
+  return undefined;
+}
+
+// Only this refusal, and only where it is the one recorded: a view that catches
+// a mismatch it asked for is the one clearing it, and a different refusal held
+// on the same transaction is somebody else's and still owed to the runner.
+export function clearSchemaRefusalTx(tx: object, refusal: unknown): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    if (schemaRefusals.get(layer) === refusal) schemaRefusals.delete(layer);
+  }
+}
+
+export function isLazyMaterializationTx(tx: object): boolean {
+  // Walk the chain rather than testing the object: a wrapper built over a
+  // transaction that was marked earlier has never been marked itself, and must
+  // still report the mark of what it wraps.
+  for (const layer of blindWriteTxChain(tx)) {
+    if (lazyMaterializationTxs.has(layer)) return true;
+  }
+  return false;
+}
+
 // Renderer-input (user-keystroke `$value`) provenance for timing-mitigation
 // cell-flip shaping (plan B, channels 4/5). Unlike the blind-write mark above —
 // which is cleared before commit — this one must SURVIVE to commit time so the

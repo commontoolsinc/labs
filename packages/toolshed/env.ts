@@ -1,5 +1,6 @@
-import { z } from "zod";
 import * as Path from "@std/path";
+
+import { z } from "zod";
 
 // Parse CLI args for --port (needed because deno --watch doesn't pass env vars)
 function parseCliArgs(): Record<string, string> {
@@ -211,6 +212,30 @@ export const EnvSchema = z.object({
   // ACL state and fresh-space genesis violations still block. `enforce` also
   // denies access shortfalls. See packages/memory/v2/server.ts.
   MEMORY_ACL_MODE: z.enum(["off", "observe", "enforce"]).default("enforce"),
+
+  // Set ONLY when a trusted reverse proxy sits in front of this process and
+  // overwrites X-Forwarded-For. Rate limiting keys on the real TCP peer by
+  // default; behind a proxy every caller would otherwise collapse onto the
+  // proxy's address and one client could starve everyone. Enabling it without a
+  // proxy is worse than leaving it off: the header becomes client-controlled,
+  // so a fresh value per request yields a fresh bucket and the limit vanishes.
+  RATE_LIMIT_TRUST_FORWARDED_FOR: boolFlag(),
+
+  // Mounts the self-serve ingest-channel control plane
+  // (POST /api/ingest-channels/*). OFF by default and deliberately so.
+  //
+  // Minting issues a durable, operator-backed append capability into a user's
+  // space, and it is only as trustworthy as the claim "this DID owns that
+  // space". Where named-space keys derive from a public passphrase, anyone who
+  // knows a space NAME can reconstruct its key, grant themselves OWNER, and
+  // mint legitimately — and repairing the derivation later does NOT retract
+  // what was issued. Enabling this before that repair converts a temporary
+  // takeover into persistence beyond remediation.
+  //
+  // Turn it on only where space keys are not derivable from public inputs. The
+  // tripwire in packages/toolshed/routes/ingest-channels/ and
+  // `deno task check-tripwires` fire when that repair lands.
+  INGEST_SELF_SERVE_ENABLED: boolFlag(),
 
   // Comma-separated DIDs with implicit OWNER on every space (e.g. the
   // background service operator identity).

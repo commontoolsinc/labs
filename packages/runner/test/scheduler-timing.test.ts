@@ -1,5 +1,9 @@
 // Scheduler debounce and throttle tests.
 
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
+
+import { getActionStats, recordActionTime } from "../src/scheduler/timing.ts";
+import type { ActionStats } from "../src/telemetry.ts";
 import {
   afterEach,
   beforeEach,
@@ -17,9 +21,6 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
-import { BoundedKeyMap } from "@commonfabric/utils/cache";
-import type { ActionStats } from "../src/telemetry.ts";
-import { getActionStats, recordActionTime } from "../src/scheduler/timing.ts";
 
 describe("action timing stats", () => {
   // Each action instance gets its own id, so a pattern that keeps creating
@@ -395,7 +396,7 @@ describe("debounce and throttling", () => {
 
       expect(runCount).toBe(0);
     } finally {
-      // The scheduler is disposed above as the behaviour under test, and the
+      // The scheduler is disposed above as the behavior under test, and the
       // real teardown still runs over it — see scheduler-dispose-idle.test.ts
       // for the contract that makes the two compose.
       await disposeSchedulerTestRuntime(local);

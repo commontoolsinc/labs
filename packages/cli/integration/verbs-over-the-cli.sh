@@ -67,8 +67,11 @@ export EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true
 START=$(date +%s)
 
 step "1. Deploy the fixture"
-BOARD=$($CF piece new "$FIXTURE" $ARGS 2>&1 |
-  grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
+# --quiet makes the piece id stdout's only line; stderr is dropped and the
+# grep anchored so a compile warning carrying a fid1: token cannot be taken
+# for the deploy's id.
+BOARD=$($CF piece new --quiet "$FIXTURE" $ARGS 2>/dev/null |
+  grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
 if [ -n "$BOARD" ]; then ok "deployed $BOARD"; else
   bad "deploy failed"
   exit 1
@@ -94,6 +97,21 @@ check "false" "$(echo "$VERBS" | jq -r '.verbs[] |
   select(.name == "touch") | has("outputSchema")' 2>/dev/null)" \
   "a value-less verb advertises no result"
 
+# The same declaration reaches the page a caller reads before calling ONE verb,
+# where the listing answers for the whole piece. It names where the value
+# arrives — the Invocation JSON's result — because that is what a handler's
+# caller collects rather than stdout.
+HELP=$($CF piece call --piece "$BOARD" $ARGS createNote --help 2>/dev/null)
+check "1" "$(printf '%s\n' "$HELP" | grep -c '^Output:')" \
+  "createNote's help page carries an Output section"
+check "1" "$(printf '%s\n' "$HELP" | grep -c '^    note ')" \
+  "createNote's help page enumerates the result field it declared"
+# And a value-less verb's page carries no Output section at all, the same
+# distinction the listing draws.
+VOID_HELP=$($CF piece call --piece "$BOARD" $ARGS touch --help 2>/dev/null)
+check "0" "$(printf '%s\n' "$VOID_HELP" | grep -c '^Output:')" \
+  "a value-less verb's help page carries no Output section"
+
 step "3. A create hands back the piece it created"
 R=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation create-1 \
   createNote '{"title":"First note","body":"written at create"}' 2>/dev/null)
@@ -117,7 +135,9 @@ step "5. Address the piece you were handed, and call it"
 LINKED=$($CF piece call --quiet --show-links --piece "$BOARD" $ARGS \
   --invocation create-linked \
   createNote '{"title":"Addressable note","body":"first line"}' 2>/dev/null)
-NOTE_ID=$(echo "$LINKED" | jq -r '.links["/note"].id // empty' | sed 's/^of://')
+# The id is used verbatim, of: scheme included — --piece takes the entity URI
+# form, so an emitted address composes into the next command unchanged.
+NOTE_ID=$(echo "$LINKED" | jq -r '.links["/note"].id // empty')
 if [ -n "$NOTE_ID" ]; then ok "the result names the note's document: $NOTE_ID"; else
   bad "no link for /note in the annotated result"
 fi
@@ -149,7 +169,7 @@ check "true" "$(echo "$BOTH" | jq -c \
   "a marker beside a projection returns the address AND the fields"
 # The point of an address: act on the child, rather than read a copy of it.
 FIRST=$(echo "$BOTH" | jq -r \
-  '.[] | select(.title == "First note") | .["$link"].id' | sed 's/^of://')
+  '.[] | select(.title == "First note") | .["$link"].id')
 if [ -n "$FIRST" ]; then ok "the read names the first note: $FIRST"; else
   bad "no address for the first note in the projected read"
 fi
@@ -267,6 +287,39 @@ echo "$NO_SESSION" | grep -q -- "CF_INVOCATION_SESSION" &&
 echo "$NO_SESSION" | grep -q "invocation-session new" &&
   ok "and the command that mints one" ||
   bad "the refusal does not say how to mint a session"
+
+step "14. A detached call returns an address that reads back the outcome"
+# --no-wait exits at "committed": the handler ran and its write is durable;
+# only the readback is skipped. The envelope still carries the receipt, so a
+# detached call is a handle rather than a dead end — collecting the outcome
+# later is an ordinary read of that address, verbatim, of: prefix included,
+# and the verb's body does not run a second time.
+NW=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation detached-1 \
+  --no-wait setLabel '{"label":"Detached label"}' 2>/dev/null)
+check "committed" "$(echo "$NW" | jq -r '.status')" \
+  "--no-wait returns at committed"
+RECEIPT_ID=$(echo "$NW" | jq -r '.receipt.id // empty')
+check "of:" "${RECEIPT_ID:0:3}" \
+  "the envelope names the receipt, scheme included"
+if [ -n "$RECEIPT_ID" ]; then
+  COLLECTED=$($CF piece get --quiet --piece "$RECEIPT_ID" $ARGS 2>/dev/null)
+  check "Detached label" "$(echo "$COLLECTED" | jq -r '.label // empty')" \
+    "the address reads back the outcome the detached call filed"
+else
+  bad "no receipt address to collect from"
+fi
+# And in settled mode the same address reads back exactly what the call
+# reported: the receipt names the result, not a copy that can drift from it.
+S=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation settled-rcpt-1 \
+  setLabel '{"label":"Settled label"}' 2>/dev/null)
+S_ID=$(echo "$S" | jq -r '.receipt.id // empty')
+if [ -n "$S_ID" ]; then
+  S_READ=$($CF piece get --quiet --piece "$S_ID" $ARGS 2>/dev/null)
+  check "$(echo "$S" | jq -cS '.result')" "$(echo "$S_READ" | jq -cS '.')" \
+    "a settled call's receipt reads back exactly its result"
+else
+  bad "no receipt address on the settled envelope"
+fi
 
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed — %ds wall clock\n' "$PASS" "$FAIL" "$ELAPSED"

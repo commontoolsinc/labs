@@ -1,8 +1,11 @@
-import ts from "typescript";
 import type {
   MutableJSONSchema,
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -15,8 +18,6 @@ import {
   resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
-import { isRecord } from "@commonfabric/utils/types";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { dedupeByValueEqual } from "../value-equality.ts";
 
 // Simple primitive schemas only have these keys (possibly just one)
@@ -618,7 +619,7 @@ export class UnionFormatter implements TypeFormatter {
       return schemas[0]!;
     }
     const nullSchema = schemas.find((schema) =>
-      isRecord(schema) && schema.type === "null"
+      isObjectOrArray(schema) && schema.type === "null"
     );
     const nonNullSchemas = schemas.filter((schema) => schema !== nullSchema);
     if (nullSchema && nonNullSchemas.length === 1) {
@@ -674,7 +675,7 @@ export class UnionFormatter implements TypeFormatter {
     rootDefs?: Record<string, unknown>,
   ): MutableJSONSchema {
     const withDefault = this.applySchemaDefault(schema, defaultValue);
-    if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
+    if (!this.isDefaultObject(defaultValue) || !isObjectOrArray(withDefault)) {
       return withDefault;
     }
 
@@ -693,11 +694,11 @@ export class UnionFormatter implements TypeFormatter {
     rootDefs?: Record<string, unknown>,
     targetSchema?: MutableJSONSchema,
   ): MutableJSONSchemaObj {
-    const properties = isRecord(schema.properties)
+    const properties = isObjectOrArray(schema.properties)
       ? { ...schema.properties }
       : {};
     const targetProperties = this.getObjectTargetProperties(
-      isRecord(targetSchema) ? targetSchema : schema,
+      isObjectOrArray(targetSchema) ? targetSchema : schema,
       rootDefs,
     );
 
@@ -735,7 +736,7 @@ export class UnionFormatter implements TypeFormatter {
     targetSchema?: MutableJSONSchema,
   ): MutableJSONSchema {
     const withDefault = this.applySchemaDefault(schema ?? true, defaultValue);
-    if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
+    if (!this.isDefaultObject(defaultValue) || !isObjectOrArray(withDefault)) {
       return withDefault;
     }
 
@@ -758,7 +759,7 @@ export class UnionFormatter implements TypeFormatter {
     }
     seen.add(schema);
 
-    if (isRecord(schema.properties)) {
+    if (isObjectOrArray(schema.properties)) {
       return schema.properties;
     }
 
@@ -770,7 +771,7 @@ export class UnionFormatter implements TypeFormatter {
     if (Array.isArray(schema.anyOf)) {
       const candidates = schema.anyOf
         .map((option) =>
-          isRecord(option)
+          isObjectOrArray(option)
             ? this.getObjectTargetProperties(
               option as MutableJSONSchemaObj,
               rootDefs,
@@ -804,20 +805,22 @@ export class UnionFormatter implements TypeFormatter {
 
     const defs = this.getSchemaDefs(schema) ?? rootDefs;
     const resolved = defs?.[schema.$ref.slice(prefix.length)];
-    return isRecord(resolved) ? resolved as MutableJSONSchemaObj : undefined;
+    return isObjectOrArray(resolved)
+      ? resolved as MutableJSONSchemaObj
+      : undefined;
   }
 
   private getSchemaDefs(
     schema: MutableJSONSchemaObj,
   ): Record<string, unknown> | undefined {
-    if (isRecord(schema.$defs)) {
+    if (isObjectOrArray(schema.$defs)) {
       return schema.$defs;
     }
-    return isRecord(schema.definitions) ? schema.definitions : undefined;
+    return isObjectOrArray(schema.definitions) ? schema.definitions : undefined;
   }
 
   private isDefaultObject(value: unknown): value is Record<string, unknown> {
-    return isRecord(value) && !Array.isArray(value);
+    return isObjectNotArray(value);
   }
 
   private extractDefaultValueFromNode(
@@ -1056,7 +1059,7 @@ export class UnionFormatter implements TypeFormatter {
     }
     // See if we can merge into one of the anyOf options
     const matchingTypeIdx = anyOf.findIndex((option) =>
-      isRecord(option) &&
+      isObjectOrArray(option) &&
       PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(new Set(Object.keys(option))) &&
       "type" in option && option.type === cur.type
     );
@@ -1067,7 +1070,8 @@ export class UnionFormatter implements TypeFormatter {
       new Set(Object.keys(cur)),
     );
     if (
-      isRecord(cur) && Array.isArray(cur.enum) && isRecord(matchingType) &&
+      isObjectOrArray(cur) && Array.isArray(cur.enum) &&
+      isObjectOrArray(matchingType) &&
       Array.isArray(matchingType.enum)
     ) {
       // Add our enum values to their enum values, and keep the same type.
@@ -1093,7 +1097,7 @@ export class UnionFormatter implements TypeFormatter {
           enum: mergedEnum.toSorted(),
         };
       }
-    } else if (isRecord(matchingType)) {
+    } else if (isObjectOrArray(matchingType)) {
       // If either entry is missing an enum, we can have any value of that type, so clear enum
       const { enum: _dropped, ...rest } = matchingType;
       anyOf[matchingTypeIdx] = rest;
@@ -1102,14 +1106,14 @@ export class UnionFormatter implements TypeFormatter {
     ) {
       // If cur is a primitive non-enum with a known type, we can merge with any existing non-enum primitive
       const matchingNonEnumIdx = anyOf.findIndex((option) =>
-        isRecord(option) &&
+        isObjectOrArray(option) &&
         PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(new Set(Object.keys(option))) &&
         option.enum === undefined
       );
       const matchingNonEnum = matchingNonEnumIdx !== -1
         ? anyOf[matchingNonEnumIdx]
         : undefined;
-      if (isRecord(matchingNonEnum) && matchingNonEnumIdx !== -1) {
+      if (isObjectOrArray(matchingNonEnum) && matchingNonEnumIdx !== -1) {
         const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type];
         const matchingNonEnumTypes = matchingNonEnum.type === undefined
           ? []
@@ -1155,7 +1159,7 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // Recursively normalize properties
-    if ("properties" in schema && isRecord(schema.properties)) {
+    if ("properties" in schema && isObjectOrArray(schema.properties)) {
       const props: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(schema.properties)) {
         props[key] = this.normalizeSchemaForComparison(
@@ -1211,12 +1215,12 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // Recursively merge properties
-    if ("properties" in first && isRecord(first.properties)) {
+    if ("properties" in first && isObjectOrArray(first.properties)) {
       const props: Record<string, MutableJSONSchema> = {};
       for (const key of Object.keys(first.properties)) {
         const propSchemas = schemas
           .map((s) =>
-            isRecord(s) && isRecord(s.properties)
+            isObjectOrArray(s) && isObjectOrArray(s.properties)
               ? s.properties[key]
               : undefined
           )
@@ -1233,7 +1237,7 @@ export class UnionFormatter implements TypeFormatter {
     if ("items" in first && first.items !== undefined) {
       const itemSchemas = schemas
         .map((s) =>
-          isRecord(s) && "items" in s && s.items !== undefined
+          isObjectOrArray(s) && "items" in s && s.items !== undefined
             ? s.items
             : undefined
         )

@@ -1,9 +1,14 @@
-// spendChart: the shared multi-source daily-spend chart. Each source's line
-// covers only the days that source is known for — reported days plus settled
-// quiet days — so one source's freshness never pads another with zeros.
+/**
+ * spendChart: the shared multi-source daily-spend chart. Each source's line
+ * covers only the days that source is known for — reported days plus settled
+ * quiet days — so one source's freshness never pads another with zeros. Plus
+ * the two readings a tile takes of a source's reports to decide whether the
+ * quiet days are quiet at all.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { spendChart } from "../spend.ts";
+import { newestReportedDay, reportLagDays, spendChart } from "../spend.ts";
 
 const DAY = 86_400_000;
 
@@ -49,6 +54,25 @@ const markers = (chart: string): number[][] =>
 const NOW = new Date("2026-01-20T09:00:00Z");
 
 describe("spend", () => {
+  it("takes the newest day a source has a figure for, whatever order they arrive in", () => {
+    const byDay = new Map([
+      ["2026-01-03", 1],
+      ["2026-01-11", 0],
+      ["2026-01-07", 2],
+    ]);
+    // A day that cost nothing is a day the source reported on all the same.
+    expect(newestReportedDay(byDay)).toBe("2026-01-11");
+    expect(newestReportedDay(new Map())).toBe(undefined);
+  });
+
+  it("measures a source's lag in whole days, from the day it reported through", () => {
+    // The clock reads 09:00 on the 20th, and the lag counts calendar days, so
+    // the time of day never moves it.
+    expect(reportLagDays("2026-01-20", NOW)).toBe(0);
+    expect(reportLagDays("2026-01-18", NOW)).toBe(2);
+    expect(reportLagDays("2025-12-31", NOW)).toBe(20);
+  });
+
   it("ends a lagging source at its own known day instead of padding it with zeros", () => {
     const github = source(run("2026-01-01", 20, 1), 2, "#58a6ff");
     const blacksmith = source(run("2026-01-01", 19, 2), 1, "#f59e0b");
@@ -196,7 +220,7 @@ describe("spend", () => {
     expect(quiet[0]).toBeGreaterThan(lines[0][19][1]);
   });
 
-  it("marks a day both its neighbours are missing", () => {
+  it("marks a day both its neighbors are missing", () => {
     // On 3 January a 2-day lag reaches 1 January, so the January side of the
     // hole is a single day with nothing to join it to.
     const github = source(

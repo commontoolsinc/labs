@@ -28,6 +28,12 @@
  */
 
 import {
+  createSession,
+  Identity,
+  type KeyPairRaw,
+} from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
   type Cell,
   type ConsoleHandler,
   ConsoleMethod,
@@ -38,28 +44,23 @@ import {
   patternCoverageOutputPath,
   Runtime,
   runtimePresets,
+  TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { defer } from "@commonfabric/utils/defer";
+
+import { assertionOutcome } from "./assert-record.ts";
 import {
   flushDefaultModuleByteCache,
   getDefaultModuleByteCache,
 } from "./compile-byte-cache.ts";
-import { buildActionEvent } from "./trusted-test-event.ts";
 import {
   appendLoggerDeltaMessages,
   type LoggerErrorWarnSnapshot,
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
-import {
-  createSession,
-  Identity,
-  type KeyPairRaw,
-} from "@commonfabric/identity";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { defer } from "@commonfabric/utils/defer";
-import { asAssertRecord, formatAssertRecord } from "./assert-record.ts";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 
 export interface WorkerRequest {
   id: number;
@@ -71,7 +72,13 @@ export type WorkerResponse =
   | { id: number; ok: unknown }
   | { id: number; error: string };
 
-export type StepKind = "action" | "assertion" | "render" | "label" | "await";
+export type StepKind =
+  | "action"
+  | "assertion"
+  | "render"
+  | "settle"
+  | "label"
+  | "await";
 
 export interface StepMeta {
   kind: StepKind;
@@ -196,6 +203,7 @@ const stepPeekSchema = {
     action: { type: "unknown" },
     assertion: { type: "unknown" },
     render: { type: "unknown" },
+    settle: { type: "boolean" },
     label: { type: "string" },
     await: { type: "string" },
     event: { type: "unknown" },
@@ -215,6 +223,7 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
     action?: unknown;
     assertion?: unknown;
     render?: unknown;
+    settle?: boolean;
     label?: string;
     await?: string;
     skip?: boolean;
@@ -226,6 +235,7 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
   if (typeof peek?.await === "string") {
     return { kind: "await", marker: peek.await, ...skip };
   }
+  if (peek?.settle === true) return { kind: "settle", ...skip };
   // Streams/computeds peek as present-but-opaque; key presence is the signal.
   if (Object.hasOwn(peek ?? {}, "render")) return { kind: "render", ...skip };
   if (Object.hasOwn(peek ?? {}, "action")) return { kind: "action", ...skip };
@@ -233,7 +243,8 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
     return { kind: "assertion", ...skip };
   }
   throw new Error(
-    `Test step ${index} has none of action/assertion/render/label/await ` +
+    `Test step ${index} has none of ` +
+      `action/assertion/render/settle/label/await ` +
       `(keys: ${Object.keys(peek ?? {}).join(",") || "none"})`,
   );
 }
@@ -419,7 +430,7 @@ const handlers: Record<
     }
     await settle();
 
-    const stepsValue = resultCell.key("tests").asSchema(
+    const stepsValue = resultCell.key(TESTS).asSchema(
       {
         type: "array",
         items: { type: "object", asCell: ["cell"] },
@@ -428,7 +439,7 @@ const handlers: Record<
     ).get();
     if (!Array.isArray(stepsValue)) {
       throw new Error(
-        `Participant "${args.participant}" must return { tests: TestStep[] }`,
+        `Participant "${args.participant}" must return { [TESTS]: TestStep[] }`,
       );
     }
     stepCells = stepsValue as Cell<unknown>[];
@@ -474,19 +485,9 @@ const handlers: Record<
     const stepCell = stepCells[index as number];
     const value = await (stepCell.key("assertion" as never) as Cell<unknown>)
       .pull();
-    if (value === true) return { passed: true };
-    // An `assert(...)` assertion carries the operands recorded by the
-    // evaluation that produced this value, so report them.
-    const record = asAssertRecord(value);
-    if (record) {
-      return record.ok
-        ? { passed: true }
-        : { passed: false, error: formatAssertRecord(record) };
-    }
-    return {
-      passed: false,
-      error: `Expected true, got ${toCompactDebugString(value)}`,
-    };
+    // An `assert(...)` assertion carries the operands recorded while the
+    // condition ran, so a failure names them and their values.
+    return assertionOutcome(value);
   },
 
   /** Materialize one VDOM target, then remove its renderer demand. */
@@ -496,6 +497,16 @@ const handlers: Record<
       stepCell.key("render" as never) as Cell<unknown>,
       () => settle(),
     );
+    return {};
+  },
+
+  /**
+   * Settle fully (scheduler, storage, and in-flight async builtin I/O) for an
+   * explicit `{ settle: true }` step. Every step already settles before the
+   * next, so this is a demand for full settlement at a point the author names.
+   */
+  async settleStep() {
+    await settle();
     return {};
   },
 

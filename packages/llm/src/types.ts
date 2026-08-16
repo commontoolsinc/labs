@@ -1,11 +1,11 @@
-import { isRecord } from "@commonfabric/utils/types";
-import type { JSONValue } from "@commonfabric/api";
-import { isPureJson } from "@commonfabric/pure-json";
 import type {
   BuiltInLLMContent,
   BuiltInLLMMessage,
   JSONSchema,
+  JSONValue,
 } from "@commonfabric/api";
+import { isPureJson } from "@commonfabric/pure-json";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 // Resolved by the toolshed at startup: prefers gateway:claude-sonnet-4-6 when
 // available, falls back to anthropic:claude-sonnet-4-5 otherwise. See
@@ -56,7 +56,7 @@ export function isLLMNativeModelToolId(
 export function isLLMNativeModelToolResult(
   input: unknown,
 ): input is LLMNativeModelToolResult {
-  return isRecord(input) && !Array.isArray(input) &&
+  return isObjectNotArray(input) &&
     input.type === "cf-harness.native-model-tool-result" &&
     isLLMNativeModelToolId(input.toolId) &&
     (!("provider" in input) || typeof input.provider === "string");
@@ -130,7 +130,7 @@ function isArrayOf<T>(
 export function isLLMRequestMetadata(
   input: unknown,
 ): input is LLMRequestMetadata {
-  if (!isRecord(input) || Array.isArray(input)) return false;
+  if (!isObjectNotArray(input)) return false;
   // An `undefined` value means "absent": JSON drops the key, so it is not part
   // of what crosses the boundary and does not have to be pure JSON.
   const present = Object.fromEntries(
@@ -144,34 +144,36 @@ export function isLLMRequestMetadata(
 export function isLLMContent(input: unknown): input is LLMContent {
   return typeof input === "string" || (Array.isArray(input) && input.every(
     (item) =>
-      isRecord(item) &&
+      isObjectNotArray(item) &&
       (item.type === "text" || item.type === "image" ||
         item.type === "tool-call" || item.type === "tool-result"),
   ));
 }
 
-export function isLLMToolCall(input: unknown): input is LLMToolCall {
-  return isRecord(input) && !Array.isArray(input) &&
-    typeof input.id === "string" &&
-    typeof input.name === "string" &&
-    isRecord(input.arguments);
+// The parameter is `value` rather than `input` because `LLMToolCall` carries a
+// field of that name, and the guard has to read it.
+export function isLLMToolCall(value: unknown): value is LLMToolCall {
+  return isObjectNotArray(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    isObjectNotArray(value.input);
 }
 
 export function isLLMToolResult(input: unknown): input is LLMToolResult {
-  return isRecord(input) && !Array.isArray(input) &&
+  return isObjectNotArray(input) &&
     typeof input.toolCallId === "string" &&
     (!("error" in input) || typeof input.error === "string");
 }
 
 export function isLLMTool(input: unknown): input is LLMTool {
-  return isRecord(input) && !Array.isArray(input) &&
+  return isObjectNotArray(input) &&
     typeof input.description === "string" &&
-    isRecord(input.inputSchema) &&
+    isObjectNotArray(input.inputSchema) &&
     (!("handler" in input) || typeof input.handler === "function");
 }
 
 export function isLLMMessage(input: unknown): input is BuiltInLLMMessage {
-  return isRecord(input) && !Array.isArray(input) &&
+  return isObjectNotArray(input) &&
     (input.role === "user" || input.role === "assistant" ||
       input.role === "tool") &&
     isLLMContent(input.content) &&
@@ -205,7 +207,7 @@ export function extractTextFromLLMResponse(response: LLMResponse): string {
 }
 
 export function isLLMRequest(input: unknown): input is LLMRequest {
-  return isRecord(input) && !Array.isArray(input) &&
+  return isObjectNotArray(input) &&
     typeof input.model === "string" && isLLMMessages(input.messages) &&
     ("cache" in input) &&
     (!("system" in input) || typeof input.system === "string") &&
@@ -214,7 +216,7 @@ export function isLLMRequest(input: unknown): input is LLMRequest {
     (!("stop" in input) || typeof input.stop === "string") &&
     (!("mode" in input) || input.mode === "json") &&
     (!("metadata" in input) || isLLMRequestMetadata(input.metadata)) &&
-    (!("tools" in input) || (isRecord(input.tools) &&
+    (!("tools" in input) || (isObjectNotArray(input.tools) &&
       Object.values(input.tools).every((tool: unknown) => isLLMTool(tool)))) &&
     (!("nativeModelToolIds" in input) ||
       (Array.isArray(input.nativeModelToolIds) &&

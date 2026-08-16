@@ -82,6 +82,26 @@ describe("main command", () => {
     expect(mismatchedUsage).toEqual([]);
   });
 
+  it("tells a caller what a same-id retry costs, on every waiting flag", async () => {
+    // Both waiting flags invite a retry, and a retry runs the handler body
+    // again — at-most-once is per commit, not per execution. `--wait` is the
+    // sharper case: an expiry is exactly when the caller cannot tell whether
+    // the handling committed. The two sit adjacent in `--help`, so a caveat
+    // on one and silence on the other reads as a real difference between
+    // them.
+    const { code, stdout, stderr } = await cf("piece call --help");
+    checkStderr(stderr);
+    const help = stripAnsi(stdout.join("\n")).replaceAll(/\s+/g, " ");
+    expect(help).toContain(
+      "Re-invoking under the same id and session cannot commit twice — but " +
+        "it runs the handler body again",
+    );
+    expect(help).toContain(
+      "recovers it too, but runs the handler body again",
+    );
+    expect(code).toBe(0);
+  });
+
   it("describes and parses piece call's accepted input forms", async () => {
     const { piece } = await import(
       "../commands/piece.ts?piece-call-usage-test"
@@ -207,6 +227,9 @@ describe("main command", () => {
           command.getName()
         );
         expect(commandNames).toContain("view");
+        // A command that is not registered is invisible: `cf ingest` would
+        // simply not exist, with no error anywhere to say why.
+        expect(commandNames).toContain("ingest");
         expect(commandNames).toContain("fuse-daemon");
         expect(commandNames).toContain("fuse-supervisor");
         expect(commandNames).not.toContain("dev");
@@ -233,26 +256,27 @@ describe("main command", () => {
 
   it("shows exec command help before trying to resolve a mounted file", async () => {
     const { code, stdout } = await cf("exec --help");
+    const help = stripAnsi(stdout.join("\n"));
 
     expect(code).toBe(0);
-    expect(stdout.join("\n")).toContain(
+    expect(help).toContain(
       "Execute a mounted callable file from a Common Fabric FUSE mount.",
     );
-    expect(stdout.join("\n")).not.toContain("not within a mounted cf fuse");
+    expect(help).not.toContain("not within a mounted cf fuse");
   });
 
   it("shows help for the direct FUSE daemon entry point", async () => {
     const { code, stdout } = await cf("fuse-daemon --help");
 
     expect(code).toBe(0);
-    expect(stdout.join("\n")).toContain(
+    expect(stripAnsi(stdout.join("\n"))).toContain(
       "Usage:   cf fuse-daemon <mountpoint> [options]",
     );
   });
 
   it("shows the supervisor's own help for the direct supervisor entry point", async () => {
     // The subcommand forwards its raw argv to the supervisor's parser, so the
-    // compiled binary and a direct `deno run` of the supervisor answer with the
+    // compiled binary and a direct `deno run` of the supervisor produce the
     // same flags and the same help.
     const { code, stdout } = await cf("fuse-supervisor --help");
 

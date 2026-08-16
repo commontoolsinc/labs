@@ -34,6 +34,7 @@ export {
   isReactiveValueSymbol,
   isSimpleReactiveAccessExpression,
   isWildcardTraversalCall,
+  resolveCallbackFunctionExpression,
   type VerbBuilderName,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";

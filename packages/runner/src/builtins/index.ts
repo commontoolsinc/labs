@@ -1,31 +1,33 @@
+import type {
+  BuiltInGenerateObjectParams,
+  BuiltInGenerateTextParams,
+} from "@commonfabric/api";
+
+import type { Cell } from "../cell.ts";
 import { raw } from "../module.ts";
-import { map } from "./map.ts";
-import { filter } from "./filter.ts";
-import { flatMap } from "./flatmap.ts";
+import type { Runtime } from "../runtime.ts";
+import { cellFromUrl } from "./cell-from-url.ts";
+import { compileAndRun } from "./compile-and-run.ts";
+import { fetchProgram } from "./fetch-program.ts";
 import {
   fetchBinary,
   fetchJson,
   fetchJsonUnchecked,
   fetchText,
 } from "./fetch.ts";
-import { fetchProgram } from "./fetch-program.ts";
-import { streamData } from "./stream-data.ts";
-import { generateObject, generateText, llm } from "./llm.ts";
+import { filter } from "./filter.ts";
+import { flatMap } from "./flatmap.ts";
 import { IF_ELSE_ARGUMENT_SCHEMA, ifElse } from "./if-else.ts";
-import { when } from "./when.ts";
-import { unless } from "./unless.ts";
-import type { Runtime } from "../runtime.ts";
-import { compileAndRun } from "./compile-and-run.ts";
-import { sqliteDatabase, sqliteQuery } from "./sqlite-builtins.ts";
-import { navigateTo } from "./navigate-to.ts";
 import { inspectConfLabel } from "./inspect-conf-label.ts";
-import { wish } from "./wish.ts";
-import type { Cell } from "../cell.ts";
-import type {
-  BuiltInGenerateObjectParams,
-  BuiltInGenerateTextParams,
-} from "@commonfabric/api";
 import { llmDialog } from "./llm-dialog.ts";
+import { generateObject, generateText, llm } from "./llm.ts";
+import { map } from "./map.ts";
+import { navigateTo } from "./navigate-to.ts";
+import { sqliteDatabase, sqliteQuery } from "./sqlite-builtins.ts";
+import { streamData } from "./stream-data.ts";
+import { unless } from "./unless.ts";
+import { when } from "./when.ts";
+import { wish } from "./wish.ts";
 
 const WISH_DEBOUNCE_MS = 50;
 
@@ -45,6 +47,7 @@ const WISH_DEBOUNCE_MS = 50;
 export function registerBuiltins(runtime: Runtime) {
   const moduleRegistry = runtime.moduleRegistry;
 
+  moduleRegistry.addModuleByRef("cellFromUrl", raw(cellFromUrl));
   moduleRegistry.addModuleByRef("map", raw(map));
   moduleRegistry.addModuleByRef("filter", raw(filter));
   moduleRegistry.addModuleByRef("flatMap", raw(flatMap));
