@@ -531,11 +531,13 @@ function schemaIsArrayShaped(node: Record<string, unknown>): boolean {
  */
 function isOpaqueReference(value: unknown): boolean {
   if (!isLink(value)) return false;
-  if (typeof value !== "object" || value === null) return true;
-  const envelope = (value as Record<string, unknown>)["/"];
-  if (typeof envelope !== "object" || envelope === null) return true;
-  if (!Object.hasOwn(envelope as object, "link@1")) return true;
-  const payload = (envelope as Record<string, unknown>)["link@1"];
+  const payload = (value as Record<string, Record<string, unknown>> | null)
+    ?.["/"]?.["link@1"];
+  // No payload here means this is not the envelope form at all — a live cell,
+  // which reaches this gate from code rather than from a caller's JSON and has
+  // nothing to malform. Every link a PAYLOAD can carry is the envelope form,
+  // since the primitive spelling is that same sigil.
+  if (payload === undefined) return true;
   return typeof payload === "object" && payload !== null &&
     !Array.isArray(payload);
 }

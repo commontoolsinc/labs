@@ -1078,6 +1078,33 @@ describe("verb-undeclared-field", () => {
       }
     });
 
+    it("treats a live cell as opaque without inspecting a payload", async () => {
+      // A `Cell` satisfies `isLink` while carrying no envelope at all, so the
+      // payload check has nothing to read. It reaches this gate from code
+      // rather than from a caller's JSON, and there is nothing to malform.
+      const signer = await Identity.fromPassphrase("undeclared-field-cell");
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+      });
+      try {
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "opaque-probe",
+          undefined,
+          tx,
+        );
+        cell.set({ title: "held" });
+        await tx.commit();
+        expect(verbInputSchemaError({ on: cell }, narrowed)).toBeUndefined();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
     it("still refuses a non-link object that does not fit its position", () => {
       // The link is what is opaque, not the position. A plain object at the
       // same place is judged exactly as before.
