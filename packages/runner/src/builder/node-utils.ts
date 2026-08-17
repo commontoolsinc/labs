@@ -1,17 +1,18 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import type { CfcConfClause } from "../cfc/clause.ts";
-import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
-import { ContextualFlowControl } from "../cfc.ts";
 import { FabricInstance } from "@commonfabric/data-model/fabric-value";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isCell } from "../cell.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
-import { traverseValue } from "./traverse-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
-import { isCell } from "../cell.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { resolveLocationFromFunctionSource } from "./module.ts";
+import { traverseValue } from "./traverse-utils.ts";
+import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
@@ -138,7 +139,7 @@ function attachCfcToOutputs(
     //
     // A `FabricInstance` is refused. Its codec contents can hold a `Cell`,
     // unreachable by property name, so passing one through leaves that cell
-    // _unlabelled_ while its plain siblings are labelled -- confidentiality
+    // _unlabelled_ while its plain siblings are labeled -- confidentiality
     // silently not applied, which is the unsafe direction, unlike the
     // policy-input walks in `runner.ts` whose equivalent gap fails closed.
     //

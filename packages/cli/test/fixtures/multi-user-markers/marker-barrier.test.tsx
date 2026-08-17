@@ -4,6 +4,7 @@
  * `{ label }`. Bob's assertion is read once, so it passes only when the
  * marker brought Alice's write with it.
  */
+
 import {
   action,
   assert,

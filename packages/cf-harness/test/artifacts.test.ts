@@ -1,11 +1,9 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import {
-  chatViewOfRequest,
-  responsesBodyFromChatFixture,
-} from "./support/responses-fixture.ts";
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
+
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+
 import {
   createFileSystemHarnessArtifactStore,
   readHarnessRunArtifacts,
@@ -13,8 +11,8 @@ import {
   readHarnessRunState,
   readHarnessTranscript,
 } from "../src/artifacts.ts";
-import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import type { HarnessPolicyTrace } from "../src/contracts/policy-trace.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -26,6 +24,10 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly shellRequests: SandboxShellRequest[] = [];
@@ -549,6 +551,7 @@ Deno.test({
           "edit_file",
           "write_file",
           "delegate_task",
+          "describe_handle",
         ],
       });
       assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
@@ -694,7 +697,7 @@ Deno.test({
         {
           model: "gpt-5.4",
           messageCount: 1,
-          toolCount: 7,
+          toolCount: 8,
         },
       );
       assert(
@@ -1421,7 +1424,9 @@ Deno.test({
       assertEquals(parentFailure.kind, "tool_not_allowed");
       assertEquals(parentFailure.source, "policy_event");
       assertEquals(parentFailure.toolId, "bash");
-      assertEquals(parentFailure.toolCallId, "call-child-bash-failure");
+      // The call id is the child model's own text, so it stays in the audit
+      // artifacts rather than reaching the parent model.
+      assertEquals("toolCallId" in parentFailure, false);
       assertEquals("outputId" in parentFailure, false);
       assertEquals("commandName" in parentFailure, false);
       assertEquals("exitCode" in parentFailure, false);

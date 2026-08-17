@@ -1,11 +1,11 @@
-import { isObjectNotArray } from "@commonfabric/utils/types";
-import type { JSONValue } from "@commonfabric/api";
-import { isPureJson } from "@commonfabric/pure-json";
 import type {
   BuiltInLLMContent,
   BuiltInLLMMessage,
   JSONSchema,
+  JSONValue,
 } from "@commonfabric/api";
+import { isPureJson } from "@commonfabric/pure-json";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 // Resolved by the toolshed at startup: prefers gateway:claude-sonnet-4-6 when
 // available, falls back to anthropic:claude-sonnet-4-5 otherwise. See

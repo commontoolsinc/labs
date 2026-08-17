@@ -3,20 +3,21 @@ import type {
   JSONSchema,
   JSONSchemaObj,
 } from "@commonfabric/api";
-import { isObjectOrArray } from "@commonfabric/utils/types";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
-import { getPatternEnvironment } from "../builder/env.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Schema } from "../builder/types.ts";
-import type { CellScope } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import { getPatternEnvironment } from "../builder/env.ts";
+import type { CellScope, Schema } from "../builder/types.ts";
+import { type Cell } from "../cell.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
 import { mapSubschemas } from "../schema-walk.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   isProtectedToolshedFirstPartyRoute,
   isToolshedApiOrigin,
@@ -28,7 +29,6 @@ import {
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 type FetchRequestOptions = {

@@ -1,7 +1,10 @@
-// Channel-7 closure: the sandbox `fetch` is capability-gated (handler-only) and
-// its settlement is coarsened to the wall-clock grid, so a pattern's imperative
-// network access carries no fine clock. See createGatedFetch in
-// sandbox/compartment-globals.ts and docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+/**
+ * Channel-7 closure: the sandbox `fetch` is capability-gated (handler-only) and
+ * its settlement is coarsened to the wall-clock grid, so a pattern's imperative
+ * network access carries no fine clock. See createGatedFetch in
+ * sandbox/compartment-globals.ts and docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {

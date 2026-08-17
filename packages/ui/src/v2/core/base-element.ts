@@ -2,6 +2,7 @@
  * Minimal base class for web components using Lit
  * Provides the emit() helper for consistent custom events
  */
+
 import { css, CSSResult, LitElement } from "lit";
 import { variablesCSS } from "../styles/variables.ts";
 import { DebugController } from "./debug-controller.ts";

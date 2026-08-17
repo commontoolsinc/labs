@@ -247,7 +247,7 @@ describe("valueEqual()", () => {
       it("short-circuits to unequal without hashing", () => {
         // A fresh `UnknownValue` is not auto-frozen, so the pair skips the
         // both-deep-frozen early hash and reaches the constructor check.
-        const u = new UnknownValue("tag@1", 1);
+        const u = new UnknownValue("Tag@1", 1);
         const fb = new FabricBytes(new Uint8Array([1]));
         expect(valueEqual(u, fb)).toBe(false);
         expect(valueEqual(fb, u)).toBe(false);

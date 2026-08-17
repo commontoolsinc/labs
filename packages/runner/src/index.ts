@@ -196,6 +196,7 @@ export {
   CHIP_UI,
   type FactoryInput,
   type Frame,
+  FRAMEWORK_RESULT_KEYS,
   FS,
   type FsProjection,
   type HandlerFactory,

@@ -3,6 +3,7 @@
  * a filename or shebang. It remains last in the language registry and is the
  * registry's fallback.
  */
+
 import type { Language } from "../language.ts";
 import { utf8Decoder } from "../decoder.ts";
 import {

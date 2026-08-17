@@ -5,6 +5,7 @@
  * small parsing helpers (JSONC stripping, extension classification, real-path
  * containment) that the canonical suite reaches only incidentally.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
@@ -620,7 +621,7 @@ Deno.test("diff semantics: a definition outside the diff opens as a file", () =>
     const lines = sem.fileLines(ext!.filePath!);
     assert(
       lines && lines.some((l) => l.text.includes("export function ext")),
-      "fileLines colours the external file",
+      "fileLines colors the external file",
     );
     assertEquals(sem.fileLines(join(root, "..", "outside.ts")), null);
   } finally {

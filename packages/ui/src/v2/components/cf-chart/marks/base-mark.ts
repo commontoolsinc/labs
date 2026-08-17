@@ -5,6 +5,7 @@
  * declarative config holders (like <source>, <option>, <track>).
  * The parent cf-chart reads their properties and renders all SVG.
  */
+
 import { css, LitElement, PropertyValues } from "lit";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import { CellController } from "../../../core/cell-controller.ts";

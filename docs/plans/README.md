@@ -95,14 +95,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   work on verbs across both arcs that produced it: what a verb declares, what a
   caller may ask for, and what comes back. Read it for order; read the designs
   it points at for reasoning.
-- [Projection keys, and the schema a read is handed](projection-key-classification.md)
-  designs the refusal of an unrecognized `--schema` key and the rule it is half
-  of — the projection reader never hands the read boundary a schema it did not
-  construct. Four tiers rather than three, because the keys that decide an
-  untyped position's container change behavior, so a caller's copy of one is
-  consumed rather than carried onward. Carries the measured blast radius, and
-  separates a constraint a caller supplies from the same keyword the reader
-  derives from the source schema.
 - [The CLI surface — implementation plan](cli-surface-implementation.md) builds
   the rest of the command surface: positional addresses, the honest top-level
   names, deprecating the spellings they replace, and merging the commands that

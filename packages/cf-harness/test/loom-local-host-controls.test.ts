@@ -8,6 +8,10 @@ import {
 } from "../src/cli.ts";
 import { createLoomLocalCfHarnessHost } from "../src/loom-local-host.ts";
 import { runLoomLocalCfHarnessHostMain } from "../src/loom-local-host-main.ts";
+import type {
+  CreateHarnessPromptLoopOptions,
+  HarnessPromptLoopResult,
+} from "../src/prompt-loop.ts";
 
 const ioBuffers = (): {
   io: CfHarnessCliIO;
@@ -103,6 +107,136 @@ Deno.test("local Loom batch control-looking prompt text does not bypass binding"
     JSON.parse(io.stderr.join("")).error.code,
     "provider-configuration-required",
   );
+});
+
+Deno.test("local Loom batch rejects control argv before it bills a prompt run", async () => {
+  const controlArgv: ReadonlyArray<readonly string[]> = [
+    ["auth", "status", "openai-codex"],
+    ["config", "set", "model-provider", "openai-codex"],
+    ["models", "list"],
+    ["whoami"],
+    ["--", "auth", "status", "openai-codex"],
+  ];
+
+  for (const argv of controlArgv) {
+    const label = argv.join(" ");
+    const home = await Deno.makeTempDir();
+    let promptLoops = 0;
+    let providerReads = 0;
+    let providerRequests = 0;
+    const io = ioBuffers();
+    const host = await createLoomLocalCfHarnessHost({
+      harnessHome: home,
+      env: {
+        CF_HARNESS_GATEWAY_BASE_URL: "https://gateway.example/",
+        CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+      },
+      providerSettingsStore: {
+        inspect: () => {
+          providerReads += 1;
+          return Promise.resolve({
+            state: "configured" as const,
+            settings: {
+              version: 1 as const,
+              modelProvider: "openai-compatible-gateway" as const,
+            },
+          });
+        },
+      },
+      fetchFn: () => {
+        providerRequests += 1;
+        return Promise.reject(new Error("provider traffic must not occur"));
+      },
+      cliDependencies: {
+        cwd: home,
+        io: io.io,
+        // A billable run would succeed here, so an unguarded control argv
+        // reports exit 0 for a model call nobody asked for.
+        createPromptLoop: (options: CreateHarnessPromptLoopOptions) => {
+          promptLoops += 1;
+          const result: HarnessPromptLoopResult = {
+            model: options.model ?? "gpt-5.6-terra",
+            finalAssistantText: "billed",
+            transcript: [],
+            modelTurns: 1,
+            runState: options.engine!.getRunState(),
+          };
+          return {
+            runPrompt: () => Promise.resolve(result),
+            runTranscript: () => Promise.reject(new Error("unexpected resume")),
+          };
+        },
+      },
+    });
+
+    assertEquals(await host.runBatch(argv), 1, label);
+    assertEquals(promptLoops, 0, label);
+    assertEquals(providerReads, 0, label);
+    assertEquals(providerRequests, 0, label);
+    assertEquals(io.stdout, [], label);
+    const failure = JSON.parse(io.stderr.join(""));
+    assertEquals(failure.error.code, "invalid-request", label);
+    assertStringIncludes(
+      failure.error.message,
+      argv[0] === "--" ? argv[1] : argv[0],
+    );
+    assertStringIncludes(failure.error.message, "--prompt");
+  }
+});
+
+Deno.test("local Loom batch runs a prompt whose own first word is a subcommand", async () => {
+  // The guard reads the leading token, so `--prompt` is what separates "run
+  // the models subcommand" from "ask the model about models". The rejection
+  // above names this flag; a caller who follows it has to get a run.
+  const home = await Deno.makeTempDir();
+  const io = ioBuffers();
+  let prompt: string | undefined;
+  const host = await createLoomLocalCfHarnessHost({
+    harnessHome: home,
+    env: {
+      CF_HARNESS_GATEWAY_BASE_URL: "https://gateway.example/",
+      CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+    },
+    providerSettingsStore: {
+      inspect: () =>
+        Promise.resolve({
+          state: "configured" as const,
+          settings: {
+            version: 1 as const,
+            modelProvider: "openai-compatible-gateway" as const,
+          },
+        }),
+    },
+    cliDependencies: {
+      cwd: home,
+      io: io.io,
+      createPromptLoop: (options: CreateHarnessPromptLoopOptions) => ({
+        runPrompt: (request: { prompt: string }) => {
+          prompt = request.prompt;
+          return Promise.resolve<HarnessPromptLoopResult>({
+            model: options.model ?? "gpt-5.6-terra",
+            finalAssistantText: "answered",
+            transcript: [],
+            modelTurns: 1,
+            runState: options.engine!.getRunState(),
+          });
+        },
+        runTranscript: () => Promise.reject(new Error("unexpected resume")),
+      }),
+    },
+  });
+
+  assertEquals(
+    await host.runBatch([
+      "--prompt",
+      "models are great",
+      "--cfc-enforcement-mode",
+      "disabled",
+    ]),
+    0,
+    io.stderr.join(""),
+  );
+  assertEquals(prompt, "models are great");
 });
 
 Deno.test("local Loom batch executable exposes help and capabilities before setup", async () => {

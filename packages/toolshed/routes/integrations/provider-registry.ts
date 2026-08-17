@@ -13,9 +13,15 @@
  * first provider router with valid credentials.
  */
 
-import { createRouter } from "@/lib/create-app.ts";
-import type { AppRouteHandler } from "@/lib/types.ts";
+import { getLogger } from "@commonfabric/utils/logger";
 import { cors } from "@hono/hono/cors";
+
+import { AirtableDescriptor } from "./airtable-oauth/airtable.descriptor.ts";
+import { DiscordDescriptor } from "./discord-oauth/discord.descriptor.ts";
+import { GitHubDescriptor } from "./github-oauth/github.descriptor.ts";
+import { GoogleDescriptor } from "./google-oauth/google.descriptor.ts";
+import { LinearDescriptor } from "./linear-oauth/linear.descriptor.ts";
+import { NotionDescriptor } from "./notion-oauth/notion.descriptor.ts";
 import {
   createOAuth2Handlers,
 } from "./oauth2-common/oauth2-common.handlers.ts";
@@ -27,20 +33,15 @@ import {
   type OAuth2LogoutRoute,
   type OAuth2RefreshRoute,
 } from "./oauth2-common/oauth2-common.routes.ts";
-import { discoverProviderConfig } from "./oauth2-common/oauth2-common.utils.ts";
 import type {
   OAuth2ProviderConfig,
   ProviderDescriptor,
 } from "./oauth2-common/oauth2-common.types.ts";
-import { AirtableDescriptor } from "./airtable-oauth/airtable.descriptor.ts";
-import { DiscordDescriptor } from "./discord-oauth/discord.descriptor.ts";
-import { GitHubDescriptor } from "./github-oauth/github.descriptor.ts";
-import { GoogleDescriptor } from "./google-oauth/google.descriptor.ts";
-import { LinearDescriptor } from "./linear-oauth/linear.descriptor.ts";
-import { NotionDescriptor } from "./notion-oauth/notion.descriptor.ts";
+import { discoverProviderConfig } from "./oauth2-common/oauth2-common.utils.ts";
 import { SpotifyDescriptor } from "./spotify-oauth/spotify.descriptor.ts";
 import { StravaDescriptor } from "./strava-oauth/strava.descriptor.ts";
-import { getLogger } from "@commonfabric/utils/logger";
+import { createRouter } from "@/lib/create-app.ts";
+import type { AppRouteHandler } from "@/lib/types.ts";
 
 const logger = getLogger("provider-registry");
 
@@ -153,7 +154,7 @@ async function createProviderRouter(
 
   // The generic factory handlers return broader types than the route schemas
   // declare (e.g. Record<string, unknown> vs specific fields). We cast to the
-  // route-specific handler types here; runtime behaviour is correct.
+  // route-specific handler types here; runtime behavior is correct.
   let router = createRouter()
     .openapi(routes.login, handlers.login as AppRouteHandler<OAuth2LoginRoute>)
     .openapi(

@@ -1,27 +1,28 @@
-import { css, html, nothing } from "lit";
-import { property, state } from "lit/decorators.js";
-import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import { type DID, KeyStore } from "@commonfabric/identity";
-import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
-import { RuntimeInternals } from "../lib/runtime.ts";
-import { DebuggerController } from "../lib/debugger-controller.ts";
-import { Task, TaskStatus } from "@lit/task";
-import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { type NameSchema, stringSchema } from "@commonfabric/runner/schemas";
-import {
-  isEmbeddedView,
-  isViewingDefaultPatternView,
-  replaceNavigation,
-  updatePageTitle,
-} from "../../shared/mod.ts";
-import { GlobalShortcutsController } from "../lib/global-shortcuts-controller.ts";
+import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
 import {
   type Cancel,
   type ErrorNotification,
   NAME,
   PageHandle,
 } from "@commonfabric/runtime-client";
+import { Task, TaskStatus } from "@lit/task";
+import { css, html, nothing } from "lit";
+import { property, state } from "lit/decorators.js";
+
+import {
+  isEmbeddedView,
+  isViewingDefaultPatternView,
+  replaceNavigation,
+  updatePageTitle,
+} from "../../shared/mod.ts";
+import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
+import { DebuggerController } from "../lib/debugger-controller.ts";
+import { GlobalShortcutsController } from "../lib/global-shortcuts-controller.ts";
 import { prepareNamedSpace } from "../lib/named-space.ts";
+import { RuntimeInternals } from "../lib/runtime.ts";
+import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import type { LoadError } from "./BodyView.ts";
 
 export class XAppView extends BaseView {

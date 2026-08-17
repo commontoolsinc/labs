@@ -43,7 +43,7 @@ The local, opt-in implementation is shipped in this changeset:
 - The CFC render-policy and two-user lunch-poll tests are the accepted reference
   demos. Both also pass through the normal integration command with presentation
   mode disabled.
-- Focused unit tests cover configuration, frame timing, recorder acknowledgement,
+- Focused unit tests cover configuration, frame timing, recorder acknowledgment,
   task selection, and one- through four-participant filter construction. Local
   live acceptance verified H.264 output at 1280x720 and 2560x720 respectively.
 
@@ -289,7 +289,7 @@ Expected new or expanded files:
 - `packages/integration/presentation/interactions.ts` — before/after click and
   type hooks shared by helper and direct Astral interaction paths.
 - `packages/integration/presentation/recorder.ts` — per-page screencast state,
-  frame acknowledgements, ordered writes, and manifest rows.
+  frame acknowledgments, ordered writes, and manifest rows.
 - `packages/integration/presentation/session.ts` — run-level participant and
   step timeline; coordinates recorders without serializing their actions.
 - `packages/integration/presentation/encode.ts` — FFmpeg discovery, per-stream
@@ -417,7 +417,7 @@ accumulate millisecond literals.
 - [ ] Make start/stop idempotence and invalid lifecycle transitions explicit.
 - [ ] Ensure listeners are removed on stop, failure, navigation teardown, and
   page close.
-- [ ] Unit-test the wrapper with fake bindings, including acknowledgements
+- [ ] Unit-test the wrapper with fake bindings, including acknowledgments
   after consumer failure.
 
 ### WP1.2 — Implement an ordered per-page recorder
@@ -425,7 +425,7 @@ accumulate millisecond literals.
 - [ ] Copy frame payloads out of the event handler and acknowledge before any
   awaited filesystem operation.
 - [ ] Use a bounded asynchronous write queue. Define whether a full queue
-  drops frames with diagnostics or fails capture; never block acknowledgement.
+  drops frames with diagnostics or fails capture; never block acknowledgment.
 - [ ] Generate stable, zero-padded frame names.
 - [ ] Record receipt order and source timestamps, normalize durations, and
   enforce a minimum positive duration.
@@ -780,7 +780,7 @@ package tasks at each stage gate.
 | Risk | Mitigation |
 | --- | --- |
 | CDP emits frames only on visual change | Preserve variable durations and explicitly hold/repeat the final frame. |
-| Frame acknowledgement blocks on I/O | Copy payload, acknowledge immediately, and use a bounded write queue. |
+| Frame acknowledgment blocks on I/O | Copy payload, acknowledge immediately, and use a bounded write queue. |
 | Presentation delays create test flakes | Keep event-driven correctness waits unchanged and outside presentation timing. |
 | Bulk fill and slow typing commit differently | Reuse the same host commit and verification tail and test both modes against the same assertions. |
 | Synthetic cursor disagrees with the real click | Derive both from the same final bounding box and animate the CDP mouse along the same route. |

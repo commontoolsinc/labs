@@ -3,6 +3,7 @@
  * `cf view`. Each corpus entry covers direct source, a diff, an incomplete
  * live edit, and every representative selection route recorded for it.
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 

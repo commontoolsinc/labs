@@ -5,6 +5,7 @@
  * FAIL with "expected non-idempotent computation(s), none detected" — a
  * silent pass here is exactly the detection regression the flag guards.
  */
+
 import { assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

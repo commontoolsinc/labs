@@ -536,7 +536,7 @@ Deno.test("0 stays harmless on unsupported paths", async () => {
   const client = clientWith(captured, [{
     choices: [{ index: 0, message: { role: "assistant", content: "ok" } }],
   }]);
-  // Its requested behaviour is already "do not compact", so it need not throw.
+  // Its requested behavior is already "do not compact", so it need not throw.
   const result = await client.complete(turn({
     model: "gemini-3.5-flash",
     compactThreshold: 0,

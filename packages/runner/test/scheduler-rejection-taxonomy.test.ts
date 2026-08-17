@@ -1,5 +1,8 @@
-// Integration coverage for no-retry behavior lands in work orders 03/04,
-// where the engine can actually emit precondition failures.
+/**
+ * Integration coverage for no-retry behavior lands in work orders 03/04,
+ * where the engine can actually emit precondition failures.
+ */
+
 import { describe, expect, it } from "./scheduler-test-utils.ts";
 import {
   isPermanentRejection,

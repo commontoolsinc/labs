@@ -550,7 +550,7 @@ function captureOperand(
 }
 
 /**
- * Emits a recording call around `value`, labelled with the authored text of
+ * Emits a recording call around `value`, labeled with the authored text of
  * `labelSource`. The two differ once `value` has itself been instrumented, at
  * which point it no longer has authored text of its own to read.
  */

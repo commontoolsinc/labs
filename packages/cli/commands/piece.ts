@@ -1,6 +1,30 @@
-import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
-import { VerbInputValidationError } from "../lib/callable.ts";
+import { Table } from "@cliffy/table";
+import type { CellScope } from "@commonfabric/api";
+import type {
+  PatternCompatibilityReport,
+  PiecePatternRef,
+} from "@commonfabric/piece/ops";
+import ports from "@commonfabric/ports" with { type: "json" };
+import { parseCellPath, UI } from "@commonfabric/runner";
+import { parseScopedIdSegment } from "@commonfabric/runner/shared";
+import { decode } from "@commonfabric/utils/encoding";
+
+import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
+import type {
+  InvocationIdentity,
+  InvocationOutcome,
+  InvocationPhase,
+} from "../lib/callable.ts";
+import {
+  type CellSelection,
+  CellSelectionError,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
+import { cliText } from "../lib/cli-name.ts";
+import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
+import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
+import { renderPiece } from "../lib/piece-render.ts";
 import {
   applyPieceInput,
   checkPiecePattern,
@@ -40,32 +64,10 @@ import type {
   ExecutedPieceCallable,
   PieceCallablesListing,
 } from "../lib/piece.ts";
-import type { PatternCompatibilityReport } from "@commonfabric/piece/ops";
-import type {
-  InvocationIdentity,
-  InvocationOutcome,
-  InvocationPhase,
-} from "../lib/callable.ts";
-import { newSessionId } from "../lib/session.ts";
-import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
-import { renderPiece } from "../lib/piece-render.ts";
-import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
-import { decode } from "@commonfabric/utils/encoding";
-import { cliText } from "../lib/cli-name.ts";
+import { newSessionId } from "../lib/session.ts";
+import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { absPath } from "../lib/utils.ts";
-import type { CellScope } from "@commonfabric/api";
-import { parseCellPath } from "@commonfabric/runner";
-import { parseScopedIdSegment } from "@commonfabric/runner/shared";
-import { UI } from "@commonfabric/runner";
-import ports from "@commonfabric/ports" with { type: "json" };
-import type { PiecePatternRef } from "@commonfabric/piece/ops";
-import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
-import {
-  type CellSelection,
-  CellSelectionError,
-  parseCellSelectionOptions,
-} from "../lib/cell-selection.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -658,7 +660,7 @@ export function invocationPhaseReporter(
  * wall-clock span per observed phase transition (verb contract WS-D, phase
  * timings). Spans are bounded by the phases the `onPhase` callback already
  * observes — initial sync up to dispatch, the dispatched handler run up to
- * its transaction-local commit acknowledgement, the receipt classification,
+ * its transaction-local commit acknowledgment, the receipt classification,
  * and the receipt readback up to settlement — because those boundaries are
  * what the invocation actually reports; nothing new is instrumented inside
  * the runner. Every line goes to stderr so stdout stays exactly the settled
@@ -666,7 +668,7 @@ export function invocationPhaseReporter(
  * a failure exit keeps every span observed before the failure — `finish`
  * closes the in-flight span with the outcome that ended it: `settled`,
  * `failed`, or `detached` for a `--no-wait` exit that stopped at the commit
- * acknowledgement and skipped the readback.
+ * acknowledgment and skipped the readback.
  */
 export function pieceCallPhaseObserver(
   verbose: boolean,
@@ -736,9 +738,17 @@ export function renderPieceCallOutcome(
       // it is advisory until the invocation protocol carries it in the
       // stdout Invocation JSON (verb contract WS-D), and --quiet callers
       // asked for the bare result.
-      const ref = result.resultRef;
+      //
+      // Written as an address argument, which is the same spelling the
+      // receipt hint below uses: a caller reads the address off one command
+      // and passes it to the next without taking it apart first. It stays
+      // bare because the readback runs under the same configured space as
+      // the call; `cf exec`, whose space comes from the mount instead,
+      // prints the space-carrying canonical form.
+      const ref = addressArgument(result.resultRef);
       hintOut(
-        `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
+        `Tool result cell: ${ref} (read it back with ` +
+          `\`cf piece get --piece ${ref}\`)`,
         false,
       );
     }
@@ -754,18 +764,12 @@ export function renderPieceCallOutcome(
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
     // The address the envelope published, when the runtime wrote a receipt.
     // It leads the detached next steps because it collects the outcome
-    // without running the verb again. The scope is part of the address —
-    // reopening a user- or session-scoped cell without it resolves the
-    // space-scoped instance, a different cell (CallableResultRef) — so the
-    // hint spells the non-default scopes in the `id@scope` form
-    // `parseScopedId` accepts, and only those: the bare form already means
-    // space.
-    const receipt = result.invocation.receipt;
-    const receiptId = receipt === undefined
-      ? undefined
-      : receipt.scope === "space"
-      ? receipt.id
-      : `${receipt.id}@${receipt.scope}`;
+    // without running the verb again, and it composes into the command named
+    // beside it: the envelope publishes it as one canonical reference string,
+    // which `--piece` takes back in unchanged. The scope rides inside it, so
+    // reopening a user- or session-scoped receipt cannot land on the
+    // space-scoped instance, a different cell (CallableResultRef).
+    const receiptId = result.invocation.receipt;
     hintOut(
       opts.detached
         ? cliText(
@@ -835,10 +839,10 @@ export function invocationJson(
 
 /** How long `cf piece call` waits for a handler invocation (verb contract
  * WS-F, F3). `settle` is the default: await this handling's commit
- * acknowledgement plus receipt readback, optionally bounded by the caller's
+ * acknowledgment plus receipt readback, optionally bounded by the caller's
  * patience (`--wait <seconds>`). `commit` (`--no-wait`) awaits the
- * transaction-local commit acknowledgement — the durable point; the handler
- * runs in THIS process, so the acknowledgement is not skippable — and skips
+ * transaction-local commit acknowledgment — the durable point; the handler
+ * runs in THIS process, so the acknowledgment is not skippable — and skips
  * only the receipt readback. */
 export interface PieceCallWaitControl {
   mode: "settle" | "commit";
@@ -1045,7 +1049,9 @@ const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
 const PIECE_OPTION_HELP =
   "The target piece: an id, slug, or canonical LLM-friendly reference " +
-  "(/of:fid1:.../).";
+  "(/of:fid1:.../). A space embedded in the reference (/@did:.../of:.../) " +
+  "supplies --space when the flag is absent, and must agree with it when " +
+  "both are given.";
 const PIECE_OPTION_PATH_HELP = `${PIECE_OPTION_HELP} A path embedded in ` +
   `the reference prefixes the positional path.`;
 const PIECE_REGISTRY_LINK_EXAMPLE = [
@@ -1748,7 +1754,8 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   .option(
     "--select <fields:string>",
     "Project output to comma-separated field paths; a trailing @ asks for a " +
-      "position's address, and @ alone for the source's own",
+      "position's address, and @ alone for the source's own. An address " +
+      "comes back as one reference string, which --piece takes back in",
   )
   .option(
     "--schema <schema:string>",
@@ -2018,15 +2025,16 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "Exit once this handling's commit is acknowledged (before the callable " +
       "name), skipping only the receipt readback: stdout reports status " +
       '"committed" plus the receipt address, so `cf piece get --piece <that ' +
-      "id>` collects the outcome later without re-running the handler; a " +
-      "call naming the same session and --invocation recovers it too, but " +
+      "address>` collects the outcome later without re-running the handler; " +
+      "a call naming the same session and --invocation recovers it too, but " +
       "runs the handler body again. The handler still executes here and its " +
       "commit is durable. Handler invocations only.",
   )
   .option(
     "--show-links",
     "Annotate the Invocation JSON with a links dictionary mapping result " +
-      "paths to their backing cell addresses (before the callable name). " +
+      "paths to their backing cell addresses, each one reference string " +
+      "--piece takes back in (before the callable name). " +
       'The root "/" entry is the result\'s own backing document — the ' +
       "receipt, unless the result is itself a reference, in which case a " +
       'separate "receipt" entry keeps the receipt address; other entries ' +
@@ -2533,6 +2541,12 @@ export function parsePieceOptions(
 // ways of defining service components, we cannot make the options
 // "required" with cliffy. Ensure that all required values are
 // available after parsing both args and env vars.
+//
+// The space can arrive three ways: `--url` embeds it, `--space` names it, and
+// a canonical `--piece` reference may carry it as a `/@did:.../` prefix. A
+// reference's space fills an absent `--space`; a present one must agree —
+// checked at parse time when `--space` is a DID, and at session open through
+// `validateEmbeddedSpaces` when it is a name still to be resolved.
 export function parseSpaceOptions(
   input: PieceCLIOptions,
 ): SpaceConfig {
@@ -2570,12 +2584,6 @@ export function parseSpaceOptions(
       { exitCode: 1 },
     );
   }
-  if (!input.space) {
-    throw new ValidationError(
-      `Missing required option: "--space".`,
-      { exitCode: 1 },
-    );
-  }
 
   if (input.piece) {
     // Do not validate here -- piece is only
@@ -2587,7 +2595,10 @@ export function parseSpaceOptions(
       output.piece = llmRef.pieceId;
       if (llmRef.scope) output.pieceScope = llmRef.scope;
       if (llmRef.path.length > 0) output.piecePath = llmRef.path;
-      if (llmRef.embeddedSpace) output.embeddedSpaces = [llmRef.embeddedSpace];
+      if (llmRef.embeddedSpace) {
+        output.embeddedSpaces = [llmRef.embeddedSpace];
+        if (!input.space) output.space = llmRef.embeddedSpace;
+      }
     } else {
       const parsedPiece = parseScopedId(input.piece);
       output.piece = parsedPiece.id;
@@ -2595,15 +2606,15 @@ export function parseSpaceOptions(
     }
   }
 
-  output.apiUrl = normalizeApiUrl(input.apiUrl);
-  output.space = input.space;
-
-  if (!input.identity) {
+  if (input.space) output.space = input.space;
+  if (!output.space) {
     throw new ValidationError(
-      `Missing required option: "--identity", or "CF_IDENTITY".`,
+      `Missing required option: "--space".`,
       { exitCode: 1 },
     );
   }
+
+  output.apiUrl = normalizeApiUrl(input.apiUrl);
   return output as PieceConfig;
 }
 

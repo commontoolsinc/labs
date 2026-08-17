@@ -1,9 +1,10 @@
-import { encodePointer } from "../../../memory/v2/path.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { uniqueCfcAtoms } from "./observation.ts";
+
+import { encodePointer } from "../../../memory/v2/path.ts";
+import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
+import { uniqueCfcAtoms } from "./observation.ts";
 
 export type IFCLabel = {
   confidentiality?: CfcConfClause[];

@@ -1,16 +1,17 @@
 /**
  * A small JSON / JSONC highlighter and structure builder for the pager. It is
  * hand-written — it shares nothing with the TypeScript parser — so a `.json` or
- * `.jsonc` file is coloured as data (keys apart from string values, numbers,
+ * `.jsonc` file is colored as data (keys apart from string values, numbers,
  * `true`/`false`/`null`, rainbow brackets) rather than run through a TypeScript
  * parse that would misread a bare top-level `{…}` as a block and shred it.
  *
  * The tokeniser is lenient: it never throws on malformed input (an unterminated
- * string or comment simply runs to end of file) so the pager keeps colouring a
+ * string or comment simply runs to end of file) so the pager keeps coloring a
  * file the user is midway through editing. JSONC line and block comments and
- * trailing commas are coloured, not rejected. Object keys become a navigation
+ * trailing commas are colored, not rejected. Object keys become a navigation
  * tree, so `wasd`/Tab step through a document's structure.
  */
+
 import type {
   Definition,
   Document,
@@ -29,7 +30,7 @@ interface Token {
   readonly start: number;
   readonly end: number;
   readonly cls: TokenClass;
-  /** Nesting depth for `bracket` tokens, for rainbow colouring. */
+  /** Nesting depth for `bracket` tokens, for rainbow coloring. */
   readonly depth?: number;
 }
 
@@ -165,7 +166,7 @@ function isWordChar(c: string): boolean {
   return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z");
 }
 
-/** Colour `text` into rendered lines by splitting each token across the line
+/** Color `text` into rendered lines by splitting each token across the line
  * boundaries it spans (a block comment is the only token that crosses one). */
 export function jsonHighlightLines(text: string): Line[] {
   const lineStarts = computeLineStarts(text);
@@ -205,7 +206,7 @@ export function jsonHighlightLines(text: string): Line[] {
   return rawLines.map((t, i) => ({ text: t, spans: spans[i] }));
 }
 
-/** A whole-document JSON highlighter. JSON is cheap enough to recolour whole on
+/** A whole-document JSON highlighter. JSON is cheap enough to recolor whole on
  * every keystroke, so no incremental state is needed. */
 export function createJsonHighlighter(initial: string): Highlighter {
   let lines: Line[] = jsonHighlightLines(initial);
@@ -220,7 +221,7 @@ export function createJsonHighlighter(initial: string): Highlighter {
   };
 }
 
-/** A full JSON {@link Document}: coloured lines, an object-key navigation tree,
+/** A full JSON {@link Document}: colored lines, an object-key navigation tree,
  * and a name → declaration index over the keys. */
 export function jsonDocument(text: string): Document {
   const lines = jsonHighlightLines(text);

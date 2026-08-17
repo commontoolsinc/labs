@@ -16,6 +16,7 @@
  * barrier's discriminating coverage is the pattern-test corpus, where removing
  * it fails seven assertions across `topics`, `lobby`, and `cfc-group-chat-demo`.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";

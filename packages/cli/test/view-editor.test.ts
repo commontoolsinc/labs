@@ -1,10 +1,11 @@
 /**
- * Editor behaviour at the session level: revealing/moving/hiding the text
+ * Editor behavior at the session level: revealing/moving/hiding the text
  * cursor, live re-highlighting on edit, the Emacs kill/yank bindings reached
  * through the session, saving to disk, and the dirty-quit save prompt. The
- * cursor-free pager behaviour lives in view-session.test.ts; the pure edit
+ * cursor-free pager behavior lives in view-session.test.ts; the pure edit
  * engine is covered in view-editbuffer.test.ts.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument, promptText } from "./view-helpers.ts";
 import { highlightDocument } from "../lib/view/languages/typescript/parse.ts";
@@ -502,13 +503,13 @@ Deno.test("editor: typing re-highlights live and defers only the structure repar
   assert(!s.needsReparse, "reparse clears the deferred flag");
 });
 
-Deno.test("editor: opening a block comment re-colours the following lines live", () => {
+Deno.test("editor: opening a block comment re-colors the following lines live", () => {
   const { src } = memSource();
   const s = editSession("const a = 1;\nconst b = 2;\n", src);
   press(s, "e"); // reveal at (0,0)
   type(s, "/* "); // open an (unterminated) block comment at the top
-  // Line 1 is now inside the comment — re-coloured immediately, no reparse. A
-  // per-line patch would leave `const` on line 1 still keyword-coloured.
+  // Line 1 is now inside the comment — re-colored immediately, no reparse. A
+  // per-line patch would leave `const` on line 1 still keyword-colored.
   const line1 = s.doc.lines[1];
   assert(
     !line1.spans.some((sp) => sp.cls === "storageKeyword"),
@@ -516,7 +517,7 @@ Deno.test("editor: opening a block comment re-colours the following lines live",
   );
   assert(
     line1.spans.some((sp) => sp.cls === "comment"),
-    `line 1 should be comment-coloured: ${line1.spans.map((x) => x.cls)}`,
+    `line 1 should be comment-colored: ${line1.spans.map((x) => x.cls)}`,
   );
 });
 

@@ -5,13 +5,9 @@
 // Spec: docs/specs/sqlite-builtin/06-cfc.md ("Read — re-derive per row,
 // attach, ceiling"; "Fail-closed rules").
 
-import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import {
-  computeRowLabelRead,
-  resolveCeilingPlaceholders,
-} from "../src/builtins/sqlite/row-label-read.ts";
-import { table } from "@commonfabric/memory/sqlite/schema";
+import { describe, it } from "@std/testing/bdd";
+
 import {
   all,
   any,
@@ -22,6 +18,12 @@ import {
   principal,
   whenMatches,
 } from "@commonfabric/memory/sqlite/row-label";
+import { table } from "@commonfabric/memory/sqlite/schema";
+
+import {
+  computeRowLabelRead,
+  resolveCeilingPlaceholders,
+} from "../src/builtins/sqlite/row-label-read.ts";
 
 const ADDR = /[^\s<>,;"]+@[^\s<>,;"]+/g;
 const OWNER = "did:key:zOwner";

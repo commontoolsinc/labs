@@ -16,6 +16,22 @@
  * the info card navigate the same patterns/builders/schemas the source view
  * would show, scoped to what the diff touches.
  */
+
+import { dirname, isAbsolute, join, relative } from "@std/path";
+
+import { spawnSync } from "@node/child_process";
+
+import { cpLen } from "./ansi.ts";
+import { type DiffFile, type DiffHunk, type DiffModel } from "./diff.ts";
+import type { Language } from "./languages/language.ts";
+import {
+  canRenderDiffLines,
+  decodeLanguageInput,
+  languageForFile,
+  readOnlyReasonFor,
+  renderedLinesFor,
+} from "./languages/language.ts";
+import { computeLineStarts, lineIndexOf } from "./lines.ts";
 import type {
   Definition,
   Document,
@@ -25,19 +41,6 @@ import type {
   ViewMode,
 } from "./model.ts";
 import { flattenStructure } from "./model.ts";
-import { type DiffFile, type DiffHunk, type DiffModel } from "./diff.ts";
-import { computeLineStarts, lineIndexOf } from "./lines.ts";
-import type { Language } from "./languages/language.ts";
-import {
-  canRenderDiffLines,
-  decodeLanguageInput,
-  languageForFile,
-  readOnlyReasonFor,
-  renderedLinesFor,
-} from "./languages/language.ts";
-import { cpLen } from "./ansi.ts";
-import { dirname, isAbsolute, join, relative } from "@std/path";
-import { spawnSync } from "@node/child_process";
 
 /** How the diff document reaches the workspace. Injectable for tests. */
 export interface DiffWorkspace {
@@ -69,7 +72,7 @@ export interface DiffWorkspace {
 export function realWorkspace(cwd: string): DiffWorkspace {
   const repoRoot = findRepoRoot(cwd);
   const bases = repoRoot && repoRoot !== cwd ? [repoRoot, cwd] : [cwd];
-  // The bound is physical, not lexical: paths are canonicalised before the
+  // The bound is physical, not lexical: paths are canonicalized before the
   // containment check, so an in-repo symlink pointing outside the workspace
   // cannot smuggle an outside file in.
   const realBases = bases.map((b) => safeRealPath(b) ?? b);
@@ -113,7 +116,7 @@ export function realWorkspace(cwd: string): DiffWorkspace {
       for (const base of bases) {
         const abs = join(base, path);
         if (!bounded(abs)) continue; // `..` escapes and symlinks out: blocked
-        // bounded() canonicalised abs via realPathSync, so statSync resolves;
+        // bounded() canonicalized abs via realPathSync, so statSync resolves;
         // only the file-vs-directory check remains. read() guards the contents.
         if (Deno.statSync(abs).isFile) return abs;
       }
@@ -831,7 +834,7 @@ export function buildDiffDocument(
 
   for (const [fileIndex, file] of model.files.entries()) {
     // The language is chosen once per file, from its path, and every operation
-    // on the file — parsing the workspace copy, colouring fragments, projecting
+    // on the file — parsing the workspace copy, coloring fragments, projecting
     // structure — dispatches through it. A rename can change the extension, so
     // the old and new sides resolve separately.
     const newLanguage = languageForFile(file.newPath ?? file.oldPath);
@@ -999,7 +1002,7 @@ interface FragmentLine {
   code: string;
   /** Whether decoding removed a BOM before parsing this source line. */
   omitsUtf8Bom?: boolean;
-  /** Context can establish old-side state without replacing new-side colours. */
+  /** Context can establish old-side state without replacing new-side colors. */
   render?: boolean;
 }
 
@@ -1021,7 +1024,7 @@ interface HunkCtx {
   definitions: Map<string, Definition[]>;
   hunks: DiffHunkInfo[];
   /** The languages of the new and old sides (they differ across a rename that
-   * changes the extension); each colours its side's fragments and, for the new
+   * changes the extension); each colors its side's fragments and, for the new
    * side, projects the hunk's structure. */
   newLanguage: Language;
   oldLanguage: Language;

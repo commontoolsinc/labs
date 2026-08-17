@@ -15,26 +15,26 @@
  * as well -- two values differing only in it hash differently.
  */
 
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 
-import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { isConvertibleNativeInstance } from "@/native-conversion.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import {
   isFabricCompatible,
   shallowFabricFromNativeValue,
 } from "@/fabric-value.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { isConvertibleNativeInstance } from "@/native-conversion.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
 } from "@/native-type-tags.ts";
-import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {
@@ -174,6 +174,44 @@ describe("FabricRegExp", () => {
         it("decodes non-object state to `ProblematicValue`", () => {
           const decoded = codec.decode(expectedTag, "nope", context);
           expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+
+        it("decodes a non-string field to `ProblematicValue`", () => {
+          // Only the `es2025` flavor is validated for syntax, so under any
+          // other one these values reach the constructor untouched -- and
+          // `source` and `flags` are exposed by getters typed `string`. An
+          // unchecked object here would put one behind such a getter, and take
+          // an unfrozen reference into a frozen instance with it.
+          for (
+            const state of [
+              { flavor: "future", source: { mutable: true }, flags: "g" },
+              { flavor: "future", source: "a", flags: ["g"] },
+              { flavor: ["future"], source: "a", flags: "g" },
+              // Present as `undefined` is present, not absent. A peer can
+              // reach this through the nonterminal walk by encoding the field
+              // as `{"/Undefined@1": null}`, and defaulting it would answer a
+              // question the wire did ask -- with `flavor`, by naming a
+              // dialect the sender did not.
+              { flavor: undefined, source: "a", flags: "g" },
+            ]
+          ) {
+            expect(codec.decode(expectedTag, state as never, context))
+              .toBeInstanceOf(ProblematicValue);
+          }
+        });
+
+        it("decodes a state omitting a field, taking that field's default", () => {
+          // Absent is not the same as present-and-wrong: a narrower encoder
+          // may leave a field out, and the default stands in for it.
+          const decoded = codec.decode(
+            expectedTag,
+            {},
+            context,
+          ) as FabricRegExp;
+
+          expect(decoded).toBeInstanceOf(FabricRegExp);
+          expect(decoded.source).toBe("");
+          expect(decoded.flags).toBe("");
         });
 
         it("decodes an unparseable `es2025` pattern to `ProblematicValue`", () => {

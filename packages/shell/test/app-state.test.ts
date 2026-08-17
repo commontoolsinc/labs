@@ -1,4 +1,7 @@
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+
+import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
 import {
   AppState,
   AppStateSerialized,
@@ -14,8 +17,6 @@ import {
   serialize,
   urlToAppView,
 } from "@commonfabric/shell/shared";
-import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
-import { assert, assertEquals, assertThrows } from "@std/assert";
 
 const API_URL = "http://common.test/";
 const SPACE_NAME = "common-knowledge";

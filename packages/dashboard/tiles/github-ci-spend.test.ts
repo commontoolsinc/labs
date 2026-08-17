@@ -1,6 +1,9 @@
-// ci spend tests. The tile is a pure collect(ctx) -> TileView over GitHub and
-// Blacksmith billing data. The tests pin the clock and provide fixed responses
-// for both sources.
+/**
+ * ci spend tests. The tile is a pure collect(ctx) -> TileView over GitHub and
+ * Blacksmith billing data. The tests pin the clock and provide fixed responses
+ * for both sources.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";
@@ -311,7 +314,7 @@ Deno.test("ci spend: no Actions budget in GitHub -> the projection stands, uncom
   assertEquals(none.sub, undefined);
   assertStringIncludes(none.extra ?? "", "Budget $???");
   assertEquals(none.status, "good"); // an absent budget never alarms
-  // The org budgets Actions' neighbours but not Actions.
+  // The org budgets Actions' neighbors but not Actions.
   const other = await view("2026-01-20T09:00:00Z", {
     [usagePath(2026, 1)]: usage,
     [budgetsPath()]: {

@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { FakeTime } from "@std/testing/time";
+
 import type { ReactiveControllerHost } from "lit";
+
 import { InputTimingController } from "./input-timing-controller.ts";
 
 function createMockHost(): ReactiveControllerHost {

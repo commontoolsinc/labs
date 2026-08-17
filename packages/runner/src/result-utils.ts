@@ -1,5 +1,6 @@
-import type { Cell } from "./cell.ts";
 import type { FabricValue } from "@commonfabric/api";
+
+import type { Cell } from "./cell.ts";
 
 /**
  * @param resultCell The cell whose meta pattern will be set

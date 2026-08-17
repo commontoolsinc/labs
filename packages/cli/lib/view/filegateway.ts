@@ -4,6 +4,7 @@
  * test injects a fake. Opening a file selects its language from raw bytes, then
  * yields an {@link EditableSource} plus the language-decoded buffer.
  */
+
 import { basename, dirname, join } from "@std/path";
 import { type EditableSource, fileSource } from "./editsource.ts";
 import {
@@ -33,7 +34,7 @@ export interface FileGateway {
   list(absDir: string): DirEntry[] | null;
   /** Open a file: its source and decoded buffer, or null on failure. */
   open(absPath: string): { source: EditableSource; text: string } | null;
-  /** Join a directory and a path segment, normalised. */
+  /** Join a directory and a path segment, normalized. */
   join(dir: string, segment: string): string;
   /** The parent directory of a path. */
   parent(path: string): string;

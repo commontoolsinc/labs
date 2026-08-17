@@ -1,14 +1,14 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import type { Module } from "../src/builder/types.ts";
-import type { toEncodableForm } from "../src/builder/types.ts";
-import { moduleToEncodableForm } from "../src/builder/to-encodable-form.ts";
+
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { moduleToEncodableForm } from "../src/builder/to-encodable-form.ts";
+import type { Module, toEncodableForm } from "../src/builder/types.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import { Runtime } from "../src/runtime.ts";
 
 /**
  * Identity E5 (design §5, as decided): host-trusted values ride a minted

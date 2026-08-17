@@ -1,20 +1,21 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
   State,
   URI,
 } from "@commonfabric/memory/interface";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+
+import type { JSONSchema, JSONSchemaTypes } from "../src/builder/types.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
 import {
   IMemorySpaceValueAttestation,
+  ManagedStorageTransaction,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
-import { StoreObjectManager } from "../src/storage/query.ts";
-import { ManagedStorageTransaction } from "../src/traverse.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import type { JSONSchema, JSONSchemaTypes } from "../src/builder/types.ts";
 
 function getTraverser(
   store: Map<string, Revision<State>>,

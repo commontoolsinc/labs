@@ -1,5 +1,8 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { StaticCache } from "@commonfabric/static";
+
 import {
   CompilerError,
   getTypeScriptEnvironmentTypes,
@@ -8,7 +11,6 @@ import {
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "../mod.ts";
-import { StaticCache } from "@commonfabric/static";
 
 type TestDef =
   & { name: string; source: string; expectedError?: string }

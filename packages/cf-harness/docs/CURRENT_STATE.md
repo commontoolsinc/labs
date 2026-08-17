@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-07-30
+Last verified: 2026-08-14
 
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
@@ -39,13 +39,21 @@ The current package provides:
 - workspace, Fabric, and explicit host mounts with path containment;
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
-- one child at a time through `default`, `browser`, `web_fetch`, and
-  `web_search` profiles;
+- one child at a time through `default`, `browser`, `web_fetch`, `web_search`,
+  and `pattern-author` profiles;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;
 - explicit skill preload, indexed supporting-resource reads, and exact
   allowlisted Deno/Bash skill scripts;
+- recoverable rejection of a malformed tool call: a name no tool answers to,
+  arguments that are not a JSON object, or a `delegate_task` argument of the
+  wrong shape comes back as a `cf-harness.invalid-tool-call` tool result naming
+  the field and the shape expected of it — never the value it rejected — and the
+  run carries on; the call is recorded as a denied policy decision, a `not-run`
+  tool activity, and an `invalid_tool_call` failure record. Only what the model
+  cannot correct — transport, engine invariants, artifact persistence,
+  cancellation, the turn cap — ends the run;
 - transcript-based resume and durable run artifacts;
 - per-turn and aggregate token/cache usage in run reports, operator output,
   batch metadata, and interactive turn-completion events;
@@ -62,6 +70,26 @@ The current package provides:
   resume; the prompt loop swaps addresses to tokens in model-bound tool output
   and resolves tokens in model-authored tool arguments before policy evaluation
   and dispatch, `delegate_task` arguments excepted;
+- cross-agent handles: a delegation seeds the child's own table with a verbatim
+  copy of every parent entry whose token the `goal` or `context` names, and
+  nothing else, so a child resolves exactly the references the delegation handed
+  it while the tokens stay identical across the hierarchy; a reference the child
+  produces is resolved through the child's table and minted through the parent's
+  boundary, reaching the parent as a parent-resolvable token, and any
+  token-shaped text still standing after that resolution is scrubbed to fixed
+  inert text so it cannot resolve later in the parent's own table;
+- shape captured where it is free and read back by token: a handle entry may
+  carry the schema of its referent — a `run_pattern` result reference records
+  the compiled pattern's result schema, marked `schemaSource: "harness"` — while
+  no mint takes a schema off the reference it is handed or reads a cell to fill
+  one in, so an entry without one means the shape was never free to capture;
+- a `describe_handle` tool, available in any run that has handles and gated on
+  no fabric session: given a token it reports the harness-derived schema and the
+  path segments of the referent, never the value, and reports an unknown token
+  as unknown rather than as an error. It never dereferences the cell. Disclosing
+  shape is a policy-governed read whose current default is permissive; a schema
+  without harness provenance is not disclosed, closing the encoding channel a
+  data-carried schema would open;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
   environment fallbacks): compiles and runs an inline `sourceText` pattern
@@ -76,7 +104,29 @@ The current package provides:
   value, and leaves the piece detached (no recorded origin) and out of the
   space's registered piece list, with run→piece provenance carried by the run's
   persisted artifacts; without the session configuration the tool is absent from
-  the tool surface.
+  the tool surface, for a `default`- or `pattern-author`-profile subagent as
+  much as for the parent — a child shares the one session the parent built;
+- a `pattern-author` child profile that authors and runs Common Fabric pattern
+  source: `run_pattern` under the same fabric-session gate, plus `read_file`,
+  `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable
+  is a result reference rather than a file. It preloads whichever of
+  `pattern-dev` and `pattern-schema` the run's skill registry carries — a run
+  without them still gets the same child, without the guidance — and it is told
+  that the references its delegation hands it are addresses to wire in as
+  pattern inputs, that it owns the write/compile-error/fix loop, and that it
+  returns the result reference plus an inert description rather than data. This
+  is the division of labour a data question wants: the root orchestrates and
+  never pays for pattern syntax or reads the data, and the child computes over
+  references it cannot read out. It runs on its own turn budget of 24 rather
+  than the default subagent cap of 8, since each compile-error iteration costs a
+  turn, and it carries a return contract — a discriminated union of
+  `{ ok: true, resultRef, describes }` and `{ ok: false, code, detail? }` —
+  applied to any `pattern-author` delegation that declares no `returnSchema` of
+  its own, so a failure and a success are different shapes and only the success
+  branch carries a reference. The failure `code` comes from a fixed inert
+  vocabulary, so a parent learns why without declassifying anything, and any
+  child return saying `ok: false` reaches the parent as a coded failure rather
+  than as a schema complaint.
 
 Run the capability probe instead of copying this list into adapters:
 

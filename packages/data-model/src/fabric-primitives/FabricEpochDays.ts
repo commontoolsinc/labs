@@ -12,10 +12,10 @@ import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import {
+  JSON_CODEC,
   type ReconstructionContext,
   type TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 

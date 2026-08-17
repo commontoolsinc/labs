@@ -1,19 +1,22 @@
-// `Runtime.editWithRetry` retries on an ALLOW-LIST of rejection classes, not on
-// the truthiness of the commit error.
-//
-// Before this, every commit rejection was retried: a deterministic refusal —
-// an ACL `ProtocolError` about operation shape, an `AuthorizationError`, a
-// `PreconditionFailedError` whose own interface doc says "this class is
-// PERMANENT: the client must not retry" — burned the whole budget on identical
-// doomed round-trips, each one emitting a subscriber revert notification from
-// `finalizeRejection`. With the default budget that is 6 attempts; callers size
-// budgets larger (pattern-manager: `Math.max(16, 2 * importEdges + 8)`).
-//
-// These tests therefore assert the COMMIT COUNT, not just the outcome. A
-// classification that got the right final error after five doomed attempts
-// would pass an outcome-only assertion and fail here. The counterpart —
-// a genuine `ConflictError` still exhausting its budget — is asserted here and
-// in compile-cache-writeback-conflict.test.ts.
+/**
+ * `Runtime.editWithRetry` retries on an ALLOW-LIST of rejection classes, not on
+ * the truthiness of the commit error.
+ *
+ * Before this, every commit rejection was retried: a deterministic refusal —
+ * an ACL `ProtocolError` about operation shape, an `AuthorizationError`, a
+ * `PreconditionFailedError` whose own interface doc says "this class is
+ * PERMANENT: the client must not retry" — burned the whole budget on identical
+ * doomed round-trips, each one emitting a subscriber revert notification from
+ * `finalizeRejection`. With the default budget that is 6 attempts; callers size
+ * budgets larger (pattern-manager: `Math.max(16, 2 * importEdges + 8)`).
+ *
+ * These tests therefore assert the COMMIT COUNT, not just the outcome. A
+ * classification that got the right final error after five doomed attempts
+ * would pass an outcome-only assertion and fail here. The counterpart —
+ * a genuine `ConflictError` still exhausting its budget — is asserted here and
+ * in compile-cache-writeback-conflict.test.ts.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assert, assertEquals } from "@std/assert";

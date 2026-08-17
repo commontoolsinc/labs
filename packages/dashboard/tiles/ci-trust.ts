@@ -15,11 +15,11 @@ import {
 import { strip } from "../lib.ts";
 import { CI_RUNS_MAX, CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_COLS, TRUST_GOOD, TRUST_WARN } from "../config.ts";
 
-type TrustOutcome = "green" | "red" | "run" | "grey";
+type TrustOutcome = "green" | "red" | "run" | "gray";
 
 function trustOutcome(run: Run): TrustOutcome {
   if (run.status === "in_progress") return "run";
-  if (run.status !== "completed" || !run.conclusion) return "grey";
+  if (run.status !== "completed" || !run.conclusion) return "gray";
   return run.conclusion === "success" && run.run_attempt === 1 ? "green" : "red";
 }
 

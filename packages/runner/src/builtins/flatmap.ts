@@ -1,5 +1,43 @@
-import type { Pattern } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import type { Pattern } from "../builder/types.ts";
+import type { AddCancel } from "../cancel.ts";
+import type { Cell } from "../cell.ts";
+import { resolveLink } from "../link-resolution.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import type { RawBuiltinReturnType } from "../module.ts";
+import { setPatternCell } from "../result-utils.ts";
+import type { Runtime } from "../runtime.ts";
+import type { Action } from "../scheduler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../storage/reactivity-log.ts";
+import {
+  listElementKeys,
+  releaseRemovedElements,
+} from "./list-element-keys.ts";
+import { listElementLink } from "./list-element-link.ts";
+import {
+  type ElementRun,
+  type SetupRecord,
+  trackListSetupRollback,
+} from "./list-element-rollback.ts";
+import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { issueResultContainerSetup } from "./list-result-container.ts";
+import { listResultSchema } from "./list-result-schema.ts";
+import { resolveOpPattern } from "./op-pattern-ref.ts";
+import {
+  createResumeRepublisher,
+  type ElementContribution,
+} from "./resume-republish.ts";
+import {
+  narrowestCellScope,
+  outputSpotFromBinding,
+  scopedCell,
+} from "./scope-policy.ts";
 
 // Presence probe for the result container: slots resolve as cells, so the
 // coordinator can ask "is the container initialized?" without materializing
@@ -20,44 +58,6 @@ const FLATMAP_INPUT_SCHEMA = internSchema({
   },
   required: ["op"],
 });
-
-import type { Cell } from "../cell.ts";
-import type { Action } from "../scheduler.ts";
-import type { AddCancel } from "../cancel.ts";
-import type { Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { RawBuiltinReturnType } from "../module.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
-import { listResultSchema } from "./list-result-schema.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
-import { setPatternCell } from "../result-utils.ts";
-import { issueResultContainerSetup } from "./list-result-container.ts";
-import {
-  narrowestCellScope,
-  outputSpotFromBinding,
-  scopedCell,
-} from "./scope-policy.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
-import {
-  type ElementRun,
-  type SetupRecord,
-  trackListSetupRollback,
-} from "./list-element-rollback.ts";
-import {
-  listElementKeys,
-  releaseRemovedElements,
-} from "./list-element-keys.ts";
-import {
-  createResumeRepublisher,
-  type ElementContribution,
-} from "./resume-republish.ts";
-import {
-  linkResolutionProbe,
-  machineryRead,
-} from "../storage/reactivity-log.ts";
-import { resolveLink } from "../link-resolution.ts";
-import { listElementLink } from "./list-element-link.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
 

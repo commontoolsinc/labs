@@ -1935,7 +1935,7 @@ contract, analogous to §11.4's `__cfReg` pairing:
   (`packages/runner/test/security.test.ts`, "does not expose loader machinery on
   the module compartment globals").
 - **Tooling consumer** — `cf view` classifies the three names as "module
-  scaffolding" for syntax colouring via its own hard-coded copy of the list
+  scaffolding" for syntax coloring via its own hard-coded copy of the list
   (`packages/cli/lib/view/languages/typescript/vocab.ts`, `SCAFFOLDING_NAMES`), which can drift from
   `SHADOWED_FACTORY_BINDINGS` since it does not import it.
 

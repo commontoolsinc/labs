@@ -1,16 +1,20 @@
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
+
 import "../cf-chat-message/index.ts";
 import "../cf-tool-call/index.ts";
+
 import type {
   BuiltInLLMMessage,
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commonfabric/api";
+
 import {
   applyThemeToElement,
   type CFTheme,

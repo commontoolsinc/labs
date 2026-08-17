@@ -1,3 +1,5 @@
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+
 import {
   compatibleMemoryProtocolFlags,
   getMemoryProtocolFlags,
@@ -8,7 +10,6 @@ import {
   type ServerMessage,
   wireMemoryProtocolFlags,
 } from "../v2.ts";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 type TypedError = {
   name: string;

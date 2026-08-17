@@ -1,15 +1,17 @@
-import { describe, it } from "@std/testing/bdd";
-import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { describe, it } from "@std/testing/bdd";
+
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
-import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
-import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
-import type { SinkMaxConfidentiality } from "../src/cfc/mod.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
+import type { SinkMaxConfidentiality } from "../src/cfc/mod.ts";
+import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-sink-ceiling");
 

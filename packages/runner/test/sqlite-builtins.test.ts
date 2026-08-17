@@ -4,17 +4,19 @@
 // not-implemented error (asserted here so the wiring — not fabricated results —
 // is what's tested).
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import { defer } from "@commonfabric/utils/defer";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
-import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { defer } from "@commonfabric/utils/defer";
+
+import { createBuilder } from "../src/builder/factory.ts";
 import { createCell } from "../src/cell.ts";
+import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

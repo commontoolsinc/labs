@@ -1,6 +1,10 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { VDomOp } from "../src/vdom-ops.ts";
+
+import { Identity } from "@commonfabric/identity";
+import { Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { CellHandle } from "@commonfabric/runtime-client";
+
 import {
   clearPieceBoundary,
   getPieceBoundary,
@@ -8,10 +12,8 @@ import {
   providePieceBoundary,
   subscribePieceBoundary,
 } from "../src/main/space-context.ts";
-import type { CellHandle } from "@commonfabric/runtime-client";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "@commonfabric/runner";
+import type { VDomOp } from "../src/vdom-ops.ts";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
 
 // Space stamping (seefeldb's #4074 design): each create-element op
 // carries the space of the cell whose render produced it, elided when

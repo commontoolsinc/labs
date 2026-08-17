@@ -1,14 +1,16 @@
-import * as esbuild from "esbuild";
-import { denoPlugin } from "@deno/esbuild-plugin";
 import { debounce } from "@std/async/debounce";
+import { blue, dim, green, red, yellow } from "@std/fmt/colors";
 import {
   isAbsolute as isAbsolutePath,
   join as joinPath,
   relative as relativePath,
   resolve as resolvePath,
 } from "@std/path";
+
+import { denoPlugin } from "@deno/esbuild-plugin";
+import * as esbuild from "esbuild";
+
 import { ResolvedConfig, ResolvedEntryPoint } from "./interface.ts";
-import { blue, dim, green, red, yellow } from "@std/fmt/colors";
 
 function formatFileSize(bytes: number): string {
   const units = ["B", "KB", "MB", "GB"];

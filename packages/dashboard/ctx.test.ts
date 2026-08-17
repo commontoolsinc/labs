@@ -1,6 +1,9 @@
-// Ctx tests: makeCtx() builds the memoized data sources every tile reads. The
-// GitHub API is stubbed with a canned runs response, so these pin the paging,
-// the age cutoff, the cap, and the caching without a network.
+/**
+ * Ctx tests: makeCtx() builds the memoized data sources every tile reads. The
+ * GitHub API is stubbed with a canned runs response, so these pin the paging,
+ * the age cutoff, the cap, and the caching without a network.
+ */
+
 import { assert, assertEquals } from "@std/assert";
 import { makeCtx } from "./ctx.ts";
 import {

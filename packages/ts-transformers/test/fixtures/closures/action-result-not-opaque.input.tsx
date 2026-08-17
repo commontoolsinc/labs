@@ -3,6 +3,7 @@
  * opaque origin but handler results are typically used directly
  * (no property access), so opaque classification doesn't affect them.
  */
+
 import { action, pattern, UI, Writable } from "commonfabric";
 
 interface State {

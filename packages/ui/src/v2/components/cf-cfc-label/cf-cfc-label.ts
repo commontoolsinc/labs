@@ -1,6 +1,7 @@
-import { css, html } from "lit";
-import { BaseElement } from "../../core/base-element.ts";
 import type { CfcLabelView } from "@commonfabric/runtime-client";
+import { css, html } from "lit";
+
+import { BaseElement } from "../../core/base-element.ts";
 
 type LabelKey = "confidentiality" | "integrity";
 

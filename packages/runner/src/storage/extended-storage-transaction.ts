@@ -1,72 +1,21 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { getLogger } from "@commonfabric/utils/logger";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   type FabricPlainObject,
   type FabricValue,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { aclDocId } from "@commonfabric/memory/acl";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import type {
-  CommitError,
-  IAttestation,
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-  InactiveTransactionError,
-  INotFoundError,
-  IReadActivity,
-  IReadOptions,
-  IStorageTransaction,
-  ITransactionJournal,
-  IWriteAttempt,
-  IWriteOptions,
-  MemorySpace,
-  Metadata,
-  ReadError,
-  Result,
-  StorageTransactionFailed,
-  StorageTransactionStatus,
-  TransactionCommitOptions,
-  TransactionReactivityLog,
-  TransactionWriteDetail,
-  Unit,
-  WriteError,
-  WriterError,
-} from "./interface.ts";
-import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
 import type {
   CommitPrecondition,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
-import type { MergeableOpDelta } from "./mergeable-ops.ts";
-import { TransactionAborted } from "./transaction-errors.ts";
-import {
-  getDirectTransactionReactivityLog,
-  getTransactionReadActivities,
-  getTransactionWriteAttempts,
-  getTransactionWriteDetails,
-} from "./transaction-inspection.ts";
-import {
-  clearSchemaRefusalTx,
-  isInternalVerifierRead,
-  isLazyMaterializationTx,
-  markLazyMaterializationTx,
-  noteSchemaRefusalTx,
-  reactivityLogFromActivities,
-  takeSchemaRefusalTx,
-  unmarkLazyMaterializationTx,
-} from "./reactivity-log.ts";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
-import {
-  type NormalizedFullLink,
-  toMemorySpaceAddress,
-} from "../link-types.ts";
-import { normalizeCellScope, scopeRank } from "../scope.ts";
 import type { CellScope } from "../builder/types.ts";
-import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   type AttemptedWrite,
   canonicalizeLogicalPath,
@@ -114,6 +63,57 @@ import {
   type WritePolicyInput,
 } from "../cfc/mod.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
+import {
+  type NormalizedFullLink,
+  toMemorySpaceAddress,
+} from "../link-types.ts";
+import { ignoreReadForScheduling } from "../scheduler.ts";
+import { normalizeCellScope, scopeRank } from "../scope.ts";
+import type {
+  CommitError,
+  IAttestation,
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  InactiveTransactionError,
+  INotFoundError,
+  IReadActivity,
+  IReadOptions,
+  IStorageTransaction,
+  ITransactionJournal,
+  IWriteAttempt,
+  IWriteOptions,
+  MemorySpace,
+  Metadata,
+  ReadError,
+  Result,
+  StorageTransactionFailed,
+  StorageTransactionStatus,
+  TransactionCommitOptions,
+  TransactionReactivityLog,
+  TransactionWriteDetail,
+  Unit,
+  WriteError,
+  WriterError,
+} from "./interface.ts";
+import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
+import {
+  clearSchemaRefusalTx,
+  isInternalVerifierRead,
+  isLazyMaterializationTx,
+  markLazyMaterializationTx,
+  noteSchemaRefusalTx,
+  reactivityLogFromActivities,
+  takeSchemaRefusalTx,
+  unmarkLazyMaterializationTx,
+} from "./reactivity-log.ts";
+import { TransactionAborted } from "./transaction-errors.ts";
+import {
+  getDirectTransactionReactivityLog,
+  getTransactionReadActivities,
+  getTransactionWriteAttempts,
+  getTransactionWriteDetails,
+} from "./transaction-inspection.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,

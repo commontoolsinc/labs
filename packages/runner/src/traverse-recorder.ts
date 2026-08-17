@@ -1,10 +1,11 @@
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import type { SchemaPathSelector } from "@commonfabric/api";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+
 import { getLogger } from "../../utils/src/logger.ts";
 import type { NormalizedFullLink } from "./link-utils.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,

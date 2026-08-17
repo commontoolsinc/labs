@@ -4,6 +4,7 @@
  * chosen one. A read-only diff (its files do not resolve on disk) is enough —
  * the list is derived from the diff text itself.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { Session } from "../lib/view/session.ts";
 import { parseDiff } from "../lib/view/diff.ts";
@@ -88,7 +89,7 @@ const SHOW = [
   "",
 ].join("\n");
 
-Deno.test("jumplist: i lists the diff's files, dirs summarised", () => {
+Deno.test("jumplist: i lists the diff's files, dirs summarized", () => {
   const s = diffSession(TWO_FILES);
   press(s, "i");
   assertEquals(entryText(s), [

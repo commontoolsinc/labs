@@ -1,14 +1,15 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { setEagerSourceAnnotation } from "../src/builder/module.ts";
 import { getComposeBundleSourceMapCallsForTesting } from "@commonfabric/js-compiler/source-map";
-import type { RuntimeProgram } from "../src/harness/types.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { setEagerSourceAnnotation } from "../src/builder/module.ts";
 import type { Module, Pattern } from "../src/builder/types.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
 
 // Regression: under the ESM module-record loader, a verified handler's
 // `implementation.src` must resolve back to its ORIGINAL authored source

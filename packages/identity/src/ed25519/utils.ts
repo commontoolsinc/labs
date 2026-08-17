@@ -1,9 +1,10 @@
+import { decode, encode } from "@commonfabric/utils/encoding";
+import * as ed25519 from "@noble/ed25519";
+import { varint } from "multiformats";
 import { base58btc } from "multiformats/bases/base58";
 import { base64pad } from "multiformats/bases/base64";
-import { varint } from "multiformats";
+
 import { DIDKey } from "../interface.ts";
-import * as ed25519 from "@noble/ed25519";
-import { decode, encode } from "@commonfabric/utils/encoding";
 
 export const ED25519_ALG = "Ed25519";
 const ED25519_CODE = 0xed;

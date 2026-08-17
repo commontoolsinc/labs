@@ -1,7 +1,8 @@
-import ts from "typescript";
-import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { transformFiles } from "./utils.ts";
+import { describe, it } from "@std/testing/bdd";
+
+import ts from "typescript";
+
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import {
   callsMatching,
@@ -12,6 +13,7 @@ import {
   literalToValue,
   parseModule,
 } from "./transformed-ast.ts";
+import { transformFiles } from "./utils.ts";
 
 /**
  * True when some emitted `.for(...)` call is attached directly to a

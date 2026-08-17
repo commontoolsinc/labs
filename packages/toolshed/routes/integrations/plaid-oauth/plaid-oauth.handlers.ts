@@ -1,4 +1,17 @@
-import type { AppRouteHandler } from "@/lib/types.ts";
+import { setBGPiece } from "@commonfabric/background-piece";
+import {
+  type NormalizedLink,
+  parseLink,
+  type SigilLink,
+} from "@commonfabric/runner";
+import {
+  CountryCode,
+  LinkTokenCreateRequest,
+  Transaction,
+  TransactionsSyncRequest,
+} from "plaid";
+
+import { plaidErrorFrom } from "./plaid-oauth.error.ts";
 import type {
   BackgroundIntegrationRoute,
   CreateLinkTokenRoute,
@@ -15,21 +28,9 @@ import {
   removePlaidItem,
   upsertPlaidItem,
 } from "./plaid-oauth.utils.ts";
-import { setBGPiece } from "@commonfabric/background-piece";
-import {
-  type NormalizedLink,
-  parseLink,
-  type SigilLink,
-} from "@commonfabric/runner";
-import { runtime } from "@/index.ts";
 import env from "@/env.ts";
-import {
-  CountryCode,
-  LinkTokenCreateRequest,
-  Transaction,
-  TransactionsSyncRequest,
-} from "plaid";
-import { plaidErrorFrom } from "./plaid-oauth.error.ts";
+import { runtime } from "@/index.ts";
+import type { AppRouteHandler } from "@/lib/types.ts";
 
 /**
  * Plaid Create Link Token Handler

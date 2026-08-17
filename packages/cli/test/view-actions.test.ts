@@ -217,17 +217,17 @@ Deno.test("nodeAtLine finds the innermost containing node", () => {
   );
 });
 
-Deno.test("frameTop: centres a node that fits on screen", () => {
+Deno.test("frameTop: centers a node that fits on screen", () => {
   // node lines 20–29 (height 10), height 40 -> contentRows 39 (fits)
-  // centred: top = 20 - floor((39 - 10) / 2) = 20 - 14 = 6
+  // centered: top = 20 - floor((39 - 10) / 2) = 20 - 14 = 6
   const top = frameTop(20, 29, 40, 1000);
   assertEquals(top, 6);
-  // the node is fully visible and roughly centred
+  // the node is fully visible and roughly centered
   const rows = 39;
   assert(20 >= top && 29 <= top + rows - 1, "whole node on screen");
   const above = 20 - top;
   const below = (top + rows - 1) - 29;
-  assert(Math.abs(above - below) <= 1, "node roughly centred");
+  assert(Math.abs(above - below) <= 1, "node roughly centered");
 });
 
 Deno.test("frameTop: puts a too-tall node's top line ~1/10 down", () => {

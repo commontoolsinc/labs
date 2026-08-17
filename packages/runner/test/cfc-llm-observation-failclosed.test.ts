@@ -26,7 +26,7 @@ import {
 
 const cellWhoseMetadataReadErrors = {
   getAsNormalizedFullLink: () => ({
-    id: "of:labelled-cell",
+    id: "of:labeled-cell",
     space: "did:key:test",
     type: "application/json",
     path: [],

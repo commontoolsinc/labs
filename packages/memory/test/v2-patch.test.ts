@@ -16,11 +16,15 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
-import { applyPatch, applyPatchToDocument } from "../v2/patch.ts";
+
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
 import { FabricInstance } from "@commonfabric/data-model/fabric-value";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
+
+import { applyPatch, applyPatchToDocument } from "../v2/patch.ts";
 
 Deno.test("memory v2 patch preserves `FabricInstance` values with full fidelity", () => {
   const placements = [

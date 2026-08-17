@@ -1,18 +1,20 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { ConsoleMethod } from "@commonfabric/runner";
+
 import {
   handlePieceRenderNoUi,
   pieceCallRawArgs,
   writePieceRenderStatus,
 } from "../commands/piece.ts";
-import { cf, stripAnsi } from "./utils.ts";
-import { ConsoleMethod } from "@commonfabric/runner";
 import {
   hasJsonArgument,
   reservesStdoutForCommandOutput,
   stderrConsoleHandler,
 } from "../lib/json-output.ts";
 import { safeStringify } from "../lib/render.ts";
+import { cf, stripAnsi } from "./utils.ts";
 
 describe("JSON command contracts", () => {
   it("redirects runtime consoles without changing the console method", () => {

@@ -2,6 +2,7 @@
  * Screen-row layout for wrapped pager content. A wrapped row identifies
  * the logical line it draws and the display-column offset where that row starts.
  */
+
 import {
   type DisplayCell,
   displayLine,

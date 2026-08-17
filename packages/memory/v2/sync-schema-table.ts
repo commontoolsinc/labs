@@ -1,17 +1,18 @@
 import type { FabricValue, JSONSchema } from "@commonfabric/api";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isPlainObject } from "@commonfabric/utils/types";
+
 import type {
   ServerMessage,
   SessionEffectMessage,
   SessionSync,
 } from "../v2.ts";
-import { isPlainObject } from "@commonfabric/utils/types";
+import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   findSyncSchemaRef,
   SYNC_SCHEMA_REF_PREFIX,
 } from "./sync-schema-ref.ts";
-import { mapLinkSchemas } from "./schema-table-links.ts";
 
 type SchemaTable = Record<string, JSONSchema>;
 

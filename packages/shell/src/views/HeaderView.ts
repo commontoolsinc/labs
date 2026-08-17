@@ -1,15 +1,17 @@
-import { css, html, nothing, type PropertyValues } from "lit";
-import { property, state } from "lit/decorators.js";
+import type { FavoriteEntry } from "@commonfabric/home-schemas";
 import { type DID, KeyStore } from "@commonfabric/identity";
 import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
-import { BaseView } from "./BaseView.ts";
-import { RuntimeInternals } from "../lib/runtime.ts";
-import { navigate } from "../../shared/mod.ts";
-import { Task } from "@lit/task";
 import { type CellHandle } from "@commonfabric/runtime-client";
-import type { FavoriteEntry } from "@commonfabric/home-schemas";
+import { Task } from "@lit/task";
+import { css, html, nothing, type PropertyValues } from "lit";
+import { property, state } from "lit/decorators.js";
+
+import { navigate } from "../../shared/mod.ts";
+import { RuntimeInternals } from "../lib/runtime.ts";
+import { BaseView } from "./BaseView.ts";
+
 import "../components/PieceList.ts";
-import { type PieceItem } from "../components/PieceList.ts";
+
 import {
   iconArrowLeft,
   iconBug,
@@ -22,6 +24,7 @@ import {
   iconStar,
   iconThemeToggle,
 } from "../components/icons.ts";
+import { type PieceItem } from "../components/PieceList.ts";
 import { getEffectiveTheme, toggleTheme } from "../lib/theme-preference.ts";
 
 type ConnectionStatus =

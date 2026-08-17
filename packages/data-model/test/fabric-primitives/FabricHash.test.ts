@@ -11,14 +11,14 @@
  * when a caller explicitly transfers it.
  */
 
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);

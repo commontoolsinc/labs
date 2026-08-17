@@ -1,26 +1,27 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { encodableFormOf } from "./encodable-form.ts";
-import {
-  hasEntityUriScheme,
-  hashStringForEntityAddress,
-} from "./entity-kind.ts";
-import { BaseFabricPrimitive } from "@commonfabric/data-model/codec-common";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,
   entityRefFrom,
   entityRefFromString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
+import { BaseFabricPrimitive } from "@commonfabric/data-model/codec-common";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import { isReactive } from "./builder/types.ts";
+import { isCell } from "./cell.ts";
+import { encodableFormOf } from "./encodable-form.ts";
+import {
+  hasEntityUriScheme,
+  hashStringForEntityAddress,
+} from "./entity-kind.ts";
+import { isSigilLink, parseLink } from "./link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { isCell } from "./cell.ts";
 import { fromURI } from "./uri-utils.ts";
-import { isSigilLink, parseLink } from "./link-utils.ts";
 
 declare const ENTITY_ID_BRAND: unique symbol;
 

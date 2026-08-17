@@ -1,9 +1,10 @@
 /**
- * Coverage-driving behavioural tests for the pager state machine in
+ * Coverage-driving behavioral tests for the pager state machine in
  * `lib/view/session.ts`. Each test reaches a specific code path by feeding keys
  * and inspecting `view()` / `doc` / `quit`, mirroring the style of
  * `view-session.test.ts`, `view-filepicker.test.ts` and `view-diffedit.test.ts`.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument, promptText, SAMPLE } from "./view-helpers.ts";
@@ -1038,7 +1039,7 @@ Deno.test("session: an unmodelled Alt combo while editing is a no-op", () => {
   const { s } = fileSession("text\n");
   press(s, "e"); // enter edit mode
   const before = s.doc.text;
-  s.handleKey(alt("q")); // not a modelled Alt binding
+  s.handleKey(alt("q")); // not a modeled Alt binding
   assertEquals(s.doc.text, before, "unmodelled Alt combo changed nothing");
 });
 

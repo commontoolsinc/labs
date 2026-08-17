@@ -2,12 +2,31 @@ import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { schemaToTypeString } from "@commonfabric/runner";
 import { cliCommand } from "./cli-name.ts";
+// A value import back to callable.ts, whose own import of this module is
+// type-only and therefore erased — so this creates no runtime cycle.
+import {
+  declaredEventFields,
+  eventSchemaJudgesRootFields,
+} from "./callable.ts";
+import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 
 export interface ExecCommandSpec {
   callableKind: "handler" | "tool";
   defaultVerb: "invoke" | "run";
   inputSchema: JSONSchema;
   outputSchemaSummary?: JSONSchema;
+  /**
+   * What this callable is FOR, in the author's own words: the doc comment on
+   * the pattern property that declares it.
+   *
+   * Absent where the author wrote none, which is why it is optional rather
+   * than defaulted — a page with no summary line says nothing, while one
+   * carrying a restated property name says something false about where it came
+   * from. It describes the callable and not its input, so it does not ride
+   * `inputSchema`, whose own `description` would be a claim about the event
+   * object a caller sends.
+   */
+  description?: string;
 }
 
 export interface ParsedExecArgs {
@@ -63,26 +82,28 @@ function isSchemaObject(schema: JSONSchema): schema is Record<string, unknown> {
     !Array.isArray(schema);
 }
 
+/**
+ * The fields a verb declares, as every flag-facing surface reads them.
+ *
+ * Delegates to `declaredEventFields`, which merges what a conjunction's
+ * members contribute and follows a `$ref` into the definition that carries
+ * them. Reading `schema.properties` alone — which this did — made an
+ * `allOf`-declared field invisible here while the payload door judged it: the
+ * help page omitted it, `required` did not enforce it, and a flag naming it
+ * was refused as undeclared. One reader is what keeps the two doors from
+ * disagreeing about what a verb declares.
+ *
+ * `null` still means "not a position with fields", which is the signal the
+ * single-value paths key off.
+ */
 function objectProperties(
   schema: JSONSchema,
 ): Record<string, JSONSchema> | null {
-  if (!isSchemaObject(schema)) return null;
-  if (schema.type !== "object" && !schema.properties) return null;
-  const properties = schema.properties;
-  if (
-    typeof properties !== "object" || properties === null ||
-    Array.isArray(properties)
-  ) {
-    return {};
-  }
-  return properties as Record<string, JSONSchema>;
+  return declaredEventFields(schema)?.properties ?? null;
 }
 
 function requiredFlags(schema: JSONSchema): Set<string> {
-  if (!isSchemaObject(schema) || !Array.isArray(schema.required)) {
-    return new Set();
-  }
-  return new Set(schema.required as string[]);
+  return declaredEventFields(schema)?.required ?? new Set();
 }
 
 function schemaType(schema: JSONSchema): string | undefined {
@@ -208,6 +229,97 @@ function parseValueForSchema(
   return rawValue;
 }
 
+/**
+ * The flags a verb taking a single non-object value accepts. Fixed rather
+ * than schema-derived, because such a verb declares no fields for a flag to
+ * name — the value is the whole payload.
+ */
+const SCALAR_INPUT_FLAGS = [
+  "value",
+  "value-file",
+  "json",
+  "json-file",
+] as const;
+
+/**
+ * `--help` was given an argument by a verb that declares no `help` field.
+ *
+ * Written once and used at both arrival points, which parse their arguments
+ * separately: two copies of one sentence drift, and this one is long enough
+ * that a drift would not be obvious in a diff.
+ *
+ * `--help` is not unknown — alone it prints the help page. It takes an
+ * argument only where the verb declares a `help` field for it to fill.
+ */
+const HELP_TAKES_NO_ARGUMENTS =
+  "--help takes no arguments — it prints the help page, and this verb " +
+  "declares no help field for it to fill";
+
+/**
+ * The refusal a flag naming no declared field earns.
+ *
+ * The same five elements `undeclaredVerbFieldError` gives the payload door:
+ * the name, the position, the refusal, a near miss, and the accepted
+ * vocabulary. A caller who types `--titel` and a caller who sends
+ * `{"titel": …}` have made one mistake, and the flag spelling is the one the
+ * verb-session walkthrough teaches — so it is the spelling most likely to be
+ * mistyped and was the one answering with the least.
+ *
+ * Two honest differences from the payload door, both forced:
+ *
+ * - The position is always `<event>`, because a flag can only name a root
+ *   field. A payload can nest, so its refusal has a path to report.
+ * - Names are written as flags, because that is what the caller typed and
+ *   what they must retype. `flagNameForKey` is what maps a declared field to
+ *   it, so the vocabulary here is the same event schema the payload door
+ *   validates against, spelled for this door.
+ *
+ * Declaration order, not sorted: it is the order the help page lists the
+ * flags in and the order the payload door names them in, so a caller reading
+ * two of the three sees one vocabulary rather than two arrangements of it.
+ */
+function undeclaredFlagError(
+  rawFlag: string,
+  descriptors: Map<string, FlagDescriptor>,
+): string {
+  const declared = [...descriptors.keys()];
+  const opening = `"--${rawFlag}" at ${EVENT_ROOT_POSITION} is not a field ` +
+    "this verb declares. ";
+
+  // A caller who wrote `--no-something` is asking to negate, and only a
+  // boolean can be negated. Both halves of the answer narrow accordingly:
+  // the near miss is searched against the negatable names, and the
+  // vocabulary lists those rather than every field. Offering `--no-title`
+  // for a string `title` would name a spelling that fails just as surely.
+  //
+  // The prefix is stripped before matching because it is three edits of pure
+  // noise against the declared name, and the threshold scales with the
+  // misspelling's length — so leaving it on makes the match HARDER precisely
+  // because the caller typed more.
+  if (rawFlag.startsWith("no-")) {
+    const negatable = declared.filter((name) =>
+      schemaType(descriptors.get(name)!.schema) === "boolean"
+    );
+    const nearest = nearestName(rawFlag.slice(3), negatable);
+    return opening +
+      (nearest === undefined ? "" : `Did you mean "--no-${nearest}"? `) +
+      (negatable.length === 0
+        ? "Only a boolean field can be negated, and this verb declares none"
+        : `Only a boolean field can be negated, and this verb declares ${
+          negatable.map((name) => `"--${name}"`).join(", ")
+        }`);
+  }
+
+  const nearest = nearestName(rawFlag, declared);
+  return opening +
+    (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
+    (declared.length === 0
+      ? `${EVENT_ROOT_POSITION} declares no fields at all`
+      : `${EVENT_ROOT_POSITION} takes ${
+        declared.map((name) => `"--${name}"`).join(", ")
+      }`);
+}
+
 function parseObjectInput(
   schema: JSONSchema,
   args: string[],
@@ -293,14 +405,32 @@ function parseObjectInput(
       negated = descriptor !== undefined;
     }
     if (!descriptor) {
-      throw new Error(`Unknown flag --${rawFlag}`);
+      // The question is whether the SCHEMA judges its fields, not whether
+      // this particular name is declared. Asking the second lets a declared
+      // field typed in its schema spelling — `--fooBar` where the flag is
+      // `--foo-bar` — read as undeclared-against-an-open-schema and be
+      // accepted as a silent alias, when what the caller needs is the near
+      // miss naming the spelling that works.
+      if (eventSchemaJudgesRootFields(schema)) {
+        throw new Error(undeclaredFlagError(rawFlag, descriptors));
+      }
+      // A schema judging nothing says nothing about the value either, so the
+      // flag is taken as the string the caller typed: there is no declared
+      // type to read it as, and inventing one would be this door deciding
+      // something the schema deliberately left open.
+      descriptor = { key: rawFlag, flagName: rawFlag, schema: true };
     }
 
     const flagName = `--${descriptor.flagName}`;
     const type = schemaType(descriptor.schema);
     if (negated) {
       if (type !== "boolean") {
-        throw new Error(`Unknown flag --${rawFlag}`);
+        // The field exists, so naming the vocabulary would send the caller
+        // looking for a name they already found. What is wrong is the
+        // negation, and only its own field can say so.
+        throw new Error(
+          `"--${rawFlag}" negates "${flagName}", which is not a boolean field`,
+        );
       }
       input[descriptor.key] = false;
       usedGeneratedFlags = true;
@@ -390,7 +520,18 @@ function parseNonObjectInput(
     flag !== "--value" && flag !== "--json" && flag !== "--value-file" &&
     flag !== "--json-file"
   ) {
-    throw new Error(`Unknown flag ${flag}`);
+    // A verb taking a single non-object value has no fields, so its
+    // vocabulary is this fixed four rather than anything schema-derived, and
+    // there is no position to name — the value IS the payload. The near miss
+    // is owed all the same: a fixed vocabulary is still a vocabulary, and
+    // `--valu` is the same slip here as `--titel` is at the field door.
+    const nearest = nearestName(flag.replace(/^--/, ""), SCALAR_INPUT_FLAGS);
+    throw new Error(
+      `"${flag}" is not a flag this verb takes. ` +
+        (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
+        "This verb takes a single value, so its flags are " +
+        SCALAR_INPUT_FLAGS.map((name) => `"--${name}"`).join(", "),
+    );
   }
   if (flag === "--json" && rawValue === undefined) {
     return {
@@ -568,6 +709,14 @@ async function resolveImplicitPipedHandlerInput(
   deps: ExecInputResolverDeps = {},
 ): Promise<ResolvedExecInvocation | null> {
   if (spec.callableKind !== "handler" || rawArgs.length > 0) {
+    return null;
+  }
+
+  // A schema-less input declares no payload, so no piped input exists to
+  // infer: return before consulting stdin at all. Reading it would hold the
+  // advertised bare spelling open until a non-terminal stdin reaches EOF —
+  // a hang whenever the pipe outlives the call.
+  if (isSchemaLessHandlerInput(spec.inputSchema)) {
     return null;
   }
 
@@ -949,7 +1098,7 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      throw new Error("Unknown flag --help");
+      throw new Error(HELP_TAKES_NO_ARGUMENTS);
     }
   }
 
@@ -989,7 +1138,7 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      throw new Error("Unknown flag --help");
+      throw new Error(HELP_TAKES_NO_ARGUMENTS);
     }
   }
 
@@ -1027,6 +1176,7 @@ export function parseExecArgs(
 export function renderExecHelpJson(spec: ExecCommandSpec): string {
   const value: Record<string, unknown> = {
     callableKind: spec.callableKind,
+    ...(spec.description !== undefined && { description: spec.description }),
     inputSchema: spec.inputSchema,
   };
   if (spec.outputSchemaSummary !== undefined) {
@@ -1137,6 +1287,11 @@ export function renderPieceCallHelp(
   const lines = [
     "Usage:",
     ...pieceUsageLines(commandPrefix, spec),
+    // The verb's own prose, as a paragraph of its own between Usage and the
+    // sections describing the payload. Nothing stands here when the author
+    // wrote no comment: an empty paragraph would read as a summary the page
+    // failed to fill in, rather than as a verb nobody documented.
+    ...(spec.description !== undefined ? ["", spec.description] : []),
     "",
     "JSON input:",
     ...pieceJsonInputLines(spec.inputSchema),

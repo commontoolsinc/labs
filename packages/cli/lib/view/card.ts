@@ -1,12 +1,17 @@
 /**
- * Builds the Enter "info card": a structured, colourised summary of a structure
+ * Builds the Enter "info card": a structured, colorized summary of a structure
  * node assembled from its extracted {@link NodeMeta}, the navigation tree, and
  * cross-references — i.e. information that is NOT obvious from the raw source.
  * The verbatim source is returned alongside so the overlay can toggle to it.
  *
  * Pure: produces model {@link Line}s (the same shape the renderer already draws)
- * with token classes chosen so the existing theme colours everything coherently.
+ * with token classes chosen so the existing theme colors everything coherently.
  */
+
+import { basename } from "@std/path";
+
+import { cpLen } from "./ansi.ts";
+import type { Semantics } from "./languages/language.ts";
 import type {
   Document,
   Line,
@@ -24,9 +29,6 @@ import {
   findReferences,
   type IdentUse,
 } from "./references.ts";
-import { basename } from "@std/path";
-import { cpLen } from "./ansi.ts";
-import type { Semantics } from "./languages/language.ts";
 
 /** A selectable cross-reference line that jumps the main view when invoked. */
 export interface CardTarget {
@@ -177,7 +179,7 @@ export function buildPeekCard(
 }
 
 /** The card title. A generic AST node leads with its AST kind(s) rather than
- * the internal "node" label; a recognised shape keeps its structure kind. */
+ * the internal "node" label; a recognized shape keeps its structure kind. */
 function cardTitle(node: StructureNode): string {
   if (node.kind === "node" || node.kind === "comment") {
     const k = node.astKinds && node.astKinds.length > 0
@@ -407,7 +409,7 @@ function importDetail(
 /**
  * The meaningful descendants for the outline: declarations, builders, control
  * flow and the like, hoisted up through the generic expression/wrapper nodes
- * that now sit between them in the full-AST tree. So the card summarises a
+ * that now sit between them in the full-AST tree. So the card summarizes a
  * node's real sub-structure rather than listing a lone `VariableDeclarationList`
  * or every sub-expression.
  */
@@ -811,7 +813,7 @@ function enclosingNode(
 
 const INLINE_MAX = 56;
 
-/** A labelled schema: `input  { token: string }` inline, or a heading + block. */
+/** A labeled schema: `input  { token: string }` inline, or a heading + block. */
 function schemaSection(label: string, schema: SchemaMeta): Line[] {
   const inline = inlineSchemaParts(schema);
   const labelPart: Part = [`${label}  `, "comment"];

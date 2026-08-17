@@ -65,16 +65,17 @@ other. Nothing about the verb differs; only the door the caller came through.
 
 ### Why the round trip is a constraint rather than a preference
 
-Two spellings of an address are already in use, and they do not meet:
+Two spellings of an address are already in use:
 
 | Spelling | Where | Direction |
 | --- | --- | --- |
 | `{"@link": "…"}` | `llm-dialog` | in **and** out |
-| `{"$link": {id, space, scope, path}}` | shaped reads ([shaped reads](shaped-reads-and-verb-results.md)) | out only |
+| `{"$link": "/[@did/]<id>[@scope][/path]"}` | shaped reads ([shaped reads](shaped-reads-and-verb-results.md)) | out only |
 
-So a caller that reads a result and submits the address it was handed has no
-route that works — the form it received is not a form anything accepts. Picking
-a spelling is the implementer's call; accepting the one a read emits is what
+Both carry the canonical reference string, so the address a caller reads is one
+`--piece` already accepts. What remains is the verb argument: a reference
+handed to a handler is still refused at the dispatch gate, so a caller can
+address a piece but cannot pass one in. Accepting the form a read emits is what
 makes the capability compose, and it is the property
 [CLI surface shape](cli-surface-shape.md) already states for commands.
 

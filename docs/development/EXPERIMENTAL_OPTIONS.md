@@ -727,7 +727,7 @@ the per-epic implementation notes).
   delete the negotiation and the expanded-form encoder and always send the
   compact form.
 
-> Two neighbours in the same handshake are related but are not
+> Two neighbors in the same handshake are related but are not
 > runtime-toggleable experimental flags:
 >
 > - **`sqliteCommitRowLabelEval`** is a build-inherent capability, hardwired to
@@ -1205,13 +1205,20 @@ ESM module-record loader is now the only loader. See
 [`docs/history/specs/module-loading-implementation-plan.md`](../history/specs/module-loading-implementation-plan.md),
 whose status header records the removal.
 
-### `EXPERIMENTAL_MODERN_DATA_MODEL` (never implemented)
+### `modernDataModel` / `MODERN_DATA_MODEL` (removed)
 
-Mentioned only in
+The flag that selected the fabric data model during its rollout. It was a
+memory-config flag with a matching environment variable, carried in the memory
+protocol's flag set so that peers agreed on which encoding was in use, and it
+bifurcated cell-storage behavior along with the tests that pinned it — interned
+symbols and the special numbers among them — for as long as the two encodings
+coexisted. It ran from March 2026 until #3821 removed the environment variable
+and the memory-config flag together; the fabric data model is now the only one.
+
 [`docs/history/specs/persistent-scheduler-state/implementation_notes.md`](../history/specs/persistent-scheduler-state/implementation_notes.md)
-as an example of how to plumb a flag through the runtime, shell, toolshed, and
-CLI. It was never built; the persistent-scheduler-state flag was built instead,
-following the same plumbing pattern.
+cites it as the worked example of how to plumb a flag through the runtime,
+shell, toolshed, and CLI, which is the pattern the persistent-scheduler-state
+flag then followed.
 
 ---
 

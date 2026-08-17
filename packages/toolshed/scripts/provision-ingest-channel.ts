@@ -1,28 +1,31 @@
-// Provision a vouched ingest channel — the OPERATOR / break-glass path.
-//
-// PREFER `cf ingest mint`. Users can now mint their own channels against
-// /api/ingest-channels, signing with their own identity key; the server checks
-// they hold an explicit OWNER grant on the target space's ACL, which is what
-// closes the confused-deputy hole that kept creation out-of-band originally.
-// See docs/features/self-serve-ingest-channels.md.
-//
-// This script remains for the cases the self-serve path cannot cover: minting
-// for a space whose ACL does not (yet) name a concrete owner, and recovery when
-// the control plane itself is unavailable. It bypasses the ownership check
-// entirely — it runs AS the operator identity — so treat it as an admin action.
-//
-// A channel minted here has no verified `owner`, so it does not appear in a
-// user's own `cf ingest ls`. It DOES appear in `cf ingest ls --space <space>`,
-// which lists everything targeting a space its current owner holds — so a
-// break-glass channel is discoverable, and revocable, by that owner.
-//
-// It mints a per-install token, writes the registration into the toolshed
-// service space, and prints the token ONCE. Adding an install = re-run this.
-//
-// Usage:
-//   deno task provision-ingest-channel \
-//     --space did:key:<user-space> --install-id <stable-id> \
-//     [--cause-prefix location] [--name <label>] [--force]
+/**
+ * Provision a vouched ingest channel — the OPERATOR / break-glass path.
+ *
+ * PREFER `cf ingest mint`. Users can now mint their own channels against
+ * /api/ingest-channels, signing with their own identity key; the server checks
+ * they hold an explicit OWNER grant on the target space's ACL, which is what
+ * closes the confused-deputy hole that kept creation out-of-band originally.
+ * See docs/features/self-serve-ingest-channels.md.
+ *
+ * This script remains for the cases the self-serve path cannot cover: minting
+ * for a space whose ACL does not (yet) name a concrete owner, and recovery when
+ * the control plane itself is unavailable. It bypasses the ownership check
+ * entirely — it runs AS the operator identity — so treat it as an admin action.
+ *
+ * A channel minted here has no verified `owner`, so it does not appear in a
+ * user's own `cf ingest ls`. It DOES appear in `cf ingest ls --space <space>`,
+ * which lists everything targeting a space its current owner holds — so a
+ * break-glass channel is discoverable, and revocable, by that owner.
+ *
+ * It mints a per-install token, writes the registration into the toolshed
+ * service space, and prints the token ONCE. Adding an install = re-run this.
+ *
+ * Usage:
+ *   deno task provision-ingest-channel \
+ *     --space did:key:<user-space> --install-id <stable-id> \
+ *     [--cause-prefix location] [--name <label>] [--force]
+ */
+
 import { parseArgs } from "@std/cli/parse-args";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -110,7 +113,7 @@ export function validateProvisionRequest(
 
 /**
  * The provisioning write itself. BORROWS the runtime rather than owning it —
- * `main` below constructs and disposes one, but the lifecycle behaviour here
+ * `main` below constructs and disposes one, but the lifecycle behavior here
  * (carrying expiry and revocation history forward, refusing to overwrite a
  * concurrent revoke) is what a test needs to reach, and a function that
  * disposes its caller's runtime cannot be tested against stored state.

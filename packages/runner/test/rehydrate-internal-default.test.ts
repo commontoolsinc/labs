@@ -1,16 +1,18 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Cell, type Pattern } from "../src/builder/types.ts";
-import { Runtime } from "../src/runtime.ts";
-import { getMetaLink, parseLink } from "../src/link-utils.ts";
-import { trustExecutable } from "./support/trusted-builder.ts";
 import { JSONValue } from "@commonfabric/runner/shared";
+import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+
+import { Cell, type Pattern } from "../src/builder/types.ts";
 import { isPrimitiveCellLink } from "../src/link-types.ts";
+import { getMetaLink, parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { trustExecutable } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

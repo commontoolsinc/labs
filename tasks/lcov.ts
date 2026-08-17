@@ -40,7 +40,7 @@ export interface ParseLcovOptions {
  * (`BRDA:`) records are dropped: LCOV keys function hits by name, and a single
  * source file can declare several functions with the same name (for example a
  * free function and a method), so merging them faithfully is not possible from
- * the report alone. Line coverage is what IDEs use to colour the gutter and
+ * the report alone. Line coverage is what IDEs use to color the gutter and
  * what the coverage-debt metric counts.
  */
 export function parseLcovReports(

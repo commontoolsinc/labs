@@ -9,20 +9,22 @@
 // path is the integration test). It proves the runtime half: rowSchema -> stored
 // sigil object -> asCell read -> live Cell.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { table } from "@commonfabric/memory/sqlite/schema";
 import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { Runtime } from "../src/runtime.ts";
-import { isCell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { encodeCfLinkValue } from "../src/builtins/sqlite/cf-link.ts";
-import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { isCell } from "../src/cell.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 type QueryState = {
   pending: boolean;

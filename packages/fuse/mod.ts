@@ -8,17 +8,20 @@
 // Unknown space names are resolved on-demand via lookup.
 
 import { parseArgs } from "@std/cli/parse-args";
+
+import { linkRefFrom } from "@commonfabric/runner/shared";
+
+import {
+  type CfcXattrNamespace,
+  getCfcXattrValue,
+  listCfcXattrNames,
+} from "./annotations.ts";
 import {
   CellBridge,
   type HandlerTarget,
   type SourceWritePath,
   type WritePath,
 } from "./cell-bridge.ts";
-import {
-  type CfcXattrNamespace,
-  getCfcXattrValue,
-  listCfcXattrNames,
-} from "./annotations.ts";
 import {
   applyPreparedCreate,
   applyPreparedExistingWrite,
@@ -47,6 +50,29 @@ import {
   shouldEnableCfcAnnotations,
 } from "./cfc-writeback.ts";
 import {
+  type DirectorySnapshotEntry,
+  replyWithRetainedState,
+  visitDirectoryEntries,
+} from "./directory-handles.ts";
+import {
+  handleHasBufferedContent,
+  handleHasPendingChanges,
+  HandleMap,
+  type HandleState,
+  validateVirtualFileRange,
+} from "./handles.ts";
+import { ReverseInvalidationQueue } from "./invalidation.ts";
+import {
+  buildMountFuseArgs,
+  type MountCacheOptions,
+  resolveMountCacheOptions,
+} from "./mount-options.ts";
+import {
+  closeKernelFileHandle,
+  createFuseOperationState,
+} from "./operation-wiring.ts";
+import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
+import {
   EACCES,
   EFBIG,
   EINVAL,
@@ -64,32 +90,8 @@ import {
   O_WRONLY,
   readCString,
 } from "./platform.ts";
-import { linkRefFrom } from "@commonfabric/runner/shared";
-import { FsTree } from "./tree.ts";
-import {
-  handleHasBufferedContent,
-  handleHasPendingChanges,
-  HandleMap,
-  type HandleState,
-  validateVirtualFileRange,
-} from "./handles.ts";
-import {
-  type DirectorySnapshotEntry,
-  replyWithRetainedState,
-  visitDirectoryEntries,
-} from "./directory-handles.ts";
-import {
-  closeKernelFileHandle,
-  createFuseOperationState,
-} from "./operation-wiring.ts";
-import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
-import {
-  buildMountFuseArgs,
-  type MountCacheOptions,
-  resolveMountCacheOptions,
-} from "./mount-options.ts";
 import { buildNodeStat, getMountOwnership } from "./stat.ts";
-import { ReverseInvalidationQueue } from "./invalidation.ts";
+import { FsTree } from "./tree.ts";
 
 const encoder = new TextEncoder();
 // Operation ring buffer — last 50 ops for crash diagnostics

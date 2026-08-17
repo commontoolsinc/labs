@@ -1,8 +1,10 @@
-import ts from "typescript";
 import {
   MERGEABLE_OP_METHODS,
   type MergeableOpMethodKind,
 } from "@commonfabric/api";
+import { type CellBrand } from "@commonfabric/schema-generator/cell-brand";
+import ts from "typescript";
+
 import {
   classifyArrayCallbackContainerCall,
   getNodeText,
@@ -17,10 +19,9 @@ import {
   type UnreadableCellArgument,
 } from "../core/mod.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
-import { type CellBrand } from "@commonfabric/schema-generator/cell-brand";
-import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
-import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import { decodePath, encodePath } from "../utils/path-serialization.ts";
+import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import {
   createMergeablePushClassifier,
   type MergeableCollectionSite,

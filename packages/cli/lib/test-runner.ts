@@ -25,7 +25,12 @@
  * use the --root option to specify a common ancestor directory.
  */
 
+import { basename } from "@std/path";
+
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
@@ -49,28 +54,6 @@ import type {
   Stream,
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
-import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
-import { assertionOutcome } from "./assert-record.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { basename } from "@std/path";
-import { timeout } from "@commonfabric/utils/sleep";
-import {
-  appendLoggerDeltaMessages,
-  snapshotLoggerErrorWarnCounts,
-} from "./console-capture.ts";
-import { buildActionEvent } from "./trusted-test-event.ts";
-import {
-  multiUserDescriptorMeta,
-  runMultiUserTestPattern,
-} from "./multi-user-test-runner.ts";
-import {
-  type FetchMockEntry,
-  makeMockFetch,
-  readFetchMocks,
-} from "./fetch-mock.ts";
-import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import {
   type CDFPoint,
   getLogger,
@@ -81,6 +64,25 @@ import {
   resetAllTimingBaselines,
   resetAllTimingStats,
 } from "@commonfabric/utils/logger";
+import { timeout } from "@commonfabric/utils/sleep";
+
+import { assertionOutcome } from "./assert-record.ts";
+import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
+import {
+  appendLoggerDeltaMessages,
+  snapshotLoggerErrorWarnCounts,
+} from "./console-capture.ts";
+import {
+  type FetchMockEntry,
+  makeMockFetch,
+  readFetchMocks,
+} from "./fetch-mock.ts";
+import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
+import {
+  multiUserDescriptorMeta,
+  runMultiUserTestPattern,
+} from "./multi-user-test-runner.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 
 const phaseLogger = getLogger("test-runner-phase", {
   enabled: false,
@@ -146,6 +148,12 @@ type HarnessTestStepMeta = {
   // `{ settle: true }` step: wait for full settlement (scheduler + storage +
   // in-flight async builtin I/O) via `runtime.settled()` before the next step.
   settle?: boolean;
+  // `{ label }` / `{ await }` synchronize participants in a multi-user test.
+  // A single-user run has no participant to synchronize with, so they carry
+  // no work here — but they still have to be recognized, or a step holding
+  // one matches no discriminant and the run reports it as malformed.
+  label?: string;
+  await?: string;
 };
 
 type HarnessTestStepCell = Cell<unknown>;
@@ -156,7 +164,13 @@ const testStepPeekSchema = internSchema(
     properties: {
       action: { type: "unknown" },
       assertion: { type: "unknown" },
-      event: { type: "unknown" },
+      // The payload is what the step sends, so it is read as authored: an
+      // object arrives as an object, reaching the handler as a reference into
+      // this step rather than a snapshot of it. `type: "unknown"` marks a
+      // value the traversal must not descend into, which is right for the
+      // fields this schema only tests for presence and wrong here, where it
+      // drops an object payload to `undefined`.
+      event: true,
       trustedUi: {
         type: "object",
         properties: {
@@ -167,6 +181,8 @@ const testStepPeekSchema = internSchema(
       render: { type: "unknown" },
       skip: { type: "boolean" },
       settle: { type: "boolean" },
+      label: { type: "string" },
+      await: { type: "string" },
     },
   },
 );
@@ -1363,6 +1379,12 @@ export async function runTestPattern(
       const isAssertion = Object.hasOwn(stepValue, "assertion");
       const isRender = Object.hasOwn(stepValue, "render");
       const isSettle = Object.hasOwn(stepValue, "settle");
+      const isMarker = Object.hasOwn(stepValue, "label") ||
+        Object.hasOwn(stepValue, "await");
+
+      // A multi-user marker in a single-user run: inert, and transparent to
+      // the reported results.
+      if (isMarker) continue;
 
       // `{ settle: true }` step: wait for FULL settlement (scheduler + storage +
       // in-flight async builtin I/O — sqlite query RPC + writeback, fetch / llm)
@@ -1397,8 +1419,8 @@ export async function runTestPattern(
       if (!isAction && !isAssertion) {
         throw new Error(
           `Test step at index ${i} must have an 'action', 'assertion', ` +
-            `'render', or 'settle' key. Got: ${
-              toCompactDebugString(Object.keys(stepValue))
+            `'render', 'settle', 'label', or 'await' key. Got: ${
+              toCompactDebugString(Object.keys(stepCell.get() as object))
             }`,
         );
       }

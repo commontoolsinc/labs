@@ -3,15 +3,18 @@
  *
  * If any type assertion is wrong, this file fails to compile.
  */
-import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import type { Default, Writable } from "@commonfabric/api";
+
 import type {
   FactoryInput,
   HandlerFactory,
   PatternFactory,
   StripCell,
 } from "../src/builder/types.ts";
-import type { Default, Writable } from "@commonfabric/api";
 
 type MustBeTrue<T extends true> = T;
 type AssertAssignable<T, U> = [T] extends [U] ? true : never;

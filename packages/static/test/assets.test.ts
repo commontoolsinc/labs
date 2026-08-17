@@ -1,5 +1,7 @@
-import { decode } from "@commonfabric/utils/encoding";
 import { assert } from "@std/assert";
+
+import { decode } from "@commonfabric/utils/encoding";
+
 import {
   createTestStaticCache,
   TEST_ASSET,

@@ -1,3 +1,8 @@
+import type { FabricValue } from "@commonfabric/api";
+import {
+  internPathSelector,
+  REJECTING_SELECTOR,
+} from "@commonfabric/data-model/schema-utils";
 import {
   CompoundCycleTracker,
   createSchemaMemo,
@@ -14,6 +19,8 @@ import {
   schemaTrackerCoversSelector,
   type TraversalContext,
 } from "@commonfabric/runner/traverse";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
@@ -22,14 +29,8 @@ import {
   registerSchemaDocument,
 } from "../../runner/src/schema-registry.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
-import { isObjectNotArray } from "@commonfabric/utils/types";
-import type { FabricValue } from "@commonfabric/api";
-import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
-import {
-  internPathSelector,
-  REJECTING_SELECTOR,
-} from "@commonfabric/data-model/schema-utils";
+import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   type CellScope,

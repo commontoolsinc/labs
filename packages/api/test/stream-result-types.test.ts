@@ -69,7 +69,7 @@ const _InfersEvent: AssertAssignable<EventOf<Returning>, AddTopic> = true;
 
 // Stream carries the result in its OWN property rather than borrowing the
 // discrimination from ICreatable. Deleting `[CELL_RESULT_TYPE]` from Stream
-// makes this line a type error, which is the point: without it the behaviour
+// makes this line a type error, which is the point: without it the behavior
 // above rides on ICreatable's signature and would vanish silently if that
 // signature ever changed.
 const _ResultPinnedLocally: AssertAssignable<

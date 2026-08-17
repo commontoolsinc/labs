@@ -5,6 +5,8 @@
  * minting and swapping machinery lives in `../handle-table.ts`.
  */
 
+import type { JSONSchema } from "@commonfabric/api";
+
 /** Discriminator value of a {@link HarnessHandleTable}. */
 export const HARNESS_HANDLE_TABLE_TYPE = "cf-harness.handle-table";
 
@@ -66,12 +68,34 @@ export interface HarnessHandleEntry {
    * identity: minting the same address twice returns the existing token.
    */
   addressKey: string;
+  /**
+   * Shape of the value at the referent, when a mint knew it — the compiled
+   * pattern's result schema behind a `run_pattern` result reference. Absent
+   * means the shape was never free to capture, not that the referent has none:
+   * no mint reads the cell to fill this in.
+   */
+  schema?: JSONSchema;
+  /**
+   * Where {@link HarnessHandleEntry.schema} came from. `harness` means a
+   * harness step supplied it out of its own work — the schema a pattern WE
+   * compiled and ran declares — which is the only provenance a mint records.
+   *
+   * A schema is disclosed to a model only under that provenance. The
+   * difference is not fussiness: a schema that arrived with data is data, and
+   * property names are a channel wide enough to carry whatever whoever wrote
+   * them wanted said. An entry whose schema has no provenance — one adopted
+   * from state this code did not write — reads as shapeless rather than as
+   * trusted.
+   */
+  schemaSource?: "harness";
 }
 
 /**
  * The session-local handle table. `salt` is the owning run's id, fixed at
  * creation, so token derivation is deterministic within a run and disjoint
- * across runs.
+ * across runs. The version stays `1` across the optional
+ * {@link HarnessHandleEntry.schema}: an entry without one is well-formed, so
+ * a table persisted before schemas were captured loads unchanged.
  */
 export interface HarnessHandleTable {
   type: typeof HARNESS_HANDLE_TABLE_TYPE;

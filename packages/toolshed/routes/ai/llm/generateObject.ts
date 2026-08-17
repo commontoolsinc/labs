@@ -1,17 +1,18 @@
+import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commonfabric/llm";
 import {
   type LLMGenerateObjectRequest,
   type LLMGenerateObjectResponse,
 } from "@commonfabric/llm/types";
-import { LLMRequestError } from "./errors.ts";
-import { resolveModel } from "./models.ts";
+import { trace } from "@opentelemetry/api";
 import {
   generateObject as generateObjectCore,
   jsonSchema,
   type ModelMessage,
 } from "ai";
 import { Ajv } from "ajv";
-import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commonfabric/llm";
-import { trace } from "@opentelemetry/api";
+
+import { LLMRequestError } from "./errors.ts";
+import { resolveModel } from "./models.ts";
 import { normalizeSchemaForProvider } from "./schema.ts";
 import { withGatewayOperation } from "@/lib/gateway-provenance.ts";
 

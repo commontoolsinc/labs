@@ -1,10 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
-import * as assert from "./assert.ts";
-import { h } from "../src/h.ts";
+
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { createCell } from "../../runner/src/cell.ts";
+import { h } from "../src/h.ts";
+import * as assert from "./assert.ts";
 
 describe("jsx dom fragments support", () => {
   it("dom fragments should work", () => {

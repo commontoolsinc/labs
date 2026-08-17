@@ -1,3 +1,5 @@
+import type { CellKind, LinkScope } from "@commonfabric/api";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   applyPieceSourceTransition,
   Cell,
@@ -35,7 +37,6 @@ import {
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
-import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
   cfcSchemaChildRoot,
   cfcSchemaMergeIssue,
@@ -45,20 +46,13 @@ import {
   storedSchemaCoversCandidateEnvelope,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import { pieceId } from "../piece-id.ts";
-import type { PiecesController } from "./pieces-controller.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
-import { compileProgram } from "./utils.ts";
+
+import { pieceId } from "../piece-id.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
 } from "../schema-compatibility.ts";
-import {
-  qualifyFabricOrigin,
-  readPieceOrigin,
-  resolvePieceOriginSource,
-} from "./piece-origin.ts";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   cloneInternalManifest,
   pinCloneSnapshotCells,
@@ -67,6 +61,13 @@ import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "./clone-data-snapshot.ts";
+import {
+  qualifyFabricOrigin,
+  readPieceOrigin,
+  resolvePieceOriginSource,
+} from "./piece-origin.ts";
+import type { PiecesController } from "./pieces-controller.ts";
+import { compileProgram } from "./utils.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -2277,13 +2278,14 @@ export function omitMissingProjectionAliases(
   pieces: PiecesController,
   schemaViewPresent = true,
   changedPaths: readonly (readonly (string | number)[])[] = [],
+  acceptOpaqueValue:
+    | ((value: unknown, schema: JSONSchema) => boolean)
+    | undefined = undefined,
   resolving = new Set<string>(),
 ): unknown | typeof MISSING_PROJECTION_ALIAS {
   if (isLink(raw)) {
-    if (
-      isCell(schemaView) &&
-      !changedPaths.some((path) => path.length > 0)
-    ) {
+    const reachesNothingBelow = !changedPaths.some((path) => path.length > 0);
+    if (isCell(schemaView) && reachesNothingBelow) {
       // Schema-aware reads preserve declared Cell/Stream projections as
       // handles. Keep that opaque proof in the staged producer root instead
       // of replacing it with the target's untyped payload; unrelated Stream
@@ -2292,6 +2294,27 @@ export function omitMissingProjectionAliases(
       // descendant write is the exception: materialize that producer value so
       // staging preserves its unchanged siblings.
       return schemaView;
+    }
+    // Settling this link on the link alone needs two things. The caller must
+    // settle a bare link wherever one appears: the probe asks its predicate at
+    // the most permissive point, which is enough because the one predicate
+    // that reaches here answers on the link alone, while
+    // `schemaAcceptsOpaqueCellValue` wants a Cell and says no — so a second
+    // call site cannot enable this by passing a boolean it did not mean. And
+    // the node must not be one the missing-alias sentinel below could claim,
+    // whose precondition is an absent target under a materialization and a
+    // schema view that both came back absent.
+    //
+    // Settled means settled whole. `acceptOpaqueValue` is consulted at a node
+    // ahead of the keywords there, so nothing the link's own schema says, and
+    // nothing a schema below it says, is measured against the target; a
+    // keyword the containing object or array evaluates — `const`, `enum`,
+    // `oneOf` discrimination, `uniqueItems` — additionally sees a link where
+    // the target's value would have been.
+    const settlesOnTheLink = reachesNothingBelow &&
+      acceptOpaqueValue?.(raw, true) === true;
+    if (settlesOnTheLink && (materialized !== undefined || schemaViewPresent)) {
+      return raw;
     }
     const resolvedSchemaView = isCell(schemaView) && !isStream(schemaView)
       ? schemaView.get()
@@ -2327,6 +2350,9 @@ export function omitMissingProjectionAliases(
       ) {
         return MISSING_PROJECTION_ALIAS;
       }
+      // Resolved only to learn the target exists; that answered, the link
+      // settles the rest on its own.
+      if (settlesOnTheLink) return raw;
       const resolvedCell = pieces.runtime.getCellFromLink(
         { ...resolved, schema: undefined },
         undefined,
@@ -2340,6 +2366,7 @@ export function omitMissingProjectionAliases(
         pieces,
         schemaViewPresent,
         changedPaths,
+        acceptOpaqueValue,
         resolving,
       );
     } finally {
@@ -2382,6 +2409,7 @@ export function omitMissingProjectionAliases(
       pieces,
       childViewPresent,
       childChangedPaths,
+      acceptOpaqueValue,
       resolving,
     );
     if (reconciled === MISSING_PROJECTION_ALIAS) {
@@ -2393,6 +2421,25 @@ export function omitMissingProjectionAliases(
   return result;
 }
 
+/**
+ * Prove that storing `nextValue` leaves every producer-owned document that
+ * exposes the destination valid against the schema its producer declared.
+ *
+ * The staged root is the whole document, not the written path: a producer root
+ * constrains its members jointly, so a payload that satisfies the schema at its
+ * own path can still leave a sibling, a container bound, or a `required` member
+ * unsatisfiable.
+ *
+ * What it does not stage is the contents of a link the write does not reach.
+ * Such a link is staged as itself and accepted whole, subtree included: nothing
+ * its own schema says, and nothing a schema below it says, is measured against
+ * the target. That is the price of not materializing another document, and
+ * everything that one links in turn, to judge a write that never reaches it.
+ *
+ * One thing is still asked of an unreached link — whether it has a target at
+ * all. A projection alias with nothing behind it drops out of the staged root,
+ * so `required` still refuses it.
+ */
 function validateDurableSourceRoots(
   destination: DurableSourceContract,
   nextValue: unknown,
@@ -2444,6 +2491,7 @@ function validateDurableSourceRoots(
       pieces,
       true,
       group.paths,
+      acceptOpaqueValue,
     );
     if (candidate === MISSING_PROJECTION_ALIAS) candidate = undefined;
     for (const path of group.paths) {
@@ -2607,10 +2655,7 @@ class PiecePropIo implements PieceCellIo {
           );
         }
         const destination = durableDestination;
-        let localizedDestination: {
-          contracts: PathSchemaContract[];
-          isStream: boolean;
-        };
+        let localizedDestination: { contracts: PathSchemaContract[] };
         try {
           const destinationRootCell = pieces.runtime.getCellFromLink(
             { ...resolved, path: [], schema: undefined },
@@ -2624,12 +2669,14 @@ class PiecePropIo implements PieceCellIo {
               nextValue,
             )
           );
-          const isStream = resolveDeclaredStreamCapability(
+          // Called for the agreement it asserts: contracts that disagree on
+          // Stream capability throw here. What it returns is the capability the
+          // producer declares, which no one below asks about.
+          resolveDeclaredStreamCapability(
             localized.map((entry) => entry.declaredStream),
           );
           localizedDestination = {
             contracts: localized.flatMap((entry) => entry.contracts),
-            isStream,
           };
           const links = suppliedLinks(nextValue);
           if (
@@ -2672,7 +2719,14 @@ class PiecePropIo implements PieceCellIo {
           );
           if (issue !== undefined) break;
         }
-        if (issue === undefined) {
+        // A Stream destination consumes the value as an event: the write below
+        // sends it instead of storing it, and `Cell.set()` reaches that decision
+        // through this same predicate on this same cell. Nothing is stored, so
+        // no producer document changes and no producer root's validity can
+        // change. What the event itself owes — the producer's own event
+        // contract, at every producer-owned projection of the destination — the
+        // loop above has already proven.
+        if (issue === undefined && !isStream(txCell)) {
           issue = validateDurableSourceRoots(
             destination,
             nextValue,

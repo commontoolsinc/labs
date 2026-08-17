@@ -1,11 +1,13 @@
 import * as path from "@std/path";
-import { createRouter } from "@/lib/create-app.ts";
-import { getMimeType } from "@/lib/mime-type.ts";
+
 import {
   compareETags,
   createCacheHeaders,
   generateETag,
 } from "@commonfabric/static/etag";
+
+import { createRouter } from "@/lib/create-app.ts";
+import { getMimeType } from "@/lib/mime-type.ts";
 
 /**
  * Inputs the static router reads files and computes ETags with. Injectable so

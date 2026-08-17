@@ -1,20 +1,14 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { Identity } from "@commonfabric/identity";
+import type { Source } from "@commonfabric/js-compiler";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   injectCfHelpers,
   isLegacyInjectedEnvelope,
 } from "@commonfabric/ts-transformers";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { Engine } from "../src/harness/engine.ts";
-import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
-import type { Source } from "@commonfabric/js-compiler";
-import type { CachedCompiledModule } from "../src/sandbox/module-record-compiler.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
-import { computeModuleHashes } from "../src/harness/module-identity.ts";
+
 import {
   getCompileCacheRuntimeVersion,
   loadCompiledClosure,
@@ -22,6 +16,13 @@ import {
   setCompileCacheRuntimeVersionForTesting,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+import { Engine } from "../src/harness/engine.ts";
+import { computeModuleHashes } from "../src/harness/module-identity.ts";
+import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { CachedCompiledModule } from "../src/sandbox/module-record-compiler.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("load-by-identity");
 const space = signer.did();

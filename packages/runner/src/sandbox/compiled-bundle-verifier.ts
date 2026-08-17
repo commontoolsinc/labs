@@ -1,3 +1,17 @@
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  BINDING_IDENTITY_HELPER_NAME,
+  createBindingIdentityHelperSource,
+  createFunctionHardeningHelperSource,
+  RESERVED_FACTORY_BINDINGS,
+} from "@commonfabric/utils/sandbox-contract";
+
+import {
+  isIdentifierStartCode,
+  isSimpleIdentifierText,
+  readIdentifierEnd,
+  startsWithStatementWord,
+} from "./compiled-js-identifiers.ts";
 import {
   CompiledJsParseError,
   findTopLevelArrow,
@@ -13,13 +27,6 @@ import {
   trimRange,
   tryParseCallExpression,
 } from "./compiled-js-parser.ts";
-import {
-  isIdentifierStartCode,
-  isSimpleIdentifierText,
-  readIdentifierEnd,
-  startsWithStatementWord,
-} from "./compiled-js-identifiers.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 import { ModuleVerificationError } from "./module-verification-error.ts";
 import {
   isTrustedBuilder,
@@ -27,12 +34,6 @@ import {
   SAFE_GLOBAL_IDENTIFIERS,
   TOP_LEVEL_CALL_RESULT_ERROR,
 } from "./policy.ts";
-import {
-  BINDING_IDENTITY_HELPER_NAME,
-  createBindingIdentityHelperSource,
-  createFunctionHardeningHelperSource,
-  RESERVED_FACTORY_BINDINGS,
-} from "@commonfabric/utils/sandbox-contract";
 
 export type BindingKind =
   | "builder"

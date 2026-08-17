@@ -1,16 +1,19 @@
+import { ENTITY_URI_SCHEMES } from "@commonfabric/runner/entity-kind";
+import type { SchedulerGraphNode } from "@commonfabric/runtime-client";
+import dagre from "dagre";
 // Note: deno fmt can crash on deeply nested ternaries in html/svg templates - see renderBaselineStats
 import { css, html, LitElement, svg as svgTag, TemplateResult } from "lit";
-import { ENTITY_URI_SCHEMES } from "@commonfabric/runner/entity-kind";
 import { property, query, state } from "lit/decorators.js";
-import dagre from "dagre";
+
 import type { DebuggerController } from "../lib/debugger-controller.ts";
-import type { SchedulerGraphNode } from "@commonfabric/runtime-client";
+
 import "./SchedulerSourceView.ts";
+
+import { entityUriFromActionId } from "../lib/scheduler-graph-identity.ts";
 import {
   parseActionLocation,
   type SourceViewNode,
 } from "./SchedulerSourceView.ts";
-import { entityUriFromActionId } from "../lib/scheduler-graph-identity.ts";
 
 interface LayoutNode {
   id: string;

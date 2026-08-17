@@ -1,21 +1,16 @@
-import ts from "typescript";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import {
-  type CellWrapperKind,
-  getCellBrand,
-  getCellWrapperInfo,
-  isCellBrand,
-  wrapperKindToBrand,
-} from "../typescript/cell-brand.ts";
-import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
-import { numberFromExpression } from "../typescript/numeric-expression.ts";
-import { dedupeByValueEqual } from "../value-equality.ts";
 import type {
   AsCellEntry,
   MutableJSONSchema,
   MutableJSONSchemaObj,
   SchemaScope,
 } from "@commonfabric/api";
+import {
+  CFC_ATOM_TYPE,
+  CFC_CANONICAL_ALIAS_NAMES,
+} from "@commonfabric/api/cfc";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
@@ -27,9 +22,15 @@ import {
   type TypeWithInternals,
 } from "../type-utils.ts";
 import {
-  CFC_ATOM_TYPE,
-  CFC_CANONICAL_ALIAS_NAMES,
-} from "@commonfabric/api/cfc";
+  type CellWrapperKind,
+  getCellBrand,
+  getCellWrapperInfo,
+  isCellBrand,
+  wrapperKindToBrand,
+} from "../typescript/cell-brand.ts";
+import { numberFromExpression } from "../typescript/numeric-expression.ts";
+import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
+import { dedupeByValueEqual } from "../value-equality.ts";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);

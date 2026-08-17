@@ -16,6 +16,7 @@ import type {
   HarnessSkillScriptExecutionTarget,
 } from "../contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
+import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
@@ -30,6 +31,13 @@ export interface HarnessToolContext {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
+  /**
+   * The run's handle table, as it stands at the invocation. Undefined until
+   * the run mints its first handle. `describe_handle` is the only tool that
+   * reads it: every other tool sees its input with tokens already resolved to
+   * addresses by the prompt loop.
+   */
+  handleTable?: HarnessHandleTable;
   /**
    * The run's trusted Fabric session, lazy and cached by the engine.
    * Undefined when the run has no fabric session configured, which also

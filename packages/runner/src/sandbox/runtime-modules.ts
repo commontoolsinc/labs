@@ -1,8 +1,9 @@
-import { createBuilder } from "../builder/factory.ts";
+import * as cfcModule from "@commonfabric/api/cfc-authoring";
 import type { StaticCache } from "@commonfabric/static";
 import turndown from "turndown";
+
+import { createBuilder } from "../builder/factory.ts";
 import { freezeSandboxValue } from "./hardening.ts";
-import * as cfcModule from "@commonfabric/api/cfc-authoring";
 export type { RuntimeModuleIdentifier } from "./runtime-module-policy.ts";
 export {
   isRuntimeModuleIdentifier,

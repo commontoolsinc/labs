@@ -200,7 +200,7 @@ The same machinery carries three mergeable ops. `append` is described below;
   op, never an indexed `add`/`remove`/`move` (`assertNoIndexedArrayStructuralOps`
   guards this). So a reader of the list is invalidated by an op, while the op's
   own (dropped) read keeps two ops from conflicting with each other — the
-  array-membership analogue of the conflict-granularity fix for distinct-key
+  array-membership analog of the conflict-granularity fix for distinct-key
   writers to a container.
 
 ### The op family
@@ -358,7 +358,7 @@ first, since the op carries only the delta.
 
   In every case reachable today the reshaping write also leaves an unmarked read
   at the path, which keeps it in the conflict set regardless — so the delete is
-  belt and braces rather than a demonstrated behaviour change, and no test
+  belt and braces rather than a demonstrated behavior change, and no test
   asserts a conflict outcome that depends on it. It is kept because the
   guarantee should not rest on that coincidence: nothing obliges a reshape to
   read what it overwrites.

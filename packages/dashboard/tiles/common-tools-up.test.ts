@@ -1,9 +1,12 @@
-// common.tools uptime tile: a synthetic HTTP check, exercised with a stubbed
-// fetch and a hand-made Ctx. No network.
-//
-// The tile keeps a consecutive-failure counter across collect() calls, and the
-// module holds it for the life of the process. Each test that cares about the
-// counter starts from a reachable check, which resets it to zero.
+/**
+ * common.tools uptime tile: a synthetic HTTP check, exercised with a stubbed
+ * fetch and a hand-made Ctx. No network.
+ *
+ * The tile keeps a consecutive-failure counter across collect() calls, and the
+ * module holds it for the life of the process. Each test that cares about the
+ * counter starts from a reachable check, which resets it to zero.
+ */
+
 import { assert, assertEquals } from "@std/assert";
 import type { Ctx } from "../types.ts";
 import { commonToolsUp } from "./common-tools-up.ts";

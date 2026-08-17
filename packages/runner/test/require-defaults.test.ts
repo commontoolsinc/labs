@@ -5,14 +5,17 @@
  * StripDefaultBrand<T>, and the Default<T,V> brand detection logic.
  * If any type assertion is wrong, this file will fail to compile.
  */
-import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import type { DeepDefault, Default } from "@commonfabric/api";
+import type { Cell } from "@commonfabric/runner";
+
 import type {
   RequireDefaults,
   StripDefaultBrand,
 } from "../src/builder/types.ts";
-import type { DeepDefault, Default } from "@commonfabric/api";
-import type { Cell } from "@commonfabric/runner";
 
 // ============================================================================
 // Helpers

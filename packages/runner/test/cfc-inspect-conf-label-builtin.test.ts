@@ -1,21 +1,23 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
-import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import type { URI } from "@commonfabric/memory/interface";
+
+import type { Cell } from "../src/cell.ts";
+import type { InspectConfLabelResult } from "../src/cfc/label-introspection.ts";
 import {
   cfcLabelViewForCell,
   redactCaveatSourcesForDisplay,
 } from "../src/cfc/label-view.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import type { Cell } from "../src/cell.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { InspectConfLabelResult } from "../src/cfc/label-introspection.ts";
-import type { URI } from "@commonfabric/memory/interface";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-inspect-conf-label-builtin",

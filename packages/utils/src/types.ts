@@ -233,7 +233,7 @@ export function isPlainObject(
  * user-defined classes, ...) deliberately do not qualify.
  *
  * This is a structural predicate, so it narrows in one direction only, and is
- * overloaded accordingly; see the module header. Unlike its neighbours it
+ * overloaded accordingly; see the module header. Unlike its neighbors it
  * narrows to a *mutable* pair of types, because its callers are the ones that
  * go on to write through the result.
  *

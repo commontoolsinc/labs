@@ -1,29 +1,31 @@
-import { describe, it } from "@std/testing/bdd";
-import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,
   cfcAtom,
 } from "@commonfabric/api/cfc";
+
 import { atomEntails, matchAtomPattern } from "../src/cfc/atom-pattern.ts";
 import { clauseSubsumes } from "../src/cfc/clause.ts";
-import {
-  atomsOutsideCeiling,
-  cfcIntegritySatisfiesFloorCoherently,
-} from "../src/cfc/observation.ts";
+import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
 import {
   commitCfcFieldValue,
   transformCfcLabelForCrossSpacePersist,
 } from "../src/cfc/label-representation.ts";
 import {
+  atomsOutsideCeiling,
+  cfcIntegritySatisfiesFloorCoherently,
+} from "../src/cfc/observation.ts";
+import { buildCfcPolicySnapshot } from "../src/cfc/policy.ts";
+import { createRenderConfidentialityResolver } from "../src/cfc/render-ceiling.ts";
+import {
   dischargeMaterialRiskAtoms,
   schemaWithInjectionSafeAnnotations,
 } from "../src/cfc/schema-sanitization.ts";
-import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
-import { buildCfcPolicySnapshot } from "../src/cfc/policy.ts";
 import { STANDARD_PROMPT_CAVEAT_POLICY } from "../src/cfc/standard-profile.ts";
-import { createRenderConfidentialityResolver } from "../src/cfc/render-ceiling.ts";
 
 // Inv-12 Stage 1 same-form matching (SC-25; design §2; spec §4.6.4.1):
 // enforcement keeps working on commitment forms, fail-closed where it

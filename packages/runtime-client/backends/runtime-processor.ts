@@ -1,8 +1,23 @@
-import { DID, Identity, type Session } from "@commonfabric/identity";
+import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
+import {
+  type SiteTable,
+  siteTableCause,
+  siteTableSchema,
+} from "@commonfabric/home-schemas";
+import {
+  normalizeRenderConfidentialityCeiling,
+  normalizeRenderDeclassificationPolicy,
+  type RenderConfidentialityCeiling,
+  type RenderDeclassificationPolicy,
+  WorkerReconciler,
+} from "@commonfabric/html/worker";
+import { DID, Identity, type Session } from "@commonfabric/identity";
+import type { Program } from "@commonfabric/js-compiler";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
   PieceController,
@@ -12,15 +27,6 @@ import {
   readPieceSourceRevision,
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
-import {
-  getLogger,
-  getLoggerCountsBreakdown,
-  getLoggerFlagsBreakdown,
-  getTimingStatsBreakdown,
-  Logger,
-  resetAllCountBaselines,
-  resetAllTimingBaselines,
-} from "@commonfabric/utils/logger";
 import {
   ACLManager,
   type BrowserWorkerPresetParams,
@@ -46,8 +52,7 @@ import {
   SpaceHostValidationError,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import { linkRefPayload } from "@commonfabric/runner/shared";
-import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
+import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -58,14 +63,27 @@ import {
   type SpaceMembershipProvider,
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
+import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { StorageManager } from "../../runner/src/storage/cache.ts";
+import { linkRefPayload } from "@commonfabric/runner/shared";
+import { RemoteResponse } from "@commonfabric/runtime-client";
+import {
+  getLogger,
+  getLoggerCountsBreakdown,
+  getLoggerFlagsBreakdown,
+  getTimingStatsBreakdown,
+  Logger,
+  resetAllCountBaselines,
+  resetAllTimingBaselines,
+} from "@commonfabric/utils/logger";
+
 import {
   getMetaLink,
   KeepAsCell,
   type NormalizedFullLink,
   parseLink,
 } from "../../runner/src/link-utils.ts";
+import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
@@ -152,35 +170,18 @@ import {
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
-import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
-import type { Program } from "@commonfabric/js-compiler";
-import { setLLMUrl } from "@commonfabric/llm";
+import type { VDomOp } from "../protocol/types.ts";
+import { cellRefToKey } from "../shared/utils.ts";
 import {
-  type SiteTable,
-  siteTableCause,
-  siteTableSchema,
-} from "@commonfabric/home-schemas";
+  postContextualRuntimeError,
+  postRuntimeError,
+} from "./runtime-error.ts";
 import {
   createCellRef,
   createPageRef,
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
-import { cellRefToKey } from "../shared/utils.ts";
-import { RemoteResponse } from "@commonfabric/runtime-client";
-import {
-  normalizeRenderConfidentialityCeiling,
-  normalizeRenderDeclassificationPolicy,
-  type RenderConfidentialityCeiling,
-  type RenderDeclassificationPolicy,
-  WorkerReconciler,
-} from "@commonfabric/html/worker";
-import type { VDomOp } from "../protocol/types.ts";
-import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
-import {
-  postContextualRuntimeError,
-  postRuntimeError,
-} from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadCodec = newDefaultJsonCodecEngine();

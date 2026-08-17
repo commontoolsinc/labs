@@ -1,13 +1,18 @@
+import { join, resolve } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
+
 import { env, waitFor, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
-import { describe, it } from "@std/testing/bdd";
-import { join, resolve } from "@std/path";
+
 import "../src/globals.ts";
-import { PieceController, PiecesController } from "@commonfabric/piece/ops";
-import { clickPierce } from "./shadow-dom.ts";
+
 import { expect } from "@std/expect";
+
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+
+import { clickPierce } from "./shadow-dom.ts";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 const REPO_ROOT = resolve(import.meta.dirname!, "../../..");

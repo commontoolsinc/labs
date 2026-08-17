@@ -472,7 +472,7 @@ result schemas carry and dispatches an event to one, with an optional JSON
 payload. A handler only appears if the stream is declared in the pattern's
 output (or argument) type — the schema'd read is closed-world, so a handler
 returned at runtime behind an index signature is invisible to it. Dispatches
-from the menu are accepted-for-delivery acknowledgements (the commit is
+from the menu are accepted-for-delivery acknowledgments (the commit is
 asynchronous) and are not renderer-trusted, so a handler gated on UI
 provenance will refuse them.
 

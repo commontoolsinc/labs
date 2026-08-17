@@ -4,8 +4,6 @@ import {
   join as joinFileSystemPath,
   relative as relativeFileSystemPath,
 } from "@std/path";
-import { Parser as HtmlParser } from "htmlparser2";
-import { marked, type Token } from "marked";
 import {
   basename as graphPathBasename,
   dirname as graphPathDirname,
@@ -13,6 +11,9 @@ import {
   join as joinGraphPath,
   normalize as normalizeGraphPath,
 } from "@std/path/posix";
+
+import { Parser as HtmlParser } from "htmlparser2";
+import { marked, type Token } from "marked";
 
 interface MarkdownFile {
   readonly name: string;
