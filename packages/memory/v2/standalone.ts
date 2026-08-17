@@ -75,6 +75,16 @@ export class StandaloneMemoryServer {
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(encodeMemoryBoundary(message));
         }
+      }, () => {
+        // A server-initiated close (the evaluation boundary) must reach
+        // the wire: the socket close is the signal the client's reconnect
+        // recovery keys on.
+        if (
+          socket.readyState === WebSocket.OPEN ||
+          socket.readyState === WebSocket.CONNECTING
+        ) {
+          socket.close(1011, "memory connection closed by server");
+        }
       });
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
       socket.addEventListener("message", (event) => {

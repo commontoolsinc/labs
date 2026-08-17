@@ -874,12 +874,13 @@ class Connection {
   /**
    * Query/watch evaluation shares ONE failure boundary: any exception —
    * schema-closure corruption included — records its diagnostics and
-   * closes this connection, discarding its session and graph state whole.
-   * The client's ordinary disconnect/reconnect recovery reinstalls fresh
+   * closes this connection, discarding every session and graph state it
+   * carries (a connection can mount sessions in several spaces; the
+   * teardown is deliberately whole-connection, since partial evaluation
+   * state cannot be trusted and reconnection rebuilds everything). The
+   * client's ordinary disconnect/reconnect recovery reinstalls fresh
    * connection, session, and watch state; persistent corruption fails
-   * loudly again rather than ever serving a partial result. One session
-   * per connection means no independent session state is worth
-   * preserving across the failure.
+   * loudly again rather than ever serving a partial result.
    */
   async #evaluationBoundary<T>(
     label: string,

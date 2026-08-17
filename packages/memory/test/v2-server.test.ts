@@ -2406,7 +2406,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
   }
 });
 
-Deno.test("memory v2 server rolls back failed watch.add mutations", async () => {
+Deno.test("memory v2 server closes the connection on a failed watch.add and supports resume", async () => {
   const server = createServer("memory://memory-v2-server-watch-add-rollback");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -2509,10 +2509,10 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
     // mutations die with the connection's graph state.
     assertEquals(messages, []);
 
-    // Client-side recovery: resume the session on a fresh connection. The
-    // discarded add left nothing behind — doc:2 is not watched, so its
-    // update rides no frame, while the accept's catch-up marker still
-    // arrives (CT-1927).
+    // Client-side recovery: resume the session on a fresh connection and
+    // transact. Watch state is connection-scoped, so the resumed session
+    // starts with no watches: doc:2's update rides no frame, while the
+    // accept's catch-up marker still arrives (CT-1927).
     const resumedMessages: ServerMessage[] = [];
     const resumed = server.connect((message) => resumedMessages.push(message));
     await resumed.receive(encodeMemoryBoundary(HELLO));

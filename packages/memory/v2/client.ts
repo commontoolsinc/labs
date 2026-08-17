@@ -1657,8 +1657,9 @@ export const connect = Client.connect;
 // from receive() entry, and a send that merely enqueued would let fan-out
 // read heads that predate a write already handed to the transport. Frames
 // staged at close() are dropped — nothing arrives after the socket is
-// gone. Remaining fidelity gap: setCloseReceiver is a no-op, so a
-// server-initiated disconnect is invisible over loopback.
+// gone. A server-initiated close (the evaluation boundary) surfaces
+// through setCloseReceiver like a socket close, and the next send opens a
+// fresh server connection — the same reconnect shape a deployment has.
 //
 // The pump takes that turn through armTurn, so a queued frame always has an
 // armed zero-delay timer for `clock.settle()` to see without the delivery
