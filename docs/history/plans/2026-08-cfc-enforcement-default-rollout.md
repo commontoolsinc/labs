@@ -910,6 +910,31 @@ input schema contains the defining module policy. The direct-release pattern
 test then proves that both its default and custom protected messages can be
 read by their assertions while enforcement is enabled.
 
+## 38. Merge matching closed-empty unions by meaning
+
+An object cell with an empty-object default can reach the runtime as an
+`anyOf` with two branches. One branch is a closed empty object. The other is
+the stored value. Type expansion can reverse those branches and can add policy
+to the stored-value branch without changing either branch's structural
+meaning. Treating the arrays as positional makes those equivalent unions look
+divergent. Strict preparation then rejects an authorized write before the
+ordinary policy merge can examine it.
+
+Recognize only the two-branch form with exactly one policy-free closed empty
+object. Match the remaining value branches after resolving local references
+and ignoring their policy fields. Continue checking nested alternatives for
+unsupported divergence. Merge the matching value branches with the ordinary
+schema and policy rules, then retain the stored union's branch order. This
+keeps added integrity evidence, preserves existing restrictions, and rejects a
+replacement integrity atom as a weakening.
+
+A schema-merge regression presents the empty and value branches in opposite
+orders. The candidate adds integrity to each stored list item. The merged
+schema must retain both the list requirement and the item evidence, and it must
+remain stable when merged with itself. The existing changed-policy regression
+continues to prove that the matched-union case does not permit a policy
+replacement.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an

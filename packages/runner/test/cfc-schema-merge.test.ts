@@ -2617,6 +2617,52 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/divergent anyOf branches/);
   });
 
+  it("merges matching closed-empty unions independent of branch order", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      anyOf: [
+        { $ref: "#/$defs/StoredValue" },
+        { type: "object", properties: {}, additionalProperties: false },
+      ],
+      $defs: {
+        StoredValue: {
+          type: "object",
+          properties: {
+            list: {
+              type: "array",
+              items: { type: "string" },
+              ifc: { requiredIntegrity: ["admin"] },
+            },
+          },
+        },
+      },
+    }, {
+      anyOf: [
+        { type: "object", properties: {}, additionalProperties: false },
+        { $ref: "#/$defs/TrustedValue" },
+      ],
+      $defs: {
+        TrustedValue: {
+          type: "object",
+          properties: {
+            list: {
+              type: "array",
+              items: {
+                type: "string",
+                ifc: { addIntegrity: ["admin"] },
+              },
+              ifc: { requiredIntegrity: ["admin"] },
+            },
+          },
+        },
+      },
+    });
+    const encoded = JSON.stringify(merged);
+
+    expect(encoded).toContain('"requiredIntegrity":["admin"]');
+    expect(encoded).toContain('"addIntegrity":["admin"]');
+    expect(() => mergeCfcSchemaEnvelopes(merged, merged)).not.toThrow();
+  });
+
   it("rejects changed policy in a defaulted empty-or-value union", () => {
     expect(() =>
       mergeCfcSchemaEnvelopes({
@@ -2647,7 +2693,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
           },
         ],
       })
-    ).toThrow(/divergent anyOf branches/);
+    ).toThrow(/addIntegrity cannot be weakened/);
   });
 
   it("retains equal branch-local policy while siblings change", () => {

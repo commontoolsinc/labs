@@ -636,6 +636,47 @@ const branchSchemasEquivalent = (
   return true;
 };
 
+const isPolicyFreeClosedEmptyObject = (
+  branch: JSONSchema,
+  root: JSONSchema,
+): boolean => {
+  const resolved = resolvedBranchCheckPosition(branch, root).schema;
+  return isObjectOrArray(resolved) && resolved.type === "object" &&
+    isObjectOrArray(resolved.properties) &&
+    Object.keys(resolved.properties).length === 0 &&
+    resolved.additionalProperties === false &&
+    !resolvedSchemaTreeContainsIfc(branch, root);
+};
+
+const closedEmptyObjectUnion = (
+  schema: JSONSchemaObj,
+  root: JSONSchema,
+):
+  | {
+    branches: readonly JSONSchema[];
+    emptyIndex: number;
+    value: JSONSchema;
+  }
+  | undefined => {
+  if (!Array.isArray(schema.anyOf) || schema.anyOf.length !== 2) {
+    return undefined;
+  }
+  const emptyIndex = schema.anyOf.findIndex((branch) =>
+    isPolicyFreeClosedEmptyObject(branch, root)
+  );
+  if (
+    emptyIndex === -1 ||
+    isPolicyFreeClosedEmptyObject(schema.anyOf[1 - emptyIndex], root)
+  ) {
+    return undefined;
+  }
+  return {
+    branches: schema.anyOf,
+    emptyIndex,
+    value: schema.anyOf[1 - emptyIndex],
+  };
+};
+
 const assertNoDivergentIfcBranches = (
   schema: JSONSchema,
   counterpart: JSONSchema | undefined,
@@ -687,17 +728,6 @@ const assertNoDivergentIfcBranches = (
   }
   if (!isObjectOrArray(current.schema)) return;
   const object = current.schema as JSONSchemaObj;
-  const isPolicyFreeClosedEmptyObject = (
-    branch: JSONSchema,
-    root: JSONSchema,
-  ): boolean => {
-    const resolved = resolvedBranchCheckPosition(branch, root).schema;
-    return isObjectOrArray(resolved) && resolved.type === "object" &&
-      isObjectOrArray(resolved.properties) &&
-      Object.keys(resolved.properties).length === 0 &&
-      resolved.additionalProperties === false &&
-      !resolvedSchemaTreeContainsIfc(branch, root);
-  };
   const isDefaultedProjectionOfClosedEmptyUnion = (
     union: JSONSchemaObj,
     unionRoot: JSONSchema,
@@ -723,6 +753,40 @@ const assertNoDivergentIfcBranches = (
       )
     );
   };
+  const currentClosedEmptyUnion = closedEmptyObjectUnion(
+    object,
+    current.root,
+  );
+  const counterpartClosedEmptyUnion = isObjectOrArray(
+      counterpartCurrent.schema,
+    )
+    ? closedEmptyObjectUnion(
+      counterpartCurrent.schema,
+      counterpartCurrent.root,
+    )
+    : undefined;
+  if (
+    currentClosedEmptyUnion !== undefined &&
+    counterpartClosedEmptyUnion !== undefined &&
+    branchSchemasEquivalent(
+      currentClosedEmptyUnion.value,
+      current.root,
+      counterpartClosedEmptyUnion.value,
+      counterpartCurrent.root,
+      undefined,
+      true,
+    )
+  ) {
+    assertNoDivergentIfcBranches(
+      currentClosedEmptyUnion.value,
+      counterpartClosedEmptyUnion.value,
+      path,
+      current.root,
+      counterpartCurrent.root,
+      nextActive,
+    );
+    return;
+  }
   if (
     isObjectOrArray(counterpartCurrent.schema) &&
     (isDefaultedProjectionOfClosedEmptyUnion(
@@ -2236,6 +2300,43 @@ const mergeSchemaNode = (
     mergedPrefixItems = slots;
   }
 
+  const leftClosedEmptyUnion = closedEmptyObjectUnion(
+    left,
+    existingScope,
+  );
+  const rightClosedEmptyUnion = closedEmptyObjectUnion(
+    right,
+    candidateScope,
+  );
+  let mergedAnyOf: JSONSchema[] | undefined;
+  if (
+    leftClosedEmptyUnion !== undefined &&
+    rightClosedEmptyUnion !== undefined &&
+    branchSchemasEquivalent(
+      leftClosedEmptyUnion.value,
+      existingScope,
+      rightClosedEmptyUnion.value,
+      candidateScope,
+      undefined,
+      true,
+    )
+  ) {
+    const mergedValue = mergeSchemaNode(
+      leftClosedEmptyUnion.value,
+      rightClosedEmptyUnion.value,
+      path,
+      logicalPath,
+      options,
+      existingScope,
+      candidateScope,
+      activeRefMerges,
+      context,
+    );
+    mergedAnyOf = leftClosedEmptyUnion.branches.map((branch, index) =>
+      index === leftClosedEmptyUnion.emptyIndex ? branch : mergedValue
+    );
+  }
+
   // Unequal same-name definition scopes are namespaced before their reference
   // sites are merged. Equal definitions can share a name. Unreachable
   // definitions are pruned after the two definition maps are combined.
@@ -2250,6 +2351,7 @@ const mergeSchemaNode = (
     ...(mergedPrefixItems !== undefined
       ? { prefixItems: mergedPrefixItems }
       : {}),
+    ...(mergedAnyOf !== undefined ? { anyOf: mergedAnyOf } : {}),
     ...(mergedAdditionalProperties !== undefined
       ? { additionalProperties: mergedAdditionalProperties }
       : {}),
