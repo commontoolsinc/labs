@@ -25,6 +25,13 @@ import { safeImageUrl, safeUrl } from "../../core/safe-url.ts";
  * drawing plays, which would let a drawing write a `javascript:` URL into an
  * attribute this function had already checked. `foreignObject` opens a window
  * back into HTML, where everything the list excludes becomes available again.
+ *
+ * `style` is the one entry that paints nothing, and it is here because a
+ * drawing exported from a design tool routinely carries its fills in a
+ * stylesheet rather than on each shape, and drops to black without it. CSS
+ * runs no script, so it does not cost the guarantee above. It can name a URL,
+ * which the network caveat above already covers and which this function does
+ * not read: a `url()` inside a stylesheet is not an attribute value.
  */
 const ALLOWED_ELEMENTS = new Set([
   "a",
