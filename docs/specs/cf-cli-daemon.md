@@ -3,14 +3,14 @@
 ## Status
 
 This document specifies intended behavior. The daemon is not implemented.
-The invocation-identity requirements depend on the shaped-reads plan and its
-pending CLI and runner implementations ([#5435], [#5460], and [#5469]). Until
-that contract lands, they specify coordinated intended behavior rather than
-current direct-execution behavior.
 
-[#5435]: https://github.com/commontoolsinc/labs/pull/5435
-[#5460]: https://github.com/commontoolsinc/labs/pull/5460
-[#5469]: https://github.com/commontoolsinc/labs/pull/5469
+The invocation-identity rules it describes ARE in effect for direct execution:
+`resolveInvocationIdentity` (`packages/cli/commands/piece.ts`) mints both
+halves when neither is supplied, takes both when both are, and rejects an
+invocation id offered without the session it is replayable within. What this
+document adds is where those rules sit relative to a daemon — resolved by the
+short-lived client before admission, carried as request-owned data, never read
+or minted or retained by the daemon process.
 
 ## Summary
 
@@ -315,7 +315,8 @@ Every request owns and must release:
 - error and console collectors;
 - navigation callbacks and other command effects;
 - the caller's Fabric invocation identity: the `--invocation` ID paired with
-  the invocation session resolved from `--session` or `CF_SESSION`; and
+  the invocation session resolved from `--invocation-session` or
+  `CF_INVOCATION_SESSION`; and
 - filesystem/compiler state that is not safely content-addressed.
 
 The Fabric invocation identity is caller input, not connection state. The pair
@@ -325,11 +326,12 @@ would place unrelated callers in one deduplication scope, where one caller
 could be told that its request settled on another caller's outcome.
 
 The short-lived client resolves the pair under the same rules as direct
-execution before daemon admission. `--session` overrides `CF_SESSION`; when
-neither half is supplied, the client mints both; and an invocation ID without
-an invocation session is rejected before dispatch. The normalized pair travels
+execution before daemon admission. `--invocation-session` overrides
+`CF_INVOCATION_SESSION`; when neither half is supplied, the client mints both;
+and an invocation ID without an invocation session is rejected before dispatch. The normalized pair travels
 as an explicit request-envelope field. The daemon process never reads its own
-`CF_SESSION`, never receives it as request environment, never mints either
+`CF_INVOCATION_SESSION`, never receives it as request environment, never mints
+either
 half, and never retains the pair after request cleanup.
 
 The next request is not admitted to execution until cleanup has stopped
@@ -595,7 +597,7 @@ parsing or validation rules in a daemon-only client path.
    performs context-free validation, and lets daemon handlers perform schema-
    dependent validation without ambient stdin access. Carry the client-resolved
    Fabric invocation identity as request-owned data without forwarding
-   `CF_SESSION`.
+   `CF_INVOCATION_SESSION`.
 7. Add filesystem and compiler commands only after cwd, input freshness, and
    content-cache boundaries are validated.
 
