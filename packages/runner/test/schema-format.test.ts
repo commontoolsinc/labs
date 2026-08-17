@@ -679,3 +679,48 @@ Deno.test("schemaToTypeString does not make an object of a scalar conjunction", 
     "unknown",
   );
 });
+
+Deno.test("schemaToTypeString steps over a conjunct that is not a schema", () => {
+  // `allOf` is caller data and can hold anything. A member that is not an
+  // object contributes no field rather than ending the walk, so the members
+  // beside it are still read.
+  assertEquals(
+    schemaToTypeString({
+      allOf: [null, "nope", { properties: { a: { type: "string" } } }],
+    } as never),
+    "{\n  a?: string\n}",
+  );
+});
+
+Deno.test("schemaToTypeString steps over a conjunct naming a definition that is absent", () => {
+  assertEquals(
+    schemaToTypeString(
+      {
+        type: "object",
+        properties: { a: { type: "string" } },
+        allOf: [{ $ref: "#/$defs/Missing" }],
+      } as never,
+      { defs: {} as never },
+    ),
+    "{\n  a?: string\n}",
+  );
+});
+
+Deno.test("schemaToTypeString stops following a conjunction past its depth bound", () => {
+  // Nested `allOf` is followed 8 levels. The 10th level's field is beyond the
+  // bound and does not appear; the levels within it still do. The bound is
+  // what keeps a pathological schema from walking forever.
+  let deepest: Record<string, unknown> = {
+    properties: { level10: { type: "string" } },
+  };
+  for (let level = 9; level >= 1; level--) {
+    deepest = {
+      properties: { [`level${level}`]: { type: "string" } },
+      allOf: [deepest],
+    };
+  }
+  const rendered = schemaToTypeString(deepest as never, { maxDepth: 99 });
+  assert(rendered.includes("level1"), "the outermost level is read");
+  assert(rendered.includes("level8"), "the level at the bound is read");
+  assert(!rendered.includes("level10"), "the level past the bound is not");
+});
