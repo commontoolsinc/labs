@@ -25,6 +25,7 @@ import {
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
   type CfcDereferenceTrace,
+  cfcDereferenceTracesEqual,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
@@ -987,12 +988,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
+    const traces = this.#cfcState.dereferenceTraces;
+    // Only a dereference the transaction had not already performed can move
+    // the digest, which binds the trace SET
+    // (`canonicalizePreparedDigestInput`). Invalidating on a repeat would
+    // reject a commit the recheck in `commit()` goes on to accept, so this
+    // guard answers the same question that recheck does.
+    //
+    // The scan is the rare path, not the hot one: it runs only once prepared,
+    // and every resolution that reaches here has already probed its way down
+    // the link — a probe invalidates on its own, before the hop is recorded.
+    const changesDigest = this.#cfcState.prepare.status === "prepared" &&
+      !traces.some((recorded) => cfcDereferenceTracesEqual(recorded, trace));
     // Freeze on entry: from this point on the record is owned by the tx and
     // identity-stable. Mirrors the chokepoint pattern on
     // `recordCfcWritePolicyInput()`; together they ensure every CfcAddress
     // that flows into the digest input lives behind a deep-frozen wrapper.
-    this.#cfcState.dereferenceTraces.push(deepFreeze(trace));
-    if (this.#cfcState.prepare.status === "prepared") {
+    traces.push(deepFreeze(trace));
+    if (changesDigest) {
       this.invalidateCfc("dereference-trace-added");
     }
   }

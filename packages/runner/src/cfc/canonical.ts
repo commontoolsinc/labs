@@ -105,6 +105,18 @@ const compareDereferenceTrace = (
   return left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0;
 };
 
+/**
+ * Whether two dereference traces are the same record, comparing paths in
+ * canonical form — `compareAddress` reaches each path through
+ * `logicalPathToPointer`, which strips a leading `"value"` on the way. So a
+ * raw trace and its canonicalized twin compare equal without either being
+ * canonicalized first.
+ */
+export const cfcDereferenceTracesEqual = (
+  left: CfcDereferenceTrace,
+  right: CfcDereferenceTrace,
+): boolean => compareDereferenceTrace(left, right) === 0;
+
 const compareConsultedGrant = (
   left: ConsultedGrant,
   right: ConsultedGrant,
