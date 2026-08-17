@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import type {
   InitializeResponse,
   ListSessionsRequest,
@@ -96,6 +96,139 @@ Deno.test("ACP driver enumerates and loads persisted sessions", async () => {
   assertEquals(calls, ["list:", "load:session-1"]);
   assertEquals(driver.source.capabilities.rename, false);
   await driver.stop();
+});
+
+Deno.test("ACP controls are discovered and enforced per session", async () => {
+  const modeCalls: SetSessionModeRequest[] = [];
+  const configCalls: SetSessionConfigOptionRequest[] = [];
+  let firstLoads = 0;
+  const transport: AcpTransport = {
+    setSessionUpdateSink() {},
+    initialize: () =>
+      Promise.resolve({
+        protocolVersion: 1,
+        agentCapabilities: {
+          loadSession: true,
+          sessionCapabilities: { list: {} },
+        },
+      }),
+    listSessions: () =>
+      Promise.resolve({
+        sessions: [
+          { sessionId: "first", cwd: "/tmp/first" },
+          { sessionId: "second", cwd: "/tmp/second" },
+        ],
+      }),
+    loadSession: (params) => {
+      if (params.sessionId === "first") firstLoads++;
+      return Promise.resolve(
+        params.sessionId === "first"
+          ? firstLoads === 1
+            ? {
+              modes: {
+                currentModeId: "plan",
+                availableModes: [{ id: "plan", name: "Plan" }],
+              },
+              configOptions: [{
+                id: "thinking",
+                name: "Thinking",
+                type: "boolean" as const,
+                currentValue: false,
+              }],
+            }
+            : {}
+          : {
+            modes: {
+              currentModeId: "build",
+              availableModes: [{ id: "build", name: "Build" }],
+            },
+            configOptions: [],
+          },
+      );
+    },
+    resumeSession: () => Promise.resolve({}),
+    prompt: () => Promise.resolve({ stopReason: "end_turn" }),
+    cancel: () => Promise.resolve(),
+    setSessionMode: (params) => {
+      modeCalls.push(params);
+      return Promise.resolve({});
+    },
+    setSessionConfigOption: (params) => {
+      configCalls.push(params);
+      return Promise.resolve({ configOptions: [] });
+    },
+    stop: () => Promise.resolve(),
+  };
+  const driver = new AcpDriver(
+    { id: " ACP:Default ", driver: "acp", enabled: true, command: ["fake"] },
+    transport,
+  );
+
+  await driver.start();
+  await driver.listSessions();
+  await driver.readSession("first");
+  await driver.readSession("second");
+  assertEquals(driver.source.id, "acp:default");
+  assertEquals(driver.source.capabilities.modes, ["build", "plan"]);
+  assertEquals(
+    (await driver.setMode("first", "build")).status,
+    "unsupported",
+  );
+  assertEquals((await driver.setMode("first", "plan")).status, "succeeded");
+  assertEquals(
+    (await driver.setConfigOption("second", "thinking", true)).status,
+    "unsupported",
+  );
+  assertEquals(
+    (await driver.setConfigOption("first", "thinking", "yes")).status,
+    "unsupported",
+  );
+  assertEquals(
+    (await driver.setConfigOption("first", "thinking", true)).status,
+    "succeeded",
+  );
+  assertEquals(modeCalls.length, 1);
+  assertEquals(configCalls.length, 1);
+  await driver.readSession("first");
+  assertEquals(driver.source.capabilities.modes, ["build"]);
+  assertEquals(driver.source.capabilities.configOptions, {});
+  assertEquals(
+    (await driver.setMode("first", "plan")).status,
+    "unsupported",
+  );
+});
+
+Deno.test("ACP startup stops transports missing required capabilities", async () => {
+  for (
+    const agentCapabilities of [
+      { loadSession: true },
+      { sessionCapabilities: { list: {} } },
+    ]
+  ) {
+    let stops = 0;
+    const transport: AcpTransport = {
+      setSessionUpdateSink() {},
+      initialize: () =>
+        Promise.resolve({ protocolVersion: 1, agentCapabilities }),
+      listSessions: () => Promise.resolve({ sessions: [] }),
+      loadSession: () => Promise.resolve({}),
+      resumeSession: () => Promise.resolve({}),
+      prompt: () => Promise.resolve({ stopReason: "end_turn" }),
+      cancel: () => Promise.resolve(),
+      setSessionMode: () => Promise.resolve({}),
+      setSessionConfigOption: () => Promise.resolve({ configOptions: [] }),
+      stop: () => {
+        stops++;
+        return Promise.resolve();
+      },
+    };
+    const driver = new AcpDriver(
+      { id: "acp:invalid", driver: "acp", enabled: true, command: ["fake"] },
+      transport,
+    );
+    await assertRejects(() => driver.start(), Error, "must advertise");
+    assertEquals(stops, 1);
+  }
 });
 
 Deno.test("ACP driver stops an adapter blocked during initialization", async () => {
@@ -213,6 +346,10 @@ Deno.test("ACP driver serializes overlapping loads of the same session", async (
   const first = driver.readSession("session-1");
   await firstLoadStarted.promise;
   const firstPrompt = driver.prompt("session-1", { text: "continue" });
+  assertEquals(
+    (await driver.prompt("session-1", { text: "duplicate" })).status,
+    "needs-confirmation",
+  );
   const second = driver.readSession("session-1");
   assertEquals(loadCount, 1);
   assertEquals(maximumActiveLoads, 1);

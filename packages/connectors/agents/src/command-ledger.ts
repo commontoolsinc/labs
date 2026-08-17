@@ -6,11 +6,20 @@ import {
 import { AGENT_CONNECTOR_SCHEMAS } from "./protocol.ts";
 import { AsyncSerialQueue } from "./serial-queue.ts";
 import { canonicalJson } from "./canonical-json.ts";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import { stableFabricValue } from "./stable-fabric-value.ts";
+
+type StoredReceipt = Omit<AgentSessionCommandReceipt, "result"> & {
+  result?: string;
+};
 
 interface LedgerFile {
   schema: typeof AGENT_CONNECTOR_SCHEMAS.commandLedger;
   generation: number;
-  receipts: Record<string, AgentSessionCommandReceipt>;
+  receipts: Record<string, StoredReceipt>;
   pendingPublicationCommandIds: string[];
 }
 
@@ -26,12 +35,51 @@ function comparableLedgerValue(value: ParsedLedgerFile): LedgerFile {
   return {
     schema: AGENT_CONNECTOR_SCHEMAS.commandLedger,
     generation: value.generation,
-    receipts: Object.fromEntries(
-      [...value.receipts].sort(([left], [right]) => left.localeCompare(right)),
-    ),
+    receipts: storedReceipts(value.receipts),
     pendingPublicationCommandIds: [...value.pendingPublicationCommandIds]
       .sort((left, right) => left.localeCompare(right)),
   };
+}
+
+function storeReceipt(receipt: AgentSessionCommandReceipt): StoredReceipt {
+  const { result, ...stored } = receipt;
+  return {
+    ...stored,
+    ...(result === undefined
+      ? {}
+      : { result: jsonFromFabricValue(stableFabricValue(result)) }),
+  };
+}
+
+function storedReceipts(
+  receipts: Map<string, AgentSessionCommandReceipt>,
+): Record<string, StoredReceipt> {
+  return Object.fromEntries(
+    [...receipts].sort(([left], [right]) => left.localeCompare(right)).map(
+      ([commandId, receipt]) => [commandId, storeReceipt(receipt)],
+    ),
+  );
+}
+
+function parseStoredReceipt(
+  commandId: string,
+  value: unknown,
+): AgentSessionCommandReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`command ledger receipt must be an object: ${commandId}`);
+  }
+  const stored = value as Record<string, unknown>;
+  if (stored.result !== undefined && typeof stored.result !== "string") {
+    throw new Error(
+      `command ledger receipt result must use Fabric JSON: ${commandId}`,
+    );
+  }
+  return parseCommandReceipt(commandId, {
+    ...stored,
+    ...(typeof stored.result === "string"
+      ? { result: fabricFromJsonValue(stored.result) }
+      : {}),
+  }, "command ledger receipt");
 }
 
 function validatePrivateInfo(
@@ -105,7 +153,7 @@ function parseLedgerFile(decoded: unknown): ParsedLedgerFile {
   const receipts = new Map(
     Object.entries(parsed.receipts).map(([commandId, receipt]) => [
       commandId,
-      parseCommandReceipt(commandId, receipt, "command ledger receipt"),
+      parseStoredReceipt(commandId, receipt),
     ]),
   );
   if (
@@ -371,7 +419,7 @@ export class CommandLedger {
 
   get(commandId: string): AgentSessionCommandReceipt | undefined {
     const receipt = this.#receipts.get(commandId);
-    return receipt ? structuredClone(receipt) : undefined;
+    return receipt ? parseCommandReceipt(commandId, receipt) : undefined;
   }
 
   pendingPublicationCount(): number {
@@ -431,7 +479,9 @@ export class CommandLedger {
       await this.#persist(receipts, pendingPublicationCommandIds);
       return [...this.#pendingPublicationCommandIds]
         .sort((left, right) => left.localeCompare(right))
-        .map((commandId) => structuredClone(this.#receipts.get(commandId)!));
+        .map((commandId) =>
+          parseCommandReceipt(commandId, this.#receipts.get(commandId)!)
+        );
     });
   }
 
@@ -449,11 +499,7 @@ export class CommandLedger {
     const value: LedgerFile = {
       schema: AGENT_CONNECTOR_SCHEMAS.commandLedger,
       generation: this.#generation + 1,
-      receipts: Object.fromEntries(
-        [...nextReceipts.entries()].sort(([left], [right]) =>
-          left.localeCompare(right)
-        ),
-      ),
+      receipts: storedReceipts(nextReceipts),
       pendingPublicationCommandIds: [...nextPendingPublicationCommandIds]
         .sort((left, right) => left.localeCompare(right)),
     };

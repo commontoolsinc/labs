@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { CodexJsonlClient } from "../../src/drivers/codex-jsonl-client.ts";
 
@@ -65,6 +65,18 @@ try:
             break
 finally:
     write_exit_marker()
+`;
+
+const MALFORMED_SERVER = String.raw`#!/usr/bin/env python3
+import json, sys
+
+frame = sys.argv[1] if len(sys.argv) > 1 else "{not-json"
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("method") == "initialize":
+        print(json.dumps({"id": message["id"], "result": {}}), flush=True)
+    elif message.get("method") == "emit-malformed":
+        print(frame, flush=True)
 `;
 
 function outcome<T>(promise: Promise<T>) {
@@ -236,7 +248,14 @@ Deno.test("aborting the Codex owner stops the child and rejects pending work", a
     }
     assertEquals((await request).ok, false);
     assertEquals((await notification).ok, false);
-    assertEquals(exitReason, "terminated\n");
+    if (shutdown.kind === "request") {
+      assertEquals(
+        exitReason === "terminated\n" || exitReason === "released\n",
+        true,
+      );
+    } else {
+      assertEquals(exitReason, "terminated\n");
+    }
     assertEquals((await exitObserver.status).success, true);
   } finally {
     await client.stop();
@@ -329,5 +348,31 @@ Deno.test("Codex rejects notification waits after the child exits", async () => 
   } finally {
     await client.stop();
     await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Codex terminates a server that emits malformed JSON", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = `${directory}/malformed-server`;
+  await Deno.writeTextFile(server, MALFORMED_SERVER);
+  await Deno.chmod(server, 0o755);
+  try {
+    for (const frame of ["{not-json", "{}"]) {
+      const client = new CodexJsonlClient([server, frame]);
+      try {
+        await client.start();
+        const notification = client.waitForNotification(() => true);
+        await assertRejects(
+          () => client.call("emit-malformed"),
+          Error,
+          frame === "{}" ? "invalid JSON-RPC message" : "emitted invalid JSON",
+        );
+        await assertRejects(() => notification, Error);
+      } finally {
+        await client.stop();
+      }
+    }
+  } finally {
+    await Deno.remove(directory, { recursive: true });
   }
 });

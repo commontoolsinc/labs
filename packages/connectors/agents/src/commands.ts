@@ -7,7 +7,8 @@ import {
 import { AGENT_CONNECTOR_SCHEMAS } from "./protocol.ts";
 import type { AgentDriver, CommandExecutionResult } from "./types.ts";
 import type { CommandLedger } from "./command-ledger.ts";
-import { canonicalJson } from "./canonical-json.ts";
+import { hashFabricValue } from "./canonical-json.ts";
+import { stableFabricValue } from "./stable-fabric-value.ts";
 
 export type CommandType =
   | "prompt"
@@ -79,7 +80,11 @@ const RECEIPT_STATUSES = new Set([
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -197,7 +202,11 @@ export function parseCommandReceipt(
     ...(completedAt ? { completedAt } : {}),
     ...(providerOperationId ? { providerOperationId } : {}),
     ...(error ? { error } : {}),
-    ...(value.result ? { result: structuredClone(value.result) } : {}),
+    ...(value.result
+      ? {
+        result: stableFabricValue(value.result) as Record<string, unknown>,
+      }
+      : {}),
   };
 }
 
@@ -240,10 +249,10 @@ function parseCommand(value: unknown): AgentSessionCommand {
   ) {
     throw new Error(`unsupported command type: ${String(type)}`);
   }
-  const payload = raw.payload && typeof raw.payload === "object" &&
-      !Array.isArray(raw.payload)
-    ? { ...raw.payload as Record<string, unknown> }
-    : {};
+  if (!isRecord(raw.payload)) {
+    throw new Error("command payload must be an object");
+  }
+  const payload = { ...raw.payload };
   const id = normalizeCommandId(requiredString(raw.id, "command id", 256));
   const sourceId = normalizeSourceId(
     requiredString(raw.sourceId, "sourceId", 256),
@@ -457,7 +466,7 @@ export class CommandWorker {
       if (!target.readReceipt) continue;
       const receipt = await target.readReceipt(commandId);
       if (!receipt) continue;
-      if (found && canonicalJson(found) !== canonicalJson(receipt)) {
+      if (found && hashFabricValue(found) !== hashFabricValue(receipt)) {
         throw new Error(
           `command targets disagree about the existing receipt: ${commandId}`,
         );
@@ -535,18 +544,20 @@ export class CommandWorker {
 
     const driver = this.#drivers.get(command.sourceId);
     const invocation = driver
-      ? this.#invoke(
-        driver,
-        command,
-        markCancellationReady,
-        async () => {
-          markCancellationReady?.();
-          await Promise.allSettled(
-            this.#targets.map((target) =>
-              target.refreshSession(driver, command.nativeSessionId)
-            ),
-          );
-        },
+      ? Promise.resolve().then(() =>
+        this.#invoke(
+          driver,
+          command,
+          markCancellationReady,
+          async () => {
+            markCancellationReady?.();
+            await Promise.allSettled(
+              this.#targets.map((target) =>
+                target.refreshSession(driver, command.nativeSessionId)
+              ),
+            );
+          },
+        )
       ).catch((
         error,
       ): CommandExecutionResult => ({

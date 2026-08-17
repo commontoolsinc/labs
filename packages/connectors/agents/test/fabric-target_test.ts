@@ -736,8 +736,16 @@ Deno.test("newer session refresh wins over an older full collection", async () =
     })();
 
     await olderCollectionObserved.promise;
+    const refreshedSource: SourceDescriptor = {
+      ...source,
+      capabilities: {
+        ...source.capabilities,
+        setMode: false,
+        modes: [],
+      },
+    };
     const driver = {
-      source,
+      source: refreshedSource,
       readSession: () => Promise.resolve(snapshot(null, "Terminal snapshot")),
     } as unknown as AgentDriver;
     try {
@@ -755,6 +763,15 @@ Deno.test("newer session refresh wins over an older full collection", async () =
     assertEquals(published.active, null);
     assertEquals(published.title, "Terminal snapshot");
     assertEquals(published.syncStatus, "complete");
+    assertEquals(
+      (published.capabilities as Record<string, unknown>).setMode,
+      false,
+    );
+    assertEquals(
+      ((index.sources as Array<Record<string, unknown>>)[0]
+        .capabilities as Record<string, unknown>).setMode,
+      false,
+    );
     const manifest = published.manifest as Record<string, unknown>;
     const summary = manifest.summary as Record<string, unknown>;
     assertEquals(summary.active, null);

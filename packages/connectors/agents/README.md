@@ -14,11 +14,6 @@ A host supplies source configuration, starts and stops drivers, connects a
 Common Fabric runtime, chooses the target space, schedules collection, and
 decides how health is reported.
 
-[`@commonfabric/agents-host`](../../agents-host/README.md) is the repository's
-command-line implementation of that host contract. It remains a separate
-workspace package so applications can continue to embed the connector without
-adopting its command-line policy or debug user interface.
-
 ## Documentation
 
 - [Architecture](docs/architecture.md) explains the components, data paths,

@@ -68,7 +68,7 @@ export async function pushStableCellGraph(
         return cell;
       }
       for (const key of Object.keys(priorValue)) {
-        if (!(key in value)) {
+        if (!Object.hasOwn(value, key)) {
           tx.writeOrThrow(
             {
               space: link.space!,

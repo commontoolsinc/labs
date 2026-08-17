@@ -11,6 +11,7 @@ import type {
   SourceDescriptor,
 } from "../types.ts";
 import { AsyncSerialQueue } from "../serial-queue.ts";
+import { normalizeSourceId } from "../session-contract.ts";
 
 interface ClaudeSessionInfo {
   sessionId: string;
@@ -206,7 +207,7 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
     // temporary values into its explicit per-query environment.
     this.#queryBaseEnvironment = Deno.env.toObject();
     this.source = {
-      id: config.id,
+      id: normalizeSourceId(config.id),
       driver: config.driver,
       capabilities: {
         inventory: true,
@@ -229,9 +230,14 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
     };
   }
 
-  start(): Promise<void> {
-    this.#stopped = false;
-    return Promise.resolve();
+  start(signal?: AbortSignal): Promise<void> {
+    try {
+      signal?.throwIfAborted();
+      this.#stopped = false;
+      return Promise.resolve();
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   stop(): Promise<void> {
@@ -384,6 +390,9 @@ export class ClaudeAgentSdkDriver implements AgentDriver {
             : {}),
           ...(this.#sessionModels.has(nativeSessionId)
             ? { model: this.#sessionModels.get(nativeSessionId) }
+            : {}),
+          ...(this.#sessionModes.get(nativeSessionId) === "bypassPermissions"
+            ? { allowDangerouslySkipPermissions: true }
             : {}),
           ...(promptCwd ? { cwd: promptCwd } : {}),
           env: {

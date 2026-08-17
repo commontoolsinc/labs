@@ -10,6 +10,7 @@ import type {
   SessionSummary,
 } from "../types.ts";
 import { CodexJsonlClient } from "./codex-jsonl-client.ts";
+import { normalizeSourceId } from "../session-contract.ts";
 
 export interface CodexAppServerLaunch {
   command: string[];
@@ -137,7 +138,7 @@ function textFrom(value: unknown): string | null {
 
 function normalizedItems(turns: unknown[]): NormalizedMessage[] {
   const out: NormalizedMessage[] = [];
-  for (const turn of turns) {
+  for (const [rawIndex, turn] of turns.entries()) {
     for (const itemValue of array(record(turn).items)) {
       const item = record(itemValue);
       const type = String(item.type ?? "unknown");
@@ -154,7 +155,7 @@ function normalizedItems(turns: unknown[]): NormalizedMessage[] {
         kind: type,
         createdAt: timestamp(item.createdAt ?? item.created_at),
         textPreview: textFrom(item.content ?? item.text ?? item),
-        rawIndex: out.length,
+        rawIndex,
       });
     }
   }
@@ -187,6 +188,7 @@ export class CodexAppServerDriver implements AgentDriver {
   readonly #bootstrapCommand?: string[];
   readonly #env: Record<string, string>;
   readonly #activeTurns = new Map<string, string>();
+  readonly #pendingTurns = new Set<string>();
 
   constructor(config: AgentSourceConfig) {
     this.#config = config;
@@ -201,7 +203,7 @@ export class CodexAppServerDriver implements AgentDriver {
       handleServerRequest: (method) => codexServerRequestPolicy(method),
     });
     this.source = {
-      id: config.id,
+      id: normalizeSourceId(config.id),
       driver: config.driver,
       capabilities: {
         inventory: true,
@@ -300,7 +302,10 @@ export class CodexAppServerDriver implements AgentDriver {
     input: PromptInput,
     options: CommandExecutionOptions = {},
   ): Promise<CommandExecutionResult> {
-    if (this.#activeTurns.has(nativeSessionId)) {
+    if (
+      this.#pendingTurns.has(nativeSessionId) ||
+      this.#activeTurns.has(nativeSessionId)
+    ) {
       return {
         status: "needs-confirmation",
         error: {
@@ -310,65 +315,72 @@ export class CodexAppServerDriver implements AgentDriver {
         },
       };
     }
-    await this.#client.call("thread/resume", { threadId: nativeSessionId });
-    const executionPolicy = codexTurnExecutionPolicy(this.#config);
-    const started = record(
-      await this.#client.call("turn/start", {
-        threadId: nativeSessionId,
-        input: [{ type: "text", text: input.text, text_elements: [] }],
-        ...executionPolicy,
-      }),
-    );
-    const turn = record(started.turn ?? started);
-    const turnId = String(turn.id ?? "");
-    if (!turnId) {
-      return {
-        status: "unknown",
-        error: {
-          code: "missing-turn-id",
-          message: "Codex turn/start returned no turn id",
-          retryable: false,
-        },
-      };
-    }
-    this.#activeTurns.set(nativeSessionId, turnId);
+    this.#pendingTurns.add(nativeSessionId);
     try {
-      options.onCancellationReady?.();
-      await options.onSessionActive?.();
-      const completed = await this.#client.waitForNotification((message) => {
-        if (message.method !== "turn/completed") return false;
-        const params = record(message.params);
-        return params.threadId === nativeSessionId &&
-          record(params.turn).id === turnId;
-      });
-      const status = String(
-        record(record(completed).params).turn
-          ? record(record(record(completed).params).turn).status ?? "completed"
-          : "completed",
+      await this.#client.call("thread/resume", { threadId: nativeSessionId });
+      const executionPolicy = codexTurnExecutionPolicy(this.#config);
+      const started = record(
+        await this.#client.call("turn/start", {
+          threadId: nativeSessionId,
+          input: [{ type: "text", text: input.text, text_elements: [] }],
+          ...executionPolicy,
+        }),
       );
-      return status === "completed"
-        ? { status: "succeeded", providerOperationId: turnId }
-        : {
-          status: "failed",
-          providerOperationId: turnId,
+      const turn = record(started.turn ?? started);
+      const turnId = String(turn.id ?? "");
+      if (!turnId) {
+        return {
+          status: "unknown",
           error: {
-            code: "turn-failed",
-            message: `Codex turn ended with ${status}`,
+            code: "missing-turn-id",
+            message: "Codex turn/start returned no turn id",
             retryable: false,
           },
         };
-    } catch (error) {
-      return {
-        status: "unknown",
-        providerOperationId: turnId,
-        error: {
-          code: "turn-outcome-unknown",
-          message: String(error),
-          retryable: false,
-        },
-      };
+      }
+      this.#pendingTurns.delete(nativeSessionId);
+      this.#activeTurns.set(nativeSessionId, turnId);
+      try {
+        options.onCancellationReady?.();
+        await options.onSessionActive?.();
+        const completed = await this.#client.waitForNotification((message) => {
+          if (message.method !== "turn/completed") return false;
+          const params = record(message.params);
+          return params.threadId === nativeSessionId &&
+            record(params.turn).id === turnId;
+        });
+        const status = String(
+          record(record(completed).params).turn
+            ? record(record(record(completed).params).turn).status ??
+              "completed"
+            : "completed",
+        );
+        return status === "completed"
+          ? { status: "succeeded", providerOperationId: turnId }
+          : {
+            status: "failed",
+            providerOperationId: turnId,
+            error: {
+              code: "turn-failed",
+              message: `Codex turn ended with ${status}`,
+              retryable: false,
+            },
+          };
+      } catch (error) {
+        return {
+          status: "unknown",
+          providerOperationId: turnId,
+          error: {
+            code: "turn-outcome-unknown",
+            message: String(error),
+            retryable: false,
+          },
+        };
+      } finally {
+        this.#activeTurns.delete(nativeSessionId);
+      }
     } finally {
-      this.#activeTurns.delete(nativeSessionId);
+      this.#pendingTurns.delete(nativeSessionId);
     }
   }
 

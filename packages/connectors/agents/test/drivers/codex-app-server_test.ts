@@ -66,7 +66,7 @@ for line in sys.stdin:
             result = {"data": [{"id": "thread-1", "name": "Current", "cwd": "/tmp/project", "status": {"type": "active", "activeFlags": []}}], "nextCursor": None}
     elif method == "thread/read":
         tid = msg["params"]["threadId"]
-        result = {"thread": {"id": tid, "name": "Current", "status": {"type": "active", "activeFlags": []}, "turns": [{"id": "turn-1", "items": [{"id": "item-1", "type": "userMessage", "content": [{"type": "text", "text": "hello"}]}]}]}}
+        result = {"thread": {"id": tid, "name": "Current", "status": {"type": "active", "activeFlags": []}, "turns": [{"id": "turn-1", "items": [{"id": "item-1", "type": "userMessage", "content": [{"type": "text", "text": "hello"}]}, {"id": "item-2", "type": "agentMessage", "content": [{"type": "text", "text": "hi"}]}]}, {"id": "turn-2", "items": [{"id": "item-3", "type": "userMessage", "content": [{"type": "text", "text": "again"}]}]}]}}
     elif method == "thread/name/set":
         result = {}
     elif method == "thread/resume":
@@ -116,6 +116,33 @@ finally:
     with open(pending_marker, "w") as exited:
         exited.write(exit_reason + "\n")
     os.replace(pending_marker, marker)
+`;
+
+const BLOCKED_PROMPT_SERVER = String.raw`#!/usr/bin/env python3
+import json, sys
+
+ready_path = sys.argv[1]
+release_path = sys.argv[2]
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    if "id" not in message:
+        continue
+    if method == "initialize":
+        result = {}
+    elif method == "thread/resume":
+        with open(ready_path, "w") as ready:
+            ready.write("ready\n")
+        with open(release_path, "r") as release:
+            release.read()
+        result = {}
+    elif method == "turn/start":
+        result = {"turn": {"id": "turn-1"}}
+    else:
+        result = {}
+    print(json.dumps({"id": message["id"], "result": result}), flush=True)
+    if method == "turn/start":
+        print(json.dumps({"method": "turn/completed", "params": {"threadId": message["params"]["threadId"], "turn": {"id": "turn-1", "status": "completed"}}}), flush=True)
 `;
 
 Deno.test("Codex launch modes distinguish private stdio and shared proxies", () => {
@@ -420,8 +447,12 @@ Deno.test("Codex driver enumerates persisted active and archived threads", async
     const snapshot = await driver.readSession("thread-1");
     assertEquals(snapshot.complete, true);
     assertEquals(snapshot.summary.active, true);
-    assertEquals(snapshot.events.length, 1);
+    assertEquals(snapshot.events.length, 2);
     assertEquals(snapshot.normalizedMessages[0].textPreview, "hello");
+    assertEquals(
+      snapshot.normalizedMessages.map((message) => message.rawIndex),
+      [0, 0, 1],
+    );
     assertEquals(
       (await driver.renameSession("thread-1", "Renamed")).status,
       "succeeded",
@@ -470,5 +501,46 @@ Deno.test("Codex driver declines colliding numeric approval requests without han
   } finally {
     await driver.stop();
     await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Codex reserves a session while a turn is starting", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = `${directory}/blocked-prompt-server`;
+  const readyPath = `${directory}/ready`;
+  const releasePath = `${directory}/release`;
+  await Deno.writeTextFile(server, BLOCKED_PROMPT_SERVER);
+  await Deno.chmod(server, 0o755);
+  for (const path of [readyPath, releasePath]) {
+    const created = await new Deno.Command("mkfifo", { args: [path] }).output();
+    assertEquals(created.success, true);
+  }
+  const readyObserver = new Deno.Command("cat", {
+    args: [readyPath],
+    stdout: "piped",
+  }).spawn();
+  const driver = new CodexAppServerDriver({
+    id: "codex:default",
+    driver: "codex-app-server",
+    enabled: true,
+    command: [server, readyPath, releasePath],
+  });
+  await driver.start();
+  try {
+    const first = driver.prompt("thread-1", { text: "first" });
+    assertEquals(
+      await new Response(readyObserver.stdout).text(),
+      "ready\n",
+    );
+    assertEquals((await readyObserver.status).success, true);
+    const second = await driver.prompt("thread-1", { text: "second" });
+    assertEquals(second.status, "needs-confirmation");
+    assertEquals(second.error?.code, "already-active");
+    const release = await Deno.open(releasePath, { write: true });
+    release.close();
+    assertEquals((await first).status, "succeeded");
+  } finally {
+    await driver.stop();
+    await Deno.remove(directory, { recursive: true });
   }
 });

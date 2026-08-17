@@ -47,7 +47,10 @@ normalized or Fabric APIs.
 | `allowDangerFullAccess` | Explicit permission for Claude bypass mode and unrestricted Codex turns                                           |
 
 `createAgentDriver(config)` selects the class named by `config.driver`. It does
-not start the driver.
+not start the driver. Each bundled driver trims and lowercases `config.id` when
+it constructs its `SourceDescriptor`. Hosts use the descriptor ID, rather than
+the unprocessed configuration value, as the key in driver maps. Hosts must
+reject configurations whose IDs become equal after this normalization.
 
 ### Driver lifecycle
 
@@ -805,6 +808,11 @@ formats are rejected. Receipt map keys must equal their receipt `commandId`
 values. Every receipt schema, identity, status, optional error, and optional
 result is validated. Pending command IDs must be unique and must refer to stored
 receipts.
+
+The optional receipt `result` is stored as an `fvj1:` Fabric JSON string inside
+the outer ledger JSON file. The ledger decodes that string before returning a
+receipt. This preserves `undefined`, big integers, special numbers, links, and
+other Fabric values across process restarts.
 
 Writes are serialized. Receipts are sorted by command ID. Every committed write
 increments `generation`. On Unix systems, the ledger writes an indented

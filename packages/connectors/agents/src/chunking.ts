@@ -1,3 +1,6 @@
+import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
+import { stableFabricValue } from "./stable-fabric-value.ts";
+
 export const DEFAULT_CHUNK_BYTES = 512 * 1024;
 
 export interface EventChunk<T> {
@@ -6,10 +9,10 @@ export interface EventChunk<T> {
   byteLength: number;
 }
 
-const encoder = new TextEncoder();
+const fabricJsonCodec = newDefaultJsonCodecEngine();
 
 export function encodedJsonBytes(value: unknown): number {
-  return encoder.encode(JSON.stringify(value)).byteLength;
+  return fabricJsonCodec.encodeToBytes(stableFabricValue(value)).byteLength;
 }
 
 function encodedJsonArrayElementBytes(value: unknown): number {

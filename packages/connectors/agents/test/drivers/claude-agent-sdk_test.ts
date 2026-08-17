@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import {
   ClaudeAgentSdkDriver,
   type ClaudeSdkAdapter,
@@ -114,6 +114,81 @@ Deno.test("Claude bypassPermissions mode requires explicit opt-in", () => {
     dangerous.source.capabilities.modes?.includes("bypassPermissions"),
     true,
   );
+});
+
+Deno.test("Claude acknowledges bypass permission prompts", async () => {
+  let queryOptions: Record<string, unknown> | undefined;
+  const sdk = {
+    getSessionInfo: () =>
+      Promise.resolve({
+        sessionId: "session-1",
+        summary: "First task",
+        cwd: "/session/worktree",
+        createdAt: 1_000,
+        lastModified: 2_000,
+      }),
+    query: (params: { options?: Record<string, unknown> }) => {
+      queryOptions = params.options;
+      return fakeQuery([{
+        type: "result",
+        subtype: "success",
+        is_error: false,
+      }]);
+    },
+  } as unknown as ClaudeSdkAdapter;
+  const driver = new ClaudeAgentSdkDriver({
+    id: "claude-code:default",
+    driver: "claude-agent-sdk",
+    enabled: true,
+    allowDangerFullAccess: true,
+  }, sdk);
+
+  assertEquals(
+    (await driver.setMode("session-1", "bypassPermissions")).status,
+    "succeeded",
+  );
+  assertEquals(
+    (await driver.prompt("session-1", { text: "continue" })).status,
+    "succeeded",
+  );
+  assertEquals(queryOptions?.permissionMode, "bypassPermissions");
+  assertEquals(queryOptions?.allowDangerouslySkipPermissions, true);
+});
+
+Deno.test("aborted Claude startup retains the stopped state", async () => {
+  let queryCalls = 0;
+  const sdk = {
+    getSessionInfo: () => Promise.resolve(undefined),
+    query: () => {
+      queryCalls++;
+      return fakeQuery([]);
+    },
+  } as unknown as ClaudeSdkAdapter;
+  const driver = new ClaudeAgentSdkDriver({
+    id: "claude-code:default",
+    driver: "claude-agent-sdk",
+    enabled: true,
+  }, sdk);
+  await driver.stop();
+  const controller = new AbortController();
+  controller.abort();
+  await assertRejects(
+    () => driver.start(controller.signal),
+    DOMException,
+    "aborted",
+  );
+  assertEquals(
+    (await driver.prompt("session-1", { text: "continue" })).error?.code,
+    "claude-driver-stopped",
+  );
+  const started = driver.start();
+  await driver.stop();
+  await started;
+  assertEquals(
+    (await driver.prompt("session-1", { text: "continue" })).error?.code,
+    "claude-driver-stopped",
+  );
+  assertEquals(queryCalls, 0);
 });
 
 Deno.test("Claude driver reports connector-owned queries as active", async () => {

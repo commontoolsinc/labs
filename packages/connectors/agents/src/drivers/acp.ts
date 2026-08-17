@@ -29,6 +29,7 @@ import type {
   SessionSummary,
   SourceDescriptor,
 } from "../types.ts";
+import { normalizeSourceId } from "../session-contract.ts";
 
 export interface AcpTransport {
   setSessionUpdateSink(sink: (notification: SessionNotification) => void): void;
@@ -51,6 +52,22 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object"
     ? value as Record<string, unknown>
     : {};
+}
+
+function arrayConfigValues(value: unknown): Set<string> {
+  const values = new Set<string>();
+  if (!Array.isArray(value)) return values;
+  for (const itemValue of value) {
+    const item = record(itemValue);
+    if (typeof item.value === "string") values.add(item.value);
+    if (Array.isArray(item.options)) {
+      for (const optionValue of item.options) {
+        const option = record(optionValue);
+        if (typeof option.value === "string") values.add(option.value);
+      }
+    }
+  }
+  return values;
 }
 
 function textFrom(value: unknown): string | null {
@@ -219,9 +236,13 @@ export class AcpDriver implements AgentDriver {
   readonly #updates = new Map<string, unknown[]>();
   readonly #loadQueues = new Map<string, Promise<void>>();
   readonly #activePrompts = new Set<string>();
+  readonly #pendingPrompts = new Set<string>();
+  readonly #sessionModes = new Map<string, Set<string>>();
+  readonly #sessionConfigOptions = new Map<
+    string,
+    Map<string, Record<string, unknown>>
+  >();
   #initialized?: InitializeResponse;
-  #modeSupported = false;
-  readonly #configOptions = new Set<string>();
 
   constructor(
     config: AgentSourceConfig,
@@ -230,7 +251,7 @@ export class AcpDriver implements AgentDriver {
     this.#config = config;
     this.#transport = transport;
     this.source = {
-      id: config.id,
+      id: normalizeSourceId(config.id),
       driver: "acp",
       capabilities: {
         inventory: false,
@@ -264,6 +285,17 @@ export class AcpDriver implements AgentDriver {
         ? await Promise.race([initialization, aborted])
         : await initialization;
       signal?.throwIfAborted();
+      const caps = this.#initialized.agentCapabilities;
+      const inventory = caps?.sessionCapabilities?.list != null;
+      const read = caps?.loadSession === true;
+      this.source.version = this.#initialized.agentInfo?.version ?? undefined;
+      this.source.capabilities.inventory = inventory;
+      this.source.capabilities.read = read;
+      if (!inventory || !read) {
+        throw new Error(
+          `ACP source ${this.#config.id} must advertise session/list and session/load to sync persisted sessions`,
+        );
+      }
     } catch (error) {
       await this.#transport.stop();
       throw error;
@@ -271,17 +303,6 @@ export class AcpDriver implements AgentDriver {
       if (signal && abortListener) {
         signal.removeEventListener("abort", abortListener);
       }
-    }
-    const caps = this.#initialized.agentCapabilities;
-    const inventory = caps?.sessionCapabilities?.list != null;
-    const read = caps?.loadSession === true;
-    this.source.version = this.#initialized.agentInfo?.version ?? undefined;
-    this.source.capabilities.inventory = inventory;
-    this.source.capabilities.read = read;
-    if (!inventory || !read) {
-      throw new Error(
-        `ACP source ${this.#config.id} must advertise session/list and session/load to sync persisted sessions`,
-      );
     }
   }
 
@@ -355,13 +376,7 @@ export class AcpDriver implements AgentDriver {
           : undefined,
         mcpServers: [],
       });
-      this.#modeSupported = response.modes != null;
-      this.source.capabilities.setMode = this.#modeSupported;
-      for (const option of response.configOptions ?? []) {
-        const id = record(option).id;
-        if (typeof id === "string") this.#configOptions.add(id);
-      }
-      this.source.capabilities.setConfigOption = this.#configOptions.size > 0;
+      this.#rememberSessionControls(nativeSessionId, response);
       return {
         summary,
         events,
@@ -379,7 +394,10 @@ export class AcpDriver implements AgentDriver {
     input: PromptInput,
     options: CommandExecutionOptions = {},
   ): Promise<CommandExecutionResult> {
-    if (this.#activePrompts.has(nativeSessionId)) {
+    if (
+      this.#pendingPrompts.has(nativeSessionId) ||
+      this.#activePrompts.has(nativeSessionId)
+    ) {
       return {
         status: "needs-confirmation",
         error: {
@@ -393,57 +411,67 @@ export class AcpDriver implements AgentDriver {
     if (!summary?.cwd) {
       return unsupported(`ACP session was not listed: ${nativeSessionId}`);
     }
-    const cwd = summary.cwd;
-    if (
-      this.#initialized?.agentCapabilities?.sessionCapabilities?.resume != null
-    ) {
-      await this.#transport.resumeSession({
-        sessionId: nativeSessionId,
-        cwd,
-        mcpServers: [],
-      });
-    } else {
-      await this.#withSessionLoad(
-        nativeSessionId,
-        () =>
-          this.#transport.loadSession({
-            sessionId: nativeSessionId,
-            cwd,
-            mcpServers: [],
-          }),
-      );
-    }
-    this.#activePrompts.add(nativeSessionId);
+    this.#pendingPrompts.add(nativeSessionId);
     try {
-      const pending = this.#transport.prompt({
-        sessionId: nativeSessionId,
-        prompt: [{ type: "text", text: input.text }],
-      });
-      options.onCancellationReady?.();
-      await options.onSessionActive?.();
-      const result = await pending;
-      return result.stopReason === "cancelled"
-        ? {
-          status: "failed",
-          result: { stopReason: result.stopReason },
+      const cwd = summary.cwd;
+      if (
+        this.#initialized?.agentCapabilities?.sessionCapabilities?.resume !=
+          null
+      ) {
+        const response = await this.#transport.resumeSession({
+          sessionId: nativeSessionId,
+          cwd,
+          mcpServers: [],
+        });
+        this.#rememberSessionControls(nativeSessionId, response);
+      } else {
+        await this.#withSessionLoad(
+          nativeSessionId,
+          async () => {
+            const response = await this.#transport.loadSession({
+              sessionId: nativeSessionId,
+              cwd,
+              mcpServers: [],
+            });
+            this.#rememberSessionControls(nativeSessionId, response);
+          },
+        );
+      }
+      this.#pendingPrompts.delete(nativeSessionId);
+      this.#activePrompts.add(nativeSessionId);
+      try {
+        const pending = this.#transport.prompt({
+          sessionId: nativeSessionId,
+          prompt: [{ type: "text", text: input.text }],
+        });
+        options.onCancellationReady?.();
+        await options.onSessionActive?.();
+        const result = await pending;
+        return result.stopReason === "cancelled"
+          ? {
+            status: "failed",
+            result: { stopReason: result.stopReason },
+            error: {
+              code: "cancelled",
+              message: "ACP prompt was cancelled",
+              retryable: false,
+            },
+          }
+          : { status: "succeeded", result: { stopReason: result.stopReason } };
+      } catch (error) {
+        return {
+          status: "unknown",
           error: {
-            code: "cancelled",
-            message: "ACP prompt was cancelled",
+            code: "prompt-outcome-unknown",
+            message: String(error),
             retryable: false,
           },
-        }
-        : { status: "succeeded", result: { stopReason: result.stopReason } };
-    } catch (error) {
-      return {
-        status: "unknown",
-        error: {
-          code: "prompt-outcome-unknown",
-          message: String(error),
-          retryable: false,
-        },
-      };
+        };
+      } finally {
+        this.#activePrompts.delete(nativeSessionId);
+      }
     } finally {
-      this.#activePrompts.delete(nativeSessionId);
+      this.#pendingPrompts.delete(nativeSessionId);
     }
   }
 
@@ -470,8 +498,10 @@ export class AcpDriver implements AgentDriver {
     nativeSessionId: string,
     mode: string,
   ): Promise<CommandExecutionResult> {
-    if (!this.#modeSupported) {
-      return unsupported("ACP adapter did not advertise session modes");
+    if (!this.#sessionModes.get(nativeSessionId)?.has(mode)) {
+      return unsupported(
+        `ACP adapter did not advertise mode for this session: ${mode}`,
+      );
     }
     await this.#transport.setSessionMode({
       sessionId: nativeSessionId,
@@ -485,21 +515,77 @@ export class AcpDriver implements AgentDriver {
     key: string,
     value: unknown,
   ): Promise<CommandExecutionResult> {
-    if (!this.#configOptions.has(key)) {
-      return unsupported(`ACP adapter did not advertise config option: ${key}`);
-    }
-    if (typeof value !== "boolean" && typeof value !== "string") {
+    const option = this.#sessionConfigOptions.get(nativeSessionId)?.get(key);
+    if (!option) {
       return unsupported(
-        `ACP config values must be a boolean or string: ${key}`,
+        `ACP adapter did not advertise config option for this session: ${key}`,
       );
     }
-    await this.#transport.setSessionConfigOption({
+    if (option.type !== "boolean" && option.type !== "select") {
+      return unsupported(`ACP config option has an unknown type: ${key}`);
+    }
+    if (option.type === "boolean" && typeof value !== "boolean") {
+      return unsupported(
+        `ACP config value has the wrong type: ${key}`,
+      );
+    }
+    if (option.type === "select") {
+      if (typeof value !== "string") {
+        return unsupported(`ACP config value has the wrong type: ${key}`);
+      }
+      if (!arrayConfigValues(option.options).has(value)) {
+        return unsupported(`ACP config value was not advertised: ${key}`);
+      }
+    }
+    const response = await this.#transport.setSessionConfigOption({
       sessionId: nativeSessionId,
       configId: key,
       ...(typeof value === "boolean"
         ? { type: "boolean" as const, value }
-        : { value }),
+        : { value: value as string }),
     });
+    this.#rememberSessionControls(nativeSessionId, {
+      configOptions: response.configOptions,
+    }, true);
     return { status: "succeeded", result: { key, value } };
+  }
+
+  #rememberSessionControls(
+    nativeSessionId: string,
+    response: Pick<LoadSessionResponse, "modes" | "configOptions">,
+    partial = false,
+  ): void {
+    if (!partial || "modes" in response) {
+      const modes = new Set(
+        response.modes?.availableModes.map((mode) => mode.id) ?? [],
+      );
+      this.#sessionModes.set(nativeSessionId, modes);
+    }
+    if (!partial || "configOptions" in response) {
+      const options = new Map<string, Record<string, unknown>>();
+      for (const option of response.configOptions ?? []) {
+        options.set(option.id, { ...option });
+      }
+      this.#sessionConfigOptions.set(nativeSessionId, options);
+    }
+    const modes = new Set<string>();
+    for (const sessionModes of this.#sessionModes.values()) {
+      for (const mode of sessionModes) modes.add(mode);
+    }
+    const configOptions = new Map<string, Record<string, unknown>>();
+    const sessions = [...this.#sessionConfigOptions].sort(([left], [right]) =>
+      left.localeCompare(right)
+    );
+    for (const [, sessionOptions] of sessions) {
+      for (const [id, option] of sessionOptions) {
+        configOptions.set(id, option);
+      }
+    }
+    this.source.capabilities.setMode = modes.size > 0;
+    this.source.capabilities.modes = [...modes].sort();
+    this.source.capabilities.setConfigOption = configOptions.size > 0;
+    this.source.capabilities.configOptions = Object.fromEntries(
+      [...configOptions].sort(([left], [right]) => left.localeCompare(right)),
+    );
   }
 }

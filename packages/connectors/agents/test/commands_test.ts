@@ -875,3 +875,158 @@ Deno.test("commands reject control characters before creating a claim", async ()
     await Deno.remove(directory, { recursive: true });
   }
 });
+
+Deno.test("commands reject non-record payloads before claiming", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const ledger = await CommandLedger.open(`${directory}/ledger.json`);
+    const worker = new CommandWorker(new Map(), [], ledger);
+    const base = {
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      createdAt: "2026-07-20T00:00:00.000Z",
+      sourceId: "fake:default",
+      nativeSessionId: "session-1",
+      type: "cancel",
+    };
+    const commands = [
+      undefined,
+      null,
+      "",
+      1,
+      false,
+      [],
+      new Date(0),
+      new Map(),
+    ].map(
+      (payload, index) => ({ ...base, id: `bad-payload-${index}`, payload }),
+    );
+    await worker.handle(commands);
+    await worker.drain();
+    for (const command of commands) {
+      assertEquals(ledger.get(command.id), undefined);
+    }
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("synchronous driver failures publish a terminal receipt", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const ledger = await CommandLedger.open(`${directory}/ledger.json`);
+    const statuses: string[] = [];
+    const driver = {
+      source: {
+        id: "fake:default",
+        driver: "acp",
+        capabilities: {
+          inventory: true,
+          read: true,
+          prompt: false,
+          cancel: false,
+          rename: true,
+          setMode: false,
+          setConfigOption: false,
+        },
+      },
+      renameSession: () => {
+        throw new Error("synchronous provider failure");
+      },
+    } as unknown as AgentDriver;
+    const target: CommandTarget = {
+      publishReceipt: (receipt) => {
+        statuses.push(receipt.status);
+        return Promise.resolve();
+      },
+      refreshSession: () => Promise.resolve(),
+    };
+    const worker = new CommandWorker(
+      new Map([[driver.source.id, driver]]),
+      [target],
+      ledger,
+    );
+    await worker.handle([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      id: "sync-failure",
+      createdAt: "2026-07-20T00:00:00.000Z",
+      sourceId: "fake:default",
+      nativeSessionId: "session-1",
+      type: "rename",
+      payload: { title: "New title" },
+    }]);
+    await worker.drain();
+    assertEquals(statuses, ["in-flight", "failed"]);
+    assertEquals(
+      ledger.get("sync-failure")?.error?.code,
+      "provider-call-failed",
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("receipt ownership compares Fabric values", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const ledger = await CommandLedger.open(`${directory}/ledger.json`);
+    const receipt: AgentSessionCommandReceipt = {
+      schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      commandId: "fabric-receipt",
+      sourceId: "fake:default",
+      nativeSessionId: "session-1",
+      status: "succeeded",
+      result: { value: undefined },
+    };
+    const target = (result: Record<string, unknown>): CommandTarget => ({
+      publishReceipt: () => Promise.resolve(),
+      refreshSession: () => Promise.resolve(),
+      readReceipt: () => Promise.resolve({ ...receipt, result }),
+    });
+    const worker = new CommandWorker(
+      new Map(),
+      [target({ value: undefined }), target({})],
+      ledger,
+    );
+    await worker.handle([{
+      schema: AGENT_CONNECTOR_SCHEMAS.command,
+      id: "fabric-receipt",
+      createdAt: "2026-07-20T00:00:00.000Z",
+      sourceId: "fake:default",
+      nativeSessionId: "session-1",
+      type: "cancel",
+      payload: {},
+    }]);
+    await assertRejects(() => worker.drain(), AggregateError);
+    assertEquals(ledger.get("fabric-receipt"), undefined);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("command ledger preserves Fabric receipt results across reopen", async () => {
+  const directory = await Deno.makeTempDir();
+  const path = `${directory}/ledger.json`;
+  try {
+    const receipt: AgentSessionCommandReceipt = {
+      schema: AGENT_CONNECTOR_SCHEMAS.commandReceipt,
+      commandId: "fabric-ledger-result",
+      sourceId: "fake:default",
+      nativeSessionId: "session-1",
+      status: "succeeded",
+      result: {
+        omittedByJson: undefined,
+        integer: 2n ** 80n,
+        notANumber: NaN,
+        infinity: Infinity,
+        negativeZero: -0,
+      },
+    };
+    await (await CommandLedger.open(path)).put(receipt);
+    assertEquals(
+      (await CommandLedger.open(path)).get(receipt.commandId),
+      receipt,
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});

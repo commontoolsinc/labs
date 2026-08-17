@@ -80,6 +80,27 @@ function replaceCellsWithLinks(
     return converted;
   }
   const nativeTag = tagFromNativeValue(value);
+  if (nativeTag === NATIVE_TAGS.Error) {
+    const error = value as Error;
+    const existing = seen.get(error);
+    if (existing) return existing;
+    const converted = FabricError.fromNativeError(error);
+    seen.set(error, converted);
+    if (error.cause !== undefined) {
+      converted.cause = replaceCellsWithLinks(
+        error.cause,
+        seen,
+        activeToJson,
+      ) as FabricValue;
+    }
+    for (const [key, child] of converted.extraEntries()) {
+      converted.setExtra(
+        key,
+        replaceCellsWithLinks(child, seen, activeToJson) as FabricValue,
+      );
+    }
+    return converted;
+  }
   if (
     nativeTag !== null &&
     nativeTag !== NATIVE_TAGS.Object &&
@@ -113,7 +134,12 @@ function replaceCellsWithLinks(
     ) as Record<string, unknown>;
     seen.set(value, converted);
     for (const [key, child] of Object.entries(value)) {
-      converted[key] = replaceCellsWithLinks(child, seen, activeToJson);
+      Object.defineProperty(converted, key, {
+        value: replaceCellsWithLinks(child, seen, activeToJson),
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      });
     }
     return converted;
   }
@@ -193,11 +219,16 @@ function captureFabricValue(
         Object.getPrototypeOf(value),
       ) as Record<string, FabricValue>;
       for (const [key, child] of Object.entries(value)) {
-        copy[key] = captureFabricValue(
-          child as FabricValue,
-          seen,
-          active,
-        );
+        Object.defineProperty(copy, key, {
+          value: captureFabricValue(
+            child as FabricValue,
+            seen,
+            active,
+          ),
+          configurable: true,
+          enumerable: true,
+          writable: true,
+        });
       }
       captured = Object.freeze(copy) as FabricValue;
     } else {

@@ -68,6 +68,7 @@ export class CodexJsonlClient {
   #stopSignal?: AbortSignal;
   #stopListener?: () => void;
   #stopTask?: Promise<void>;
+  #cleanupTask?: Promise<void>;
 
   constructor(
     command: string[],
@@ -85,6 +86,8 @@ export class CodexJsonlClient {
 
   async start(signal?: AbortSignal): Promise<Record<string, unknown>> {
     if (this.#child) throw new Error("Codex App Server already started");
+    await this.#cleanupTask;
+    if (this.#child) throw new Error("Codex App Server already started");
     signal?.throwIfAborted();
     const child = new Deno.Command(this.#command[0], {
       args: this.#command.slice(1),
@@ -98,7 +101,9 @@ export class CodexJsonlClient {
     this.#writer = child.stdin.getWriter();
     this.#running = true;
     this.#readTask = this.#readLoop(child.stdout);
-    this.#stderrTask = this.#drainStderr(child.stderr);
+    const stderrTask = this.#drainStderr(child.stderr);
+    this.#stderrTask = stderrTask;
+    void stderrTask.catch((error) => this.#terminate(error));
     if (signal) {
       this.#stopSignal = signal;
       this.#stopListener = () => {
@@ -110,12 +115,20 @@ export class CodexJsonlClient {
         signal.throwIfAborted();
       }
     }
-    const initialized = await this.call("initialize", {
-      clientInfo: { name: "commonfabric-agents-connector", version: "0.1.0" },
-      capabilities: null,
-    });
-    await this.notify("initialized");
-    return initialized as Record<string, unknown>;
+    try {
+      const initialized = await this.call("initialize", {
+        clientInfo: {
+          name: "commonfabric-agents-connector",
+          version: "0.1.0",
+        },
+        capabilities: null,
+      });
+      await this.notify("initialized");
+      return initialized as Record<string, unknown>;
+    } catch (error) {
+      await this.#terminate(error);
+      throw error;
+    }
   }
 
   stop(): Promise<void> {
@@ -128,29 +141,41 @@ export class CodexJsonlClient {
   }
 
   async #stop(): Promise<void> {
+    const readTask = this.#readTask;
+    await this.#terminate(new Error("Codex App Server stopped"));
+    await readTask;
+  }
+
+  #terminate(reason: unknown): Promise<void> {
     if (this.#stopSignal && this.#stopListener) {
       this.#stopSignal.removeEventListener("abort", this.#stopListener);
     }
     this.#stopSignal = undefined;
     this.#stopListener = undefined;
     const child = this.#child;
-    if (!child) return;
+    if (!child) return this.#cleanupTask ?? Promise.resolve();
     this.#child = undefined;
     this.#running = false;
-    this.#rejectAll(new Error("Codex App Server stopped"));
+    this.#rejectAll(reason);
     const writer = this.#writer;
     this.#writer = undefined;
+    const stderrTask = this.#stderrTask;
+    this.#stderrTask = undefined;
     const closeTask = writer?.close().catch(() => undefined);
     try {
       child.kill("SIGTERM");
     } catch {
       // Child already exited.
     }
-    await child.status.catch(() => undefined);
-    await closeTask;
-    await Promise.allSettled(
-      [this.#readTask, this.#stderrTask].filter(Boolean) as Promise<void>[],
-    );
+    const cleanup = Promise.allSettled([
+      child.status,
+      closeTask,
+      stderrTask,
+    ]).then(() => undefined);
+    this.#cleanupTask = cleanup;
+    return cleanup.finally(() => {
+      if (this.#cleanupTask === cleanup) this.#cleanupTask = undefined;
+    });
   }
 
   call(
@@ -203,9 +228,15 @@ export class CodexJsonlClient {
       for await (const line of lines(stdout)) {
         let message: Record<string, unknown>;
         try {
-          message = JSON.parse(line) as Record<string, unknown>;
-        } catch {
-          continue;
+          const parsed: unknown = JSON.parse(line);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("top-level value must be an object");
+          }
+          message = parsed as Record<string, unknown>;
+        } catch (error) {
+          throw new Error("Codex App Server emitted invalid JSON", {
+            cause: error,
+          });
         }
         if (
           typeof message.method === "string" &&
@@ -215,10 +246,26 @@ export class CodexJsonlClient {
           continue;
         }
         if (typeof message.id === "number") {
+          const hasResult = Object.hasOwn(message, "result");
+          const hasError = Object.hasOwn(message, "error");
+          if (hasResult === hasError) {
+            throw new Error(
+              "Codex App Server emitted an invalid JSON-RPC response",
+            );
+          }
+          if (
+            hasError &&
+            (!message.error || typeof message.error !== "object" ||
+              Array.isArray(message.error))
+          ) {
+            throw new Error(
+              "Codex App Server emitted an invalid JSON-RPC error",
+            );
+          }
           const pending = this.#pending.get(message.id);
           if (!pending) continue;
           this.#pending.delete(message.id);
-          if (message.error) {
+          if (hasError) {
             const error = message.error as JsonRpcError;
             pending.reject(new Error(error.message || JSON.stringify(error)));
           } else {
@@ -226,15 +273,19 @@ export class CodexJsonlClient {
           }
           continue;
         }
-        if (typeof message.method === "string") {
+        if (
+          typeof message.method === "string" &&
+          !Object.hasOwn(message, "id")
+        ) {
           this.#publishNotification(message);
+          continue;
         }
+        throw new Error("Codex App Server emitted an invalid JSON-RPC message");
       }
     } catch (error) {
       exitReason = error;
     }
-    this.#running = false;
-    this.#rejectAll(exitReason);
+    await this.#terminate(exitReason);
   }
 
   async #answerServerRequest(message: Record<string, unknown>): Promise<void> {
@@ -265,7 +316,6 @@ export class CodexJsonlClient {
 
   async #drainStderr(stderr: ReadableStream<Uint8Array>): Promise<void> {
     for await (const _line of lines(stderr)) {
-      // Drain to prevent child-process backpressure. Raw stderr may contain
       // Transcript data is drained without being copied to process output.
     }
   }

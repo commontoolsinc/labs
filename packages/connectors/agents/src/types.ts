@@ -33,6 +33,7 @@ export interface DriverCapabilities {
 }
 
 export interface SourceDescriptor {
+  /** Trimmed, lowercase source identity used by commands and Fabric records. */
   id: string;
   driver: DriverKind;
   version?: string;

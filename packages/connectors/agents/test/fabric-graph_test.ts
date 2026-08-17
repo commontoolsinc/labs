@@ -1,10 +1,16 @@
-import { assertEquals, assertFalse, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertFalse,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { isLinkRef, linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   FabricBytes,
   FabricEpochNsec,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -16,6 +22,44 @@ import {
   pushStableCellGraph,
   readStableCellGraphValue,
 } from "../src/fabric-graph.ts";
+import { stableFabricValue } from "../src/stable-fabric-value.ts";
+
+Deno.test("stable values replace cells inside native errors", async () => {
+  const signer = await Identity.fromPassphrase("agent connector error test");
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const cell = runtime.getCell(signer.did(), { graphTest: "error-cell" });
+    const error = new TypeError("provider failed", { cause: cell });
+    Object.defineProperty(error, "detail", {
+      enumerable: true,
+      get: () => ({ cell }),
+    });
+    const stored = stableFabricValue(error) as FabricError;
+    assertEquals(stored instanceof FabricError, true);
+    assertEquals(stored.type, "TypeError");
+    assertEquals(isLinkRef(stored.cause), true);
+    assertEquals(
+      isLinkRef(
+        (stored.getExtra("detail") as Record<string, unknown>).cell,
+      ),
+      true,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("stable values retain reserved keys for validation", () => {
+  assertThrows(
+    () => stableFabricValue({ ["__proto__"]: "invalid" }),
+    Error,
+  );
+});
 
 Deno.test("stable graph writes keep child identity and hydrate linked values", async () => {
   const signer = await Identity.fromPassphrase("agent connector graph test");
@@ -115,6 +159,35 @@ Deno.test("stable graph writes preserve native Fabric values", async () => {
     assertEquals(expression.source, "agent-data");
     assertEquals(expression.flags, "gi");
     assertEquals(bytes.slice(), new Uint8Array([1, 2, 3]));
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("stable graph deletes fields whose names exist on the prototype", async () => {
+  const signer = await Identity.fromPassphrase(
+    "agent connector inherited field test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const connection = { runtime, spaceDid: signer.did() };
+  try {
+    const root = runtime.getCell(signer.did(), {
+      graphTest: "inherited-fields",
+    });
+    await pushStableCellGraph(connection, [{
+      cell: root,
+      value: () => ({ toString: "old", hasOwnProperty: "old" }),
+    }]);
+    await pushStableCellGraph(connection, [{
+      cell: root,
+      value: () => ({}),
+    }]);
+    assertEquals(await readStableCellGraphValue(connection, root), {});
   } finally {
     await runtime.dispose();
     await storageManager.close();

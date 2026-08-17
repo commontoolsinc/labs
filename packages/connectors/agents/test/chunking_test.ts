@@ -51,3 +51,17 @@ Deno.test("chunkEvents serializes each provider event once", () => {
     encodedJsonBytes([{ id: "b", text: "世界" }]),
   ]);
 });
+
+Deno.test("chunkEvents measures bigint using the Fabric JSON encoding", () => {
+  const events = [
+    { id: "positive", value: 1n },
+    { id: "negative", value: -1n },
+    { id: "large", value: 2n ** 100n },
+  ];
+  const chunks = chunkEvents(events, encodedJsonBytes([events[0]]));
+  assertEquals(chunks.map((chunk) => chunk.events.length), [1, 1, 1]);
+  assertEquals(
+    chunks.map((chunk) => chunk.byteLength),
+    events.map((event) => encodedJsonBytes([event])),
+  );
+});

@@ -24,7 +24,11 @@ import {
   type CommandTarget,
   parseCommandReceipt,
 } from "./commands.ts";
-import type { AgentDriver, NormalizedMessage } from "./types.ts";
+import type {
+  AgentDriver,
+  DriverCapabilities,
+  NormalizedMessage,
+} from "./types.ts";
 import { AGENT_CONNECTOR_SCHEMAS } from "./protocol.ts";
 import { GitContextResolver } from "./git-context.ts";
 import {
@@ -459,6 +463,7 @@ export class AgentFabricTarget implements CommandTarget {
   readonly #mutations = new AsyncSerialQueue();
   readonly #latestObservationBySession = new Map<string, number>();
   readonly #latestCompleteObservationBySource = new Map<string, number>();
+  readonly #latestDescriptorObservationBySource = new Map<string, number>();
   #nextObservationSequence = 1;
 
   private constructor(
@@ -515,6 +520,9 @@ export class AgentFabricTarget implements CommandTarget {
         options.observationSequence;
     const isSourceSuperseded = (sourceId: string) =>
       (this.#latestCompleteObservationBySource.get(sourceId) ?? 0) >
+        options.observationSequence;
+    const isDescriptorSuperseded = (sourceId: string) =>
+      (this.#latestDescriptorObservationBySource.get(sourceId) ?? 0) >
         options.observationSequence;
     const gitContext = this.#gitContext.beginObservation();
     const graphReadCache = new Map<string, Promise<unknown>>();
@@ -575,6 +583,7 @@ export class AgentFabricTarget implements CommandTarget {
     let pendingGraphs: PlannedSessionGraph[] = [];
     const observedSessionKeys = new Set<string>();
     const observedCompleteSourceIds = new Set<string>();
+    const observedDescriptorSourceIds = new Set<string>();
     const flushGraphs = async () => {
       if (pendingGraphs.length === 0) return;
       const batch = pendingGraphs;
@@ -584,6 +593,20 @@ export class AgentFabricTarget implements CommandTarget {
 
     for (const source of collected) {
       if (isSourceSuperseded(source.source.id)) continue;
+      const priorSourceRow = sourceRows.get(source.source.id);
+      const descriptorSuperseded = isDescriptorSuperseded(source.source.id);
+      const driver = descriptorSuperseded &&
+          typeof priorSourceRow?.driver === "string"
+        ? priorSourceRow.driver
+        : source.source.driver;
+      const capabilities = descriptorSuperseded &&
+          priorSourceRow?.capabilities &&
+          typeof priorSourceRow.capabilities === "object"
+        ? priorSourceRow.capabilities as DriverCapabilities
+        : source.source.capabilities;
+      if (!descriptorSuperseded) {
+        observedDescriptorSourceIds.add(source.source.id);
+      }
       const priorForSource = [...entriesByKey.values()].filter((entry) =>
         entry.sourceId === source.source.id
       );
@@ -604,12 +627,12 @@ export class AgentFabricTarget implements CommandTarget {
         if (
           previousEntry &&
           previousEntry.contentHash === prepared.snapshotHash &&
-          previousEntry.driver === source.source.driver
+          previousEntry.driver === driver
         ) {
           const { deletedAt: _deletedAt, ...rest } = previousEntry;
           entriesByKey.set(prepared.key, {
             ...rest,
-            capabilities: { ...source.source.capabilities },
+            capabilities: { ...capabilities },
             recentMessages: recentSessionMessages(
               prepared.normalizedMessages,
             ),
@@ -620,24 +643,33 @@ export class AgentFabricTarget implements CommandTarget {
         const graph = await planSessionGraph(
           this.conn,
           prepared,
-          source.source.driver,
+          driver,
         );
         const entry = graph.indexEntry;
-        entry.capabilities = { ...source.source.capabilities };
+        entry.capabilities = { ...capabilities };
         entriesByKey.set(entry.key, entry);
         pendingGraphs.push(graph);
         if (pendingGraphs.length >= SESSION_GRAPH_BATCH_SIZE) {
           await flushGraphs();
         }
       }
+      for (const prior of priorForSource) {
+        if (currentKeys.has(prior.key)) continue;
+        entriesByKey.set(prior.key, {
+          ...prior,
+          driver,
+          capabilities: { ...capabilities },
+        });
+      }
       if (source.complete) {
         observedCompleteSourceIds.add(source.source.id);
         for (const prior of priorForSource) {
           if (!currentKeys.has(prior.key) && !isSuperseded(prior.key)) {
+            const current = entriesByKey.get(prior.key) ?? prior;
             entriesByKey.set(prior.key, {
-              ...prior,
+              ...current,
               syncStatus: "deleted",
-              deletedAt: prior.deletedAt ?? new Date().toISOString(),
+              deletedAt: current.deletedAt ?? new Date().toISOString(),
             });
             observedSessionKeys.add(prior.key);
           }
@@ -654,13 +686,18 @@ export class AgentFabricTarget implements CommandTarget {
           }
         }
       }
-      if (
-        !options.preserveUntouchedStatus || !sourceRows.has(source.source.id)
-      ) {
+      if (options.preserveUntouchedStatus && priorSourceRow) {
+        sourceRows.set(source.source.id, {
+          ...priorSourceRow,
+          id: source.source.id,
+          driver,
+          capabilities,
+        });
+      } else {
         sourceRows.set(source.source.id, {
           id: source.source.id,
-          driver: source.source.driver,
-          capabilities: source.source.capabilities,
+          driver,
+          capabilities,
           complete: source.complete,
           sessionCount: source.sessions.length,
           errors: source.errors,
@@ -734,6 +771,12 @@ export class AgentFabricTarget implements CommandTarget {
     }
     for (const sourceId of observedCompleteSourceIds) {
       this.#latestCompleteObservationBySource.set(
+        sourceId,
+        options.observationSequence,
+      );
+    }
+    for (const sourceId of observedDescriptorSourceIds) {
+      this.#latestDescriptorObservationBySource.set(
         sourceId,
         options.observationSequence,
       );
