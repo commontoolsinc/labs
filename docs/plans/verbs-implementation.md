@@ -53,7 +53,7 @@ without reconstructing it.
 | 2. an unrecognized projection key is refused | on main (#5817); design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
 | 5. `cf wish` and `cf exec` take the read options | on main (#5844) |
-| 11. a caller may name a reference | not started; sequenced, gated on one measurement |
+| 11. a caller may name a reference | **capability on main** (#5880); the refusal that protects it is not built |
 
 Item 9 is split because its two halves have different fates: the marks landed,
 the emission is parked.
@@ -277,13 +277,23 @@ adding a fourth.
 *Exit:* the same cell, reached four ways, renders identically under the same
 selection.
 
-**11. A caller may name a reference.** *(M)* A verb whose event declares
-`Writable<T>` is callable by a model and by nothing else. `traverseAndCellify`
-(`packages/runner/src/builtins/llm-dialog.ts`) resolves `{"@link": …}` into a
-live cell before dispatch, so the LLM boundary has a complete round trip; the
-CLI rejects the address and the webhook path forwards it unresolved. The
-shape-matching payload the CLI *does* accept stores a detached copy and reports
-success.
+**11. A caller may name a reference.** *(M)* **The capability is on main
+as #5880.** A caller names an existing cell where a verb declares a reference,
+and the edge that comes back is the target rather than a copy of it.
+
+What it removes: a verb whose event declared `Writable<T>` was callable by a
+model and by nothing else. `traverseAndCellify`
+(`packages/runner/src/builtins/llm-dialog.ts`) resolved `{"@link": …}` into a
+live cell before dispatch, so the LLM boundary had a complete round trip while
+the CLI rejected the address and the webhook path forwarded it unresolved.
+
+**The refusal that protects it is not built.** A shape-matching payload is
+still accepted, still stores a detached copy, and still reports success — so a
+caller who sends the shape rather than the address is told it worked. Refusing
+that needs to identify a reference position, which needs the `asCell` marker,
+and the marker reaches nothing the CLI can read: the served event schema is the
+handler's narrowed read, and the stored pattern's declared schema has lost it
+too. #5560 carries the measurements.
 
 *The refusal is drift, not policy.* `closedWorldEventRejection`
 (`packages/runner/src/runner.ts`) validates a present event payload with
@@ -476,7 +486,7 @@ its own track.
 | 12 | An unrecognized projection key is refused | **on main** (#5817) — item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md) |
 | 12a | `cf` refuses an undeclared field on a call | **on main** (#5835) — item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says. Built against #5817's wording rather than its code, since that branch is unmerged |
 | 13 | `cf wish` and `cf exec` take the read options | **on main** (#5844) — item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
-| 14 | A caller may name a reference | item 11, #5560 | — | Item 11 has carried this since the State table was written and the ordering never gave it a step, so nothing scheduled it. Sequenced last only because it is unstarted, not because anything gates it — and it is the most consequential thing open: the shape-matching payload the CLI does accept **stores a detached copy and reports success**, so a caller relating two pieces is told it worked |
+| 14 | A caller may name a reference | **capability on main** (#5880) — item 11, #5560 | — | A caller can now name an existing cell where a verb declares a reference, and the edge that comes back is the target rather than a copy of it. What remains is the REFUSAL that protects it: a shape-matching payload still **stores a detached copy and reports success**, so a caller who sends the shape instead of the address is still told it worked. Refusing it needs to identify a reference position, which needs the `asCell` marker, which reaches nothing the CLI can read — see #5560 for the measurements |
 
 **`--show-links` is not redundant, and nothing should schedule its removal
 yet.** [Verb result selection](verb-result-selection.md) prices it as a stopgap
