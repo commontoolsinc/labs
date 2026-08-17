@@ -276,29 +276,44 @@ describe("runtime.dispose({ closeStorage })", () => {
     // Nor can it retire itself: both return `{ done: false }` unconditionally,
     // and `{ done: true }` is the contract's only self-cancelling answer.
     //
-    // The count matters, not the presence. A manager outliving its runtimes
-    // accumulates two per runtime, each holding a disposed scheduler or runner
-    // reachable, and `hasSubscribers()` reads the same either way.
-    const baseline = held.live.size;
+    // What is asserted is the CALLERS' half of the contract — that each keeps
+    // its subscription and returns it — because that is the half in question.
+    // `live` mirrors the subscribe/unsubscribe calls reaching the manager, not
+    // the relay's membership: the relay is private and its `hasSubscribers()`
+    // is not surfaced, and it would answer the wrong question anyway, reading
+    // the same whether teardown was clean or leaked two per runtime.
+    const baseline = new Set(held.live);
+    const addedBy = (built: Set<IStorageSubscription>) =>
+      [...held.live].filter((s) => !built.has(s));
 
     const first = new Runtime({
       apiUrl: new URL("memory://"),
       storageManager: held,
     });
-    expect(held.live.size).toBe(baseline + 2);
-    await first.dispose({ closeStorage: false });
-    expect(held.live.size).toBe(baseline);
+    const firstPair = addedBy(baseline);
+    expect(firstPair).toHaveLength(2);
 
-    // And across several, because one runtime returning to baseline would also
-    // hold if disposal removed a subscriber some OTHER runtime had registered.
-    for (let i = 0; i < 3; i++) {
-      const runtime = new Runtime({
-        apiUrl: new URL("memory://"),
-        storageManager: held,
-      });
-      await runtime.dispose({ closeStorage: false });
-    }
-    expect(held.live.size).toBe(baseline);
+    // The two runtimes OVERLAP, and the assertions name WHICH subscriptions are
+    // handed back rather than how many. Sequential construct-dispose rounds
+    // would not: neither round ever has another runtime's subscription to
+    // return by mistake, so a disposal that gave back the wrong one still ends
+    // at baseline.
+    const second = new Runtime({
+      apiUrl: new URL("memory://"),
+      storageManager: held,
+    });
+    const secondPair = addedBy(new Set([...baseline, ...firstPair]));
+    expect(secondPair).toHaveLength(2);
+
+    await first.dispose({ closeStorage: false });
+    expect(firstPair.filter((s) => held.live.has(s))).toEqual([]);
+    expect(secondPair.filter((s) => held.live.has(s))).toEqual(secondPair);
+
+    await second.dispose({ closeStorage: false });
+    expect(secondPair.filter((s) => held.live.has(s))).toEqual([]);
+    expect(held.live).toEqual(baseline);
+
+    // Neither disposal closed the store, which is the option's whole point.
     expect(held.closeCount).toBe(0);
   });
 });
