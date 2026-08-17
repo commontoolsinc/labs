@@ -296,6 +296,25 @@ describe("schema-shape", () => {
       ).toEqual({});
     });
 
+    it("keeps the entries of a `type` array that are in the schema vocabulary and drops the rest", () => {
+      expect(
+        schemaShapeOnly(
+          { type: ["string", "null", "smuggled"] } as unknown as Record<
+            string,
+            unknown
+          >,
+        ),
+      ).toEqual({ type: ["string", "null"] });
+    });
+
+    it("drops a `type` array holding no entry from the schema vocabulary", () => {
+      expect(
+        schemaShapeOnly(
+          { type: ["smuggled", 7] } as unknown as Record<string, unknown>,
+        ),
+      ).toEqual({});
+    });
+
     it("keeps a `format` from the known vocabulary and drops one outside it", () => {
       expect(schemaShapeOnly({ type: "string", format: "date-time" })).toEqual({
         type: "string",

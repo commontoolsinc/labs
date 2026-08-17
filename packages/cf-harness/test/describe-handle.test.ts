@@ -193,6 +193,32 @@ describe("describe_handle", () => {
     expect(output.known).toBe(false);
   });
 
+  it("returns the recorded schema when the fabric session cannot be established", async () => {
+    // A session that cannot be established leaves the record to answer, which
+    // is what a run without one does anyway — the failure is not the caller's
+    // to see.
+    const minted = await mintAddressHandle(
+      createHarnessHandleTable("run-describe"),
+      REF_A,
+      { schema: DOUBLED_SCHEMA },
+    );
+    const context = {
+      handleTable: minted.table,
+      getFabricSession: () =>
+        Promise.reject(new Error("authorization denied for the space")),
+      nextOutputId: (toolId: string) =>
+        createToolOutputId("run-describe", toolId, 1),
+    } as unknown as HarnessToolContext;
+
+    const output = await describeHandleTool.invoke(context, {
+      token: minted.token,
+    });
+
+    expect(output.known).toBe(true);
+    expect(output.hasSchema).toBe(true);
+    expect(output.schema).toEqual(DOUBLED_SCHEMA);
+  });
+
   it("reports structure and drops every value-bearing keyword it was handed", async () => {
     // A recorded schema is disclosed as structure, not as it was recorded. A
     // schema is a place a value can hide, and these hide at every depth the
@@ -271,6 +297,9 @@ describe("describe_handle", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
     let session: HarnessFabricSession;
+    /** A second space on the same runtime, so a cross-space address in these
+     * tests names a document the runtime really could read. */
+    let neighbour: PiecesController;
 
     beforeEach(async () => {
       storageManager = StorageManager.emulate({ as: signer });
@@ -287,6 +316,14 @@ describe("describe_handle", () => {
       );
       await pieces.synced();
       session = { pieces };
+      neighbour = new PiecesController(
+        await createSession({
+          identity: signer,
+          spaceName: `describe-handle-neighbour-${crypto.randomUUID()}`,
+        }),
+        runtime,
+      );
+      await neighbour.synced();
     });
 
     afterEach(async () => {
@@ -379,6 +416,61 @@ describe("describe_handle", () => {
       const reply = JSON.stringify(output);
       expect(reply).not.toContain("Spending Overview");
       expect(reply).not.toContain("groceries");
+    });
+
+    it("reports an address in another space as shapeless even though the runtime could read it", async () => {
+      // The session's authority ends at its own space. The neighbouring space
+      // is on this very runtime and its piece declares a shape, so an answer
+      // here would be a shape read across the boundary rather than a shape the
+      // session could not find.
+      const neighbourRef = await runPatternTool.invoke(
+        contextWith(undefined, { pieces: neighbour }),
+        { sourceText: SPENDING_PATTERN_SOURCE, inputs: { n: 21 } },
+      ) as RunPatternToolSuccessOutput;
+      expect(neighbourRef.status).toBe("ok");
+      const crossSpaceRef =
+        `/@${neighbour.getSpace()}${neighbourRef.resultRef}`;
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        crossSpaceRef,
+      );
+
+      const output = await describeHandleTool.invoke(
+        contextWith(minted.table, session),
+        { token: minted.token },
+      );
+
+      expect(output.known).toBe(true);
+      expect(output.hasSchema).toBe(false);
+      expect(output.schema).toBeUndefined();
+    });
+
+    it("reports an entry whose reference does not parse from the recorded schema instead", async () => {
+      // A table arrives as persisted state, so an entry's `ref` is only as
+      // well-formed as whatever wrote it. The session can state no shape for
+      // an address it cannot parse, and the record answers in its place.
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        REF_A,
+        { schema: DOUBLED_SCHEMA },
+      );
+      const unparseable: HarnessHandleTable = {
+        ...minted.table,
+        entries: minted.table.entries.map((entry) => ({
+          ...entry,
+          ref: "of:not-an-address",
+        })),
+      };
+
+      const output = await describeHandleTool.invoke(
+        contextWith(unparseable, session),
+        { token: minted.token },
+      );
+
+      expect(output.known).toBe(true);
+      expect(output.path).toBeUndefined();
+      expect(output.hasSchema).toBe(true);
+      expect(output.schema).toEqual(DOUBLED_SCHEMA);
     });
 
     it("reports an address the session's space does not hold as shapeless", async () => {

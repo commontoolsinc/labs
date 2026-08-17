@@ -12,6 +12,7 @@ import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
   RUN_PATTERN_MAX_SOURCE_TEXT_BYTES,
   type RunPatternToolErrorOutput,
+  type RunPatternToolInput,
   type RunPatternToolSuccessOutput,
 } from "../src/tools/run-pattern.ts";
 import type {
@@ -94,6 +95,55 @@ const OPEN_DOUBLING_PATTERN_SOURCE = [
   "}));",
   "",
 ].join("\n");
+
+/**
+ * A pattern whose argument schema admits any undeclared key without saying
+ * what it may hold, so `additionalProperties` is `true`.
+ */
+const ANY_DOUBLING_PATTERN_SOURCE = [
+  "import { computed, pattern } from 'commonfabric';",
+  "// deno-lint-ignore no-explicit-any",
+  "interface Input { n: number; [key: string]: any; }",
+  "interface Output { doubled: number; }",
+  "export default pattern<Input, Output>(({ n }) => ({",
+  "  doubled: computed(() => n * 2),",
+  "}));",
+  "",
+].join("\n");
+
+/** A pattern whose single input is an array, for the nested-position cases. */
+const ROW_COUNT_PATTERN_SOURCE = [
+  "import { computed, pattern } from 'commonfabric';",
+  "interface Input { rows: string[]; }",
+  "interface Output { rowCount: number; }",
+  "export default pattern<Input, Output>(({ rows }) => ({",
+  "  rowCount: computed(() => rows.length),",
+  "}));",
+  "",
+].join("\n");
+
+const ROW_COUNT_RESULT_SCHEMA = {
+  type: "object",
+  properties: { rowCount: { type: "number" } },
+  required: ["rowCount"],
+} as const;
+
+/** A pattern whose single input is a string, for the link-shaped-string case. */
+const LABEL_PATTERN_SOURCE = [
+  "import { computed, pattern } from 'commonfabric';",
+  "interface Input { label: string; }",
+  "interface Output { labelLength: number; }",
+  "export default pattern<Input, Output>(({ label }) => ({",
+  "  labelLength: computed(() => label.length),",
+  "}));",
+  "",
+].join("\n");
+
+const LABEL_LENGTH_RESULT_SCHEMA = {
+  type: "object",
+  properties: { labelLength: { type: "number" } },
+  required: ["labelLength"],
+} as const;
 
 const DOUBLED_RESULT_SCHEMA = {
   type: "object",
@@ -597,6 +647,104 @@ describe("run-pattern", () => {
       expect(spy.calls).toBe(0);
     });
 
+    it("returns an error naming the position of a sealed opaque link inside an array input, creating no piece", async () => {
+      // A model composes an input out of what an earlier result handed it, and
+      // an array is one of the shapes it composes. The seal is the same
+      // redaction at index 1 of a list as it is at the top of an input.
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: ROW_COUNT_PATTERN_SOURCE,
+        inputs: { rows: ["first", SEALED_OPAQUE_TARGET] },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('input "rows"');
+      expect(output.message).toContain('at "rows[1]"');
+      expect(output.message).toContain("redaction, not an address");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("runs an array input whose entries carry no sealed opaque link", async () => {
+      // The control for the case above: the same pattern and the same shape of
+      // input, so the refusal there is the seal rather than the array.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: ROW_COUNT_PATTERN_SOURCE,
+        inputs: { rows: ["first", "second"] },
+        resultSchema: ROW_COUNT_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ rowCount: 2 });
+    });
+
+    it("keeps a link-shaped string that does not parse as a link as the input's plain value", async () => {
+      // A string can wear the shape of an LLM-friendly link without being one:
+      // this one carries a piece handle too short to be a fabric identifier. It
+      // is the input's value, not a reference, so the pattern computes over the
+      // string itself.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: LABEL_PATTERN_SOURCE,
+        inputs: { label: "/of:fid1:short/x" },
+        resultSchema: LABEL_LENGTH_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ labelLength: "/of:fid1:short/x".length });
+      const piece = await pieces.get(output.pieceId);
+      expect(await piece.input.get(["label"])).toBe("/of:fid1:short/x");
+    });
+
+    it("runs an undeclared input the argument schema admits without saying what it may hold", async () => {
+      // `additionalProperties: true` states that an undeclared key is
+      // permitted and nothing about its value, so there is no schema to
+      // measure it against and no shape it can fail.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: ANY_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21, offset: "five" },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ doubled: 42 });
+      const piece = await pieces.get(output.pieceId);
+      expect(await piece.input.get(["offset"])).toBe("five");
+    });
+
+    it("runs an undeclared live-cell input the argument schema admits without saying what it may hold", async () => {
+      const space = pieces.getSpace();
+      const seed = runtime.getCell(
+        space,
+        "run-pattern-any-seed",
+        {
+          type: "string",
+        } as const,
+      );
+      const { error } = await runtime.editWithRetry((tx) => {
+        seed.withTx(tx).set("five");
+      });
+      expect(error).toBeUndefined();
+      await runtime.idle();
+      const seedRef = createLLMFriendlyLink(
+        seed.getAsNormalizedFullLink(),
+        space,
+      );
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: ANY_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21, offset: seedRef },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ doubled: 42 });
+      const piece = await pieces.get(output.pieceId);
+      expect(await piece.input.get(["offset"])).toBe("five");
+    });
+
     it("returns an error for a plain-JSON input whose value does not match the argument schema, creating no piece", async () => {
       const spy = spyOnRunPersistent();
       const engine = createEngine();
@@ -748,6 +896,55 @@ describe("run-pattern", () => {
         .toThrow();
     });
 
+    it("still returns `cancelled` when removing the piece from the space's piece list fails", async () => {
+      // The removal is best effort: the caller asked to stop, and a run that
+      // reported the removal's failure instead of the cancellation would be
+      // answering a question nobody asked.
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+
+      const controller = new AbortController();
+      const originalGetSpace = pieces.getSpace.bind(pieces);
+      const originalAdd = pieces.add.bind(pieces);
+      const originalRemove = pieces.remove.bind(pieces);
+      pieces.add = async (cells) => {
+        await originalAdd(cells);
+        pieces.getSpace = () => {
+          pieces.getSpace = originalGetSpace;
+          throw new Error("slug assignment refused");
+        };
+        controller.abort();
+      };
+      let removeCalls = 0;
+      pieces.remove = () => {
+        removeCalls += 1;
+        return Promise.reject(new Error("removal refused"));
+      };
+
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      }, { signal: controller.signal });
+      pieces.getSpace = originalGetSpace;
+      pieces.add = originalAdd;
+      pieces.remove = originalRemove;
+
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("cancelled");
+      expect(output.message).toContain("cancelled");
+      expect(result.runState.status).toBe("completed");
+      // The removal really was attempted and really did fail, so the
+      // cancellation above stands despite it rather than beside it.
+      expect(removeCalls).toBe(1);
+      expect((await pieces.getRegisteredPieces()).length).toBe(1);
+    });
+
     it("surfaces a rejected session construction as a structured error and invokes the factory again on the next call", async () => {
       let factoryCalls = 0;
       const engine = new CfHarnessEngine({
@@ -867,6 +1064,132 @@ describe("run-pattern", () => {
       expect(output.status).toBe("error");
       expect(output.message).toContain("register slug is invalid");
       expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error for a `register` request that is not an object, without creating a piece", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 1 },
+        // The shape a model can send: `register` is whatever arrived in the
+        // tool call, not something the type system got to check.
+        register: "doubling-report",
+      } as unknown as RunPatternToolInput);
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain(
+        "register must be an object with a slug",
+      );
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error for a `register` request whose slug is not a string, without creating a piece", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 1 },
+        register: { slug: 7 },
+      } as unknown as RunPatternToolInput);
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("register requires a string slug");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns the registered slug without a URL when the session's space is configured by DID", async () => {
+      // A space configured by `did:key` has no name to put in a URL, and the
+      // only address available would carry the space DID — a bare fabric
+      // identifier that does not cross the model boundary. The slug still
+      // reaches the model, because it is the caller's own word.
+      const spaceIdentity = await signer.derive(
+        `run-pattern-did-${crypto.randomUUID()}`,
+      );
+      const didPieces = new PiecesController(
+        await createSession({
+          identity: signer,
+          spaceDid: spaceIdentity.did(),
+        }),
+        runtime,
+      );
+      await didPieces.synced();
+      expect(didPieces.getSpaceName()).toBeUndefined();
+      const defaultRoot = await didPieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await didPieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await didPieces.synced();
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `run-pattern-test-${crypto.randomUUID()}`,
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces: didPieces }),
+      });
+
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.registrationError).toBeUndefined();
+      expect(output.registration?.slug).toBe("doubling-report");
+      expect(output.registration?.url).toBeUndefined();
+      // The registration really happened, so the missing URL is a refusal to
+      // compose one rather than a registration that did not take place.
+      expect(await resolvePieceAddress(didPieces, "doubling-report")).toBe(
+        output.pieceId,
+      );
+    });
+
+    it("returns a `cancelled` output without creating a piece when the signal is already aborted", async () => {
+      const spy = spyOnRunPersistent();
+      const controller = new AbortController();
+      controller.abort();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 1 },
+      }, { signal: controller.signal });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("cancelled");
+      expect(output.message).toContain("cancelled");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error for a `resultSchema` that is not a JSON Schema, creating no piece", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 1 },
+        resultSchema: "{ not json",
+      } as unknown as RunPatternToolInput);
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain(
+        "resultSchema string must be valid JSON",
+      );
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error naming the configuration a run without a fabric session is missing", async () => {
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `run-pattern-test-${crypto.randomUUID()}`,
+        cfcEnforcementMode: "disabled",
+      });
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 1 },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("requires a fabric session");
+      expect(output.message).toContain("--fabric-space");
     });
 
     it("reports a `registrationError` alongside a usable `resultRef` when the space has no piece registry", async () => {
