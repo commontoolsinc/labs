@@ -409,7 +409,7 @@ for:
   `ProblematicValue` a codec returns becomes a throw.
 
 Note: `/object` escaping (Section 6) is applied directly by the engine's
-private encode walker in its plain-objects path, since it is structural
+internal encode walker in its plain-objects path, since it is structural
 escaping rather than type encoding.
 
 ## 8. Unknown Type Handling

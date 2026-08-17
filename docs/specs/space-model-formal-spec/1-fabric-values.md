@@ -2559,10 +2559,10 @@ Encode:  value -> codec.encode(value) -> serialized form (e.g., JSON string)
 Decode:  serialized form -> codec.decode(data, context) -> FabricValue
 ```
 
-Internally, `JsonCodecEngine`'s `encode()` method calls a private encode walker
-(`#encodeValue()`) to walk the `FabricValue` tree and produce a
+Internally, `JsonCodecEngine`'s `encode()` method calls its internal encode
+walker (`encodeValue()`) to walk the `FabricValue` tree and produce a
 `JsonCodecValue` tree, then stringifies it. The `decode()` method parses
-the JSON string, then calls a private decode walker (`#decodeValue()`) to
+the JSON string, then calls its internal decode walker (`decodeValue()`) to
 walk the `JsonCodecValue` tree and decode runtime types. The
 recursive descent and codec dispatch are entirely internal to `JsonCodecEngine`.
 
@@ -2743,9 +2743,9 @@ error** — every wire form is explicitly represented; there is no implicit
 fallback for fabric classes. Arrays and plain objects (the structural
 types) are handled by the walker itself after no codec matches.
 
-#### Private encode walker (`#encodeValue()`)
+#### Internal encode walker (`encodeValue()`)
 
-`JsonCodecEngine`'s private encode walker processes the `FabricValue` tree:
+`JsonCodecEngine`'s internal encode walker processes the `FabricValue` tree:
 
 1. **Codec dispatch** — `codecFromValue()` finds how to encode the value.
    A `SELF_REP` result means the value is its own wire form (emitted
@@ -2768,9 +2768,9 @@ types) are handled by the walker itself after no codec matches.
 
 Circular references are detected via a `Set<object>` tracked during the walk.
 
-#### Private decode walker (`#decodeValue()`)
+#### Internal decode walker (`decodeValue()`)
 
-`JsonCodecEngine`'s private decode walker processes the `JsonCodecValue` tree:
+`JsonCodecEngine`'s internal decode walker processes the `JsonCodecValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed
    keys.
