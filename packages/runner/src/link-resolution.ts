@@ -21,7 +21,7 @@ import type {
 import { linkResolutionProbe } from "./storage/reactivity-log.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
-import type { CfcAddress } from "./cfc/types.ts";
+import type { CfcAddress, CfcDereferenceTrace } from "./cfc/types.ts";
 import { canFollowScopedLink, narrowerScopeCap } from "./scope.ts";
 import type { SchemaScope } from "./builder/types.ts";
 
@@ -66,15 +66,24 @@ const hopKindForLink = (
 ): LinkHop["kind"] =>
   link.overwrite === "redirect" ? "write-redirect" : "value";
 
+/**
+ * Record a hop on the transaction and hand back what was recorded, so a
+ * memoized resolution can record the same trace object again rather than build
+ * an equal one. Sharing it is what lets the label view derived from its
+ * addresses be memoized in turn, and the transaction freezes on entry either
+ * way, so the trace list reads exactly as it does for an unmemoized walk.
+ */
 const recordDereferenceHop = (
   tx: IExtendedStorageTransaction,
   hop: LinkHop,
-): void => {
-  tx.recordCfcDereferenceTrace({
+): CfcDereferenceTrace => {
+  const trace = {
     source: cfcAddressFromLink(hop.source),
     target: cfcAddressFromLink(hop.link),
     kind: hop.kind,
-  });
+  };
+  tx.recordCfcDereferenceTrace(trace);
+  return trace;
 };
 
 // The scope cap a link's schema imposes on the next link it permits a read to
@@ -164,6 +173,105 @@ const canFollowLinkHop = (
   );
 
 /**
+ * Force a fetch from the server when the local replica cannot serve a hop
+ * target: crossing spaces (the origin server never pushes other-space docs), or
+ * a same-space doc this replica has never pulled, which `shouldPullDoc`
+ * reserves so only the first reader kicks.
+ *
+ * The second arm is the fresh-replica read-asymmetry fix: selector driven syncs
+ * only deliver what a schema covered, so a link can point at a same-space doc
+ * no selector ever walked — without this kick such reads mask as `undefined`,
+ * indistinguishable from absence. The kick is async; one-shot reads still
+ * return the masked value, but `Cell.pull()`'s convergence loop awaits the
+ * tracked sync and re-reads.
+ *
+ * Sync failures are swallowed: the kick is best-effort (the read still resolves
+ * from the local replica) and an unhandled rejection here would otherwise
+ * escape the resolution path. On failure, retract the `shouldPullDoc`
+ * reservation so a later read may retry — but only when THIS kick took it: a
+ * cross-space kick never reserved, and must not clear a reservation a
+ * concurrent same-space read holds for the same target (that would permit
+ * duplicate syncs).
+ */
+const kickDocPull = (
+  runtime: Runtime,
+  link: NormalizedFullLink,
+  reserved: boolean,
+): void => {
+  const mgr = runtime.storageManager;
+  const { space, id, scope } = link;
+  mgr.trackUntilSettled(
+    runtime.getCellFromLink(link).sync().catch(() => {
+      if (reserved) mgr.retractDocPullKick?.(space, id, scope);
+    }),
+  );
+};
+
+/**
+ * What a resolution leaves on the transaction besides the link it returns, so
+ * a memoized one can reproduce it. See {@link resolveLink}'s cache notes.
+ */
+type LinkResolutionRecord = {
+  /** The resolved link. Handed out as a copy, never this object. */
+  readonly result: NormalizedFullLink;
+  /** Every hop the walk recorded, in order, ready to be recorded again. */
+  readonly traces: readonly CfcDereferenceTrace[];
+  /**
+   * Hop targets in another space. Their sync kick is unreserved, so it fires on
+   * every resolution and a memoized one has to fire it too. A same-space kick
+   * is taken against a reservation and fires once whatever happens, so it is
+   * not recorded here.
+   */
+  readonly crossSpaceTargets: readonly NormalizedFullLink[];
+};
+
+// Identity tags for the link fields a cache key cannot cheaply serialize.
+// Schemas are interned at every resolution exit and `scopeCaps` arrays travel
+// by reference, so within one transaction the hot path presents the same
+// object each time. A structurally-equal object under a different identity
+// simply misses, which costs a resolution rather than serving a wrong one.
+let nextIdentityTag = 0;
+const identityTags = new WeakMap<object, number>();
+
+const identityTag = (value: object): number => {
+  let tag = identityTags.get(value);
+  if (tag === undefined) {
+    tag = ++nextIdentityTag;
+    identityTags.set(value, tag);
+  }
+  return tag;
+};
+
+/**
+ * The address a link names, which is both the walk's cycle-detection key and
+ * the tail of its memo key. Computed once and reused for both, so a resolution
+ * that misses the memo pays for exactly the one the walk needed anyway.
+ */
+const linkAddressKey = (link: NormalizedFullLink): string =>
+  JSON.stringify([link.space, link.id, link.scope, link.path]);
+
+/**
+ * What distinguishes two resolutions of the same address. `schema` and
+ * `scopeCaps` decide which hops may be followed and what the result carries,
+ * `overwrite` survives into the result under `preserveOverwrite`, and both
+ * arguments change the answer for the same link.
+ */
+const resolutionMemoVariant = (
+  link: NormalizedFullLink,
+  lastNode: LastNode,
+  preserveOverwrite: boolean,
+): string => {
+  const schema = typeof link.schema === "object" && link.schema !== null
+    ? `#${identityTag(link.schema)}`
+    : String(link.schema);
+  const caps = link.scopeCaps === undefined
+    ? ""
+    : `#${identityTag(link.scopeCaps)}`;
+  return `link:${lastNode}|${preserveOverwrite ? 1 : 0}|` +
+    `${link.overwrite ?? ""}|${schema}|${caps}|`;
+};
+
+/**
  * Resolves a document path with support for links inside documents.
  *
  * It returns a `ResolvedFullLink` that points to a document that no longer has
@@ -195,6 +303,22 @@ const canFollowLinkHop = (
  * same link to be followed several times, so they are bounded by an upper
  * limit of `MAX_PATH_RESOLUTION_LENGTH` iterations, which throws.
  *
+ * A transaction is a consistent snapshot, so resolving the same link twice
+ * against one has to give the same answer, and the second walk is redundant.
+ * The transaction memoizes them: it hands out a cache while it may be used, and
+ * replaces it on every write, so an entry is only ever served when nothing has
+ * been written since it was made. It withholds the cache entirely where a
+ * resolution is not a pure function of the snapshot — once CFC is prepared,
+ * where the read-after-prepare invalidation is load-bearing, and inside an
+ * ambient-read-meta scope, where the same read carries different metadata.
+ *
+ * A hit still has to leave behind what the walk would have: the dereference
+ * traces, which the transaction accumulates for the commit's digest, and the
+ * sync kicks that fire on every resolution. What it does skip is the probe
+ * reads, which the first resolution already journaled on this transaction —
+ * the reactivity log is a set of addresses, and the second walk adds nothing
+ * to it.
+ *
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param lastNode - The last node in the path.
@@ -212,7 +336,59 @@ export function resolveLink(
   lastNode: LastNode = "value",
   options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
 ): ResolvedFullLink {
+  return resolveLinkTracingDereferences(runtime, tx, link, lastNode, options)
+    .link;
+}
+
+/**
+ * {@link resolveLink}, with the dereference traces this resolution recorded.
+ *
+ * A caller that derives a CFC label view from those traces would otherwise
+ * bracket the call and slice them back off the transaction, which reads the
+ * CFC state through its read-only proxy twice per resolution — the dominant
+ * cost of an element read once the resolution itself is memoized. Taking them
+ * from here reads nothing.
+ *
+ * The traces are recorded on the transaction either way; this is the same list,
+ * not an alternative to recording it.
+ */
+export function resolveLinkTracingDereferences(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  lastNode: LastNode = "value",
+  options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
+): { link: ResolvedFullLink; traces: readonly CfcDereferenceTrace[] } {
+  // The walk needs this to detect cycles; the memo needs it to name the entry.
+  let addressKey = linkAddressKey(link);
+  const memo = tx.getSnapshotMemo?.();
+  const memoKey = memo &&
+    resolutionMemoVariant(link, lastNode, options.preserveOverwrite === true) +
+      addressKey;
+  if (memoKey !== undefined) {
+    const cached = memo!.get(memoKey) as LinkResolutionRecord | undefined;
+    if (cached !== undefined) {
+      for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
+      for (const target of cached.crossSpaceTargets) {
+        kickDocPull(runtime, target, false);
+      }
+      return {
+        // A copy, so a caller that mutates what it got back cannot reach into
+        // the entry the next resolution will serve.
+        link: { ...cached.result } as unknown as ResolvedFullLink,
+        traces: cached.traces,
+      };
+    }
+  }
+
   const seen = new Set<string>();
+  const traces: CfcDereferenceTrace[] = [];
+  const crossSpaceTargets: NormalizedFullLink[] = [];
+  // A resolution is memoized only when replaying `traces` and
+  // `crossSpaceTargets` reproduces everything it left behind. A blocked follow
+  // does not: its `onScopeBlocked` and its warning belong to every resolution
+  // that reaches the cut, not just the first.
+  let memoizable = true;
 
   let iteration = 0;
 
@@ -222,8 +398,9 @@ export function resolveLink(
       throw new Error(`Link resolution iteration limit reached`);
     }
 
-    // Detect cycles.
-    const key = JSON.stringify([link.space, link.id, link.scope, link.path]);
+    // Detect cycles. `addressKey` always names the link this iteration starts
+    // from: computed for the first before the loop, refreshed by each hop.
+    const key = addressKey;
     if (seen.has(key)) {
       logger.error(
         "link-res-error",
@@ -351,6 +528,7 @@ export function resolveLink(
           },
         ]);
         options.onScopeBlocked?.();
+        memoizable = false;
         link = undefinedDataLink(link);
         break;
       }
@@ -372,7 +550,7 @@ export function resolveLink(
         logger.error("link-res-error", `Link cycle detected: ${detail}`);
         throw new Error(`Link cycle detected at ${key}: ${detail}`);
       }
-      recordDereferenceHop(tx, nextHop);
+      traces.push(recordDereferenceHop(tx, nextHop));
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
       // The hop consumed `nextHop.depth` of our path and re-rooted the rest
@@ -401,33 +579,18 @@ export function resolveLink(
           ? nextLink
           : { ...nextLink, scopeCaps: carriedCaps };
       }
-      // Force fetching data from the server when the local replica cannot
-      // serve the hop target: crossing spaces (the origin server never pushes
-      // other-space docs), or a same-space doc this replica has never pulled.
-      // The second arm is the fresh-replica read-asymmetry fix: selector
-      // driven syncs only deliver what a schema covered, so a link can point
-      // at a same-space doc no selector ever walked — without this kick such
-      // reads mask as `undefined`, indistinguishable from absence. The kick
-      // is async; one-shot reads still return the masked value, but
-      // `Cell.pull()`'s convergence loop awaits the tracked sync and re-reads.
       const mgr = runtime.storageManager;
-      const { space, id, scope } = link;
       const reserved = !crossSpace &&
-        mgr.shouldPullDoc?.(space, id, scope) === true;
+        mgr.shouldPullDoc?.(link.space, link.id, link.scope) === true;
       if (crossSpace || reserved) {
-        // Swallow sync failures: this kick is best-effort (the read still
-        // resolves from the local replica) and an unhandled rejection here
-        // would otherwise escape the resolution path. On failure, retract
-        // the shouldPullDoc reservation so a later read may retry — but only
-        // when THIS kick took it: a failed cross-space kick never reserved,
-        // and must not clear a reservation a concurrent same-space read
-        // holds for the same target (that would permit duplicate syncs).
-        mgr.trackUntilSettled(
-          runtime.getCellFromLink(link).sync().catch(() => {
-            if (reserved) mgr.retractDocPullKick?.(space, id, scope);
-          }),
-        );
+        // Only the cross-space kick is replayed. A same-space one is taken
+        // against a reservation, so a second resolution of this link would not
+        // kick it either — and if the sync fails and retracts the reservation,
+        // the read that retries is in a later transaction with its own memo.
+        if (crossSpace) crossSpaceTargets.push(link);
+        kickDocPull(runtime, link, reserved);
       }
+      addressKey = linkAddressKey(link);
     } else {
       break;
     }
@@ -450,9 +613,22 @@ export function resolveLink(
     delete result.overwrite;
   }
 
+  if (memoKey !== undefined && memoizable) {
+    // The entry keeps its own copy, for the same reason a hit hands one out:
+    // this caller owns what it is about to be returned.
+    memo!.set(
+      memoKey,
+      {
+        result: { ...result },
+        traces,
+        crossSpaceTargets,
+      } satisfies LinkResolutionRecord,
+    );
+  }
+
   // The casting is a workaround for the branding, we don't actually want to add
   // the symbol to the result.
-  return result as unknown as ResolvedFullLink;
+  return { link: result as unknown as ResolvedFullLink, traces };
 }
 
 /**

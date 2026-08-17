@@ -101,6 +101,7 @@ import {
   clearSchemaRefusalTx,
   isInternalVerifierRead,
   isLazyMaterializationTx,
+  isUiInputBlindWriteTx,
   markLazyMaterializationTx,
   noteSchemaRefusalTx,
   reactivityLogFromActivities,
@@ -380,6 +381,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private readResultCacheHits = 0;
   private readResultCacheMisses = 0;
   private readResultCacheSets = 0;
+  // Per-transaction memo for derivations that read only this snapshot -- link
+  // resolution and CFC label views, each under its own key prefix. Dropped on
+  // any write alongside the read cache above, and bounded the same way: it
+  // retains only what was derived since this transaction's last write.
+  private snapshotMemo = new Map<string, unknown>();
 
   constructor(
     public tx: IStorageTransaction,
@@ -877,6 +883,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   resetNarrowestReadScope(scope: CellScope = "space"): void {
     this.narrowestReadScope = scope;
+    // The caller is about to re-read to learn the scope of what it reads. A
+    // memoized link resolution issues no reads, so it would contribute nothing
+    // to the scope taken afterwards and the answer would come out too wide.
+    this.snapshotMemo = new Map();
   }
 
   markLazyMaterialize(enabled = true): void {
@@ -941,6 +951,28 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.readResultCacheSets++;
   }
 
+  getSnapshotMemo(): Map<string, unknown> | undefined {
+    // A finished transaction answers no reads, so nothing it memoized earlier
+    // may be handed out as if it had.
+    if (this.status().status !== "ready") return undefined;
+    // Once CFC is prepared, the read path's `read-after-prepare` invalidation
+    // is load-bearing: a memoized resolution issues no reads and would leave a
+    // prepared digest standing over a read it never made.
+    if (this.#cfcState.prepare.status === "prepared") return undefined;
+    // Inside an ambient-read-meta scope the reads a derivation issues carry
+    // metadata that flow-label derivation reads. Serving one across the scope
+    // boundary — either way — would journal the wrong ones, so the scope
+    // neither reads the memo nor writes to it.
+    if (this.#ambientReadMeta !== undefined) return undefined;
+    // Same for the UI-input blind-write mode, which tags every read it sees
+    // `ignoreReadForCommit`. An entry made under it, served after it is
+    // cleared, would stand in for reads that are supposed to carry a
+    // value-equality commit precondition — and the precondition would simply
+    // not be there.
+    if (isUiInputBlindWriteTx(this)) return undefined;
+    return this.snapshotMemo;
+  }
+
   getReadResultCacheStats(): {
     hits: number;
     misses: number;
@@ -979,11 +1011,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private invalidateReadResultCache(): void {
-    // A write may have changed any value a cached read depends on. Drop the
-    // whole cache by replacing the map; this enforces
-    // the "no writes between the last read and this one" invariant the cache
-    // relies on.
+    // A write may have changed any value a cached read depends on — including
+    // the links a resolution walked, which a write can add, retarget or
+    // replace with a plain value. Drop both caches by replacing the maps; this
+    // enforces the "no writes between the last read and this one" invariant
+    // they rely on.
     this.readResultCache = new Map();
+    this.snapshotMemo = new Map();
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {

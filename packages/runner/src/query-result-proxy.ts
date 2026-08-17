@@ -6,7 +6,7 @@ import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { resolveLinkTracingDereferences } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell, frameAnchorIds } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
@@ -243,15 +243,14 @@ function createViewProxy<T>(
     );
   }
 
-  // Resolve path and follow links to actual value.
-  const traceStart = viewTx.getCfcState().dereferenceTraces.length;
-  link = resolveLink(runtime, viewTx, link);
+  // Resolve path and follow links to actual value. The resolution hands back
+  // the dereference traces it recorded, so the label view below costs no read
+  // of the transaction's CFC state.
+  const resolved = resolveLinkTracingDereferences(runtime, viewTx, link);
+  link = resolved.link;
   cfcLabelView = mergeCfcLabelViews([
     cloneCfcLabelView(cfcLabelView),
-    cfcLabelViewForDereferenceTraces(
-      viewTx,
-      viewTx.getCfcState().dereferenceTraces.slice(traceStart),
-    ),
+    cfcLabelViewForDereferenceTraces(viewTx, resolved.traces),
   ]);
   const value = viewTx.readValueOrThrow(link, SHAPE_READ) as any;
 
