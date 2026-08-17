@@ -127,29 +127,32 @@ describe("unknown-reference materialization", () => {
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
       });
-      const setup = rt.edit();
-      const cell = rt.getCell(
-        space,
-        `paths-${seq}`,
-        { type: "object", properties: { v: schema } } as JSONSchema,
-        setup,
-      );
-      cell.set({ v: value } as never);
-      await setup.commit();
-      const read = async (lazy: boolean) => {
-        const readTx = rt.edit();
-        if (lazy) readTx.markLazyMaterialize(true);
-        // Projected while the transaction is open: a lazy view resolves what
-        // a reader touches when it touches it, and a closed one refuses.
-        const out = project((cell.withTx(readTx).get() as { v: unknown }).v);
-        await readTx.commit();
-        return out;
-      };
-      const eager = await read(false);
-      const lazy = await read(true);
-      await rt.dispose();
-      await sm.close();
-      return { eager, lazy };
+      try {
+        const setup = rt.edit();
+        const cell = rt.getCell(
+          space,
+          `paths-${seq}`,
+          { type: "object", properties: { v: schema } } as JSONSchema,
+          setup,
+        );
+        cell.set({ v: value } as never);
+        await setup.commit();
+        const read = async (lazy: boolean) => {
+          const readTx = rt.edit();
+          if (lazy) readTx.markLazyMaterialize(true);
+          // Projected while the transaction is open: a lazy view resolves what
+          // a reader touches when it touches it, and a closed one refuses.
+          const out = project((cell.withTx(readTx).get() as { v: unknown }).v);
+          await readTx.commit();
+          return out;
+        };
+        return { eager: await read(false), lazy: await read(true) };
+      } finally {
+        // The suite's `afterEach` owns the shared pair, not this one, so a
+        // failing projection would otherwise leave this runtime open.
+        await rt.dispose();
+        await sm.close();
+      }
     };
 
     it("answer an opaque position identically", async () => {
