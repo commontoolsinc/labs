@@ -82,30 +82,38 @@ The current package provides:
   carry the schema of its referent — a `run_pattern` result reference records
   the compiled pattern's result schema, marked `schemaSource: "harness"` — while
   no mint takes a schema off the reference it is handed or reads a cell to fill
-  one in, so an entry without one means the shape was never free to capture;
-- a `describe_handle` tool, available in any run that has handles and gated on
-  no fabric session: given a token it reports the harness-derived schema and the
-  path segments of the referent, never the value, and reports an unknown token
-  as unknown rather than as an error. It never dereferences the cell. Disclosing
-  shape is a policy-governed read whose current default is permissive; a schema
-  without harness provenance is not disclosed, closing the encoding channel a
-  data-carried schema would open;
+  one in, so an entry without one is one whose shape was never free to capture
+  and is answered from the fabric instead;
+- a `describe_handle` tool, available in any run that has handles: given a token
+  it reports the shape of the referent and its path segments, never the value,
+  and reports an unknown token as unknown rather than as an error. The shape is
+  what the referent declares in the session's fabric when the run has one — a
+  piece's document schema is the result schema of the pattern behind it, which
+  is what an agent building over that piece needs — and otherwise the
+  harness-derived schema the mint recorded. Whatever the source, the reported
+  schema is rebuilt from an allowlist of structural keywords at every depth, so
+  `const`, `enum`, `default`, `examples`, and free-text annotations never leave
+  the tool. Disclosing shape is a policy-governed read whose current default is
+  permissive, bounded to addresses in the session's own space;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
   environment fallbacks): compiles and runs an inline `sourceText` pattern
   (capped at 256 KiB) against a deployed Fabric space from the trusted host side
   over a lazy per-run session that caches only a healthy, authorized
   construction; passes whole-string LLM-friendly link inputs as live cells,
-  refusing links into another space and live-cell values that mismatch the
-  compiled argument schema before any piece exists; honors the run's abort
-  signal by stopping the created piece and returning a structured `cancelled`
-  error; scrubs bare fabric identifiers from model-facing diagnostics; returns
-  the result cell's canonical reference plus an optionally schema-sanitized
-  value, and leaves the piece detached (no recorded origin) and out of the
-  space's registered piece list, with run→piece provenance carried by the run's
-  persisted artifacts; without the session configuration the tool is absent from
-  the tool surface, for a `default`- or `pattern-author`-profile subagent as
-  much as for the parent — a child shares the one session the parent built;
+  refusing links into another space, inputs the compiled pattern declares no
+  argument for, input values that carry a sealed opaque link anywhere within
+  them, and values that mismatch the compiled argument schema whether a live
+  cell or plain JSON supplies them, all before any piece exists; honors the
+  run's abort signal by stopping the created piece and returning a structured
+  `cancelled` error; scrubs bare fabric identifiers from model-facing
+  diagnostics; returns the result cell's canonical reference plus an optionally
+  schema-sanitized value, and leaves the piece detached (no recorded origin) and
+  out of the space's registered piece list, with run→piece provenance carried by
+  the run's persisted artifacts; without the session configuration the tool is
+  absent from the tool surface, for a `default`- or `pattern-author`-profile
+  subagent as much as for the parent — a child shares the one session the parent
+  built;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable

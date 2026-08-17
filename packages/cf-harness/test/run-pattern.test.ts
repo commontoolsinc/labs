@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
+import { resolvePieceAddress } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
@@ -43,6 +44,34 @@ const NAMED_DOUBLING_PATTERN_SOURCE = [
   "}));",
   "",
 ].join("\n");
+
+/** A pattern whose single input is an object, for the plain-JSON cases. */
+const OVERVIEW_PATTERN_SOURCE = [
+  "import { computed, pattern } from 'commonfabric';",
+  "interface Overview { title: string; }",
+  "interface Input { overview: Overview; }",
+  "interface Output { titleLength: number; }",
+  "export default pattern<Input, Output>(({ overview }) => ({",
+  "  titleLength: computed(() => overview.title.length),",
+  "}));",
+  "",
+].join("\n");
+
+const TITLE_LENGTH_RESULT_SCHEMA = {
+  type: "object",
+  properties: { titleLength: { type: "number" } },
+  required: ["titleLength"],
+} as const;
+
+/**
+ * What a `resultSchema`-sanitized result carries at a position it sealed:
+ * the single-key `@link` object over an `opaque:` target. A model reading a
+ * tool result can copy one of these back out, which is what the sealed-input
+ * refusal exists for.
+ */
+const SEALED_OPAQUE_LINK = {
+  "@link": "opaque:run-pattern-test%3Arun_pattern%3A1#/overview",
+} as const;
 
 const DOUBLED_RESULT_SCHEMA = {
   type: "object",
@@ -269,6 +298,45 @@ describe("run-pattern", () => {
       expect((output.value as { doubled: number }).doubled).toBe(14);
     });
 
+    it("stores a by-reference input as a link, so the created piece's argument follows the referenced cell", async () => {
+      const space = pieces.getSpace();
+      const seed = runtime.getCell<number>(space, "run-pattern-wired-seed", {
+        type: "number",
+      });
+      const seeded = await runtime.editWithRetry((tx) => {
+        seed.withTx(tx).set(7);
+      });
+      expect(seeded.error).toBeUndefined();
+      await runtime.idle();
+      const seedRef = createLLMFriendlyLink(
+        seed.getAsNormalizedFullLink(),
+        space,
+      );
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: seedRef },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+
+      // The created piece's argument reads back as the referenced cell's
+      // value, at the key the pattern declares.
+      const piece = await pieces.get(output.pieceId);
+      expect(await piece.input.get(["n"])).toBe(7);
+
+      // And it holds the reference rather than a copy of what the reference
+      // pointed at when the piece was created: a later write to the seed
+      // reaches the piece's result.
+      const rewritten = await runtime.editWithRetry((tx) => {
+        seed.withTx(tx).set(10);
+      });
+      expect(rewritten.error).toBeUndefined();
+      await runtime.idle();
+      await pieces.synced();
+      expect(await piece.result.get(["doubled"])).toBe(20);
+    });
+
     it("returns a `compile-error` output carrying the raw diagnostics without failing the run", async () => {
       const engine = createEngine();
       const result = await engine.invokeBuiltinTool("run_pattern", {
@@ -348,6 +416,84 @@ describe("run-pattern", () => {
       expect(spy.calls).toBe(0);
     });
 
+    it("returns an error naming an input the pattern's argument schema does not declare, creating no piece", async () => {
+      // A misnamed input is the mismatch a shape check cannot see: the
+      // pattern runs with its argument undefined, computes nothing from it,
+      // and renders a complete page holding no values. Refusing before the
+      // piece exists turns that into something the model can correct.
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { count: 21 },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('"count"');
+      expect(output.message).toContain('it declares "n"');
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error naming an input that is a sealed opaque link, creating no piece", async () => {
+      // A seal is a redaction, so storing it would leave a dead literal where
+      // the pattern declared a live reference: the piece would run, compute
+      // nothing from that argument, and report `ok`.
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: SEALED_OPAQUE_LINK },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('input "n"');
+      expect(output.message).toContain("sealed opaque link");
+      expect(output.message).toContain("redaction, not an address");
+      expect(output.message).toContain("cfh:a:");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error naming the path of a sealed opaque link nested inside an object input, creating no piece", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: OVERVIEW_PATTERN_SOURCE,
+        inputs: { overview: { title: SEALED_OPAQUE_LINK } },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('input "overview"');
+      expect(output.message).toContain('at "overview.title"');
+      expect(output.message).toContain("redaction, not an address");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error for a plain-JSON input whose value does not match the argument schema, creating no piece", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: "twenty-one" },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('input "n"');
+      expect(output.message).toContain("argument schema");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("runs a plain-JSON object input that matches its declared argument schema", async () => {
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: OVERVIEW_PATTERN_SOURCE,
+        inputs: { overview: { title: "Weekly" } },
+        resultSchema: TITLE_LENGTH_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ titleLength: 6 });
+    });
+
     it("returns a `cancelled` output and stops the piece when the signal aborts during the settle barrier", async () => {
       const controller = new AbortController();
       // Abort exactly when the tool reaches its post-create barrier, and
@@ -409,7 +555,7 @@ describe("run-pattern", () => {
       expect(factoryCalls).toBe(2);
     });
 
-    it("leaves the created piece out of the space's real registered piece list", async () => {
+    it("leaves the created piece out of the space's real registered piece list without a `register` request", async () => {
       // A real default pattern first: without one, `getRegisteredPieces()`
       // reads a detached always-empty fallback and the assertion below
       // holds vacuously.
@@ -435,6 +581,89 @@ describe("run-pattern", () => {
       await pieces.add([control.getCell()]);
       const afterAdd = await pieces.getRegisteredPieces();
       expect(afterAdd.length).toBe(1);
+    });
+
+    it("registers the created piece under the requested slug when `register` asks for it", async () => {
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.registrationError).toBeUndefined();
+      const registered = await pieces.getRegisteredPieces();
+      expect(registered.map((piece) => piece.id)).toEqual([output.pieceId]);
+      // The slug resolves to the same piece, so the address a person opens
+      // names the piece the run created rather than merely existing.
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        output.pieceId,
+      );
+    });
+
+    it("returns the registered slug and an openable URL composed from the session's API URL and space name", async () => {
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.registration?.slug).toBe("doubling-report");
+      expect(output.registration?.url).toBe(
+        `http://toolshed.test/${pieces.getSpaceName()}/doubling-report`,
+      );
+      // Nothing the model receives here carries a fabric identifier: the slug
+      // is its own word and the URL is the API URL plus the space's name.
+      expect(output.registration?.url).not.toContain(output.pieceId);
+      expect(output.registration?.url).not.toContain("did:");
+    });
+
+    it("returns an error for an unusable `register` slug without creating a piece", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 1 },
+        register: { slug: "Doubling Report" },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("register slug is invalid");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("reports a `registrationError` alongside a usable `resultRef` when the space has no piece registry", async () => {
+      // No default pattern linked, so `pieces.add` has nothing to register
+      // through. The computation still succeeded, and the reference to it is
+      // still the run's result.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+        register: { slug: "doubling-report" },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.registration).toBeUndefined();
+      expect(output.registrationError).toContain("default pattern");
+      expect(output.resultRef).toMatch(/^\/of:/);
+      expect((output.value as { doubled: number }).doubled).toBe(42);
     });
   });
 });

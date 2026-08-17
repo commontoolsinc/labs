@@ -127,7 +127,8 @@ network confinement model.
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` together) that compiles and runs a pattern against a deployed
   Fabric space from the trusted host side and returns a live result cell
-  reference; see
+  reference, optionally registering the piece in the space's piece list at a
+  caller-chosen slug so a person can open it; see
   [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space)
 
 What is not done yet:
@@ -614,12 +615,11 @@ in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 #### Inspecting a handle's shape
 
-A token says nothing about what it refers to, and an agent that holds several
-cannot tell one from another by looking. `describe_handle` closes that gap
-without opening the data: given a token, it reports the recorded schema and the
-path segments of the referent — what field of what piece the token names — and
-never the value. It does not dereference the cell, and it needs no fabric
-session, so it is available in every run that has handles at all.
+A token says nothing about what it refers to, and an agent handed one cannot
+write a line of code over it without knowing the shape of what is there.
+`describe_handle` closes that gap without opening the data: given a token, it
+reports the shape of the referent and the path segments — what field of what
+piece the token names — and never the value.
 
 ```json
 {
@@ -634,34 +634,51 @@ session, so it is available in every run that has handles at all.
 }
 ```
 
-Schemas are captured where they are already free rather than fetched, and only
-from the harness's own work: a `run_pattern` result reference carries the
-compiled pattern's result schema, which compilation produced anyway. Such an
-entry is marked `schemaSource: "harness"`, and that mark is what
-`describe_handle` discloses. A mint never takes a schema off the reference it is
-handed and never reads a cell to fill one in, so `hasSchema: false` means the
-shape was never free to capture, not that the referent has none. A token the
-run's table does not hold comes back `known: false` rather than as an error,
-since a token from another run simply names nothing here. A session-backed
-schema fetch — reading a referent's declared schema without reading its value —
-is a possible extension, and would arrive with a provenance of its own to answer
-for.
+Two sources can answer, in this order. The referent's own declared schema, read
+through the run's fabric session when it has one: a piece's document schema is
+the result schema of the pattern behind it, which is exactly what an agent
+holding a handle to that piece would be wiring into a pattern of its own.
+Failing that, the schema the mint recorded out of the harness's own work — a
+`run_pattern` result reference carries the compiled pattern's result schema,
+which compilation produced anyway, and the entry is marked
+`schemaSource: "harness"`. A run with no session still answers from its own
+table, so shape stays inspectable in every run that has handles at all. A token
+the run's table does not hold comes back `known: false` rather than as an error,
+since a token from another run simply names nothing here.
+
+**What is disclosed is structure and only structure**: property names, types,
+nesting, required-ness, array and object composition, a `type` from the schema
+vocabulary, a `format` from the small known set, and a local `$ref` with the
+`$defs` it points into.
+
+**What is not disclosed is anything a value or a word can hide in.** A JSON
+Schema is a place to put data: `const`, `enum`, `default` and `examples` carry
+values outright, and `title`, `description`, `$comment` and `pattern` carry free
+text whoever authored the schema chose. Every schema this tool reports is
+therefore REBUILT from an allowlist of structural keywords rather than copied
+with a few keywords deleted — at every depth, through `properties`, `items`,
+`$defs`, and every combinator — so a keyword nobody anticipated is absent rather
+than disclosed. A `required` name that no property declares is dropped too: that
+is a string, not structure. Numeric bounds, string patterns, and the Common
+Fabric schema extensions do not cross either.
+
+That reduction is what makes the fabric-side read safe to allow. The schema a
+piece declares was authored by someone other than this run — quite possibly a
+person — and property names cross the line because nothing can be written over
+data without them. Prose and values do not cross it at all, so the channel a
+schema could otherwise carry is narrowed to the names an agent needs and nothing
+more.
 
 Disclosing shape is a policy-governed read, and the current default is
-permissive: any run holding the token gets an answer. That is the same ground
-declassification stands on elsewhere — for a cell whose pattern this harness
-compiled and ran, the shape is ours to state — and it is the contract patterns
-already work under internally: you cannot see the data, you can only describe
-the data flow. The dial belongs beside the other observation boundaries, and
-moving it is a policy change rather than a redesign.
+permissive: any run holding the token gets an answer, for any address in the
+session's own space. A reference outside that space is not followed — the
+session's authority ends at its space — and an address the session can state no
+shape for is reported as shapeless rather than as a failed call. The dial
+belongs beside the other observation boundaries, and moving it is a policy
+change rather than a redesign.
 
-What is not permissive is what counts as a schema worth reporting. Property
-names are a channel — whoever writes them chooses the words — so a schema that
-arrived with data is never disclosed, and none is ever recorded from one. An
-entry carrying a schema with no harness provenance reads as shapeless.
-
-Shape is what makes a chain of steps checkable. An orchestrator that passes a
-reference from one step to the next can confirm the reference is the kind of
+Shape is also what makes a chain of steps checkable. An orchestrator that passes
+a reference from one step to the next can confirm the reference is the kind of
 thing the next step expects — before it runs, and without reading the data
 flowing through it.
 
@@ -741,29 +758,64 @@ session that fails to build surfaces as an ordinary tool-output error rather
 than a run failure, and the next tool call retries the construction.
 
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
-over-cap source is a structured tool error), an optional `inputs` object, and an
-optional `resultSchema`. An `inputs` string value that is a whole-string
-LLM-friendly link (`/of:fid1:.../path`) is passed to the pattern as a live cell
-reference; everything else passes through as plain JSON. A link that resolves
-into a space other than the configured session space is refused with a
-structured error before anything is created, and a live-cell input whose current
+over-cap source is a structured tool error), an optional `inputs` object, an
+optional `resultSchema`, and an optional `register`. An `inputs` string value
+that is a whole-string LLM-friendly link (`/of:fid1:.../path`) is passed to the
+pattern as a live cell reference; everything else passes through as plain JSON.
+A link that resolves into a space other than the configured session space is
+refused with a structured error before anything is created, and an input whose
 value does not match the compiled pattern's argument schema for its key is
 refused the same way — named after the offending key, with no piece persisted.
-The deployed piece is deliberately unregistered — it never appears in the
-space's piece list — and deliberately detached: no origin is recorded, because
-model-authored source starts detached under the piece source-lifecycle spec.
-Run→piece provenance is carried by the run's persisted artifacts instead —
-run-state and the tool-output artifact record the `pieceId`. When the run's
-abort signal fires while the tool is waiting for the pattern to settle, the tool
-stops the created piece and returns a structured `cancelled` error; the signal
-is the only cancellation source — there is no timeout.
+What supplies the value does not change that question: a live cell is measured
+by what it currently holds, and a plain JSON value by itself. So is an input the
+pattern's argument schema does not declare at all, listing the names the pattern
+does declare: a misnamed input is the mismatch a shape check cannot see, since
+the pattern then runs with that argument undefined and renders a complete page
+holding no values. Only a pattern whose argument schema names its properties,
+and does not admit further ones, is measured that way.
 
-Every `run_pattern` invocation persists such a piece in the configured space. A
-cancelled run stops its piece, but no piece is ever deleted, and each piece's
-source-history revision is a storage-retention root the piece list does not
-reveal. Tooling that enumerates a space's contents from the piece list must not
-assume the list is exhaustive, and there is no garbage collection for these
-pieces yet.
+An input value carrying a sealed opaque link — the single-key
+`{"@link":"opaque:..."}` object a `resultSchema` sanitization leaves at a
+position it seals — is refused before anything is created too, at the top level
+or nested anywhere inside a plain-JSON value, and the refusal names the path it
+was found at. A seal is a redaction rather than an address: it marks a position
+an earlier result withheld, and it names nothing any reader resolves, so storing
+one would leave a dead literal where the pattern declared a live reference. The
+reference for that same data is the `cfh:a:` handle token, or the LLM-friendly
+link it stands for, passed as the input's own whole string value — which is what
+the refusal tells the model to do instead. The deployed piece is unregistered by
+default — it never appears in the space's piece list — and always detached: no
+origin is recorded, because model-authored source starts detached under the
+piece source-lifecycle spec. Run→piece provenance is carried by the run's
+persisted artifacts instead — run-state and the tool-output artifact record the
+`pieceId`. When the run's abort signal fires while the tool is waiting for the
+pattern to settle, the tool stops the created piece and returns a structured
+`cancelled` error; the signal is the only cancellation source — there is no
+timeout.
+
+`register` is how a run publishes its result to a person. It takes one required
+field, `slug` — the named address the piece is reachable at, in the same
+lowercase-hyphen form every fabric slug uses — and asks for the piece to join
+the space's piece list. The slug is validated before anything is compiled, so an
+unusable one is a structured error that persists no piece. Registration itself
+runs after the pattern has settled: the piece joins the space's registry through
+the default pattern, and the slug is then pointed at it, the same two steps
+`cf piece new` performs. A space with no default pattern has no registry to
+join; `run_pattern` reports that as `registrationError` on an otherwise `ok`
+output rather than bootstrapping the space's root, so the computation and its
+`resultRef` survive a failed publish. `register` sets the address, not the
+title: what the piece list displays is the pattern's own `NAME` result, so a
+pattern that wants a title sets `NAME` in its source.
+
+Every `run_pattern` invocation persists a piece in the configured space,
+registered or not. A cancelled run stops its piece, but no piece is ever
+deleted, and each piece's source-history revision is a storage-retention root
+the piece list does not reveal. Registration changes only whether a piece is
+findable, never whether it is retained: an unregistered piece is exactly as
+durable as a registered one, and registering makes a retained piece visible to
+the tooling that could otherwise not see it. Tooling that enumerates a space's
+contents from the piece list must not assume the list is exhaustive, and there
+is no garbage collection for these pieces yet.
 
 A successful run returns `{ status: "ok", resultRef }` to the model, where
 `resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
@@ -785,12 +837,23 @@ shown. The ordinary outbound swap turns `resultRef` (and any link strings inside
 swap resolves such a token passed back through `inputs`; the tool itself carries
 no handle code. The persisted tool-output artifact keeps the raw reference, the
 raw result value, and the `pieceId` — a bare fabric identifier the handle
-boundary never swaps, so it stays out of the model-facing rendering. Compiler
-diagnostics come back as `{ status: "compile-error", message }` so the model can
-iterate on the source; bare fabric identifiers a diagnostic can embed
-(compiler-generated `fid1:` module roots, DIDs, `data:` URIs) are replaced with
-a `[fabric-id]` placeholder in the model-facing message, while the persisted
-artifact keeps the raw text.
+boundary never swaps, so it stays out of the model-facing rendering.
+
+A registered run adds `registration` to that output: `{ slug }`, plus `url` when
+the harness can compose one honestly. The URL is the session's API URL, the
+space, and the slug — the address `cf piece new` prints — and it appears only
+when `--fabric-space` names the space. A space configured as a `did:key` has no
+URL that is not built from that DID, and a bare fabric identifier does not cross
+the model boundary, so the output carries the slug alone rather than a
+fabricated link. Nothing in `registration` is swapped for a handle token,
+because nothing in it is a fabric reference: the slug is the model's own word
+and the URL is the operator's API URL and space name. `registrationError`, which
+can carry a DID from an authorization failure, is scrubbed for bare fabric
+identifiers like the other free-text fields. Compiler diagnostics come back as
+`{ status: "compile-error", message }` so the model can iterate on the source;
+bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
+module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder
+in the model-facing message, while the persisted artifact keeps the raw text.
 
 Interactive chat stdio transport:
 

@@ -1,5 +1,9 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { type Cell, compileAndSavePattern } from "@commonfabric/runner";
+import {
+  type Cell,
+  compileAndSavePattern,
+  validateSlug,
+} from "@commonfabric/runner";
 import { validateAgainstSchema } from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
@@ -7,20 +11,51 @@ import {
   matchLLMFriendlyLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
-import { PieceController } from "@commonfabric/piece/ops";
+import { assignSlug } from "@commonfabric/piece";
+import {
+  PieceController,
+  type PiecesController,
+} from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
+  isSealedOpaqueLinkObject,
   parseStructuredResultSchema,
   validateAndSanitizeStructuredResult,
 } from "../structured-result.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
+/**
+ * Asks for the created piece to be registered in the space's piece list under
+ * `slug`, the named address a person opens. A slug rather than a free-text
+ * name because the slug is the only handle the tool can set: what the piece
+ * list displays is the pattern's own `NAME` result, which the pattern source
+ * carries and nothing outside it writes.
+ */
+export interface RunPatternRegistrationRequest {
+  slug: string;
+}
+
 export interface RunPatternToolInput {
   sourceText?: string;
   inputs?: Record<string, unknown>;
   resultSchema?: JSONSchema;
+  register?: RunPatternRegistrationRequest;
+}
+
+/** What a registered piece gives a person: a named address, and a URL for it
+ * when one can be composed honestly. */
+export interface RunPatternRegistration {
+  slug: string;
+  /**
+   * Absolute URL for the registered piece, composed from the session's API URL
+   * and the space's configured name. Absent when the session was configured by
+   * `did:key` rather than by name: the only URL available then would carry the
+   * space DID, a bare fabric identifier that does not cross the model
+   * boundary, so no URL is offered rather than a fabricated one.
+   */
+  url?: string;
 }
 
 /** Upper bound on `sourceText`, enforced with a structured tool error. */
@@ -49,6 +84,20 @@ export interface RunPatternToolSuccessOutput {
    * rendering; only `resultRef` reaches model context.
    */
   pieceId: string;
+  /**
+   * Present only when `register` was given and registration succeeded. Its
+   * `slug` is the caller's own word and its `url` is composed from the
+   * session's API URL and space name, so neither carries a fabric identifier
+   * and both reach the model.
+   */
+  registration?: RunPatternRegistration;
+  /**
+   * Why `registration` is absent despite a `register` request. Registration
+   * happens after the piece is live, so a failure here leaves a working piece
+   * and a usable `resultRef` — the run is still `ok`, and only the publishing
+   * step did not happen.
+   */
+  registrationError?: string;
   /** Sanitized result value; present only when `resultSchema` was given. */
   value?: unknown;
   linkedStringCount?: number;
@@ -85,7 +134,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    "Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. The piece is not registered in the space's piece list.",
+    "Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. The piece is not registered in the space's piece list unless `register` asks for it.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -108,6 +157,20 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         description:
           'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself, anything else as an opaque link. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
       },
+      register: {
+        type: "object",
+        properties: {
+          slug: {
+            type: "string",
+            description:
+              "Named address for the piece: lowercase letters, numbers, and single hyphens between words, at most 80 characters.",
+          },
+        },
+        required: ["slug"],
+        additionalProperties: false,
+        description:
+          "Ask for the piece to be registered in the space's piece list at this address, so a person can open it. Omit it and the piece stays out of the list, which is what pure computation wants. The output then carries `registration.slug` and, when the space is configured by name, `registration.url` — the link to hand a person. To give the piece a title in that list, set `NAME` in the pattern source; nothing outside the pattern writes it.",
+      },
     },
     required: ["sourceText"],
     additionalProperties: false,
@@ -121,6 +184,16 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         resultRef: { type: "string" },
         resultRefSchema: {},
         pieceId: { type: "string" },
+        registration: {
+          type: "object",
+          properties: {
+            slug: { type: "string" },
+            url: { type: "string" },
+          },
+          required: ["slug"],
+          additionalProperties: false,
+        },
+        registrationError: { type: "string" },
         value: {},
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
@@ -183,6 +256,112 @@ const asSerializableValue = (value: unknown): unknown => {
   try {
     const encoded = JSON.stringify(value);
     return encoded === undefined ? undefined : JSON.parse(encoded);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The path at which `value` carries a sealed opaque-link object, or
+ * `undefined` when it carries none. `path` names the position `value` itself
+ * sits at, so a caller starting from an input key gets back a path that
+ * points at the offending position within that input. The search is
+ * exhaustive because a sealed value reaches an input however the model
+ * composed it — nested inside an object or an array it built around what a
+ * tool result handed back.
+ */
+const sealedOpaqueLinkPath = (
+  value: unknown,
+  path: string,
+): string | undefined => {
+  if (isSealedOpaqueLinkObject(value)) {
+    return path;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = sealedOpaqueLinkPath(value[index], `${path}[${index}]`);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+  if (isObjectNotArray(value)) {
+    for (const [key, entry] of Object.entries(value)) {
+      const found = sealedOpaqueLinkPath(entry, `${path}.${key}`);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * What the model is told when it passes back a value a structured result
+ * sealed. The distinction the message has to carry is the whole of the fix: a
+ * seal is a redaction, so it names nothing, and the reference the model was
+ * given for that same data is what it should have passed instead.
+ */
+const sealedInputRefusal = (key: string, path: string): string =>
+  `run_pattern input "${key}" ${
+    path === key
+      ? "is a sealed opaque link"
+      : `carries a sealed opaque link at "${path}"`
+  } — a single-key {"@link":"opaque:..."} object. A sealed value is a redaction, not an address: it marks a position an earlier result withheld, so it names nothing that can be read, and storing it would leave a dead literal where the pattern declared a live reference, with everything computed from it empty. Pass the reference you were given for that data instead — the whole cfh:a: handle token, or the LLM-friendly link it stands for — as the input's own string value.`;
+
+/**
+ * The slug a `register` request asks for, validated by the same rule every
+ * other named address in the fabric answers to. Validation happens before
+ * anything is compiled or created, so an unusable slug is a model-correctable
+ * error that persists no piece. Returns `undefined` when no registration was
+ * asked for; throws with the reason when the request is unusable.
+ */
+const parseRegistrationSlug = (
+  register: unknown,
+): string | undefined => {
+  if (register === undefined) {
+    return undefined;
+  }
+  if (!isObjectNotArray(register)) {
+    throw new Error("run_pattern register must be an object with a slug");
+  }
+  const { slug } = register;
+  if (typeof slug !== "string") {
+    throw new Error("run_pattern register requires a string slug");
+  }
+  try {
+    return validateSlug(slug);
+  } catch (error) {
+    throw new Error(
+      `run_pattern register slug is invalid: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+};
+
+/**
+ * The URL a person opens for a registered piece, or `undefined` when none can
+ * be composed without inventing one. The address is the session's API URL,
+ * then the space, then the slug — the same shape `cf piece new` prints. Only a
+ * space configured by NAME yields one: a space configured by `did:key` would
+ * put a bare fabric identifier in the URL, and that does not cross the model
+ * boundary.
+ */
+const registeredPieceUrl = (
+  pieces: PiecesController,
+  slug: string,
+): string | undefined => {
+  const spaceName = pieces.getSpaceName();
+  if (spaceName === undefined) {
+    return undefined;
+  }
+  try {
+    const url = new URL(pieces.runtime.apiUrl);
+    const base = url.pathname.endsWith("/") ? url.pathname : `${url.pathname}/`;
+    url.pathname = `${base}${encodeURIComponent(spaceName)}/${slug}`;
+    return url.toString();
   } catch {
     return undefined;
   }
@@ -262,6 +441,12 @@ export const runPatternTool: HarnessToolDefinition<
     } catch (error) {
       return errorOutput("error", errorMessage(error));
     }
+    let registrationSlug;
+    try {
+      registrationSlug = parseRegistrationSlug(input.register);
+    } catch (error) {
+      return errorOutput("error", errorMessage(error));
+    }
     let session;
     try {
       session = await context.getFabricSession();
@@ -282,12 +467,19 @@ export const runPatternTool: HarnessToolDefinition<
     // seen here carry canonical addresses. Non-link strings and non-strings
     // pass through as plain JSON. A link that resolves outside the session's
     // configured space is refused before anything is created: the session's
-    // authority ends at its own space.
+    // authority ends at its own space. So is a value carrying a sealed
+    // opaque link anywhere within it, which is a redaction the model copied
+    // back out of an earlier result rather than a reference to anything.
     let pieceInput: Record<string, unknown> | undefined;
     const liveCellInputs: Array<{ key: string; cell: Cell<unknown> }> = [];
+    const plainInputs: Array<{ key: string; value: unknown }> = [];
     if (input.inputs !== undefined) {
       const converted: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(input.inputs)) {
+        const sealedPath = sealedOpaqueLinkPath(value, key);
+        if (sealedPath !== undefined) {
+          return errorOutput("error", sealedInputRefusal(key, sealedPath));
+        }
         let entry = value;
         if (
           typeof value === "string" && matchLLMFriendlyLink.test(value.trim())
@@ -310,6 +502,9 @@ export const runPatternTool: HarnessToolDefinition<
             entry = cell;
           }
         }
+        if (entry === value) {
+          plainInputs.push({ key, value });
+        }
         defineOwnEntry(converted, key, entry);
       }
       pieceInput = converted;
@@ -325,13 +520,44 @@ export const runPatternTool: HarnessToolDefinition<
       // identifiers from the model-facing rendering.
       return errorOutput("compile-error", errorMessage(error));
     }
-    // A live-cell input's current value must match the compiled pattern's
-    // argument schema for its key before any piece exists, so a mismatch is
-    // a model-correctable error rather than a persisted broken piece.
+    // An input's value must match the compiled pattern's argument schema for
+    // its key before any piece exists, so a mismatch is a model-correctable
+    // error rather than a persisted broken piece. What supplies the value
+    // does not change the question: a live cell is measured by what it
+    // currently holds, and a plain JSON value by itself.
     const argumentProperties = isObjectNotArray(pattern.argumentSchema) &&
         isObjectNotArray(pattern.argumentSchema.properties)
       ? pattern.argumentSchema.properties
       : undefined;
+    // An input the compiled pattern declares no argument for is refused for
+    // the same reason: the pattern would run with that argument undefined and
+    // every field computed from it empty, which renders as a complete page
+    // holding nothing. Only a pattern whose argument schema names its
+    // properties is measured this way — one that admits further properties, or
+    // that declares its argument through a `$ref` or a combinator, states no
+    // closed set of names to measure against.
+    if (
+      argumentProperties !== undefined && input.inputs !== undefined &&
+      (pattern.argumentSchema as { additionalProperties?: unknown })
+          .additionalProperties !== true
+    ) {
+      const declared = Object.keys(argumentProperties);
+      const undeclared = Object.keys(input.inputs).filter(
+        (key) => !Object.hasOwn(argumentProperties, key),
+      );
+      if (undeclared.length > 0) {
+        return errorOutput(
+          "error",
+          `run_pattern inputs name ${
+            undeclared.map((key) => `"${key}"`).join(", ")
+          }, which the pattern's argument schema does not declare; it declares ${
+            declared.length === 0
+              ? "no inputs"
+              : declared.map((key) => `"${key}"`).join(", ")
+          }`,
+        );
+      }
+    }
     if (argumentProperties !== undefined) {
       for (const { key, cell } of liveCellInputs) {
         const propertySchema = argumentProperties[key];
@@ -342,6 +568,23 @@ export const runPatternTool: HarnessToolDefinition<
         const failure = validateAgainstSchema(
           propertySchema as JSONSchema,
           cell.get(),
+          pattern.argumentSchema,
+        );
+        if (failure !== undefined) {
+          return errorOutput(
+            "error",
+            `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
+          );
+        }
+      }
+      for (const { key, value } of plainInputs) {
+        const propertySchema = argumentProperties[key];
+        if (propertySchema === undefined) {
+          continue;
+        }
+        const failure = validateAgainstSchema(
+          propertySchema as JSONSchema,
+          value,
           pattern.argumentSchema,
         );
         if (failure !== undefined) {
@@ -384,6 +627,31 @@ export const runPatternTool: HarnessToolDefinition<
       }
       return cancelledOutput();
     }
+    // Registration is the publishing step, and it runs only when asked for.
+    // Without it the piece stays absent from the space's piece list, which is
+    // what pure computation wants; with it the piece gains a named address and
+    // joins the list through the space's default pattern — the same
+    // `assignSlug` then `pieces.add` the CLI's registered create performs. A
+    // failure here leaves a live piece and a usable `resultRef`, so it is
+    // reported alongside the result rather than as the run's outcome.
+    let registration: RunPatternRegistration | undefined;
+    let registrationError: string | undefined;
+    if (registrationSlug !== undefined) {
+      try {
+        // The registry join goes first, so a space with no piece list to join
+        // leaves no orphan slug behind; the slug was validated before
+        // anything was created, so this order costs nothing.
+        await pieces.add([piece.getCell()]);
+        await assignSlug(pieces, piece.getCell(), registrationSlug);
+        const url = registeredPieceUrl(pieces, registrationSlug);
+        registration = {
+          slug: registrationSlug,
+          ...(url !== undefined ? { url } : {}),
+        };
+      } catch (error) {
+        registrationError = errorMessage(error);
+      }
+    }
     const resultCell = await piece.result.getCell();
     const resultRef = createLLMFriendlyLink(
       resultCell.getAsNormalizedFullLink(),
@@ -420,6 +688,8 @@ export const runPatternTool: HarnessToolDefinition<
       resultRef,
       resultRefSchema: pattern.resultSchema,
       pieceId: piece.id,
+      ...(registration !== undefined ? { registration } : {}),
+      ...(registrationError !== undefined ? { registrationError } : {}),
       ...(value !== undefined ? { value } : {}),
       ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),
       ...(valueError !== undefined ? { valueError } : {}),

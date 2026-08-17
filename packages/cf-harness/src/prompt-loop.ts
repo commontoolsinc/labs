@@ -114,6 +114,7 @@ import type {
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
+import { isSealedOpaqueLinkObject } from "./structured-result.ts";
 import {
   parseSubagentReturnJson,
   parseSubagentReturnSchema,
@@ -1075,21 +1076,6 @@ const summarizeSubagentRunState = (
       ? { primaryFailure: summarizeSubagentFailure(runState.primaryFailure) }
       : {}),
   };
-};
-
-/**
- * Helper for `createStructuredSubagentReturn()`, which tells whether `value`
- * is a sealed opaque-link object — the single-key `@link` object the
- * sanitizer substitutes for a position it seals.
- */
-const isSealedOpaqueLinkObject = (value: unknown): boolean => {
-  if (!isObjectNotArray(value)) {
-    return false;
-  }
-  const target = value["@link"];
-  return Object.keys(value).length === 1 &&
-    typeof target === "string" &&
-    target.startsWith("opaque:");
 };
 
 /**
@@ -3198,7 +3184,10 @@ export class CfHarnessPromptLoop {
       // redundant with `resultRef` since the piece cell is the result cell.
       // It also keeps the pattern's result schema, which reaches the model
       // through `describe_handle` on the minted token rather than inline.
-      // The model sees only `resultRef` and the schema-sanitized `value`.
+      // The model sees `resultRef`, the schema-sanitized `value`, and — when
+      // registration was asked for — the `registration` block, whose slug is
+      // the model's own word and whose URL is composed from the session's API
+      // URL and space name, so neither is a fabric identifier.
       // Free-text diagnostic fields can embed compiler-generated bare
       // fabric identifiers the handle boundary never swaps, so those fields
       // are scrubbed here; the artifact keeps the raw text.
@@ -3209,7 +3198,7 @@ export class CfHarnessPromptLoop {
         ...publicOutput
       } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };
-      for (const field of ["message", "valueError"]) {
+      for (const field of ["message", "valueError", "registrationError"]) {
         const text = scrubbed[field];
         if (typeof text === "string") {
           scrubbed[field] = scrubBareFabricIdentifiers(text);
