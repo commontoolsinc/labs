@@ -587,7 +587,20 @@ describe("cli piece parsing", () => {
       { input: undefined },
     ]);
     expect(hints[0]).toContain("cf piece step");
-    // A pathless write is apply's job, whichever spelling carried the target.
+    // An explicit empty positional has always named the root — the fuse
+    // integration writes a whole input cell with `piece set "" --input` —
+    // so it stays a valid spelling, in both target forms.
+    await setCellValueFromCommand(
+      { ...base, piece: `/${LLM_HANDLE}`, input: true },
+      "",
+      undefined,
+      deps,
+    );
+    expect(writes[1]?.slice(1)).toEqual([[], "Milk", { input: true }]);
+    await setCellValueFromCommand(base, `/${LLM_HANDLE}`, "", deps);
+    expect(writes[2]?.slice(1)).toEqual([[], "Milk", { input: undefined }]);
+    // What stays refused is no path in any spelling: a bare pasted address
+    // must not silently overwrite a whole cell.
     await expect(
       setCellValueFromCommand(base, `/${LLM_HANDLE}`, undefined, deps),
     )

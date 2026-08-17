@@ -2427,10 +2427,12 @@ export async function getCellValueFromCommand(
 
 /**
  * The `cf piece set` action, with the same positional-address intake as
- * {@link getCellValueFromCommand}. The write must land at a path — the
- * root is `piece apply`'s job — and the path may arrive embedded in the
- * address, positionally, or both, so the emptiness check runs on the merge
- * rather than on any one spelling.
+ * {@link getCellValueFromCommand}. The write needs a path spelled somewhere
+ * — embedded in the address, positionally, or both — and an explicit empty
+ * positional (`""`) is a spelling: it has always named the root, and the
+ * fuse integration writes a whole input cell with it. What is refused is a
+ * bare positional address with no path anywhere, so a pasted address cannot
+ * silently overwrite a whole cell.
  */
 export async function setCellValueFromCommand(
   options: PieceLabelCLIOptions,
@@ -2445,10 +2447,10 @@ export async function setCellValueFromCommand(
     { acceptsPath: true, acceptsArgument: true },
   );
   const pathSegments = mergePiecePath(pieceConfig, target.pathString);
-  if (pathSegments.length === 0) {
+  if (pathSegments.length === 0 && target.pathString === undefined) {
     throw new ValidationError(
       `A path is required: embed it in the address (/of:.../title) or ` +
-        `pass it as an argument.`,
+        `pass it as an argument ("" writes the root).`,
       { exitCode: 1 },
     );
   }
