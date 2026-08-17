@@ -15,11 +15,11 @@ Draft formal spec — extracted from the data model proposal.
 ### 1.1 Overview
 
 The system stores **fabric values** — data that can flow through the runtime
-as typed values and be encoded to wire/storage formats at boundary crossings.
+as typed values and be serialized to wire/storage formats at boundary crossings.
 All persistent data and in-flight messages use this representation.
 
 The key design principle is **late serialization**: values flow through the
-runtime as themselves; encoding to wire/storage formats happens only at
+runtime as themselves; serialization to wire/storage formats happens only at
 boundary crossings (persistence, IPC, network).
 
 #### Three-Layer Architecture
@@ -42,7 +42,7 @@ JavaScript "wild west" (unknown/any) <-> Strongly typed (FabricValue) <-> Serial
 
 - **Right layer — Serialized form.** The wire/storage representation
   (`Uint8Array` for binary formats, JSON-compatible trees for the JSON engine).
-  Encoding operates exclusively on `FabricValue` input; it never sees raw
+  Serialization operates exclusively on `FabricValue` input; it never sees raw
   native JS objects.
 
 Conversion functions bridge the left and middle layers:
@@ -1205,7 +1205,7 @@ across consumers, each specializing the general link value in its own way.
 
 Like every fabric class, `FabricLink` hosts a static `[CODEC]` (Section 2.4)
 with wire tag `Link@1`. Its encoded state **is** the payload object: the
-codec's `encode()` returns the payload directly, and `decode()` decodes a
+codec's `encode()` returns the payload directly, and `decode()` rebuilds a
 `FabricLink` from it (or a `ProblematicValue`, Section 3.5, if the payload is
 malformed). The JSON wire form is the `/Link@1`-tagged envelope
 `{ "/Link@1": <payload> }`; see Section 3 of `3-json-encoding.md` for the wire
@@ -2210,7 +2210,7 @@ reason above.
 `UnknownValue`'s codec is a deliberate "snowflake": it declares **no
 `recognizedTypeTag`** (its instances each carry a per-instance tag, which
 `tagForValue()` reads back), so it is not registered for tag-based decode
-dispatch — an unrecognized tag reaches it through the encoding context's
+dispatch — an unrecognized tag reaches it through the engine's
 unknown-tag arm instead (Section 4.5). Its `encode()` returns the preserved
 **bare `state`** (not an envelope), so an instance round-trips to the *same*
 storage form as the value it stands in for.
@@ -2821,8 +2821,8 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 > and carries the preserved one as data, that tag being possibly no tag at all
 > (Section 3.2).
 
-> **Why these are private methods.** `encode()` and `decode()` are
-> private to `JsonCodecEngine`, which keeps the public API to
+> **Why the walkers are internal.** `encodeValue()` and `decodeValue()` are
+> internal to the engine, which keeps the public API to
 > `encode()`/`decode()` and lets the engine hold its own state — registry,
 > codec view, lenient mode — instead of threading it through every recursive
 > call.

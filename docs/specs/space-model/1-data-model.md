@@ -266,7 +266,7 @@ identity whether later serialized to JSON, CBOR, or Automerge.
 
 #### The Principle
 
-Rich types should flow through the runtime as themselves; encoding to
+Rich types should flow through the runtime as themselves; serialization to
 wire/storage formats should happen only at boundary crossings.
 
 ```
@@ -862,7 +862,7 @@ Protocol section) to preserve the data for round-tripping.
 
 This wire format is what codec engines produce. The engine's `wrap()`
 and `unwrap()` methods would generate and parse these `/<type>@<version>` keys,
-mapping between rich runtime types and their serialized form. The context is
+mapping between rich runtime types and their serialized form. The engine is
 also responsible for:
 - Applying `/object` or `/quote` escaping when encoding plain objects that
   happen to have slash-prefixed keys

@@ -265,7 +265,7 @@ streaming) builds on top.
   cases where nested semantics might be useful (e.g. a chain of events with
   rollback), branches and merging branches may be the better mechanism.
   Transactions are intended for short-lived operations.
-- ~~How are transactions encoded for storage?~~ As UCAN invocations.
+- ~~How are transactions serialized for storage?~~ As UCAN invocations.
 - ~~What consistency guarantees exist across spaces?~~ None so far.
 
 ---

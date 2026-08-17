@@ -23,7 +23,7 @@ Cells can be categorized along two dimensions:
    - Precious data cells (irreplaceable):
      - User input (created/edited by user)
      - External input (fetched from outside, world has moved on)
-   - Computed result cells (derived, decodable)
+   - Computed result cells (derived, reconstructible)
    - Stream cells (event endpoints)
 
 ---
@@ -111,7 +111,7 @@ The argument cell and each derived internal cell are value cells with reciprocal
 
 #### Precious Data Cells
 
-Data that **cannot be decoded** from inputs. Two subtypes:
+Data that **cannot be reconstructed** from inputs. Two subtypes:
 
 **User input**: Data created or edited directly by the user:
 - Text they typed
@@ -139,7 +139,7 @@ Derived data produced by patterns from inputs:
 - Aggregations and transformations
 - Cached computations
 
-These **can be decoded** by re-running the pattern with the same inputs.
+These **can be reconstructed** by re-running the pattern with the same inputs.
 Persisting them is an optimization (avoid recomputation), not a requirement.
 The system could potentially discard and recompute these during compaction.
 
@@ -158,7 +158,7 @@ but event payloads do not persist.
 
 - **Implementation vs semantics**: "Value cell" spans three semantic roles
   (process, precious, computed). The implementation doesn't distinguish them.
-- **Decodability**: The key semantic question is "can this be rebuilt?"
+- **Reconstructibility**: The key semantic question is "can this be rebuilt?"
   Process and computed cells: yes. Precious and stream identity: no.
 - **Identity mechanism**: All categories use the same `NormalizedFullLink`
   infrastructure for addressing and reactivity.
@@ -176,7 +176,7 @@ Regardless of cell type, all cells share:
 
 - `entityId` — stable identifier
 - `schema` — optional type information
-- `getAsLink()` — encoding to `SigilLink`
+- `getAsLink()` — serialization to `SigilLink`
 
 A cell has no representation of its own in stored data; the link naming it
 stands in wherever one is reached. Two mechanisms produce that link, and they
@@ -189,7 +189,7 @@ differ in what they already know about the value in hand:
   pattern-authored schema default — has recognized nothing, so it asks **by
   member name**: `toEncodableForm()`, read via `hasEncodableForm()` /
   `encodableFormOf()` (`packages/runner/src/encodable-form.ts`). That name is
-  the runtime's own, shared with the builder artifacts the same walk encodes.
+  the runtime's own, shared with the builder artifacts the same walk serializes.
 
 `toJSON()` returns the same link under the JSON protocol's name, so a cell reads
 as what it names in any renderer that honors the protocol — `toCompactDebugString()`

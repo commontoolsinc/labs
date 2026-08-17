@@ -81,7 +81,7 @@ round-trip correctly.
 /**
  * Standard JSON encodings for all built-in special types.
  *
- * In each case, the tag string (e.g. `"Link@1"`) is passed to the context's
+ * In each case, the tag string (e.g. `"Link@1"`) is passed to the engine's
  * internal `wrapTag()` method, which prepends `/` to produce the JSON key
  * (e.g. `"/Link@1"`).
  */
@@ -350,7 +350,7 @@ result is still deep-frozen (arrays and plain objects within the quoted value
 are frozen via `Object.freeze()`). The immutability guarantee (see
 `1-fabric-values.md` Section 2.9) is a property of decoding output, not
 of whether decoding occurred. A caller receiving a value from the
-context's `decode()` can always assume it is immutable, regardless of whether
+engine's `decode()` can always assume it is immutable, regardless of whether
 it came from a `/quote` path, a decoded type, or a plain literal.
 
 Use cases:
@@ -392,8 +392,8 @@ properties a decoder preserves regardless of which form it sees.
 
 ## 7. Codec Engine Responsibilities
 
-The JSON encoding context's internal `wrapTag()` / `#unwrapTag()` methods
-generate and parse `/<Type>@<Version>` keys. The context is also responsible
+The JSON engine's internal `wrapTag()` / `#unwrapTag()` methods
+generate and parse `/<Type>@<Version>` keys. The engine is also responsible
 for:
 
 - Owning recursion and tag-wrapping around the shallow per-type codecs
@@ -408,7 +408,7 @@ for:
   codec's throw becomes a `ProblematicValue`, and in strict mode a
   `ProblematicValue` a codec returns becomes a throw.
 
-Note: `/object` escaping (Section 6) is applied directly by the context's
+Note: `/object` escaping (Section 6) is applied directly by the engine's
 private encode walker in its plain-objects path, since it is structural
 escaping rather than type encoding.
 
