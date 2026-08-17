@@ -18,7 +18,7 @@ primitive), and are run via `cf test`.
 
 1. **Patterns all the way down** - Tests are patterns, proving the system works
 2. **Fast feedback loops** - Tests run with emulated storage (~10ms setup)
-3. **Debuggability** - Inspect test patterns via CLI (`cf piece inspect`, `cf piece get`)
+3. **Debuggability** - Inspect test patterns via CLI (`cf piece inspect`, `cf get`)
 4. **Minimal infrastructure** - Reuse existing `piece step` machinery
 5. **Self-contained tests** - Test logic lives inside actions, not external scripts
 

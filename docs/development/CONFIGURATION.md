@@ -299,9 +299,9 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 
 | Var | Default | Notes |
 |---|---|---|
-| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for `piece`, `acl`, `exec` against a remote toolshed. |
+| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for the server-touching commands — `piece`, the top-level `get`/`set`/`call`, `wish`, `acl`, `exec` — against a remote toolshed. |
 | `CF_API_URL` | _(none)_ | Toolshed URL. Required for the same commands as above. |
-| `CF_INVOCATION_SESSION` | _(none)_ | Invocation session `cf piece call` scopes an invocation id to. Mint one per agent run with `cf invocation-session new`. Carried here rather than as `--invocation-session <id>` because the session is what makes a call's outcome unguessable, and an argument is readable in a process listing. |
+| `CF_INVOCATION_SESSION` | _(none)_ | Invocation session `cf call` scopes an invocation id to. Mint one per agent run with `cf invocation-session new`. Carried here rather than as `--invocation-session <id>` because the session is what makes a call's outcome unguessable, and an argument is readable in a process listing. |
 | `CF_LOG_LEVEL` | `error` | `debug` \| `info` \| `warn` \| `error` \| `silent`. Also settable per-invocation with `--log-level`. |
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
 | `CF_CLI_TRACE_TIMINGS` | `0` | Set to `1` for detailed timing traces. |
