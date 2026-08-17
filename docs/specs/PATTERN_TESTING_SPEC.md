@@ -333,6 +333,8 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       settle?: boolean;
       label?: string;
       await?: string;
+      event?: unknown;
+      trustedUi?: { surface: string; action: string };
     };
 
     // Check discriminated union keys
@@ -354,7 +356,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       actionCount++;
       lastActionIndex = i;
       const actionStream = testsCell.key(i).key("action") as Stream<unknown>;
-      actionStream.send();  // No argument needed for void streams
+      // The step's payload, `undefined` for a plain void action. A
+      // `trustedUi` step wraps it in the DOM provenance a renderer would
+      // attach, so a write guarded by a UI contract sees a trusted gesture.
+      actionStream.send(buildActionEvent(stepValue.event, stepValue.trustedUi));
 
       await Promise.race([
         runtime.idle(),
