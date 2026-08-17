@@ -18,7 +18,7 @@ The two gates guard different halves of the same risk:
 | | Gate | CI job | What it proves |
 | --- | --- | --- | --- |
 | Tier 1 | `deno task pattern-compat` | Pattern Update Compatibility | The **contract** a pattern declares can still be applied over every contract it has declared before |
-| Tier 2 | `deno task pattern-vintage` | Pattern Update State Continuity | A real **document** written by an older version is still readable, and its data survives |
+| Tier 2 | `deno task pattern-vintage` | Pattern Update State and Baseline Integrity | A real **document** written by an older version is still readable, and its data survives |
 
 Tier 1 is a statement about schemas. Tier 2 proves the stronger thing schemas
 cannot say. Neither subsumes the other: a contract can stay compatible while
@@ -33,8 +33,8 @@ over every contract recorded for it under `packages/patterns/baselines/`.
 There is no opt-in: a pattern is covered by existing.
 
 Baselines are **append-only**, enforced mechanically by
-`tasks/check-baselines-append-only.ts` (CI job: Pattern Baselines
-Append-Only). An author-run `--update` that could remove a baseline could
+`tasks/check-baselines-append-only.ts` in the Pattern Update State and Baseline
+Integrity job. An author-run `--update` that could remove a baseline could
 remove the very one that would have caught a break.
 
 ### Findings and their remedies
