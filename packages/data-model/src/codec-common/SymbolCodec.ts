@@ -2,7 +2,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
-import type { DecodeContext } from "@/codec-interface/interface.ts";
+import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
 
@@ -79,7 +79,7 @@ export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
   decode(
     typeTag: string,
     state: Encoded,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(

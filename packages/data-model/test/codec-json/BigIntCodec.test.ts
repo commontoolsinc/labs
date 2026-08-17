@@ -17,13 +17,13 @@ import { expect } from "@std/expect";
 
 import { BigIntCodec } from "@/codec-json/BigIntCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("BigIntCodec", () => {
   const codec = new BigIntCodec();
   const expectedTag = CODEC_TYPE_TAGS.BigInt;
-  const context = EMPTY_DECODE_CONTEXT;
+  const context = NULL_LIVE_ENVIRONMENT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {

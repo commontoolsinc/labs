@@ -1,5 +1,5 @@
 /**
- * Shared doubles for the fabric-instance tests: a decode context that
+ * Shared doubles for the fabric-instance tests: a live environment that
  * refuses to resolve a cell, and the two recursion callbacks for driving the
  * freeze protocols by hand.
  *
@@ -8,18 +8,18 @@
  * do the walking.
  */
 
-import { BaseDecodeContext } from "@/codec-interface/BaseDecodeContext.ts";
+import { BaseLiveEnvironment } from "@/codec-interface/BaseLiveEnvironment.ts";
 import type { FabricValue } from "@/interface.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
-/** Dummy decode context for tests. */
-export class DummyDecodeContext extends BaseDecodeContext {
+/** Dummy live environment for tests. */
+export class DummyLiveEnvironment extends BaseLiveEnvironment {
   override getCell(): never {
     throw new Error("getCell not implemented in test");
   }
 }
 
-export const dummyContext = new DummyDecodeContext(true);
+export const dummyContext = new DummyLiveEnvironment(true);
 
 /**
  * Recursion-callback helpers for exercising the `[DEEP_FREEZE]` /

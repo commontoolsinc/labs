@@ -120,7 +120,7 @@ export interface FabricCodec<Encoded> {
   decode(
     typeTag: string,
     state: Encoded,
-    context: DecodeContext,
+    context: LiveEnvironment,
   ): FabricValue;
 
   /**
@@ -229,7 +229,7 @@ export interface FabricClassWithNonterminalCodec {
  * avoid a circular dependency between the fabric protocol and the runner.
  * See Section 2.5 of the formal spec.
  */
-export interface DecodeContext {
+export interface LiveEnvironment {
   /**
    * Resolves a cell reference, for a type that needs to intern or look up an
    * existing instance during decoding.
@@ -247,7 +247,7 @@ export interface DecodeContext {
    * `cloneIfNecessary(value, { frozen: true })`.
    *
    * Required (not optional): every context declares it. Contexts get it for
-   * free by extending `BaseDecodeContext`, which centralizes the
+   * free by extending `BaseLiveEnvironment`, which centralizes the
    * getter; the `cloneIfNecessary`-style `true` default lives there.
    *
    * Enforcement: each codec's `decode()` queries this and abides by it,

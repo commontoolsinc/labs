@@ -7,7 +7,7 @@ import {
   type EntityRef,
   getModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { EmptyDecodeContext } from "@commonfabric/data-model/codec-common";
+import { NullLiveEnvironment } from "@commonfabric/data-model/codec-common";
 import {
   fabricFromJsonValue,
   jsonFromFabricValue,
@@ -860,7 +860,7 @@ export type ServerMessage =
   | SessionEffectMessage
   | SessionRevokedMessage;
 
-const memoryDecodeContext = new EmptyDecodeContext(
+const memoryLiveEnvironment = new NullLiveEnvironment(
   true,
   "no cell decoding at the memory boundary",
 );
@@ -1134,7 +1134,7 @@ export const decodeMemoryBoundary = <Value extends FabricValue = FabricValue>(
 ): Value & FabricValue => {
   const decoded = fabricFromJsonValue(
     source,
-    memoryDecodeContext,
+    memoryLiveEnvironment,
   );
 
   return decoded as Value;

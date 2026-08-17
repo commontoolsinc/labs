@@ -8,7 +8,7 @@ import {
 } from "./BaseFabricInstance.ts";
 import {
   CODEC,
-  type DecodeContext,
+  type LiveEnvironment,
   type NonterminalCodec,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
@@ -124,7 +124,7 @@ export class UnknownValue extends BaseFabricInstance {
       decode(
         typeTag: string,
         state: FabricValue,
-        context: DecodeContext,
+        context: LiveEnvironment,
       ): FabricValue {
         const result = new UnknownValue(typeTag, state);
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen

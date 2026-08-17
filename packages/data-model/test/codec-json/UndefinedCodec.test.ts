@@ -13,12 +13,12 @@ import { expect } from "@std/expect";
 
 import { UndefinedCodec } from "@/codec-json/UndefinedCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 describe("UndefinedCodec", () => {
   const codec = new UndefinedCodec();
   const expectedTag = CODEC_TYPE_TAGS.Undefined;
-  const context = EMPTY_DECODE_CONTEXT;
+  const context = NULL_LIVE_ENVIRONMENT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {

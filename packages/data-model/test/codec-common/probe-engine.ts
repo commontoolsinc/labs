@@ -13,7 +13,10 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
-import type { DecodeContext, WireFormat } from "@/codec-interface/interface.ts";
+import type {
+  LiveEnvironment,
+  WireFormat,
+} from "@/codec-interface/interface.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
@@ -79,7 +82,7 @@ export class XCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     _typeTag: string,
     _state: ProbeValue,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     return "decoded-X";
   }
@@ -134,7 +137,7 @@ export class TerminalHostCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     _typeTag: string,
     state: ProbeValue,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     this.#record.decoded.push(state);
     return TERMINAL_HOST;
@@ -170,7 +173,7 @@ export class NonterminalHostCodec extends BaseNonterminalCodec {
   decode(
     _typeTag: string,
     state: FabricValue,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     this.#record.decoded.push(state);
     return NONTERMINAL_HOST;
@@ -197,7 +200,7 @@ export class ThrowingCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     _typeTag: string,
     _state: ProbeValue,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     throw new Error("rejected by throwing");
   }
@@ -224,7 +227,7 @@ export class RejectingCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     typeTag: string,
     state: ProbeValue,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     return new ProblematicValue(
       typeTag,
@@ -271,7 +274,7 @@ export class MarkerCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     _typeTag: string,
     _state: ProbeValue,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     return { deep: { n: 1 } };
   }
@@ -295,7 +298,7 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
   // graph with a cycle in it, and the base's guard is what refuses one.
   override decode(
     data: ProbeValue,
-    context: DecodeContext,
+    context: LiveEnvironment,
   ): FabricValue {
     return this.decodeValue(data, context, new Set());
   }
@@ -329,7 +332,7 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
 
   protected override decodeValue(
     data: ProbeValue,
-    context: DecodeContext,
+    context: LiveEnvironment,
     seen?: Set<object>,
   ): FabricValue {
     if ((data === null) || (typeof data !== "object")) {

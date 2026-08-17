@@ -16,7 +16,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
@@ -184,7 +184,7 @@ describe("FabricHash", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricHash[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Hash;
-      const context = EMPTY_DECODE_CONTEXT;
+      const context = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Hash` wire type tag", () => {

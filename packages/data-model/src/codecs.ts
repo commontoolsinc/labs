@@ -17,8 +17,8 @@
 import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "./fabric-value.ts";
-import type { DecodeContext } from "./codec-interface/interface.ts";
-import { EMPTY_DECODE_CONTEXT } from "./codec-interface/EmptyDecodeContext.ts";
+import type { LiveEnvironment } from "./codec-interface/interface.ts";
+import { NULL_LIVE_ENVIRONMENT } from "./codec-interface/NullLiveEnvironment.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodecEngine } from "./codec-json/JsonCodecEngine.ts";
@@ -84,7 +84,7 @@ export function jsonFromFabricValue(value: FabricValue): string {
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
-  context?: DecodeContext,
+  context?: LiveEnvironment,
 ): T {
   const result = fabricFromJsonValue(json, context);
 
@@ -107,12 +107,12 @@ export function plainObjectFromJson<T extends object = object>(
 
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
- * `context` is omitted, {@link EMPTY_DECODE_CONTEXT} is substituted,
+ * `context` is omitted, {@link NULL_LIVE_ENVIRONMENT} is substituted,
  * which throws if any decoding is needed.
  */
 export function fabricFromJsonValue(
   json: string,
-  context?: DecodeContext | undefined,
+  context?: LiveEnvironment | undefined,
 ): FabricValue {
-  return jsonCodecEngine.decode(json, context ?? EMPTY_DECODE_CONTEXT);
+  return jsonCodecEngine.decode(json, context ?? NULL_LIVE_ENVIRONMENT);
 }

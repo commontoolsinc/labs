@@ -10,7 +10,7 @@ import {
 } from "./BaseFabricInstance.ts";
 import {
   CODEC,
-  type DecodeContext,
+  type LiveEnvironment,
   type NonterminalCodec,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
@@ -174,7 +174,7 @@ export class ProblematicValue extends BaseFabricInstance {
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: DecodeContext,
+        context: LiveEnvironment,
       ): FabricValue {
         let result: ProblematicValue;
 

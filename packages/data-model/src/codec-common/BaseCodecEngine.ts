@@ -7,8 +7,8 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
   CodecForFormat,
-  DecodeContext,
   EncodeContext,
+  LiveEnvironment,
   NonterminalCodec,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
@@ -121,7 +121,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    */
   abstract decode(
     data: SerializedForm,
-    context: DecodeContext,
+    context: LiveEnvironment,
   ): FabricValue;
 
   /** Encodes an array, which is this format's business entirely. */
@@ -160,7 +160,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    */
   protected abstract decodeValue(
     data: Encoded,
-    context: DecodeContext,
+    context: LiveEnvironment,
     seen?: Set<object>,
   ): FabricValue;
 
@@ -315,7 +315,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   protected decodeTagged(
     tag: any,
     rawState: Encoded,
-    context: DecodeContext,
+    context: LiveEnvironment,
     seen?: Set<object>,
   ): FabricValue {
     if (!isCodecTypeTag(tag)) {

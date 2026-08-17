@@ -125,7 +125,7 @@
     "DEFAULT_CONVERSATION",
     "DEFAULT_PREFS",
     "DEFAULT_PROFILE",
-    "DecodeContext",
+    "LiveEnvironment",
     "Delegation",
     "Delete",
     "DeleteOperation",

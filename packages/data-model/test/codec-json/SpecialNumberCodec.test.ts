@@ -17,13 +17,13 @@ import { expect } from "@std/expect";
 
 import { SpecialNumberCodec } from "@/codec-json/SpecialNumberCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("SpecialNumberCodec", () => {
   const codec = new SpecialNumberCodec();
   const expectedTag = CODEC_TYPE_TAGS.SpecialNumber;
-  const context = EMPTY_DECODE_CONTEXT;
+  const context = NULL_LIVE_ENVIRONMENT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {

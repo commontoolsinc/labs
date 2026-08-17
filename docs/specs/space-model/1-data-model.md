@@ -373,7 +373,7 @@ interface FabricCodec<Encoded> {
   decode(                                    // shallow
     typeTag: string,
     state: Encoded,
-    context: DecodeContext,
+    context: LiveEnvironment,
   ): FabricValue;
 }
 
@@ -412,7 +412,7 @@ contracts.
 `decode()` lives on the codec rather than being a constructor for two
 reasons:
 
-1. **Decoding-specific context**: It receives a `DecodeContext`
+1. **Decoding-specific context**: It receives a `LiveEnvironment`
    (and potentially other context) which shouldn't be mandated in a regular
    constructor's signature.
 2. **Instance interning**: It can return existing instances rather than always
@@ -445,7 +445,7 @@ class Cell<T> extends FabricInstance {
     decode(
       _typeTag: string,
       state: FabricValue,
-      context: DecodeContext,
+      context: LiveEnvironment,
     ): Cell<unknown> {
       return context.getCell(state as CellState);
     }
@@ -608,7 +608,7 @@ function encodeValue(value: FabricValue): JsonCodecValue {
 // At boundary entry (inside the engine's decode walk)
 function decodeValue(
   data: JsonCodecValue,
-  ctx: DecodeContext,
+  ctx: LiveEnvironment,
 ): FabricValue {
   const unwrapped = unwrapTag(data);
   if (unwrapped) {
@@ -621,7 +621,7 @@ function decodeValue(
 }
 ```
 
-The decode path needs runtime context (`DecodeContext`) to
+The decode path needs a live environment (`LiveEnvironment`) to
 reconstitute rich types (e.g., looking up existing Cell instances rather
 than creating duplicates).
 
@@ -644,7 +644,7 @@ This makes identity hashing independent of any particular wire encoding.
 #### Trade-offs
 
 - **Migration complexity**: Existing code assumes JSON forms internally
-- **Runtime context required**: Decoding needs access to the runtime
+- **Live environment required**: Decoding needs access to the runtime
 - **Comparison semantics**: Must define equality for rich types (by identity?
   by encoded state?)
 - **Not "zero transformations"**: Late encoding eliminates encoding

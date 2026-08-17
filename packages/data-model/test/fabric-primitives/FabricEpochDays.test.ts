@@ -16,7 +16,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
@@ -65,7 +65,7 @@ describe("FabricEpochDays", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricEpochDays[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochDays;
-      const context = EMPTY_DECODE_CONTEXT;
+      const context = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `EpochDays` wire type tag", () => {

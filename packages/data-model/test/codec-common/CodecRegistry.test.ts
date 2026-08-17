@@ -34,8 +34,8 @@ import {
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
-  DecodeContext,
   FabricCodec,
+  LiveEnvironment,
   WireFormat,
 } from "@/codec-interface/interface.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
@@ -73,7 +73,7 @@ class TestCodec extends BaseNonterminalCodec {
   decode(
     _typeTag: string,
     _state: FabricValue,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     throw new Error("Unimplemented.");
   }
@@ -124,7 +124,7 @@ class TestTerminalCodec extends BaseTerminalCodec<string> {
   decode(
     _typeTag: string,
     _state: string,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     throw new Error("Unimplemented.");
   }
@@ -158,7 +158,7 @@ const UNCLASSIFIABLE_CODEC: FabricCodec<string> = {
   decode(
     _typeTag: string,
     _state: string,
-    _context: DecodeContext,
+    _context: LiveEnvironment,
   ): FabricValue {
     throw new Error("Unimplemented.");
   },

@@ -26,10 +26,10 @@ import { seemsLikeJsonEncodedFabricValue } from "@/codec-json/impl.ts";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
-import { BaseDecodeContext } from "@/codec-interface/BaseDecodeContext.ts";
+import { BaseLiveEnvironment } from "@/codec-interface/BaseLiveEnvironment.ts";
 
 /** Mock runtime for decode calls. */
-class MockRuntime extends BaseDecodeContext {
+class MockRuntime extends BaseLiveEnvironment {
   constructor() {
     super(true);
   }
