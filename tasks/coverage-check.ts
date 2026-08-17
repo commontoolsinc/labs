@@ -164,9 +164,10 @@ export function parseMergedBaselineOverrides(
   warn: (message: string) => void = console.warn,
 ): BaselineOverrides | null {
   try {
-    // Merged baseline PRs predating the marker rename accepted coverage debt
-    // with NEW_PERF_BASELINE; still honor that so their acceptance truncates
-    // the baseline timeline (see parseBaselineOverrides).
+    // A merged PR's description was written under the rules in force when it
+    // landed and cannot be rewritten now, so a marker the parser cannot read is
+    // passed over and the rest of the body still yields its acceptances, which
+    // truncate the baseline timeline (see parseBaselineOverrides).
     return parseBaselineOverrides(pr.body ?? "", true);
   } catch (error) {
     warn(
@@ -381,7 +382,7 @@ export interface WalkBaselineRunsOptions {
  * ancestor is cold the nearest one stands, so a metric never loses its baseline
  * to coldness alone.
  *
- * A merged pull request that accepted a metric's debt, with a per-metric
+ * A merged pull request that accepted a metric's debt, with a per-group
  * acceptance or the whole-coverage reset marker, sets the floor: its own run is
  * the oldest baseline the ratchet may reach for that metric, so the accepted
  * level is what later runs are held to and nothing older undoes it. Only a run
@@ -1174,8 +1175,13 @@ export interface CoverageRows {
  *
  * A metric is failed only when it is gated and its count rose above the
  * baseline. It is not gated when the pull request left its group alone, when
- * the description accepts its level, or when no baseline counts the same
- * base-branch code as this run.
+ * the description accepts a rise at least as large as the one measured, or when
+ * no baseline counts the same base-branch code as this run.
+ *
+ * An acceptance is read against the baseline this run chose rather than as a
+ * total, so rebasing the pull request onto a different baseline changes what the
+ * same acceptance line permits, and the pull request is still held to the amount
+ * of new debt its author accepted.
  */
 export function buildCoverageRows(
   options: BuildCoverageRowsOptions,
@@ -1189,7 +1195,7 @@ export function buildCoverageRows(
     const resolvedBaseline = options.baselineByMetric.get(metric);
     const baselineSample = resolvedBaseline?.sample;
     const latestBaseline = baselineSample?.uncoveredLines;
-    const override = options.overrides.metrics.get(metric);
+    const acceptedRise = options.overrides.metrics.get(metric);
     const coverageReset = options.overrides.coverageBaselineReset;
     const comparable = resolvedBaseline?.comparable ?? false;
     if (!comparable) {
@@ -1200,8 +1206,10 @@ export function buildCoverageRows(
       shouldGateCoverageDebtMetric(metric, options.changedCoverageGroups);
 
     if (latestBaseline === undefined) {
+      // With no baseline the ratchet holds the metric to zero, as the gating
+      // branch below does, so the whole of an acceptance is available here.
       if (
-        coverageReset || (override !== undefined && current <= override)
+        coverageReset || (acceptedRise !== undefined && current <= acceptedRise)
       ) {
         rows.push({ metric, status: "ovrd", current });
       } else if (!shouldGateCoverage) {
@@ -1237,7 +1245,9 @@ export function buildCoverageRows(
       continue;
     }
 
-    if (override !== undefined && current <= override) {
+    if (
+      acceptedRise !== undefined && current <= latestBaseline + acceptedRise
+    ) {
       rows.push({ metric, status: "ovrd", current, ...stats });
       continue;
     }
@@ -1641,7 +1651,7 @@ export async function writeCoverageResolved(
     );
 
   // The gate passed because a changed group's debt was accepted with a
-  // per-metric override or the reset marker (status "ovrd"), not because the
+  // per-group acceptance or the reset marker (status "ovrd"), not because the
   // new code is covered.
   const overridden = coverageRows.some((row) => {
     if (row.status !== "ovrd") return false;
@@ -2069,8 +2079,9 @@ export async function main() {
   );
   console.log("---BEGIN COPY-PASTE---");
   for (const f of failures) {
-    const suggested = formatOverrideSuggestion(f.current);
-    console.log(`ACCEPT_COVERAGE_DEBT: ${f.metric} = ${suggested}`);
+    const suggested = formatOverrideSuggestion(f.current - (f.baseline ?? 0));
+    const group = coverageMetricGroupName(f.metric) ?? f.metric;
+    console.log(`ACCEPT_COVERAGE_DEBT: ${group} +${suggested}`);
   }
   console.log("---END COPY-PASTE---");
 
