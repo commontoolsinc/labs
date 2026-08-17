@@ -236,45 +236,6 @@ broader again, but the slot redirect stays. No un-narrowing code
 exists anywhere on main, and v2 keeps it that way: the widen-back
 question (formerly open) is closed NO.
 
-**Handler writes obey the same narrowing-redirect rule as derivations
-(RULED 2026-08-17).** A `Writable` slot declared user- (or session-)
-scoped at instantiation — by the pattern's argument SCHEMA
-(`PerUser<…>` / `PerSession<…>`) or by the LINK the caller passes for
-that slot — is never written at the SPACE address: a handler's write
-through it lands off the shared space row, at the acting principal's own
-instance, behind the same redirect a derivation's discovered narrowing
-writes. Owner: "a Writable scoped to user at declaration (either schema
-or the passed in link) should not write to space? that would be a clear
-yes, but also a serious problem on main right now." The mechanism is
-INSTANTIATION-TIME PRE-NARROWING at the STRUCTURAL `space→user` hop:
-the runner's argument staging writes the broad-slot `space→user`
-redirect for every declared-scope slot (user- OR session-declared) the
-argument document does not hold yet — whether the caller handed in a
-value or a document link — so the first write through the slot already
-lands at the acting principal's USER instance
-(`data-updating.ts` `preNarrowDeclaredScopeSlots`, called from the
-runner's argument staging). Only the top hop: it is STRUCTURAL
-(for-everyone, per the monotonicity rule above), so it is safe to
-establish eagerly; the `user→session` hop stays per-principal and
-discovered by running (writing a session redirect at instantiation
-would be static scope analysis — D11's tripwire — and would over-narrow
-the instantiator's own slot to session for data that does not exist).
-A session-declared slot therefore reaches session later, per principal,
-exactly as a discovered narrowing would; the confidentiality boundary
-the pre-narrowing closes is CROSS-USER (the leak: a per-user draft on
-the shared space row, readable by every other principal), and user
-confinement is the whole of it. Before the fix, a piece instantiated
-over an existing document handed in as a cell had unnarrowed slots —
-the eager redirect fired only for a value written THROUGH the schema —
-and the first per-user handler write landed on the shared row: a
-confidentiality leak, posture-independent (client-only, OFF). Fixing it
-is a deliberate OFF-arm behavior change (verification-coverage.md's
-recorded-acceptance row). Slots that already hold a value — a link, or
-a plain value written before the redirect existed — are left as they
-are (absent slots only): whether a legacy plain value in a
-declared-scope slot migrates into the instantiator's instance or is
-shadowed by the redirect is NOT ruled and stays open (§8).
-
 ## 3. Lifecycle: durable, with retirement (S2)
 
 Session-scoped DERIVED state is durable-with-retirement. It is
@@ -372,6 +333,34 @@ An event MAY operate ENTIRELY within user or session scope: when
 the state a handler modifies is user- or session-scoped, its
 consequences are too, and a purely session-local interaction (this
 session's UI state) never escapes its scope by accident.
+
+**The declared-scope invariant (owner thread, 2026-08-17).** The two
+paragraphs above cover DISCOVERED scope (a run learns its scope by
+reading). A `PerUser`/`PerSession` slot is the OTHER kind — its scope
+is DECLARED on the argument schema, and it narrows through the
+EAGER-REDIRECT pass (`data-updating.ts:1478-1517` / `:1545`): when an
+object is written through a schema whose child declares a narrower
+scope, the child's `space→…` redirect is materialized even if the
+value omits the key, so a later schema-less write (a handler's
+`draft.set(…)`) follows the redirect into the narrower instance. The
+invariant that makes this safe was never written down and is added
+here: **a declared scope must be VISIBLE TO THE WRITE PATH at the top
+level of the slot's own schema.** `ContextualFlowControl.getSchemaScope
+Cap` reads only the top level, so a scope declared inside an
+`anyOf`/`oneOf` branch (`PerUser<T> | undefined` spelled with the union
+OUTSIDE the wrapper) is invisible to the write side — `declaredCellScope`
+and `foldDeclaredScopeIntoLinkSchema` miss it while the READ side folds
+it in (`link-resolution.ts:132`, `schema.ts:1603`), so reads and writes
+disagree and the slot lands on the SPACE row. This is a **today** bug on
+main, NOT created by served handler writes: the eager pass narrows the
+ordinary `PerUser<T>` shape correctly (verified on both main and the
+fan-out-B tree — the redirect is written), and served execution merely
+EXPOSES a violation as cross-user sharing rather than causing it.
+Corpus reachability is nil (all 165 declarations put the union inside
+the wrapper), so it is a latent trap; the enforcement is a
+SCHEMA-GENERATOR guard that throws when a scope wrapper ends up a union
+member (owned by the main-side scope-handler-write thread, 2026-08-17 —
+verification-coverage.md's flag row), not a v2 write-path change.
 
 ## 6. Effectful built-ins: once per scope instance (S5)
 
@@ -526,19 +515,6 @@ citations use it):
    deletion rule in serving-loop.md §3b keeps the stranding from
    growing without bound in the narrowing case; a retirement design
    still owes the general one.
-3. **Legacy plain values in declared-scope slots (2026-08-17).** The
-   instantiation-time pre-narrowing (§2, RULED 2026-08-17) writes the
-   redirect for ABSENT declared-scope slots only. A slot that already
-   holds a plain value at the broad address — data written before the
-   redirect existed, i.e. the leak's own residue — is left untouched:
-   a later handler write through such a slot still lands at the broad
-   address until the slot is narrowed. Whether that value migrates into
-   the instantiating principal's instance (what the value-argument
-   path does when it stages `{draft: "old"}` through the schema), is
-   shadowed by a redirect over an empty instance, or is repaired by a
-   one-time migration, is an owner call — the ruling spoke to the
-   FIRST write, and none of the three is obviously right for data
-   whose author is unknown.
 
 ## 9. Tripwires
 

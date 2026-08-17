@@ -3116,59 +3116,63 @@ supply; OW29/OW32/OW34 closed):
   piece's roots — deterministically, while queued, never after, never
   for another piece). Two FLAGS surfaced while building (j)'s E2E
   shape (owner rulings owed; NOT filled):
-  (1) **A handler's write to a NEVER-narrowed PerUser slot lands on
-  the SPACE slot — RULED 2026-08-17 (option a: instantiation-time
-  pre-narrowing) and FIXED in the stage-B fix round; the FOURTH
-  RECORDED OFF-arm acceptance.** As found: a `type` handler running
-  as Alice (`firedAt.user` = Alice) wrote her draft into the shared
-  argument row (`{n:1, draft:"A", saved:"saved:echo:A"}` observed on
-  the space-scoped row; no `user:alice` row) — every served-handler
-  test in `executor-instance-keyed-replica.test.ts` pre-narrows the
-  slots it writes (`typed.key("saved").set("")` through the argument
-  schema), which is why the R7 pins never met it. The independent
-  review characterized it POSTURE-INDEPENDENT: reproduced
-  byte-identically OFF, client-only, no server — the handler's handle
-  carries no scope cap (its own input schema is a plain
-  `Writable<string>`; the `PerUser` declaration lives on the pattern's
-  argument schema) and the eager scoped-key redirect fires only when
-  the parent object is written THROUGH that schema, which a piece
-  instantiated over an EXISTING document handed in as a cell never
-  is. Owner: "a Writable scoped to user at declaration (either schema
-  or the passed in link) should not write to space? that would be a
-  clear yes, but also a serious problem on main right now." Fix
-  (own commit, cherry-pickable to main): `data-updating.ts`
-  `preNarrowDeclaredScopeSlots`, called from the runner's argument
-  staging (`updateArgument`) — writes the broad-slot `space→user`
-  redirect for every declared-scope slot the argument document does
-  not hold yet, so the first write through it lands off the shared
-  space row at the acting principal's USER instance; absent slots
-  only, idempotent. Only the STRUCTURAL top hop: `space→user` is
-  for-everyone (scopes.md §2 monotonicity) and safe to establish
-  eagerly, while the `user→session` hop stays per-principal and
-  discovered by running — pre-narrowing to session would be static
-  scope analysis (D11) and would over-narrow the instantiator to
-  session for empty data (it also broke the ragged pin (c) and the
-  no-session-attribution pin (a) when first tried at full session
-  depth; capping at the user hop keeps both green). The
-  confidentiality boundary is CROSS-USER; user confinement is the
-  whole of it. scopes.md §2 carries the binding sentence (handler
-  writes obey the derivation narrowing-redirect rule, at the
-  structural hop) and §8 item 3 the open corner (legacy plain values
-  already on the broad row are NOT moved — migrate vs shadow vs
-  one-time repair is an owner call). Pinned red-first in
-  `scoped-slot-pre-narrowing.test.ts` (four OFF-arm arms, a second
-  client reading): the SCHEMA-declared slot over an existing doc cell
-  (RED before the fix at "Alice's row holds her draft" — it was on the
-  space row, and Bob read it), the value path (control), and the
-  LINK-declared slot passed in / stored (already confined; regression
-  pins). Mutation (the pre-narrowing call removed) → the doc-cell arm
-  red. RECORDED ACCEPTANCE (OFF-arm behavior change, deliberate): a
-  piece instantiated over a document handed in as a link now writes
-  the declared-scope slots' `space→user` redirect into that document
-  at instantiation, and a handler's write through a declared-scope
-  slot lands at the acting principal's user instance instead of the
-  space row — the former write was a confidentiality leak; no
-  legitimate producer depended on it.
+  (1) **A handler's write to a per-user slot can land on the SPACE row
+  — real behavior, WRONG cause, nil reachability, fixed UPSTREAM by a
+  schema-generator guard; NO v2 code change (the fix round's
+  pre-narrowing was RETRACTED 2026-08-17).** As found: a `type` handler
+  running as Alice wrote her draft onto the shared argument row, no
+  `user:alice` row; the independent review characterized it
+  posture-independent (reproduced OFF, client-only). The owner's
+  main-side investigation (`scope-handler-write-findings.md`, main
+  `751cbf75c`) confirmed the STORAGE behavior but REFUTED the cause and
+  the seat, and the fixer pass RE-VERIFIED the refutation on the
+  fan-out-B tree with a 4-cell raw-row check:
+  - **The eager-redirect pass WORKS on our tree.** The ordinary
+    `PerUser<T>` shape (generated `{type:"string",
+    asCell:[{kind:"cell",scope:"user"}]}` — scope at the TOP level, NOT
+    a compound) narrows correctly: the report's §8 recipe (parent
+    written THROUGH the schema, then a schema-less handler write) yields
+    SPACE = redirect → user, USER = the value — identical to main. A
+    piece instantiated with a VALUE argument narrows the same way. So
+    stage A/B did NOT break the eager pass (verified: the eager
+    scoped-keys pass in `data-updating.ts` and `updateArgument` /
+    `setupInternal`'s cell-link handling are BYTE-IDENTICAL across the
+    stage-A base `6d18d6998` → stage-B head — the only stage-A
+    `data-updating.ts` change is `seedMemoKey`, unrelated).
+  - **The review's leak came from a NON-STANDARD construction, not a
+    handler-write gap.** The review's repro seeded a SCHEMA-LESS
+    document with `{n:1}` and instantiated the piece over that doc
+    cell; `run` converts a cell argument to a link and never re-writes
+    the parent through the schema, so the eager pass never fired and the
+    slot stayed at `space` — the same on main (unchanged code). This is
+    "the construction is valid but skips a mitigation that fires first"
+    (the report's words). Normal instantiation (value argument, or a
+    schema-bearing doc) narrows; the two-browsers gate's real served
+    pieces keep per-user state isolated (GREEN 2/2).
+  - **The genuine defect is compound-schema blindness.**
+    `getSchemaScopeCap` (`cfc.ts:787`) reads only the top level, so a
+    scope inside an `anyOf`/`oneOf` branch is invisible to the write
+    path (`declaredCellScope`, `foldDeclaredScopeIntoLinkSchema`) while
+    the READ side folds it in — writes and reads disagree and the slot
+    lands on `space`. Corpus reachability is NIL (all 165 declarations
+    put the union inside the wrapper). ENFORCEMENT: a schema-generator
+    guard that throws when a scope wrapper ends up a union member —
+    OWNED BY THE MAIN-SIDE thread, at that layer, in that thread; NOT a
+    v2 write-path change.
+  - **Spec.** scopes.md §5 already says handler consequences land in the
+    acting principal's scoped instances; §2 governs DISCOVERED scope
+    (derivations). The genuine gap is that the DECLARED-scope path had
+    no stated invariant — added to §5 (2026-08-17 owner thread): *a
+    declared scope must be visible to the write path at the top level of
+    the slot's own schema; declared-scope narrowing is the eager-redirect
+    pass, and served execution EXPOSES a violation as cross-user sharing
+    rather than causing it.*
+  DISPOSITION: the fix round's `preNarrowDeclaredScopeSlots` (an
+  instantiation-time pre-narrow) was **REVERTED** — it was a behavior
+  change for a leak the ordinary path does not reach, and the real bug
+  is fixed one layer up. No recorded OFF-arm acceptance. The F2 pins
+  that need a narrowed slot narrow it the ORDINARY way (a schema write —
+  the R7 idiom), never via pre-narrowing.
   (2) **The transient demander's REACH — CLOSED (review F2, fix round
   2026-08-17).** As found: the ruled sentence was read as "a DIRTY
   scoped input at the dispatch's preflight", and the preflight

@@ -933,8 +933,6 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
           expect((await seed.commit()).error).toBeUndefined();
         }
         {
-          // The declared-scope slots are pre-narrowed at instantiation
-          // (RULED 2026-08-17): nothing here narrows them by hand.
           const tx = creator.edit();
           creator.run(tx, compiled, arg, result);
           expect((await tx.commit()).error).toBeUndefined();
@@ -943,6 +941,29 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         await creator.storageManager.synced();
         argId = arg.getAsNormalizedFullLink().id;
         resultId = result.getAsNormalizedFullLink().id;
+        // Narrow the declared-scope slots THROUGH the argument schema (the
+        // R7 idiom, `executor-instance-keyed-replica.test.ts`; the
+        // reviewer's flag-2 probe does the same): a PerUser slot narrows
+        // when a value is written through its schema (the eager-redirect
+        // pass, `data-updating.ts`), so `echo`'s read of `draft` discovers
+        // `user` and the node fans out per principal. This is the ordinary
+        // narrowing path — not the RETRACTED instantiation-time
+        // pre-narrowing (2026-08-17: the declared-scope `PerUser` path
+        // already narrows on a schema write; the never-narrowed leak is
+        // the compound-`anyOf` shape, nil reachability, fixed by the
+        // main-side generator guard).
+        {
+          const typed = creator.getCell<{ draft: string; saved: string }>(
+            space,
+            names.arg,
+            compiled.argumentSchema,
+          );
+          const tx = creator.edit();
+          typed.key("draft").withTx(tx).set("");
+          typed.key("saved").withTx(tx).set("");
+          expect((await tx.commit()).error).toBeUndefined();
+          await creator.storageManager.synced();
+        }
         await creator.dispose();
         await manager.close();
       }
