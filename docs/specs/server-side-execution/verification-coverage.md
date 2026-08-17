@@ -3039,6 +3039,56 @@ supply; OW29/OW32/OW34 closed):
   the memory server's `demandChanged` observer and per-session demand
   rows are read only by the ExecutorHost. Whole-suite witness in the
   build report.
+- Self-review delta (the mutation ledger, 2026-08-17): two mechanisms
+  survived their first mutation and got discriminating pins —
+  `executor-fan-out.test.ts` (f-walk) now requires the result root's
+  walk to have RUN stamped with each demander's key (a walk registered
+  without its demand root runs once as the service; the guarded value
+  still materialized because a demander's own instance of the ifElse
+  pulled it — the walk's per-demander identity is a supply fact, not
+  what that value witnesses), and (j) pins the TRANSIENT event
+  demander at the resolver seam (a queued served event fired by a
+  non-watching principal makes their pair a demander of the target
+  piece's roots — deterministically, while queued, never after, never
+  for another piece). Two FLAGS surfaced while building (j)'s E2E
+  shape (owner rulings owed; NOT filled):
+  (1) **A served handler's write to a NEVER-narrowed PerUser slot
+  lands on the SPACE slot** — a `type` handler running as Alice
+  (`firedAt.user` = Alice) wrote her draft into the shared argument
+  row (`{n:1, draft:"A", saved:"saved:echo:A"}` observed on the
+  space-scoped row; no `user:alice` row) — every served-handler test
+  in `executor-instance-keyed-replica.test.ts` pre-narrows the slots
+  it writes (`typed.key("saved").set("")` through the argument
+  schema), which is why the R7 pins never met it. Pre-stage-B (the
+  served write path is P2/stage-A machinery; stage B touched no write
+  path but the ragged hop, which fires only above `space`). A
+  per-user write visible to everyone is a correctness AND a
+  confidentiality residual: it wants the narrow-on-write hop for a
+  scoped slot's first write under the flag (`data-updating.ts`'s
+  one-hop path), or a ruling that scoped slots are pre-narrowed at
+  instantiation. Owner: the served-events line (events.md §5) — a
+  new OW row when ruled.
+  (2) **The transient demander's REACH**: the ruled sentence covers a
+  DIRTY scoped input at the dispatch's preflight. A non-watching
+  actor whose earlier event dirtied the input (type, then save, as
+  two sequential appends) found the input recomputed BETWEEN the two
+  dispatches with no event queued — the actor not a demander — and
+  the save's preflight met a CLEAN node whose actor-instance had never
+  run: the handler read an empty `echo` (`saved:""` beside
+  `draft:"A"` under Alice). Whether the preflight should also compute
+  a never-run actor instance of a clean input (an instance-level
+  "not current", B7's sense) is UNSTATED; flagged, not filled. The
+  shape that IS ruled (dirty at preflight) is pinned at the seam by
+  (j); the E2E shape stays a flag until ruled.
+  Also on the record: (f-walk)'s walk-key wait failed 5/9 in one
+  window (Alice's walk instance CLEAN with no keyed run 20 s after
+  her flag write; the diagnostic label now prints the walk node's
+  fan-out record and every run since the flag write) and then held
+  40+/40 across two soaks including one under CPU load; unexplained,
+  so the pin waits on TWO keyed changes under her chain (flag, then
+  draft) — a recurrence in CI is evidence about B7 (a keyed cascade
+  not dirtying a walk instance) and should be read as such, not
+  retried.
 
 ## 4. Standing rule
 
