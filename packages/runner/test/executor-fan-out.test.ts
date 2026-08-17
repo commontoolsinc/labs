@@ -759,6 +759,81 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     setup.cancel();
   });
 
+  it("(j) the event actor is a TRANSIENT demander (RULED 2026-08-16, design §B5/§I.5): while a served event fired by a NON-watching Carol is queued, the piece's run supply counts her (user, session) pair — so a preflight recompute of a dirty scoped input runs HER instance — and not once the event has dispatched; never for another piece", async () => {
+    const setup = await standUp({
+      names: { arg: "fo-j-arg", result: "fo-j-result" },
+      clients: [aliceSigner, bobSigner],
+    });
+    const carol = carolSigner.did();
+    const isCarol = (identity: { principal?: string; sessionId?: string }) =>
+      identity.principal === carol;
+    // Carol watches nothing: not a demander of the piece.
+    expect(
+      (servingRuntime!.serverRunDemandersFor([setup.resultId]) ?? [])
+        .some(isCarol),
+    ).toBe(false);
+    // A handler on a probe stream of THIS piece (its demand root is the
+    // piece root, as the runner stamps every handler of a piece).
+    const probeHandler = Object.assign(
+      (_tx: unknown, _event: unknown) => {},
+      {
+        schedulerObservationIdentity: {
+          pieceId: `probe:${setup.resultId}`,
+          ownerSpace: space,
+          pieceRootId: setup.resultId,
+        },
+      },
+    );
+    const streamLink = {
+      space,
+      id: setup.resultId as never,
+      path: ["fo-j-probe"],
+      type: "application/json" as const,
+    };
+    const cancel = servingRuntime!.scheduler.addEventHandler(
+      probeHandler as never,
+      streamLink as never,
+    );
+    try {
+      // Queue a SERVED event fired by Carol from a session (the drain's
+      // shape: `served.firedAt`); until it dispatches, the queue holds
+      // it, and the supply for the piece's roots counts her pair.
+      servingRuntime!.scheduler.queueEvent(
+        streamLink as never,
+        { kind: "probe" },
+        true,
+        undefined,
+        false,
+        {
+          eventId: `evt:fo-j:${crypto.randomUUID()}`,
+          served: { firedAt: { user: carol, session: "carol-session-1" } },
+        },
+      );
+      const queued = servingRuntime!.serverRunDemandersFor([setup.resultId]) ??
+        [];
+      expect(queued.filter(isCarol)).toEqual([{
+        principal: carol,
+        sessionId: "carol-session-1",
+      }]);
+      // Never for a piece the event does not target.
+      expect(
+        (servingRuntime!.serverRunDemandersFor(["of:some-other-root"]) ?? [])
+          .some(isCarol),
+      ).toBe(false);
+      // The pair is TRANSIENT: gone once the event dispatched.
+      await servingRuntime!.idle();
+      await waitUntil(
+        () =>
+          !(servingRuntime!.serverRunDemandersFor([setup.resultId]) ?? [])
+            .some(isCarol),
+        "carol's transient demand to retire with the dispatch",
+      );
+    } finally {
+      cancel();
+    }
+    setup.cancel();
+  });
+
   it("(h) B7 scaling probe — N users × M narrowed nodes: ONE user's input change re-runs only that user's M instances, never the other users' (precise per-instance dirtiness); the node count stays independent of N (C11b)", async () => {
     const M = 3;
     const users = [aliceSigner, bobSigner, carolSigner, daveSigner];
