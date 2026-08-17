@@ -172,24 +172,34 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "the wish runs per demander and provisions with its " +
         "`demanded-run:<user>` carriage — 'both join lands' 35–640 ms), " +
         "and OW34 (the renderer-trust attestation on the durable entry). " +
-        "Under the full ON posture on a fresh store this gate is now " +
-        "BIMODAL, 1/2 (stage B's build runs `store-lunch4` GREEN in 2m28s " +
-        "with every step in seconds; `store-lunch5` RED at 'both browsers " +
-        "see 2 love it (merge)' after 'both cast green concurrently' took " +
-        "13.9 s): the store shows BOTH vote events consequenced with no " +
-        "error, yet ONE vote landed — the served `castVote` handler run " +
-        "as the second voter read `nowTick` (the `#now/300` interval " +
-        "wish's value, null until that wish resolves for the run) and " +
-        "returned without writing (`if (!now) return`); the client's " +
-        "speculative vote rendered, its echo retired to the server's " +
-        "no-op. The residual mechanism is the served handler reading a " +
-        "not-yet-derived wish value for its actor at dispatch (the " +
-        "transient-demander preflight, RULED 2026-08-16, recomputes dirty " +
-        "INPUTS — a wish whose interval timer has not fired for the " +
-        "serving runtime is not dirty). Recorded in " +
-        "verification-coverage.md (OW32's row); lifts when this gate " +
-        "greens ≥2/2 fresh-store under the full ON posture; the flip PR " +
-        "needs this list EMPTY.",
+        "Under the full ON posture on a fresh store this gate is " +
+        "BIMODAL (stage B build `store-lunch4` GREEN 2m28s; the fixer " +
+        "pass on the independent review reproduced 1/2 on binary " +
+        "fadc2efb1b — run 1 RED at 'both browsers see 2 love it (merge)' " +
+        "hanging to the 300 s timeout with '1 love it', run 2 GREEN " +
+        "1m18s). The residual mechanism, triaged (review F4) as " +
+        "SERVED-WISH TIMING and NOT a stage-B B7 dirtiness miss: the " +
+        "served `castVote` handler run as the second voter reads " +
+        "`nowTick` (the `#now/300` interval wish's value) null and " +
+        "returns without writing (`main.tsx` `if (!now) return`), so " +
+        "ONE vote no-ops; `todaysVotes`/`ranked` read only SHARED inputs " +
+        "(they are SPACE-scoped, not fanned out — a `nowTick` change is a " +
+        "space cause that dirties them and any per-user swatch VDOM " +
+        "downstream via `dirtyFanOutAll`, never a missed re-dirty), so " +
+        "the review's swatch flip [Bob,Alice]→[Alice]→[Bob,Alice] is " +
+        "`todaysVotes`' `dayKeyOf(nowTick)` filter flipping as `nowTick` " +
+        "resolves, not a per-instance dirtiness bug. The two-browsers " +
+        "gate (no `#now`/`nowTick` dependency) is GREEN 2/2 under the " +
+        "same binary and load, isolating the failure to the `nowTick` " +
+        "chain. Compounded by the pre-existing client-instantiate-vs-" +
+        "server-derive re-fetch race at piece creation (the ~6 s " +
+        "`compile-cache-hit` churn the 300 ms demand-wake grace only " +
+        "softens). Owed at Stage C (NOT stage-B-owned): the served " +
+        "`#now/300` value for a serving runtime at dispatch, or a wall " +
+        "clock the serving runtime supplies to the `if (!now)` guard. " +
+        "Recorded in verification-coverage.md (OW32's row); lifts when " +
+        "this gate greens ≥2/2 fresh-store under the full ON posture; " +
+        "the flip PR needs this list EMPTY.",
     },
   ],
   runner: [

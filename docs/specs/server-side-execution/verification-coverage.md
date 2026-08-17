@@ -2580,21 +2580,37 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   key), and whether a per-demander sidecar wants the chain's instances
   or exactly its own demander is an UNSTATED semantic — owner ruling
   needed before it is wired.
-  **CLOSED (fan-out stage B, 2026-08-17): direction VINDICATED, storm
-  cut PINNED.** Both extensions landed on stage A's instance-keyed
-  replica: space-root demanders (every demanding pair recorded on
-  every root; the walk and the supply per demander) and the demand-
-  arrival re-run (the arrival re-arm). The 4,427-wave storm's cycle —
-  N instance runs writing one collapsed local doc + patches diffed
-  against a sibling's value — is UNCONSTRUCTIBLE now: per-instance
-  local docs (stage A) + precise dirtiness (B7) cut every edge; pinned
-  in `executor-fan-out.test.ts` (i): two users, 20 divergent authored
+  **DIRECTION VINDICATED, storm cut PINNED IN THE HARNESS; a lunch
+  residual stays OPEN (fan-out stage B, 2026-08-17; wording corrected on
+  the independent review's F4).** Both extensions landed on stage A's
+  instance-keyed replica: space-root demanders (every demanding pair
+  recorded on every root; the walk and the supply per demander) and the
+  demand-arrival re-run (the arrival re-arm). The 4,427-wave storm's
+  cycle — N instance runs writing one collapsed local doc + patches
+  diffed against a sibling's value — is pinned UNBUILT in the HARNESS:
+  `executor-fan-out.test.ts` (i) — two users, 20 divergent authored
   edits each, waves ≤ 2·edits + 8, quiescent after the last edit (no
   wave in a 3 s window), zero `wave-commit-rejected … missing path`,
-  neither instance ever holding the sibling's value. The wish-sidecar
-  chain is filled per the panel's Lens 5 (the sidecar's actions run as
-  demanders; the lunch gate's `#profile` family joins in 35–640 ms);
-  the per-demander pin stays FLAGGED (OW17 residual viii).
+  neither instance ever holding the sibling's value. But "UNCONSTRUCTIBLE
+  now" OVERCLAIMED against the LIVE gate: the independent review's
+  lunch run 4 still showed a churning serving loop (331
+  `wavesBudgetExhausted`, `wave-commit-rejected … path is not
+  traversable at /value/children/2/children/0` ×5) under ON — a
+  transient patch-vs-wrong-base race on a `computed:` VDOM. The fixer
+  pass did NOT reproduce that on its own ON binary (fadc2efb1b): lunch
+  runs 1–2 show `wavesBudgetExhausted` 66–90 (well below run 4's 331)
+  and ZERO `wave-commit-rejected`, so the storm cut holds far better
+  here than the review's snapshot — plausibly helped by F1's
+  RetryImmediately bound removing one hot-loop source — but the residual
+  is not PROVEN gone at the live gate, so the honest disposition is
+  "storm pinned unbuilt in the harness; a live churn residual of open
+  attribution, unreproduced at the fixer's binary". The wish-sidecar
+  chain is WIRED per the panel's Lens 5 (the sidecar's actions carry the
+  outer root and run as demanders) but its runner-suite pin is OWED
+  (review F3 — it needs the sidecar to RUN, which does not complete
+  under the suite's fake clock; the per-demander pin stays FLAGGED, OW17
+  residual viii). The lunch gate STAYS SKIP-LISTED with the residual
+  named below.
 - OW30 — the controller-side write-destination validation RACE under
   the flag (`piece-controller.ts` `validateWriteDestination`, the
   #4717 guard as narrowed 2026-08-07): under the full ON posture
@@ -2696,28 +2712,62 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   stage A's read seam, and the per-user derived state of real users
   needs stage B's supply — record the two-browser gates' status
   honestly at each stage (stage A's build report carries the runs).
-  **CLOSED as a CAUSE (fan-out stage B, 2026-08-17): the loop's
-  premise — the store holds per-user instances under the SERVICE
-  identity and no user principal — is gone; every demanded per-user
-  node runs per demanding principal (OW17 leg 2). The arrival gate
-  STAYS as the backstop for the first-demand transient and any
-  walk-coverage gap (design §E residuals 1 and 4). Gate observations
-  on stage B's ON-built binary, fresh store per run: the two-browsers
-  gate GREEN 3/3 (1m08s–1m23s; client action runs 401–586 per browser
-  vs 45–56 k; zero `scheduler-non-settling`; every step in seconds) —
-  UN-SKIPPED (`tasks/server-execution-on-skips.ts`); the lunch gate
-  boots and joins in seconds (login 1.6 s, runtimes idle 0.6–1.0 s,
-  'both join lands' 35–640 ms — the identity-less `#profile` wish is
-  gone) and is BIMODAL 1/2 on a NEW residual, named in its skip
-  entry: run 5 stalled at "both browsers see 2 love it (merge)" with
-  BOTH vote events consequenced and no error but ONE vote landed —
-  the served `castVote` run for the second voter read `nowTick` (the
-  `#now/300` interval wish's value) null and returned without writing;
-  the transient-demander preflight recomputes DIRTY inputs, and a
-  wish whose interval timer has not fired for the serving runtime is
-  not dirty. Owed: the served interval `#now` wish's value for a
-  demanding actor at dispatch (or the pattern's `if (!now) return`
-  guard reading a wall clock the serving runtime supplies) — Stage C.**
+  **CAUSE FIXED FOR WATCHING PRINCIPALS (fan-out stage B, 2026-08-17;
+  wording corrected on the independent review's F4 — not blanket
+  "CLOSED as a cause").** The loop's premise — the store holds per-user
+  instances under the SERVICE identity and no user principal — is gone;
+  every demanded per-user node runs per demanding principal (OW17 leg
+  2). The NON-watching actor gap the review's F2 named (a served handler
+  reading a per-user derivation it does not watch lost its event
+  silently) is CLOSED by the fixer pass's transient-demander PREFLIGHT
+  (`rearmNotCurrentFanOutForActor` — instance-level currency, not
+  node-level; flag (2) row above). The arrival gate STAYS as the
+  backstop for the first-demand transient and any walk-coverage gap
+  (design §E residuals 1 and 4). Gate observations on the fixer's
+  ON-built binary (fadc2efb1b), fresh store per run: the two-browsers
+  gate GREEN 2/2 (1m53s, 56s; zero `scheduler-non-settling`;
+  `structureLoadTerminal` 105 — NOT the build report's "0"), holding
+  the stage-A/B builders' 3/3 + the review's 2/2 — UN-SKIPPED. The lunch
+  gate is BIMODAL (fixer runs 1/2: run 1 merge-hang, run 2 green
+  1m18s), on a residual the F4 TRIAGE attributes to SERVED-WISH TIMING,
+  NOT a stage-B B7 precise-dirtiness miss:
+  - the swatch flip and the merge's lost vote are the SAME chain,
+    `ranked ← todaysVotes ← nowTick`. `todaysVotes` and `ranked`
+    (`lunch-poll/main.tsx`) read only SHARED inputs (options, votes,
+    users, `nowTick`), so they are SPACE-scoped — NOT fanned out per
+    user — and B7 per-instance dirtiness does not even apply to them; a
+    change to `nowTick` (a shared doc) is a space cause that dirties the
+    single instance (and, for any per-user swatch VDOM downstream,
+    `dirtyFanOutForCause`'s space arm dirties ALL instances —
+    `dirtyFanOutAll`, not a miss). The flip is `ranked` recomputing a
+    different VALUE as `nowTick` resolves, not a missed re-dirty.
+  - the ROOT is the served `#now/300` interval wish (`nowTick`)
+    resolving null/stale on the serving loop: `castVote` NO-OPS when
+    `nowTick` is null (`main.tsx` `if (!now) return`) → the merge's lost
+    vote (fixer run 1: "1 love it" at the 300 s timeout, the client
+    re-fetching the piece every ~6 s — `compile-cache-hit` — with
+    commitConflicts but `eventLostRaces=0` and NO `wave-commit-rejected`);
+    `todaysVotes`' `dayKeyOf(nowTick)` filter flips which votes are
+    "today" as `nowTick` changes → the review's swatch flip
+    [Bob,Alice]→[Alice]→[Bob,Alice].
+  - the two-browsers gate — which has NO `#now/300`/`nowTick`
+    dependency — is GREEN 2/2 under the SAME binary and load, isolating
+    the failure to the `nowTick` chain, not stage B's per-user run
+    supply. The review's run-4 churn (331 `wavesBudgetExhausted`,
+    `wave-commit-rejected … path is not traversable
+    /value/children/2/children/0` ×5) did NOT reproduce on the fixer's
+    binary (0 in 2 runs; `wavesBudgetExhausted` 66–90), so that storm
+    is characterized as a transient patch-vs-wrong-base race on a
+    `computed:` VDOM under the review's timing (the OW29-cousin
+    class) — NOT a persistent stage-B issue; a register note, not a
+    stage-B fix, plausibly further damped by F1's RetryImmediately
+    bound.
+  Owed (Stage C, a NAMED FOLLOW-UP, NOT stage-B-owned): the served
+  interval `#now/300` wish's value for a serving runtime at dispatch
+  (or the pattern's `if (!now) return` guard reading a wall clock the
+  serving runtime supplies) — plus the pre-existing
+  client-instantiate-vs-server-derive race at piece creation (the
+  300 ms demand-wake grace mitigates, does not close it; residual x).**
 - OW34 — a CFC-serving POLICY item: served handler runs carry NO
   renderer-trusted event mark, so a per-user served handler's write to a
   UI-contract-gated (owner-protected) cell is refused by CFC at prepare
