@@ -5094,12 +5094,17 @@ function schemaTypeValidity(
   if ("type" in schemaObj) {
     if (Array.isArray(schemaObj["type"])) {
       const types = schemaObj["type"];
-      // type unknown matches anything
+      const concreteMatch = types.some((type) =>
+        type !== "unknown" && schemaTypeMatchesValueType(type, valueType)
+      );
+      // `unknown` admits anything, so it decides only when nothing else in the
+      // list does. A concrete type beside it is a reader asking for the value
+      // — including the shape a declaration takes once combined with an
+      // `unknown` carried on a link — and answering that opaquely would
+      // discard a declaration somebody made.
       if (types.includes("unknown")) {
-        typeValidity = TypeValidity.Unknown;
-      } else if (
-        !types.some((type) => schemaTypeMatchesValueType(type, valueType))
-      ) {
+        if (!concreteMatch) typeValidity = TypeValidity.Unknown;
+      } else if (!concreteMatch) {
         return TypeValidity.False;
       }
     } else if (isString(schemaObj["type"])) {
