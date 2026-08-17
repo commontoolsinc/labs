@@ -17,7 +17,7 @@ export abstract class BaseDecodeContext implements DecodeContext {
 
   /**
    * Constructs an instance which reports `shouldDeepFreeze` for the frozenness
-   * of what it reconstructs.
+   * of what it decodes.
    */
   constructor(shouldDeepFreeze: boolean) {
     this.#shouldDeepFreeze = shouldDeepFreeze;
@@ -37,7 +37,7 @@ export abstract class BaseDecodeContext implements DecodeContext {
   //
 
   /**
-   * Whether a reconstruction call should produce a deep-frozen result. See
+   * Whether a decode call should produce a deep-frozen result. See
    * `DecodeContext.shouldDeepFreeze`.
    */
   get shouldDeepFreeze(): boolean {

@@ -28,7 +28,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
 import { BaseDecodeContext } from "@/codec-interface/BaseDecodeContext.ts";
 
-/** Mock runtime for deserialization calls. */
+/** Mock runtime for decode calls. */
 class MockRuntime extends BaseDecodeContext {
   constructor() {
     super(true);
@@ -243,7 +243,7 @@ describe("codecs", () => {
       expect(fabricFromJsonValue("fvj1:42")).toBe(42);
     });
 
-    it("decodes tagged values that don't need cell reconstruction", () => {
+    it("decodes tagged values that don't need cell decoding", () => {
       expect(fabricFromJsonValue('fvj1:{"\/Undefined@1":null}')).toBe(
         undefined,
       );

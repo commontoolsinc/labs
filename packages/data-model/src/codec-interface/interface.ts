@@ -232,15 +232,15 @@ export interface FabricClassWithNonterminalCodec {
 export interface DecodeContext {
   /**
    * Resolves a cell reference, for a type that needs to intern or look up an
-   * existing instance during reconstruction.
+   * existing instance during decoding.
    */
   getCell(
     ref: { id: string; path: string[]; space: string },
   ): FabricInstance;
 
   /**
-   * Signals whether a reconstruction call should produce a deep-frozen
-   * result: `true` means the reconstructed value should be deep-frozen,
+   * Signals whether a decode call should produce a deep-frozen
+   * result: `true` means the decoded value should be deep-frozen,
    * `false` means a mutable result is acceptable. Same contract as `frozen`
    * passed to `cloneIfNecessary()` (see `value-clone.ts`):
    * `shouldDeepFreeze === true` corresponds to

@@ -15,7 +15,7 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
  * emits `null` for `NaN`/`±Infinity` and drops the sign on `-0`, which would
  * make a numeric-state form lossy through the JSON layer.
  *
- * Any NaN bit pattern serializes as the literal `"NaN"` and round-trips
+ * Any NaN bit pattern encodes as the literal `"NaN"` and round-trips
  * back to `Number.NaN`.
  */
 export class SpecialNumberCodec extends BaseTerminalCodec<JsonCodecValue> {

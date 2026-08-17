@@ -33,7 +33,7 @@ export class EmptyDecodeContext extends BaseDecodeContext {
     ref: { id: string; path: string[]; space: string },
   ): FabricInstance {
     throw new Error(
-      `Cannot reconstruct cell reference ${
+      `Cannot decode cell reference ${
         backtickQuote(ref.id)
       }: ${this.#getCellMessage}`,
     );
@@ -43,8 +43,8 @@ export class EmptyDecodeContext extends BaseDecodeContext {
 /**
  * Shared `EmptyDecodeContext` instance with `.shouldDeepFreeze ===
  * true` and whose `getCell()` always throws. Pass this when a decoder wants a
- * context object but isn't expected to need cell reconstruction; if a cell ref
- * does turn up, the throw makes the unexpected reconstruction obvious instead
+ * context object but isn't expected to need cell decoding; if a cell ref
+ * does turn up, the throw makes the unexpected decode obvious instead
  * of silent.
  */
 export const EMPTY_DECODE_CONTEXT: DecodeContext = Object

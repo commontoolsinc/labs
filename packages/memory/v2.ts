@@ -862,7 +862,7 @@ export type ServerMessage =
 
 const memoryDecodeContext = new EmptyDecodeContext(
   true,
-  "no cell reconstruction at the memory boundary",
+  "no cell decoding at the memory boundary",
 );
 
 // These ambient flags and the memory protocol flags below are catalogued, with

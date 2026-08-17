@@ -34,7 +34,7 @@ describe("BigIntCodec", () => {
 
     describe("canEncode()", () => {
       it("only claims `bigint` values", () => {
-        // `bigint` serializes to `BigInt@1`, whereas `number` does not -- the
+        // `bigint` encodes to `BigInt@1`, whereas `number` does not -- the
         // two produce distinct wire forms.
         expect(codec.canEncode(42n)).toBe(true);
         expect(codec.canEncode(42)).toBe(false);

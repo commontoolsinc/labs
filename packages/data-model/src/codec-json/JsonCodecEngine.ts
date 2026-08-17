@@ -80,7 +80,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   }
 
   /**
-   * Deserializes UTF-8 JSON bytes back into a fabric value. Carries no cycle
+   * Decodes UTF-8 JSON bytes back into a fabric value. Carries no cycle
    * guard, for the reason {@link #decode} gives: this walk too gets its tree
    * from a parse.
    */
@@ -98,7 +98,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * Prepends `/` to the tag to produce the JSON key. See Section 5.2 of the
    * formal spec.
    *
-   * The result is not frozen. A serialize-side tree is stringified and
+   * The result is not frozen. An encode-side tree is stringified and
    * discarded without ever reaching a caller, so the deep-frozen invariant
    * `JsonCodecValue` states does not cover it, and freezing every tagged node
    * on the way out is measurable on small values. The meta-tag call sites
@@ -258,7 +258,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   }
 
   /**
-   * Arrays: recursively deserialize elements.
+   * Arrays: recursively decode elements.
    *
    * One pass. A `/hole` run advances the write index past the indices it
    * stands for, leaving them absent, and the final length is set from that
@@ -326,7 +326,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   }
 
   /**
-   * Plain objects: recursively deserialize values and freeze. Any
+   * Plain objects: recursively decode values and freeze. Any
    * `/`-prefixed key is reserved per spec — return `ProblematicValue` on
    * first occurrence rather than silently round-tripping the object.
    */
@@ -584,7 +584,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
   /**
    * Returns true if the already-encoded codec value `v` can be embedded
-   * inside a /quote wrap without inner deserialization: primitives, plain
+   * inside a /quote wrap without inner decoding: primitives, plain
    * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
    * values (which `#unquote()` can collapse).
    */

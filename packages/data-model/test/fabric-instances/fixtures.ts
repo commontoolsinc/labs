@@ -1,5 +1,5 @@
 /**
- * Shared doubles for the fabric-instance tests: a reconstruction context that
+ * Shared doubles for the fabric-instance tests: a decode context that
  * refuses to resolve a cell, and the two recursion callbacks for driving the
  * freeze protocols by hand.
  *
@@ -12,7 +12,7 @@ import { BaseDecodeContext } from "@/codec-interface/BaseDecodeContext.ts";
 import type { FabricValue } from "@/interface.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
-/** Dummy reconstruction context for tests. */
+/** Dummy decode context for tests. */
 export class DummyDecodeContext extends BaseDecodeContext {
   override getCell(): never {
     throw new Error("getCell not implemented in test");

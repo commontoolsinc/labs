@@ -79,7 +79,7 @@ export function jsonFromFabricValue(value: FabricValue): string {
  * Decodes a string in the `FabricValue` JSON-embedded encoding format, which is
  * expected to be a plain object. Throws if it turns out to be something else.
  * If `context` is omitted, a shared decode-framed empty context is
- * substituted (via `fabricFromJsonValue()`), which throws if any reconstruction
+ * substituted (via `fabricFromJsonValue()`), which throws if any decoding
  * is needed.
  */
 export function plainObjectFromJson<T extends object = object>(
@@ -108,7 +108,7 @@ export function plainObjectFromJson<T extends object = object>(
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
  * `context` is omitted, {@link EMPTY_DECODE_CONTEXT} is substituted,
- * which throws if any reconstruction is needed.
+ * which throws if any decoding is needed.
  */
 export function fabricFromJsonValue(
   json: string,

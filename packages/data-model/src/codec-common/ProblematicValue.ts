@@ -20,7 +20,7 @@ import { toReportableState } from "./toReportableState.ts";
 import { toReportableTag } from "./toReportableTag.ts";
 
 /**
- * Container for a value whose deconstruction or reconstruction failed.
+ * Container for a value whose encoding or decoding failed.
  * Preserves the tag and raw state at fault, for round-tripping and debugging.
  * Used in lenient mode to allow graceful degradation rather than hard
  * failures. See Section 3.5 of the formal spec.

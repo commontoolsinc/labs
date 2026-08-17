@@ -545,7 +545,7 @@ function fabricFromNativeValueInternal(
  * Creates a new `Error` with the same class and properties as the original,
  * but with `.cause` and custom enumerable properties recursively converted
  * to `FabricValue`. This ensures that when `FabricError`'s `[CODEC]` encodes
- * at serialization time, all nested values are already `FabricValue`.
+ * at encode time, all nested values are already `FabricValue`.
  *
  * We create a new `Error` rather than mutating the original because the
  * caller's `Error` should not be modified as a side effect of converting it.

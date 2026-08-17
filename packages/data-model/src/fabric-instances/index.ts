@@ -24,7 +24,7 @@ type InstanceCodecClass = Constructor & FabricClassWithNonterminalCodec;
 /**
  * The concrete instance classes whose instances are available over the wire,
  * each via its static `[CODEC]`. This is the curated source of truth for which
- * instance types participate in serialization.
+ * instance types participate in encoding.
  *
  * `UnknownValue` and `ProblematicValue` are included too, and their codecs
  * differ from each other. `UnknownValue`'s has no preferred wire tag -- the

@@ -62,7 +62,7 @@ describe("EmptyDecodeContext", () => {
       expect(() =>
         ctx.getCell({ id: "of:bafyDEFAULT", path: [], space: "did:key:z1" })
       ).toThrow(
-        "Cannot reconstruct cell reference `of:bafyDEFAULT`: no runtime context provided.",
+        "Cannot decode cell reference `of:bafyDEFAULT`: no runtime context provided.",
       );
     });
 
@@ -77,7 +77,7 @@ describe("EmptyDecodeContext", () => {
       const ctx = new EmptyDecodeContext(true, "custom");
       expect(() =>
         ctx.getCell({ id: "of:bafyCUSTOM", path: [], space: "did:key:z1" })
-      ).toThrow("Cannot reconstruct cell reference `of:bafyCUSTOM`: custom");
+      ).toThrow("Cannot decode cell reference `of:bafyCUSTOM`: custom");
     });
 
     it("correctly accepts the two-argument form", () => {
@@ -87,7 +87,7 @@ describe("EmptyDecodeContext", () => {
         ctx.getCell({ id: "of:bafyX", path: [], space: "did:key:z1" })
       )
         .toThrow(
-          "Cannot reconstruct cell reference `of:bafyX`: deep-clone path.",
+          "Cannot decode cell reference `of:bafyX`: deep-clone path.",
         );
     });
   });

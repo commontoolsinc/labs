@@ -831,7 +831,7 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("sparse arrays", () => {
-    it("serializes `[1,,3]` with `/hole`", () => {
+    it("encodes `[1,,3]` with `/hole`", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , 3];
       const result = toEncodedFormat(arr) as JsonCodecValue[];
@@ -851,7 +851,7 @@ describe("JsonCodecEngine", () => {
       expect(result[2]).toBe(3);
     });
 
-    it("serializes consecutive holes as run-length encoded", () => {
+    it("encodes consecutive holes as run-length encoded", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , , , 5];
       const result = toEncodedFormat(arr) as JsonCodecValue[];
@@ -911,7 +911,7 @@ describe("JsonCodecEngine", () => {
       expect(result[4]).toBe(3);
     });
 
-    it("serializes interleaved holes/`undefined` correctly", () => {
+    it("encodes interleaved holes/`undefined` correctly", () => {
       const arr = new Array(5) as FabricValue[];
       arr[0] = 1;
       arr[2] = undefined;
@@ -1202,7 +1202,7 @@ describe("JsonCodecEngine", () => {
         expect(toEncodedFormat(obj)).toEqual({ a: 1, b: 2 });
       });
 
-      it("deserializes an `/object`-wrapped multi-key object with `/`-prefixed key correctly", () => {
+      it("decodes an `/object`-wrapped multi-key object with `/`-prefixed key correctly", () => {
         const data = { "/object": { a: 1, "/b": 2 } } as JsonCodecValue;
         const result = fromEncodedFormat(data) as Record<string, FabricValue>;
         expect(result["a"]).toBe(1);
@@ -1264,7 +1264,7 @@ describe("JsonCodecEngine", () => {
         // realm that keeps the `__proto__` accessor, the key would be lost and
         // the result's prototype repointed to whatever the bytes carried.
         // Nothing this implementation writes can contain one, so bytes that do
-        // are reported rather than reconstructed.
+        // are reported rather than decoded.
         //
         // The keys are computed on purpose: in an object literal a bare or
         // quoted `__proto__:` sets the prototype instead of creating a
@@ -1323,7 +1323,7 @@ describe("JsonCodecEngine", () => {
         // property -- so a decoder that assigned the key would look correct
         // here no matter what. This installs the standard accessor, which is
         // what browsers have and what this code also runs under, and pins the
-        // outcome the refusal exists to produce: nothing reconstructed, and no
+        // outcome the refusal exists to produce: nothing decoded, and no
         // prototype repointed.
         const saved = Object.getOwnPropertyDescriptor(
           Object.prototype,
@@ -1371,12 +1371,12 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("/quote handling", () => {
-    it("deserializes `/quote` as literal (no inner deserialization)", () => {
+    it("decodes `/quote` as literal (no inner decoding)", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
       } as JsonCodecValue;
       const result = fromEncodedFormat(data);
-      // The inner structure is returned as-is, not reconstructed.
+      // The inner structure is returned as-is, not decoded.
       const obj = result as Record<string, unknown>;
       expect(obj["/Link@1"]).toEqual({ id: "abc" });
     });
@@ -1533,7 +1533,7 @@ describe("JsonCodecEngine", () => {
       expect(result.error).toBe("boom");
     });
 
-    it("lenient mode wraps failed handler reconstruction", () => {
+    it("lenient mode wraps failed handler decoding", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestDecodeContext();
 
@@ -1593,7 +1593,7 @@ describe("JsonCodecEngine", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("lenient mode wraps failed class-registry reconstruction", () => {
+    it("lenient mode wraps failed class-registry decoding", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestDecodeContext();
 
@@ -1616,21 +1616,21 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("freeze guarantees", () => {
-    it("deserialized arrays are frozen", () => {
+    it("decoded arrays are frozen", () => {
       const result = fromEncodedFormat(
         [1, 2, 3] as JsonCodecValue,
       );
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("deserialized objects are frozen", () => {
+    it("decoded objects are frozen", () => {
       const result = fromEncodedFormat(
         { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("mutation of deserialized array throws", () => {
+    it("mutation of a decoded array throws", () => {
       const result = fromEncodedFormat(
         [1, 2, 3] as JsonCodecValue,
       );
@@ -1639,7 +1639,7 @@ describe("JsonCodecEngine", () => {
       }).toThrow();
     });
 
-    it("mutation of deserialized object throws", () => {
+    it("mutation of a decoded object throws", () => {
       const result = fromEncodedFormat(
         { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
@@ -1648,7 +1648,7 @@ describe("JsonCodecEngine", () => {
       }).toThrow();
     });
 
-    it("nested deserialized objects are frozen", () => {
+    it("nested decoded objects are frozen", () => {
       const result = fromEncodedFormat(
         { inner: { val: 42 } } as JsonCodecValue,
       ) as Record<string, Record<string, FabricValue>>;
@@ -1656,7 +1656,7 @@ describe("JsonCodecEngine", () => {
       expect(Object.isFrozen(result.inner)).toBe(true);
     });
 
-    it("deserialized `/object`-unwrapped objects are frozen", () => {
+    it("decoded `/object`-unwrapped objects are frozen", () => {
       const data = { "/object": { "/myKey": "val" } } as JsonCodecValue;
       const result = fromEncodedFormat(data) as Record<
         string,
@@ -1675,7 +1675,7 @@ describe("JsonCodecEngine", () => {
 
     it("codec-produced value is deep-frozen at the boundary", () => {
       // `/EpochNsec@1` dispatches through a registered codec; the
-      // reconstructed FabricEpochNsec must be deep-frozen on return.
+      // decoded FabricEpochNsec must be deep-frozen on return.
       const result = fromEncodedFormat(
         { "/EpochNsec@1": "AA" } as JsonCodecValue,
       );
@@ -1711,8 +1711,8 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("deep-frozen encoded invariant (`decode()`/`decodeFromBytes()` symmetry)", () => {
-    // Every `JsonCodecValue` handed to `deserialize()` must be deep-frozen, so
-    // both `deserialize()` entry points must produce equally deep-frozen
+    // Every `JsonCodecValue` handed to the decode walk must be deep-frozen, so
+    // both decode entry points must produce equally deep-frozen
     // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
     // via `#fromBytes()`).
     //
@@ -1810,10 +1810,10 @@ describe("JsonCodecEngine", () => {
       }).toThrow();
     });
 
-    it("`serialize()`→`/quote`→`decode()` round-trip is deep-frozen end-to-end", () => {
+    it("`encode()`→`/quote`→`decode()` round-trip is deep-frozen end-to-end", () => {
       // An object whose keys are all /-prefixed but whose values are all
-      // quote-safe routes through the serialize-side /quote path, then back
-      // through the deserialize /quote `return state` arm.
+      // quote-safe routes through the encode-side /quote path, then back
+      // through the decode /quote `return state` arm.
       const value = {
         "/a": 1,
         "/b": { plain: [1, 2] },
@@ -1979,11 +1979,11 @@ describe("JsonCodecEngine", () => {
       // shape asserted below is the contract rather than an implementation
       // detail.
       const se = FabricError.fromNativeError(new TypeError("compat test"));
-      const serialized = toEncodedFormat(
+      const encoded = toEncodedFormat(
         se,
       ) as Record<string, unknown>;
-      expect(Object.keys(serialized)).toEqual(["/Error@1"]);
-      const state = serialized["/Error@1"] as Record<string, unknown>;
+      expect(Object.keys(encoded)).toEqual(["/Error@1"]);
+      const state = encoded["/Error@1"] as Record<string, unknown>;
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe(null); // null = same as type (common case)
       expect(state.message).toBe("compat test");
@@ -2102,7 +2102,7 @@ describe("JsonCodecEngine", () => {
 
     describe("`isMalformed`", () => {
       // `Map@1`'s codec always throws on decode, so it stands in for any
-      // payload the codec cannot reconstruct. Reaching that codec takes a
+      // payload the codec cannot decode. Reaching that codec takes a
       // registry that has it: against the format-only default, `Map@1` is
       // merely an unrecognized tag and decodes to an `UnknownValue`.
       const undecodable = JSON.stringify({ "/Map@1": [["key", "value"]] });

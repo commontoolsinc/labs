@@ -99,7 +99,7 @@ export type FabricErrorState = {
  * Like all `FabricInstance`s, a `FabricError` is wholeheartedly mutable
  * until frozen and immutable thereafter. Every mutator -- the slot setters
  * along with `setExtra` / `deleteExtra` -- throws once the instance is
- * `Object.freeze`'d. The serialization layer handles `FabricError` via its
+ * `Object.freeze`'d. The codec layer handles `FabricError` via its
  * static `[CODEC]`, which is the source of truth for the encoded form.
  * See Section 1.4.1 of the formal spec.
  */
@@ -383,14 +383,14 @@ export class FabricError extends FabricNativeWrapper<Error>
    */
   protected override [DEEP_CLONE_CORE](frozen: boolean): FabricError {
     const codec = FabricError[CODEC];
-    const reconstructContext = new EmptyDecodeContext(
+    const decodeContext = new EmptyDecodeContext(
       frozen,
       "no runtime context (FabricError deep-clone path).",
     );
     return codec.decode(
       CODEC_TYPE_TAGS.Error,
       codec.encode(this),
-      reconstructContext,
+      decodeContext,
     ) as FabricError;
   }
 

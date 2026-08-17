@@ -200,7 +200,7 @@ describe("ProblematicValue", () => {
       describe("decode()", () => {
         const CONTEXT = EMPTY_DECODE_CONTEXT;
 
-        it("reconstructs the tag, state, and error", () => {
+        it("decodes the tag, state, and error", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             { tag: "Weird@7", state: { x: 1 }, error: "oops" },

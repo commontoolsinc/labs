@@ -75,12 +75,12 @@ const textDecoder = new TextDecoder();
 /**
  * `DecodeContext` for decoding `data:` URI payloads. Links at this
  * boundary are sigil (plain) data rather than cell references, so no cell
- * reconstruction is ever needed; this context exists so that an unexpected
+ * decoding is ever needed; this context exists so that an unexpected
  * cell reference produces a message that names the boundary.
  */
 const dataUriDecodeContext = new EmptyDecodeContext(
   true,
-  "no cell reconstruction at the `data:` URI boundary",
+  "no cell decoding at the `data:` URI boundary",
 );
 
 /**
