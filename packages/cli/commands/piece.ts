@@ -1629,9 +1629,11 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
  * A top-level instance of a piece data command: the same builder the
  * `piece` chain mounts under the same name, carrying the target options
  * itself. `cf get`, `cf set`, and `cf call` are these — one definition per
- * command, two spellings that parse and behave identically
- * (docs/plans/cli-surface-shape.md, step 5). Deprecating the `cf piece`
- * spellings later means touching the piece-mounted instances only.
+ * command, two spellings that parse and behave identically in every
+ * respect but one: the piece-mounted spelling is deprecated (step 6a) and
+ * its invocations print the dated stderr notice `dataCommandAction`
+ * attaches, until {@link PIECE_DATA_SPELLING_END_DATE} removes it with the
+ * spelling (docs/plans/cli-surface-shape.md, steps 5–6).
  */
 // deno-lint-ignore no-explicit-any
 export function pieceDataCommand(name: "get" | "set" | "call"): Command<any> {
