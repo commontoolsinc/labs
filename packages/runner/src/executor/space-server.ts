@@ -105,6 +105,7 @@ import { readWatermarkSeq, watermarkDocLink } from "./watermark.ts";
 import type { ServingLoopStats } from "./stats.ts";
 import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
+import { markRendererTrustedEvent } from "../cfc/ui-contract.ts";
 import {
   identityOfScopeKey,
   resolveScopeKey,
@@ -1883,6 +1884,21 @@ export class SpaceServer implements TransactionSealDestination {
           // A cold stream doc defers like a cold piece load below.
         }
         try {
+          // The renderer-trust RE-MARK (fan-out stage B, OW34 — the
+          // sister of the injected-keys re-mint below): an entry the
+          // firing runtime attested renderer-trusted (`rendererTrusted:
+          // true`, set only from the process-local mark; admission
+          // refuses any other value) re-marks its payload in THIS
+          // runtime, so the served handler run's UI-contract-gated
+          // writes record the trusted-event policy input the CFC ladder
+          // requires — under the same in-process trust the client-side
+          // gate ran under (the entry was committed under the firing
+          // client's own admission). Without it a per-user served
+          // handler's write to an owner-protected cell is refused at
+          // prepare ("missing trusted-event policy input").
+          if (entry.rendererTrusted === true) {
+            markRendererTrustedEvent(entry.payload);
+          }
           runtime.scheduler.queueEvent(
             link,
             entry.payload,

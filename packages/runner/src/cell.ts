@@ -161,7 +161,10 @@ import {
 } from "./cfc/label-view-state.ts";
 import { setLinkCfcLabelView } from "./cfc/link-label-view.ts";
 import { listResultSchema } from "./builtins/list-result-schema.ts";
-import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
+import {
+  isRendererTrustedEvent,
+  propagateRendererTrustedEvent,
+} from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { MetaField } from "@commonfabric/api";
@@ -1615,6 +1618,14 @@ export class CellImpl<T extends FabricValue>
             ...(mintedKeys !== undefined
               ? { runtimeInjectedEventKeys: [...mintedKeys] }
               : {}),
+            // The renderer-trust attestation (fan-out stage B, OW34):
+            // the runtime — never the pattern — records that the sent
+            // event carried the process-local renderer-trust mark, so the
+            // SERVED handler run can re-mark the payload and record the
+            // trusted-event policy input its UI-contract-gated writes
+            // need. The sister of the injected-keys carriage above, same
+            // trust argument (see StreamEventEntry.rendererTrusted).
+            ...(isRendererTrustedEvent(event) ? { rendererTrusted: true } : {}),
           }).then((delivery) => {
             if (!delivery.delivered) {
               // Deterministic admission refusal: the intent is dead —
@@ -1755,6 +1766,12 @@ export class CellImpl<T extends FabricValue>
                 ...(acting?.user !== undefined ? { user: acting.user } : {}),
                 session: acting?.session ?? "server",
               },
+              // A served cascade forwarding a renderer-trusted event
+              // object keeps its attestation (in-process propagation's
+              // durable twin; fan-out stage B, OW34).
+              ...(isRendererTrustedEvent(event)
+                ? { rendererTrusted: true as const }
+                : {}),
             };
             this.tx.writeValueOrThrow(entriesLink, [
               ...(Array.isArray(currentEntries) ? currentEntries : []),

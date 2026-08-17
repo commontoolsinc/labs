@@ -73,6 +73,8 @@ export type QueuedEventAppend = {
    * this session's own appends and steers nothing. */
   clientSeq: number;
   runtimeInjectedEventKeys?: string[];
+  /** See StreamEventEntry.rendererTrusted (fan-out stage B). */
+  rendererTrusted?: true;
 };
 
 /** The delivery outcome one discharge resolves with. */
@@ -541,6 +543,7 @@ export class EventAppendQueue {
       ...(append.runtimeInjectedEventKeys !== undefined
         ? { runtimeInjectedEventKeys: append.runtimeInjectedEventKeys }
         : {}),
+      ...(append.rendererTrusted === true ? { rendererTrusted: true } : {}),
     };
     const decl: EventAppendDecl = {
       id: append.sidecarId as EventAppendDecl["id"],

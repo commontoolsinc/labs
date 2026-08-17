@@ -519,6 +519,56 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
     );
 
     await t.step(
+      "an entry with a malformed rendererTrusted attestation is refused — a present value must be exactly true (fan-out stage B, the sister of the injected-keys check); the well-formed positive admits",
+      () => {
+        for (
+          const [seq, malformed] of [
+            [36, "yes"],
+            [37, 1],
+            [38, false],
+            [39, { trusted: true }],
+          ] as const
+        ) {
+          assertThrows(
+            () =>
+              authored(
+                seq,
+                appendCommit(seq, [
+                  entryOf(`evt-malformed-trust-${seq}`, {
+                    rendererTrusted: malformed as never,
+                  }),
+                ]),
+              ),
+            ProtocolError,
+            "rendererTrusted",
+          );
+        }
+        const trustStream = { id: "of:wellformed-trust", path: [] as string[] };
+        const trustSidecar = streamEntriesDocId(trustStream);
+        authored(40, {
+          operations: [{
+            op: "patch",
+            id: trustSidecar,
+            patches: [{
+              op: "append",
+              path: "/value/entries",
+              values: [{
+                eventId: "evt-wellformed-trust",
+                stream: trustStream,
+                payload: { vote: "green" },
+                rendererTrusted: true,
+              }] as never[],
+            }],
+          }],
+          eventAppends: [{
+            id: trustSidecar,
+            eventId: "evt-wellformed-trust",
+          }],
+        });
+      },
+    );
+
+    await t.step(
       "an entry whose stream link does not derive the sidecar being written is refused — a fresh sidecar id cannot smuggle another stream's handler dispatch past that stream's event-id horizon (verdict blocker, 2026-08-12)",
       () => {
         // The attack: append into a FRESH sidecar doc (empty horizon)

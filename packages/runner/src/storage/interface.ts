@@ -2016,6 +2016,11 @@ export type EventAppendRequest = {
    * queue when absent. */
   clientSeq?: number;
   runtimeInjectedEventKeys?: string[];
+  /** The runtime's attestation that the sent event was renderer-trusted
+   * (server-execution v2 fan-out stage B; the sister of
+   * `runtimeInjectedEventKeys` — see `StreamEventEntry.rendererTrusted`).
+   * Set by `Cell.send` from the process-local mark, never by callers. */
+  rendererTrusted?: true;
 };
 
 export type EventAppendDeliveryOutcome =

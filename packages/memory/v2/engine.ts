@@ -2270,6 +2270,21 @@ const validateEventAppends = (
             "array of strings (events.md §1's entry shape)",
         );
       }
+      // The renderer-trust attestation (fan-out stage B, the sister of
+      // the keys above): a present value must be exactly `true` — the
+      // drain re-marks on it, and a malformed value would be judged on
+      // every scan pass. Refused at the door instead.
+      if (
+        (entry as { rendererTrusted?: unknown }).rendererTrusted !==
+          undefined &&
+        (entry as { rendererTrusted?: unknown }).rendererTrusted !== true
+      ) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} carries malformed ` +
+            "rendererTrusted — a present value must be true (events.md " +
+            "§1's entry shape)",
+        );
+      }
 
       // The firedAt stamp, per admitting class (protocol.md §2).
       let firedAt: StreamEventFiredAt;

@@ -394,6 +394,20 @@ export type StreamEventEntry = {
    * the payload as the firing client's runtime did (same in-process
    * trust as today's client-side enforcement). */
   runtimeInjectedEventKeys?: string[];
+  /** The firing RUNTIME's attestation that the sent event was
+   * RENDERER-TRUSTED — it carried the process-local renderer-trust mark
+   * (`markRendererTrustedEvent`, set by the renderer's dispatch and
+   * unreachable from pattern code) when the runtime appended it
+   * (server-execution v2 fan-out stage B; the sister of
+   * `runtimeInjectedEventKeys`, carried and re-minted with the same
+   * in-process trust argument: the entry was committed under the firing
+   * client's own admission, and the served dispatch re-marks the payload
+   * so the served handler's UI-contract-gated write records the
+   * trusted-event policy input the CFC ladder requires — verification-
+   * coverage.md OW34). Set ONLY by the runtime, only when the mark was
+   * present; a present value must be `true` (admission refuses any
+   * other). Absent = not attested. */
+  rendererTrusted?: true;
   /** Processing-side (SpaceServer-written): consequences committed. */
   consequenced?: boolean;
   /** Processing-side: the handler threw — the error IS the consequence

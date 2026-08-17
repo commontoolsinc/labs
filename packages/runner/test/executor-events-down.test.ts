@@ -43,6 +43,10 @@ import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { readWatermarkSeq } from "../src/executor/watermark.ts";
+import {
+  isRendererTrustedEvent,
+  markRendererTrustedEvent,
+} from "../src/cfc/ui-contract.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 /** The serving-loop harness's settle-gate seam (see
@@ -506,6 +510,151 @@ describe("Phase 3 events-down (serving side)", () => {
       id: argument.getAsNormalizedFullLink().id,
     });
     expect((doc?.value as { value?: number })?.value).toBe(0);
+    cancelDemand();
+  });
+
+  it("the renderer-trust attestation rides the durable entry and is RE-MARKED at the served dispatch (fan-out stage B, OW34's sister-mark carriage): a fire whose event carried the process-local renderer-trust mark appends `rendererTrusted: true`, the served handler sees a renderer-trusted event; an unmarked fire appends no attestation and the served handler sees none; a forged attestation value is refused at admission", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "trust-arg",
+      result: "trust-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    // A renderer-marked fire (what the reconciler's dispatch does before
+    // handing a DOM event to the pattern's handler); its admission
+    // activates the space.
+    const marked = { kind: "marked" };
+    markRendererTrustedEvent(marked);
+    result.key("bump").send(marked);
+    // An unmarked fire (a pattern-minted event, or a payload that merely
+    // CLAIMS renderer provenance — the WeakSet mark is what the runtime
+    // attests, never the payload's own fields).
+    result.key("bump").send({
+      kind: "unmarked",
+      provenance: { origin: "dom", trusted: true },
+    });
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the appends to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        return (value?.entries?.length ?? 0) >= 2 &&
+          value!.entries!.every((entry) => entry.consequenced === true);
+      },
+      "both events to consequence",
+    );
+    const entries =
+      (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
+        .entries!;
+    const markedEntry = entries.find((entry) =>
+      (entry.payload as { kind?: string } | undefined)?.kind === "marked"
+    )!;
+    const unmarkedEntry = entries.find((entry) =>
+      (entry.payload as { kind?: string } | undefined)?.kind === "unmarked"
+    )!;
+    // THE CARRIAGE: only the runtime-attested fire carries the flag.
+    expect(
+      (markedEntry as { rendererTrusted?: unknown }).rendererTrusted,
+    ).toBe(true);
+    expect(
+      (unmarkedEntry as { rendererTrusted?: unknown }).rendererTrusted,
+    ).toBeUndefined();
+
+    // THE RE-MARK: the served dispatch marks an attested entry's payload
+    // — observed by a served handler on the same stream (a probe on the
+    // SERVING runtime, live now that the space is active). Fire two more
+    // (marked / unmarked) once the probe handler is installed.
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const seen: Array<{ kind: string; trusted: boolean }> = [];
+    // The entry's self-describing stream link IS the dispatch target.
+    const streamLink = {
+      space,
+      id: markedEntry.stream.id as never,
+      path: [...markedEntry.stream.path],
+      scope: (markedEntry.stream.scope ?? "space") as never,
+    };
+    const cancelProbe = servingRuntime!.scheduler.addEventHandler(
+        (_tx, event: unknown) => {
+          seen.push({
+            kind: (event as { kind?: string })?.kind ?? "?",
+            trusted: isRendererTrustedEvent(event),
+          });
+        },
+        streamLink,
+      );
+    try {
+      const marked2 = { kind: "marked-2" };
+      markRendererTrustedEvent(marked2);
+      result.key("bump").send(marked2);
+      result.key("bump").send({ kind: "unmarked-2" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () =>
+          seen.some((s) => s.kind === "marked-2") &&
+          seen.some((s) => s.kind === "unmarked-2"),
+        "the served probe handler to see both fires",
+      );
+      expect(seen.find((s) => s.kind === "marked-2")!.trusted).toBe(true);
+      expect(seen.find((s) => s.kind === "unmarked-2")!.trusted).toBe(false);
+    } finally {
+      cancelProbe();
+    }
+
+    // A caller-supplied attestation VALUE never reaches the entry: the
+    // append queue carries only the runtime's `true` (a forged "yes"
+    // through the raw append API is dropped at the queue; the engine's
+    // admission refuses any non-`true` value that does arrive — pinned
+    // in memory's `v2-event-append.test.ts`).
+    const forgedManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    try {
+      const delivery = await forgedManager.open(space).replica
+        .enqueueEventAppend!({
+          sidecarId,
+          stream: markedEntry.stream,
+          eventId: `evt:forged:${sidecarId}`,
+          payload: { kind: "forged" } as never,
+          ...({ rendererTrusted: "yes" } as Record<string, unknown>),
+        });
+      expect(delivery.delivered).toBe(true);
+    } finally {
+      await forgedManager.close();
+    }
+    await waitUntil(
+      () =>
+        ((Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined)?.entries ?? []).some((entry) =>
+            (entry.payload as { kind?: string } | undefined)?.kind ===
+              "forged"
+          ),
+      "the forged-value append to land (sanitized)",
+    );
+    const forgedEntry =
+      (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
+        .entries!.find((entry) =>
+          (entry.payload as { kind?: string } | undefined)?.kind === "forged"
+        )!;
+    expect(
+      (forgedEntry as { rendererTrusted?: unknown }).rendererTrusted,
+    ).toBeUndefined();
     cancelDemand();
   });
 
