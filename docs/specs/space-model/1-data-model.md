@@ -574,7 +574,7 @@ The flow becomes:
 Encode: codec.encode(instance) → state
         → wrap(codec.tagForValue(instance), state) → wire
 Decode: wire → unwrap() → { tag, state }
-        → registry.codecFromTag(tag).decode(tag, state, ctx)
+        → registry.codecFromTag(tag).decode(tag, state, env)
         → instance
 ```
 
@@ -608,14 +608,14 @@ function encodeValue(value: FabricValue): JsonCodecValue {
 // At boundary entry (inside the engine's decode walk)
 function decodeValue(
   data: JsonCodecValue,
-  ctx: LiveEnvironment,
+  env: LiveEnvironment,
 ): FabricValue {
   const unwrapped = unwrapTag(data);
   if (unwrapped) {
     const { tag, state } = unwrapped;
     const codec = registry.codecFromTag(tag);
-    if (codec) return codec.decode(tag, decodeValue(state, ctx), ctx);
-    return new UnknownValue(tag, decodeValue(state, ctx));
+    if (codec) return codec.decode(tag, decodeValue(state, env), env);
+    return new UnknownValue(tag, decodeValue(state, env));
   }
   // Handle primitives, arrays, plain objects recursively...
 }

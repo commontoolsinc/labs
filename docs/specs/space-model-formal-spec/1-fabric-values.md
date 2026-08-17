@@ -2548,7 +2548,7 @@ decode direction:
 
 > **Why the boundary is this narrow.** Tag wrapping and unwrapping are
 > machinery internal to the engine, leaving only the
-> `encode(value) -> SerializedForm` / `decode(data, runtime) -> FabricValue`
+> `encode(value) -> SerializedForm` / `decode(data, env) -> FabricValue`
 > pair as public API. The engine owns the full pipeline rather than the tag
 > step alone, and its public surface says so by exposing nothing else.
 
