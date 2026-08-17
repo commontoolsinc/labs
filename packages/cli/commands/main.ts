@@ -18,7 +18,7 @@ import { ingest } from "./ingest.ts";
 import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
 import { invocationSession } from "./invocation-session.ts";
-import { piece } from "./piece.ts";
+import { piece, pieceDataCommand } from "./piece.ts";
 import { space } from "./space.ts";
 import { test } from "./test-command.ts";
 import { view } from "./view.ts";
@@ -173,4 +173,14 @@ export const main = new Command()
   .command("init", init)
   .command("invocation-session", invocationSession)
   .command("test", test)
-  .command("wish", wish);
+  .command("wish", wish)
+  // The top-level spellings of the piece data commands: the same builders
+  // the `piece` chain mounts under the same names, so `cf get` and
+  // `cf piece get` are one definition parsed two ways
+  // (docs/plans/cli-surface-shape.md, step 5).
+  // @ts-ignore for the above type issue
+  .command("get", pieceDataCommand("get"))
+  // @ts-ignore for the above type issue
+  .command("set", pieceDataCommand("set"))
+  // @ts-ignore for the above type issue
+  .command("call", pieceDataCommand("call"));
