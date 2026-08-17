@@ -100,6 +100,10 @@ jobs:
         timeout-minutes: *work-timeout
         run: deno task check-conflict-markers
 
+      - name: 🎭 Check the verb-session walkthrough against its demo
+        timeout-minutes: *work-timeout
+        run: deno task check-verb-session-sync
+
       - name: 🔎 Check for unused import map dependencies
         timeout-minutes: *work-timeout
         run: deno task check-unused-deps
