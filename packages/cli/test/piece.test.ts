@@ -26,6 +26,7 @@ import {
   checkPieceSourceFromCommand,
   formatPatternIdentity,
   formatPatternRef,
+  getCellValueFromCommand,
   localPatternEntry,
   mergePiecePath,
   normalizeApiUrl,
@@ -33,6 +34,9 @@ import {
   parsePieceOptions,
   parseSpaceOptions,
   piece,
+  readCallTarget,
+  readTargetPositionals,
+  setCellValueFromCommand,
   setPieceSourceFromCommand,
 } from "../commands/piece.ts";
 import {
@@ -415,6 +419,142 @@ describe("cli piece parsing", () => {
       .toThrow(/--space/);
     expect(() => parseSpaceOptions({ ...base, piece: PIECE }))
       .toThrow(/--space/);
+  });
+
+  it('parsePieceOptions() honors "#argument" only where a command takes --input', () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    expect(parsePieceOptions(
+      { ...base, piece: `/${LLM_HANDLE}#argument` },
+      { acceptsArgument: true },
+    )).toMatchObject({
+      piece: LLM_HANDLE,
+      pieceInput: true,
+    });
+    expect(() =>
+      parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}#argument` })
+    )
+      .toThrow(/does not take "--input"/);
+    // The alias grammar has no fragments; refusing loudly beats burying the
+    // suffix inside an id that later fails as unknown.
+    expect(() => parseSpaceOptions({ ...base, piece: `${PIECE}#argument` }))
+      .toThrow(/canonical reference form/);
+  });
+
+  it("readTargetPositionals() reads a leading canonical reference as the address", () => {
+    expect(readTargetPositionals({}, undefined, undefined)).toEqual({});
+    expect(readTargetPositionals({}, "items/0", undefined)).toEqual({
+      pathString: "items/0",
+    });
+    expect(readTargetPositionals({}, `/${LLM_HANDLE}`, "items/0")).toEqual({
+      address: `/${LLM_HANDLE}`,
+      pathString: "items/0",
+    });
+    // Naming the target twice is refused, like --space beside --url.
+    expect(() => readTargetPositionals({ piece: PIECE }, `/${LLM_HANDLE}`))
+      .toThrow(/"--piece" cannot be provided/);
+    // Only an address earns a second positional.
+    expect(() => readTargetPositionals({}, "items/0", "title"))
+      .toThrow(/Unexpected argument "title"/);
+  });
+
+  it("readCallTarget() lets a canonical reference precede the callable name", () => {
+    expect(readCallTarget({}, "addItem", ["{}"])).toEqual({
+      callableName: "addItem",
+      tail: ["{}"],
+    });
+    expect(readCallTarget({}, `/${LLM_HANDLE}`, ["addItem", "{}"])).toEqual({
+      piece: `/${LLM_HANDLE}`,
+      callableName: "addItem",
+      tail: ["{}"],
+    });
+    expect(() =>
+      readCallTarget({ piece: PIECE }, `/${LLM_HANDLE}`, ["addItem"])
+    )
+      .toThrow(/"--piece" cannot be provided/);
+    expect(() => readCallTarget({}, `/${LLM_HANDLE}`, []))
+      .toThrow(/callable name/);
+  });
+
+  it('parseLink() rejects the "#argument" suffix on a link endpoint', () => {
+    expect(() => parseLink(`/${LLM_HANDLE}#argument`))
+      .toThrow(/does not apply to a link endpoint/);
+  });
+
+  it("getCellValueFromCommand() reads through a positional address, honoring #argument", async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const reads: unknown[][] = [];
+    const rendered: unknown[] = [];
+    const deps = {
+      getCellValue: ((...args: unknown[]) => {
+        reads.push(args);
+        return Promise.resolve({ ok: true });
+      }) as never,
+      render: ((value: unknown) => {
+        rendered.push(value);
+      }) as never,
+    };
+    await getCellValueFromCommand(
+      base,
+      `/${LLM_HANDLE}/items/0`,
+      "title",
+      deps,
+    );
+    expect(reads[0]?.[0]).toMatchObject({ piece: LLM_HANDLE });
+    expect(reads[0]?.slice(1)).toEqual([
+      ["items", 0, "title"],
+      { input: undefined, step: undefined },
+    ]);
+    await getCellValueFromCommand(
+      base,
+      `/${LLM_HANDLE}#argument`,
+      undefined,
+      deps,
+    );
+    expect(reads[1]?.slice(1)).toEqual([[], { input: true, step: undefined }]);
+    expect(rendered).toEqual([{ ok: true }, { ok: true }]);
+  });
+
+  it("setCellValueFromCommand() writes through a positional address and requires a path", async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const writes: unknown[][] = [];
+    const hints: string[] = [];
+    const deps = {
+      drainStdin: (() => Promise.resolve("Milk")) as never,
+      setCellValue: ((...args: unknown[]) => {
+        writes.push(args);
+        return Promise.resolve();
+      }) as never,
+      render: (() => {}) as never,
+      hint: ((text: string) => {
+        hints.push(text);
+      }) as never,
+    };
+    // The embedded path alone satisfies the path requirement.
+    await setCellValueFromCommand(
+      base,
+      `/${LLM_HANDLE}/title`,
+      undefined,
+      deps,
+    );
+    expect(writes[0]?.slice(1)).toEqual([
+      ["title"],
+      "Milk",
+      { input: undefined },
+    ]);
+    expect(hints[0]).toContain("cf piece step");
+    // A pathless write is apply's job, whichever spelling carried the target.
+    await expect(
+      setCellValueFromCommand(base, `/${LLM_HANDLE}`, undefined, deps),
+    )
+      .rejects.toThrow(/A path is required/);
+    await expect(
+      setCellValueFromCommand(
+        { ...base, piece: `/${LLM_HANDLE}` },
+        undefined,
+        undefined,
+        deps,
+      ),
+    ).rejects.toThrow(/A path is required/);
   });
 
   it("parsePieceOptions() throws on incomplete input", () => {

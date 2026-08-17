@@ -2,7 +2,9 @@
  * The LLM-friendly link form — `/[@did:.../]of:fid1:<id>[@scope][/path]`,
  * the runner's `parseLLMFriendlyLink` grammar — is the canonical reference
  * syntax of the fabric: the same string names the same cell in patterns, in
- * the shell, and at this CLI's intake seams. The CLI's bare grammar
+ * the shell, and at this CLI's intake seams. At those seams the reference
+ * may additionally end in the `#argument` suffix, which selects the piece's
+ * arguments cell the way `--input` does. The CLI's bare grammar
  * (`pieceId[@scope]`, `pieceId[@scope]/path` at link endpoints, and slugs)
  * is a convenience alias for interactive use. New reference-syntax
  * capabilities land in the canonical form first, and the alias must not
@@ -22,6 +24,12 @@ import {
 export interface NormalizedLLMFriendlyRef {
   pieceId: string;
   scope?: CellScope;
+  /**
+   * True when the reference ended in the `#argument` suffix: the caller
+   * selected the piece's arguments cell, the same selection `--input`
+   * spells as a flag. Only commands that take `--input` accept it.
+   */
+  input?: boolean;
   /**
    * The space DID embedded in the reference, when the command's target
    * space is a name (or absent) rather than a DID. A name only resolves to
@@ -79,16 +87,38 @@ export function validateEmbeddedSpaces(
  * name (or absent), the embedded DID comes back as `embeddedSpace` for the
  * caller to validate through `validateEmbeddedSpaces` once the session has
  * resolved the name.
+ *
+ * The one addition to the runner's grammar is the trailing `#argument`
+ * suffix, which comes back as `input`. `#` is reserved for it: a reference
+ * carrying any other fragment is refused, so a path key containing `#` needs
+ * the positional path spelling rather than the embedded one.
  */
 export function normalizeLLMFriendlyRef(
   ref: string,
   options: { space?: string } = {},
 ): NormalizedLLMFriendlyRef | undefined {
-  if (!matchLLMFriendlyLink.test(ref.trim())) return undefined;
+  let trimmed = ref.trim();
+  if (!matchLLMFriendlyLink.test(trimmed)) return undefined;
+
+  let input = false;
+  const hash = trimmed.indexOf("#");
+  if (hash !== -1) {
+    const suffix = trimmed.slice(hash);
+    if (suffix !== "#argument") {
+      throw new ValidationError(
+        `Unknown reference suffix "${suffix}". The one supported suffix ` +
+          `is "#argument", which selects the piece's arguments cell the ` +
+          `way "--input" does.`,
+        { exitCode: 1 },
+      );
+    }
+    input = true;
+    trimmed = trimmed.slice(0, hash);
+  }
 
   let parsed;
   try {
-    parsed = parseLLMFriendlyLink(ref);
+    parsed = parseLLMFriendlyLink(trimmed);
   } catch (error) {
     throw new ValidationError(
       error instanceof Error ? error.message : String(error),
@@ -115,6 +145,7 @@ export function normalizeLLMFriendlyRef(
     pieceId,
     ...(parsed.scope && { scope: parsed.scope as CellScope }),
     ...(embeddedSpace !== undefined && { embeddedSpace }),
+    ...(input && { input: true }),
     path: parsed.path.map(linkPathSegmentToCellPathSegment),
   };
 }

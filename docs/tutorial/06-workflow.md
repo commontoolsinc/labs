@@ -130,6 +130,11 @@ disagrees with it is refused. So an address copied off one command's output
 drives the next command unchanged, even from a shell configured for a
 different space.
 
+On `get`, `set`, and `call`, the canonical reference can also sit in the
+first positional instead of the flag — `cf piece get /of:fid1:.../items` —
+and a trailing `#argument` selects the piece's arguments cell the way
+`--input` does.
+
 One subtlety: neither `piece set` nor `piece call` refreshes *computed*
 outputs. `set` writes the cell without running anything; `call` runs the
 handler (so the handler's own writes land and sync), but the scheduler is

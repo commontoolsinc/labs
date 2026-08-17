@@ -350,8 +350,13 @@ const ARGUMENT_PROVIDERS: Readonly<
   Record<string, (line: CompletionLine) => Promise<ProviderResult>>
 > = {
   "piece call:callable": callableCandidates,
+  // The first positional of `piece get`/`piece set` is a cell path unless the
+  // caller writes a canonical address there, and an address is pasted rather
+  // than completed — so the path candidates serve the slot either way.
+  "piece get:addressOrPath": cellPathCandidates,
   "piece get:path": cellPathCandidates,
   "piece get-label:path": cellPathCandidates,
+  "piece set:addressOrPath": cellPathCandidates,
   "piece set:path": cellPathCandidates,
   "piece set-label:path": cellPathCandidates,
   "piece link:source": linkEndpointCandidates,
