@@ -131,13 +131,18 @@ export function isStandaloneFunctionDefinition(
     return true;
   }
 
-  const parent = func.parent;
+  // Parentheses around the function are spelling: `const f = ((x) => x)`
+  // defines the same standalone function as the bare initializer, and must
+  // reach the same standalone validation and context classification.
+  let parent: ts.Node | undefined = func.parent;
+  while (parent && ts.isParenthesizedExpression(parent)) {
+    parent = parent.parent;
+  }
+  if (!parent) return false;
   if (ts.isVariableDeclaration(parent)) return true;
   if (ts.isPropertyAssignment(parent)) return true;
-  if (ts.isCallExpression(parent) && parent.arguments.includes(func)) {
-    return false;
-  }
-  if (ts.isJsxExpression(parent)) return false;
+  // Everything else — call arguments, JSX expressions, operands — is an
+  // inline use, owned by whatever consumes it.
   return false;
 }
 
