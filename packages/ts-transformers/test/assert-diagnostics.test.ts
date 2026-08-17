@@ -150,7 +150,8 @@ Deno.test("assert lowers to a lift carrying a concrete record schema", async () 
   return { check };`));
 
   // The record has to reach the harness intact. An inferred `unknown` here
-  // would give the field `{ type: "unknown" }`, which reads back as undefined.
+  // would give the field `{ type: "unknown" }`, which reads back as a
+  // reference carrying none of the record's fields.
   const [, result] = callSchemas(root, "lift");
   assertEquals(result?.type, "object");
   const properties = result?.properties as Record<string, { type?: string }>;

@@ -15,8 +15,8 @@ interface ParentChildBubbleArgs {
 }
 
 type BubbleEvent = {
-  amount?: unknown;
-  via?: unknown;
+  amount?: number;
+  via?: string;
 };
 
 type BubbleRecord = {

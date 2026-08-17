@@ -6,6 +6,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
+import { areLinksSame, parseLink } from "../src/link-utils.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -282,8 +283,8 @@ describe("Schema - AnyOf Support", () => {
 
         const cell = c.asSchema(schema);
         const result = cell.get();
-        // Object schema matches first; mergeAnyOfMatches returns matches[0]
-        // which is the resolved object, so the full property value is present.
+        // Both branches match, so the merge combines them; the object
+        // branch is what carries the properties.
         expect((result.item as { name: string }).name).toBe("Alice");
       });
 
@@ -312,9 +313,63 @@ describe("Schema - AnyOf Support", () => {
 
         const cell = c.asSchema(schema);
         const result = cell.get();
-        // unknown matches first; mergeAnyOfMatches returns matches[1]
-        // which is the resolved object, so the full property value is present.
+        // Branch order does not matter to the merge: the object branch is
+        // still what carries the properties.
         expect((result.item as { name: string }).name).toBe("Alice");
+      });
+
+      it("keeps the identity of the position every branch describes", () => {
+        // The merge combines the branches' properties. It must also carry the
+        // back-to-cell annotation they share, or the merged value stops
+        // naming where it was read from: `equals()` refuses it, and writing it
+        // back stores an inline copy where a link belongs.
+        const target = runtime.getCell<{ name: string; rank: number }>(
+          space,
+          "anyOf merge keeps identity target",
+          undefined,
+          tx,
+        );
+        target.set({ name: "Alice", rank: 1 });
+
+        const holderSchema = {
+          type: "object",
+          properties: {
+            item: {
+              anyOf: [
+                { type: "object", properties: { name: { type: "string" } } },
+                { type: "unknown" },
+              ],
+            },
+          },
+        } as const satisfies JSONSchema;
+        const holder = runtime.getCell(
+          space,
+          "anyOf merge keeps identity holder",
+          holderSchema as JSONSchema,
+          tx,
+        );
+        holder.set({ item: target } as never);
+
+        const item = (holder.get() as { item: unknown }).item;
+        expect(areLinksSame(item, target, undefined, true, tx, runtime))
+          .toBe(true);
+
+        const sink = runtime.getCell(
+          space,
+          "anyOf merge keeps identity sink",
+          holderSchema as JSONSchema,
+          tx,
+        );
+        sink.set({ item } as never);
+        const stored = (sink.getRaw() as { item?: unknown })?.item;
+        // A link, not an inline copy of the target's properties...
+        expect(parseLink(stored, sink.getAsNormalizedFullLink()))
+          .not.toBeUndefined();
+        // ...and one that resolves to the target. The link addresses the slot
+        // it was read from rather than the target directly, which is what an
+        // object property has always stored.
+        expect(areLinksSame(stored, target, undefined, true, tx, runtime))
+          .toBe(true);
       });
     });
 

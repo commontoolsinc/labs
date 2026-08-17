@@ -32,7 +32,7 @@ import {
 } from "@commonfabric/utils/types";
 
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
-import { toCell } from "./back-to-cell.ts";
+import { opaqueReference, toCell } from "./back-to-cell.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -966,7 +966,7 @@ export function mergeDefaults(
  * is first shallow-cloned. It is up to callers to ensure that mutable and
  * unbound `value`s are indeed appropriate to be mutated.
  */
-function annotateWithBackToCellSymbols(
+export function annotateWithBackToCellSymbols(
   value: any,
   runtime: Runtime,
   link: NormalizedFullLink,
@@ -1365,6 +1365,36 @@ const combinedCellSchemaCache = new WeakMap<
   Map<string, JSONSchema>
 >();
 
+/**
+ * The value an opaque (`type: "unknown"`) position projects to when something
+ * is there: an empty object carrying the back-to-cell annotation and the
+ * marker that says it holds nothing of what it names. Both read paths mint it
+ * here, so a reader cannot tell which one answered.
+ */
+export function createOpaqueReference(
+  runtime: Runtime,
+  link: NormalizedFullLink,
+  tx: IExtendedStorageTransaction | undefined,
+  synced: boolean,
+  cfcLabelView: CfcLabelView | undefined,
+): FabricValue {
+  const value: Record<symbol, unknown> = {};
+  // Non-enumerable, like the back-to-cell annotation beside it, so the marker
+  // stays off `Object.keys` and out of a spread.
+  Object.defineProperty(value, opaqueReference, {
+    value: true,
+    enumerable: false,
+  });
+  return annotateWithBackToCellSymbols(
+    value,
+    runtime,
+    link,
+    tx,
+    synced,
+    cfcLabelView,
+  );
+}
+
 class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<FabricValue>> {
   constructor(
@@ -1483,6 +1513,30 @@ class TransformObjectCreator
       this.synced,
       this.labelViewFor(link),
     );
+  }
+
+  /**
+   * An opaque (`type: "unknown"`) position that holds something projects to an
+   * empty object carrying the back-to-cell annotation. That is the whole
+   * contract: it is truthy, it compares by identity through `equals()`, and
+   * writing it back stores a link to the same document. It carries no
+   * properties, so a reader that probes it learns nothing about the target
+   * beyond its existence — which is what `unknown` declares.
+   *
+   * An empty object rather than a fresh symbol only because the back-to-cell
+   * annotation is carried as a property and a symbol cannot hold one; see the
+   * TODO on `toCell`.
+   */
+  createOpaquePresence(
+    link: NormalizedFullLink,
+  ): AnyCellWrapping<FabricValue> {
+    return createOpaqueReference(
+      this.runtime,
+      link,
+      this.tx,
+      this.synced,
+      this.labelViewFor(link),
+    ) as AnyCellWrapping<FabricValue>;
   }
 
   /**

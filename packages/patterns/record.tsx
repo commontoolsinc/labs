@@ -61,16 +61,18 @@ export interface RecordOutput {
   /** Adds a module of the named type to this record's sub-pieces. */
   addModule?: Stream<{
     type: string;
-    initialData?: Record<string, unknown>;
+    initialData?: { label?: string; [key: string]: unknown };
     result?: Writable<unknown>;
   }>;
   /** Writes a structured summary of every module into the result cell. */
   getSummary?: Stream<{ result?: Writable<unknown> }>;
-  /** Sets a directly-settable field on the module at the given index. */
+  /** Sets a directly-settable field on the module at the given index. The
+   * value is written into that field, so it is declared as the scalars a
+   * module field holds rather than as `unknown`, which declares a reference. */
   updateModule?: Stream<{
     index: number;
     field: string;
-    value: unknown;
+    value: string | number | boolean | null;
     result?: Writable<unknown>;
   }>;
   /** Moves the module at the given index to the trash. */
@@ -94,8 +96,8 @@ const seedRecord = lift<{
   currentPieces: SubPieceEntry[]; // Unwrapped value, used only for the guard
   subPieces: Writable<SubPieceEntry[]>;
   // The pieces the seeder stores on the entries. Typed as cells so the handle
-  // survives the lift boundary; a plain `unknown` is read back as undefined and
-  // the module is lost.
+  // survives the lift boundary with something to write; a plain `unknown` is
+  // read back as a reference carrying nothing, and the module is lost.
   notesPiece: Cell<NoteOutput>;
   typePickerPiece: Cell<TypePickerOutput>;
   isInitialized: Writable<boolean>;
@@ -137,9 +139,10 @@ const seedRecord = lift<{
 // ===== Reading a sub-piece's own fields =====
 //
 // SubPieceEntry.piece is typed `unknown`, which lowers to `{ type: "unknown" }`,
-// and an object read under that schema comes back as undefined rather than
-// materialized. So `entry.piece.label` and its siblings read as undefined
-// wherever the entry carries its declared schema. What materializes a read is
+// and a read under that schema stops at the reference rather than
+// materializing what it names. So `entry.piece.label` and its siblings read as
+// undefined wherever the entry carries its declared schema. What materializes
+// a read is
 // the schema of the operand it is read into, so the lifts below name the fields
 // they want: the read then follows the entry's link into the sub-piece and
 // materializes them, and re-runs when the sub-piece changes them. The call sites
@@ -168,11 +171,18 @@ const readDisplayFields = lift<
   nickname: piece?.nickname,
 }));
 
-// Helper to check if a module has settings UI
+/** The one field the settings lifts read off a sub-piece. */
+interface SettingsBearing {
+  settingsUI?: unknown;
+}
+
+// Whether the module exports a settings UI. Naming `settingsUI` on the operand
+// is what makes the read follow the link: an operand that only says the piece
+// is permissive defers to the schema the entry carries, which has
+// `piece: unknown` in it. The node itself stays `unknown` — this asks whether
+// there is one, not what it renders.
 const moduleHasSettings = lift(
-  // deno-lint-ignore no-explicit-any
-  ({ piece }: { piece?: any }) => {
-    // Check if the piece exports a settingsUI
+  ({ piece }: { piece?: SettingsBearing }) => {
     return !!piece?.settingsUI;
   },
 );
@@ -186,8 +196,7 @@ const moduleHasSettings = lift(
 // a copy, so the controls in it stay bound to the sub-piece.
 const readSettingsUI = lift(
   ({ entries, index }: {
-    // deno-lint-ignore no-explicit-any
-    entries?: { piece: any }[];
+    entries?: { piece: SettingsBearing }[];
     index?: number;
   }) => {
     if (index === undefined || index === null) return null;
@@ -570,7 +579,7 @@ const handleGetSummary = handler<
 const handleAddModule = handler<
   {
     type: string;
-    initialData?: Record<string, unknown>;
+    initialData?: { label?: string; [key: string]: unknown };
     result?: Writable<unknown>;
   },
   {
@@ -660,8 +669,16 @@ const handleAddModule = handler<
 // index: module index in subPieces array
 // field: field name to update
 // value: new value
+// `value` is written into the addressed field, so it is declared as the
+// scalars a module field holds. `unknown` is the declaration for a reference
+// nobody reads through, and this one is read on its way into the piece.
 const handleUpdateModule = handler<
-  { index: number; field: string; value: unknown; result?: Writable<unknown> },
+  {
+    index: number;
+    field: string;
+    value: string | number | boolean | null;
+    result?: Writable<unknown>;
+  },
   { subPieces: Writable<SubPieceEntryHandle[]> }
 >(({ index, field, value, result }, { subPieces: sc }) => {
   const current = sc.get() || [];
@@ -1088,7 +1105,7 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Get the settings UI for the currently selected module (if any)
     const currentSettingsUI = readSettingsUI({
-      entries: subPieces,
+      entries: subPieces as { piece: SettingsBearing }[],
       index: settingsModuleIndex,
     });
 
@@ -1321,7 +1338,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 {/* Settings gear - only show if module has settingsUI */}
                                 {!isExpanded &&
                                   ifElse(
-                                    moduleHasSettings({ piece: entry.piece }),
+                                    moduleHasSettings({
+                                      piece: entry.piece as SettingsBearing,
+                                    }),
                                     <button
                                       type="button"
                                       onClick={openSettings({
@@ -1613,7 +1632,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   {/* Settings gear - only show if module has settingsUI */}
                                   {!isExpanded &&
                                     ifElse(
-                                      moduleHasSettings({ piece: entry.piece }),
+                                      moduleHasSettings({
+                                        piece: entry.piece as SettingsBearing,
+                                      }),
                                       <button
                                         type="button"
                                         onClick={openSettings({
@@ -1898,7 +1919,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                               {/* Settings gear - only show if module has settingsUI */}
                               {!isExpanded &&
                                 ifElse(
-                                  moduleHasSettings({ piece: entry.piece }),
+                                  moduleHasSettings({
+                                    piece: entry.piece as SettingsBearing,
+                                  }),
                                   <button
                                     type="button"
                                     onClick={openSettings({
@@ -2237,7 +2260,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               {settingsModuleDisplay.icon} {settingsModuleDisplay.label}{" "}
               Settings
             </span>
-            {currentSettingsUI}
+            {currentSettingsUI as VNode}
             <cf-hstack
               slot="footer"
               gap="3"

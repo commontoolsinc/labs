@@ -399,8 +399,7 @@ export default pattern(() => {
   });
 
   const action_capture_projection = action(() => {
-    // `FsProjection` is a union whose open arm types content loosely.
-    projectedBody.set(String(projected[FS].content ?? ""));
+    projectedBody.set(projected[FS].content ?? "");
   });
 
   // The property every `touch` depends on: handing back exactly what was

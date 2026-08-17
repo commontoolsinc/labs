@@ -214,7 +214,8 @@ Three things about the stage are load-bearing:
 - The callback gets an **explicit return type annotation**, because schema
   injection uses a callback's annotation directly when it has one. An inferred
   `unknown` return would give the assertion `{ type: "unknown" }`, and a field
-  with that schema reads back as `undefined`.
+  with that schema is not materialized: it reads back as an opaque reference
+  carrying none of the value's properties.
 - The record shape is emitted **unconditionally**, since `assert` declares that
   it returns an `AssertRecord` and the value has to match the declared type.
   `TransformationOptions.assertDiagnostics: false` drops the recording calls and
