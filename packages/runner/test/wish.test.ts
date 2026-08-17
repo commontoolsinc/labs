@@ -3032,11 +3032,62 @@ describe("wish built-in", () => {
       expect(String(state?.error)).toContain("profile");
       expect(ui?.name).toBe("cf-render");
       expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
+      // The cell behind that `cf-render` is filled by the deferred launch, and
+      // this suite runs without net access, so what lands in it is the load
+      // failure. The case below is the one that pins that.
       expect(
-        result.key("profile").key(UI).key("props").key("$cell")
-          .resolveAsCell()
-          .getRaw(),
-      ).toBeUndefined();
+        JSON.stringify(
+          result.key("profile").key(UI).key("props").key("$cell")
+            .resolveAsCell().getRaw(),
+        ),
+      ).toContain("profile-create.tsx");
+    });
+
+    it("settles the create surface's launch and says so when it cannot load", async () => {
+      // Two things the create surface used to get wrong at once. The wish sends
+      // its `[UI]` — a `cf-render` over a cell only the deferred launch fills —
+      // and then the runtime reported itself idle with that cell still empty,
+      // so a caller settling the view was told a surface still on its way had
+      // arrived. And when the launch could not produce a pattern (here the
+      // fetch is refused: this suite runs without net access), nothing was
+      // written at all, leaving the only route to a first profile permanently
+      // blank with no account of why.
+      //
+      // One `idle()`, no draining loop, and the cell holds the failure.
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-create-launch",
+        undefined,
+        tx,
+      );
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile" }),
+      }));
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-create-launch-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+      await runtime.idle();
+
+      const createCell = result.key("profile").key(UI).key("props").key("$cell")
+        .resolveAsCell();
+      expect(JSON.stringify(createCell.key(UI).get())).toContain(
+        "profile-create.tsx",
+      );
     });
 
     it("fetches the profile-create pattern from the pattern environment apiUrl set after module load", async () => {
@@ -3086,16 +3137,14 @@ describe("wish built-in", () => {
 
         await result.pull();
 
-        // The missing-profile UI kicks off a deferred profile-create fetch.
-        // `recordedUrls` is a plain array, not a cell, so there is no sink to
-        // wait on; drain the runtime (including post-commit effects) until the
-        // deferred fetch has routed through, bounded as a stuck-condition guard.
-        const expectedUrl =
-          "https://pattern-env.test/api/patterns/system/profile-create.tsx";
-        for (let i = 0; i < 50 && !recordedUrls.includes(expectedUrl); i++) {
-          await runtime.settled();
-        }
-        expect(recordedUrls).toContain(expectedUrl);
+        // The missing-profile UI kicks off a deferred profile-create fetch,
+        // which the wish registers as scheduler background work — so one idle
+        // covers it and `recordedUrls`, a plain array with no sink to wait on,
+        // is already written by the time idle resolves.
+        await runtime.idle();
+        expect(recordedUrls).toContain(
+          "https://pattern-env.test/api/patterns/system/profile-create.tsx",
+        );
       } finally {
         globalThis.fetch = originalFetch;
         setPatternEnvironment(originalEnvironment);
@@ -4135,16 +4184,10 @@ describe("wish built-in", () => {
           // Give the deferred fetch a moment to route through and commit.
           const pickerCell = result.key("profile").key(UI).key("props")
             .key("$cell").resolveAsCell();
-          // The deferred fetch rejects and the error UI commits into the picker
-          // cell; drain the runtime until it lands, bounded as a stuck-condition
-          // guard.
-          let errorNode: any;
-          for (let i = 0; i < 50; i++) {
-            await runtime.settled();
-            errorNode = pickerCell.key(UI).get() as any;
-            if (errorNode) break;
-          }
-          expect(errorNode).toBeDefined();
+          // The picker launch is scheduler background work, so one settle
+          // covers the rejected fetch and the error UI it commits.
+          await runtime.settled();
+          expect(pickerCell.key(UI).get()).toBeDefined();
         } finally {
           globalThis.fetch = originalFetch;
           setPatternEnvironment(originalEnvironment);

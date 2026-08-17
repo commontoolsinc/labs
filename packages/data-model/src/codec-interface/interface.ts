@@ -120,7 +120,7 @@ export interface FabricCodec<Encoded> {
   decode(
     typeTag: string,
     state: Encoded,
-    context: ReconstructionContext,
+    context: DecodeContext,
   ): FabricValue;
 
   /**
@@ -229,25 +229,25 @@ export interface FabricClassWithNonterminalCodec {
  * avoid a circular dependency between the fabric protocol and the runner.
  * See Section 2.5 of the formal spec.
  */
-export interface ReconstructionContext {
+export interface DecodeContext {
   /**
    * Resolves a cell reference, for a type that needs to intern or look up an
-   * existing instance during reconstruction.
+   * existing instance during decoding.
    */
   getCell(
     ref: { id: string; path: string[]; space: string },
   ): FabricInstance;
 
   /**
-   * Signals whether a reconstruction call should produce a deep-frozen
-   * result: `true` means the reconstructed value should be deep-frozen,
+   * Signals whether a decode call should produce a deep-frozen
+   * result: `true` means the decoded value should be deep-frozen,
    * `false` means a mutable result is acceptable. Same contract as `frozen`
    * passed to `cloneIfNecessary()` (see `value-clone.ts`):
    * `shouldDeepFreeze === true` corresponds to
    * `cloneIfNecessary(value, { frozen: true })`.
    *
    * Required (not optional): every context declares it. Contexts get it for
-   * free by extending `BaseReconstructionContext`, which centralizes the
+   * free by extending `BaseDecodeContext`, which centralizes the
    * getter; the `cloneIfNecessary`-style `true` default lives there.
    *
    * Enforcement: each codec's `decode()` queries this and abides by it,
@@ -257,29 +257,14 @@ export interface ReconstructionContext {
 }
 
 /**
- * Public boundary interface for serialization contexts. Encodes fabric
- * values into a serialized form and decodes them back. The type parameter
- * `SerializedForm` is the boundary type: `string` for JSON contexts,
- * `Uint8Array` for binary contexts.
+ * Public boundary interface for encoding a fabric value into a serialized
+ * form, ready to cross whatever boundary the format exists for. The type
+ * parameter `SerializedForm` is the boundary type: `string` for JSON
+ * contexts, `Uint8Array` for binary contexts.
  *
- * This is the only interface external callers need. Internal tree-walking
- * machinery is private to the context implementation.
+ * Internal tree-walking machinery is private to the implementation.
  */
-export interface SerializationContext<SerializedForm = unknown> {
-  /**
-   * Whether a failed reconstruction produces a `ProblematicValue` instead of
-   * throwing.
-   *
-   * @default false
-   */
-  readonly lenient: boolean;
-
+export interface EncodeContext<SerializedForm = unknown> {
   /** Encodes a fabric value into serialized form for boundary crossing. */
   encode(value: FabricValue): SerializedForm;
-
-  /** Decodes a serialized form back into a fabric value. */
-  decode(
-    data: SerializedForm,
-    context: ReconstructionContext,
-  ): FabricValue;
 }

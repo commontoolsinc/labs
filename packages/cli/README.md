@@ -78,12 +78,35 @@ Commands that take a piece accept two textual reference forms:
   `/[@did:.../]of:fid1:<id>[@scope][/path]`. This is the one reference syntax of
   the fabric — the same string names the same cell in patterns, in the shell,
   and here. A path embedded in a canonical `--piece` reference prefixes the
-  command's positional path argument.
+  command's positional path argument. A space embedded in it names the target
+  space: it supplies the space when `--space` is absent, and when both are given
+  they must agree — a mismatch is refused rather than resolved, at parse time
+  against a `--space` DID and once the session opens against a `--space` name.
+  An address printed by one command therefore composes into the next with no
+  flag beside it, whatever space the reader has configured.
 - The CLI's bare form: `pieceId[@scope]`, `pieceId[@scope]/path` at link
   endpoints, and slugs. This is a convenience alias for interactive use.
 
 New reference-syntax capabilities land in the canonical form first; the alias
 does not grow a capability the canonical form lacks.
+
+On `piece get`, `piece set`, and `piece call`, a canonical reference can sit in
+the first positional instead of riding `--piece`: an address begins with `/` and
+a relative path never does, so the two positions cannot collide. The bare and
+slug spellings stay on `--piece`, where no path competes for the position.
+Naming the target twice — `--piece` beside a positional address — is refused
+rather than resolved.
+
+Those three commands are also mounted at top level as `cf get`, `cf set`, and
+`cf call`: reading and writing cells is not a piece-management concern, and the
+spelling says so. Each pair is one definition mounted twice, so the two
+spellings take the same flags, behave identically, and complete identically;
+both keep working.
+
+A canonical reference may also end in `#argument`, which selects the piece's
+arguments cell the way `--input` does. Only commands that take `--input` accept
+it; `#` is reserved for the suffix, so a path key containing `#` needs the
+positional path spelling.
 
 ## Piece discovery
 
@@ -133,9 +156,10 @@ standard error and continues searching that piece and the rest of the space.
 ## Piece CFC labels
 
 `cf piece get-label` returns the effective CFC label view for a result path.
-Pass `--input` to select the input cell. The paths in the returned view are
-relative to the selected path, and the view includes declared, derived, and
-link-carried labels. An unlabeled value returns JSON `null`.
+Pass `--input` to select the input cell — a `--piece` reference ending in
+`#argument` selects it too. The paths in the returned view are relative to the
+selected path, and the view includes declared, derived, and link-carried labels.
+An unlabeled value returns JSON `null`.
 
 ```bash
 cf piece get-label --piece ID messages/0/body

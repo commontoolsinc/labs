@@ -1,4 +1,4 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { URI } from "@commonfabric/memory/interface";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type {
@@ -22,8 +22,8 @@ const isPrefix = (
   left.every((segment, index) => segment === right[index]);
 
 const isCfcMetadata = (value: unknown): value is CfcMetadata =>
-  isObjectOrArray(value) && value.version === 1 &&
-  isObjectOrArray(value.labelMap) &&
+  isObjectNotArray(value) && value.version === 1 &&
+  isObjectNotArray(value.labelMap) &&
   Array.isArray(value.labelMap.entries);
 
 export const readStoredCfcMetadata = (

@@ -10,8 +10,8 @@ import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
+  DecodeContext,
   JSON_CODEC,
-  ReconstructionContext,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 
@@ -129,7 +129,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       decode(
         typeTag: string,
         state: JsonCodecValue,
-        _context: ReconstructionContext,
+        _context: DecodeContext,
       ): FabricBytes | ProblematicValue {
         if (typeof state !== "string") {
           return new ProblematicValue(

@@ -32,7 +32,7 @@ import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
@@ -181,7 +181,7 @@ describe("FabricLink", () => {
     describe("[CODEC]", () => {
       const codec = FabricLink[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Link;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const context = EMPTY_DECODE_CONTEXT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Link` wire type tag", () => {

@@ -17,7 +17,7 @@ import { JSON_FORMAT, type JsonCodecValue } from "./interface.ts";
  * * The self-representing types (`null`, `boolean`, finite `number`, `string`)
  *   go through `registerSelfRep()`, each being its own JSON form, so that
  *   `codecFromValue()` reports them directly. Arrays and plain objects are
- *   likewise handled structurally by the serializer once no codec matches.
+ *   likewise handled structurally by the engine once no codec matches.
  * * The four types JSON cannot carry (`bigint`, special `number`, interned
  *   `symbol`, `undefined`) get a tagged encoding. None has an owned class to
  *   host a `[CODEC]`, so each is registered by `typeof` through

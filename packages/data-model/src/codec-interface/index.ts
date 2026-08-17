@@ -1,12 +1,12 @@
 export {
   CODEC,
   type CodecForFormat,
+  type DecodeContext,
+  type EncodeContext,
   type FabricClassWithNonterminalCodec,
   type FabricCodec,
   JSON_CODEC,
   type NonterminalCodec,
-  type ReconstructionContext,
-  type SerializationContext,
   type TerminalCodec,
   type WireFormat,
 } from "./interface.ts";
@@ -18,8 +18,8 @@ export { BaseFabricCodec } from "./BaseFabricCodec.ts";
 export { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
 export { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 
-export { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
+export { BaseDecodeContext } from "./BaseDecodeContext.ts";
 export {
-  EMPTY_RECONSTRUCTION_CONTEXT,
-  EmptyReconstructionContext,
-} from "./EmptyReconstructionContext.ts";
+  EMPTY_DECODE_CONTEXT,
+  EmptyDecodeContext,
+} from "./EmptyDecodeContext.ts";

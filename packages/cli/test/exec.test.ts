@@ -559,6 +559,16 @@ describe("parseExecArgs edge cases", () => {
     // And the help page lists it, which is the half a caller reads first.
     const help = renderExecHelp("/mnt/x.handler", spec, {});
     expect(help).toMatch(/--count/);
+
+    // The type block above the flags shows it too. The two are rendered by
+    // DIFFERENT readers — the flag list by the CLI's own, the type block by
+    // the runner's formatter — so one page could state two answers about one
+    // schema, and did. Sliced out rather than matched against the whole page,
+    // because `--count` in the flag list would satisfy a looser match on its
+    // own and the disagreement is exactly what needs catching.
+    const typeBlock = help.split("Input type:")[1]?.split("Flags:")[0] ?? "";
+    expect(typeBlock).toMatch(/note/);
+    expect(typeBlock).toMatch(/count/);
   });
 
   it("follows a reference into the definition a conjunction names", () => {

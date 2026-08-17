@@ -364,19 +364,21 @@ describe("cf exec read options", () => {
       { write: (text) => out.push(text), writeError: (text) => err.push(text) },
     );
 
-    // stdout stays exactly the tool's result; the address rides stderr in the
-    // `<id>@<scope>` form `--piece` parses, rather than the prose spelling
-    // `<id> (space <space>, scope <scope>)` that no command accepts.
+    // stdout stays exactly the tool's result; the address rides stderr as the
+    // canonical `/@<space>/<id>@<scope>` reference `--piece` parses, rather
+    // than the prose spelling `<id> (space <space>, scope <scope>)` that no
+    // command accepts.
     expect(out).toEqual(["{}"]);
     expect(err).toHaveLength(1);
-    expect(err[0]).toContain("of:tool-result@user");
     expect(err[0]).not.toContain("(space ");
-    // All three parts of the address, each where the reading command takes it.
-    // Dropping the space leaves a command that runs and reads whichever space
-    // the caller happens to have configured, which is the failure a spelling
-    // no command accepts at least could not cause.
+    // All three parts of the address inside the one token. Dropping the space
+    // leaves a command that runs and reads whichever space the caller happens
+    // to have configured — `cf exec` takes its space from the mount, so the
+    // two need not agree. The token carrying it is what lets the suggested
+    // command name no `--space` at all.
+    expect(err[0]).not.toContain("--space");
     expect(err[0]).toContain(
-      "cf piece get --space did:key:test-home --piece of:tool-result@user",
+      "cf piece get --piece /@did:key:test-home/of:tool-result@user",
     );
   });
 
@@ -396,7 +398,7 @@ describe("cf exec read options", () => {
     );
 
     expect(err[0]).toContain(
-      "cf piece get --space did:key:test-home --piece of:tool-result`)",
+      "cf piece get --piece /@did:key:test-home/of:tool-result`)",
     );
     expect(err[0]).not.toContain("@space");
   });

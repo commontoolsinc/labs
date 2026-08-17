@@ -1,5 +1,5 @@
 /**
- * Empty `ReconstructionContext`: a singleton whose `getCell()` always throws.
+ * Empty `DecodeContext`: a singleton whose `getCell()` always throws.
  * Useful as a default for decode paths that aren't expected to encounter
  * `Cell` references (e.g. storage-boundary reads of values known to be
  * structurally flat).
@@ -7,14 +7,14 @@
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import type { FabricInstance } from "@/interface.ts";
-import type { ReconstructionContext } from "./interface.ts";
-import { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
+import type { DecodeContext } from "./interface.ts";
+import { BaseDecodeContext } from "./BaseDecodeContext.ts";
 
 /**
- * `ReconstructionContext` whose `getCell()` always throws. `shouldDeepFreeze`
- * is inherited from `BaseReconstructionContext` (defaults to `true`).
+ * `DecodeContext` whose `getCell()` always throws. `shouldDeepFreeze`
+ * is inherited from `BaseDecodeContext` (defaults to `true`).
  */
-export class EmptyReconstructionContext extends BaseReconstructionContext {
+export class EmptyDecodeContext extends BaseDecodeContext {
   readonly #getCellMessage: string;
 
   /**
@@ -33,7 +33,7 @@ export class EmptyReconstructionContext extends BaseReconstructionContext {
     ref: { id: string; path: string[]; space: string },
   ): FabricInstance {
     throw new Error(
-      `Cannot reconstruct cell reference ${
+      `Cannot decode cell reference ${
         backtickQuote(ref.id)
       }: ${this.#getCellMessage}`,
     );
@@ -41,11 +41,11 @@ export class EmptyReconstructionContext extends BaseReconstructionContext {
 }
 
 /**
- * Shared `EmptyReconstructionContext` instance with `.shouldDeepFreeze ===
+ * Shared `EmptyDecodeContext` instance with `.shouldDeepFreeze ===
  * true` and whose `getCell()` always throws. Pass this when a decoder wants a
- * context object but isn't expected to need cell reconstruction; if a cell ref
- * does turn up, the throw makes the unexpected reconstruction obvious instead
+ * context object but isn't expected to need cell decoding; if a cell ref
+ * does turn up, the throw makes the unexpected decode obvious instead
  * of silent.
  */
-export const EMPTY_RECONSTRUCTION_CONTEXT: ReconstructionContext = Object
-  .freeze(new EmptyReconstructionContext(true));
+export const EMPTY_DECODE_CONTEXT: DecodeContext = Object
+  .freeze(new EmptyDecodeContext(true));

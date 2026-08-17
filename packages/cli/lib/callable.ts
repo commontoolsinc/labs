@@ -232,11 +232,23 @@ export interface CallableResultRef {
  * a different cell.
  *
  * The space is not part of it: an address argument is read against the space
- * the command is connected to, and a caller carrying one across spaces names
- * the other with `--space` rather than inside the id.
+ * the command is connected to. A caller carrying one across spaces writes
+ * {@link canonicalAddress}, the spelling whose reference names its own space.
  */
 export function addressArgument(ref: CallableResultRef): string {
   return ref.scope === "space" ? ref.id : `${ref.id}@${ref.scope}`;
+}
+
+/**
+ * `ref` written as the canonical fabric reference with its space embedded —
+ * `/@<space>/<id>[@scope]` — the one token that names the cell from any
+ * configuration. `--piece` takes it whole: the embedded space supplies the
+ * target space when `--space` is absent, and is checked against it when both
+ * are named. The id-and-scope segment is {@link addressArgument}'s, so the
+ * two spellings of an address cannot drift apart.
+ */
+export function canonicalAddress(ref: CallableResultRef): string {
+  return encodeJsonPointer(["", `@${ref.space}`, addressArgument(ref)]);
 }
 
 export interface ExecutedCallable {

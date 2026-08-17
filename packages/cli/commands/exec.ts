@@ -1,7 +1,7 @@
 import { Command } from "@cliffy/command";
 import { executeMountedCallableFile } from "../lib/exec.ts";
 import { cliText } from "../lib/cli-name.ts";
-import { addressArgument, type InvocationPhase } from "../lib/callable.ts";
+import { canonicalAddress, type InvocationPhase } from "../lib/callable.ts";
 import {
   exitPieceCallFailure,
   exitWithDataError,
@@ -43,13 +43,12 @@ export interface ExecCommandOptions {
  * piece address, and that is the whole of the difference between them.
  *
  * **The result cell's address goes to stderr, written the way the next command
- * takes it.** An address has three parts, and the line spells all three where
- * that command wants them: `addressArgument` renders id and scope as the one
- * token `--piece` parses, and the space rides its own `--space` flag, because
- * that is where `cf piece get` reads it from. Naming the space is not
- * decoration — `cf exec` takes its space from the mount, while `cf piece get`
- * falls back to whatever space the caller has configured, so a line that
- * omitted it would suggest a command that reads a different cell.
+ * takes it.** An address has three parts, and `canonicalAddress` renders all
+ * three as the one token `--piece` parses, the space embedded as its
+ * `/@did:.../` prefix. Naming the space is not decoration — `cf exec` takes
+ * its space from the mount, while `cf piece get` falls back to whatever space
+ * the caller has configured, so a token that omitted it would suggest a
+ * command that reads a different cell.
  *
  * Extracted from the action body so it is unit-coverable: command action
  * bodies never execute under the unit suite (docs/development/COVERAGE.md).
@@ -70,10 +69,10 @@ export function renderExecOutcome(
   if (result.outputText) {
     write(result.outputText);
     if (result.resultRef) {
-      const address = addressArgument(result.resultRef);
+      const address = canonicalAddress(result.resultRef);
       writeError(
         `Tool result cell: ${address} (read it back with \`cf piece get ` +
-          `--space ${result.resultRef.space} --piece ${address}\`)`,
+          `--piece ${address}\`)`,
       );
     }
     return;

@@ -31,7 +31,7 @@ export { FabricEpochDays } from "./FabricEpochDays.ts";
 /**
  * The concrete primitive classes whose instances are available over the wire,
  * each via its static `[JSON_CODEC]`. This is the curated source of truth for
- * which primitive types participate in serialization: add a class here once it
+ * which primitive types participate in encoding: add a class here once it
  * gains a `[JSON_CODEC]`.
  *
  * Typed only as classes, which is weaker than it looks: a `FabricPrimitive`
