@@ -18,6 +18,7 @@ import {
 } from "../src/schema-decompose.ts";
 import { setContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { lookupSchemaDocument } from "../src/schema-registry.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
   getSyncSchemaTableConfig,
   resetSyncSchemaTableConfig,
@@ -142,23 +143,57 @@ describe("schema-doc-writer", () => {
         },
       },
     };
+    const sigilA = sigilFor(schema);
+    const sigilB = sigilFor(schema);
+    // The two decompositions bind to the SAME reference: a drifting second
+    // decomposition would first-install fresh documents and both commits
+    // would still succeed, so the identity of the refs is the pin.
+    const refA = (payloadSchema(sigilA) as JSONSchemaObj).$ref!;
+    const refB = (payloadSchema(sigilB) as JSONSchemaObj).$ref!;
+    expect(refB).toBe(refA);
+
     const first = writer.edit();
     first.writeValueOrThrow(
       { space, id: "of:reinstall-a" as URI, scope: "space", path: [] },
-      { person: sigilFor(schema) },
+      { person: sigilA },
     );
     expect((await first.commit()).ok).toBeDefined();
 
     // A second transaction referencing the same closure materializes the
     // same documents again. The commit boundary accepts only a first
-    // installation or an identical re-set of a cid: document, so this
-    // pins the writer's output as byte-stable across transactions.
+    // installation or a content-identical re-set of a cid: document, so
+    // this pins the writer's output as content-stable across transactions.
     const second = writer.edit();
     second.writeValueOrThrow(
       { space, id: "of:reinstall-b" as URI, scope: "space", path: [] },
-      { person: sigilFor(schema) },
+      { person: sigilB },
     );
     expect((await second.commit()).ok).toBeDefined();
+
+    // Every stored closure document verifies against its id.
+    const rootHash = parseExternalSchemaRef(refA)!.taggedHash;
+    const closure = new Set<string>([rootHash]);
+    for (const hash of closure) {
+      for (
+        const dep of collectExternalSchemaRefHashes(lookupSchemaDocument(hash))
+      ) {
+        closure.add(dep);
+      }
+    }
+    const provider = readerStorage.open(space);
+    for (const hash of closure) {
+      const synced = await provider.sync(`cid:${hash}` as URI, {
+        path: [],
+        schema: false,
+      });
+      expect(synced.error).toBeUndefined();
+      const stored = (provider as unknown as {
+        get: (uri: URI) => { value?: unknown } | undefined;
+      }).get(`cid:${hash}` as URI);
+      expect(
+        internSchemaAsTaggedHashString(stored?.value as JSONSchemaObj),
+      ).toBe(hash);
+    }
   });
 
   it("externalizes a schema whose only external refs are embedded", async () => {
