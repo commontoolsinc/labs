@@ -845,6 +845,411 @@ Deno.test("stage A: a lease holder names two instances of one (branch, id, scope
   }
 });
 
+// ---------------------------------------------------------------------------
+// The exemption LIFECYCLE under the keyed wire (fan-out stage A's
+// independent review, finding 1 — 2026-08-17). Two halves of one
+// invariant: (i) a session's wire vocabulary is STICKY once it was
+// admitted explicit-instance reads — an instance delivered KEYED is
+// always retracted KEYED, so a former holder's catch-up names exactly the
+// foreign instances it retracts and never the session's own (an unkeyed
+// remove resolves against the client's OWN instance: the wipe); (ii) the
+// DELIVERY of foreign instances is live-lease-gated per pass, and a lapse
+// RE-ARMS on the first live pass with a full evaluation that re-delivers
+// what the lapse withheld — a renewal blip the SpaceServer survives
+// in-process must not leave its serving replica silently stale.
+// ---------------------------------------------------------------------------
+
+/** Every session/effect frame's upserts at or past `from`, with keys. */
+const effectUpserts = (
+  messages: ServerMessage[],
+  from: number,
+): Array<{ id: string; scopeKey?: string; doc?: { value?: unknown } }> =>
+  messages.slice(from)
+    .filter((message) =>
+      (message as { type?: string }).type === "session/effect"
+    )
+    .flatMap((message) =>
+      (message as {
+        effect?: {
+          upserts?: Array<
+            { id: string; scopeKey?: string; doc?: { value?: unknown } }
+          >;
+        };
+      }).effect?.upserts ?? []
+    );
+
+const writeOwnProfile = async (
+  server: Server,
+  sessionId: string,
+  localSeq: number,
+  value: Record<string, string>,
+): Promise<void> => {
+  const write = await server.transact({
+    type: "transact",
+    requestId: nextRequestId("own-write"),
+    space: SPACE,
+    sessionId,
+    commit: {
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:profile",
+        scope: "user",
+        value: { value },
+      }],
+    },
+  });
+  assertExists(write.ok, JSON.stringify(write.error));
+};
+
+Deno.test("finding 1 (wire half): a former holder's catch-up RETRACTS a keyed-delivered foreign instance BY KEY — its own instance of the same doc is never named; and a foreign write after the retraction still evaluates the session (the watch stays tracked) so a re-armed lease re-delivers it keyed", async () => {
+  const server = newServer("memory://explicit-read-keyed-retract");
+  setServerExecutionConfig(true);
+  try {
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+
+    const service = await connect(server);
+    const opened = await openSession(service, SERVICE);
+    // The service writes ITS OWN instance of the same doc — the stage-A
+    // serving-replica shape: the own instance and a demander's instance
+    // of one (branch, id, scope) held side by side.
+    await writeOwnProfile(server, opened.sessionId, 1, {
+      name: "service-own",
+    });
+    const serviceKey = resolveScopeKey("user", { principal: SERVICE });
+
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    // The holder watches BOTH: its own instance (a keyless root) and
+    // Alice's (a keyed root).
+    const watch = await server.watchSet({
+      type: "session.watch.set",
+      requestId: nextRequestId("watch-both"),
+      space: SPACE,
+      sessionId: opened.sessionId,
+      watches: [{
+        id: "w-both",
+        kind: "graph",
+        query: {
+          roots: [
+            {
+              id: "of:profile",
+              scope: "user",
+              selector: { path: [], schema: false },
+            },
+            {
+              id: "of:profile",
+              scope: "user",
+              entityScopeKey: aliceKey as never,
+              selector: { path: [], schema: false },
+            },
+          ],
+        },
+      }],
+    }) as ResponseMessage<WatchSetResult>;
+    assertExists(watch.ok, JSON.stringify(watch.error));
+    assertEquals(
+      watch.ok.sync.upserts.map((upsert) => upsert.scopeKey).toSorted(),
+      [aliceKey, serviceKey].toSorted(),
+      "both instances delivered, each keyed",
+    );
+
+    // The connection dies and the lease lapses while detached; foreign
+    // state moves (so the catch-up diff has something to retract).
+    service.connection.close();
+    expireLease(engine, holder);
+    await writeAliceProfile(server, aliceSession, 2, { name: "alice-2" });
+    await drainDelivery(server, () => false);
+
+    // Resume without a live lease: the catch-up is a full evaluation
+    // that DROPS Alice's instance (protocol.md §3's filter) and retracts
+    // it — the retraction MUST carry her key. Pre-fix the frame keying
+    // hung from the live verdict, so the remove went out UNKEYED and the
+    // client resolved it against its OWN instance (the service's doc
+    // wiped, Alice's stale instance kept).
+    const resumedHarness = await connect(server);
+    const resumed = await openSession(resumedHarness, SERVICE, {
+      sessionId: opened.sessionId,
+      sessionToken: opened.sessionToken,
+    });
+    assertEquals(resumed.sessionId, opened.sessionId);
+    const sync = resumed.sync as {
+      upserts?: Array<{ id: string; scope?: string; scopeKey?: string }>;
+      removes?: Array<{ id: string; scope?: string; scopeKey?: string }>;
+    } | undefined;
+    const removes = (sync?.removes ?? []).filter((remove) =>
+      remove.id === "of:profile"
+    );
+    assertEquals(removes.length, 1, "exactly Alice's instance is retracted");
+    assertEquals(
+      removes[0].scopeKey,
+      aliceKey,
+      "a keyed-delivered foreign instance is retracted BY KEY (an unkeyed " +
+        "remove would name the session's OWN instance in its replica)",
+    );
+    assertEquals(
+      (sync?.upserts ?? []).filter((upsert) => upsert.id === "of:profile"),
+      [],
+      "the own instance is untouched by the catch-up (not re-sent, not " +
+        "retracted)",
+    );
+
+    // The lease comes back to the SAME holder (the in-process reacquire).
+    // Alice's watch never left the session's watch set — only its
+    // delivery was withheld — so her next write must still EVALUATE the
+    // session (its dirty key stays tracked across the retraction) and,
+    // the lease being live again, re-deliver her instance KEYED. Pre-fix
+    // the retraction also dropped her key from the session's tracked
+    // set, so this write touched nothing and never re-delivered.
+    assertEquals(
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const from = resumedHarness.messages.length;
+    await writeAliceProfile(server, aliceSession, 3, { name: "alice-3" });
+    await drainDelivery(
+      server,
+      () =>
+        effectUpserts(resumedHarness.messages, from).some((upsert) =>
+          upsert.id === "of:profile"
+        ),
+    );
+    const redelivered = effectUpserts(resumedHarness.messages, from).filter(
+      (upsert) => upsert.id === "of:profile",
+    );
+    assertEquals(redelivered.length, 1);
+    assertEquals(redelivered[0].scopeKey, aliceKey);
+    assertEquals(redelivered[0].doc?.value, { name: "alice-3" });
+
+    alice.connection.close();
+    resumedHarness.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+Deno.test("finding 1 (silent-stale half): a survived lease blip RE-ARMS the exemption on the next pass with NO re-issued watch — the SpaceServer's reacquire notice schedules that pass, and the update the lapse withheld is redelivered KEYED", async () => {
+  const server = newServer("memory://explicit-read-blip-rearm");
+  setServerExecutionConfig(true);
+  try {
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+
+    const service = await connect(server);
+    const { sessionId: serviceSession } = await openSession(service, SERVICE);
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const watch = await server.watchSet(
+      watchAliceInstance(serviceSession, aliceKey),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(watch.ok, JSON.stringify(watch.error));
+
+    // The blip: the lease lapses; Alice's write inside it is WITHHELD
+    // (the P0 rule — and never cached as delivered).
+    expireLease(engine, holder);
+    const lapsedFrom = service.messages.length;
+    await writeAliceProfile(server, aliceSession, 2, { name: "alice-2" });
+    await drainDelivery(server, () => false);
+    assertEquals(
+      effectUpserts(service.messages, lapsedFrom).filter((upsert) =>
+        upsert.id === "of:profile"
+      ),
+      [],
+      "withheld while the lease is lapsed",
+    );
+
+    // The same holder reacquires (serving-loop.md §2's same-process
+    // reacquire) and — as the SpaceServer's renew arm does — reports it.
+    // NO watch is re-issued: the exemption re-arms by itself, and the
+    // notice is what schedules the pass (nothing else dirties the
+    // session's tracked set here). Pre-fix the lapse CLEARED the bit and
+    // only a fresh explicit-instance admission re-armed it, so the
+    // serving replica kept Alice's stale instance for as long as no
+    // per-instance read happened to re-admit — silently.
+    assertEquals(
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const rearmFrom = service.messages.length;
+    server.noteLeaseReacquired({ space: SPACE, principal: SERVICE });
+    await drainDelivery(
+      server,
+      () =>
+        effectUpserts(service.messages, rearmFrom).some((upsert) =>
+          upsert.id === "of:profile"
+        ),
+    );
+    const rearmed = effectUpserts(service.messages, rearmFrom).filter(
+      (upsert) => upsert.id === "of:profile",
+    );
+    assertEquals(rearmed.length, 1, "the withheld update is redelivered");
+    assertEquals(rearmed[0].scopeKey, aliceKey, "keyed");
+    assertEquals(rearmed[0].doc?.value, { name: "alice-2" });
+
+    // Steady state after the re-arm: later foreign updates flow
+    // incrementally, keyed.
+    const laterFrom = service.messages.length;
+    await writeAliceProfile(server, aliceSession, 3, { name: "alice-3" });
+    await drainDelivery(
+      server,
+      () =>
+        effectUpserts(service.messages, laterFrom).some((upsert) =>
+          upsert.id === "of:profile"
+        ),
+    );
+    const later = effectUpserts(service.messages, laterFrom).filter(
+      (upsert) => upsert.id === "of:profile",
+    );
+    assertEquals(later.length, 1);
+    assertEquals(later[0].scopeKey, aliceKey);
+    assertEquals(later[0].doc?.value, { name: "alice-3" });
+
+    // And the notice is inert when nothing lapsed (the OFF-arm and
+    // steady-state shape): no frame follows.
+    const idleFrom = service.messages.length;
+    server.noteLeaseReacquired({ space: SPACE, principal: SERVICE });
+    await drainDelivery(server, () => false);
+    assertEquals(effectUpserts(service.messages, idleFrom), []);
+
+    alice.connection.close();
+    service.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+Deno.test("finding 1 (silent-stale half, no notice): with the lease live again, the FIRST pass that evaluates the lapsed session — here, an unrelated write to a doc it tracks — re-arms with a full evaluation, so the update the lapse withheld rides along keyed", async () => {
+  const server = newServer("memory://explicit-read-blip-rearm-on-pass");
+  setServerExecutionConfig(true);
+  try {
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+
+    const service = await connect(server);
+    const { sessionId: serviceSession } = await openSession(service, SERVICE);
+    // The service's own SPACE doc — the unrelated tracked doc.
+    const settings = await server.transact({
+      type: "transact",
+      requestId: nextRequestId("settings"),
+      space: SPACE,
+      sessionId: serviceSession,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:settings",
+          value: { value: { v: 1 } },
+        }],
+      },
+    });
+    assertExists(settings.ok, JSON.stringify(settings.error));
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const watch = await server.watchSet({
+      type: "session.watch.set",
+      requestId: nextRequestId("watch-alice-and-settings"),
+      space: SPACE,
+      sessionId: serviceSession,
+      watches: [{
+        id: "w-both",
+        kind: "graph",
+        query: {
+          roots: [
+            {
+              id: "of:profile",
+              scope: "user",
+              entityScopeKey: aliceKey as never,
+              selector: { path: [], schema: false },
+            },
+            { id: "of:settings", selector: { path: [], schema: false } },
+          ],
+        },
+      }],
+    }) as ResponseMessage<WatchSetResult>;
+    assertExists(watch.ok, JSON.stringify(watch.error));
+
+    // Lapse; Alice's write inside it is withheld.
+    expireLease(engine, holder);
+    const lapsedFrom = service.messages.length;
+    await writeAliceProfile(server, aliceSession, 2, { name: "alice-2" });
+    await drainDelivery(server, () => false);
+    assertEquals(
+      effectUpserts(service.messages, lapsedFrom).filter((upsert) =>
+        upsert.id === "of:profile"
+      ),
+      [],
+    );
+
+    // Reacquire, then a write to the UNRELATED tracked doc: the pass it
+    // triggers finds the lease live and the session lapsed → a FULL
+    // evaluation, whose diff carries Alice's withheld update alongside
+    // the settings change. An incremental pass (pre-fix) would have
+    // carried the settings change alone — Alice's doc was not dirty.
+    assertEquals(
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const from = service.messages.length;
+    const settings2 = await server.transact({
+      type: "transact",
+      requestId: nextRequestId("settings-2"),
+      space: SPACE,
+      sessionId: serviceSession,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:settings",
+          value: { value: { v: 2 } },
+        }],
+      },
+    });
+    assertExists(settings2.ok, JSON.stringify(settings2.error));
+    await drainDelivery(
+      server,
+      () =>
+        effectUpserts(service.messages, from).some((upsert) =>
+          upsert.id === "of:profile"
+        ),
+    );
+    const upserts = effectUpserts(service.messages, from);
+    const profile = upserts.filter((upsert) => upsert.id === "of:profile");
+    assertEquals(profile.length, 1, "the withheld update rides the re-arm");
+    assertEquals(profile[0].scopeKey, aliceKey);
+    assertEquals(profile[0].doc?.value, { name: "alice-2" });
+
+    alice.connection.close();
+    service.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
 Deno.test("watch.add with a changed entityScopeKey on an existing watch id is a changed spec, not silently the old instance", async () => {
   const server = newServer("memory://explicit-read-changed-key");
   setServerExecutionConfig(true);

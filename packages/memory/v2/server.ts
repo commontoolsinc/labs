@@ -2367,17 +2367,15 @@ export class Server {
           "taken-over",
         );
       }
-      if (opened.resumed === true) {
-        // Resume revalidates the persisted lease-holder read exemption
-        // BEFORE any catch-up evaluation runs: the bit is an
-        // authorization tied to a LIVE execution lease (protocol.md §2's
-        // read row), and a resume must never inherit it across a lapsed
-        // or moved lease. Clears the stale bit as a side effect.
-        const resumed = this.#sessions.get(message.space, opened.sessionId);
-        if (resumed !== null) {
-          await this.#currentLeaseHolderExemption(message.space, resumed);
-        }
-      }
+      // A resumed session's catch-up (below) is a FULL watch evaluation,
+      // and every evaluation pass judges the lease-holder read exemption
+      // against the CURRENT lease before it builds a frame
+      // (syncSessionForConnection → #currentLeaseHolderExemption): a
+      // resume never inherits foreign-instance delivery across a lapsed
+      // or moved lease — the catch-up frame RETRACTS the foreign
+      // instances instead, KEYED (the session's wire vocabulary is
+      // sticky), so the retraction names exactly them and never the
+      // session's own instance.
       const catchup = opened.resumed === true
         ? await this.syncSessionForConnection(
           message.space,
@@ -3624,6 +3622,10 @@ export class Server {
     const preCallCaughtUp = session.caughtUpLocalSeq;
     const preCallPending = session.pendingCaughtUpLocalSeq;
     const preCallForceFullResync = session.forceFullResync;
+    // Whether THIS pass re-armed a lapsed lease-holder exemption (see
+    // below); restored on a throw so the re-arm's full evaluation is
+    // not lost with the failed pass.
+    let rearmedLeaseHolder = false;
     if (session.forceFullResync) {
       // Rollback re-inserted tombstones for a lost frame's removes; only a
       // full evaluation re-diffs them out. Self-clearing (restored by the
@@ -3689,10 +3691,49 @@ export class Server {
           if (session.watches.length === 0) {
             return await emptyCatchUp();
           }
+          // The lease-holder read exemption for THIS pass, judged ONCE
+          // on CURRENT holdership (protocol.md §2's read row is
+          // live-lease admission) and BEFORE the branch choice: it
+          // decides whether FOREIGN instances are delivered on either
+          // branch, and a lapse it ends is what forces the full
+          // evaluation below. A session never admitted explicit-instance
+          // reads takes the synchronous fast path — no added await on
+          // the ordinary push path.
+          const leaseHolderExempt = session.leaseHolderReads === true
+            ? await this.#currentLeaseHolderExemption(space, session)
+            : false;
+          if (leaseHolderExempt && session.leaseHolderReadsLapsed === true) {
+            // The RE-ARM (fan-out stage A's independent review, finding
+            // 1): an earlier pass found the lease lapsed and withheld or
+            // retracted this session's foreign instances; the lease is
+            // live again (a renewal blip the SpaceServer survived
+            // in-process, or a reacquire), so run a FULL evaluation
+            // NOW — the incremental branch would re-deliver only what
+            // becomes dirty from here on, leaving every instance the
+            // lapse withheld silently stale in the serving replica.
+            session.leaseHolderReadsLapsed = false;
+            rearmedLeaseHolder = true;
+            dirtyIds = undefined;
+            dirtyOrigins = undefined;
+          }
+          // The session's WIRE VOCABULARY (fan-out stage A, OW17's wire
+          // leg; protocol.md §3): a session admitted explicit-instance
+          // reads is keyed for its life — upserts AND removes — so an
+          // instance delivered keyed is always retracted keyed. Keying
+          // never hangs from the live verdict above: a former holder's
+          // catch-up must retract its foreign instances BY KEY (an
+          // unkeyed remove names the session's own instance in its
+          // replica — the wipe). Every other session's frames are
+          // byte-identical to before.
+          const keyed = session.leaseHolderReads === true;
           if (dirtyIds !== undefined) {
+            // Bound once for the closures below (the re-arm above is the
+            // one assignment after this point, and it never runs on this
+            // branch).
+            const batchDirtyIds = dirtyIds;
             const startedAt = performance.now();
             let touched = false;
-            for (const dirtyId of dirtyIds) {
+            for (const dirtyId of batchDirtyIds) {
               if (session.trackedIds.has(dirtyId)) {
                 touched = true;
                 break;
@@ -3718,7 +3759,7 @@ export class Server {
                       space,
                       engine,
                       graph,
-                      dirtyIds,
+                      batchDirtyIds,
                     );
                   } finally {
                     watchSpan.end();
@@ -3742,13 +3783,10 @@ export class Server {
               return await emptyCatchUp();
             }
 
-            // The lease-holder exemption is keyed on CURRENT holdership,
-            // once per pass: a former holder's foreign instances are
-            // filtered like any other session's (protocol.md §2's read
-            // row is live-lease admission; the check also clears a stale
-            // persisted bit).
-            const leaseHolderExempt = await this
-              .#currentLeaseHolderExemption(space, session);
+            // The lease-holder exemption was judged on CURRENT holdership
+            // above, once per pass: a former holder's foreign instances
+            // are filtered like any other session's (protocol.md §2's
+            // read row is live-lease admission).
             const filteredKeys: string[] = [];
             const upserts: SessionCacheEntry[] = [];
             for (const [key, entry] of updates) {
@@ -3837,18 +3875,18 @@ export class Server {
                 left.branch.localeCompare(right.branch) ||
                 left.id.localeCompare(right.id)
               ).map((entry) =>
-                // Keyed exactly when the exemption is LIVE this pass
-                // (stage A, OW17's wire leg): the exempt session receives
-                // every instance it serves, and the key is what keeps two
-                // instances of one (branch, id, scope) apart in its
-                // replica. Non-exempt frames are byte-identical to before.
-                toWireUpsert(entry, leaseHolderExempt)
+                // Keyed by the session's wire vocabulary (stage A, OW17's
+                // wire leg — see `keyed` above): the key is what keeps
+                // two instances of one (branch, id, scope) apart in the
+                // serving replica. Unkeyed frames are byte-identical to
+                // before.
+                toWireUpsert(entry, keyed)
               ),
               removes: [],
             });
-            // The wire frame strips instance keys; retain the frame's
-            // true instance-keyed entries so a delivery failure rolls
-            // back the EXACT instances (rollbackUndeliveredSync).
+            // An unkeyed wire frame strips instance keys; retain the
+            // frame's true instance-keyed entries so a delivery failure
+            // rolls back the EXACT instances (rollbackUndeliveredSync).
             this.#deliveredFrameEntries.set(message, {
               upserts: [...upserts],
               removes: [],
@@ -3867,17 +3905,24 @@ export class Server {
               sessionId,
             },
           );
+          // The tracked dirty keys come from the evaluation BEFORE the
+          // filter below: a lapsed holder's watches still NAME its
+          // foreign instances — only their delivery is withheld — so a
+          // later change to one must still evaluate this session (else
+          // the re-arm above never runs on that change and the update
+          // the lapse withheld never re-delivers). For every other
+          // session the filter removes nothing, so the set is the same.
+          const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
           // protocol.md §3's applicable-set filter on the FULL
           // evaluation path: explicit foreign instances enter `entities`
           // only through admitted lease-holder reads, and the exemption
-          // is keyed on CURRENT holdership — a former holder's foreign
-          // entries are dropped here, and their previously delivered
-          // predecessors diff out as removes below.
-          const fullEvalExempt = await this.#currentLeaseHolderExemption(
-            space,
-            session,
-          );
-          if (!fullEvalExempt) {
+          // is keyed on CURRENT holdership (judged above) — a former
+          // holder's foreign entries are dropped here, and their
+          // previously delivered predecessors diff out as removes below,
+          // KEYED (`keyed`, the session's sticky wire vocabulary), so
+          // the client retracts exactly those instances and its own
+          // instance survives.
+          if (!leaseHolderExempt) {
             const identity = this.#sessionScopeIdentity(session);
             for (const [key, entry] of [...entities]) {
               if (!scopeKeyApplicableTo(entry.scopeKey, identity)) {
@@ -3895,15 +3940,12 @@ export class Server {
             session.lastSyncedSeq,
             serverSeq,
             delivered,
-            // Keyed for a live lease-holder session (stage A, OW17's wire
-            // leg; see the incremental branch above).
-            fullEvalExempt,
+            keyed,
           );
           // As above: commit the re-evaluated watch state only once the
           // frame is built, so a throw leaves the diff recomputable. The
           // empty-sync branch commits first — its frame carries no doc
           // novelty, and the marker counters are restored by the catch.
-          const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
           const commitWatchState = () => {
             session.graphs = graphs;
             session.entities = entities;
@@ -3934,6 +3976,9 @@ export class Server {
           );
           session.forceFullResync = session.forceFullResync ||
             preCallForceFullResync;
+          // A re-arm consumed by a throwing pass re-stages: the next
+          // pass runs the full evaluation the lapse still owes.
+          if (rearmedLeaseHolder) session.leaseHolderReadsLapsed = true;
           throw error;
         } finally {
           span.end();
@@ -4327,22 +4372,34 @@ export class Server {
    * Whether the session's lease-holder read exemption (protocol.md §2's
    * read row) is valid NOW. The exemption is an authorization tied to
    * holding a LIVE execution lease, so every use re-keys on CURRENT
-   * holdership: a lapsed or moved lease invalidates the persisted bit —
-   * cleared here, so lease loss clears the exemption — and only a fresh
-   * explicit-instance admission (#denyExplicitInstanceReads) re-arms it.
-   * Consulted by the push path's applicable-set filter (both the
-   * incremental and the full-evaluation branch) and by session resume,
-   * so a former holder receives no foreign scoped instances anywhere.
+   * holdership: a lapsed or moved lease means NO foreign instance is
+   * delivered — the push pass filters (incremental) or retracts (full
+   * evaluation) them — until the lease is live again. Consulted once
+   * per push pass (syncSessionForConnection, before the branch choice;
+   * a session resume's catch-up is such a pass), so a former holder
+   * receives no foreign scoped instances anywhere.
+   *
+   * What a lapse does NOT do (fan-out stage A's independent review,
+   * finding 1): it does not clear `leaseHolderReads`. That bit is the
+   * session's sticky WIRE VOCABULARY — its frames stay keyed so the
+   * retraction of a keyed-delivered foreign instance is keyed too (an
+   * unkeyed remove would wipe the session's OWN instance in its
+   * replica) — and it is what lets the exemption RE-ARM: the lapse is
+   * recorded (`leaseHolderReadsLapsed`), and the first pass that finds
+   * the lease live again runs a full evaluation that re-delivers what
+   * the lapse withheld (a renewal blip survived in-process, or a
+   * reacquire; `noteLeaseReacquired` schedules that pass promptly). A
+   * fresh explicit-instance admission (#denyExplicitInstanceReads) is
+   * no longer the only way back.
    */
   async #currentLeaseHolderExemption(
     space: string,
     session: SessionState,
   ): Promise<boolean> {
     if (session.leaseHolderReads !== true) return false;
-    if (session.principal === undefined) {
-      session.leaseHolderReads = false;
-      return false;
-    }
+    // Unreachable for an admitted session (admission needs a principal
+    // to build the full holder); a principal-less bit is simply inert.
+    if (session.principal === undefined) return false;
     // The same holdership the admission accepts (Phase 5): the read
     // space's own lease, or — FP2's widening — any live co-hosted
     // lease held by THIS process's full DR1 holder (a home SpaceServer
@@ -4357,10 +4414,42 @@ export class Server {
       !holdsReadSpace &&
       this.#liveCoHostedLeaseSpaceFor(session.principal) === undefined
     ) {
-      session.leaseHolderReads = false;
+      session.leaseHolderReadsLapsed = true;
       return false;
     }
     return true;
+  }
+
+  /**
+   * The co-hosted SpaceServer reports it (re)acquired a space's lease
+   * after a renewal blip (serving-loop.md §2's same-process reacquire).
+   * A push pass that ran inside the blip found the serving identity's
+   * lease-holder sessions lapsed and withheld or retracted their foreign
+   * instances; their exemption re-arms on the next pass — schedule that
+   * pass NOW (an empty dirty batch: every other session of the space
+   * evaluates as untouched, the lapsed sessions run their full
+   * evaluation) instead of waiting for an unrelated write to touch them.
+   * Covers the identity's sessions on every space (FP2's cross-space
+   * serving reads hang from the same lease). Nothing to do when no
+   * session lapsed — the common case, and every OFF-arm call.
+   */
+  noteLeaseReacquired(
+    notice: { space: string; principal: string },
+  ): void {
+    const lapsedSpaces = new Set<string>();
+    for (
+      const session of this.#sessions.sessionsForPrincipal(notice.principal)
+    ) {
+      if (
+        session.leaseHolderReads === true &&
+        session.leaseHolderReadsLapsed === true
+      ) {
+        lapsedSpaces.add(session.space);
+      }
+    }
+    for (const space of lapsedSpaces) {
+      this.markSpaceDirty(space, []);
+    }
   }
 
   /** Whether any read root names an explicit instance — the sync gate

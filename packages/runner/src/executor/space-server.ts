@@ -1407,7 +1407,20 @@ export class SpaceServer implements TransactionSealDestination {
       ]);
       if (!lease.acquire()) {
         void this.park("lease-lost");
+        return;
       }
+      // Survived the blip in-process. Any push pass that ran inside it
+      // judged this runtime's loopback session a FORMER holder and
+      // withheld or retracted its foreign instances (protocol.md §2's
+      // read row is live-lease admission); tell the co-hosted memory
+      // server the lease is live again so the session's exemption
+      // re-arms NOW — a full re-evaluation that re-delivers what the
+      // blip withheld — rather than on the next unrelated write (fan-out
+      // stage A's independent review, finding 1: the silent-stale half).
+      this.#options.server.noteLeaseReacquired({
+        space: this.#options.space,
+        principal: this.#options.serviceIdentity,
+      });
     }
   }
 

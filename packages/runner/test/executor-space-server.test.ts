@@ -25,7 +25,12 @@ import {
   insertExecutionOutboxRows,
   selectPendingExecutionOutboxRows,
 } from "@commonfabric/memory/v2/execution-outbox";
-import { liveExecutionLeaseHolder } from "@commonfabric/memory/v2/execution-lease";
+import {
+  acquireExecutionLease,
+  executionLeaseHolder,
+  liveExecutionLeaseHolder,
+  releaseExecutionLease,
+} from "@commonfabric/memory/v2/execution-lease";
 import {
   decodeMemoryBoundary,
   resolveScopeKey,
@@ -617,6 +622,67 @@ describe("stage G SpaceServer recovery seams", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(flushed).toBe(0);
     expect(Engine.serverSeq(engine)).toBe(seqBefore);
+  });
+
+  it("reports a survived renewal blip to the memory server: the renew arm's same-process reacquire calls noteLeaseReacquired with the space and the service identity — once per blip, never on a plain renewal, never when the reacquire fails and the space parks (fan-out stage A's finding 1, the re-arm's trigger)", async () => {
+    // A Proxy facade over the real server that records the notice; every
+    // other call passes through (the sx2 facade pattern above).
+    const notices: Array<{ space: string; principal: string }> = [];
+    const spy = new Proxy(server, {
+      get(target, prop, receiver) {
+        if (prop === "noteLeaseReacquired") {
+          return (notice: { space: string; principal: string }) => {
+            notices.push(notice);
+            return target.noteLeaseReacquired(notice);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof server;
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({
+      serverFacade: spy,
+      stats,
+      policy: {
+        flushDeadlineMs: 2_000,
+        idleParkMs: 600_000,
+        renewIntervalMs: 25,
+      },
+    });
+    expect(await created.activate()).toBe(true);
+    // Plain renewals report nothing.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(notices).toEqual([]);
+    expect(stats.lease.lost).toBe(0);
+
+    // The blip: the row vanishes with NO rival, so the next tick's
+    // renewal FAILS and the same-process reacquire SUCCEEDS.
+    releaseExecutionLease(engine, { space, holder: created.holder });
+    await waitUntil(() => stats.lease.lost >= 1, "the renew tick to fail");
+    await waitUntil(
+      () => liveExecutionLeaseHolder(engine, space) === created.holder,
+      "the reacquire to restore the row",
+    );
+    await waitUntil(() => notices.length >= 1, "the reacquire notice");
+    expect(notices).toEqual([{ space, principal: serviceSigner.did() }]);
+    expect(created.active).toBe(true);
+    // Later plain renewals still report nothing (one notice per blip).
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(notices.length).toBe(1);
+
+    // A blip the reacquire LOSES (a rival took the row) parks the space
+    // and reports nothing: there is no live lease to re-arm under.
+    releaseExecutionLease(engine, { space, holder: created.holder });
+    expect(
+      acquireExecutionLease(engine, {
+        space,
+        holder: executionLeaseHolder("did:key:rival-process"),
+        ttlMs: 600_000,
+      }),
+    ).toBe(true);
+    await waitUntil(() => created.active !== true, "the space to park");
+    expect(notices.length).toBe(1);
   });
 
   // ---- stage P2-F: late-notice accounting (the sx2 unskip flake) ----

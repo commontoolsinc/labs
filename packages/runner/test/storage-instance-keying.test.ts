@@ -255,6 +255,107 @@ describe("stage A: instance keying — unit pins", () => {
     runtime.clearSealDestination();
   });
 
+  it("keyed retraction (finding 1's replica half): a KEYED remove of a keyed-delivered foreign instance drops exactly that instance and the replica's OWN instance survives — and an UNKEYED remove names the own instance, which is why the server may never send one for a keyed delivery", async () => {
+    // The serving replica's stage-A steady state: its OWN instance of a
+    // user-scoped doc (from its own commit) plus Alice's instance (from
+    // a KEYED lease-holder frame). Then the memory server retracts
+    // Alice's entry — a former holder's catch-up (protocol.md §3's
+    // filter once the lease lapsed). The wire invariant the memory server
+    // now keeps (`v2-explicit-read.test.ts` "finding 1 (wire half)"): a
+    // keyed delivery is retracted KEYED. This is the replica's side of
+    // that contract — a keyed remove resolves to the named instance, an
+    // unkeyed one to the own instance — so both halves together are what
+    // keeps the own doc intact.
+    const replica = storageManager.open(space).replica as unknown as {
+      getDocument: (
+        id: string,
+        scope?: string,
+        identity?: ScopeKeyIdentity,
+      ) => { value?: unknown } | undefined;
+      applySessionSync: (sync: unknown, type: "pull" | "integrate") => void;
+    };
+    const ownCell = runtime.getCell<{ value: string }>(
+      space,
+      "stagea-keyed-retraction-cell",
+      undefined,
+      undefined,
+      "user",
+    );
+    const ownTx = runtime.edit();
+    ownCell.withTx(ownTx).set({ value: "own" });
+    expect((await ownTx.commit()).error).toBeUndefined();
+    const docId = ownCell.getAsNormalizedFullLink().id;
+    const aliceKey = resolveScopeKey("user", alice);
+    const readAs = (identity: ScopeKeyIdentity | undefined) =>
+      (replica.getDocument(docId, "user", identity)?.value as
+        | { value?: string }
+        | undefined)?.value;
+    expect(readAs(undefined)).toBe("own");
+
+    // A KEYED lease-holder frame delivers Alice's instance.
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 5,
+      upserts: [{
+        branch: "",
+        id: docId,
+        scope: "user",
+        scopeKey: aliceKey,
+        seq: 5,
+        doc: { value: { value: "alice" } },
+      }],
+      removes: [],
+    }, "integrate");
+    expect(readAs(alice)).toBe("alice");
+    expect(readAs(undefined)).toBe("own");
+
+    // The KEYED retraction: exactly Alice's instance goes; the own
+    // instance is untouched. (Mutation: `applySessionSync` ignoring
+    // `remove.scopeKey` wipes the own instance and keeps Alice's stale
+    // one — the exact inverse.)
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 5,
+      toSeq: 6,
+      upserts: [],
+      removes: [{ branch: "", id: docId, scope: "user", scopeKey: aliceKey }],
+    }, "integrate");
+    expect(readAs(alice)).toBeUndefined();
+    expect(readAs(undefined)).toBe("own");
+
+    // Re-delivered keyed (the re-arm after a survived blip), then an
+    // UNKEYED remove: that names the OWN instance — the client cannot
+    // tell it apart from a legitimate retraction of its own watch, which
+    // is exactly why the memory server keys every retraction on a keyed
+    // wire (the pre-fix former-holder catch-up sent this frame for
+    // ALICE's entry and wiped the own doc: `own: undefined, alice: alice`).
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 6,
+      toSeq: 7,
+      upserts: [{
+        branch: "",
+        id: docId,
+        scope: "user",
+        scopeKey: aliceKey,
+        seq: 7,
+        doc: { value: { value: "alice-2" } },
+      }],
+      removes: [],
+    }, "integrate");
+    expect(readAs(alice)).toBe("alice-2");
+    replica.applySessionSync({
+      type: "sync",
+      fromSeq: 7,
+      toSeq: 8,
+      upserts: [],
+      removes: [{ branch: "", id: docId, scope: "user" }],
+    }, "integrate");
+    expect(readAs(undefined)).toBeUndefined();
+    expect(readAs(alice)).toBe("alice-2");
+  });
+
   it("the N-run loop resubscribes ONCE to the union of its instance logs: after two instance runs both instances' reads are registered (mutation: per-run replacement keeps only the last)", async () => {
     const rootId = "of:stagea-union-root";
     runtime.installSealDestination(

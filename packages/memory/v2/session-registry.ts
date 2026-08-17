@@ -21,10 +21,26 @@ export type SessionState = {
    * them out (CT-1927 review, round 7). Self-clearing. */
   forceFullResync: boolean;
   /** Set once this session was admitted an explicit `entity_scope_key`
-   * read (protocol.md §2's read row — lease holders only): the push
-   * path's applicable-set filter (protocol.md §3) exempts it, since the
-   * lease holder legitimately reads and receives every instance. */
+   * read (protocol.md §2's read row — lease holders only), and STICKY
+   * for the session's life: it selects the session's WIRE VOCABULARY
+   * (fan-out stage A, protocol.md §3) — every upsert, remove, and
+   * snapshot to it carries the instance key from then on, so an
+   * instance delivered KEYED is always retracted KEYED (an unkeyed
+   * remove names the session's OWN instance in its replica: the
+   * former-holder wipe, fan-out stage A's independent review, finding
+   * 1). Whether FOREIGN instances are DELIVERED is a separate, per-pass
+   * question answered against the LIVE lease
+   * (`Server.#currentLeaseHolderExemption`); this bit alone never
+   * admits one. */
   leaseHolderReads?: boolean;
+  /** Set by a push pass (or a resume catch-up) that found
+   * `leaseHolderReads` armed but no live lease: that pass withheld or
+   * retracted the session's foreign instances. The first pass that
+   * finds the lease live again RE-ARMS by running a FULL watch
+   * evaluation, which re-delivers every instance the lapse withheld —
+   * a renewal blip the SpaceServer survives in-process must not leave
+   * its serving replica silently stale. Cleared by that pass. */
+  leaseHolderReadsLapsed?: boolean;
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
@@ -121,6 +137,9 @@ export class SessionRegistry {
       ...(existing?.leaseHolderReads === true
         ? { leaseHolderReads: true }
         : {}),
+      ...(existing?.leaseHolderReadsLapsed === true
+        ? { leaseHolderReadsLapsed: true }
+        : {}),
       expiresAt: null,
       ownerConnectionId,
       principal: existing?.principal ?? principal,
@@ -161,6 +180,20 @@ export class SessionRegistry {
     const sessions: SessionState[] = [];
     for (const session of this.#sessions.values()) {
       if (session.space === space) {
+        sessions.push(session);
+      }
+    }
+    return sessions;
+  }
+
+  /** Every live session of one principal across ALL spaces — the
+   * co-hosted serving identity's loopback sessions (its own space's and,
+   * under FP2's cross-space reads, foreign spaces'). */
+  sessionsForPrincipal(principal: string): SessionState[] {
+    this.#prune();
+    const sessions: SessionState[] = [];
+    for (const session of this.#sessions.values()) {
+      if (session.principal === principal) {
         sessions.push(session);
       }
     }
