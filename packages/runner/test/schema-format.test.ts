@@ -724,3 +724,49 @@ Deno.test("schemaToTypeString stops following a conjunction past its depth bound
   assert(rendered.includes("level8"), "the level at the bound is read");
   assert(!rendered.includes("level10"), "the level past the bound is not");
 });
+
+Deno.test("schemaToTypeString follows a definition that aliases another", () => {
+  // A definition may be an alias for a second one. Stopping after a single hop
+  // would collect the alias, which states no field, instead of what it names.
+  assertEquals(
+    schemaToTypeString(
+      {
+        type: "object",
+        properties: { a: { type: "string" } },
+        allOf: [{ $ref: "#/$defs/Alias" }],
+      } as never,
+      {
+        defs: {
+          Alias: { $ref: "#/$defs/Real" },
+          Real: { type: "object", properties: { b: { type: "number" } } },
+        } as never,
+      },
+    ),
+    "{\n  a?: string,\n  b?: number\n}",
+  );
+});
+
+Deno.test("schemaToTypeString terminates on a definition that aliases itself", () => {
+  // The chain above has to end somewhere. A definition naming itself is the
+  // shortest loop there is.
+  assertEquals(
+    schemaToTypeString(
+      {
+        type: "object",
+        properties: { a: { type: "string" } },
+        allOf: [{ $ref: "#/$defs/S" }],
+      } as never,
+      { defs: { S: { $ref: "#/$defs/S" } } as never },
+    ),
+    "{\n  a?: string\n}",
+  );
+});
+
+Deno.test("schemaToTypeString renders an object conjunct that names no field", () => {
+  // `type: "object"` makes the whole an object even with nothing named, and
+  // `{}` is what that is. A scalar conjunct is the contrasting case below.
+  assertEquals(
+    schemaToTypeString({ allOf: [{ type: "object" }] } as never),
+    "{}",
+  );
+});

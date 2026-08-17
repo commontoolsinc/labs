@@ -169,10 +169,15 @@ function conjunctionSources(
     if (depth > MAX_CONJUNCTION_DEPTH) return;
     if (typeof entry !== "object" || entry === null) return;
     let current = entry as Record<string, unknown>;
-    if (typeof current.$ref === "string") {
-      const match = current.$ref.match(/^#\/\$defs\/(.+)$/);
-      if (!match || followed.has(current.$ref)) return;
-      followed.add(current.$ref);
+    // A chain, not a hop: a definition is allowed to be an alias for another,
+    // and stopping after one would collect the alias — which states no field —
+    // instead of what it names. The guard below is what ends a chain that
+    // loops back on itself.
+    while (typeof current.$ref === "string") {
+      const ref = current.$ref;
+      const match = ref.match(/^#\/\$defs\/(.+)$/);
+      if (!match || followed.has(ref)) return;
+      followed.add(ref);
       const def = defs[match[1]];
       if (!def || typeof def !== "object") return;
       current = def as Record<string, unknown>;
@@ -340,7 +345,12 @@ function schemaToTypeStringInner(
   // fields live only in `allOf` states no `type` and no `properties` of its
   // own, and would otherwise not reach that branch at all.
   const sources = Array.isArray(s.allOf) ? conjunctionSources(s, defs) : [s];
-  const conjoined: Record<string, JSONSchema> = {};
+  // Null-prototype, because the keys are field names out of caller JSON and a
+  // schema may legally declare one called `__proto__`. Measured on Deno 2.9.4:
+  // such a key survives a plain `{}` accumulator intact. That is a property of
+  // the engine rather than of this code, and the accumulator states which it
+  // depends on rather than inheriting the question.
+  const conjoined: Record<string, JSONSchema> = Object.create(null);
   const conjoinedRequired: string[] = [];
   for (const source of sources) {
     const sourceProps = source.properties as
@@ -359,10 +369,18 @@ function schemaToTypeStringInner(
     }
   }
 
-  if (type === "object" || s.properties || Object.keys(conjoined).length > 0) {
-    const props = Object.keys(conjoined).length > 0
-      ? conjoined
-      : s.properties as Record<string, JSONSchema> | undefined;
+  // A conjunct saying `type: "object"` makes the whole an object even when it
+  // names no field, and `{}` is what that is. Falling through to `unknown`
+  // would deny a shape the schema states. A conjunct saying `type: "string"`
+  // is a different matter and still falls through: it contributes no field,
+  // and rendering it `{}` would invent an object nothing described.
+  //
+  // For a schema with no `allOf`, `sources` is the schema alone, so this asks
+  // exactly what the object branch has always asked.
+  if (
+    sources.some((source) => source.type === "object" || !!source.properties)
+  ) {
+    const props = conjoined;
     // An index signature (object-valued additionalProperties) carries a value
     // schema worth showing; a bare `additionalProperties: true` does not
     const indexValueSchema = typeof s.additionalProperties === "object" &&
