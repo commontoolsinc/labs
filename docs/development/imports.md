@@ -133,12 +133,17 @@ directive at the top carries the reason for all of its sites:
 ```
 
 A file-level directive covers sites added later too, so prefer the per-site
-form unless the file really is uniformly about deferred loading. A file gets
-only one such directive — Deno reads the first and ignores any that follow —
-so a file that already carries one names both rules on that line:
+form unless the file really is uniformly about deferred loading.
+
+A file gets one such directive and no more. Deno reads the first and ignores
+every one after it, so a second directive suppresses nothing while reading as
+though it does. A file that already carries one names every rule it needs on
+that single line. Only the rule names sit before the `--`, so the reason can
+run onto the lines below it:
 
 ```text
 // deno-lint-ignore-file no-explicit-any cf-imports/no-inline-module-import --
+// the harness loads each checkout's own copy of the module under test.
 ```
 
 ## Node built-ins
