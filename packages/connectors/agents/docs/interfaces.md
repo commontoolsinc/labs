@@ -406,10 +406,18 @@ Prompts call `resumeSession` when the agent advertises resume support. Otherwise
 they call `loadSession` before `prompt`. Cancellation is available only while a
 connector-owned prompt is active.
 
-Session modes and configuration option IDs are learned from `loadSession`.
-Configuration values are limited to strings and booleans because those are the
-portable ACP value forms used by this driver. ACP has no portable rename
-operation.
+Session modes and configuration option descriptors are learned from successful
+`loadSession` and `resumeSession` responses. A later response replaces the
+controls for that session, including removing controls that are absent. A
+successful `setSessionConfigOption` response replaces that session's option
+descriptors. The published source capabilities contain the sorted union of mode
+IDs and an object of option descriptors keyed by option ID. Completed inventory
+removes control metadata for sessions that are no longer present.
+
+Mode and configuration commands are checked against the controls for their
+target session. Boolean options accept booleans. Select options accept only an
+advertised string value, including values nested in option groups. ACP has no
+portable rename operation.
 
 ACP permission requests return a cancelled outcome. The connector passes an
 empty MCP server list. Child stderr is copied to the connector's error output

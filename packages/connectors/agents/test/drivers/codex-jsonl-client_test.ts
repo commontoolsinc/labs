@@ -55,7 +55,9 @@ try:
             print(json.dumps({"id": message["id"], "result": {}}), flush=True)
         elif method == "notify":
             print(json.dumps({"id": message["id"], "result": {}}), flush=True)
-            print(json.dumps({"method": "event/ready", "params": {"ready": True}}), flush=True)
+            params = {"ready": True}
+            params.update(message.get("params", {}))
+            print(json.dumps({"method": "event/ready", "params": params}), flush=True)
         elif method == "notify-exit":
             print(json.dumps({"id": message["id"], "result": {}}), flush=True)
             print(json.dumps({"method": "event/ready", "params": {"ready": True}}), flush=True)
@@ -122,6 +124,32 @@ Deno.test("Codex notification waits remain pending until a match arrives", async
     assertEquals(await pending, {
       ok: true,
       value: { method: "event/ready", params: { ready: true } },
+    });
+  } finally {
+    await client.stop();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Codex restart discards buffered notifications", async () => {
+  const dir = await Deno.makeTempDir();
+  const server = `${dir}/deferred-codex`;
+  await Deno.writeTextFile(server, DEFERRED_SERVER);
+  await Deno.chmod(server, 0o755);
+  const client = new CodexJsonlClient([server]);
+  try {
+    await client.start();
+    await client.call("notify", { run: "old" });
+    await client.stop();
+
+    await client.start();
+    const notification = client.waitForNotification((message) =>
+      message.method === "event/ready"
+    );
+    await client.call("notify", { run: "new" });
+    assertEquals(await notification, {
+      method: "event/ready",
+      params: { ready: true, run: "new" },
     });
   } finally {
     await client.stop();

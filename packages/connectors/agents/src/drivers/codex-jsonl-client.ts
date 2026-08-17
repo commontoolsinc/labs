@@ -89,6 +89,7 @@ export class CodexJsonlClient {
     await this.#cleanupTask;
     if (this.#child) throw new Error("Codex App Server already started");
     signal?.throwIfAborted();
+    this.#notifications = [];
     const child = new Deno.Command(this.#command[0], {
       args: this.#command.slice(1),
       cwd: this.#cwd,

@@ -657,7 +657,6 @@ export class AgentFabricTarget implements CommandTarget {
         if (currentKeys.has(prior.key)) continue;
         entriesByKey.set(prior.key, {
           ...prior,
-          driver,
           capabilities: { ...capabilities },
         });
       }

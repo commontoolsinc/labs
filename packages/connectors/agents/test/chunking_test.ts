@@ -20,7 +20,20 @@ Deno.test("chunkEvents keeps provider events whole and deterministic", () => {
 });
 
 Deno.test("chunkEvents returns one empty chunk for an empty complete snapshot", () => {
-  assertEquals(chunkEvents([], 512), [{ part: 0, events: [], byteLength: 2 }]);
+  assertEquals(chunkEvents([], 512), [{
+    part: 0,
+    events: [],
+    byteLength: encodedJsonBytes([]),
+  }]);
+});
+
+Deno.test("chunkEvents reports the exact size of multi-event chunks", () => {
+  const events = [{ value: 1 }, { value: 2 }, { value: 3 }];
+  assertEquals(chunkEvents(events, 1024), [{
+    part: 0,
+    events,
+    byteLength: encodedJsonBytes(events),
+  }]);
 });
 
 Deno.test("chunkEvents serializes each provider event once", () => {

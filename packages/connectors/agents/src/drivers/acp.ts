@@ -237,6 +237,7 @@ export class AcpDriver implements AgentDriver {
   readonly #loadQueues = new Map<string, Promise<void>>();
   readonly #activePrompts = new Set<string>();
   readonly #pendingPrompts = new Set<string>();
+  readonly #inventorySessionIds = new Set<string>();
   readonly #sessionModes = new Map<string, Set<string>>();
   readonly #sessionConfigOptions = new Map<
     string,
@@ -311,6 +312,7 @@ export class AcpDriver implements AgentDriver {
   }
 
   async listSessions(cursor?: string): Promise<SessionPage> {
+    if (!cursor) this.#inventorySessionIds.clear();
     const result = await this.#transport.listSessions({
       ...(cursor ? { cursor } : {}),
     });
@@ -326,6 +328,16 @@ export class AcpDriver implements AgentDriver {
     }));
     for (const summary of sessions) {
       this.#summaries.set(summary.nativeSessionId, summary);
+      this.#inventorySessionIds.add(summary.nativeSessionId);
+    }
+    if (!result.nextCursor) {
+      for (const sessionId of this.#summaries.keys()) {
+        if (this.#inventorySessionIds.has(sessionId)) continue;
+        this.#summaries.delete(sessionId);
+        this.#sessionModes.delete(sessionId);
+        this.#sessionConfigOptions.delete(sessionId);
+      }
+      this.#publishSessionControls();
     }
     return { sessions, nextCursor: result.nextCursor ?? undefined };
   }
@@ -568,6 +580,10 @@ export class AcpDriver implements AgentDriver {
       }
       this.#sessionConfigOptions.set(nativeSessionId, options);
     }
+    this.#publishSessionControls();
+  }
+
+  #publishSessionControls(): void {
     const modes = new Set<string>();
     for (const sessionModes of this.#sessionModes.values()) {
       for (const mode of sessionModes) modes.add(mode);

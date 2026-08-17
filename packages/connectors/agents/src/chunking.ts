@@ -15,8 +15,10 @@ export function encodedJsonBytes(value: unknown): number {
   return fabricJsonCodec.encodeToBytes(stableFabricValue(value)).byteLength;
 }
 
+const EMPTY_ARRAY_BYTES = encodedJsonBytes([]);
+
 function encodedJsonArrayElementBytes(value: unknown): number {
-  return encodedJsonBytes([value]) - 2;
+  return encodedJsonBytes([value]) - EMPTY_ARRAY_BYTES;
 }
 
 export function chunkEvents<T>(
@@ -27,12 +29,12 @@ export function chunkEvents<T>(
     throw new Error("targetBytes must be a positive safe integer");
   }
   if (events.length === 0) {
-    return [{ part: 0, events: [], byteLength: 2 }];
+    return [{ part: 0, events: [], byteLength: EMPTY_ARRAY_BYTES }];
   }
 
   const chunks: EventChunk<T>[] = [];
   let current: T[] = [];
-  let currentBytes = 2;
+  let currentBytes = EMPTY_ARRAY_BYTES;
   for (const event of events) {
     const eventBytes = encodedJsonArrayElementBytes(event);
     const candidateBytes = currentBytes +
@@ -45,7 +47,7 @@ export function chunkEvents<T>(
         byteLength: currentBytes,
       });
       current = [event];
-      currentBytes = 2 + eventBytes;
+      currentBytes = EMPTY_ARRAY_BYTES + eventBytes;
     } else {
       current.push(event);
       currentBytes = candidateBytes;

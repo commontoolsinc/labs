@@ -102,6 +102,7 @@ Deno.test("ACP controls are discovered and enforced per session", async () => {
   const modeCalls: SetSessionModeRequest[] = [];
   const configCalls: SetSessionConfigOptionRequest[] = [];
   let firstLoads = 0;
+  let inventoryIncludesSecond = true;
   const transport: AcpTransport = {
     setSessionUpdateSink() {},
     initialize: () =>
@@ -116,7 +117,9 @@ Deno.test("ACP controls are discovered and enforced per session", async () => {
       Promise.resolve({
         sessions: [
           { sessionId: "first", cwd: "/tmp/first" },
-          { sessionId: "second", cwd: "/tmp/second" },
+          ...(inventoryIncludesSecond
+            ? [{ sessionId: "second", cwd: "/tmp/second" }]
+            : []),
         ],
       }),
     loadSession: (params) => {
@@ -196,6 +199,10 @@ Deno.test("ACP controls are discovered and enforced per session", async () => {
     (await driver.setMode("first", "plan")).status,
     "unsupported",
   );
+  inventoryIncludesSecond = false;
+  await driver.listSessions();
+  assertEquals(driver.source.capabilities.modes, []);
+  assertEquals(driver.source.capabilities.setMode, false);
 });
 
 Deno.test("ACP startup stops transports missing required capabilities", async () => {
