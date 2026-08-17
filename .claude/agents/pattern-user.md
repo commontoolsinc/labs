@@ -39,14 +39,14 @@ deno task cf check main.tsx --no-run
 deno task cf test main.test.tsx
 
 # Deploy to toolshed (this is how you "run" it)
-API_URL=<url> deno task cf piece new main.tsx --test main.test.tsx --identity <key_path>
+CF_API_URL=<url> deno task cf piece new main.tsx --test main.test.tsx --identity <key_path>
 
 # Update existing piece
-API_URL=<url> deno task cf piece setsrc main.tsx --test main.test.tsx --piece <piece_id> --identity <key_path>
+CF_API_URL=<url> deno task cf piece setsrc main.tsx --test main.test.tsx --piece <piece_id> --identity <key_path>
 
 # Inspect state / call handler
-API_URL=<url> deno task cf piece inspect --piece <piece_id> --identity <key_path>
-API_URL=<url> deno task cf call --piece <piece_id> --identity <key_path> <handler>
+CF_API_URL=<url> deno task cf piece inspect --piece <piece_id> --identity <key_path>
+CF_API_URL=<url> deno task cf call --piece <piece_id> --identity <key_path> <handler>
 ```
 
 ## Deploy Flow
