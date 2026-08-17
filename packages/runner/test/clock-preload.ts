@@ -62,6 +62,10 @@ installFakeClock({
     // wall-clock policies; it waits on store/replica edges with bounded
     // timeouts.
     "executor-instance-keyed-replica",
+    // The speculation arrival-gate suite drives a live memory server and
+    // waits on push/watermark edges with bounded timeouts, and its
+    // "would-be loop" window is a real-time observation.
+    "speculation-arrival-gate",
     // The Phase-4 client-effect-channel suite drives a live
     // ExecutorHost (the served navigateTo → intent → enact/ack →
     // retirement journeys) under the same wall-clock policies — the

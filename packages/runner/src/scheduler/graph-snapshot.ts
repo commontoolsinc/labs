@@ -258,7 +258,10 @@ function formatAddress(
   address: IMemorySpaceAddress,
   identity: ScopeKeyIdentity,
 ): string {
+  // An address that NAMES its instance (`scopeKey`, server-execution v2
+  // stage A — a served per-instance run's logged read) renders that
+  // instance; the runtime's identity resolves the rest, as before.
   return `${address.space}/${address.id}/${
-    resolveScopeKey(address.scope, identity)
+    address.scopeKey ?? resolveScopeKey(address.scope, identity)
   }/${address.path.join("/")}`;
 }
