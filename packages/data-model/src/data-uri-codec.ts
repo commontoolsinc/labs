@@ -10,7 +10,7 @@ import {
   fromBase64url,
   toUnpaddedBase64urlFromText,
 } from "@commonfabric/utils/base64url";
-import { EmptyReconstructionContext } from "./codec-common/index.ts";
+import { EmptyDecodeContext } from "./codec-common/index.ts";
 import { fabricFromJsonValue, jsonFromFabricValue } from "./codecs.ts";
 import type { FabricValue } from "./fabric-value.ts";
 
@@ -73,14 +73,14 @@ export function dataUriFromValue(value: FabricValue): UriString {
 const textDecoder = new TextDecoder();
 
 /**
- * `ReconstructionContext` for decoding `data:` URI payloads. Links at this
+ * `DecodeContext` for decoding `data:` URI payloads. Links at this
  * boundary are sigil (plain) data rather than cell references, so no cell
- * reconstruction is ever needed; this context exists so that an unexpected
+ * decoding is ever needed; this context exists so that an unexpected
  * cell reference produces a message that names the boundary.
  */
-const dataUriReconstructionContext = new EmptyReconstructionContext(
+const dataUriDecodeContext = new EmptyDecodeContext(
   true,
-  "no cell reconstruction at the `data:` URI boundary",
+  "no cell decoding at the `data:` URI boundary",
 );
 
 /**
@@ -150,7 +150,7 @@ export function extractDataUriPayloadText(
  *   it is empty or is bare JSON.
  */
 export function valueFromDataUriPayloadText(text: string): FabricValue {
-  return fabricFromJsonValue(text, dataUriReconstructionContext);
+  return fabricFromJsonValue(text, dataUriDecodeContext);
 }
 
 /**

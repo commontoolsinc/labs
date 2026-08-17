@@ -1,7 +1,7 @@
 import type { FabricValue } from "@/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "./interface.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import type { DecodeContext } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
@@ -15,7 +15,7 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
  * emits `null` for `NaN`/`±Infinity` and drops the sign on `-0`, which would
  * make a numeric-state form lossy through the JSON layer.
  *
- * Any NaN bit pattern serializes as the literal `"NaN"` and round-trips
+ * Any NaN bit pattern encodes as the literal `"NaN"` and round-trips
  * back to `Number.NaN`.
  */
 export class SpecialNumberCodec extends BaseTerminalCodec<JsonCodecValue> {
@@ -46,7 +46,7 @@ export class SpecialNumberCodec extends BaseTerminalCodec<JsonCodecValue> {
   decode(
     typeTag: string,
     state: JsonCodecValue,
-    _context: ReconstructionContext,
+    _context: DecodeContext,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(

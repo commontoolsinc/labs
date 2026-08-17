@@ -14,7 +14,7 @@ import {
   JSON_CODEC,
   type NonterminalCodec,
   REALM_CODEC,
-  type ReconstructionContext,
+  type DecodeContext,
   type TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
@@ -192,7 +192,7 @@ export class FabricRegExp extends BaseFabricPrimitive
       decode(
         typeTag: string,
         state: FabricValue,
-        _context: ReconstructionContext,
+        _context: DecodeContext,
       ): FabricValue {
         if (!isPlainObject(state)) {
           return new ProblematicValue(
@@ -262,7 +262,7 @@ export class FabricRegExp extends BaseFabricPrimitive
       decode(
         typeTag: string,
         state: RealmCodecValue,
-        _context: ReconstructionContext,
+        _context: DecodeContext,
       ): FabricValue {
         if (!isPlainObject(state)) {
           return new ProblematicValue(

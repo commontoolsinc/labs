@@ -17,13 +17,13 @@ import { expect } from "@std/expect";
 
 import { BigIntCodec } from "@/codec-json/BigIntCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("BigIntCodec", () => {
   const codec = new BigIntCodec();
   const expectedTag = CODEC_TYPE_TAGS.BigInt;
-  const context = EMPTY_RECONSTRUCTION_CONTEXT;
+  const context = EMPTY_DECODE_CONTEXT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {
@@ -34,7 +34,7 @@ describe("BigIntCodec", () => {
 
     describe("canEncode()", () => {
       it("only claims `bigint` values", () => {
-        // `bigint` serializes to `BigInt@1`, whereas `number` does not -- the
+        // `bigint` encodes to `BigInt@1`, whereas `number` does not -- the
         // two produce distinct wire forms.
         expect(codec.canEncode(42n)).toBe(true);
         expect(codec.canEncode(42)).toBe(false);

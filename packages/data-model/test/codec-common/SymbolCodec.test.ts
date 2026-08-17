@@ -19,7 +19,7 @@ import { expect } from "@std/expect";
 
 import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 
@@ -39,7 +39,7 @@ const _refusesAWrapper = new SymbolCodec<JsonCodecValue>((key) => ({ key }));
 describe("SymbolCodec", () => {
   const codec = new SymbolCodec<JsonCodecValue>((key) => key);
   const expectedTag = CODEC_TYPE_TAGS.Symbol;
-  const context = EMPTY_RECONSTRUCTION_CONTEXT;
+  const context = EMPTY_DECODE_CONTEXT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {

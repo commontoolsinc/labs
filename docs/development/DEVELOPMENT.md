@@ -42,7 +42,7 @@ about one aspect of the runtime, are indexed in
 - Alpha-sorting each run is strongly suggested. Sorting is what makes a list
   scannable rather than merely grouped, and it answers by rule the question of
   where a new import goes. Sort on the specifier, comparing without regard to
-  case, so that `codec-type-tags.ts` precedes `EmptyReconstructionContext.ts`
+  case, so that `codec-type-tags.ts` precedes `EmptyDecodeContext.ts`
   the way a reader expects. Where sorting and the grouping above disagree, the
   grouping wins: sort within the standard-library, external, and internal
   blocks, not across them.
