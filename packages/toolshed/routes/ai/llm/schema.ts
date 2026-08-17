@@ -1,10 +1,6 @@
-const OMIT_SCHEMA = Symbol("omit-schema");
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
-function isObjectRecord(
-  value: unknown,
-): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const OMIT_SCHEMA = Symbol("omit-schema");
 
 function normalizeSchemaNode(schema: unknown): unknown {
   if (schema === true || schema === false) return schema;
@@ -13,7 +9,7 @@ function normalizeSchemaNode(schema: unknown): unknown {
       .map((item) => normalizeSchemaNode(item))
       .filter((item) => item !== OMIT_SCHEMA);
   }
-  if (!isObjectRecord(schema)) return schema;
+  if (!isObjectNotArray(schema)) return schema;
   if (schema.type === "undefined") return OMIT_SCHEMA;
 
   const out: Record<string, unknown> = {};
@@ -44,7 +40,7 @@ function normalizeSchemaNode(schema: unknown): unknown {
   }
 
   let droppedPropertyNames = new Set<string>();
-  if (isObjectRecord(schema.properties)) {
+  if (isObjectNotArray(schema.properties)) {
     const properties: Record<string, unknown> = {};
     droppedPropertyNames = new Set<string>();
     for (const [key, value] of Object.entries(schema.properties)) {
@@ -71,7 +67,7 @@ function normalizeSchemaNode(schema: unknown): unknown {
     const anyOf = schema.anyOf
       .map((branch) => normalizeSchemaNode(branch))
       .filter((branch) => branch !== OMIT_SCHEMA);
-    if (anyOf.length === 1 && isObjectRecord(anyOf[0])) {
+    if (anyOf.length === 1 && isObjectNotArray(anyOf[0])) {
       return {
         ...anyOf[0],
         ...out,

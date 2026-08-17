@@ -1,4 +1,5 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
 import { ProcessTimeoutError } from "./sandbox/process-runner.ts";
 import type {
@@ -219,9 +220,6 @@ const createEmptyCapabilitySnapshot = (
   cfc,
 });
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const isCfcEnforcementMode = (
   value: unknown,
 ): value is CfcEnforcementMode =>
@@ -232,10 +230,10 @@ const isFailedDelegateTaskOutput = (
   output: unknown,
 ): output is DelegateTaskToolOutput => {
   if (
-    !isRecord(output) ||
+    !isObjectNotArray(output) ||
     output.type !== "cf-harness.delegate-task-output" ||
     typeof output.outputId !== "string" ||
-    !isRecord(output.subagent)
+    !isObjectNotArray(output.subagent)
   ) {
     return false;
   }
@@ -393,8 +391,8 @@ const parseFabricStatusProbeOutput = (
   }
   try {
     const parsed = JSON.parse(payload);
-    const cfc = isRecord(parsed) ? parsed.cfc : undefined;
-    const mode = isRecord(cfc) ? cfc.mode : undefined;
+    const cfc = isObjectNotArray(parsed) ? parsed.cfc : undefined;
+    const mode = isObjectNotArray(cfc) ? cfc.mode : undefined;
     return {
       statusProbe: "present",
       ...(isCfcEnforcementMode(mode) ? { attestedMode: mode } : {}),
@@ -785,11 +783,11 @@ const classifyWebFetchToolFailure = (
 const isFailedSkillResourceOutput = (
   output: unknown,
 ): output is ReadSkillResourceToolOutput =>
-  isRecord(output) &&
+  isObjectNotArray(output) &&
   output.type === "cf-harness.read-skill-resource-output" &&
   output.status === "error" &&
   typeof output.outputId === "string" &&
-  isRecord(output.error) &&
+  isObjectNotArray(output.error) &&
   typeof output.error.message === "string";
 
 const classifySkillResourceToolFailure = (

@@ -1,4 +1,8 @@
 import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
+import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
   type RunHarnessTranscriptOptions,
@@ -42,9 +46,6 @@ import type {
 } from "./contracts/transcript.ts";
 import type { HarnessChatSessionStore } from "./session-store.ts";
 import { HarnessControlError } from "./control-errors.ts";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 export type HarnessInteractivePromptLoop = Pick<
   CfHarnessPromptLoop,
@@ -177,7 +178,7 @@ const providerMismatchError = (
 const isLoomLocalHostBinding = (
   value: unknown,
 ): value is LoomLocalHostBinding => {
-  if (!isRecord(value) || value.source !== "loom") {
+  if (!isObjectNotArray(value) || value.source !== "loom") {
     return false;
   }
   if (
@@ -194,7 +195,7 @@ const isLoomLocalHostBinding = (
     return false;
   }
   const owner = value.credentialOwner;
-  return isRecord(owner) &&
+  return isObjectNotArray(owner) &&
     owner.type === "cf-harness.credential-owner-ref" && owner.version === 1 &&
     typeof owner.ownerKey === "string" && owner.ownerKey.length > 0 &&
     (owner.tenantKey === undefined || typeof owner.tenantKey === "string") &&
@@ -353,17 +354,17 @@ const clearActiveTurnStatus = (
 
 const parseToolMessageContent = (
   content: string,
-): Record<string, unknown> | undefined => {
+): ReadonlyRecord | undefined => {
   try {
     const parsed: unknown = JSON.parse(content);
-    return isRecord(parsed) ? parsed : undefined;
+    return isObjectNotArray(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
 };
 
 const toolMessageStatus = (
-  parsedContent: Record<string, unknown> | undefined,
+  parsedContent: ReadonlyRecord | undefined,
 ): "completed" | "failed" | "denied" => {
   if (parsedContent?.type === "cf-harness.observation-denied") {
     return "denied";
@@ -376,7 +377,7 @@ const toolMessageStatus = (
 
 const fileChangeFromToolMessage = (
   message: HarnessToolTranscriptMessage,
-  parsedContent: Record<string, unknown> | undefined,
+  parsedContent: ReadonlyRecord | undefined,
 ): HarnessChatStructuredEvent | undefined => {
   if (
     parsedContent === undefined ||

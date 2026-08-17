@@ -5,6 +5,7 @@ import {
   validateAndSanitizeStructuredResultValue,
   validateStructuredResultValue as validateCfcStructuredResultValue,
 } from "@commonfabric/runner/cfc";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 export const DEFAULT_STRUCTURED_RESULT_SCHEMA_MAX_BYTES = 32 * 1024;
 
@@ -44,9 +45,6 @@ const sha256Digest = async (input: Uint8Array): Promise<string> => {
 export const digestJsonValue = async (input: unknown): Promise<string> =>
   await sha256Digest(textBytes(JSON.stringify(input)));
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 export const parseStructuredResultSchema = (
   input: unknown,
   options: ParseStructuredResultSchemaOptions = {},
@@ -63,10 +61,7 @@ export const parseStructuredResultSchema = (
       throw new Error(`${label} string must be valid JSON`);
     }
   }
-  if (
-    typeof parsed !== "boolean" &&
-    (!isRecord(parsed) || Array.isArray(parsed))
-  ) {
+  if (typeof parsed !== "boolean" && !isObjectNotArray(parsed)) {
     throw new Error(
       `${label} must be a JSON Schema object, boolean, or JSON string`,
     );

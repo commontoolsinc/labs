@@ -17,6 +17,7 @@ import {
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { CfcConfClause } from "../../cfc/clause.ts";
 import { clauseAlternatives } from "../../cfc/clause.ts";
@@ -71,9 +72,6 @@ export type RowLabelReadResult =
      *  clearance was requested. */
     withheld?: number;
   };
-
-const isRecord = (x: unknown): x is Record<string, unknown> =>
-  typeof x === "object" && x !== null && !Array.isArray(x);
 
 // The common-alternative outcome for a null-origin (aggregate) projection over
 // the rule-bearing tables. `unconstrained`: no rule imposes any confidentiality
@@ -280,7 +278,7 @@ export function computeRowLabelRead(
         labels = [];
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
-          if (!isRecord(row)) {
+          if (!isObjectNotArray(row)) {
             return { error: `sqlite: result row ${i} is not an object` };
           }
           const rowValues: Record<string, unknown> = {};
@@ -415,7 +413,8 @@ export function resolveCeilingPlaceholders(
   const atoms: CfcConfClause[] = [];
   for (const atom of ceiling) {
     if (
-      isRecord(atom) && (atom as CfcAtomObject).__ctCurrentPrincipal === true
+      isObjectNotArray(atom) &&
+      (atom as CfcAtomObject).__ctCurrentPrincipal === true
     ) {
       if (ctx.actingPrincipal === undefined) {
         return {
@@ -426,7 +425,9 @@ export function resolveCeilingPlaceholders(
       atoms.push(ctx.actingPrincipal);
       continue;
     }
-    if (isRecord(atom) && (atom as CfcAtomObject).__ctDbOwner === true) {
+    if (
+      isObjectNotArray(atom) && (atom as CfcAtomObject).__ctDbOwner === true
+    ) {
       if (ctx.owner === undefined) {
         return {
           error: "sqlite: ceiling references the db owner but the db ref " +
