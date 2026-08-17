@@ -589,14 +589,14 @@ describe("Phase 3 events-down (serving side)", () => {
       scope: (markedEntry.stream.scope ?? "space") as never,
     };
     const cancelProbe = servingRuntime!.scheduler.addEventHandler(
-        (_tx, event: unknown) => {
-          seen.push({
-            kind: (event as { kind?: string })?.kind ?? "?",
-            trusted: isRendererTrustedEvent(event),
-          });
-        },
-        streamLink,
-      );
+      (_tx, event: unknown) => {
+        seen.push({
+          kind: (event as { kind?: string })?.kind ?? "?",
+          trusted: isRendererTrustedEvent(event),
+        });
+      },
+      streamLink,
+    );
     try {
       const marked2 = { kind: "marked-2" };
       markRendererTrustedEvent(marked2);

@@ -2260,9 +2260,7 @@ const validateEventAppends = (
       if (
         entry.runtimeInjectedEventKeys !== undefined &&
         (!Array.isArray(entry.runtimeInjectedEventKeys) ||
-          entry.runtimeInjectedEventKeys.some((key) =>
-            typeof key !== "string"
-          ))
+          entry.runtimeInjectedEventKeys.some((key) => typeof key !== "string"))
       ) {
         throw new ProtocolError(
           `event append ${entry.eventId} carries malformed ` +
