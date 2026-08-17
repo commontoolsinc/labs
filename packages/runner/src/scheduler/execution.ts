@@ -91,25 +91,43 @@ export function recordExecuteEnd(
   };
 }
 
-export function markNonSettlingEpisode(
+/**
+ * Summarizes the tracker's current busy window without touching its state, so
+ * a caller can report every non-settling episode rather than only the first.
+ */
+export function summarizeNonSettlingWindow(
   tracker: SettlingTracker,
   now = performance.now(),
-): ExecuteEndUpdate["nonSettlingTelemetry"] | undefined {
-  if (tracker.nonSettlingDetected) return undefined;
-
+): NonNullable<ExecuteEndUpdate["nonSettlingTelemetry"]> {
   const windowStart = tracker.windowStart || now;
   const inFlightBusyTime = tracker.isExecuting
     ? Math.max(0, now - tracker.lastExecuteStart)
     : 0;
   const busyTime = tracker.busyTime + inFlightBusyTime;
   const windowDuration = Math.max(1, now - windowStart);
-  tracker.nonSettlingDetected = true;
 
   return {
     busyTime,
     windowDuration,
     busyRatio: Math.min(1, busyTime / windowDuration),
   };
+}
+
+/**
+ * Latches the tracker's non-settling flag, returning the window summary for the
+ * episode that set it and `undefined` for every episode after it. The flag
+ * lives on the tracker, which the scheduler replaces when a continuation
+ * begins, so the latch spans a run of settle passes rather than the runtime.
+ */
+export function markNonSettlingEpisode(
+  tracker: SettlingTracker,
+  now = performance.now(),
+): ExecuteEndUpdate["nonSettlingTelemetry"] | undefined {
+  if (tracker.nonSettlingDetected) return undefined;
+
+  const summary = summarizeNonSettlingWindow(tracker, now);
+  tracker.nonSettlingDetected = true;
+  return summary;
 }
 
 export function buildPullInitialSeeds(state: {
