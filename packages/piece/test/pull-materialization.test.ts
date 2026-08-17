@@ -3561,6 +3561,108 @@ describe("piece pull materialization", () => {
     });
   });
 
+  it("sends a stream event past an invalid producer sibling", async () => {
+    const members = {
+      other: { type: "number" },
+      spare: { type: "number" },
+    } as const;
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            event: { type: "number", asCell: ["stream"] },
+            ...members,
+          },
+          required: ["event", "other", "spare"],
+        },
+        // The result declares the same stream with its payload unconstrained,
+        // so a payload only the producer refuses reaches the producer contract
+        // instead of stopping at this Piece's own result schema.
+        resultSchema: {
+          type: "object",
+          properties: { event: { asCell: ["stream"] }, ...members },
+          required: ["event", "other", "spare"],
+        },
+        result: {
+          event: { $alias: { cell: "argument", path: ["event"] } },
+          other: { $alias: { cell: "argument", path: ["other"] } },
+          spare: { $alias: { cell: "argument", path: ["spare"] } },
+        },
+        nodes: [],
+      }),
+      { event: { $stream: true }, other: 1, spare: 2 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+    const argument = pieces.getArgument(piece);
+    // A producer member that no write below touches, holding a value the
+    // producer's own schema refuses.
+    await runtime.editWithRetry((tx) => {
+      argument.withTx(tx).key("spare").setRawUntyped("bad");
+    });
+
+    const stream = argument.key("event");
+    const events: unknown[] = [];
+    const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
+      events.push(event);
+    }, stream.getAsNormalizedFullLink());
+    try {
+      await controller.result.set(7, ["event"]);
+      await runtime.idle();
+      expect(events).toEqual([7]);
+      // The premise the skip rests on: sending stores nothing, so the producer
+      // document the root pass would have judged is the one it already was.
+      expect(argument.getRawUntyped()).toEqual({
+        event: { $stream: true },
+        other: 1,
+        spare: "bad",
+      });
+
+      // Bypassing the root pass does not excuse a payload the producer's own
+      // event contract refuses: nothing further reaches the stream.
+      await expect(controller.result.set("bad", ["event"])).rejects.toThrow(
+        /does not match its write destination: value does not match type number/,
+      );
+      await runtime.idle();
+      expect(events).toEqual([7]);
+    } finally {
+      removeHandler();
+    }
+  });
+
+  it("drops a raw key the materialized view does not carry", async () => {
+    // `omitMissingProjectionAliases` reconciles two views of one document. A
+    // raw key with no counterpart in the materialized view is not a missing
+    // alias to resolve — there is nothing on the materialized side to keep — so
+    // it is skipped rather than recursed into.
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const result = omitMissingProjectionAliases(
+      { kept: 1 },
+      { kept: 1, absentFromMaterialized: 2 },
+      undefined,
+      pieces.getResult(piece),
+      pieces,
+    );
+    // `toEqual` treats a present undefined as absent, so ask about the key
+    // itself: recursing would have set it, to undefined.
+    expect(Object.hasOwn(result as object, "absentFromMaterialized")).toBe(
+      false,
+    );
+    expect(result).toEqual({ kept: 1 });
+  });
+
   it("rejects descendant writes through Stream wrappers", async () => {
     const event = {
       type: "object",

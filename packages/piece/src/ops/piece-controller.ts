@@ -2655,10 +2655,7 @@ class PiecePropIo implements PieceCellIo {
           );
         }
         const destination = durableDestination;
-        let localizedDestination: {
-          contracts: PathSchemaContract[];
-          isStream: boolean;
-        };
+        let localizedDestination: { contracts: PathSchemaContract[] };
         try {
           const destinationRootCell = pieces.runtime.getCellFromLink(
             { ...resolved, path: [], schema: undefined },
@@ -2672,12 +2669,14 @@ class PiecePropIo implements PieceCellIo {
               nextValue,
             )
           );
-          const isStream = resolveDeclaredStreamCapability(
+          // Called for the agreement it asserts: contracts that disagree on
+          // Stream capability throw here. What it returns is the capability the
+          // producer declares, which no one below asks about.
+          resolveDeclaredStreamCapability(
             localized.map((entry) => entry.declaredStream),
           );
           localizedDestination = {
             contracts: localized.flatMap((entry) => entry.contracts),
-            isStream,
           };
           const links = suppliedLinks(nextValue);
           if (
@@ -2720,7 +2719,14 @@ class PiecePropIo implements PieceCellIo {
           );
           if (issue !== undefined) break;
         }
-        if (issue === undefined) {
+        // A Stream destination consumes the value as an event: the write below
+        // sends it instead of storing it, and `Cell.set()` reaches that decision
+        // through this same predicate on this same cell. Nothing is stored, so
+        // no producer document changes and no producer root's validity can
+        // change. What the event itself owes — the producer's own event
+        // contract, at every producer-owned projection of the destination — the
+        // loop above has already proven.
+        if (issue === undefined && !isStream(txCell)) {
           issue = validateDurableSourceRoots(
             destination,
             nextValue,
