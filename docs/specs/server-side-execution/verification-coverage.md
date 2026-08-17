@@ -1234,7 +1234,21 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   the EARLY-EMIT GUARD — send-then-read refused fail-closed, retry
   attributed at the learned scope, one durable entry); the P2-F pins
   moved to the ruled attribution (a user-scoped instance carries the
-  user only). Stage-B residuals, FLAGGED: (viii) the wish sidecar's
+  user only). PINNING (review F3, fix round 2026-08-17): the RAGGED
+  redirect fix now carries a DETERMINISTIC unit pin at
+  `sendValueToBinding` (`pattern-binding.test.ts` "RAGGED redirect": an
+  existing space→user redirect + a session discovery → the run's own
+  USER slot is re-pointed at session, the SHARED space slot untouched;
+  M9 — revert to writing the shared slot — kills it 4/4, replacing the
+  timing-sensitive (c)/(f-walk) coverage the review found M9 surviving
+  3/4). The WISH-SIDECAR demand-root chain (`sidecarRunOptions`) stays
+  covered only by the bimodal lunch gate: a runner-suite pin needs the
+  profile-create sidecar to actually RUN, and its fetch→compile→run
+  `.then` does not complete under the suite's mandatory fake clock (the
+  fetch fires, but `runSidecarInOwnTx`'s run never does), so a reliable
+  MWISH pin is OWED as a served-host wish E2E (the fan-out E2E's
+  ExecutorHost shape) — a named follow-up, not landed here.
+  Stage-B residuals, FLAGGED: (viii) the wish sidecar's
   instance SET is the chain's demanders, not only the demander the
   sidecar was minted for (a sibling's runs of a per-user sidecar's
   narrowed nodes are inert but not free) — a per-demander pin
