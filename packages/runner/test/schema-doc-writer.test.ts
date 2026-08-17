@@ -131,6 +131,63 @@ describe("schema-doc-writer", () => {
     }
   });
 
+  it("re-installs the same closure across transactions under the immutability boundary", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { reinstalled: { $ref: "#/$defs/ReinstalledLeaf" } },
+      $defs: {
+        ReinstalledLeaf: {
+          type: "object",
+          properties: { reinstalledLeaf: { type: "string" } },
+        },
+      },
+    };
+    const first = writer.edit();
+    first.writeValueOrThrow(
+      { space, id: "of:reinstall-a" as URI, scope: "space", path: [] },
+      { person: sigilFor(schema) },
+    );
+    expect((await first.commit()).ok).toBeDefined();
+
+    // A second transaction referencing the same closure materializes the
+    // same documents again. The commit boundary accepts only a first
+    // installation or an identical re-set of a cid: document, so this
+    // pins the writer's output as byte-stable across transactions.
+    const second = writer.edit();
+    second.writeValueOrThrow(
+      { space, id: "of:reinstall-b" as URI, scope: "space", path: [] },
+      { person: sigilFor(schema) },
+    );
+    expect((await second.commit()).ok).toBeDefined();
+  });
+
+  it("externalizes a schema whose only external refs are embedded", async () => {
+    const vnodeRef = "https://commonfabric.org/schemas/vnode.json";
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { embeddedUi: { $ref: "#/$defs/EmbeddedUi" } },
+      $defs: {
+        EmbeddedUi: {
+          type: "object",
+          properties: { $UI: { $ref: vnodeRef } },
+        },
+      },
+    };
+    const stamped = payloadSchema(sigilFor(schema)) as JSONSchemaObj;
+    // The embedded ref no longer refuses decomposition: the link carries a
+    // cid: reference...
+    expect(typeof stamped.$ref).toBe("string");
+    const rootHash = parseExternalSchemaRef(stamped.$ref!)!.taggedHash;
+    const rootDoc = lookupSchemaDocument(rootHash);
+    expect(rootDoc).toBeDefined();
+    // ...and the embedded URL rides inside the definition document as
+    // ordinary content, contributing nothing to the closure.
+    const [uiHash] = [...collectExternalSchemaRefHashes(rootDoc)];
+    const uiDoc = lookupSchemaDocument(uiHash) as JSONSchemaObj;
+    expect(uiDoc.properties?.["$UI"]).toEqual({ $ref: vnodeRef });
+    expect(collectExternalSchemaRefHashes(uiDoc).size).toBe(0);
+  });
+
   it("disables the sync schema table for the process", () => {
     // Both mechanisms dedupe the same link-schema positions; a flag-on
     // process must not negotiate the frame table (the Runtime in
