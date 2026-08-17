@@ -135,7 +135,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
       decode(
         typeTag: string,
         state: FabricValue,
-        _context: LiveEnvironment,
+        _env: LiveEnvironment,
       ): FabricValue {
         if (!isPlainObject(state)) {
           return new ProblematicValue(

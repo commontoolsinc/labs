@@ -198,13 +198,13 @@ describe("ProblematicValue", () => {
       });
 
       describe("decode()", () => {
-        const CONTEXT = NULL_LIVE_ENVIRONMENT;
+        const ENV = NULL_LIVE_ENVIRONMENT;
 
         it("decodes the tag, state, and error", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             { tag: "Weird@7", state: { x: 1 }, error: "oops" },
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Weird@7");
@@ -216,7 +216,7 @@ describe("ProblematicValue", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             { tag: "Weird@7", state: undefined, error: "oops" },
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Weird@7");
@@ -231,7 +231,7 @@ describe("ProblematicValue", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             { tag: "Weird@7", error: "oops" },
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Problematic@1");
@@ -242,7 +242,7 @@ describe("ProblematicValue", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             "nope",
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Problematic@1");

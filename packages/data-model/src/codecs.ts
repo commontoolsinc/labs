@@ -84,9 +84,9 @@ export function jsonFromFabricValue(value: FabricValue): string {
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
-  context?: LiveEnvironment,
+  env?: LiveEnvironment,
 ): T {
-  const result = fabricFromJsonValue(json, context);
+  const result = fabricFromJsonValue(json, env);
 
   if ((result === null) || (typeof result !== "object")) {
     throw new Error(
@@ -112,7 +112,7 @@ export function plainObjectFromJson<T extends object = object>(
  */
 export function fabricFromJsonValue(
   json: string,
-  context?: LiveEnvironment | undefined,
+  env?: LiveEnvironment | undefined,
 ): FabricValue {
-  return jsonCodecEngine.decode(json, context ?? NULL_LIVE_ENVIRONMENT);
+  return jsonCodecEngine.decode(json, env ?? NULL_LIVE_ENVIRONMENT);
 }

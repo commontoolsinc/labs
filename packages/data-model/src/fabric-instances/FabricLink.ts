@@ -128,13 +128,13 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
       decode(
         typeTag: string,
         state: FabricValue,
-        context: LiveEnvironment,
+        env: LiveEnvironment,
       ): FabricValue {
         // The constructor validates the shape and throws on any violation, so
         // bad state falls into the `catch`.
         try {
           const result = new FabricLink(state as FabricPlainObject);
-          return context.shouldDeepFreeze ? deepFreeze(result) : result;
+          return env.shouldDeepFreeze ? deepFreeze(result) : result;
         } catch (e) {
           return new ProblematicValue(
             typeTag,

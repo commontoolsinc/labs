@@ -49,7 +49,7 @@ Path conventions:
 2. Descending object/array/string-native properties (`length` support for arrays and strings)
 3. Returning `{ value: undefined }` when descent fails
 
-When links are followed, schema context is re-rooted and combined with any schema on the link.
+When links are followed, schema env is re-rooted and combined with any schema on the link.
 
 ---
 
@@ -58,7 +58,7 @@ When links are followed, schema context is re-rooted and combined with any schem
 `followPointer(...)`:
 
 - Resolves one pointer step, then delegates further descent back to `getAtPath`
-- Detects pointer cycles using `(pointer value, schema-context)` tracking
+- Detects pointer cycles using `(pointer value, schema-env)` tracking
 - Records traversed linked docs in `schemaTracker`
 - Returns `undefined` for missing/retracted targets instead of throwing
 
@@ -111,7 +111,7 @@ Behavior is intentionally asymmetrical:
 
 - Missing object property reached through traversal:
   - included as `undefined` only when schema permits it
-  - otherwise omitted/rejected depending on context
+  - otherwise omitted/rejected depending on env
 - Missing array entry reached through traversal:
   - may become `null` when schema allows `null`
   - otherwise causes array validation failure

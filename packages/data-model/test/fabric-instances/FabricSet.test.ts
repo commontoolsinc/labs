@@ -111,7 +111,7 @@ describe("FabricSet", () => {
     describe("[CODEC]", () => {
       const codec = FabricSet[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Set;
-      const context = NULL_LIVE_ENVIRONMENT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Set` wire type tag", () => {
@@ -136,7 +136,7 @@ describe("FabricSet", () => {
 
       describe("decode()", () => {
         it("throws (stub)", () => {
-          expect(() => codec.decode(expectedTag, null, context)).toThrow(
+          expect(() => codec.decode(expectedTag, null, env)).toThrow(
             "not yet implemented",
           );
         });

@@ -124,12 +124,12 @@ export class UnknownValue extends BaseFabricInstance {
       decode(
         typeTag: string,
         state: FabricValue,
-        context: LiveEnvironment,
+        env: LiveEnvironment,
       ): FabricValue {
         const result = new UnknownValue(typeTag, state);
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );

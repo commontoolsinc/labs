@@ -31,7 +31,7 @@ class TestCodec extends BaseFabricCodec<FabricValue> {
   decode(
     _typeTag: string,
     _state: FabricValue,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     throw new Error("Unimplemented.");
   }

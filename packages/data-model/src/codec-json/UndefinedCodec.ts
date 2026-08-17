@@ -29,7 +29,7 @@ export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue> {
   decode(
     typeTag: string,
     state: JsonCodecValue,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     if (state !== null) {
       throw new Error(

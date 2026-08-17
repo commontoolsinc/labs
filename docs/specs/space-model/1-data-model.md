@@ -76,7 +76,7 @@ authoritative statement of these rules.
 
 #### `undefined`
 
-`undefined` has special semantics depending on context:
+`undefined` has special semantics depending on env:
 
 - **Top-level**: Indicates deletion (remove the stored value)
 - **Object property**: Treated as absent (property is omitted)
@@ -373,7 +373,7 @@ interface FabricCodec<Encoded> {
   decode(                                    // shallow
     typeTag: string,
     state: Encoded,
-    context: LiveEnvironment,
+    env: LiveEnvironment,
   ): FabricValue;
 }
 
@@ -412,8 +412,8 @@ contracts.
 `decode()` lives on the codec rather than being a constructor for two
 reasons:
 
-1. **Decoding-specific context**: It receives a `LiveEnvironment`
-   (and potentially other context) which shouldn't be mandated in a regular
+1. **Decoding-specific env**: It receives a `LiveEnvironment`
+   (and potentially other env) which shouldn't be mandated in a regular
    constructor's signature.
 2. **Instance interning**: It can return existing instances rather than always
    creating new ones — essential for types like `Cell` where identity matters.
@@ -445,9 +445,9 @@ class Cell<T> extends FabricInstance {
     decode(
       _typeTag: string,
       state: FabricValue,
-      context: LiveEnvironment,
+      env: LiveEnvironment,
     ): Cell<unknown> {
-      return context.getCell(state as CellState);
+      return env.getCell(state as CellState);
     }
   })();
 
@@ -745,7 +745,7 @@ Examples:
 
 **Note:** The `/<type>@<version>` convention described here applies specifically
 to the JSON encoding. Codec engines for other formats are free to use
-whatever representation makes the most sense in their context.
+whatever representation makes the most sense in their env.
 
 #### Benefits
 

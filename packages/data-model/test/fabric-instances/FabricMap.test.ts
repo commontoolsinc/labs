@@ -127,7 +127,7 @@ describe("FabricMap", () => {
     describe("[CODEC]", () => {
       const codec = FabricMap[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Map;
-      const context = NULL_LIVE_ENVIRONMENT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Map` wire type tag", () => {
@@ -152,7 +152,7 @@ describe("FabricMap", () => {
 
       describe("decode()", () => {
         it("throws (stub)", () => {
-          expect(() => codec.decode(expectedTag, null, context)).toThrow(
+          expect(() => codec.decode(expectedTag, null, env)).toThrow(
             "not yet implemented",
           );
         });

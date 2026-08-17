@@ -82,7 +82,7 @@ export class XCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     _typeTag: string,
     _state: ProbeValue,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     return "decoded-X";
   }
@@ -137,7 +137,7 @@ export class TerminalHostCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     _typeTag: string,
     state: ProbeValue,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     this.#record.decoded.push(state);
     return TERMINAL_HOST;
@@ -173,7 +173,7 @@ export class NonterminalHostCodec extends BaseNonterminalCodec {
   decode(
     _typeTag: string,
     state: FabricValue,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     this.#record.decoded.push(state);
     return NONTERMINAL_HOST;
@@ -200,7 +200,7 @@ export class ThrowingCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     _typeTag: string,
     _state: ProbeValue,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     throw new Error("rejected by throwing");
   }
@@ -227,7 +227,7 @@ export class RejectingCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     typeTag: string,
     state: ProbeValue,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     return new ProblematicValue(
       typeTag,
@@ -274,7 +274,7 @@ export class MarkerCodec extends BaseTerminalCodec<ProbeValue> {
   decode(
     _typeTag: string,
     _state: ProbeValue,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     return { deep: { n: 1 } };
   }
@@ -298,9 +298,9 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
   // graph with a cycle in it, and the base's guard is what refuses one.
   override decode(
     data: ProbeValue,
-    context: LiveEnvironment,
+    env: LiveEnvironment,
   ): FabricValue {
-    return this.decodeValue(data, context, new Set());
+    return this.decodeValue(data, env, new Set());
   }
 
   protected override wrapTag(tag: string, state: ProbeValue): ProbeValue {
@@ -332,7 +332,7 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
 
   protected override decodeValue(
     data: ProbeValue,
-    context: LiveEnvironment,
+    env: LiveEnvironment,
     seen?: Set<object>,
   ): FabricValue {
     if ((data === null) || (typeof data !== "object")) {
@@ -351,14 +351,14 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
 
     try {
       if (data instanceof Tagged) {
-        return this.decodeTagged(data.tag, data.state, context, seen);
+        return this.decodeTagged(data.tag, data.state, env, seen);
       } else if (Array.isArray(data)) {
-        return data.map((d) => this.decodeValue(d, context, seen));
+        return data.map((d) => this.decodeValue(d, env, seen));
       }
 
       const result: Record<string, FabricValue> = {};
       for (const [k, v] of Object.entries(data)) {
-        result[k] = this.decodeValue(v as ProbeValue, context, seen);
+        result[k] = this.decodeValue(v as ProbeValue, env, seen);
       }
       return result;
     } finally {

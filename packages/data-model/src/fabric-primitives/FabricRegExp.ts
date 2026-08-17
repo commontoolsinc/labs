@@ -188,7 +188,7 @@ export class FabricRegExp extends BaseFabricPrimitive
       decode(
         typeTag: string,
         state: FabricValue,
-        _context: LiveEnvironment,
+        _env: LiveEnvironment,
       ): FabricValue {
         if (!isPlainObject(state)) {
           return new ProblematicValue(

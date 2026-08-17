@@ -456,7 +456,7 @@ export class FabricError extends FabricNativeWrapper<Error>
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: LiveEnvironment,
+        env: LiveEnvironment,
       ): FabricValue {
         const s = state as Record<string, FabricValue>;
         const type = (s.type as string) ?? (s.name as string) ?? "Error";
@@ -484,7 +484,7 @@ export class FabricError extends FabricNativeWrapper<Error>
         });
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );

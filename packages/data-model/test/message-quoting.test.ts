@@ -85,11 +85,11 @@ describe("message quoting", () => {
 
   describe("`JsonCodecEngine.decode()`", () => {
     it("hands back the excerpt it refused", () => {
-      const context = new NullLiveEnvironment(false);
+      const env = new NullLiveEnvironment(false);
       for (const data of HOSTILE) {
         let message = "";
         try {
-          newDefaultJsonCodecEngine().decode(data, context);
+          newDefaultJsonCodecEngine().decode(data, env);
         } catch (e) {
           message = (e as Error).message;
         }

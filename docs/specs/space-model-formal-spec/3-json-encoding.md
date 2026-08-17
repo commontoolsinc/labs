@@ -246,7 +246,7 @@ round-trip correctly.
 > malformed input — wrong type, invalid format, or missing fields — the codec
 > must reject it rather than silently produce garbage. A codec may reject by
 > throwing, or by returning a `ProblematicValue` (see `1-fabric-values.md`
-> Section 3.5); the two are equivalent, because the encoding context settles
+> Section 3.5); the two are equivalent, because the encoding env settles
 > them into one answer according to its own `lenient` setting (see
 > `1-fabric-values.md` Section 4.5). Which one a codec uses is therefore a
 > matter of what reads well where it is written, and carries no meaning for a
@@ -414,7 +414,7 @@ escaping rather than type encoding.
 
 ## 8. Unknown Type Handling
 
-When a JSON context encounters a `/<Type>@<Version>` key it doesn't recognize,
+When a JSON env encounters a `/<Type>@<Version>` key it doesn't recognize,
 it wraps the data in `UnknownValue` (see `1-fabric-values.md` Section 3) to
 preserve it for round-tripping. Re-encoding reproduces the original key,
 the codec's `tagForValue()` reading back the preserved tag and `encode()`
@@ -455,10 +455,10 @@ Specifically:
 - **Multi-key objects** containing one or more `/`-prefixed keys are structural
   encoding errors, and are rejected. They are not valid plain objects.
 
-A structural violation is malformed wire data the encoding context detects
+A structural violation is malformed wire data the encoding env detects
 itself, rather than a state a codec refuses, and the two are settled the same
 way: against `lenient` (see `1-fabric-values.md` Section 4.5). A lenient
-context yields a `ProblematicValue`, and a strict one raises. Which of the two
+env yields a `ProblematicValue`, and a strict one raises. Which of the two
 noticed the fault is an implementation detail of where a check lives, and does
 not reach a caller.
 

@@ -79,7 +79,7 @@ export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
   decode(
     typeTag: string,
     state: Encoded,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(

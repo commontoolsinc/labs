@@ -46,7 +46,7 @@ export class SpecialNumberCodec extends BaseTerminalCodec<JsonCodecValue> {
   decode(
     typeTag: string,
     state: JsonCodecValue,
-    _context: LiveEnvironment,
+    _env: LiveEnvironment,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(

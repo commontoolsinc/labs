@@ -1,6 +1,6 @@
 /**
  * Base class for `LiveEnvironment` implementations. Centralizes the
- * `shouldDeepFreeze` getter so every context declares the (required) member
+ * `shouldDeepFreeze` getter so every live environment declares the (required) member
  * via a single shared implementation instead of repeating it.
  */
 

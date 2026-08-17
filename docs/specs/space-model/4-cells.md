@@ -300,10 +300,10 @@ The "event-ness" emerges from the data shape. Event producers include timestamps
 The original stream/cell distinction was intentional and reflects real semantic
 differences beyond change detection:
 
-- **Scheduler context**: Computed values (lifts) are idempotent — they receive
-  the same context across re-invocations, and re-running them with the same
+- **Scheduler env**: Computed values (lifts) are idempotent — they receive
+  the same env across re-invocations, and re-running them with the same
   inputs should produce the same result. Event handlers are not idempotent —
-  each invocation receives a fresh context, and side effects should not be
+  each invocation receives a fresh env, and side effects should not be
   replayed. A unified cell type would still need to distinguish these execution
   modes.
 - **Reactive trigger semantics**: A lift re-executes when *any* input changes.
@@ -317,7 +317,7 @@ differences beyond change detection:
   semantics. Replacing it with timestamp conventions may reduce clarity.
 
 Any implementation of unification should adopt the existing behavioral
-distinctions (scheduler context, trigger semantics) rather than trying to
+distinctions (scheduler env, trigger semantics) rather than trying to
 eliminate them. The goal is to unify the *storage and type representation*, not
 to pretend that state and events have identical execution semantics.
 
@@ -336,10 +336,10 @@ dispatched event (`tx.dispatchedEventId`), falling back to a fresh
 `crypto.randomUUID()` for non-dispatch invocations such as a test calling the
 handler directly. This ensures that each invocation produces distinct result
 cells, even for identical event payloads. The uniqueness is in the invocation
-context, not in the event data itself.
+env, not in the event data itself.
 
 For unification, timestamps or IDs would need to be part of the **event payload
-or cell value** (not just the invocation context) — either injected at the
+or cell value** (not just the invocation env) — either injected at the
 `send()` layer, in `serializeEvent()`, or by event producers explicitly.
 
 #### Event Replay Consideration

@@ -44,7 +44,7 @@ export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
   abstract decode(
     typeTag: string,
     state: Encoded,
-    context: LiveEnvironment,
+    env: LiveEnvironment,
   ): FabricValue;
 
   /** @inheritDoc */

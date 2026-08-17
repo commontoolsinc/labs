@@ -61,7 +61,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
       decode(
         typeTag: string,
         state: JsonCodecValue,
-        _context: LiveEnvironment,
+        _env: LiveEnvironment,
       ): FabricValue {
         if (typeof state !== "string") {
           return new ProblematicValue(

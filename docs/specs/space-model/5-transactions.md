@@ -14,12 +14,12 @@ implementation; no major changes are currently proposed.
 ### Overview
 
 Transactions provide atomicity and consistency for cell operations. All writes
-to cells require a transaction context.
+to cells require a transaction env.
 
 ### Transaction Lifecycle
 
 1. **Open**: `runtime.edit()` creates a new transaction
-2. **Read**: `cell.withTx(tx).get()` reads within transaction context
+2. **Read**: `cell.withTx(tx).get()` reads within transaction env
 3. **Write**: `cell.withTx(tx).set(value)` buffers write
 4. **Commit**: `tx.commit()` attempts to persist changes
 5. **Abort**: `tx.abort()` discards changes (or automatic on error)
@@ -222,7 +222,7 @@ The scheduler also provides automatic retry for handlers on transaction conflict
 
 ### Relationship to Handlers
 
-Handlers execute within transaction context:
+Handlers execute within transaction env:
 - The transaction is provided to the handler function
 - Reads and writes within the handler use this transaction
 - On handler completion, the transaction commits

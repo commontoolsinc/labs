@@ -71,7 +71,7 @@ describe("FabricEpochNsec", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricEpochNsec[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochNsec;
-      const context = NULL_LIVE_ENVIRONMENT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `EpochNsec` wire type tag", () => {
@@ -99,14 +99,14 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             "AA",
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(0n);
         });
 
         it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 42, context);
+          const decoded = codec.decode(expectedTag, 42, env);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
@@ -114,7 +114,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             "not valid base64!!",
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -126,7 +126,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sn),
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(0n);
@@ -140,7 +140,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sn),
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(nsec);
@@ -152,7 +152,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sn),
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(nsec);
@@ -165,7 +165,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sn),
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded.value).toBe(nsec);
         });

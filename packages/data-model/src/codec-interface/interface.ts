@@ -120,7 +120,7 @@ export interface FabricCodec<Encoded> {
   decode(
     typeTag: string,
     state: Encoded,
-    context: LiveEnvironment,
+    env: LiveEnvironment,
   ): FabricValue;
 
   /**

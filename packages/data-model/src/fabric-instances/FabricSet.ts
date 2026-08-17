@@ -98,7 +98,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
       decode(
         _typeTag: string,
         _state: FabricValue,
-        _context: LiveEnvironment,
+        _env: LiveEnvironment,
       ): FabricValue {
         throw new Error("`FabricSet`: not yet implemented");
       }

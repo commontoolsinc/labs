@@ -129,7 +129,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       decode(
         typeTag: string,
         state: JsonCodecValue,
-        _context: LiveEnvironment,
+        _env: LiveEnvironment,
       ): FabricBytes | ProblematicValue {
         if (typeof state !== "string") {
           return new ProblematicValue(

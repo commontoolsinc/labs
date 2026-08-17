@@ -43,7 +43,7 @@ export class NullLiveEnvironment extends BaseLiveEnvironment {
 /**
  * Shared `NullLiveEnvironment` instance with `.shouldDeepFreeze ===
  * true` and whose `getCell()` always throws. Pass this when a decoder wants a
- * context object but isn't expected to need cell decoding; if a cell ref
+ * live environment but isn't expected to need cell decoding; if a cell ref
  * does turn up, the throw makes the unexpected decode obvious instead
  * of silent.
  */
