@@ -49,6 +49,7 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
+import { isOpaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import type { LastNode } from "./link-resolution.ts";
@@ -1367,7 +1368,21 @@ export function mergeAnyOfMatches<T>(
     if (matches.every((v) => isObjectNotArray(v))) {
       const unified: Record<string, T> = {};
       for (const match of matches) {
-        Object.assign(unified, match);
+        for (const [key, value] of Object.entries(match as object)) {
+          // A branch that declined to look never overrides one that looked.
+          // An opaque position projects to a reference carrying nothing of
+          // what it names, so letting it land on a key another branch
+          // materialized would replace that branch's answer with silence —
+          // which is what an `additionalProperties: {type: "unknown"}` branch
+          // beside a branch declaring the same property used to do.
+          if (
+            isOpaqueReference(value) && Object.hasOwn(unified, key) &&
+            !isOpaqueReference(unified[key])
+          ) {
+            continue;
+          }
+          unified[key] = value as T;
+        }
       }
       // `Object.assign` copies enumerable string keys, so it leaves behind the
       // back-to-cell annotation each match carries — a non-enumerable symbol —
@@ -3583,7 +3598,30 @@ export class SchemaObjectTraverser<V extends FabricValue>
         : this.isValidType(schemaObj, "undefined")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
-    } else if (doc.value === null) {
+    }
+
+    // An opaque (`type: "unknown"`) position answers presence and identity for
+    // whatever is there, whatever shape it has: the declaration names a
+    // reference rather than a value, so a stored string is as opaque as a
+    // stored object, and one uniform answer is what lets a reader test,
+    // compare and pass on any of them the same way. A link is exempt — it is
+    // followed first, because the reference is to what it names and not to the
+    // link. Answering here descends into nothing, so it is also not part of a
+    // cycle and registers nothing with the tracker.
+    const jsonType = getJsonType(doc.value);
+    if (
+      jsonType !== null && !isSigilLink(doc.value) &&
+      isObjectOrArray(doc.value) &&
+      this.isValidType(schemaObj, jsonType) === TypeValidity.Unknown
+    ) {
+      const opaqueLink = link ?? getNormalizedLink(doc.address, schemaObj);
+      return {
+        ok: this.objectCreator.createOpaquePresence?.(opaqueLink) ??
+          this.objectCreator.createObject(opaqueLink, undefined),
+      };
+    }
+
+    if (doc.value === null) {
       return isPlainTypeSchema(schemaObj, "null") ||
           this.isValidType(schemaObj, "null")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
@@ -3621,16 +3659,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
         doc.address,
         schemaObj,
       );
-      // An opaque position is answered without descending, so it is not part
-      // of a cycle and registers nothing. Registering the empty container
-      // first would hand a re-entrant read that bare container in place of
-      // the presence value, losing the back-to-cell annotation with it.
-      if (valid === TypeValidity.Unknown) {
-        return {
-          ok: this.objectCreator.createOpaquePresence?.(newLink) ??
-            this.objectCreator.createObject(newLink, undefined),
-        };
-      }
       const newValue: FabricValue[] = [];
       using t = this.tracker.include(doc.value, schema, newValue, doc);
       if (t === null) {
@@ -3689,14 +3717,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
       }
       // Our link is based on the last link in the chain and not the first.
       const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
-      // See the array arm above: an opaque position descends into nothing, so
-      // it registers nothing.
-      if (valid === TypeValidity.Unknown) {
-        return {
-          ok: this.objectCreator.createOpaquePresence?.(newLink) ??
-            this.objectCreator.createObject(newLink, undefined),
-        };
-      }
       const newValue: Record<string, FabricValue> = {};
       using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
       if (t === null) {

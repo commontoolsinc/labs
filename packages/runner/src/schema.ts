@@ -32,7 +32,7 @@ import {
 } from "@commonfabric/utils/types";
 
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
-import { toCell } from "./back-to-cell.ts";
+import { opaqueReference, toCell } from "./back-to-cell.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -1500,8 +1500,15 @@ class TransformObjectCreator
   createOpaquePresence(
     link: NormalizedFullLink,
   ): AnyCellWrapping<FabricValue> {
+    const value: Record<symbol, unknown> = {};
+    // Non-enumerable, like the back-to-cell annotation beside it, so the
+    // marker stays off `Object.keys` and out of a spread.
+    Object.defineProperty(value, opaqueReference, {
+      value: true,
+      enumerable: false,
+    });
     return annotateWithBackToCellSymbols(
-      {},
+      value,
       this.runtime,
       link,
       this.tx,

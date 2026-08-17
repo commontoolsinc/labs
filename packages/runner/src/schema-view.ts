@@ -504,8 +504,8 @@ export function materializeSchemaView(
     }
   }
 
-  // PROBE: an opaque (`type: "unknown"`) container answers presence and stops,
-  // the way eager traversal does, instead of building a view over it.
+  // PROBE: an opaque (`type: "unknown"`) position answers presence and stops,
+  // the way eager traversal does, instead of viewing what is behind it.
   if (
     isObjectOrArray(value) && !(value instanceof FabricPrimitive) &&
     isObjectOrArray(schema) && schema.type !== undefined &&

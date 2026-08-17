@@ -31,3 +31,20 @@ export type BackToCellInternals = {
  * Type representing a value that has been annotated with back-to-cell symbols.
  */
 export type WithBackToCell<T> = T & BackToCellInternals;
+
+/**
+ * Marks the value an opaque (`type: "unknown"`) position projects to: a
+ * reference that answers presence and identity and carries nothing of what it
+ * names.
+ *
+ * A merge needs to tell one from an ordinary empty object, because a branch
+ * that declined to look must never override a branch that looked — see
+ * `mergeAnyOfMatches()`.
+ */
+export const opaqueReference = Symbol("opaqueReference");
+
+/** Whether `value` is the projection of an opaque position. */
+export function isOpaqueReference(value: unknown): boolean {
+  return typeof value === "object" && value !== null &&
+    (value as Record<symbol, unknown>)[opaqueReference] === true;
+}
