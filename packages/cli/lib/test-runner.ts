@@ -7,17 +7,21 @@
  * 3. Return { [TESTS]: TestStep[] } under the reserved `[TESTS]` output key
  *
  * TestStep is a discriminated union:
- * - { assertion: Reactive<boolean> } from computed(() => condition)
- * - { action: Stream<void> } from action(() => sideEffect)
+ * - { assertion: Reactive<AssertRecord> } from assert(() => condition)
+ * - { action: Stream<unknown> } from action(() => sideEffect)
+ * - { render: unknown } naming a UI target to materialize
+ * - { settle: true } settling fully at a point the author names
+ * - { label: string } and { await: string } coordinating participants
+ *   in a multi-user test
  *
  * The discriminated union avoids TypeScript declaration emit issues
  * that occur when mixing Cell and Stream types in the same array.
  *
  * Example:
  * [TESTS]: [
- *   { assertion: computed(() => game.phase === "playing") },
+ *   { assertion: assert(() => game.phase === "playing") },
  *   { action: action(() => game.start.send(undefined)) },
- *   { assertion: computed(() => game.phase === "started") },
+ *   { assertion: assert(() => game.phase === "started") },
  * ]
  *
  * Note: By default, test patterns can only import from their own directory or

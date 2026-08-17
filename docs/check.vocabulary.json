@@ -18,6 +18,7 @@
     "Writable",
     "__cfHelpers",
     "action",
+    "assert",
     "cell",
     "cfSqlite",
     "compileAndRun",
