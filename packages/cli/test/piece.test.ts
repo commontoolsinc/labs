@@ -2005,6 +2005,9 @@ describe("cli piece parsing", () => {
   });
 
   it("rejects attached data files when resetting the home pattern", async () => {
+    // The test mutates the command's error handling, so it needs a copy of its
+    // own; the query string is what makes the copy.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const { piece: command } = await import(
       "../commands/piece.ts?test-reset-datafile"
     );
