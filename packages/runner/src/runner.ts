@@ -1337,8 +1337,31 @@ export class Runner {
     MemorySpace[]
   >();
 
+  /** The subscriber registered below, kept so disposal can hand it back.
+   * `subscribe` returns nothing, so the ARGUMENT is the only handle there
+   * will ever be — building one inline leaves it unreachable. */
+  readonly #storageSubscription: IStorageSubscription;
+
   constructor(readonly runtime: Runtime) {
-    this.runtime.storageManager.subscribe(this.createStorageSubscription());
+    this.#storageSubscription = this.createStorageSubscription();
+    this.runtime.storageManager.subscribe(this.#storageSubscription);
+  }
+
+  /**
+   * Unregister from storage notifications.
+   *
+   * A storage manager outliving this runner keeps every subscriber it was
+   * given, and each one holds its runner reachable — so a process reusing one
+   * manager across runtimes (`Runtime.dispose({ closeStorage: false })`, which
+   * exists for exactly that) accumulates them. The subscription cannot retire
+   * itself either: its `next` returns `{ done: false }` unconditionally, and
+   * `{ done: true }` is the only self-cancelling answer the contract has.
+   *
+   * `unsubscribe` is optional on the capability, so a manager that does not
+   * implement it is left as it was rather than crashing a disposal.
+   */
+  dispose(): void {
+    this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
   }
 
   /**

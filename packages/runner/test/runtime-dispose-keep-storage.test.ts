@@ -28,6 +28,7 @@ import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type { IStorageSubscription } from "../src/storage/interface.ts";
 import {
   type Options,
   type SessionFactory,
@@ -69,6 +70,10 @@ class LoopbackSessionFactory implements SessionFactory {
  */
 class CountingStorageManager extends StorageManager {
   closeCount = 0;
+  /** Subscribers currently registered. The relay inside exposes only
+   * `hasSubscribers()`, and what a leak needs is the COUNT: two per runtime,
+   * so "some are registered" cannot tell a clean teardown from a leaking one. */
+  readonly live = new Set<IStorageSubscription>();
   static over(server: MemoryV2Server.Server): CountingStorageManager {
     return new CountingStorageManager(
       { as: signer, memoryHost: new URL("memory://") } as Options,
@@ -78,6 +83,14 @@ class CountingStorageManager extends StorageManager {
   override close(): Promise<void> {
     this.closeCount++;
     return super.close();
+  }
+  override subscribe(subscription: IStorageSubscription): void {
+    this.live.add(subscription);
+    super.subscribe(subscription);
+  }
+  override unsubscribe(subscription: IStorageSubscription): void {
+    this.live.delete(subscription);
+    super.unsubscribe(subscription);
   }
 }
 
@@ -254,5 +267,53 @@ describe("runtime.dispose({ closeStorage })", () => {
     // Verified by mutation: with `settled()` left at its default cap this reads
     // 50, and the chain is still running after dispose returned.
     expect(reached).toBe(GENERATIONS);
+  });
+
+  it("leaves no storage subscriber behind on a store it does not close", async () => {
+    // `Scheduler` and `Runner` each register one at construction. `subscribe`
+    // returns nothing, so the argument is the only handle there will ever be —
+    // a subscription built inline is unreachable and can never be handed back.
+    // Nor can it retire itself: both return `{ done: false }` unconditionally,
+    // and `{ done: true }` is the contract's only self-cancelling answer.
+    //
+    // What is asserted is the CALLERS' half of the contract — that each keeps
+    // its subscription and returns it — because that is the half in question.
+    // `live` mirrors the subscribe/unsubscribe calls reaching the manager, not
+    // the relay's membership: the relay is private and its `hasSubscribers()`
+    // is not surfaced, and it would answer the wrong question anyway, reading
+    // the same whether teardown was clean or leaked two per runtime.
+    const baseline = new Set(held.live);
+    const addedBy = (built: Set<IStorageSubscription>) =>
+      [...held.live].filter((s) => !built.has(s));
+
+    const first = new Runtime({
+      apiUrl: new URL("memory://"),
+      storageManager: held,
+    });
+    const firstPair = addedBy(baseline);
+    expect(firstPair).toHaveLength(2);
+
+    // The two runtimes OVERLAP, and the assertions name WHICH subscriptions are
+    // handed back rather than how many. Sequential construct-dispose rounds
+    // would not: neither round ever has another runtime's subscription to
+    // return by mistake, so a disposal that gave back the wrong one still ends
+    // at baseline.
+    const second = new Runtime({
+      apiUrl: new URL("memory://"),
+      storageManager: held,
+    });
+    const secondPair = addedBy(new Set([...baseline, ...firstPair]));
+    expect(secondPair).toHaveLength(2);
+
+    await first.dispose({ closeStorage: false });
+    expect(firstPair.filter((s) => held.live.has(s))).toEqual([]);
+    expect(secondPair.filter((s) => held.live.has(s))).toEqual(secondPair);
+
+    await second.dispose({ closeStorage: false });
+    expect(secondPair.filter((s) => held.live.has(s))).toEqual([]);
+    expect(held.live).toEqual(baseline);
+
+    // Neither disposal closed the store, which is the option's whole point.
+    expect(held.closeCount).toBe(0);
   });
 });
