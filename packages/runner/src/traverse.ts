@@ -2547,7 +2547,7 @@ function loadSchemaDocClosure(
     }
     context.schemaTracker.add(key, REJECTING_SELECTOR);
     const doc = result.ok.value;
-    if (!isObjectOrArray(doc) || !("value" in doc)) continue;
+    if (!isObjectNotArray(doc) || !("value" in doc)) continue;
     const schemaValue = (doc as { value?: FabricValue }).value;
     try {
       const interned = registerSchemaDocument(

@@ -412,15 +412,16 @@ delivery and traversal split the work in two layers:
   referrer. An assembly failure means a violated writer or storage
   invariant — a writer that broke the closure obligation, a tampered
   store, a pre-immutability hole — never a transient condition, since
-  the commit boundary preserves every installed document. Every
-  query/watch evaluation exception shares one
-  failure boundary: the server records the diagnostics and closes the
-  affected CONNECTION, discarding its session and graph state whole
-  (one session per connection leaves nothing worth preserving), while
-  fan-out to other connections proceeds. The client's ordinary
-  disconnect/reconnect recovery reinstalls fresh state; a still-corrupt
-  store fails the reinstalled watch loudly again, and no partial result
-  is ever served.
+  the commit boundary preserves every installed document. A
+  request-shaped evaluation (watch installation, an initial query)
+  answers its caller with the diagnostic as a QueryError; the fan-out
+  refresh logs the failure and skips the affected session's frame,
+  leaving the connection alone — either a bad commit passed the
+  write-side safeguards or the database was altered out of band, and
+  neither has a connection-level remedy. The session keeps its
+  consistent pre-failure view, other sessions' fan-out proceeds, no
+  partial result is ever served, and a later write touching the affected
+  documents re-evaluates and delivers.
 
 A client that syncs a document therefore receives the schema documents for
 every link it contains in the same round trip, keeping the "resolved means

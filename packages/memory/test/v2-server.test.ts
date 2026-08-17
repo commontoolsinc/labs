@@ -2406,7 +2406,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
   }
 });
 
-Deno.test("memory v2 server closes the connection on a failed watch.add and supports resume", async () => {
+Deno.test("memory v2 server rolls back failed watch.add mutations", async () => {
   const server = createServer("memory://memory-v2-server-watch-add-rollback");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -2504,30 +2504,14 @@ Deno.test("memory v2 server closes the connection on a failed watch.add and supp
         },
       }],
     } as any));
-    // The broken watch fails evaluation, which closes the connection at
-    // the boundary: no response arrives, and the failed add's partial
-    // mutations die with the connection's graph state.
-    assertEquals(messages, []);
+    // The broken watch answers with a QueryError — evaluation state is
+    // staged, so the session continues on this connection and the failed
+    // add's "extra" watch left nothing behind.
+    const failed = nextResponse<any>(messages);
+    assertEquals(failed.requestId, "watch-2");
+    assertEquals(failed.error?.name, "QueryError");
 
-    // Client-side recovery: resume the session on a fresh connection and
-    // transact. Watch state is connection-scoped, so the resumed session
-    // starts with no watches: doc:2's update rides no frame, while the
-    // accept's catch-up marker still arrives (CT-1927).
-    const resumedMessages: ServerMessage[] = [];
-    const resumed = server.connect((message) => resumedMessages.push(message));
-    await resumed.receive(encodeMemoryBoundary(HELLO));
-    const resumedOpen = expectHelloOk(resumedMessages);
-    await resumed.receive(encodeMemoryBoundary({
-      type: "session.open",
-      requestId: "open-resume",
-      space,
-      session: { sessionId, sessionToken },
-      invocation: authInvocation(resumedOpen),
-    }));
-    const reopened = nextResponse<{ sessionId: string }>(resumedMessages);
-    assertEquals(reopened.ok?.sessionId, sessionId);
-
-    await resumed.receive(encodeMemoryBoundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "update-doc-2",
       space,
@@ -2543,17 +2527,17 @@ Deno.test("memory v2 server closes the connection on a failed watch.add and supp
       },
     }));
     assertEquals(
-      nextResponse<any>(resumedMessages).requestId,
+      nextResponse<any>(messages).requestId,
       "update-doc-2",
     );
 
     await tick();
     // The accept's catch-up marker rides an otherwise-empty frame
-    // (CT-1927); no watched novelty is echoed.
-    const marker2 = assertEffect(shiftMessage(resumedMessages));
+    // (CT-1927); no watched novelty is echoed — a leaked "extra" watch
+    // would have put doc:2's update on this frame.
+    const marker2 = assertEffect(shiftMessage(messages));
     assertEquals(marker2.effect.upserts, []);
     assertEquals(marker2.effect.caughtUpLocalSeq, 2);
-    assertEquals(resumedMessages, []);
     assertEquals(messages, []);
   } finally {
     await server.close();

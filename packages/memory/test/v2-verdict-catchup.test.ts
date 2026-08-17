@@ -105,12 +105,9 @@ const setup = async (options: {
     session: {},
     invocation: authInvocation(committerSessionOpen),
   }));
-  const committerOpened = assertResponse<{
-    sessionId: string;
-    sessionToken: string;
-  }>(shiftMessage(committerMessages)).ok!;
-  const committerSessionId = committerOpened.sessionId;
-  const committerSessionToken = committerOpened.sessionToken;
+  const committerSessionId =
+    assertResponse<{ sessionId: string }>(shiftMessage(committerMessages))
+      .ok!.sessionId;
 
   await committer.receive(
     encodeMemoryBoundary(watchBoth(space, committerSessionId)),
@@ -128,34 +125,7 @@ const setup = async (options: {
     committer,
     committerMessages,
     committerSessionId,
-    committerSessionToken,
   };
-};
-
-// Resume the committer's session on a fresh connection — the client-side
-// recovery the connection-level evaluation boundary relies on.
-const resumeCommitter = async (
-  server: Server,
-  space: string,
-  sessionId: string,
-  sessionToken: string,
-) => {
-  const messages: ServerMessage[] = [];
-  const connection = server.connect((message) => messages.push(message));
-  await connection.receive(encodeMemoryBoundary(HELLO));
-  const sessionOpen = expectHelloOk(messages);
-  await connection.receive(encodeMemoryBoundary({
-    type: "session.open",
-    requestId: "committer-resume",
-    space,
-    session: { sessionId, sessionToken },
-    invocation: authInvocation(sessionOpen),
-  }));
-  const opened = assertResponse<{ sessionId: string; sync?: SessionSync }>(
-    shiftMessage(messages),
-  );
-  assertEquals(opened.ok?.sessionId, sessionId);
-  return { connection, messages, sync: opened.ok?.sync };
 };
 
 Deno.test("memory v2 server: an accept returns inline and its marker rides the batched frame with the parked novelty", async () => {
@@ -672,7 +642,7 @@ Deno.test("memory v2 server: a failed send rolls back delivery state; the next f
   assertEquals(committerMessages.length, 0);
 });
 
-Deno.test("memory v2 server: a throwing evaluation closes the connection and the resumed session recovers the marker", async () => {
+Deno.test("memory v2 server: a throwing refresh evaluation skips that session's frame; a fresh session sees current state", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-eval-rollback",
@@ -718,26 +688,41 @@ Deno.test("memory v2 server: a throwing evaluation closes the connection and the
     }
     return originalAttach(...args);
   };
-  // The evaluation failure closes the committer's connection at the
-  // boundary (no throw surfaces, nothing is delivered to it), with the
-  // marker obligation rolled back into the detached session.
+  // The evaluation failure is logged and the session's frame skipped —
+  // no throw surfaces, nothing is delivered to it, and the connection is
+  // left alone (a broken evaluation means a bad commit slipped past the
+  // commit boundary or the database was altered out of band; neither has
+  // a connection-level remedy).
   await server.flushSessions([space]);
   assertEquals(committerMessages.length, 0);
 
-  // Client-side recovery: resume on a fresh connection. Catch-up delivers
-  // the parked novelty AND the restored obligation together.
-  const { sync } = await resumeCommitter(
-    server,
+  // A fresh session's own watch evaluation sees the current state, parked
+  // novelty included.
+  const freshMessages: ServerMessage[] = [];
+  const fresh = server.connect((message) => freshMessages.push(message));
+  await fresh.receive(encodeMemoryBoundary(HELLO));
+  const freshOpen = expectHelloOk(freshMessages);
+  await fresh.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "fresh-open",
     space,
-    context.committerSessionId,
-    context.committerSessionToken,
+    session: {},
+    invocation: authInvocation(freshOpen),
+  }));
+  const freshSessionId =
+    assertResponse<{ sessionId: string }>(shiftMessage(freshMessages))
+      .ok!.sessionId;
+  await fresh.receive(
+    encodeMemoryBoundary({
+      ...watchBoth(space, freshSessionId),
+      requestId: "fresh-watch",
+    }),
   );
-  assertExists(sync);
-  assertEquals(sync.caughtUpLocalSeq, 1);
-  // A resume catch-up carries no per-batch origin info, so the session's
-  // own doc:a write rides along with the parked foreign doc:b.
+  const watched = assertResponse<{ sync: SessionSync }>(
+    shiftMessage(freshMessages),
+  );
   assertEquals(
-    sync.upserts.map((upsert) => upsert.id).toSorted(),
+    watched.ok?.sync.upserts.map((upsert) => upsert.id).toSorted(),
     ["of:doc:a", "of:doc:b"],
   );
 });

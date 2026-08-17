@@ -30,7 +30,7 @@
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -158,13 +158,13 @@ const externalRefPresenceCache = new WeakMap<JSONSchemaObj, boolean>();
 export function containsExternalSchemaRef(
   schema: JSONSchema | undefined,
 ): boolean {
-  if (!isObjectOrArray(schema)) return false;
+  if (!isObjectNotArray(schema)) return false;
   const cached = externalRefPresenceCache.get(schema);
   if (cached !== undefined) return cached;
   const result = anySchema(
     schema,
     (node) =>
-      isObjectOrArray(node.schema) &&
+      isObjectNotArray(node.schema) &&
       typeof node.schema.$ref === "string" &&
       isExternalSchemaRef(node.schema.$ref),
     { includeDefs: true, includeUnused: true },
@@ -184,7 +184,7 @@ const externalRefHashCache = new WeakMap<JSONSchemaObj, ReadonlySet<string>>();
 export function collectExternalSchemaRefHashes(
   schema: JSONSchema | undefined,
 ): ReadonlySet<string> {
-  if (!isObjectOrArray(schema)) return EMPTY_HASHES;
+  if (!isObjectNotArray(schema)) return EMPTY_HASHES;
   const cached = externalRefHashCache.get(schema);
   if (cached !== undefined) return cached;
   const hashes = new Set<string>();
@@ -192,7 +192,7 @@ export function collectExternalSchemaRefHashes(
     schema,
     (node) => {
       if (
-        isObjectOrArray(node.schema) && typeof node.schema.$ref === "string"
+        isObjectNotArray(node.schema) && typeof node.schema.$ref === "string"
       ) {
         const parsed = parseExternalSchemaRef(node.schema.$ref);
         if (parsed !== undefined) hashes.add(parsed.taggedHash);
@@ -226,7 +226,7 @@ function scanFragment(
   defNames: ReadonlySet<string>,
   into: Set<string>,
 ): void {
-  if (!isObjectOrArray(fragment)) return;
+  if (!isObjectNotArray(fragment)) return;
   if (fragment.$defs !== undefined) {
     throw new SchemaNotDecomposableError(
       "a subschema declares its own `$defs` scope",
@@ -281,7 +281,7 @@ function rewriteRefs(
   refFor: (name: string) => string,
   keepLocal: ReadonlySet<string>,
 ): JSONSchema {
-  if (!isObjectOrArray(fragment)) return fragment;
+  if (!isObjectNotArray(fragment)) return fragment;
   let result: JSONSchemaObj = fragment;
   if (typeof fragment.$ref === "string") {
     const name = localDefName(fragment.$ref);
@@ -496,7 +496,7 @@ export function decomposeSchema(
       // wrapper document for it would not survive a recompose/decompose
       // round trip (the alias inlines away), so the name binds straight to
       // the target and the closure stays canonical across alias chains.
-      const aliasKeys = isObjectOrArray(rewritten)
+      const aliasKeys = isObjectNotArray(rewritten)
         ? Object.keys(rewritten)
         : [];
       if (
@@ -590,7 +590,7 @@ export function recomposeSchema(
     fragment: JSONSchema,
     ownMembers: ReadonlyMap<string, string>,
   ): JSONSchema => {
-    if (!isObjectOrArray(fragment)) return fragment;
+    if (!isObjectNotArray(fragment)) return fragment;
     let result: JSONSchemaObj = fragment;
     if (typeof fragment.$ref === "string") {
       const local = localDefName(fragment.$ref);
@@ -660,7 +660,7 @@ export function recomposeSchema(
     }
     rootBody = { $ref: encodeJsonPointer(["#", "$defs", rootName]) };
   } else {
-    if (isObjectOrArray(rootDocument) && rootDocument.$defs !== undefined) {
+    if (isObjectNotArray(rootDocument) && rootDocument.$defs !== undefined) {
       throw new Error(
         "A bare root reference must not target a cyclic-group document",
       );
@@ -699,7 +699,7 @@ export function recomposeSchema(
   }
 
   if (combined.size === 0) return internSchema(rootBody);
-  if (!isObjectOrArray(rootBody)) {
+  if (!isObjectNotArray(rootBody)) {
     throw new Error("A boolean root cannot carry a `$defs` scope");
   }
   return internSchema({ ...rootBody, $defs: Object.fromEntries(combined) });

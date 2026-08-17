@@ -378,10 +378,9 @@ const scanSnapshotSchemaRefs = (
  * assembled from the delivering space's own store: a referenced document
  * is missing, or its stored content does not hash to its id. The commit
  * boundary preserves installed documents, so this is a violated writer
- * or storage invariant, never a transient condition. Like every
- * query/watch evaluation exception, it closes the affected connection at
- * the server's evaluation boundary; reconnection reinstalls fresh state,
- * and a still-broken store fails loudly again.
+ * or storage invariant, never a transient condition. A request-shaped
+ * evaluation answers its caller with the diagnostic (a QueryError); the
+ * fan-out refresh logs it and skips the affected session's frame.
  */
 export class SchemaClosureError extends Error {
   constructor(message: string) {

@@ -1657,9 +1657,8 @@ export const connect = Client.connect;
 // from receive() entry, and a send that merely enqueued would let fan-out
 // read heads that predate a write already handed to the transport. Frames
 // staged at close() are dropped — nothing arrives after the socket is
-// gone. A server-initiated close (the evaluation boundary) surfaces
-// through setCloseReceiver like a socket close, and the next send opens a
-// fresh server connection — the same reconnect shape a deployment has.
+// gone. Remaining fidelity gap: setCloseReceiver is a no-op, so a
+// server-initiated disconnect is invisible over loopback.
 //
 // The pump takes that turn through armTurn, so a queued frame always has an
 // armed zero-delay timer for `clock.settle()` to see without the delivery
@@ -1669,7 +1668,6 @@ export const connect = Client.connect;
 // cascade rather than on a turn of their own.
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
-  let closeReceiver: ((error?: Error) => void) | undefined;
   let closed = false;
   const queue: string[] = [];
   let turn: ArmedTurn | null = null;
@@ -1684,47 +1682,27 @@ export const loopback = (server: Server): Transport => {
   const schedule = () => {
     turn ??= armTurn(drainOne);
   };
-  // The server can close a connection (the evaluation boundary does); the
-  // loopback surfaces that like a socket close, and the next send opens a
-  // fresh connection — the same reconnect shape a deployment has.
-  let connection: ReturnType<Server["connect"]> | null = null;
-  const ensureConnection = () => {
-    if (connection !== null) return connection;
-    const opened = server.connect((message) => {
-      if (closed) return;
-      queue.push(encodeMemoryBoundary(message));
-      schedule();
-    }, () => {
-      if (connection !== opened) return;
-      connection = null;
-      if (closed) return;
-      queue.length = 0;
-      closeReceiver?.(new Error("memory loopback connection closed by server"));
-    });
-    connection = opened;
-    return opened;
-  };
-  ensureConnection();
+  const connection = server.connect((message) => {
+    if (closed) return;
+    queue.push(encodeMemoryBoundary(message));
+    schedule();
+  });
   return {
     async send(payload: string) {
-      await ensureConnection().receive(payload);
+      await connection.receive(payload);
     },
     close() {
       closed = true;
       turn?.cancel();
       turn = null;
       queue.length = 0;
-      const current = connection;
-      connection = null;
-      current?.close();
+      connection.close();
       return Promise.resolve();
     },
     setReceiver(next) {
       receiver = next;
     },
-    setCloseReceiver(next) {
-      closeReceiver = next;
-    },
+    setCloseReceiver() {},
   };
 };
 

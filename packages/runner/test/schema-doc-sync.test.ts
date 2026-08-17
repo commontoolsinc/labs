@@ -264,7 +264,9 @@ describe("schema-doc-sync", () => {
       path: [],
       schema: false,
     });
-    expect(String(first.error?.message)).toContain("connection closed");
+    expect(String(first.error?.message)).toContain(
+      "not stored in this space",
+    );
     expect(isSchemaDocumentClosureComplete(rootHash)).toBe(false);
 
     // The leaf lands late. A fresh sync (differently selected, so coverage
@@ -403,7 +405,9 @@ describe("schema-doc-sync", () => {
       "of:dangling-carrier" as URI,
       { path: [], schema: false },
     );
-    expect(String(result.error?.message)).toContain("connection closed");
+    expect(String(result.error?.message)).toContain(
+      "not stored in this space",
+    );
   });
 
   it("fails a pull whose stored dependency is forged even though the realm registry holds a valid copy", async () => {
@@ -433,7 +437,9 @@ describe("schema-doc-sync", () => {
       `cid:${rootHash}` as URI,
       { path: [], schema: false },
     );
-    expect(String(result.error?.message)).toContain("connection closed");
+    expect(String(result.error?.message)).toContain(
+      "did not verify in this space",
+    );
   });
 
   it("delivers the closure behind a ref a document gains after the watch was established", async () => {
@@ -492,7 +498,7 @@ describe("schema-doc-sync", () => {
     expect(getDoc(`cid:${rootHash}` as URI)).toBeDefined();
   });
 
-  it("terminates the session whose closure breaks, and a fresh session succeeds once the store heals", async () => {
+  it("skips a broken session's frames (logged) and delivers once the store heals", async () => {
     const decomposed = decomposeSchema({
       type: "object",
       properties: { brokenClosure: { $ref: "#/$defs/BrokenClosureLeaf" } },
@@ -518,8 +524,8 @@ describe("schema-doc-sync", () => {
 
     // The carrier gains a ref but only PART of the closure is written —
     // the write-side guarantee deliberately violated. The push refresh
-    // detects the hole and terminates this session loudly; there is no
-    // hold and no automatic repair.
+    // logs the failure and skips this session's frame; the session keeps
+    // its consistent pre-break view.
     await writeDocs({
       [`cid:${rootHash}`]: decomposed.documents.get(rootHash)! as FabricValue,
       "of:broken-closure-carrier": {
@@ -536,16 +542,8 @@ describe("schema-doc-sync", () => {
     });
     await server.idle();
 
-    // The terminated session's next use fails loudly — whether as the
-    // terminal revocation or as a reopen whose initial query hits the
-    // same hole.
-    const after = await provider.sync("of:broken-closure-carrier" as URI, {
-      path: [],
-      schema: true,
-    });
-    expect(after.error).toBeDefined();
-
-    // A fresh session's initial query fails against the hole too.
+    // A fresh session's initial query fails against the hole, with the
+    // assembly diagnostic answering the request.
     const probeStorage = EmulatedStorageManager.connectTo(server, {
       as: await Identity.fromPassphrase("schema-doc-sync"),
     });
@@ -554,37 +552,53 @@ describe("schema-doc-sync", () => {
         "of:broken-closure-carrier" as URI,
         { path: [], schema: false },
       );
-      expect(String(probe.error?.message)).toContain("connection closed");
+      expect(String(probe.error?.message)).toContain(
+        "not stored in this space",
+      );
     } finally {
       await probeStorage.close();
     }
 
-    // Installing the missing document is an ordinary first write; a fresh
-    // session then succeeds. Nothing resumes the terminated watch.
+    // Installing the missing document is an ordinary first write; the
+    // next refresh that touches the carrier evaluates cleanly and the
+    // SAME session's watch delivers what it missed.
+    const healed = defer<void>();
+    const cancel = (provider as unknown as {
+      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
+    }).sink("of:broken-closure-carrier" as URI, (doc: unknown) => {
+      if (
+        doc !== null && typeof doc === "object" && doc !== undefined &&
+        (doc as { value?: { repaired?: unknown } }).value?.repaired === true
+      ) {
+        healed.resolve();
+      }
+    });
     await writeDocs({
       [`cid:${leafHash}`]: decomposed.documents.get(leafHash)! as FabricValue,
+      "of:broken-closure-carrier": {
+        repaired: true,
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:broken-closure-target",
+              path: [],
+              schema: { $ref: decomposed.rootRef },
+            },
+          },
+        },
+      } as FabricValue,
     });
-    await server.idle();
-    const healedStorage = EmulatedStorageManager.connectTo(server, {
-      as: await Identity.fromPassphrase("schema-doc-sync"),
-    });
-    try {
-      const healedProvider = healedStorage.open(space);
-      const healed = await healedProvider.sync(
-        "of:broken-closure-carrier" as URI,
-        { path: [], schema: false },
-      );
-      expect(healed.error).toBeUndefined();
-      const stored = (healedProvider as unknown as {
-        get: (uri: URI) => unknown;
-      }).get(`cid:${leafHash}` as URI);
-      expect(stored).toBeDefined();
-    } finally {
-      await healedStorage.close();
-    }
+    await healed.promise;
+    cancel();
+    const getDoc = (provider as unknown as {
+      get: (uri: URI) => unknown;
+    }).get.bind(provider);
+    expect(getDoc(`cid:${rootHash}` as URI)).toBeDefined();
+    expect(getDoc(`cid:${leafHash}` as URI)).toBeDefined();
+    expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
   });
 
-  it("terminates only the affected session: an unrelated watch keeps receiving updates", async () => {
+  it("skips only the affected session's frame: an unrelated watch keeps receiving updates", async () => {
     await writeDocs({
       "of:isolated-broken-carrier": { plain: "v1" } as FabricValue,
       "of:isolated-bystander": { counter: 1 } as FabricValue,

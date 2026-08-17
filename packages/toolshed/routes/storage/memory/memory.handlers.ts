@@ -168,11 +168,6 @@ export const attachMemorySocketPipeline = (
       return;
     }
     socket.send(encodeMemoryBoundary(message));
-  }, () => {
-    // A server-initiated close (the evaluation boundary) must reach the
-    // wire: the socket close is the signal the client's reconnect
-    // recovery keys on.
-    safeSocketClose(1011, "memory connection closed by server");
   });
   const closeConnection = () => {
     connection.close();

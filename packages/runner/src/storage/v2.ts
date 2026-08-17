@@ -1558,7 +1558,7 @@ export class StorageManager implements IStorageManager {
       }
       // Verify THIS SPACE's copy, not merely realm resolvability: a forged
       // local document with a valid twin elsewhere must fail here.
-      const storedSchema = isObjectOrArray(stored) ? stored.value : undefined;
+      const storedSchema = isObjectNotArray(stored) ? stored.value : undefined;
       if (
         internSchemaAsTaggedHashString(storedSchema as JSONSchema) !== hash
       ) {
@@ -1579,7 +1579,7 @@ export class StorageManager implements IStorageManager {
     space: MemorySpace,
     document: EntityDocument | undefined,
   ): Promise<Error | undefined> {
-    const cfc = isObjectOrArray(document?.cfc) ? document.cfc : undefined;
+    const cfc = isObjectNotArray(document?.cfc) ? document.cfc : undefined;
     const schemaHash = cfc?.schemaHash;
     if (typeof schemaHash !== "string" || schemaHash.length === 0) {
       return undefined;
@@ -4285,7 +4285,7 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
       const doc = upsert.doc;
-      if (!isObjectOrArray(doc)) continue;
+      if (!isObjectNotArray(doc)) continue;
       overlay.set(id, doc);
       deletedInFrame.delete(id);
       if (id.startsWith("cid:")) {
@@ -4360,7 +4360,7 @@ class SpaceReplica implements ISpaceReplica {
   ): boolean {
     const doc = overlay.get(`cid:${hash}`) ??
       this.getDocument(`cid:${hash}` as URI);
-    if (!isObjectOrArray(doc)) return false;
+    if (!isObjectNotArray(doc)) return false;
     const value = (doc as { value?: unknown }).value;
     return isSubschema(value) &&
       internSchemaAsTaggedHashString(value as JSONSchema) === hash;
