@@ -1,3 +1,20 @@
+/**
+ * Validates where a scope declaration sits in a generated schema, so a slot an
+ * author marked `PerUser`/`PerSession` cannot reach storage as shared
+ * space-scoped data.
+ *
+ * The runtime reads a slot's scope from the top level of that slot's own
+ * schema (`ContextualFlowControl.getSchemaScopeCap`). A declaration anywhere
+ * else is not a weaker declaration, it is no declaration: no narrowing
+ * redirect is written, the value lands on the space row, and every principal
+ * reads one instance. Refusing the schema at generation time is what keeps
+ * that from being a silent outcome.
+ *
+ * The subject here is PLACEMENT. Which scope a slot should carry, and which
+ * instance the runtime addresses once it has one, are the write path's
+ * questions.
+ */
+
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { MutableJSONSchema } from "@commonfabric/api";
 
