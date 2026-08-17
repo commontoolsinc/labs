@@ -242,17 +242,20 @@ Remaining fallback behavior is intentionally narrow:
   classify as builders in type-only environments
 - shadowed local helpers and object methods with Common Fabric-like names are not
   classified
-- a property call spelled `mapWithPattern` / `filterWithPattern` /
-  `flatMapWithPattern` whose method resolves to **no symbol** classifies as
-  the array-method family by spelling alone. The transformer emits these
-  calls against receivers whose static type is still the plain array type
-  (a site-lifted collection local, for example), so the method never
-  resolves and the spelling is the only remaining evidence of the family —
-  this is what keeps post-closure stages from wrapping an already-rewritten
-  call in a second lift. A `*WithPattern` method that **does** resolve is an
-  author's own declaration and keeps its author's semantics; authored
-  spellings (`.map` et al.) that fail symbol resolution still require a
-  reactive receiver to classify
+- a **synthetic** property call spelled `mapWithPattern` /
+  `filterWithPattern` / `flatMapWithPattern` whose method resolves to **no
+  symbol** classifies as the array-method family by spelling alone. The
+  closure stage emits these calls against receivers whose static type is
+  still the plain array type (a site-lifted collection local, for example),
+  so the method never resolves and the emitted spelling is the only
+  remaining evidence of the family — this is what keeps post-closure stages
+  from wrapping an already-rewritten call in a second lift. The
+  synthetic-node requirement scopes that testimony to calls the transformer
+  actually produced: an **authored** `*WithPattern` spelling keeps its
+  author's semantics whether its method resolves (their own declaration) or
+  not (an untyped receiver classifies as no call kind). Authored spellings
+  of every family that fail symbol resolution still require a reactive
+  receiver to classify
 
 Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
 functions returned by builders are not reclassified as direct `lift()` or

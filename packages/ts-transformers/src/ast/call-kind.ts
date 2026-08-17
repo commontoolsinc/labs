@@ -50,6 +50,7 @@ import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts"
 import {
   getTypeAtLocationWithFallback,
   getVariableInitializer,
+  isSyntheticNode,
 } from "./utils.ts";
 import { isCollectionType } from "./type-inference.ts";
 
@@ -1387,18 +1388,24 @@ function resolveExpressionKind(
     const name = target.name.text;
     if (isKnownArrayMethodName(name)) {
       // Fallback path: when symbol resolution doesn't already identify the
-      // array-method family. A symbol-less `*WithPattern` spelling needs no
-      // receiver check: the transformer emits these calls against receivers
-      // whose static type is still the plain array type, so the method never
-      // resolves to a symbol and provenance walks see a plain binding — the
-      // spelling itself testifies to the provenance the rewritten tree can
-      // no longer show structurally. A `*WithPattern` method that DOES
-      // resolve is an author's own declaration and keeps its author's
-      // semantics; the authored spellings stay gated on reactive receivers —
-      // a `.map`-named call whose symbol did not resolve is otherwise not
+      // array-method family. A synthetic, symbol-less `*WithPattern`
+      // spelling needs no receiver check: the closure stage emits these
+      // calls against receivers whose static type is still the plain array
+      // type, so the method never resolves to a symbol and provenance walks
+      // see a plain binding — the emitted spelling itself testifies to the
+      // provenance the rewritten tree can no longer show structurally. The
+      // synthetic-node requirement is what scopes that testimony to calls
+      // the transformer actually produced: an AUTHORED `*WithPattern`
+      // spelling keeps its author's semantics whether its method resolves
+      // (their own declaration) or not (an untyped receiver). Authored
+      // spellings of every family stay gated on reactive receivers — a
+      // `.map`-named call whose symbol did not resolve is otherwise not
       // evidence of the family.
       if (
-        (!symbol && getArrayMethodAccessKindByName(name)?.lowered) ||
+        (
+          !symbol && isSyntheticNode(target) &&
+          getArrayMethodAccessKindByName(name)?.lowered
+        ) ||
         isReactiveArrayMethodReceiverExpression(target.expression, checker)
       ) {
         const result = { kind: "array-method" } as const;
