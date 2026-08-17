@@ -7,7 +7,10 @@ import type {
 } from "@commonfabric/piece/ops";
 import ports from "@commonfabric/ports" with { type: "json" };
 import { parseCellPath, UI } from "@commonfabric/runner";
-import { parseScopedIdSegment } from "@commonfabric/runner/shared";
+import {
+  matchLLMFriendlyLink,
+  parseScopedIdSegment,
+} from "@commonfabric/runner/shared";
 import { decode } from "@commonfabric/utils/encoding";
 
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
@@ -1684,12 +1687,27 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     `Get a value from a piece at a specific path. Omit path to return the full result.
 
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
-  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name`,
+  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
+
+ADDRESS: The target can sit in the first positional instead of --piece when
+written as a canonical reference (it begins with "/"): cf piece get
+/of:fid1:.../items 0/name. A trailing #argument selects the arguments cell
+the way --input does.`,
   )
-  .usage(`${pieceUsage} [path]`)
+  .usage(`${pieceUsage} [addressOrPath] [path]`)
   .example(
     cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} name`),
     `Get the "name" field from piece result "${RAW_EX_COMP.piece!}".`,
+  )
+  .example(
+    cliText(`cf piece get ${EX_ID} ${EX_COMP} /of:fid1:abc.../items 0/name`),
+    "Read through a positional canonical address; its embedded path applies.",
+  )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP} '/of:fid1:abc...#argument' draft`,
+    ),
+    `Read the piece's arguments cell ("#argument" spells --input).`,
   )
   .example(
     cliText(
@@ -1738,7 +1756,11 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     "Return each item's address instead of its contents.",
   )
   .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
-  .option("--input", "Read from the piece's input cell instead of result cell")
+  .option(
+    "--input",
+    "Read from the piece's input cell instead of result cell (the " +
+      '"#argument" reference suffix spells the same selection)',
+  )
   .option(
     "--step",
     "Start and recompute the piece in this session before reading",
@@ -1765,35 +1787,8 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     // said which shape it wants. Refuse before the read rather than pick.
     { conflicts: ["select"] },
   )
-  .arguments("[path:string]")
-  .action(async (options, pathString) => {
-    setQuietMode(!!options.quiet);
-    const pieceConfig = {
-      ...parsePieceOptions(options, { acceptsPath: true }),
-      jsonOutput: true,
-    };
-    const pathSegments = mergePiecePath(pieceConfig, pathString);
-    try {
-      const selection = await parseCellSelectionOptions(options);
-      const value = await getCellValue(pieceConfig, pathSegments, {
-        input: options.input,
-        step: options.step,
-        ...(selection === undefined ? {} : { selection }),
-      });
-      render(value, { json: true });
-    } catch (error) {
-      // A read that fails on a data condition — the path doesn't resolve, or
-      // the result schema can't project the stored data (PieceResultProjection
-      // Error) — is a data error, not a usage error. Report it on stderr
-      // instead of letting Cliffy dump the help screen over it.
-      const report = pieceGetDataErrorReport(error, {
-        input: options.input,
-        piece: pieceConfig.piece,
-      });
-      if (report) exitWithDataError(report);
-      throw error;
-    }
-  })
+  .arguments("[addressOrPath:string] [path:string]")
+  .action(getCellValueFromCommand)
   /* piece get-label */
   .command(
     "get-label",
@@ -1812,7 +1807,11 @@ declared, derived, and link-carried labels. Omit path to inspect the root.`,
     "Get the effective label on an input value.",
   )
   .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
-  .option("--input", "Read from the piece's input cell instead of result cell")
+  .option(
+    "--input",
+    "Read from the piece's input cell instead of result cell (the " +
+      '"#argument" reference suffix spells the same selection)',
+  )
   .option(
     "--json",
     "Select JSON output explicitly. This command always outputs JSON.",
@@ -1848,7 +1847,11 @@ updated effective label view.`),
     "Remove declared integrity claims from an input value.",
   )
   .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
-  .option("--input", "Write to the piece's input cell instead of result cell")
+  .option(
+    "--input",
+    "Write to the piece's input cell instead of result cell (the " +
+      '"#argument" reference suffix spells the same selection)',
+  )
   .option(
     "--json",
     "Select JSON output explicitly. This command always outputs JSON.",
@@ -1863,9 +1866,14 @@ updated effective label view.`),
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
   ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
 
-JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
+JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...
+
+ADDRESS: The target can sit in the first positional instead of --piece when
+written as a canonical reference (it begins with "/"): a path embedded in it
+counts, so cf piece set /of:fid1:.../title needs no path argument. A trailing
+#argument selects the arguments cell the way --input does.`),
   )
-  .usage(`${pieceUsage} <path>`)
+  .usage(`${pieceUsage} [addressOrPath] [path]`)
   .example(
     cliText(`echo '"New Name"' | cf piece set ${EX_ID} ${EX_COMP_PIECE} name`),
     `Set the "name" field in piece result "${RAW_EX_COMP.piece!}".`,
@@ -1876,24 +1884,20 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     ),
     `Set a nested object value in piece input "${RAW_EX_COMP.piece!}".`,
   )
+  .example(
+    cliText(
+      `echo '"Milk"' | cf piece set ${EX_ID} ${EX_COMP} /of:fid1:abc.../title`,
+    ),
+    "Write through a positional canonical address; the embedded path is the path.",
+  )
   .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
-  .option("--input", "Write to the piece's input cell instead of result cell")
-  .arguments("<path:string>")
-  .action(async (options, pathString) => {
-    setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options, { acceptsPath: true });
-    const pathSegments = mergePiecePath(pieceConfig, pathString);
-    const value = await drainStdin();
-    await setCellValue(pieceConfig, pathSegments, value, {
-      input: options.input,
-    });
-    render(`Set value at path: ${pathSegments.join("/")}`);
-    hint(
-      cliText(
-        `TIP: Computed values may be stale. Run 'cf piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
-      ),
-    );
-  })
+  .option(
+    "--input",
+    "Write to the piece's input cell instead of result cell (the " +
+      '"#argument" reference suffix spells the same selection)',
+  )
+  .arguments("[addressOrPath:string] [path:string]")
+  .action(setCellValueFromCommand)
   /* piece map */
   .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)
@@ -1927,9 +1931,13 @@ Arguments after the callable use the same parser as cf exec. Use --json with an
 optional inline value for complete JSON input; bare --json reads JSON from
 stdin. A single positional JSON value or "-" stdin sentinel is also accepted.
 Use --help --json for machine-readable schema help. Put schema-derived flags
-after --. Handlers interpret piped input when no input argument is present.`,
+after --. Handlers interpret piped input when no input argument is present.
+
+ADDRESS: The target can precede the callable name instead of riding --piece
+when written as a canonical reference (it begins with "/"):
+cf piece call /of:fid1:... addItem '{"title":"Milk"}'.`,
   )
-  .usage(`${pieceUsage} <callable> [input]`)
+  .usage(`${pieceUsage} [address] <callable> [input]`)
   .example(
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} increment`),
     `Call the "increment" handler on piece "${RAW_EX_COMP.piece!}".`,
@@ -1956,6 +1964,12 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .example(
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`),
     `Run the "search" tool using schema-derived flags after "--".`,
+  )
+  .example(
+    cliText(
+      `cf piece call ${EX_ID} ${EX_COMP} /of:fid1:abc... addItem '{"title":"Milk"}'`,
+    ),
+    "Name the target as a positional canonical address before the callable.",
   )
   .example(
     cliText(
@@ -2059,7 +2073,14 @@ after --. Handlers interpret piped input when no input argument is present.`,
   )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
-  .action(async function (options, callableName, ...tail) {
+  .action(async function (options, callableArg, ...tailArgs) {
+    // Positional-address intake first: it is a fact about the argv alone,
+    // so a refusal here names no invocation and no phase.
+    const { piece, callableName, tail } = readCallTarget(
+      options,
+      callableArg,
+      tailArgs,
+    );
     const identity = resolveInvocationIdentity(
       options.invocation,
       options.invocationSession,
@@ -2097,6 +2118,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
       );
       const pieceConfig = parsePieceOptions({
         ...options,
+        ...(piece !== undefined && { piece }),
         json: invocation.jsonOutput,
       });
       const result = await boundedSettlement(
@@ -2335,6 +2357,115 @@ export interface PieceLabelCommandDependencies {
   render?: typeof render;
 }
 
+export interface PieceGetCLIOptions extends PieceLabelCLIOptions {
+  step?: boolean;
+  filter?: string;
+  select?: string;
+  schema?: string;
+}
+
+export interface PieceCellCommandDependencies {
+  getCellValue?: typeof getCellValue;
+  setCellValue?: typeof setCellValue;
+  drainStdin?: typeof drainStdin;
+  render?: typeof render;
+  hint?: typeof hint;
+  exitWithDataError?: typeof exitWithDataError;
+}
+
+/**
+ * The `cf piece get` action: the target may ride `--piece` or sit in the
+ * first positional as a canonical address ({@link readTargetPositionals}
+ * decides which the positionals name), and either spelling may end in
+ * `#argument`, which reads the arguments cell the way `--input` does.
+ *
+ * A named export with seams rather than an inline action body because action
+ * bodies never execute under the unit suite (docs/development/COVERAGE.md).
+ */
+export async function getCellValueFromCommand(
+  options: PieceGetCLIOptions,
+  first?: string,
+  second?: string,
+  deps: PieceCellCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const target = readTargetPositionals(options, first, second);
+  const pieceConfig = {
+    ...parsePieceOptions(
+      target.address ? { ...options, piece: target.address } : options,
+      { acceptsPath: true, acceptsArgument: true },
+    ),
+    jsonOutput: true,
+  };
+  const pathSegments = mergePiecePath(pieceConfig, target.pathString);
+  const input = options.input || pieceConfig.pieceInput;
+  try {
+    const selection = await parseCellSelectionOptions(options);
+    const value = await (deps.getCellValue ?? getCellValue)(
+      pieceConfig,
+      pathSegments,
+      {
+        input,
+        step: options.step,
+        ...(selection === undefined ? {} : { selection }),
+      },
+    );
+    (deps.render ?? render)(value, { json: true });
+  } catch (error) {
+    // A read that fails on a data condition — the path doesn't resolve, or
+    // the result schema can't project the stored data (PieceResultProjection
+    // Error) — is a data error, not a usage error. Report it on stderr
+    // instead of letting Cliffy dump the help screen over it.
+    const report = pieceGetDataErrorReport(error, {
+      input,
+      piece: pieceConfig.piece,
+    });
+    if (report) (deps.exitWithDataError ?? exitWithDataError)(report);
+    throw error;
+  }
+}
+
+/**
+ * The `cf piece set` action, with the same positional-address intake as
+ * {@link getCellValueFromCommand}. The write needs a path spelled somewhere
+ * — embedded in the address, positionally, or both — and an explicit empty
+ * positional (`""`) is a spelling: it has always named the root, and the
+ * fuse integration writes a whole input cell with it. What is refused is a
+ * bare positional address with no path anywhere, so a pasted address cannot
+ * silently overwrite a whole cell.
+ */
+export async function setCellValueFromCommand(
+  options: PieceLabelCLIOptions,
+  first?: string,
+  second?: string,
+  deps: PieceCellCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const target = readTargetPositionals(options, first, second);
+  const pieceConfig = parsePieceOptions(
+    target.address ? { ...options, piece: target.address } : options,
+    { acceptsPath: true, acceptsArgument: true },
+  );
+  const pathSegments = mergePiecePath(pieceConfig, target.pathString);
+  if (pathSegments.length === 0 && target.pathString === undefined) {
+    throw new ValidationError(
+      `A path is required: embed it in the address (/of:.../title) or ` +
+        `pass it as an argument ("" writes the root).`,
+      { exitCode: 1 },
+    );
+  }
+  const value = await (deps.drainStdin ?? drainStdin)();
+  await (deps.setCellValue ?? setCellValue)(pieceConfig, pathSegments, value, {
+    input: options.input || pieceConfig.pieceInput,
+  });
+  (deps.render ?? render)(`Set value at path: ${pathSegments.join("/")}`);
+  (deps.hint ?? hint)(
+    cliText(
+      `TIP: Computed values may be stale. Run 'cf piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
+    ),
+  );
+}
+
 export async function getCellCfcLabelFromCommand(
   options: PieceLabelCLIOptions,
   pathString?: string,
@@ -2342,14 +2473,14 @@ export async function getCellCfcLabelFromCommand(
 ): Promise<void> {
   setQuietMode(!!options.quiet);
   const pieceConfig = {
-    ...parsePieceOptions(options, { acceptsPath: true }),
+    ...parsePieceOptions(options, { acceptsPath: true, acceptsArgument: true }),
     jsonOutput: true,
   };
   const pathSegments = mergePiecePath(pieceConfig, pathString);
   const label = await (deps.getCellCfcLabel ?? getCellCfcLabel)(
     pieceConfig,
     pathSegments,
-    { input: options.input },
+    { input: options.input || pieceConfig.pieceInput },
   );
   (deps.render ?? render)(label, { json: true });
 }
@@ -2361,7 +2492,7 @@ export async function setCellCfcLabelFromCommand(
 ): Promise<void> {
   setQuietMode(!!options.quiet);
   const pieceConfig = {
-    ...parsePieceOptions(options, { acceptsPath: true }),
+    ...parsePieceOptions(options, { acceptsPath: true, acceptsArgument: true }),
     jsonOutput: true,
   };
   const pathSegments = mergePiecePath(pieceConfig, pathString);
@@ -2370,7 +2501,7 @@ export async function setCellCfcLabelFromCommand(
     pieceConfig,
     pathSegments,
     update,
-    { input: options.input },
+    { input: options.input || pieceConfig.pieceInput },
   );
   (deps.render ?? render)(label, { json: true });
 }
@@ -2516,7 +2647,7 @@ function parseSetHomeOptions(
 
 export function parsePieceOptions(
   input: PieceCLIOptions,
-  parseOptions?: { acceptsPath?: boolean },
+  parseOptions?: { acceptsPath?: boolean; acceptsArgument?: boolean },
 ): PieceConfig {
   const options = parseSpaceOptions(input);
   if (!("piece" in options) || !options.piece) {
@@ -2534,7 +2665,89 @@ export function parsePieceOptions(
       { exitCode: 1 },
     );
   }
+  if (config.pieceInput && !parseOptions?.acceptsArgument) {
+    throw new ValidationError(
+      `The piece reference selects the arguments cell ("#argument") but ` +
+        `this command does not take "--input".`,
+      { exitCode: 1 },
+    );
+  }
   return config;
+}
+
+/**
+ * Decide what a read or write command's positionals name: an address, a
+ * path, or nothing.
+ *
+ * The deciding grammar: a positional address is written in the canonical
+ * reference form, which begins with `/` (`matchLLMFriendlyLink`), and a
+ * relative cell path never does. The bare id, slug, and scoped spellings
+ * stay on `--piece`, where no path competes for the position — a slug and a
+ * path's first segment are indistinguishable.
+ *
+ * A caller naming the target twice — `--piece` beside a positional address —
+ * is refused rather than resolved, the same rule `--space` beside `--url`
+ * follows. So is a second positional behind a path: only an address earns a
+ * path after it.
+ */
+export function readTargetPositionals(
+  options: { piece?: string },
+  first?: string,
+  second?: string,
+): { address?: string; pathString?: string } {
+  if (first === undefined) return {};
+  if (matchLLMFriendlyLink.test(first.trim())) {
+    if (options.piece) {
+      throw new ValidationError(
+        `"--piece" cannot be provided when the address is positional.`,
+        { exitCode: 1 },
+      );
+    }
+    return {
+      address: first,
+      ...(second !== undefined && { pathString: second }),
+    };
+  }
+  if (second !== undefined) {
+    throw new ValidationError(
+      `Unexpected argument "${second}": a second positional belongs after ` +
+        `an address (/of:fid1:...), and "${first}" is a path.`,
+      { exitCode: 1 },
+    );
+  }
+  return { pathString: first };
+}
+
+/**
+ * `cf piece call`'s positional intake: when the first positional is a
+ * canonical address it replaces `--piece`, and the callable name follows
+ * it. The same `/`-leading grammar decides as in
+ * {@link readTargetPositionals}; a bare callable name can never match it.
+ */
+export function readCallTarget(
+  options: { piece?: string },
+  callableName: string,
+  tail: string[],
+): { piece?: string; callableName: string; tail: string[] } {
+  if (!matchLLMFriendlyLink.test(callableName.trim())) {
+    return { callableName, tail };
+  }
+  if (options.piece) {
+    throw new ValidationError(
+      `"--piece" cannot be provided when the address is positional.`,
+      { exitCode: 1 },
+    );
+  }
+  const [nextCallable, ...rest] = tail;
+  if (nextCallable === undefined) {
+    throw new ValidationError(
+      `Missing argument "callable": the positional address ` +
+        `"${callableName}" replaces "--piece", and the callable name ` +
+        `follows it.`,
+      { exitCode: 1 },
+    );
+  }
+  return { piece: callableName, callableName: nextCallable, tail: rest };
 }
 
 // With args and env vars shadowing each other, and multiple
@@ -2545,8 +2758,11 @@ export function parsePieceOptions(
 // The space can arrive three ways: `--url` embeds it, `--space` names it, and
 // a canonical `--piece` reference may carry it as a `/@did:.../` prefix. A
 // reference's space fills an absent `--space`; a present one must agree —
-// checked at parse time when `--space` is a DID, and at session open through
-// `validateEmbeddedSpaces` when it is a name still to be resolved.
+// checked at parse time when the target space is a DID, and at session open
+// through `validateEmbeddedSpaces` when it is a name still to be resolved.
+// The piece arrives through `--piece` (or the positional address it carries)
+// or inside the `--url`: a URL that names one excludes the flag, and a
+// piece-less URL composes with it.
 export function parseSpaceOptions(
   input: PieceCLIOptions,
 ): SpaceConfig {
@@ -2569,14 +2785,67 @@ export function parseSpaceOptions(
   };
   if (input.json) output.jsonOutput = true;
 
+  // The space the piece reference below is checked against: `--space`, or
+  // the space a `--url` embeds.
+  let targetSpace = input.space;
+
   if (input.url) {
     const { apiUrl, space, piece, pieceScope } = parseUrl(input.url);
     output.apiUrl = apiUrl;
     output.space = space;
-    output.piece = piece;
-    if (pieceScope) output.pieceScope = pieceScope;
-    return output as PieceConfig;
+    targetSpace = space;
+    if (piece) {
+      // Two pieces named at once is refused rather than resolved, the same
+      // rule "--space" beside "--url" follows: silently preferring either
+      // one is how a caller reads a target they did not name. `input.piece`
+      // may carry a positional address, so the message names both spellings.
+      if (input.piece) {
+        throw new ValidationError(
+          `A piece reference ("--piece" or a positional address) cannot ` +
+            `be provided when the "--url" names a piece.`,
+          { exitCode: 1 },
+        );
+      }
+      output.piece = piece;
+      if (pieceScope) output.pieceScope = pieceScope;
+      return output as PieceConfig;
+    }
+    // A piece-less URL supplies the host and space; the piece may still
+    // arrive through "--piece" (or the positional address it carries).
   }
+
+  if (input.piece) {
+    // Do not validate here -- piece is only
+    // required via `parsePieceOptions`
+    const llmRef = normalizeLLMFriendlyRef(input.piece, {
+      space: targetSpace,
+    });
+    if (llmRef) {
+      output.piece = llmRef.pieceId;
+      if (llmRef.scope) output.pieceScope = llmRef.scope;
+      if (llmRef.path.length > 0) output.piecePath = llmRef.path;
+      if (llmRef.input) output.pieceInput = true;
+      if (llmRef.embeddedSpace) {
+        output.embeddedSpaces = [llmRef.embeddedSpace];
+        if (!targetSpace) output.space = llmRef.embeddedSpace;
+      }
+    } else {
+      // The alias grammar has no fragments, and letting one through would
+      // bury the suffix inside the id and fail as an unknown piece later.
+      if (input.piece.includes("#")) {
+        throw new ValidationError(
+          `The "#argument" suffix rides the canonical reference form ` +
+            `(/of:fid1:...#argument), not the bare piece id.`,
+          { exitCode: 1 },
+        );
+      }
+      const parsedPiece = parseScopedId(input.piece);
+      output.piece = parsedPiece.id;
+      if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
+    }
+  }
+
+  if (input.url) return output as PieceConfig;
 
   if (!input.apiUrl) {
     throw new ValidationError(
@@ -2584,28 +2853,6 @@ export function parseSpaceOptions(
       { exitCode: 1 },
     );
   }
-
-  if (input.piece) {
-    // Do not validate here -- piece is only
-    // required via `parsePieceOptions`
-    const llmRef = normalizeLLMFriendlyRef(input.piece, {
-      space: input.space,
-    });
-    if (llmRef) {
-      output.piece = llmRef.pieceId;
-      if (llmRef.scope) output.pieceScope = llmRef.scope;
-      if (llmRef.path.length > 0) output.piecePath = llmRef.path;
-      if (llmRef.embeddedSpace) {
-        output.embeddedSpaces = [llmRef.embeddedSpace];
-        if (!input.space) output.space = llmRef.embeddedSpace;
-      }
-    } else {
-      const parsedPiece = parseScopedId(input.piece);
-      output.piece = parsedPiece.id;
-      if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
-    }
-  }
-
   if (input.space) output.space = input.space;
   if (!output.space) {
     throw new ValidationError(
@@ -2659,6 +2906,12 @@ export function parseLink(
 } {
   const llmRef = normalizeLLMFriendlyRef(ref, { space: options?.space });
   if (llmRef) {
+    if (llmRef.input) {
+      throw new ValidationError(
+        `The "#argument" suffix does not apply to a link endpoint.`,
+        { exitCode: 1 },
+      );
+    }
     return {
       pieceId: llmRef.pieceId,
       ...(llmRef.scope && { scope: llmRef.scope }),

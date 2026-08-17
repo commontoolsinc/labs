@@ -108,7 +108,8 @@ describe("main command", () => {
     );
     const call = piece.getCommand("call")!;
     const expectedUsage =
-      "--identity <identity> --url <url> --api-url <api-url> --space <space> --piece <piece> <callable> [input]";
+      "--identity <identity> --url <url> --api-url <api-url> --space <space> " +
+      "--piece <piece> [address] <callable> [input]";
 
     expect(call.getArgsDefinition()).toBe(
       "<callable:string> [tail...:string]",

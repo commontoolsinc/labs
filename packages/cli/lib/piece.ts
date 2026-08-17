@@ -140,6 +140,13 @@ export interface PieceConfig extends SpaceConfig {
    * carries them.
    */
   piecePath?: (string | number)[];
+  /**
+   * True when the reference carried the `#argument` suffix: the caller
+   * selected the piece's arguments cell. A command that takes `--input`
+   * honors it as that flag; every other command rejects a reference that
+   * carries it.
+   */
+  pieceInput?: boolean;
 }
 
 export interface SetPiecePatternOptions {
