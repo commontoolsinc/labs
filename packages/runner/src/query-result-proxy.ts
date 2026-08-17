@@ -40,14 +40,13 @@ const SHAPE_READ: IReadOptions = { nonRecursive: true };
 
 // Cache of target objects to their proxies, scoped by ReactivityLog.
 //
-// `byValue` is split by writability rather than holding one proxy per value.
-// A writable proxy carries write traps a read-only one refuses, so the two are
-// different objects and a lookup that cannot tell them apart hands whichever
-// was built first to both — a read-only view that permits writes, or a
-// writable one that refuses them, decided by nothing but creation order.
-// Within one writability the sharing is unchanged: the reason this index sits
-// behind `byLink` at all is that two values reached by different routes are
-// one object to a consumer comparing by identity.
+// `byValue` holds one proxy per value per writability. A writable proxy
+// carries write traps a read-only one refuses, so the two are different
+// objects and each gets its own slot; a view built for one writability is
+// never handed to a caller asking for the other. Within a writability the two
+// share, which is what this index sits behind `byLink` for: two links that
+// resolve to one stored object are one object to a consumer comparing by
+// identity.
 type ProxyCache = {
   byLink: Map<string, any>;
   byValue: WeakMap<object, { readOnly?: any; writable?: any }>;

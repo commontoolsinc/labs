@@ -40,9 +40,9 @@ describe("query-result-proxy", () => {
 
   describe("writability of a cached view", () => {
     // Both views are taken over one cell in one transaction, so they name the
-    // same value object. Each test builds them in a stated order, because the
-    // defect being pinned is one where the order decides the outcome: a single
-    // ordering passes on its own.
+    // same value object -- the case where the two share a cache entry. Each
+    // test names the order they are built in, and both orders are exercised,
+    // because a view behaves the same whichever of the two was built first.
     const views = (id: string, order: "read-only first" | "writable first") => {
       const cell = runtime.getCell<{ a: number }>(space, id, undefined, tx);
       cell.set({ a: 1 });
