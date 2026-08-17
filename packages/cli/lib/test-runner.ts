@@ -8,7 +8,11 @@
  *
  * TestStep is a discriminated union:
  * - { assertion: Reactive<AssertRecord> } from assert(() => condition)
- * - { action: Stream<void> } from action(() => sideEffect)
+ * - { action: Stream<unknown> } from action(() => sideEffect)
+ * - { render: unknown } naming a UI target to materialize
+ * - { settle: true } settling fully at a point the author names
+ * - { label: string } and { await: string } coordinating participants
+ *   in a multi-user test
  *
  * The discriminated union avoids TypeScript declaration emit issues
  * that occur when mixing Cell and Stream types in the same array.

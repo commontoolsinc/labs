@@ -55,7 +55,7 @@ export default pattern(() => {
   });
 
   // ==========================================================================
-  // Assertions - computed booleans
+  // Assertions - assert() over pattern state
   // ==========================================================================
 
   // Initial state assertions

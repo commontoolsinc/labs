@@ -310,7 +310,7 @@ Key points:
   (`trimmedName(name.get())`, `cell.get() ?? EMPTY_LIST` with a module-level
   constant).
 - Read another runtime's arrays with INLINE literal indexing in the assertion
-  computed (`users?.[0]?.name === "Alice"`). `.map()`, loop-variable
+  body (`users?.[0]?.name === "Alice"`). `.map()`, loop-variable
   indexing, and module-level helper calls over the array resolve in the
   runtime that wrote it but NOT cross-runtime before a local write.
 - A participant cannot read their own never-written `PerUser` array (e.g. an
@@ -331,8 +331,8 @@ with `Math.random()` (allowed inside a handler, coarsened to one-second
 resolution for the clock), keep the assertions deterministic:
 
 - prefer asserting that a value was set, changed, or has the expected shape
-- avoid calling `Date.now()` or `Math.random()` inside a test `computed()`
-  assertion — those built-ins throw a `TimeCapabilityError` in a computed
+- avoid calling `Date.now()` or `Math.random()` inside a test `assert()`
+  assertion — those built-ins throw a `TimeCapabilityError` in a computation
 - if you need an exact value, capture it in the action under test and assert
   against the captured result rather than recomputing it in the assertion
 
