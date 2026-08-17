@@ -332,10 +332,13 @@ ACCEPT_COVERAGE_DEBT: packages/runner +12 lines
 
 The marker names the source group — `workspace`, a top-level directory such as
 `tasks`, or a package as `packages/runner` — rather than the metric that group's
-lines are counted in. Only `packages` splits into a second level, because that
-is where the collection stops rolling a file up; `tasks/foo` names no group. A
-name that could be a group but that the run measured nothing for, a package that
-does not exist among them, fails the job and lists the groups it did measure.
+lines are counted in. Only `packages` splits into a second level, because that is
+where the collection stops rolling a file up; `tasks/foo` names no group.
+
+A name can have the shape of a group and still name none — a package that is not
+there, or a misspelling of one that is. Nothing would ever consult such a line,
+so rather than let it pass for an acceptance that had no effect, the check fails
+the job and lists the groups the run did measure.
 
 The number is how far above the baseline the group may rise, not the total it
 may reach. The gate passes the group when its uncovered-line count is at most
