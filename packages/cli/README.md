@@ -929,6 +929,7 @@ such as `--log-level` — plus live values read from the fabric:
 | `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints           |
 | `--space`                       | space DIDs of local memory-v2 stores        |
 | `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell      |
+| `--datafile`                    | any file, via the shell                     |
 
 Live values need an identity and an api-url. Both are read from the line being
 typed (`-i`, `-a`, `-u`) before falling back to `CF_IDENTITY`/`CF_API_URL`, so

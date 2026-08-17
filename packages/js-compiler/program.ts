@@ -46,6 +46,52 @@ export class InMemoryProgram implements ProgramResolver {
   }
 }
 
+/**
+ * Read a data file from the file system as a program source, grounded against
+ * `rootPath` exactly as {@link FileSystemProgramResolver} grounds a module: the
+ * returned `name` is the portable, root-relative path the deployed package
+ * stores it under, and a path that escapes the root — through `..` or through a
+ * symbolic link — is refused.
+ *
+ * A source package holds text, so the bytes are decoded as UTF-8 strictly. A
+ * file that is not valid UTF-8 is reported by name rather than being silently
+ * stored with replacement characters in place of the bytes that were read.
+ *
+ * Deno-only.
+ */
+export function readDataFileSource(
+  dataPath: string,
+  rootPath: string,
+): Source {
+  if (!isDeno()) {
+    throw new Error("readDataFileSource is not supported in this environment.");
+  }
+  const fsRoot = normalize(rootPath);
+  const normalizedDataPath = normalize(dataPath);
+  const relativeDataPath = relative(fsRoot, normalizedDataPath);
+  if (isOutsideRoot(relativeDataPath)) {
+    throw new Error(
+      `Data file "${dataPath}" must be within root directory "${fsRoot}".`,
+    );
+  }
+  const realDataPath = Deno.realPathSync(normalizedDataPath);
+  if (isOutsideRoot(relative(Deno.realPathSync(fsRoot), realDataPath))) {
+    throw new Error(
+      `Data file "${dataPath}" must be within root directory "${fsRoot}".`,
+    );
+  }
+  const bytes = Deno.readFileSync(realDataPath);
+  let contents: string;
+  try {
+    contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(
+      `Data file "${dataPath}" is not valid UTF-8 text.`,
+    );
+  }
+  return { name: groundedSourceName(relativeDataPath), contents };
+}
+
 // Resolve a program using the file system.
 // Deno-only.
 export class FileSystemProgramResolver implements ProgramResolver {

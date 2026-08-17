@@ -135,6 +135,7 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Type check         | `deno task cf check pattern.tsx --no-run`                                                                                    |
 | Test pattern       | `deno task cf test pattern.test.tsx`                                                                                         |
 | Deploy new         | `deno task cf piece new pattern.tsx --test pattern.test.tsx --root . --repository REPO -i key -a url -s space`               |
+| Attach a data file | `deno task cf piece new pattern.tsx --test pattern.test.tsx --datafile data/cities.json ...`                                 |
 | Update existing    | `deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
 | Inspect state      | `deno task cf piece inspect --piece ID ...`                                                                                  |
 | Get field          | `deno task cf get --piece ID fieldPath ...`                                                                                  |
@@ -208,6 +209,16 @@ deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --piece bafyreia..
 packages and type-checks a test entry but does not run it. Repeat the flag for
 every authored test entry. Each `setsrc` describes a complete new source
 revision, so omitting the flags drops those test roots from that revision.
+
+`--datafile <path>` attaches a file that is not code — a fixture, a lookup
+table, a list of names — so it ships and is recovered with the source. Its bytes
+are stored verbatim: never parsed, type-checked, compiled, or importable, and
+the pattern reads one with `dataFile("/data/cities.json")` from `commonfabric`.
+It must be UTF-8 text and sit inside the deployment root, which the CLI infers
+to cover the main entry, every test entry, and every data file unless `--root`
+says otherwise. Like `--test`, it is repeatable and defines part of the
+revision, so repeat the complete set on every `setsrc`. Changing a data file
+alone still produces a new source revision.
 
 `setsrc` normally rejects incompatible argument/result schema changes and
 retained links whose durable contracts no longer fit. For an intentional

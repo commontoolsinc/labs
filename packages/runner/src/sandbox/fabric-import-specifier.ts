@@ -33,10 +33,12 @@ export function parseFabricRef(specifier: string): FabricRef | undefined {
   let rest = specifier.slice("cf:".length);
   if (
     rest.startsWith("module/") || rest.startsWith("cache-root/") ||
-    rest.startsWith("source-root/")
+    rest.startsWith("source-root/") || rest.startsWith("data-file/")
   ) {
     throw new FabricRefError(
-      "'cf:module/...', 'cf:cache-root/...', and 'cf:source-root/...' are compiler-internal namespaces and cannot be imported",
+      "'cf:module/...', 'cf:cache-root/...', 'cf:source-root/...', and " +
+        "'cf:data-file/...' are compiler-internal namespaces and cannot be " +
+        "imported",
       specifier,
     );
   }

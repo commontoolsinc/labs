@@ -11,6 +11,12 @@ export type RuntimeProgram = Program & {
   mainExport?: string;
   /** Source entry points retained and compiled without being executed. */
   sourceRoots?: string[];
+  /**
+   * Names of entries in `files` that carry data rather than code. A data file
+   * travels with the source package and binds to the entry module's identity,
+   * and is never transformed, compiled, or executed.
+   */
+  dataFiles?: string[];
 };
 
 export interface TypeScriptHarnessProcessOptions {
@@ -103,6 +109,13 @@ export interface CacheableModule extends CompiledModuleArtifact {
   source: string;
   /** Internal import edges: specifier → the dependency module's identity. */
   imports: { specifier: string; targetIdentity: string }[];
+  /**
+   * This entry carries data rather than code. A data entry's compiled form is
+   * its own bytes, so `js` repeats `source` and the compiled set carries what a
+   * warm load needs without reading the source set. It is never parsed,
+   * verified as a module body, or built into a record.
+   */
+  isData?: boolean;
 }
 
 export type Exports = Record<string, any>;

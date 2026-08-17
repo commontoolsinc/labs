@@ -173,6 +173,18 @@ Deno.test("source writeback retains attached test roots", async () => {
   );
 });
 
+Deno.test("source writeback retains attached data files", async () => {
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  const sourceWriteback = source.slice(
+    source.indexOf('if (writeTarget?.kind === "source")'),
+  );
+
+  assert(
+    sourceWriteback.includes("dataFiles: program.dataFiles"),
+    "source writeback must pass the recovered data files to setPattern",
+  );
+});
+
 Deno.test("no-handle truncate opens only the bounded target prefix", () => {
   const content = new Uint8Array([1, 2, 3, 4, 5]);
   assertEquals([...bufferForNoHandleTruncate(content, 2)], [1, 2]);

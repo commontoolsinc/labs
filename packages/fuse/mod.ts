@@ -1804,6 +1804,7 @@ export async function main(argv: string[] = Deno.args) {
             mainExport: baseMainExport,
             files: updatedFiles,
             sourceRoots: program.sourceRoots,
+            dataFiles: program.dataFiles,
           }, { dangerouslyAllowIncompatibleSchema });
           // Clear error.log on success
           const errorLogIno = tree.lookup(srcIno, "error.log");

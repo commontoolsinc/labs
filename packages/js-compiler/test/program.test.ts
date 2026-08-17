@@ -5,6 +5,7 @@ import {
   FileSystemProgramResolver,
   HttpProgramResolver,
   InMemoryProgram,
+  readDataFileSource,
 } from "../program.ts";
 
 describe("InMemoryProgram", () => {
@@ -126,6 +127,84 @@ describe("FileSystemProgramResolver", () => {
         name: "/linked-dependency.ts",
         contents: "export default 2;",
       });
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+});
+
+describe("readDataFileSource", () => {
+  it("grounds a data file under the deployment root", async () => {
+    const root = await Deno.makeTempDir();
+    const dataDirectory = `${root}/data`;
+    await Deno.mkdir(dataDirectory);
+    await Deno.writeTextFile(`${dataDirectory}/cities.json`, '{"a": 1}');
+
+    try {
+      expect(readDataFileSource(`${dataDirectory}/cities.json`, root)).toEqual({
+        name: "/data/cities.json",
+        contents: '{"a": 1}',
+      });
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads bytes verbatim without treating them as TypeScript", async () => {
+    const root = await Deno.makeTempDir();
+    const contents = 'import x from "./nowhere.ts";\n\u00e9\t{ not code';
+    await Deno.writeTextFile(`${root}/notes.txt`, contents);
+
+    try {
+      expect(readDataFileSource(`${root}/notes.txt`, root).contents).toBe(
+        contents,
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("rejects a data file outside the root", async () => {
+    const root = await Deno.makeTempDir();
+    const outside = await Deno.makeTempDir();
+    await Deno.writeTextFile(`${outside}/data.json`, "{}");
+
+    try {
+      expect(() => readDataFileSource(`${outside}/data.json`, root)).toThrow(
+        "must be within root directory",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+      await Deno.remove(outside, { recursive: true });
+    }
+  });
+
+  it("rejects a data file symlinked out of the root", async () => {
+    const root = await Deno.makeTempDir();
+    const outside = await Deno.makeTempDir();
+    await Deno.writeTextFile(`${outside}/data.json`, "{}");
+    await Deno.symlink(`${outside}/data.json`, `${root}/data.json`, {
+      type: "file",
+    });
+
+    try {
+      expect(() => readDataFileSource(`${root}/data.json`, root)).toThrow(
+        "must be within root directory",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+      await Deno.remove(outside, { recursive: true });
+    }
+  });
+
+  it("rejects bytes that are not valid UTF-8 text", async () => {
+    const root = await Deno.makeTempDir();
+    await Deno.writeFile(`${root}/blob.bin`, new Uint8Array([0xc3, 0x28]));
+
+    try {
+      expect(() => readDataFileSource(`${root}/blob.bin`, root)).toThrow(
+        "is not valid UTF-8 text",
+      );
     } finally {
       await Deno.remove(root, { recursive: true });
     }

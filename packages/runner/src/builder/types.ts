@@ -18,6 +18,7 @@ import type {
   CfSqliteHelpers,
   CompileAndRunFunction,
   ComputedFunction,
+  DataFileFunction,
   EntityRefToStringFunction,
   EqualsFunction,
   FabricExecValue,
@@ -416,6 +417,7 @@ export interface BuilderFunctionsAndConstants {
   fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
+  dataFile: DataFileFunction;
   sqliteDatabase: SqliteDatabaseFunction;
   sqliteQuery: SqliteQueryFunction;
   table: SqliteTableFunction;
