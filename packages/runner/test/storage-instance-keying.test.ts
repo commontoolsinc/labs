@@ -334,6 +334,96 @@ describe("stage A: instance keying — unit pins", () => {
     ).toBe(1);
   });
 
+  it("the writer index is instance-AGNOSTIC: a user-scoped-DECLARED writer and a reader running as Alice keep their dependent edge (mutation: an instance-keyed writer index loses it)", async () => {
+    const rootId = "of:stagea-edge-root";
+    runtime.installSealDestination(
+      { seal: (tx: IExtendedStorageTransaction) => tx.tx.commit() },
+      {
+        runStamper: (
+          tx: IExtendedStorageTransaction,
+          info: ServerRunInfo,
+        ) => {
+          stampWaveRunContext(tx, {
+            actionId: info.actionId,
+            kind: info.kind,
+            ...(info.scopeKeyIdentity !== undefined
+              ? { scopeKeyIdentity: info.scopeKeyIdentity }
+              : {}),
+            ...(info.actionScopeKey !== undefined
+              ? { actionScopeKey: info.actionScopeKey }
+              : {}),
+          });
+        },
+        runInstanceResolver: (pieceRootIds) =>
+          pieceRootIds.includes(rootId)
+            ? [{
+              scopeKeyIdentity: alice,
+              actionScopeKey: resolveScopeKey("user", alice),
+            }]
+            : [],
+      },
+    );
+    const shared = runtime.getCell<{ value: number }>(
+      space,
+      "stagea-edge-doc",
+      undefined,
+      undefined,
+      "user",
+    );
+    const sharedLink = shared.getAsNormalizedFullLink();
+    // The WRITER: a node whose DECLARED surface is the doc at USER scope
+    // (scope NAME — a declared surface never names an instance; one node
+    // writes every instance of it, C11b).
+    const writer = Object.assign((_tx: IExtendedStorageTransaction) => {}, {
+      schedulerObservationIdentity: { pieceId: "space:writer" },
+    });
+    runtime.scheduler.subscribe(writer, {
+      reads: [],
+      shallowReads: [],
+      writes: [{
+        space,
+        id: sharedLink.id,
+        scope: "user",
+        path: [],
+      }],
+    });
+    // The READER: runs AS ALICE (the demanded instance), so its logged
+    // read of the doc names `user:<alice>` — not the runtime's own
+    // instance the writer's surface resolves to at cardinality 1.
+    const reader = Object.assign(
+      (tx: IExtendedStorageTransaction) => {
+        shared.withTx(tx).get();
+      },
+      {
+        schedulerObservationIdentity: {
+          pieceId: `space:${rootId}`,
+          pieceRootId: rootId,
+        },
+      },
+    );
+    await runtime.scheduler.run(reader);
+    await runtime.idle();
+    const snapshot = runtime.scheduler.getGraphSnapshot();
+    const writerId = snapshot.nodes.find((node) =>
+      node.writes?.some((write) => write.includes(sharedLink.id))
+    )?.id;
+    const readerId = snapshot.nodes.find((node) =>
+      node.reads?.some((read) =>
+        read.includes(sharedLink.id) &&
+        read.includes(resolveScopeKey("user", alice))
+      )
+    )?.id;
+    expect(writerId).toBeDefined();
+    expect(readerId).toBeDefined();
+    // THE EDGE: writer → reader survives although the reader's read
+    // names Alice's instance and the writer's surface names the scope.
+    expect(
+      snapshot.edges.some((edge) =>
+        edge.from === writerId && edge.to === readerId
+      ),
+    ).toBe(true);
+  });
+
   it("two instance-named loads of one doc are two watches, and the pull-kick reservation is per instance", () => {
     const address = {
       id: "of:stagea-watch" as never,
