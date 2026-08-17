@@ -300,7 +300,8 @@ export interface TopicPiece extends TopicSummary {
    * materializes against. */
   mentions: unknown[] | Default<[]>;
   /** Where this topic's `[Label][key]` mentions point. Durable content, like
-   * `links`. Written by the body editor; this pattern only ever reads it. */
+   * `links`. The body editor works on a session copy of this map, which a save
+   * publishes here whole, beside the prose whose tokens name its entries. */
   // deno-lint-ignore ban-types
   references: TopicMentionRefMap | Default<{}>;
   /** Pieces referenced outside the prose, recorded by `mention`. */
@@ -344,6 +345,19 @@ export interface TopicOutput extends TopicPiece {
   linkUrlDraft: PerSession<Writable<string>>;
   linkLabelDraft: PerSession<Writable<string>>;
   linkKindDraft: PerSession<Writable<TopicLinkKind>>;
+  /**
+   * The body draft's mention map, staged so Cancel can discard it.
+   *
+   * `cf-code-editor` writes an entry the moment a mention is inserted and
+   * drops one the moment its token leaves the document, neither of them
+   * waiting for Save. Pointed at the durable map while `$value` holds a
+   * session draft, those writes would outlive a discarded edit: a canceled
+   * insertion would leave an edge no token names, and a canceled deletion
+   * would strip the destination from a token the durable body still carries.
+   * The editor's own ordering assumes its two bindings share a lifetime, so
+   * this gives them one.
+   */
+  referencesDraft: PerSession<Writable<TopicMentionRefMap>>;
   /** UI affordances as streams: composer submit, body edit lifecycle. */
   submitComment: Stream<void>;
   startEditBody: Stream<void>;
@@ -487,6 +501,9 @@ export const submitProfileComment = handler<void, {
 export const saveProfileBody = handler<void, {
   body: Writable<string | Default<"">>;
   bodyDraft: Writable<string>;
+  // deno-lint-ignore ban-types
+  references: Writable<TopicMentionRefMap | Default<{}>>;
+  referencesDraft: Writable<TopicMentionRefMap>;
   editingBody: Writable<boolean>;
   bodyUpdatedBy: Writable<
     TopicAuthor | Default<{ kind: "person"; name: "" }>
@@ -499,6 +516,8 @@ export const saveProfileBody = handler<void, {
   {
     body,
     bodyDraft,
+    references,
+    referencesDraft,
     editingBody,
     bodyUpdatedBy,
     bodyUpdatedAt,
@@ -511,6 +530,14 @@ export const saveProfileBody = handler<void, {
   // One whole-value set per explicit save keeps the conflict window small; a
   // live-bound textarea on a shared string would conflict per keystroke.
   body.set(bodyDraft.get());
+  // The map publishes with the prose it describes, in this one transaction:
+  // the tokens and the destinations they name are one document, and a save
+  // that landed only half of it would leave a dead link either way. Whole-map,
+  // for the same reason the body above is whole-value — an entry belongs to
+  // the draft that minted it, and the two conflict as one document or not at
+  // all. `destination` is `unknown`, which is what carries each one across as
+  // a link rather than expanding the piece behind it.
+  references.set(referencesDraft.get());
   bodyUpdatedBy.set(author);
   bodyUpdatedAt.set(Date.now());
   editingBody.set(false);
@@ -702,6 +729,7 @@ export default pattern<TopicInput, TopicOutput>(
     const linkUrlDraft = new Writable.perSession("");
     const linkLabelDraft = new Writable.perSession("");
     const linkKindDraft = new Writable.perSession<TopicLinkKind>("web");
+    const referencesDraft = new Writable.perSession<TopicMentionRefMap>({});
 
     // Browser mutations snapshot the current viewer's canonical Profile.
     // Agent-facing streams below deliberately remain wish-free and accept the
@@ -833,12 +861,18 @@ export default pattern<TopicInput, TopicOutput>(
 
     const startEditBody = action(() => {
       bodyDraft.set(body.get());
+      // Seeded together with the prose, so the editor opens on a map that
+      // resolves every token the draft carries. Each `destination` crosses as
+      // a link, which is what `unknown` is declared for.
+      referencesDraft.set(references.get());
       editingBody.set(true);
     });
 
     const saveBody = saveProfileBody({
       body,
       bodyDraft,
+      references,
+      referencesDraft,
       editingBody,
       bodyUpdatedBy,
       bodyUpdatedAt,
@@ -846,6 +880,8 @@ export default pattern<TopicInput, TopicOutput>(
       profileAvatar,
     });
 
+    // Nothing to undo: the prose and its mention map are both session drafts,
+    // so leaving them behind IS the discard.
     const cancelEditBody = action(() => {
       editingBody.set(false);
     });
@@ -963,7 +999,7 @@ export default pattern<TopicInput, TopicOutput>(
                       <cf-code-editor
                         $value={bodyDraft}
                         $mentionable={mentionable}
-                        $references={references}
+                        $references={referencesDraft}
                         language="text/markdown"
                         mode="prose"
                         wordWrap
@@ -1232,6 +1268,7 @@ export default pattern<TopicInput, TopicOutput>(
       linkUrlDraft,
       linkLabelDraft,
       linkKindDraft,
+      referencesDraft,
       submitComment,
       startEditBody,
       saveBody,

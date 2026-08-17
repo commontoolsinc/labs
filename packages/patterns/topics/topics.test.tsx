@@ -235,6 +235,16 @@ export default pattern(() => {
   const profileLinkUrlDraft = new Writable("https://example.com/profile-link");
   const profileLinkLabelDraft = new Writable("profile link");
   const profileLinkKindDraft = new Writable<TopicLinkKind>("session");
+  // The durable map starts holding an entry the edit never touches, so a save
+  // that published a stale or empty map would be visible as its loss.
+  // deno-lint-ignore ban-types
+  const profileReferences = new Writable<TopicMentionRefMap | Default<{}>>({
+    kept: { destination: undefined, modifiedTitle: false },
+  });
+  const profileReferencesDraft = new Writable<TopicMentionRefMap>({
+    kept: { destination: undefined, modifiedTitle: false },
+    minted: { destination: undefined, modifiedTitle: true },
+  });
   // Render the same cells the deterministic Profile handlers mutate. This
   // keeps their behavior and the detail UI in one end-to-end test path without
   // inventing a fallback identity for the pattern-test runtime.
@@ -265,6 +275,8 @@ export default pattern(() => {
   const profileSaveBody = saveProfileBody({
     body: profileBody,
     bodyDraft: profileBodyDraft,
+    references: profileReferences,
+    referencesDraft: profileReferencesDraft,
     editingBody: profileEditingBody,
     bodyUpdatedBy: profileBodyUpdatedBy,
     bodyUpdatedAt: profileBodyUpdatedAt,
@@ -562,6 +574,15 @@ export default pattern(() => {
     profileEditingBody.get() === false
   );
 
+  // The staged map publishes with the prose, entry for entry: the one the
+  // draft minted arrives, and the one it inherited survives.
+  const assert_profile_references_published = assert(() => {
+    const published = (profileReferences.get() ?? {}) as TopicMentionRefMap;
+    return Object.keys(published).toSorted().join(",") === "kept,minted" &&
+      published.minted?.modifiedTitle === true &&
+      published.kept?.modifiedTitle === false;
+  });
+
   const assert_profile_link_submitted = assert(() => {
     const list = profileLinks.get() ?? [];
     return list.length === 1 &&
@@ -783,6 +804,7 @@ export default pattern(() => {
       { assertion: assert_profile_comment_submitted },
       { action: action_save_profile_body },
       { assertion: assert_profile_body_saved },
+      { assertion: assert_profile_references_published },
       { action: action_submit_profile_link },
       { assertion: assert_profile_link_submitted },
       { action: action_set_legacy_name },
