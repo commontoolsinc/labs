@@ -104,8 +104,10 @@ Add one `cf test` command and one `--test` flag for every authored test entry,
 and one `--datafile` flag for every attached data file. Run `setsrc` once per
 piece with the complete flag set: a rehearsal that omits part of the source
 package does not rehearse the update you mean to make against real data.
-Deployment packages and type-checks the tests but does not run them, and stores
-data files verbatim without reading them at all.
+Deployment packages and type-checks the tests but does not run them. It reads
+each data file to store it, and refuses one that is not valid UTF-8 text, but
+never parses or executes it — a data file's bytes are stored exactly as
+authored.
 
 ### Stop the server before resetting
 
