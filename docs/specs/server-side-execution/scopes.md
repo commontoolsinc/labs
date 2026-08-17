@@ -159,16 +159,30 @@ faced them:
   scheduler. Do NOT port client-era cardinality assumptions into
   the fan-out path.
 
-**Monotonicity (owner-ruled): narrowing is for everyone or no one.**
-User-scoped for one user means user-scoped for ALL users; within a
-user, session-scoped for one session means session-scoped for all
-of that user's sessions. The reason is structural, not policy: the
-link INTO the narrower scope is itself shared state AT the broader
-scope — all of a user's sessions read the same user-level doc, all
-users read the same space-level doc — so one written redirect
-narrows the node for every reader of that address at once. Instance
-sets are therefore CLEAN PRODUCTS over principals, NEVER ragged
-(narrow for some principals, broad for others).
+**Monotonicity (owner-ruled; AMENDED — RULED 2026-08-16, the fan-out
+design panel's Lens 1): narrowing is for everyone or no one AT THE
+SPACE→USER HOP; below it, narrowing may be RAGGED per principal.**
+User-scoped for one user means user-scoped for ALL users, and the
+reason is structural: the link INTO the user scope is shared state AT
+the space scope — all users read the same space-level doc — so one
+written redirect narrows the node for every reader of that address at
+once. The second hop is NOT structural: the link INTO a session
+instance is written into ONE user's instance (`X/user:A` → session),
+and another user's instance (`X/user:B`) is a different doc that
+carries no such link — so a node whose per-user branch reads
+session-scoped state for A and only user-scoped state for B is
+session-scoped for A and user-scoped for B, simultaneously and stably
+(reachable by ordinary data-dependent code: a per-user flag deciding
+whether a per-session value is read). Within ONE user, sessions still
+narrow together (a user-level fact reaches all of that user's
+sessions). Instance sets are therefore clean products over principals
+at the top hop and MAY be ragged below it; a per-node scope level
+cannot represent that — instance addresses carry the FULL
+(scope-kind, principal) address, which is what the serving replica,
+the wire, and the basis index key by (fan-out stage A, OW17), and
+"the node's known scope only narrows" is a POLICY over such
+addresses (stage B's run supply), never a structural fact below the
+top hop.
 
 **Permanence (ruled by code): narrowing NEVER widens back.** A
 written redirect is permanent. Rewrites MUST NOT strip stored

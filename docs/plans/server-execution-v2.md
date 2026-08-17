@@ -863,8 +863,20 @@ Tasks:
       lands only after these ORDERED GATES, in this order:** (1) OW32 —
       the client-side scheduler-non-settling loop TRIAGED and fixed (the
       two two-browser gates green 5/5 fresh-store under the full ON
-      posture); (2) OW17 — the SpaceReplica per-instance re-keying (with
-      OW29's space-root demanders + arrival re-runs; P2-F-sized); (3)
+      posture) — *triaged 2026-08-16 (a client speculation
+      retire-to-nothing loop on per-user derivations, cause = the
+      identity-less space-root demand); the client ARRIVAL GATE landed
+      with fan-out stage A (the symptom); the cause is stage B's*;
+      (2) OW17 — the SpaceReplica per-instance re-keying (with
+      OW29's space-root demanders + arrival re-runs; P2-F-sized) — *SPLIT
+      by the fan-out design (owner-ruled 2026-08-16): STAGE A = the
+      instance-keyed serving replica + wire + tx→replica seam + scheduler
+      union/name-keyed indexes + S4 by full instance address — LANDED
+      (`claude/server-exec-v2-fanout-a`); STAGE B = the fan-out run
+      supply (identity on space-root demands, demanders resolver,
+      known-scope ratchet + discovery/arrival re-arms, per-demander demand
+      walk + wish-sidecar chain, output-scope attribution, B7) — NEXT;
+      STAGE C = closeout (un-skip the gates, the honest benchmark)*; (3)
       OW28 — compile-and-run as an outbox effect kind + completion-class
       writeback; (4) the HONEST propagation benchmark (criterion below)
       once the two-user family works; (5) the ON skip list EMPTY and the

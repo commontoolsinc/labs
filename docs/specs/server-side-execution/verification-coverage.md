@@ -1047,6 +1047,67 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   Trigger, re-stated: the flip's ordered gates (plan Phase 7 task 1):
   OW32 triage → THIS leg (with OW29) → OW28 → the honest benchmark →
   the flip PR.
+  **IN PROGRESS — leg 1 of 2 LANDED (fan-out stage A, 2026-08-16;
+  owner-ruled 2026-08-16 on the fan-out design + panel).** The
+  serving replica and the wire are INSTANCE-keyed: `SpaceReplica`
+  keys every local doc by `scope_key` (`docKey(id, instance)`;
+  key-vocabulary.md §3b) — one replica holds the service instance
+  AND per-principal instances of one doc; the wire carries
+  `scope_key` on lease-holder frames/snapshots only, the collapse
+  guard is scoped to non-holders, `WatchView` keys by instance; the
+  tx→replica identity seam threads the run's demand-supplied identity
+  (`IStorageTransaction.scopeKeyIdentity`, set by the wave stamp)
+  through reads, the commit-time claim, seals and verdicts, the
+  reactivity log (`IMemoryAddress.scopeKey` — the scheduler's
+  dependency/trigger keys per instance), and the runner's
+  explicit-instance loads (`Cell.sync` / `syncCell` / `syncInstance`
+  / the transaction-layer kick / `ensureLinkedDocLoaded` / the served
+  event's presync+preflight as its actor); the writer and
+  materializer indexes are NAME-keyed by design (the one fan-in);
+  the N-run loop resubscribes once to the union of its instance logs
+  (the last-instance-wins replacement gone); S4 keys basis rows by
+  the run's FULL instance address and clears the stranded stamp and
+  broader-chain keys in both directions (the RAGGED amendment,
+  scopes.md §2 — narrowing below the space→user hop is per
+  principal). Pinned red-first at the P7 head:
+  `executor-instance-keyed-replica.test.ts` (two demanded runs read
+  their OWN per-user inputs → divergent per-instance derived rows
+  with the right values and the serving replica holds both instances
+  — the VALUE half CLOSED; **R7** — Alice's authored draft + save
+  event → the served handler runs as Alice, reads HER draft, writes
+  her per-user consequence with the typed value; the resubscribe path
+  instance-aware — Bob's input change wakes the node; S4 — a
+  session-scoped demand on a user-discovering node records `user:<p>`
+  rows and no session-keyed zombie, a space-discovering node records
+  `space`), `storage-instance-keying.test.ts` (OFF-arm neutrality per
+  site: keys/compaction/logged addresses/notification addresses
+  byte-identical without an explicit instance; the two-instance
+  replica; the union resubscribe; per-instance watches and kicks),
+  memory `v2-explicit-read.test.ts` (a lease holder names two
+  instances of one (branch, id, scope) and receives both KEYED on
+  watch.set/watch.add/graph.query/push; a non-holder's read set is
+  still refused; a non-holder's frames carry no key). What REMAINS
+  (leg 2, stage B): the fan-out run SUPPLY — identity on space-scoped
+  demand rows, the demanders resolver, the known-scope ratchet with
+  discovery/arrival re-arms, the per-demander demand walk (+ the
+  wish-sidecar `parentPieceRootId` chain), output-scope-derived
+  attribution, and B7 precise dirtiness (the name-keyed fan-in's O(N)
+  cost is recorded, not a correctness need). Stage-A residuals,
+  FLAGGED (not filled): (i) an effect COMPLETION for a per-instance
+  run seals its local layer under the outbox carriage's identity
+  (matching its engine row) but the writeback transaction is unstamped,
+  so its hash-guard READS resolve the service's instances — a
+  per-instance node's effect completion is unpinned; (ii) a
+  handler-only write to a never-written PerUser slot lands at the
+  slot's base scope (the handler's handle carries no scope cap until
+  the slot redirects — pre-existing OFF behavior, verified at OFF;
+  the group-chat drafts avoid it because the client types first);
+  (iii) two P2-F basis-key pins moved to the S4 truth (a demanded run
+  reading only space input keys `space`, its `user:<p>` stamp cleared
+  — the acting annotations still witness the supply); (iv) the
+  wave-level fallback still runs a demanded piece before any
+  identity-bearing demand exists and leaves the `user:<serviceDID>`
+  garbage instance (stage B's B5 residual).
 - OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
   (2026-08-13; the RULED 2026-08-07 direction, built whole). A
   demanded root CONFIRMED synced with no pattern meta parks TERMINAL
@@ -2428,6 +2489,34 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   execution-on-skips.ts`), red under the full ON posture, NOT green-by-
   vacuity. Trigger: first of the flip's ordered gates (plan Phase 7 task
   1); the flip PR needs the skip list EMPTY.
+  **TRIAGED (2026-08-16) and the SYMPTOM treated — row stays OPEN
+  until stage B.** The triage attributed the loop: a purely
+  CLIENT-side speculation retire-to-nothing loop on scope-narrowed
+  (per-user) derivations — the overlay retires the echo on watermark
+  coverage of its basis (~1 ms after the seal), the store holds
+  NOTHING for the instance (the server derived it under the SERVICE
+  identity's instance — F1's identity-less space-root demand), the
+  flip is an `integrate` and the writer reads its own output, so it
+  re-derives; seal → retire → flip → re-run at ~80 ms cycles. Cause =
+  the demand registry drops identity for space roots (stage B's run
+  supply fixes it). The CLIENT ARRIVAL GATE (speculation.md §4, RULED
+  2026-08-16 on the panel's recommendation — a backstop for demand-walk
+  coverage gaps and the first-demand transient, independent of the
+  server half) LANDED with fan-out stage A as its own commit: an
+  input-origin entry retires only once every doc instance it wrote
+  holds a confirmed value at seq ≥ its floor; riders
+  supersede-by-newer and own-retirement-is-not-a-trigger. Pinned:
+  `speculation-arrival-gate.test.ts` (the OW32 shape — covering
+  watermark, no store value → the echo stays, bounded runs, no
+  non-settling; gate removed → the entry retires to nothing; arrival
+  retires it and the store value renders; the own-retirement mechanism
+  with its mutation; supersede-by-newer scripted). The triage's
+  measured effect: 45–56 k → 55–137 client runs / 5 min, both
+  two-browser gates booting < 3 s. The gates stay ON-skip-listed:
+  the gate treats the symptom; the R7 wall behind it is closed by
+  stage A's read seam, and the per-user derived state of real users
+  needs stage B's supply — record the two-browser gates' status
+  honestly at each stage (stage A's build report carries the runs).
 - OW33 — the ON-posture DENO-CLIENT family, surfaced by making the ON
   lanes UNIFORM (P7 independent review finding 7; fixer 2026-08-16):
   once the runner integration tests that talk to the lane's toolshed
@@ -2579,6 +2668,51 @@ findings; the OWNER RULING — the flip lands DARK):
   a byte-identical cross-user propagation number for the Deno client
   posture today. Recorded in the plan; the browser number waits for the
   two-user family.
+
+Delta 2026-08-16 — fan-out stage A (OW17 leg 1: the instance-keyed
+serving replica + wire; the client arrival gate):
+
+- protocol.md §2's read row: +1 binding clause (the runner ISSUES
+  explicit-instance reads for a served per-instance run's non-own
+  scoped reads; a live lease holder may name two instances of one
+  (branch, id, scope)) — pinned in memory `v2-explicit-read.test.ts`
+  ("stage A: a lease holder names two instances…", red-first at the P7
+  head) and `executor-instance-keyed-replica.test.ts` (the serving
+  replica holds both instances).
+- protocol.md §3: +1 binding clause (lease-holder frames/snapshots carry
+  `scope_key`; every other session's wire byte-identical) — pinned in
+  the same memory test (keyed frames on watch.set/add/query/push; no
+  key on a non-holder's frames).
+- scopes.md §2 Monotonicity AMENDED (RULED 2026-08-16): structural at
+  the space→user hop only; ragged per principal below it; instance
+  addresses carry the full (scope-kind, principal) address; "k only
+  narrows" is stage B's policy — a ruling, no impl-gate of its own; its
+  consequence for the basis index is the S4 amendment below.
+- serving-loop.md §3b's S4 AMENDED (+1 binding sentence set): rows keyed
+  by the run's FULL instance address, stranded stamp and broader-chain
+  keys cleared in both directions — pinned in
+  `executor-instance-keyed-replica.test.ts` (S4 step) with the two P2-F
+  pins moved to the same truth (`executor-serving-loop.test.ts`,
+  `executor-space-server.test.ts`).
+- key-vocabulary.md §3b (new inventory section) + §5's list: the
+  instance-keyed replica/wire vocabulary and `IMemoryAddress.scopeKey`;
+  §4's first tripwire covers the list — pinned in
+  `storage-instance-keying.test.ts` (OFF-arm neutrality per site).
+- speculation.md §4 step 3 + the arrival-gate paragraph (RULED
+  2026-08-16): +1 binding sentence set (the gate, its two riders) —
+  pinned in `speculation-arrival-gate.test.ts` (each with its
+  mutation); OW32's row carries the disposition.
+- Danger-zone note (storage/v2.ts near the wedge machinery): the
+  re-key touched `sealNative`/`sealOperations`, `settleSealedCommit`,
+  `confirmPending`, `finalizeRejection`, `finalizeSupersededSpeculation`,
+  `applySessionSync`, `buildReads`, `record`/`visibleVersion` and the
+  sink/notify paths — ONLY to thread the instance key/identity into
+  the doc-key resolution and the touched-doc entries; no ordering,
+  parking, marker, or shadow-floor logic moved. The wedge pins
+  (`settleSealedCommit → confirmPending` at verdict, `whenApplied`,
+  `markAuthoritativeWrites`), park/backoff, the B-1 barrier, the
+  renew-blip, and C10/T_flush suites ran green under the re-key (the
+  stage-A build report carries the counts).
 
 ## 4. Standing rule
 

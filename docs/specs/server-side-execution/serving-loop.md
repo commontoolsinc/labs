@@ -448,15 +448,28 @@ Rules the shape carries, binding:
   closed: basis rows are engine table rows on the loopback store
   transaction, never commit metadata, never pushed, never read at
   admission.
-- **Narrowing DELETES the rows it stranded** (S4, binding): a run
-  whose DISCOVERED scope is narrower than the instance key its rows
-  are recorded under MUST delete that key's rows for that action, in
-  the SAME wave transaction that writes the narrowed rows. Without
-  this the old key's rows survive forever and §6's re-mark rule
-  re-dirties a zombie at every activation — and a `space`-key zombie
-  has no runnable identity, so it can never overwrite its own rows
-  and never stops being dirty. Deleting is sound for the same reason
-  overwriting is: the rows are a basis cache, not history.
+- **Narrowing DELETES the rows it stranded** (S4, binding; AMENDED
+  2026-08-16 with scopes.md §2's ragged ruling — fan-out stage A): a
+  run's rows are recorded under its FULL instance address — its
+  DISCOVERED scope resolved against its identity (`space`,
+  `user:<p>`, `session:<p>:<s>`), the instance it actually served —
+  never under the demand's stamp alone; and every key the run's
+  address STRANDS — the stamp when it differs (a user-scoped watch's
+  `user:<p>` on a node that discovered `space`; a session-scoped
+  watch's `session:<p>:<s>` on a node that discovered `user`, the
+  ragged case) and every strictly-broader key on the run's own chain
+  (`space`; `user:<p>` under a session address) — MUST be cleared for
+  that action in the SAME wave transaction, in both directions
+  (narrower-than-stamp and broader-than-stamp), a real row set already
+  recorded in the wave under a key never being overwritten by a
+  clearance. Without this the stranded key's rows survive forever and
+  §6's re-mark rule re-dirties a zombie at every activation — a
+  `space`-key zombie has no runnable identity, so it can never
+  overwrite its own rows and never stops being dirty; a departed
+  session's over-keyed rows have none either. Sound by monotonicity at
+  the top hop and within one principal (scopes.md §2 as amended), and
+  for the same reason overwriting is: the rows are a basis cache, not
+  history.
 - **Interim retention is UNBOUNDED, and that is accepted** (S8).
   Rows at `space` and `user:<p>` keys are touched by no session
   retirement; main's 32-per-action execution-context cap

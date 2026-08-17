@@ -134,6 +134,90 @@ Plan Phase 1 stage E LANDED on this ruling: the definition move
 (one shared constructor, engine re-exports) ahead of the nine-site
 re-keying, exactly as ruled.
 
+### 3b. The instance-keyed replica and wire (fan-out stage A, OW17 — 2026-08-16)
+
+The last name-keyed LAYER — the serving runtime's local view and
+the wire that fills it — is re-keyed on stage E's shape: instance
+keys built from an explicitly supplied identity, partition unchanged
+at cardinality 1. The unifying device is an OPTIONAL EXPLICIT
+INSTANCE on the address type — `IMemoryAddress.scopeKey?: ScopeKey`
+(`packages/runner/src/storage/interface.ts`) — ABSENT everywhere off
+the serving path (every client, the whole OFF arm), so no key, frame,
+or serialized notification moves by a byte when it is absent, and SET
+only where a serving runtime knows the instance is not the ambient
+one. Every consumer that builds a key from an address PREFERS it over
+resolving `scope` against its identity. The vocabulary:
+
+- **Replica** — `SpaceReplica`'s local doc key is `docKey(id,
+  instance)` (`storage/v2.ts`), `instance` = the address's explicit
+  key, else the reading/sealing run's identity resolved over the
+  scope name, else the replica's own (memoized per scope name — the
+  hot path pays a map lookup, never a per-read resolve); an
+  unresolvable scope keys by NAME (an anonymous session's user-scoped
+  read, as before). One replica holds the service instance AND
+  per-principal instances of one doc. Every seal, verdict, frame, and
+  notification threads the instance: `sealNative(…, {identity})` and
+  its in-flight entry (confirm/rollback settle exactly that
+  identity's layers), `getDocument(id, scope, identity)`, keyed
+  frames applied under `upsert.scopeKey`, and the differential's
+  states/addresses carrying `scopeKey` (`storage/differential.ts`,
+  `storage/transaction/address.ts` — the change address is what the
+  scheduler keys per instance).
+- **Transaction** — `IStorageTransaction.scopeKeyIdentity` (set once,
+  by `stampWaveRunContext`, before the first read; a second, different
+  identity throws — one transaction serves one identity, the tx's own
+  doc cache being name-keyed) is the tx→replica seam: reads, the
+  commit-time claim, and the seal resolve against it, and the
+  reactivity log's scoped addresses carry `scopeKey` so the
+  scheduler's dependency/trigger keys (`entityKey`) key the read to
+  ITS instance; space-scope addresses carry none.
+- **The runner's explicit-instance read** — a per-instance run's
+  read of a scoped instance the replica has never seen kicks an
+  instance-NAMED load: `Cell.sync` with the cell's transaction
+  identity, `IStorageManager.syncCell(cell, {scopeKeyIdentity})` /
+  `syncInstance(address, identity)`, the transaction layer's kick in
+  `V2StorageTransaction.loadRoot` (reserved once per (space,
+  instance, id) — `shouldPullDoc(…, identity)`), the traversal's
+  absent-target kick (`Runtime.ensureLinkedDocLoaded(link, space,
+  identity)`), and the served event's presync/preflight as the
+  event's actor. The watch root carries `entityScopeKey` (protocol.md
+  §2's read row — lease-holder-only, exactly who issues one), the
+  watch id and the selector tracker (`SelectorTracker.toKey`,
+  `watchIdForEntry`, the pull dedupe key, the provider's replay map)
+  key by the instance, and the pending-load ledger keys the address
+  with it (the event preflight's park cross-matches per instance).
+- **Wire** — `SessionSyncUpsert.scopeKey` / `SessionSyncRemove.scopeKey`
+  / `EntitySnapshot.scopeKey` (`packages/memory/v2.ts`), populated
+  ONLY on frames/results to a session whose lease-holder read
+  exemption is live (`toWireUpsert(entry, keyed)`, `buildFullSync` /
+  `buildDiffSync(…, keyed)`, `queryGraph({keyedSnapshots})`); the
+  collapse guard (`#denyExplicitInstanceReads`) refuses two instances
+  of one (branch, id, scope) for NON-holders only; `WatchView.applySync`
+  keys by `scopeKey ?? scope`.
+- **Scheduler** — `entityKey(address, identity)` prefers
+  `address.scopeKey` (dependency/trigger keys per instance);
+  `sortAndCompactPaths` compacts per instance; the WRITER index and the
+  MATERIALIZER index are NAME-keyed (`entityNameKey`) — reader→writer
+  is a node-level topology relation (one node writes all instances of
+  its declared surface, C11b), so the edge between a user-scoped-declared
+  writer and a reader running as any principal holds; the N-run loop
+  resubscribes ONCE to the UNION of its instance logs (a per-run
+  resubscribe kept only the last instance's reads); instance-precise
+  dirtiness across the name-keyed fan-in is stage B's B7 (O(N) re-runs
+  per input change, equality cutoffs absorbing siblings — recorded, not
+  a correctness need).
+- **Basis rows** — keyed by the run's FULL instance address (S4 as
+  amended, serving-loop.md §3b): the discovered scope resolved against
+  the run identity, with the stamped and broader-chain keys cleared.
+
+The seed-memo site (§1 site 4) keys under the RUN's identity
+(`tx.tx.scopeKeyIdentity ?? runtime.scopeKeyIdentity`); the
+result-pattern cache (site 2) and the wake-shaper pieceId buckets keep
+the runtime's identity DELIBERATELY — the piece registry and the
+shaper group are per PIECE, and a piece is one (C11b), not per
+instance. Audited list and per-site OFF-arm argument: the stage-A build
+report.
+
 ## 4. Tripwires
 
 FORBIDDEN once stage E lands:
@@ -175,20 +259,35 @@ identity, partition-unchanged at cardinality 1 per §2's argument):
 
 - `storage/selector-tracker.ts` — `toKey` is now an instance method
   over the tracker's BOUND identity (constructor-injected thunk):
-  `${scope_key}\0${id}`. The failure it closed: A's watch deduped
-  B's, so B never subscribed.
+  `${scope_key}\0${id}` — and, since fan-out stage A, an address that
+  NAMES its instance (`scopeKey`) keys by it. The failure it closed:
+  A's watch deduped B's, so B never subscribed.
 - `storage/v2.ts` — `#docPullKicks` keys build in `#pullKickKey`
-  via the manager's own identity. The failure it closed: A's kick
-  suppressed B's pull, and B's doc never loaded.
+  via the manager's own identity, or the explicit foreign instance a
+  served per-instance read names (stage A). The failure it closed:
+  A's kick suppressed B's pull, and B's doc never loaded.
 - the server's wake/sync dirty keys — `toDirtyKey` =
   `${scope_key}\0${id}` (`packages/memory/v2/query.ts`), marked at
   admission from the COMMITTING session's resolved instance; the
   per-session sync cache carries `scopeKey` on its entries and keys
   `${branch}\0${scope_key}\0${id}` (`server-sync.ts`), with the
   wire upserts STRIPPED back to scope names (`toWireUpsert`) so
-  frames stay byte-identical. This was scopes.md §7 M4 itself:
-  dirtiness AND delivery now key by instance, and one principal's
-  commit touches only sessions tracking THAT instance.
+  frames stay byte-identical — EXCEPT (fan-out stage A, §3b) frames to
+  a session whose lease-holder read exemption is live, which keep the
+  key. This was scopes.md §7 M4 itself: dirtiness AND delivery now key
+  by instance, and one principal's commit touches only sessions
+  tracking THAT instance.
+
+**Fan-out stage A (OW17) — RE-KEYED 2026-08-16** (§3b): the serving
+replica's local doc keys (`SpaceReplica` `docKey`, formerly
+`${scope-name}\0${id}` — the last name-keyed layer, the P7 review's
+CLASS VERDICT), the wire upserts/removes/snapshots to a live lease
+holder, `WatchView`'s entity keys, the transaction's root addresses
+and logged addresses, the watch ids and pull dedupe keys, and the
+scheduler's writer/materializer indexes (name-keyed by DESIGN — the
+one deliberate fan-in, see §3b). Each carries the address's explicit
+`scopeKey` where the serving path names one and is byte-identical
+without it.
 
 **Stage-F serving-identity sites — RE-KEYED at stage F** (M1
 territory; keys construct from the runtime's identity today and take
