@@ -14,13 +14,28 @@
 // A mismatch is not one problem but two, with different severities. In local
 // development it is completely normal for cf to be NEWER than the server it
 // talks to (the checkout moved on; the server kept running, or the deploy
-// trails main) — that gets a compact heads-up. cf being OLDER than the
-// server is the dangerous direction: the server speaks a protocol this cf
-// predates, and commands will likely fail in confusing ways — that gets the
-// loud warning. Direction is proven by git ancestry in the checkout's
-// history, so it is only available to source runs whose history contains
-// the server's commit; compiled binaries and unorderable pairs fall back to
-// the undirected wording.
+// trails main), and SHA distance is not interface distance — most commits
+// touch nothing wire-visible, so on a success the mismatch was evidence of
+// nothing. That direction therefore prints nothing at connection time: the
+// note is held, and appears only when the process ends with a nonzero exit
+// code, where it is diagnostic context for a failure that actually happened
+// rather than a prophecy on every command. cf being OLDER than the server is
+// the dangerous direction: the server speaks a protocol this cf predates,
+// and commands will likely fail in confusing ways — that warns immediately
+// and loudly. Diverged and unorderable pairs (including every compiled
+// binary, which carries no history to order by) also warn immediately,
+// because cf-behind cannot be ruled out. Direction is proven by git ancestry
+// in the checkout's history, so it is only available to source runs whose
+// history contains the server's commit.
+//
+// The failure-exit deferral can only annotate failures that SURFACE — a
+// nonzero exit. If a protocol bump ever causes invisible errors (wrong
+// results, silent misbehavior, a command that exits 0 having done the wrong
+// thing), this heuristic cannot see them, and the migration is a negotiated
+// compatibility key: the server advertises a protocol version bumped only on
+// wire-visible change, and cf checks it as a range at session open, no git
+// history involved. Witnessing such an invisible error is the trigger for
+// that migration; do not build it speculatively.
 
 import {
   relateShasIn,
@@ -41,6 +56,45 @@ export interface VersionCheckDeps {
     serverSha: string,
   ) => Promise<ShaRelation>;
   warn?: (message: string) => void;
+  /** Registers the process-end hook the deferred note prints from. */
+  addUnloadListener?: (handler: () => void) => void;
+  /** The exit code the process is ending with, read inside that hook. */
+  exitCode?: () => number;
+}
+
+// The mild skew note, held for a failure exit. Module-level rather than
+// per-instance so a process that opens two runtimes still prints at most one
+// note, from at most one hook.
+let pendingSkewNote: string | null = null;
+let unloadHookInstalled = false;
+
+/** Test-only: clears the held note and the hook guard between cases. */
+export function resetDeferredSkewNoteForTest(): void {
+  pendingSkewNote = null;
+  unloadHookInstalled = false;
+}
+
+/**
+ * Hold `note` and print it only if the process ends with a nonzero exit
+ * code — the one moment the mismatch is evidence of anything. Every CLI path
+ * ends in `Deno.exit` (mod.ts funnels thrown errors there), which dispatches
+ * "unload" with `Deno.exitCode` readable, so the hook sees direct
+ * `Deno.exit(n)` calls and thrown errors alike.
+ */
+export function deferSkewNoteUntilFailureExit(
+  note: string,
+  deps: VersionCheckDeps = {},
+): void {
+  const warn = deps.warn ?? console.error;
+  const exitCode = deps.exitCode ?? (() => Deno.exitCode);
+  const addUnloadListener = deps.addUnloadListener ??
+    ((handler) => globalThis.addEventListener("unload", handler));
+  pendingSkewNote = note;
+  if (unloadHookInstalled) return;
+  unloadHookInstalled = true;
+  addUnloadListener(() => {
+    if (pendingSkewNote !== null && exitCode() !== 0) warn(pendingSkewNote);
+  });
 }
 
 export interface VersionCheck {
@@ -73,11 +127,12 @@ export function versionMismatchWarning(
       const behind = relation.serverBehindBy !== null
         ? `${relation.serverBehindBy} commit(s) behind`
         : "behind";
-      return `⚠️  cf is newer than the server at ${origin} — the server ` +
-        `(${serverSha}) is ${behind} this cf (${cliSha}).\n` +
-        `    Commands may fail where cf relies on newer behavior; restart ` +
-        `or redeploy the\n` +
-        `    server to match, or ` + SILENCE_HINT;
+      return `⚠️  A possible cause: cf is newer than the server at ` +
+        `${origin} — the server\n` +
+        `    (${serverSha}) is ${behind} this cf (${cliSha}), and the ` +
+        `failure may sit where cf\n` +
+        `    relies on newer behavior. Restart or redeploy the server to ` +
+        `match, or ` + SILENCE_HINT;
     }
     case "cli-behind":
       return `⚠️  This cf is OUTDATED: the server at ${origin} runs a ` +
@@ -139,7 +194,14 @@ export function startVersionCheck(deps: VersionCheckDeps = {}): VersionCheck {
         apiUrl,
         relation,
       );
-      if (warning) warn(warning);
+      if (!warning) return;
+      // The proven-mild direction defers to a failure exit; every other
+      // relation warns now — see the module comment for the split.
+      if (relation.kind === "cli-ahead") {
+        deferSkewNoteUntilFailureExit(warning, { ...deps, warn });
+      } else {
+        warn(warning);
+      }
     },
   };
 }

@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
+  resetDeferredSkewNoteForTest,
   SKIP_VERSION_CHECK_ENV,
   startVersionCheck,
   versionMismatchWarning,
@@ -32,12 +33,13 @@ Deno.test("versionMismatchWarning", async (t) => {
     },
   );
 
-  await t.step("cli-ahead reads as the mild, normal-in-dev case", () => {
+  await t.step("cli-ahead reads as context for a failure", () => {
     const warning = versionMismatchWarning("aaa111", "bbb222", API, {
       kind: "cli-ahead",
       serverBehindBy: 7,
     });
     assert(warning !== null);
+    assertStringIncludes(warning, "A possible cause");
     assertStringIncludes(warning, "newer than the server");
     assertStringIncludes(warning, "7 commit(s) behind");
     assertStringIncludes(warning, "redeploy");
@@ -83,7 +85,9 @@ Deno.test("versionMismatchWarning", async (t) => {
   });
 });
 
-/** Deps whose every effect records itself, so skipping is observable. */
+/** Deps whose every effect records itself, so skipping is observable. The
+ * unload hook and exit code are captured rather than real, so a test ends the
+ * process without ending the process. */
 function recordingDeps(
   envValue: string | undefined,
   options: {
@@ -93,9 +97,13 @@ function recordingDeps(
 ) {
   const calls: string[] = [];
   const warnings: string[] = [];
+  const unloadHandlers: Array<() => void> = [];
+  const exit = { code: 0 };
   return {
     calls,
     warnings,
+    unloadHandlers,
+    exit,
     deps: {
       env: (key: string) =>
         key === SKIP_VERSION_CHECK_ENV ? envValue : undefined,
@@ -116,6 +124,11 @@ function recordingDeps(
         calls.push("warn");
         warnings.push(message);
       },
+      addUnloadListener: (handler: () => void) => {
+        calls.push("addUnloadListener");
+        unloadHandlers.push(handler);
+      },
+      exitCode: () => exit.code,
     },
   };
 }
@@ -198,6 +211,79 @@ Deno.test("startVersionCheck", async (t) => {
       await startVersionCheck(deps).finish("bbb222", API);
       assertEquals(calls, ["resolveCliVersion", "warn"]);
       assertStringIncludes(warnings[0]!, "different versions");
+    },
+  );
+
+  await t.step(
+    "cli-ahead holds its note: finish() warns nothing and arms the hook",
+    async () => {
+      resetDeferredSkewNoteForTest();
+      const { calls, unloadHandlers, deps } = recordingDeps(undefined, {
+        checkoutDir: "/some/checkout/packages/cli/lib",
+        relation: { kind: "cli-ahead", serverBehindBy: 7 },
+      });
+      await startVersionCheck(deps).finish("bbb222", API);
+      assertEquals(calls, ["resolveCliVersion", "relate", "addUnloadListener"]);
+      assertEquals(unloadHandlers.length, 1);
+    },
+  );
+
+  await t.step("the held note prints on a failure exit", async () => {
+    resetDeferredSkewNoteForTest();
+    const { warnings, unloadHandlers, exit, deps } = recordingDeps(undefined, {
+      checkoutDir: "/some/checkout/packages/cli/lib",
+      relation: { kind: "cli-ahead", serverBehindBy: 7 },
+    });
+    await startVersionCheck(deps).finish("bbb222", API);
+    exit.code = 1;
+    unloadHandlers[0]!();
+    assertEquals(warnings.length, 1);
+    assertStringIncludes(warnings[0]!, "newer than the server");
+  });
+
+  await t.step("the held note stays silent on a success exit", async () => {
+    resetDeferredSkewNoteForTest();
+    const { warnings, unloadHandlers, exit, deps } = recordingDeps(undefined, {
+      checkoutDir: "/some/checkout/packages/cli/lib",
+      relation: { kind: "cli-ahead", serverBehindBy: 7 },
+    });
+    await startVersionCheck(deps).finish("bbb222", API);
+    exit.code = 0;
+    unloadHandlers[0]!();
+    assertEquals(warnings, []);
+  });
+
+  await t.step(
+    "a second finish re-arms the note without a second hook",
+    async () => {
+      resetDeferredSkewNoteForTest();
+      const { warnings, unloadHandlers, exit, deps } = recordingDeps(
+        undefined,
+        {
+          checkoutDir: "/some/checkout/packages/cli/lib",
+          relation: { kind: "cli-ahead", serverBehindBy: 7 },
+        },
+      );
+      await startVersionCheck(deps).finish("bbb222", API);
+      await startVersionCheck(deps).finish("bbb222", API);
+      assertEquals(unloadHandlers.length, 1);
+      exit.code = 1;
+      unloadHandlers[0]!();
+      assertEquals(warnings.length, 1);
+    },
+  );
+
+  await t.step(
+    "cli-behind still warns at finish(), before any exit",
+    async () => {
+      resetDeferredSkewNoteForTest();
+      const { calls, warnings, deps } = recordingDeps(undefined, {
+        checkoutDir: "/some/checkout/packages/cli/lib",
+        relation: { kind: "cli-behind" },
+      });
+      await startVersionCheck(deps).finish("bbb222", API);
+      assertEquals(calls, ["resolveCliVersion", "relate", "warn"]);
+      assertStringIncludes(warnings[0]!, "OUTDATED");
     },
   );
 });
