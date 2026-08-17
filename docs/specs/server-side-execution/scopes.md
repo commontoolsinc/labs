@@ -186,8 +186,15 @@ faced them:
   (`undemandedNarrowingRuns`; RULED 2026-08-16, design §I.4). The
   event actor is a TRANSIENT demander of the event's target piece for
   the dispatch's preflight (RULED 2026-08-16, design §I.5): the actor's
-  own instance of a dirty scoped input recomputes even if the actor
-  watches nothing — never another principal's.
+  own instance of a scoped input her handler reads is materialized
+  before the handler runs even if the actor watches nothing — never
+  another principal's. The preflight tests instance-level currency, not
+  node-level: a per-user node the WATCHERS made node-level clean can
+  still be MISSING the actor's instance (B7 made cleanliness per
+  instance), so "not current for the actor" — never run at the node's
+  ratchet for her — is what re-arms it (fix round 2026-08-17, review
+  F2; `Scheduler.rearmNotCurrentFanOutForActor`). Without it the
+  handler read her missing instance and lost its event silently.
 
 **Monotonicity (owner-ruled; AMENDED — RULED 2026-08-16, the fan-out
 design panel's Lens 1): narrowing is for everyone or no one AT THE

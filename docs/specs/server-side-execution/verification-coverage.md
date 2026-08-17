@@ -3105,18 +3105,43 @@ supply; OW29/OW32/OW34 closed):
   slot lands at the acting principal's user instance instead of the
   space row — the former write was a confidentiality leak; no
   legitimate producer depended on it.
-  (2) **The transient demander's REACH**: the ruled sentence covers a
-  DIRTY scoped input at the dispatch's preflight. A non-watching
-  actor whose earlier event dirtied the input (type, then save, as
-  two sequential appends) found the input recomputed BETWEEN the two
-  dispatches with no event queued — the actor not a demander — and
-  the save's preflight met a CLEAN node whose actor-instance had never
-  run: the handler read an empty `echo` (`saved:""` beside
-  `draft:"A"` under Alice). Whether the preflight should also compute
-  a never-run actor instance of a clean input (an instance-level
-  "not current", B7's sense) is UNSTATED; flagged, not filled. The
-  shape that IS ruled (dirty at preflight) is pinned at the seam by
-  (j); the E2E shape stays a flag until ruled.
+  (2) **The transient demander's REACH — CLOSED (review F2, fix round
+  2026-08-17).** As found: the ruled sentence was read as "a DIRTY
+  scoped input at the dispatch's preflight", and the preflight
+  (`collectInvalidUpstreamForLog`) asked only the NODE-level question.
+  A non-watching actor whose handler reads a per-user DERIVATION met a
+  node that was node-level CLEAN (it ran for the watchers) but had NO
+  instance for her — so nothing ran, her handler read the MISSING
+  instance, its argument failed the schema, the run was silently
+  skipped, and the entry was marked consequenced with NO error: silent
+  event loss, in ALL THREE schedules the independent review tried
+  (two-drains, same-drain, and the dirty-input race where the
+  recompute landed before her event queued). The register formerly
+  understated this as "reads empty / unstated"; §B5's own text says
+  "stale/**missing**", so this was a gap in the implementation of the
+  ruled mechanism, not an unstated semantic. Fix: B7 made cleanliness
+  PER INSTANCE, so the preflight now asks the per-instance question for
+  the actor — `Scheduler.rearmNotCurrentFanOutForActor` re-arms the
+  fanned-out nodes in a served handler's closure whose instance for the
+  ACTOR is not current (never run at the node's ratchet for her),
+  keeping the sibling instances clean (B7); the event waits on them,
+  and the handler then reads a CURRENT instance (or, if her instance
+  cannot be keyed — a sessionless actor at session depth — nothing is
+  materialized and the read fails as before, never a silent
+  consequence for the motivating shape). This is the arrival re-arm
+  applied to the transient demand `transientEventDemandersFor` already
+  folds in (pinned by (j)). Pinned red-first: `executor-fan-out.test.ts`
+  (k) [two-drains / same-drain / dirty-input] — the actor's `save`
+  lands `saved:echo:A` under HER instance, consequenced CLEAN, the
+  watcher's instance untouched; mutation (the re-arm dropped) → the
+  silent loss returns → red 3/3. scopes.md §2's transient-demander
+  sentence now reads "not current for the actor" (B7's sense), not
+  "dirty". Residual (documented gap, narrow): the re-arm walks the
+  handler's DIRECT read-writers only — a per-user node reached
+  TRANSITIVELY through an intervening derivation is not materialized
+  for the actor (the node-level path's inverted cone is not
+  duplicated); the watchers' rendering walk covers the rendering shape,
+  so this is narrow in practice.
   Also on the record: (f-walk)'s walk-key wait failed 5/9 in one
   window (Alice's walk instance CLEAN with no keyed run 20 s after
   her flag write; the diagnostic label now prints the walk node's
