@@ -505,7 +505,7 @@ The overall traversal is depth-first, left-to-right:
 3. For compound types (array, object), recursively hash each child, then feed
    `TAG_END`. Each child's bytes (starting with its own type tag) are fed to
    the **same** hasher — there is no per-child sub-hash.
-4. The entire value tree is serialized into one contiguous byte stream, then
+4. The entire value tree is encoded into one contiguous byte stream, then
    digested once.
 
 The type tags, length prefixes, and `TAG_END` sentinels provide unambiguous

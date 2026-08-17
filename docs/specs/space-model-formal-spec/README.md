@@ -12,9 +12,9 @@ This spec covers:
 - **Fabric values** (Sections 1-2) -- the type universe for all persistent and
   in-flight data, and the fabric protocol (a per-class codec getter --
   `[CODEC]` or `[JSON_CODEC]` -- yielding a `FabricCodec`) for custom type
-  participation in serialization
+  participation in encoding
 - **Unknown types** (Section 3) -- forward-compatibility via `UnknownValue`
-- **Serialization contexts** (Section 4) -- boundary-crossing serialization
+- **Codec engines** (Section 4) -- boundary-crossing encoding
   strategy, the `encode()`/`decode()` boundary, and boundary inventory
 - **JSON encoding** -- the `fvj1:` encoding prefix, the `/<Type>@<Version>`
   wire format for special types, escaping, detection rules, and the `/`-key
@@ -28,7 +28,7 @@ system, schemas.
 ## Documents
 
 - [1-fabric-values.md](./1-fabric-values.md) -- Fabric value types, the
-  three-layer architecture, the fabric protocol, unknown types, serialization
+  three-layer architecture, the fabric protocol, unknown types, encoding
   contexts, hashing, implementation guidance, and conversion functions.
   (Sections 1-4, 6-8.)
 - [2-hash-byte-format.md](./2-hash-byte-format.md) --

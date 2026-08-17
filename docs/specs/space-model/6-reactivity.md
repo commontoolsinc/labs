@@ -74,8 +74,8 @@ handler, which updates state, which causes dependent computations to re-run.
 
 ### Graph structure and persisted observations
 
-The live object graph is reconstructed at runtime; JavaScript node objects and
-edges are not serialized directly. What is persisted:
+The live object graph is decoded at runtime; JavaScript node objects and
+edges are not encoded directly. What is persisted:
 
 - Cell values (including stream markers)
 - Result-cell metadata (`pattern`, `argument`, and the `internal` manifest)

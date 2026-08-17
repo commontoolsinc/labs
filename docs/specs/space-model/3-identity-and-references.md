@@ -68,11 +68,11 @@ bindings — e.g.
 
 The plain-value reading applies to *data* only. Inside a Pattern object the
 interpretation is positional and shape-based with no escape encoding: pattern
-serialization (`withAliasBindings`) treats any `$alias`-shaped record it
+encoding (`withAliasBindings`) treats any `$alias`-shaped record it
 encounters as a binding. A literal `{ "$alias": { "path": [...] } }` object
 passed as factory inputs (via `.with(...)`/`.bind(...)`, captured closure
 state, or a pattern's outputs) is therefore not preserved as data: the
-serializer rewrites it as a nested-pattern binding (incrementing `defer`), and
+encoder rewrites it as a nested-pattern binding (incrementing `defer`), and
 instantiation later resolves it as a write redirect into the pattern's own
 documents.
 
@@ -127,7 +127,7 @@ mechanism — is also used directly for:
 
 ### Serialized Entity-Id Reference Form
 
-When an entity id is serialized as a reference to another cell — for example as
+When an entity id is encoded as a reference to another cell — for example as
 the value of `Cell.entityId`, or as extracted by `getEntityId()` — its concrete
 shape is **flag-dispatched** by the nascent "modern cell representation"
 (`modernCellRep`), a single gate that selects between two regimes:
@@ -194,7 +194,7 @@ from write and recognition code paths. `LegacyJSONCellLink` retains
 backwards-compatible reading for previously persisted data, but is otherwise
 inactive. `$alias` has been removed from link recognition entirely — in data it
 is a plain value. It remains in use as Pattern-binding vocabulary only, and can
-be retired once pattern serialization emits sigil bindings.
+be retired once pattern encoding emits sigil bindings.
 
 ---
 
