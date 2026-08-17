@@ -54,6 +54,7 @@
     "pattern-vintage": "deno run -A ./tasks/pattern-vintage.ts",
     "check-baselines-append-only": "deno run --allow-read --allow-run=git ./tasks/check-baselines-append-only.ts",
     "check-skill-facts": "deno run --allow-read --allow-run=git ./tasks/check-skill-facts.ts",
+    "check-verb-session-sync": "deno run --allow-read ./tasks/check-verb-session-sync.ts",
     "check-tripwires": "deno run --allow-read ./tasks/check-tripwires.ts",
     // Reports the docs/ link graph; --allow-write serves its --out flag.
     "docs-links": "deno run --allow-read --allow-write ./scripts/docs-links.ts",

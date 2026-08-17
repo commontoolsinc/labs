@@ -254,28 +254,43 @@ V=$($CF piece call --quiet --piece "$KID" $ARGS archive '{}' 2>/dev/null)
 check "settled" "$(echo "$V" | jq -r '.status')" "archive settled"
 check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witness"
 
-step "10. GAP: an address cannot be a verb argument"
-# blockOn declares `on: Writable<ItemOutput>` — a reference. `send()` already
-# resolves a native sigil (measured), so the pre-dispatch gate is the only
-# thing refusing this. docs/plans/references-as-arguments.md closes it — that
-# work carries no step number in the verbs plan, which numbers only the read
-# and result layers.
+step "10. A reference argument dispatches; the emitted spelling is the GAP"
+# blockOn declares `on: Writable<ItemOutput>` — a reference. The capability
+# landed with #5880: a link ENVELOPE in that position passes the gate and the
+# edge that comes back is the target, not a copy. What has not landed is the
+# round-trip spelling docs/plans/references-as-arguments.md holds out for —
+# the address exactly as a read emits it. The two halves are asserted apart,
+# so neither can hide behind the other.
 OTHER=$($CF piece get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
   jq -r '.[0]["$link"] // empty')
-# Guarded, and matched against the SPECIFIC refusal: an empty address, a
-# renamed verb, or a server hiccup would also exit nonzero, and a probe that
-# reads any failure as "gap still open" is a probe that cannot fail.
 if [ -z "$OTHER" ] || [ -z "${KID:-}" ]; then
   bad "no address to probe blockOn with (item=$OTHER target=${KID:-})"
 else
+  # The capability half: the envelope is assembled from the very address the
+  # read above emitted, so the target is one the session was handed.
+  SIGIL="{\"on\":{\"/\":{\"link@1\":{\"id\":\"${OTHER#/}\"}}}}"
+  BLOCKED=$($CF piece call --quiet --piece "$KID" $ARGS \
+    blockOn "$SIGIL" 2>/dev/null)
+  check "1" "$(echo "$BLOCKED" | jq -r '.result.blockedOnCount // empty')" \
+    "a link envelope names an existing item, and the edge lands"
+  # And the edge is the target rather than a copy: the address under
+  # blockedOn is the address the envelope named.
+  EDGE=$($CF piece get --quiet --piece "$KID" blockedOn $ARGS \
+    --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
+    jq -r '.[0]["$link"] // empty')
+  check "$OTHER" "$EDGE" "the edge reads back as the address that was named"
+  # The gap half. Guarded, and matched against the SPECIFIC refusal: an empty
+  # address, a renamed verb, or a server hiccup would also exit nonzero, and a
+  # probe that reads any failure as "gap still open" is a probe that cannot
+  # fail.
   BLOCK_ERR=$($CF piece call --quiet --piece "$KID" $ARGS \
     blockOn "{\"on\":\"$OTHER\"}" 2>&1 >/dev/null)
   BLOCK_RC=$?
   if [ "$BLOCK_RC" = "0" ]; then
-    gap 0 "blockOn with a bare address"
+    gap 0 "blockOn with the address a read emits"
   elif printf '%s' "$BLOCK_ERR" | grep -q "does not match type object"; then
-    gap 1 "blockOn with a bare address (the pre-dispatch gate refuses it)"
+    gap 1 "blockOn with the address a read emits (the gate still refuses the string)"
   else
     bad "blockOn failed for a reason that is not the known refusal: $BLOCK_ERR"
   fi
