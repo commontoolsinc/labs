@@ -1625,6 +1625,7 @@ describe("piece pull materialization", () => {
           pieces,
           true,
           [],
+          undefined,
           resolving,
         ),
       ).toBe("already-materialized");
@@ -3443,6 +3444,121 @@ describe("piece pull materialization", () => {
         event: source.key("event"),
       }),
     ).rejects.toThrow(/input link.*schema is not compatible/);
+  });
+
+  it("ignores a producer document the write does not reach", async () => {
+    const far = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { n: { type: "number" } },
+          required: ["n"],
+        },
+        result: { n: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const payload = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    } as const;
+    const producer = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { obj: payload, linked: { type: "number" } },
+          required: ["obj", "linked"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { obj: payload, linked: { type: "number" } },
+          required: ["obj", "linked"],
+        },
+        result: {
+          obj: { $alias: { cell: "argument", path: ["obj"] } },
+          linked: { $alias: { cell: "argument", path: ["linked"] } },
+        },
+        nodes: [],
+      }),
+      { obj: { n: 1 }, linked: 2 },
+      undefined,
+      { start: true },
+    );
+    await new PieceController(pieces, producer).input.set(
+      far.key("n"),
+      ["linked"],
+    );
+    // The producer now links a document its own schema refuses. Nothing the
+    // consumer writes below reaches it.
+    await runtime.editWithRetry((tx) => {
+      far.withTx(tx).key("n").setRawUntyped("bad");
+    });
+
+    const consumer = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            slot: {
+              type: "object",
+              properties: { n: { type: ["number", "string"] } },
+              required: ["n"],
+            },
+          },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: { n: 0 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, consumer);
+    await controller.input.set(producer.key("obj"), ["slot"]);
+
+    await controller.input.set(5, ["slot", "n"]);
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 5 },
+    });
+
+    // The producer's contract still decides the path the write does reach,
+    // even though the consumer declares it wider.
+    await expect(controller.input.set("bad", ["slot", "n"])).rejects.toThrow(
+      /^updated input does not match its write destination: value does not match type number$/,
+    );
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 5 },
+    });
+
+    // A target that exists but reads as undefined is still a target: the link
+    // settles it, and the write goes through.
+    await runtime.editWithRetry((tx) => {
+      far.withTx(tx).key("n").setRawUntyped(undefined);
+    });
+    await controller.input.set(7, ["slot", "n"]);
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 7 },
+    });
+
+    // Having no target at all is the case the link cannot settle: empty the far
+    // document and the producer's `linked` member has nothing behind it, so
+    // `required` refuses.
+    await runtime.editWithRetry((tx) => {
+      far.withTx(tx).setRawUntyped({});
+    });
+    await expect(controller.input.set(8, ["slot", "n"])).rejects.toThrow(
+      /updated input does not match its write destination: missing required property linked/,
+    );
+    expect(pieces.getArgument(producer).getRaw()).toMatchObject({
+      obj: { n: 7 },
+    });
   });
 
   it("rejects descendant writes through Stream wrappers", async () => {
