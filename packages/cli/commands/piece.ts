@@ -2756,8 +2756,11 @@ export function readCallTarget(
 // The space can arrive three ways: `--url` embeds it, `--space` names it, and
 // a canonical `--piece` reference may carry it as a `/@did:.../` prefix. A
 // reference's space fills an absent `--space`; a present one must agree —
-// checked at parse time when `--space` is a DID, and at session open through
-// `validateEmbeddedSpaces` when it is a name still to be resolved.
+// checked at parse time when the target space is a DID, and at session open
+// through `validateEmbeddedSpaces` when it is a name still to be resolved.
+// The piece arrives through `--piece` (or the positional address it carries)
+// or inside the `--url`: a URL that names one excludes the flag, and a
+// piece-less URL composes with it.
 export function parseSpaceOptions(
   input: PieceCLIOptions,
 ): SpaceConfig {
@@ -2780,27 +2783,40 @@ export function parseSpaceOptions(
   };
   if (input.json) output.jsonOutput = true;
 
+  // The space the piece reference below is checked against: `--space`, or
+  // the space a `--url` embeds.
+  let targetSpace = input.space;
+
   if (input.url) {
     const { apiUrl, space, piece, pieceScope } = parseUrl(input.url);
     output.apiUrl = apiUrl;
     output.space = space;
-    output.piece = piece;
-    if (pieceScope) output.pieceScope = pieceScope;
-    return output as PieceConfig;
-  }
-
-  if (!input.apiUrl) {
-    throw new ValidationError(
-      `Missing required option: "--api-url", or "CF_API_URL".`,
-      { exitCode: 1 },
-    );
+    targetSpace = space;
+    if (piece) {
+      // Two pieces named at once is refused rather than resolved, the same
+      // rule "--space" beside "--url" follows: silently preferring either
+      // one is how a caller reads a target they did not name. `input.piece`
+      // may carry a positional address, so the message names both spellings.
+      if (input.piece) {
+        throw new ValidationError(
+          `A piece reference ("--piece" or a positional address) cannot ` +
+            `be provided when the "--url" names a piece.`,
+          { exitCode: 1 },
+        );
+      }
+      output.piece = piece;
+      if (pieceScope) output.pieceScope = pieceScope;
+      return output as PieceConfig;
+    }
+    // A piece-less URL supplies the host and space; the piece may still
+    // arrive through "--piece" (or the positional address it carries).
   }
 
   if (input.piece) {
     // Do not validate here -- piece is only
     // required via `parsePieceOptions`
     const llmRef = normalizeLLMFriendlyRef(input.piece, {
-      space: input.space,
+      space: targetSpace,
     });
     if (llmRef) {
       output.piece = llmRef.pieceId;
@@ -2809,7 +2825,7 @@ export function parseSpaceOptions(
       if (llmRef.input) output.pieceInput = true;
       if (llmRef.embeddedSpace) {
         output.embeddedSpaces = [llmRef.embeddedSpace];
-        if (!input.space) output.space = llmRef.embeddedSpace;
+        if (!targetSpace) output.space = llmRef.embeddedSpace;
       }
     } else {
       // The alias grammar has no fragments, and letting one through would
@@ -2827,6 +2843,14 @@ export function parseSpaceOptions(
     }
   }
 
+  if (input.url) return output as PieceConfig;
+
+  if (!input.apiUrl) {
+    throw new ValidationError(
+      `Missing required option: "--api-url", or "CF_API_URL".`,
+      { exitCode: 1 },
+    );
+  }
   if (input.space) output.space = input.space;
   if (!output.space) {
     throw new ValidationError(

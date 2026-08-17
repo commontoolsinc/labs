@@ -480,6 +480,51 @@ describe("cli piece parsing", () => {
       .toThrow(/does not apply to a link endpoint/);
   });
 
+  it("parseSpaceOptions() refuses a piece reference beside a URL that names a piece", () => {
+    // Silently preferring either target is how a caller reads a piece they
+    // did not name; before this rule the URL's piece won without a word.
+    expect(() =>
+      parseSpaceOptions({ url: FULL_URL, identity: ID, piece: PIECE })
+    ).toThrow(/cannot be provided when the "--url" names a piece/);
+    expect(() =>
+      parseSpaceOptions({
+        url: FULL_URL,
+        identity: ID,
+        piece: `/${LLM_HANDLE}`,
+      })
+    ).toThrow(/cannot be provided when the "--url" names a piece/);
+  });
+
+  it("parseSpaceOptions() composes a piece-less URL with a piece reference", () => {
+    expect(parsePieceOptions({
+      url: NO_PIECE_FULL_URL,
+      identity: ID,
+      piece: PIECE,
+    })).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      piece: PIECE,
+    });
+    // The canonical reference keeps its whole grammar in this position: the
+    // embedded path and scope ride along, and an embedded space DID defers
+    // to the session check because the URL names the space as a name.
+    expect(parsePieceOptions(
+      {
+        url: NO_PIECE_FULL_URL,
+        identity: ID,
+        piece: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0`,
+      },
+      { acceptsPath: true },
+    )).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      piece: LLM_HANDLE,
+      pieceScope: "user",
+      piecePath: ["items", 0],
+      embeddedSpaces: [SPACE_DID],
+    });
+  });
+
   it("getCellValueFromCommand() reads through a positional address, honoring #argument", async () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
     const reads: unknown[][] = [];
