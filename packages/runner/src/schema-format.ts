@@ -91,6 +91,17 @@ export interface SchemaFormatOptions {
  * schemaToTypeString({ type: ["string", "null"] })   // → "string | null"
  *
  * @example
+ * // A conjunction contributes its members' fields to one object. A
+ * // disjunction stays a union: `anyOf` is a choice between shapes, while
+ * // `allOf` states shapes that hold at once.
+ * schemaToTypeString({
+ *   type: "object",
+ *   properties: { note: { type: "string" } },
+ *   allOf: [{ properties: { count: { type: "number" } } }]
+ * })
+ * // → "{\n  note?: string,\n  count?: number\n}"
+ *
+ * @example
  * // Index signatures (object-valued additionalProperties)
  * schemaToTypeString({
  *   type: "object",
@@ -126,6 +137,53 @@ export function schemaToTypeString(
     (schema as Record<string, unknown>)?.scope,
     rendered,
   );
+}
+
+/** How deep nested `allOf` is followed before a conjunction is left alone. */
+const MAX_CONJUNCTION_DEPTH = 8;
+
+/**
+ * The schemas a conjunction contributes fields from: the schema itself, then
+ * each `allOf` member, depth-first through nested conjunctions, with a
+ * `$defs` reference resolved to what it names.
+ *
+ * Order is what the caller merges by, so it matters: the schema's own
+ * properties come first and win, then earlier members beat later ones. That is
+ * the order `declaredEventFields` in the CLI reads a conjunction in, and
+ * matching it is what keeps a help page's type block and its flag list
+ * agreeing about the same schema.
+ *
+ * A disjunction is not walked. `anyOf` is a union and renders as one; only a
+ * conjunction states fields that all hold at once.
+ */
+function conjunctionSources(
+  schema: Record<string, unknown>,
+  defs: Record<string, JSONSchema>,
+): Record<string, unknown>[] {
+  const sources: Record<string, unknown>[] = [];
+  // Keyed by the reference rather than by the object it resolves to: the same
+  // `$defs` entry reached twice is the cycle worth stopping, and a schema
+  // object's identity is not stable enough to key a guard on.
+  const followed = new Set<string>();
+  const visit = (entry: unknown, depth: number): void => {
+    if (depth > MAX_CONJUNCTION_DEPTH) return;
+    if (typeof entry !== "object" || entry === null) return;
+    let current = entry as Record<string, unknown>;
+    if (typeof current.$ref === "string") {
+      const match = current.$ref.match(/^#\/\$defs\/(.+)$/);
+      if (!match || followed.has(current.$ref)) return;
+      followed.add(current.$ref);
+      const def = defs[match[1]];
+      if (!def || typeof def !== "object") return;
+      current = def as Record<string, unknown>;
+    }
+    sources.push(current);
+    if (Array.isArray(current.allOf)) {
+      for (const member of current.allOf) visit(member, depth + 1);
+    }
+  };
+  visit(schema, 0);
+  return sources;
 }
 
 function schemaToTypeStringInner(
@@ -277,8 +335,34 @@ function schemaToTypeStringInner(
   }
 
   // Handle objects
-  if (type === "object" || s.properties) {
-    const props = s.properties as Record<string, JSONSchema> | undefined;
+  // A conjunction states its fields across its members, so they are gathered
+  // before the object branch decides whether there are any. A schema whose
+  // fields live only in `allOf` states no `type` and no `properties` of its
+  // own, and would otherwise not reach that branch at all.
+  const sources = Array.isArray(s.allOf) ? conjunctionSources(s, defs) : [s];
+  const conjoined: Record<string, JSONSchema> = {};
+  const conjoinedRequired: string[] = [];
+  for (const source of sources) {
+    const sourceProps = source.properties as
+      | Record<string, JSONSchema>
+      | undefined;
+    // First declaration wins, matching how the CLI reads the same conjunction.
+    if (sourceProps) {
+      for (const [name, propSchema] of Object.entries(sourceProps)) {
+        if (!Object.hasOwn(conjoined, name)) conjoined[name] = propSchema;
+      }
+    }
+    // Required is a UNION, not first-wins: every member's constraint holds at
+    // once, so a field any member requires is required of the whole.
+    if (Array.isArray(source.required)) {
+      conjoinedRequired.push(...(source.required as string[]));
+    }
+  }
+
+  if (type === "object" || s.properties || Object.keys(conjoined).length > 0) {
+    const props = Object.keys(conjoined).length > 0
+      ? conjoined
+      : s.properties as Record<string, JSONSchema> | undefined;
     // An index signature (object-valued additionalProperties) carries a value
     // schema worth showing; a bare `additionalProperties: true` does not
     const indexValueSchema = typeof s.additionalProperties === "object" &&
@@ -295,9 +379,7 @@ function schemaToTypeStringInner(
       return "{}";
     }
 
-    const required = new Set(
-      Array.isArray(s.required) ? (s.required as string[]) : [],
-    );
+    const required = new Set(conjoinedRequired);
     const lines: string[] = [];
     const padding = "  ".repeat(indent + 1);
 
