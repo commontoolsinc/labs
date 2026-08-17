@@ -295,14 +295,22 @@ and the marker reaches nothing the CLI can read: the served event schema is the
 handler's narrowed read, and the stored pattern's declared schema has lost it
 too. #5560 carries the measurements.
 
-*The refusal is drift, not policy.* `closedWorldEventRejection`
-(`packages/runner/src/runner.ts`) validates a present event payload with
-`acceptOpaqueValue: (value) => isCellLink(value)` — a link passes unjudged,
-because its target cannot be read at dispatch. `verbInputSchemaError`
-(`packages/cli/lib/callable.ts`) calls the same `validateSchemaValue` with two
-arguments, so the options object defaults to `{}`. Same validator; the outer
-gate never got the option. The design is
+*The refusal was drift, not policy, and #5880 removed it.*
+`closedWorldEventRejection` (`packages/runner/src/runner.ts`) has always
+validated a present event payload with `acceptOpaqueValue` — a link passes
+unjudged, because its target cannot be read at dispatch. `verbInputSchemaError`
+(`packages/cli/lib/callable.ts`) called the same `validateSchemaValue` without
+that option, so the outer gate refused what the inner one accepted. It passes
+it now, through `isOpaqueReference`, which additionally requires the envelope's
+payload to be a record: `isLink` answers on shape alone and is true of
+`{"/": {"link@1": "nope"}}`. The design is
 [references as arguments](references-as-arguments.md).
+
+The second obstacle was the CLI's own, and neither the design nor this plan
+predicted it: the undeclared-field walk descended INTO the link envelope and
+reported `/` as a field the verb does not declare. Neither fix needs to know
+which positions declare a reference, which is why the capability landed with no
+`asCell` marker and no transformer change.
 
 *Measured: `send()` already resolves a native sigil.* A raw sigil link riding
 an event payload reaches the handler as the **resolved target**, not an
@@ -352,10 +360,15 @@ shape a read emits, or a caller cannot submit the address it was just handed.
 *CFC gets a notification, not a ruling* — an existing capability widening from
 the user's own model session to external principals.
 
-*Exit:* `cf piece call --piece <root> addPiece '{"piece": <address>}'` registers
-the piece — the root pattern's own verb, reachable today by `pieces.add` from
-inside the runtime and by a model through the dialog builtin, and by no other
-caller.
+*Exit, met by #5880:* `cf piece call --piece <root> addPiece
+'{"piece": <address>}'` registers the piece. That verb was reachable by
+`pieces.add` from inside the runtime and by a model through the dialog builtin,
+and by no other caller; a CLI caller now reaches it too, and the edge that comes
+back is the target rather than a copy of it.
+
+*The exit the item still owes:* the same call sending the target's SHAPE rather
+than its address is refused, instead of storing a detached copy and reporting
+success.
 
 **12. `cf` refuses an undeclared field on a call.** *(S)* **On main as
 #5835.** The failure it removes: a payload carrying a field the verb does not
