@@ -66,7 +66,7 @@ wrapper classes (Section 1.4).
 > `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
 > `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
 > carries them (Section 8.6). The serialization vocabulary (the `CODEC`
-> symbol, `FabricCodec`, `ReconstructionContext`, `SerializationContext`)
+> symbol, `FabricCodec`, `DecodeContext`, `EncodeContext`)
 > lives in `codec-interface/` (Section 2), the machinery that acts on it in
 > `codec-common/`, and the conversion functions in `native-conversion.ts`
 > (Section 8).
@@ -80,7 +80,7 @@ wrapper classes (Section 1.4).
 > re-exports it. `codec-common/` and `fabric-instances/` are exported subpaths
 > in their own right and are imported directly under those names;
 > `fabric-value` does *not* re-export the codec vocabulary, so
-> `ReconstructionContext` and its siblings come from
+> `DecodeContext` and its siblings come from
 > `@commonfabric/data-model/codec-common`. Cite a module to say where
 > something is defined; consult the package's `exports` map to know where to
 > import it from.
@@ -614,7 +614,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        context: DecodeContext,
       ): FabricValue {
         const s = state as Record<string, FabricValue>;
         const type = (s.type as string) ?? (s.name as string) ?? 'Error';
@@ -703,7 +703,7 @@ export class FabricMap
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        context: DecodeContext,
       ): FabricValue {
         const entries = state as [FabricValue, FabricValue][];
         const result = new FabricMap(new Map(entries));
@@ -757,7 +757,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        context: DecodeContext,
       ): FabricValue {
         const elements = state as FabricValue[];
         const result = new FabricSet(new Set(elements));
@@ -1794,7 +1794,7 @@ export interface FabricCodec<Encoded> {
   decode(
     typeTag: string,
     state: Encoded,
-    context: ReconstructionContext,
+    context: DecodeContext,
   ): FabricValue;
 
   /**
@@ -1916,7 +1916,7 @@ Key contracts:
   recursion and tag-wrapping (Section 4.5), which keeps the format
   mechanics in one place rather than spread across every codec.
 - **`decode()` is codec-side, not constructor-side**, for two reasons: it
-  receives a `ReconstructionContext` (Section 2.5) which shouldn't be
+  receives a `DecodeContext` (Section 2.5) which shouldn't be
   mandated in a constructor signature, and it may return an existing
   instance (interning) rather than creating a new one — essential for
   types like `Cell` where identity matters.
@@ -1950,7 +1950,7 @@ Key contracts:
  * Implementors of `decode()` should depend on this interface, not on
  * the concrete `Runtime` class.
  */
-export interface ReconstructionContext {
+export interface DecodeContext {
   /**
    * Resolves a cell reference. Used by types that need to intern or look
    * up existing instances during reconstruction.
@@ -1966,11 +1966,11 @@ export interface ReconstructionContext {
    * corresponds to `cloneIfNecessary(value, { frozen: true })`.
    *
    * Required (not optional): every context declares it. A shared
-   * `BaseReconstructionContext`
-   * (`packages/data-model/src/codec-interface/BaseReconstructionContext.ts`)
+   * `BaseDecodeContext`
+   * (`packages/data-model/src/codec-interface/BaseDecodeContext.ts`)
    * centralizes the getter with a `true` default, mirroring
    * `cloneIfNecessary()`'s default; contexts opt out by overriding. An
-   * `EmptyReconstructionContext` (same directory) covers context-less
+   * `EmptyDecodeContext` (same directory) covers context-less
    * decodes: its `getCell()` throws with a configurable message.
    */
   readonly shouldDeepFreeze: boolean;
@@ -1981,9 +1981,9 @@ export interface ReconstructionContext {
 > intended to live in a foundational package (`packages/data-model/`).
 > If codec `decode()` implementations depended on the full `Runtime` type
 > from `packages/runner/`, it would create a circular dependency. The
-> `ReconstructionContext` interface captures the minimal surface needed for
+> `DecodeContext` interface captures the minimal surface needed for
 > reconstruction. The `Runtime` class satisfies this interface. Future
-> fabric types may extend `ReconstructionContext` if they need additional
+> fabric types may extend `DecodeContext` if they need additional
 > capabilities beyond `getCell` and `shouldDeepFreeze`.
 
 ### 2.6 Brand Detection
@@ -2027,7 +2027,7 @@ import {
   CODEC,
   BaseNonterminalCodec,
   type NonterminalCodec,
-  type ReconstructionContext,
+  type DecodeContext,
 } from '@commonfabric/data-model/codec-common';
 import { BaseFabricInstance } from '@commonfabric/data-model/codec-common';
 
@@ -2074,7 +2074,7 @@ class Temperature extends BaseFabricInstance {
       decode(
         _typeTag: string,
         state: FabricValue,
-        _context: ReconstructionContext,
+        _context: DecodeContext,
       ): FabricValue {
         const s = state as { value: number; unit: TemperatureUnit };
         return new Temperature(s.value, s.unit);
@@ -2111,10 +2111,10 @@ serialization system:
    `codec.decode(tag, state, context)` to produce a real `Temperature`
    instance with its methods intact.
 
-**Reference types and `ReconstructionContext`.** The `Temperature` example
+**Reference types and `DecodeContext`.** The `Temperature` example
 above is a simple value type -- its codec's `decode()` creates a fresh
 instance each time. Reference types (such as the runtime's internal `Cell`
-type) use the `ReconstructionContext` parameter to look up or intern
+type) use the `DecodeContext` parameter to look up or intern
 existing instances, ensuring that two references to the same logical entity
 deserialize to the same object.
 
@@ -2235,7 +2235,7 @@ import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from '../interface';
 import {
   CODEC,
   type NonterminalCodec,
-  type ReconstructionContext,
+  type DecodeContext,
 } from '../codec-interface/interface';
 import { BaseNonterminalCodec } from '../codec-interface/BaseNonterminalCodec';
 import { BaseFabricInstance } from './BaseFabricInstance';
@@ -2298,7 +2298,7 @@ export class UnknownValue extends BaseFabricInstance {
       decode(
         typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        context: DecodeContext,
       ): FabricValue {
         const result = new UnknownValue(typeTag, state);
         return context.shouldDeepFreeze ? deepFreeze(result) : result;
@@ -2342,7 +2342,7 @@ import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from '../interface';
 import {
   CODEC,
   type NonterminalCodec,
-  type ReconstructionContext,
+  type DecodeContext,
 } from '../codec-interface/interface';
 import { BaseNonterminalCodec } from '../codec-interface/BaseNonterminalCodec';
 import { BaseFabricInstance } from './BaseFabricInstance';
@@ -2425,7 +2425,7 @@ export class ProblematicValue extends BaseFabricInstance {
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        context: DecodeContext,
       ): FabricValue {
         // A state that is not this shape becomes a `ProblematicValue` of
         // this decode; omitted for brevity.
@@ -2462,9 +2462,9 @@ others is worse than one that heals for none. `UnknownValue` is the type that
 heals, and it can because its tag is checked to be a real one.
 
 Whether a decode failure surfaces as a `ProblematicValue` or as a throw is the
-encoding context's `lenient` setting alone, not the codec's: a strict context
-(e.g., tests) raises either form of rejection, while a lenient one (e.g.,
-production reconstruction) degrades either into a value. The exception is this
+engine's `lenient` setting alone, not the codec's: a strict engine (e.g.,
+tests) raises either form of rejection, while a lenient one (e.g., production
+reconstruction) degrades either into a value. The exception is this
 class's own codec, whose successful product is a `ProblematicValue` — see
 Section 3.2.
 
@@ -2514,10 +2514,10 @@ export type JsonCodecValue =
 
 ### 4.3 Public Boundary Interface
 
-The public interface for serialization contexts is parameterized by the
-boundary type — `string` for JSON contexts, `Uint8Array` for binary contexts.
-External callers use only `encode()` and `decode()`; all internal machinery
-(tag wrapping, tree walking, codec dispatch) is private to the context
+The public interface for encoding is parameterized by the boundary type —
+`string` for JSON contexts, `Uint8Array` for binary contexts. External callers
+use only `encode()` and the engine's `decode()`; all internal machinery (tag
+wrapping, tree walking, codec dispatch) is private to the engine
 implementation.
 
 ```typescript
@@ -2525,31 +2525,21 @@ implementation.
 // file: packages/data-model/codec-interface/interface.ts
 
 /**
- * Public boundary interface for serialization contexts. Encodes fabric
- * values into a serialized form and decodes them back. The type parameter
- * `SerializedForm` is the boundary type: `string` for JSON contexts,
- * `Uint8Array` for binary contexts.
+ * Public boundary interface for encoding a fabric value into a serialized
+ * form, ready to cross whatever boundary the format exists for. The type
+ * parameter `SerializedForm` is the boundary type: `string` for JSON
+ * contexts, `Uint8Array` for binary contexts.
  *
- * This is the only interface external callers need. Internal tree-walking
- * machinery is private to the context implementation.
+ * Internal tree-walking machinery is private to the implementation.
  */
-export interface SerializationContext<SerializedForm = unknown> {
-  /** Whether failed reconstructions produce `ProblematicValue` instead of
-   *  throwing. @default false */
-  readonly lenient: boolean;
-
+export interface EncodeContext<SerializedForm = unknown> {
   /** Encodes a fabric value into serialized form for boundary crossing. */
   encode(value: FabricValue): SerializedForm;
-
-  /** Decodes a serialized form back into a fabric value. */
-  decode(
-    data: SerializedForm,
-    context: ReconstructionContext,
-  ): FabricValue;
 }
 ```
 
-`JsonCodecEngine` implements `SerializationContext<string>`:
+`JsonCodecEngine` implements `EncodeContext<string>`, and supplies the matching
+decode direction:
 
 - `encode(value)` serializes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
@@ -2557,10 +2547,10 @@ export interface SerializationContext<SerializedForm = unknown> {
   forms back into runtime types.
 
 > **Why the boundary is this narrow.** Tag wrapping and unwrapping are
-> machinery internal to the context class, leaving only the
+> machinery internal to the engine, leaving only the
 > `encode(value) -> SerializedForm` / `decode(data, runtime) -> FabricValue`
-> pair as public API. The context owns the full pipeline rather than the tag
-> step alone, and the interface says so by exposing nothing else.
+> pair as public API. The engine owns the full pipeline rather than the tag
+> step alone, and its public surface says so by exposing nothing else.
 
 ### 4.4 Serialization Flow
 
@@ -2896,7 +2886,7 @@ export function jsonFromFabricValue(value: FabricValue): string;
  */
 export function fabricFromJsonValue(
   json: string,
-  context?: ReconstructionContext,
+  context?: DecodeContext,
 ): FabricValue;
 
 /**
@@ -2905,7 +2895,7 @@ export function fabricFromJsonValue(
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
-  context?: ReconstructionContext,
+  context?: DecodeContext,
 ): T;
 ```
 
@@ -2929,7 +2919,7 @@ The `memory` package wraps these at its serialization boundary
 - **Write path:** `encodeMemoryBoundary(value)` calls
   `jsonFromFabricValue(value)`.
 - **Read path:** `decodeMemoryBoundary(source)` calls
-  `fabricFromJsonValue(source, context)` with a memory `ReconstructionContext`.
+  `fabricFromJsonValue(source, context)` with a memory `DecodeContext`.
 
 ### 4.9 Fabric Value Conversion
 
@@ -3322,7 +3312,7 @@ boundary-only serialization and the three-layer architecture:
    (Section 8).
 5. Remove early conversion points (e.g., `convertCellsToLinks()`,
    legacy `Error` wrapping as `{ "@Error": ... }`).
-6. Introduce `SerializationContext` at each boundary (Section 4.7).
+6. Introduce `EncodeContext` at each boundary (Section 4.7).
 7. Update internal code to work with `FabricValue` types rather than JSON
    shapes or raw native objects.
 
@@ -3971,7 +3961,7 @@ values cross from internal serialization machinery to callers:
   further copying because the input tree is already deep-frozen.
 
 - **Codec `decode()` implementations honoring `shouldDeepFreeze`.** When a
-  reconstruction call's `ReconstructionContext.shouldDeepFreeze` is
+  reconstruction call's `DecodeContext.shouldDeepFreeze` is
   `true` (Section 2.5; the safe default), each codec `decode()`
   implementation produces a deep-frozen result (typically via the
   instance's own `[DEEP_FREEZE]`, recursing through `deepFreeze()`).
@@ -4004,7 +3994,7 @@ spec from being implementable.
   (sequencing of flag introductions, criteria for graduating each flag to
   default-on) will be addressed in a separate document.
 
-- **`ReconstructionContext` extensibility**: The minimal interface defined in
+- **`DecodeContext` extensibility**: The minimal interface defined in
   Section 2.5 covers `Cell` reconstruction. Other future fabric types may
   need additional context methods. Should the interface be extended, or should
   types cast to a broader interface? Recommendation: extend the interface as

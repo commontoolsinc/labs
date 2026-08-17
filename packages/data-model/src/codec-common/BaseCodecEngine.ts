@@ -7,9 +7,9 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
   CodecForFormat,
+  DecodeContext,
+  EncodeContext,
   NonterminalCodec,
-  ReconstructionContext,
-  SerializationContext,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
@@ -57,7 +57,7 @@ import { UnknownValue } from "./UnknownValue.ts";
  * varying an implementation detail; it is being a different format.
  */
 export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
-  implements SerializationContext<SerializedForm> {
+  implements EncodeContext<SerializedForm> {
   readonly #lenient: boolean;
   readonly #registry: CodecRegistry<Encoded>;
 
@@ -121,7 +121,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    */
   abstract decode(
     data: SerializedForm,
-    context: ReconstructionContext,
+    context: DecodeContext,
   ): FabricValue;
 
   /** Encodes an array, which is this format's business entirely. */
@@ -160,7 +160,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    */
   protected abstract decodeValue(
     data: Encoded,
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen?: Set<object>,
   ): FabricValue;
 
@@ -315,7 +315,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   protected decodeTagged(
     tag: any,
     rawState: Encoded,
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen?: Set<object>,
   ): FabricValue {
     if (!isCodecTypeTag(tag)) {

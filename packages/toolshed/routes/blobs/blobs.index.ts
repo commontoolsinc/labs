@@ -1,4 +1,4 @@
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
+import { EmptyDecodeContext } from "@commonfabric/data-model/codec-common";
 import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
@@ -15,7 +15,7 @@ import { memoryServer } from "@/routes/storage/memory.ts";
 
 const router = createRouter();
 const blobUploadCodec = newDefaultJsonCodecEngine();
-const blobReconstructionContext = new EmptyReconstructionContext(
+const blobDecodeContext = new EmptyDecodeContext(
   true,
   "blob upload payloads cannot contain cell references",
 );
@@ -175,7 +175,7 @@ const readRequestContents = async (request: Request) => {
   }
   try {
     return asBlobContents(
-      blobUploadCodec.decode(source, blobReconstructionContext),
+      blobUploadCodec.decode(source, blobDecodeContext),
     );
   } catch {
     return asBlobContents(decodeMemoryBoundary(source));

@@ -373,7 +373,7 @@ interface FabricCodec<Encoded> {
   decode(                                    // shallow
     typeTag: string,
     state: Encoded,
-    context: ReconstructionContext,
+    context: DecodeContext,
   ): FabricValue;
 }
 
@@ -412,7 +412,7 @@ contracts.
 `decode()` lives on the codec rather than being a constructor for two
 reasons:
 
-1. **Reconstruction-specific context**: It receives a `ReconstructionContext`
+1. **Reconstruction-specific context**: It receives a `DecodeContext`
    (and potentially other context) which shouldn't be mandated in a regular
    constructor's signature.
 2. **Instance interning**: It can return existing instances rather than always
@@ -445,7 +445,7 @@ class Cell<T> extends FabricInstance {
     decode(
       _typeTag: string,
       state: FabricValue,
-      context: ReconstructionContext,
+      context: DecodeContext,
     ): Cell<unknown> {
       return context.getCell(state as CellState);
     }
@@ -553,10 +553,8 @@ pipeline, dispatching per-type work to the codecs through a registry:
 ```typescript
 // Shown at module scope.
 // The public boundary (formal spec Section 4.3):
-interface SerializationContext<SerializedForm = unknown> {
-  readonly lenient: boolean;
+interface EncodeContext<SerializedForm = unknown> {
   encode(value: FabricValue): SerializedForm;
-  decode(data: SerializedForm, context: ReconstructionContext): FabricValue;
 }
 
 // Internally, a registry maps classes -> codecs (for encoding) and
@@ -610,7 +608,7 @@ function encodeValue(value: FabricValue): JsonCodecValue {
 // At boundary entry (inside the context's decode walk)
 function decodeValue(
   data: JsonCodecValue,
-  ctx: ReconstructionContext,
+  ctx: DecodeContext,
 ): FabricValue {
   const unwrapped = unwrapTag(data);
   if (unwrapped) {
@@ -623,7 +621,7 @@ function decodeValue(
 }
 ```
 
-The decode path needs runtime context (`ReconstructionContext`) to
+The decode path needs runtime context (`DecodeContext`) to
 reconstitute rich types (e.g., looking up existing Cell instances rather
 than creating duplicates).
 

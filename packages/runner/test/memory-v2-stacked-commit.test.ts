@@ -6,7 +6,7 @@ import {
 } from "@std/assert";
 
 import type { FabricValue } from "@commonfabric/api";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
+import { EmptyDecodeContext } from "@commonfabric/data-model/codec-common";
 import {
   fabricFromJsonValue,
   jsonFromFabricValue,
@@ -61,7 +61,7 @@ import {
 const signer = await Identity.fromPassphrase("memory-v2-stacked-commit");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
-const testReconstructionContext = new EmptyReconstructionContext(
+const testDecodeContext = new EmptyDecodeContext(
   true,
   "no cell reconstruction in stacked commit transport",
 );
@@ -430,7 +430,7 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
   protected override decode(payload: string): ScriptedTransportMessage {
     return fabricFromJsonValue(
       payload,
-      testReconstructionContext,
+      testDecodeContext,
     ) as ScriptedTransportMessage;
   }
   protected override encode(message: unknown): string {

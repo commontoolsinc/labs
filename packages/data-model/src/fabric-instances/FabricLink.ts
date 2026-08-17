@@ -18,8 +18,8 @@ import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts"
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   CODEC,
+  type DecodeContext,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
@@ -128,7 +128,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
       decode(
         typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        context: DecodeContext,
       ): FabricValue {
         // The constructor validates the shape and throws on any violation, so
         // bad state falls into the `catch`.

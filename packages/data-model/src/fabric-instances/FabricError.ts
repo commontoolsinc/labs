@@ -28,11 +28,11 @@ import {
 } from "@/codec-common/BaseFabricInstance.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { EmptyDecodeContext } from "@/codec-interface/EmptyDecodeContext.ts";
 import {
   CODEC,
+  type DecodeContext,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
@@ -383,7 +383,7 @@ export class FabricError extends FabricNativeWrapper<Error>
    */
   protected override [DEEP_CLONE_CORE](frozen: boolean): FabricError {
     const codec = FabricError[CODEC];
-    const reconstructContext = new EmptyReconstructionContext(
+    const reconstructContext = new EmptyDecodeContext(
       frozen,
       "no runtime context (FabricError deep-clone path).",
     );
@@ -456,7 +456,7 @@ export class FabricError extends FabricNativeWrapper<Error>
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        context: DecodeContext,
       ): FabricValue {
         const s = state as Record<string, FabricValue>;
         const type = (s.type as string) ?? (s.name as string) ?? "Error";

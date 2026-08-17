@@ -20,7 +20,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -144,7 +144,7 @@ describe("FabricRegExp", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricRegExp[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.RegExp;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const context = EMPTY_DECODE_CONTEXT;
 
       describe("recognizedTypeTag", () => {
         it("is the `RegExp` wire type tag", () => {

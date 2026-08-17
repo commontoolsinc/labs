@@ -8,18 +8,18 @@
  * do the walking.
  */
 
-import { BaseReconstructionContext } from "@/codec-interface/BaseReconstructionContext.ts";
+import { BaseDecodeContext } from "@/codec-interface/BaseDecodeContext.ts";
 import type { FabricValue } from "@/interface.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
 /** Dummy reconstruction context for tests. */
-export class DummyReconstructionContext extends BaseReconstructionContext {
+export class DummyDecodeContext extends BaseDecodeContext {
   override getCell(): never {
     throw new Error("getCell not implemented in test");
   }
 }
 
-export const dummyContext = new DummyReconstructionContext(true);
+export const dummyContext = new DummyDecodeContext(true);
 
 /**
  * Recursion-callback helpers for exercising the `[DEEP_FREEZE]` /

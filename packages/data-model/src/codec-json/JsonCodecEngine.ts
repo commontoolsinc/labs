@@ -5,12 +5,9 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 import type { FabricValue } from "@/interface.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
-import {
-  CODEC,
-  type ReconstructionContext,
-} from "@/codec-interface/interface.ts";
+import { CODEC, type DecodeContext } from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { EmptyDecodeContext } from "@/codec-interface/EmptyDecodeContext.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
@@ -22,7 +19,7 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from
  * the formal spec (Section 5).
  *
- * Public interface: `SerializationContext<string>`
+ * Public surface: `EncodeContext<string>`, plus the matching decode direction.
  * - `encode(value)` -- full pipeline: tree-encode + stringify
  * - `decode(data, context)` -- full pipeline: parse + tree-decode
  *
@@ -64,7 +61,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * never receives a tree it did not build itself, which is the condition
    * under which a decode can be handed a cycle at all.
    */
-  override decode(data: string, context: ReconstructionContext): FabricValue {
+  override decode(data: string, context: DecodeContext): FabricValue {
     if (!JsonCodecEngine.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
@@ -89,7 +86,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   decodeFromBytes(
     bytes: Uint8Array,
-    context: ReconstructionContext,
+    context: DecodeContext,
   ): FabricValue {
     const tree = JsonCodecEngine.#fromBytes(bytes);
     return this.decodeValue(tree, context);
@@ -207,7 +204,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override decodeValue(
     data: JsonCodecValue,
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen?: Set<object>,
   ): FabricValue {
     const decoded = JsonCodecEngine.#unwrapTag(data);
@@ -282,7 +279,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   #decodeArray(
     data: readonly JsonCodecValue[],
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen: Set<object> | undefined,
   ): FabricValue {
     const result: FabricValue[] = new Array(data.length);
@@ -335,7 +332,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   #decodePlainObject(
     data: Record<string, JsonCodecValue>,
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen: Set<object> | undefined,
   ): FabricValue {
     const result: Record<string, FabricValue> = {};
@@ -400,8 +397,8 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * lenient codec context, a cell reference degrades to a `ProblematicValue`
    * rather than throwing.
    */
-  static readonly #testingReconstructionContext = Object.freeze(
-    new EmptyReconstructionContext(
+  static readonly #testingDecodeContext = Object.freeze(
+    new EmptyDecodeContext(
       true,
       "no runtime context (validity check in a test-only helper).",
     ),
@@ -469,7 +466,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       // the tag first, so the malformed branch above loses nothing.)
       new JsonCodecEngine({ registry }).decode(
         encoded,
-        JsonCodecEngine.#testingReconstructionContext,
+        JsonCodecEngine.#testingDecodeContext,
       );
     }
 
@@ -518,7 +515,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       jsonCodecEngine.encode(
         jsonCodecEngine.decode(
           encoded,
-          JsonCodecEngine.#testingReconstructionContext,
+          JsonCodecEngine.#testingDecodeContext,
         ),
       );
     }

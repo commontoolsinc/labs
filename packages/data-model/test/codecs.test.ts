@@ -26,10 +26,10 @@ import { seemsLikeJsonEncodedFabricValue } from "@/codec-json/impl.ts";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
-import { BaseReconstructionContext } from "@/codec-interface/BaseReconstructionContext.ts";
+import { BaseDecodeContext } from "@/codec-interface/BaseDecodeContext.ts";
 
 /** Mock runtime for deserialization calls. */
-class MockRuntime extends BaseReconstructionContext {
+class MockRuntime extends BaseDecodeContext {
   constructor() {
     super(true);
   }
