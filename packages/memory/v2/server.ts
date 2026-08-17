@@ -3745,6 +3745,11 @@ export class Server {
 
   private async refreshLoop(initial?: Set<string>): Promise<void> {
     let pending = initial;
+    // Spaces whose fan-out failed deterministically this pass
+    // (schema-closure violations): their requeued dirty state must not be
+    // re-picked by the SAME loop, or the pass never terminates. They stay
+    // dirty for the next flush, which the repairing write triggers.
+    const held = new Set<string>();
     while (true) {
       if (initial === undefined && this.#dirtySpaces.size > 0) {
         await this.waitForConnectionQueuesToDrain(
@@ -3754,7 +3759,8 @@ export class Server {
           ),
         );
       }
-      const spaces = pending ? [...pending] : [...this.#dirtySpaces];
+      const spaces = (pending ? [...pending] : [...this.#dirtySpaces])
+        .filter((space) => !held.has(space));
       if (spaces.length === 0) {
         return;
       }
@@ -3846,6 +3852,25 @@ export class Server {
                   currentOrigins.set(id, origin);
                 }
               }
+            }
+            // A schema-closure failure is deterministic over the store: a
+            // rescheduled retry against the same state fails identically,
+            // so hold the requeued dirty state without rescheduling — the
+            // repairing write re-dirties the space and re-triggers
+            // delivery through the normal path. It is contained here
+            // rather than rethrown: the generic failure path would poison
+            // unrelated synchronization points (the space's
+            // publication-lock waiters, `idle()`) with a failure that is
+            // not theirs.
+            if (
+              error instanceof Error && error.name === "SchemaClosureError"
+            ) {
+              held.add(space);
+              console.warn(
+                "memory v2: schema-closure violation; delivery held until the space is repaired",
+                error,
+              );
+              return;
             }
             this.scheduleRefresh();
             throw error;

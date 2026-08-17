@@ -1515,7 +1515,7 @@ export class StorageManager implements IStorageManager {
    * Syncs the schema document behind `taggedHash` and, transitively, every
    * document its external refs reach, so a subsequent resolution of
    * `cid:<taggedHash>` finds a complete closure. Registration happens as
-   * each document's frame is applied (`#registerArrivedSchemaDocuments`);
+   * each document's frame is applied (`#validateArrivedSchemaDocuments`);
    * this helper drives the pulls and checks between them.
    *
    * Success promises PER-SPACE VERIFIED PRESENCE: every document in the
@@ -4235,21 +4235,29 @@ class SpaceReplica implements ISpaceReplica {
     };
   }
 
+  // `cid:` hashes whose schema documents verified in this replica: the
+  // forged-replacement detector's memory. Content addressing forbids the
+  // content under an id to change, so a later frame whose copy fails the
+  // identity check for one of these ids is a violation, not another class.
+  readonly #verifiedSchemaDocHashes = new Set<string>();
+
   /**
-   * Registers the `cid:` schema documents a sync frame delivered
-   * (`docs/specs/content-addressed-schemas.md`) and validates the read-side
-   * delivery guarantee over the WHOLE frame: every schema ref a delivered
+   * Validates the read-side delivery guarantee over a whole frame BEFORE
+   * any of it is applied (`docs/specs/content-addressed-schemas.md`), and
+   * registers the frame's schema documents: every schema ref a delivered
    * document embeds — a registered schema document's own refs, or a link
    * schema anywhere in an ordinary document's value — must reach a
-   * VERIFIED schema document this replica stores, delivered by this frame
-   * or an earlier one. A broken ref throws, because it is a delivery
-   * consistency bug to surface, never a hole to quietly repair; the
-   * asynchronous closure pull for callers who ask for a closure by hash
-   * lives in `syncSchemaDocumentClosure`. Direct refs suffice: a stored
-   * verified dependency was itself validated when it arrived, and a
-   * locally written one carried its closure in its own transaction.
+   * VERIFIED schema document delivered by this frame (the prospective
+   * overlay) or already stored. A broken ref throws with the replica
+   * untouched, because it is a delivery consistency bug to surface, never
+   * a hole to quietly repair; the asynchronous closure pull for callers
+   * who ask for a closure by hash lives in `syncSchemaDocumentClosure`.
+   * Direct refs suffice: a stored verified dependency was itself validated
+   * when it arrived, and a locally written one carried its closure in its
+   * own transaction. Registration is safe pre-apply — it is hash-verified
+   * and realm-global, so a rejected frame leaves only true content behind.
    *
-   * Which arrived `cid:` documents are schema documents is decided by
+   * Which `cid:` documents are schema documents is decided by
    * content-addressed identity, the classifier the server's assembly pass
    * also uses: a document is a schema document exactly when its id is the
    * schema interning of its value. Validation applies the same identity
@@ -4257,17 +4265,29 @@ class SpaceReplica implements ISpaceReplica {
    * and a forged local copy fails even when the realm registry holds a
    * valid twin from another space.
    */
-  #registerArrivedSchemaDocuments(upserts: SessionSync["upserts"]): void {
+  #validateArrivedSchemaDocuments(sync: SessionSync): void {
     const registered: [string, JSONSchema][] = [];
     // Dependency hash → the id of the first delivered document that
     // embeds it, for the violation report.
     const embedded = new Map<string, string>();
-    for (const upsert of upserts) {
-      if (upsert.deleted === true) continue;
+    // The prospective frame: what the replica will hold once this frame
+    // applies. Dependencies resolve against it first.
+    const overlay = new Map<string, unknown>();
+    const deletedInFrame = new Set<string>();
+    for (const remove of sync.removes) {
+      if (typeof remove.id === "string") deletedInFrame.add(remove.id);
+    }
+    for (const upsert of sync.upserts) {
       const id = upsert.id;
       if (typeof id !== "string") continue;
+      if (upsert.deleted === true) {
+        deletedInFrame.add(id);
+        continue;
+      }
       const doc = upsert.doc;
       if (!isObjectOrArray(doc)) continue;
+      overlay.set(id, doc);
+      deletedInFrame.delete(id);
       if (id.startsWith("cid:")) {
         const value = (doc as { value?: unknown }).value;
         const hash = id.slice("cid:".length);
@@ -4275,13 +4295,22 @@ class SpaceReplica implements ISpaceReplica {
           isSubschema(value) &&
           internSchemaAsTaggedHashString(value as JSONSchema) === hash
         ) {
+          this.#verifiedSchemaDocHashes.add(hash);
           registered.push([
             id,
             registerSchemaDocument(hash, value as JSONSchema),
           ]);
-          // A schema document's value is a schema — it carries no links,
-          // so the link scan below has nothing to find in it.
+          // A schema document's own refs are collected below from its
+          // registered form; schema keywords such as `default` may carry
+          // link-shaped DATA, so it is not link-scanned.
           continue;
+        }
+        if (this.#verifiedSchemaDocHashes.has(hash)) {
+          throw new Error(
+            `Schema document ${id} was replaced with content that does ` +
+              `not hash to its id — content under a content-addressed id ` +
+              `must never change.`,
+          );
         }
       }
       mapLinkSchemas(doc as FabricValue, (schema) => {
@@ -4298,27 +4327,35 @@ class SpaceReplica implements ISpaceReplica {
         if (!embedded.has(dep)) embedded.set(dep, id);
       }
     }
-    // Validation runs after the whole frame's registrations: a dependency
-    // may follow its dependent within the frame, and intra-frame order must
+    // Validation runs after the whole frame is collected: a dependency may
+    // follow its dependent within the frame, and intra-frame order must
     // not matter.
     for (const [dep, referrer] of embedded) {
-      if (!this.#isVerifiedSchemaDocStored(dep)) {
+      if (
+        deletedInFrame.has(`cid:${dep}`) ||
+        !this.#isVerifiedSchemaDocDelivered(dep, overlay)
+      ) {
         throw new Error(
           `Document ${referrer} was delivered with a broken schema ref: ` +
-            `cid:${dep} is not stored and verified in this replica. Every ` +
-            `delivered document's refs must resolve within the delivered ` +
-            `set (docs/specs/content-addressed-schemas.md).`,
+            `cid:${dep} is not delivered and verified in this replica. ` +
+            `Every delivered document's refs must resolve within the ` +
+            `delivered set (docs/specs/content-addressed-schemas.md).`,
         );
       }
     }
   }
 
   /**
-   * Whether this replica stores content under `cid:<hash>` that IS the
-   * schema document that id names — the identity check, not presence.
+   * Whether the prospective frame (`overlay`) or the stored replica holds
+   * content under `cid:<hash>` that IS the schema document that id names —
+   * the identity check, not presence.
    */
-  #isVerifiedSchemaDocStored(hash: string): boolean {
-    const doc = this.getDocument(`cid:${hash}` as URI);
+  #isVerifiedSchemaDocDelivered(
+    hash: string,
+    overlay: ReadonlyMap<string, unknown>,
+  ): boolean {
+    const doc = overlay.get(`cid:${hash}`) ??
+      this.getDocument(`cid:${hash}` as URI);
     if (!isObjectOrArray(doc)) return false;
     const value = (doc as { value?: unknown }).value;
     return isSubschema(value) &&
@@ -4341,6 +4378,10 @@ class SpaceReplica implements ISpaceReplica {
       this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
+
+    // Validation precedes every record mutation: a frame that fails the
+    // delivery guarantee is rejected whole, never half-installed.
+    this.#validateArrivedSchemaDocuments(sync);
 
     const touched = [
       ...sync.upserts.map((upsert) => ({
@@ -4383,10 +4424,6 @@ class SpaceReplica implements ISpaceReplica {
       record.materialized = undefined;
       this.#watchedIds.delete(docKey(id, remove.scope));
     }
-
-    // Before notifications: readers re-run on the notification, and their
-    // resolution must find the documents this frame delivered.
-    this.#registerArrivedSchemaDocuments(sync.upserts);
 
     // Parked accepts apply BEFORE the differential compare: when the frame
     // authoritatively covers a doc the session itself wrote (mixed

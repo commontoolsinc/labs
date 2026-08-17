@@ -17,7 +17,10 @@ import {
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
-import { registerSchemaDocument } from "../../runner/src/schema-registry.ts";
+import {
+  lookupSchemaDocument,
+  registerSchemaDocument,
+} from "../../runner/src/schema-registry.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { FabricValue } from "@commonfabric/api";
@@ -213,16 +216,23 @@ export type TrackGraphOptions = {
   sessionId?: string;
 };
 
+const cloneTracker = (
+  tracker: MapSetStringToPathSelectors,
+): MapSetStringToPathSelectors => {
+  const clone = new MapSetStringToPathSelectors(true);
+  for (const [key, selectors] of tracker) {
+    for (const selector of selectors) {
+      clone.add(key, selector);
+    }
+  }
+  return clone;
+};
+
 export const cloneTrackedGraphState = (
   engine: Engine.Engine,
   state: TrackedGraphState,
 ): TrackedGraphState => {
-  const tracker = new MapSetStringToPathSelectors(true);
-  for (const [key, selectors] of state.tracker) {
-    for (const selector of selectors) {
-      tracker.add(key, selector);
-    }
-  }
+  const tracker = cloneTracker(state.tracker);
 
   const manager = new EngineObjectManager(
     engine,
@@ -288,43 +298,62 @@ const entitiesFromTracker = (
   return entities;
 };
 
-// Per-version cache of document scans for embedded schema refs: the same
-// version of the same document is scanned at most once per engine, however
-// many sessions, queries, or refreshes deliver it.
+// Per-version cache of document scans for embedded schema refs, so a
+// version delivered again — by another session, query, or refresh — is
+// not rescanned. Only canonical `"space"`-scoped snapshots are cached: a
+// user- or session-scoped doc key names different content per principal,
+// and sharing scans across principals could hand one principal's refs to
+// another. Bounded; on overflow the cache clears and repopulates from
+// live deliveries.
+const SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES = 4096;
 const schemaRefScanCaches = new WeakMap<
   Engine.Engine,
   Map<QueryDocKey, { seq: number; refs: ReadonlySet<string> }>
 >();
 
+// Per-version record of schema documents that verified in this engine's
+// store (`docKey -> seq`), so revalidating an established delivery state
+// costs one map lookup per unchanged document. A version change drops the
+// entry's usefulness by construction (the seq comparison fails).
+const verifiedSchemaDocCaches = new WeakMap<
+  Engine.Engine,
+  Map<QueryDocKey, number>
+>();
+
 const EMPTY_SCHEMA_REFS: ReadonlySet<string> = new Set();
 
 /**
- * The external schema-ref hashes a delivered document carries: every link
- * schema anywhere in its value, and — for a delivered schema document —
- * the document's own hash, so the closure walk verifies it and follows
- * its refs. Which `cid:` documents are schema documents is decided by
- * content-addressed identity (`cid:` also holds blobs): a document is a
- * schema document exactly when its id is the schema interning of its
- * value.
+ * The external schema-ref hashes a delivered document carries. For a
+ * delivered schema document — decided by content-addressed identity,
+ * since `cid:` also holds blobs: a document is a schema document exactly
+ * when its id is the schema interning of its value — the document's own
+ * hash is the single ref, and the closure walk verifies it and follows
+ * its refs; its value is not link-scanned, because schema keywords such
+ * as `default` may carry link-shaped DATA that is not a link position.
+ * Every other document is scanned for link schemas anywhere in its value.
  */
 const scanSnapshotSchemaRefs = (
   engine: Engine.Engine,
   key: QueryDocKey,
   snapshot: EntitySnapshot,
 ): ReadonlySet<string> => {
+  const cacheable = (snapshot.scope ?? DEFAULT_SCOPE) === DEFAULT_SCOPE;
   let cache = schemaRefScanCaches.get(engine);
   if (cache === undefined) {
     cache = new Map();
     schemaRefScanCaches.set(engine, cache);
   }
-  const cached = cache.get(key);
-  if (cached !== undefined && cached.seq === snapshot.seq) {
-    return cached.refs;
+  if (cacheable) {
+    const cached = cache.get(key);
+    if (cached !== undefined && cached.seq === snapshot.seq) {
+      return cached.refs;
+    }
   }
   const refs = new Set<string>();
   const doc = snapshot.document;
   if (isObjectNotArray(doc)) {
     const { id } = fromDocKey(key);
+    let isSchemaDocument = false;
     if (id.startsWith("cid:")) {
       const hash = id.slice("cid:".length);
       const inner = (doc as { value?: unknown }).value;
@@ -332,22 +361,43 @@ const scanSnapshotSchemaRefs = (
         isSubschema(inner) &&
         internSchemaAsTaggedHashString(inner as JSONSchema) === hash
       ) {
+        isSchemaDocument = true;
         refs.add(hash);
       }
     }
-    mapLinkSchemas(doc as FabricValue, (schema) => {
-      for (
-        const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
-      ) {
-        refs.add(hash);
-      }
-      return schema;
-    });
+    if (!isSchemaDocument) {
+      mapLinkSchemas(doc as FabricValue, (schema) => {
+        for (
+          const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+        ) {
+          refs.add(hash);
+        }
+        return schema;
+      });
+    }
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;
-  cache.set(key, { seq: snapshot.seq, refs: result });
+  if (cacheable) {
+    if (cache.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) cache.clear();
+    cache.set(key, { seq: snapshot.seq, refs: result });
+  }
   return result;
 };
+
+/**
+ * Thrown when a query result's schema-document closure cannot be
+ * assembled from the delivering space's own store: a referenced document
+ * is missing, or its stored content does not hash to its id. The failure
+ * is deterministic over the store — a retry against the same state fails
+ * the same way — so the server's requeue path holds the dirty state
+ * without rescheduling, and the repairing write re-triggers delivery.
+ */
+export class SchemaClosureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SchemaClosureError";
+  }
+}
 
 /**
  * The read-side delivery guarantee, enforced at the result-assembly
@@ -355,18 +405,23 @@ const scanSnapshotSchemaRefs = (
  * delivered — a link schema anywhere in a document's value, or a delivered
  * schema document's own refs — must resolve to a verified schema document
  * in this space, and the whole closure joins the delivered set and the
- * watch set. A missing or forged closure document fails the query loudly:
- * the write-side guarantee installs closures with their referrers, so a
- * hole is a consistency bug to surface, never to repair around.
+ * watch set. A missing or forged closure document fails the query loudly
+ * ({@link SchemaClosureError}): the write-side guarantee installs closures
+ * with their referrers, so a hole is a consistency bug to surface, never
+ * to repair around.
+ *
+ * Two-phase: the walk verifies everything into staging and returns the
+ * tracker keys and snapshots to add — the caller commits them only after
+ * the whole closure verified, so a throw leaves tracker and session state
+ * untouched. `established` extends validation over previously delivered
+ * snapshots (a refresh): a dependency that was deleted or replaced with
+ * forged content fails the refresh even when its referrer did not change,
+ * and the per-version scan and verification caches make an unchanged
+ * established set cost map lookups.
  *
  * Verification is against THIS space's stored content — a verified copy in
  * the realm registry never stands in for the space's own (the
  * space-boundary rule in `docs/specs/content-addressed-schemas.md`).
- *
- * Returns the closure documents that were not already delivered or
- * watched; the caller merges them into its result set. Documents the
- * tracker already covers are watched sessions' prior deliveries and are
- * not re-sent.
  */
 const assembleSchemaDocClosures = (
   space: string,
@@ -375,8 +430,11 @@ const assembleSchemaDocClosures = (
   branch: string,
   tracker: MapSetStringToPathSelectors,
   delivered: ReadonlyMap<QueryDocKey, EntitySnapshot>,
-): Map<QueryDocKey, EntitySnapshot> => {
-  const additions = new Map<QueryDocKey, EntitySnapshot>();
+  established?: ReadonlyMap<QueryDocKey, EntitySnapshot>,
+): {
+  trackerAdds: QueryDocKey[];
+  additions: Map<QueryDocKey, EntitySnapshot>;
+} => {
   const pending: string[] = [];
   const seen = new Set<string>();
   const enqueue = (hash: string) => {
@@ -390,47 +448,66 @@ const assembleSchemaDocClosures = (
       enqueue(hash);
     }
   }
+  if (established !== undefined) {
+    for (const [key, snapshot] of established) {
+      if (delivered.has(key)) continue;
+      for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
+        enqueue(hash);
+      }
+    }
+  }
+  let verified = verifiedSchemaDocCaches.get(engine);
+  if (verified === undefined) {
+    verified = new Map();
+    verifiedSchemaDocCaches.set(engine, verified);
+  }
+  const trackerAdds: QueryDocKey[] = [];
+  const additions = new Map<QueryDocKey, EntitySnapshot>();
   while (pending.length > 0) {
     const hash = pending.pop()!;
     const id = `cid:${hash}`;
     const key = toDocKey(space, id, DEFAULT_SCOPE);
-    const loaded = manager.load({
-      id,
-      scope: DEFAULT_SCOPE,
-      type: "application/json",
-    });
-    const doc = loaded?.value;
+    manager.load({ id, scope: DEFAULT_SCOPE, type: "application/json" });
+    const snapshot = snapshotForDocKey(space, manager, branch, key);
+    const doc = snapshot?.document;
     const inner = isObjectNotArray(doc)
       ? (doc as { value?: unknown }).value
       : undefined;
-    if (inner === undefined) {
-      throw new Error(
+    if (snapshot === null || inner === undefined) {
+      throw new SchemaClosureError(
         `Query result requires schema document ${id}, which is not stored ` +
           `in this space. Every embedded schema ref must resolve within ` +
           `the delivered set (docs/specs/content-addressed-schemas.md).`,
       );
     }
-    if (internSchemaAsTaggedHashString(inner as JSONSchema) !== hash) {
-      throw new Error(
-        `Schema document ${id} did not verify in this space: its stored ` +
-          `content does not hash to its id.`,
-      );
+    // This exact version verified here before: skip re-hashing, but keep
+    // the registry entry warm (a registry clear may have dropped it).
+    let registered = verified.get(key) === snapshot.seq
+      ? lookupSchemaDocument(hash)
+      : undefined;
+    if (registered === undefined) {
+      try {
+        registered = registerSchemaDocument(hash, inner as JSONSchema);
+      } catch {
+        throw new SchemaClosureError(
+          `Schema document ${id} did not verify in this space: its stored ` +
+            `content does not hash to its id.`,
+        );
+      }
+      if (verified.size >= SCHEMA_REF_SCAN_CACHE_MAX_ENTRIES) verified.clear();
+      verified.set(key, snapshot.seq);
     }
-    const interned = registerSchemaDocument(hash, inner as JSONSchema);
-    for (const dep of collectExternalSchemaRefHashes(interned)) {
+    for (const dep of collectExternalSchemaRefHashes(registered)) {
       enqueue(dep);
     }
     if (!tracker.has(key)) {
-      tracker.add(key, REJECTING_SELECTOR);
+      trackerAdds.push(key);
       if (!delivered.has(key)) {
-        const snapshot = snapshotForDocKey(space, manager, branch, key);
-        if (snapshot !== null) {
-          additions.set(key, snapshot);
-        }
+        additions.set(key, snapshot);
       }
     }
   }
-  return additions;
+  return { trackerAdds, additions };
 };
 
 export const trackGraph = (
@@ -502,16 +579,18 @@ export const trackGraph = (
   }
 
   const entities = entitiesFromTracker(space, schemaTracker, manager, branch);
-  for (
-    const [key, snapshot] of assembleSchemaDocClosures(
-      space,
-      engine,
-      manager,
-      branch,
-      schemaTracker,
-      entities,
-    )
-  ) {
+  const staged = assembleSchemaDocClosures(
+    space,
+    engine,
+    manager,
+    branch,
+    schemaTracker,
+    entities,
+  );
+  for (const key of staged.trackerAdds) {
+    schemaTracker.add(key, REJECTING_SELECTOR);
+  }
+  for (const [key, snapshot] of staged.additions) {
     entities.set(key, snapshot);
   }
 
@@ -592,22 +671,28 @@ export const extendTrackedGraph = (
     if (snapshot === null) {
       continue;
     }
-    state.entities.set(key, snapshot);
     updates.set(key, snapshot);
   }
 
-  for (
-    const [key, snapshot] of assembleSchemaDocClosures(
-      space,
-      engine,
-      manager,
-      state.branch,
-      state.tracker,
-      updates,
-    )
-  ) {
-    state.entities.set(key, snapshot);
+  // Assembly validates before anything commits to `state.entities`; the
+  // caller stages the whole graph state (`cloneTrackedGraphState`), which
+  // covers the tracker mutations the traversal above already made.
+  const staged = assembleSchemaDocClosures(
+    space,
+    engine,
+    manager,
+    state.branch,
+    state.tracker,
+    updates,
+  );
+  for (const key of staged.trackerAdds) {
+    state.tracker.add(key, REJECTING_SELECTOR);
+  }
+  for (const [key, snapshot] of staged.additions) {
     updates.set(key, snapshot);
+  }
+  for (const [key, snapshot] of updates) {
+    state.entities.set(key, snapshot);
   }
 
   stats.managerReads = manager.readCount - readCountBefore;
@@ -691,8 +776,13 @@ export const refreshTrackedGraph = (
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
 
+  // Every pre-validation mutation goes to a tracker clone, and
+  // `state.entities` is written only after assembly validates: a failed
+  // refresh leaves the session state exactly as it was, so a repaired
+  // store retries from an uncorrupted baseline.
+  const stagedTracker = cloneTracker(state.tracker);
   for (const key of affectedDocs.keys()) {
-    state.tracker.delete(key);
+    stagedTracker.delete(key);
   }
 
   for (const [key, selectors] of affectedDocs) {
@@ -703,7 +793,7 @@ export const refreshTrackedGraph = (
         manager,
         { id, scope },
         selector,
-        state.tracker,
+        stagedTracker,
         sharedMemo,
         stats,
       );
@@ -723,7 +813,7 @@ export const refreshTrackedGraph = (
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
   for (const key of touched) {
-    if (!state.tracker.has(key)) {
+    if (!stagedTracker.has(key)) {
       continue;
     }
     const snapshot = snapshotForDocKey(
@@ -735,24 +825,32 @@ export const refreshTrackedGraph = (
     if (snapshot === null) {
       continue;
     }
-    state.entities.set(key, snapshot);
     updates.set(key, snapshot);
   }
 
-  for (
-    const [key, snapshot] of assembleSchemaDocClosures(
-      space,
-      engine,
-      manager,
-      state.branch,
-      state.tracker,
-      updates,
-    )
-  ) {
-    state.entities.set(key, snapshot);
+  // `established` extends validation over the whole previously delivered
+  // state: a deleted or forged dependency fails the refresh even when its
+  // referrer did not change.
+  const staged = assembleSchemaDocClosures(
+    space,
+    engine,
+    manager,
+    state.branch,
+    stagedTracker,
+    updates,
+    state.entities,
+  );
+  for (const key of staged.trackerAdds) {
+    stagedTracker.add(key, REJECTING_SELECTOR);
+  }
+  for (const [key, snapshot] of staged.additions) {
     updates.set(key, snapshot);
   }
 
+  state.tracker = stagedTracker;
+  for (const [key, snapshot] of updates) {
+    state.entities.set(key, snapshot);
+  }
   for (const [scope, ids] of invalidations) {
     state.manager.invalidateIds(ids, scope);
   }
