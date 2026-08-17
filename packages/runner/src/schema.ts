@@ -29,7 +29,7 @@ import { createCell, isCell } from "./cell.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import {
-  isExternalClosureComplete,
+  externalResolutionMissCount,
   onSchemaRegistryClear,
 } from "./schema-registry.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
@@ -132,6 +132,7 @@ const asCellCompoundCandidates = (
     const cached = compoundAsCellCandidatesCache.get(schema);
     if (cached !== undefined) return cached;
   }
+  const missesBefore = externalResolutionMissCount();
   const branches = [
     ...(Array.isArray(schema.anyOf) ? schema.anyOf : []),
     ...(Array.isArray(schema.oneOf) ? schema.oneOf : []),
@@ -151,11 +152,10 @@ const asCellCompoundCandidates = (
       }
     }
   }
-  // Populate only when every external ref's document closure is at hand: a
-  // branch whose cid: ref missed resolves to nothing and would be missing
-  // from a memoized candidate list forever, though the document can still
-  // arrive.
-  if (cacheable && isExternalClosureComplete(schema)) {
+  // Populate only when no `cid:` resolution missed while building: a branch
+  // whose ref missed resolves to nothing and would be missing from a
+  // memoized candidate list forever, though the document can still arrive.
+  if (cacheable && externalResolutionMissCount() === missesBefore) {
     compoundAsCellCandidatesCache.set(schema, candidates);
   }
   return candidates;
@@ -576,13 +576,15 @@ export function schemaHasIfc(
     }
     context.seenByRoot.set(rootKey, initialSeen);
   }
+  const missesBefore = externalResolutionMissCount();
   const result = _schemaHasIfcUncached(schema, fullSchema, context);
   // Populate only under a deep-frozen guard (see the invariant comment
-  // above `_hasIfcCache`), and only when every external ref's document
-  // closure is at hand — a verdict computed over an absent schema document
-  // must not outlive the document's arrival.
+  // above `_hasIfcCache`), and only when no `cid:` resolution missed while
+  // computing — a verdict computed over an absent schema document must not
+  // outlive the document's arrival.
   if (
-    isTopLevel && isDeepFrozen(schema) && isExternalClosureComplete(schema)
+    isTopLevel && isDeepFrozen(schema) &&
+    externalResolutionMissCount() === missesBefore
   ) {
     _hasIfcCache.set(schema, result);
   }

@@ -27,7 +27,7 @@ import {
 } from "./cfc/schema-refs.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import {
-  isExternalClosureComplete,
+  externalResolutionMissCount,
   onSchemaRegistryClear,
 } from "./schema-registry.ts";
 export {
@@ -554,6 +554,7 @@ export class ContextualFlowControl {
       // Intern the derivation so the cached result is the canonical frozen
       // instance: downstream identity-keyed caches (standardization, value
       // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
+      const missesBefore = externalResolutionMissCount();
       result = internSchema(ContextualFlowControl.schemaAtPathInternal(
         schema,
         path,
@@ -562,11 +563,12 @@ export class ContextualFlowControl {
         defaultEmptyProperties,
         defaultMissingProperty,
       ));
-      // Populate-only guard (NOT part of `cacheable`, which every call
-      // pays, hits included — measurably hot): a derivation computed while
-      // a referenced schema document was absent must not be memoized; the
-      // document can arrive later.
-      if (isExternalClosureComplete(schema)) {
+      // Populate-only guard: a derivation during which a `cid:` resolution
+      // missed must not be memoized — the document can arrive later. The
+      // miss counter is exact and walk-free; a schema-content check here
+      // paid a full walk, dormant `$defs` bodies included, on the first
+      // lookup for every schema identity.
+      if (externalResolutionMissCount() === missesBefore) {
         if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
         byKey.set(key, result);
       }

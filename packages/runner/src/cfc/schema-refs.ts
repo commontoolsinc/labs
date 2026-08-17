@@ -30,8 +30,10 @@ import {
   parseExternalSchemaRef,
 } from "../schema-decompose.ts";
 import {
+  externalResolutionMissCount,
   isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
+  noteExternalResolutionMiss,
   onSchemaRegistryClear,
 } from "../schema-registry.ts";
 
@@ -444,15 +446,17 @@ onSchemaRegistryClear(() => {
 
 /**
  * Resolve an external `cid:` ref through the schema-document registry.
- * Returns `undefined` on a miss — an unregistered document may still arrive,
- * which is exactly why callers must never memoize this failure (see
- * `containsExternalSchemaRef`).
+ * Returns `undefined` on a miss — an unregistered document may still
+ * arrive, which is exactly why the arrival-curable misses bump the
+ * external-resolution miss counter: derived caches memoize only across a
+ * derivation the counter did not move in.
  */
 const resolveExternalCfcSchemaRef = (
   parsed: ExternalSchemaRef,
 ): JSONSchema | undefined => {
   const document = lookupSchemaDocument(parsed.taggedHash);
   if (document === undefined) {
+    noteExternalResolutionMiss();
     logger.debug("cfc", () => [
       "Schema document not (yet) registered: ",
       parsed.taggedHash,
@@ -466,6 +470,7 @@ const resolveExternalCfcSchemaRef = (
   // would never invalidate them. Completeness is monotonic, so this gate
   // opens by itself once the closure lands.
   if (!isSchemaDocumentClosureComplete(parsed.taggedHash)) {
+    noteExternalResolutionMiss();
     logger.debug("cfc", () => [
       "Schema document closure not (yet) complete: ",
       parsed.taggedHash,
@@ -670,16 +675,13 @@ export const resolveCfcSchemaRefs = (
     // Intern the result so the cached instance is canonical and frozen —
     // downstream identity-keyed caches then hit, and sharing it across callers
     // is safe. Primitive and `undefined` results intern to themselves.
+    const missesBefore = externalResolutionMissCount();
     const raw = resolveCfcSchemaRefsUncached(schemaObj, fullSchema);
     const result = internSchema(raw);
-    if (
-      result === undefined &&
-      (containsExternalSchemaRef(schemaObj) ||
-        containsExternalSchemaRef(fullSchema))
-    ) {
-      // The failure may be an unregistered schema document; the document can
-      // arrive later, so this miss must not be pinned.
-      return undefined;
+    if (externalResolutionMissCount() !== missesBefore) {
+      // A `cid:` resolution missed during this walk; the document can
+      // arrive later, so nothing from this run may be pinned.
+      return result;
     }
     byFull.set(fullKey, result === undefined ? RESOLVED_UNDEFINED : result);
     return result;

@@ -39,7 +39,7 @@ import {
   containsExternalSchemaRef,
 } from "./schema-decompose.ts";
 import {
-  isExternalClosureComplete,
+  externalResolutionMissCount,
   lookupSchemaDocument,
   onSchemaRegistryClear,
   registerSchemaDocument,
@@ -347,11 +347,12 @@ function schemaAtPathCanonical(
   // Marker-bearing calls return freshly-spread tops over the (deep-frozen,
   // since `schema` is interned) children. Default calls may already be the
   // core method's canonical result; interning is idempotent in that case.
+  const missesBefore = externalResolutionMissCount();
   const result = internSchema(compute());
-  // Populate only when every external ref's document closure is at hand: a
+  // Populate only when no `cid:` resolution missed while computing: a
   // derivation computed over a hole must not outlive the documents'
   // arrival.
-  if (!isExternalClosureComplete(schema)) return result;
+  if (externalResolutionMissCount() !== missesBefore) return result;
   if (byPath.size >= INTERN_CACHE_MAX) byPath.clear();
   byPath.set(key, result);
   return result;
@@ -688,10 +689,11 @@ export function traverseDiagnosticsEnabled(): boolean {
  * and re-walks. Only memoizes memoizable (interned or deep-frozen, hence
  * identity-stable) inputs; the un-memoized fallback is byte-identical to
  * the direct call.
- * `null` records a failed resolution (`undefined` result) — except when the
- * input contains an external `cid:` ref, whose failure is deliberately not
- * memoized: the referenced schema document can arrive after the first
- * failed lookup, and a pinned `null` would outlive the arrival.
+ * `null` records a failed resolution (`undefined` result) — except when a
+ * `cid:` resolution missed during the walk (the miss counter moved), which
+ * is deliberately not memoized: the referenced schema document can arrive
+ * after the first failed lookup, and a pinned `null` would outlive the
+ * arrival.
  */
 let _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
 // Successful resolutions embed registry content; the registry clear (last
@@ -708,11 +710,12 @@ export function resolveSchemaRefsCanonical(
   }
   let cached = _resolvedRefCache.get(schema);
   if (cached === undefined) {
+    const missesBefore = externalResolutionMissCount();
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
-    if (resolved === undefined && containsExternalSchemaRef(schema)) {
-      // The failure may be an unregistered schema document, which can arrive
-      // later; memoizing it would pin the miss past the arrival.
-      return undefined;
+    if (externalResolutionMissCount() !== missesBefore) {
+      // A `cid:` resolution missed during this walk; the document can
+      // arrive later, so nothing from this run may be pinned.
+      return resolved;
     }
     // `null` (not `undefined`) is the cache's "resolved to nothing" sentinel,
     // so it stays distinct from "absent" on `Map.get()`.
