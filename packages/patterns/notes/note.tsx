@@ -5,7 +5,6 @@ import {
   type Default,
   equals,
   FS,
-  type FsProjection,
   generateText,
   handler,
   NAME,
