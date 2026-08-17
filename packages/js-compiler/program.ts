@@ -11,6 +11,16 @@ import { isDeno } from "@commonfabric/utils/env";
 
 import { ProgramResolver, Source } from "./interface.ts";
 
+/**
+ * Guard the Deno-only file system entry points. Each caller names itself, so a
+ * caller reaching this in a browser or worker is told which one it was.
+ */
+function requireDeno(what: string): void {
+  if (!isDeno()) {
+    throw new Error(`${what} is not supported in this environment.`);
+  }
+}
+
 function isOutsideRoot(relativePath: string): boolean {
   return relativePath === ".." || relativePath.startsWith(`..${SEPARATOR}`) ||
     isAbsolute(relativePath);
@@ -63,9 +73,7 @@ export function readDataFileSource(
   dataPath: string,
   rootPath: string,
 ): Source {
-  if (!isDeno()) {
-    throw new Error("readDataFileSource is not supported in this environment.");
-  }
+  requireDeno("readDataFileSource");
   const fsRoot = normalize(rootPath);
   const normalizedDataPath = normalize(dataPath);
   const relativeDataPath = relative(fsRoot, normalizedDataPath);
@@ -156,20 +164,12 @@ export class FileSystemProgramResolver implements ProgramResolver {
   }
 
   #realPath(path: string): string {
-    if (!isDeno()) {
-      throw new Error(
-        "FileSystemProgramResolver is not supported in this environment.",
-      );
-    }
+    requireDeno("FileSystemProgramResolver");
     return Deno.realPathSync(path);
   }
 
   #readFile(path: string): string {
-    if (!isDeno()) {
-      throw new Error(
-        "FileSystemProgramResolver is not supported in this environment.",
-      );
-    }
+    requireDeno("FileSystemProgramResolver");
     return Deno.readTextFileSync(path);
   }
 }
