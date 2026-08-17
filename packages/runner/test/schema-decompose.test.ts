@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
+  collectExternalSchemaRefHashes,
   type DecomposedSchema,
   decomposeSchema,
   formatExternalSchemaRef,
@@ -330,7 +331,7 @@ describe("schema-decompose", () => {
       ).toThrow(SchemaNotDecomposableError);
     });
 
-    it("throws for a `$ref` form outside the local and external vocabularies", () => {
+    it("throws for a `$ref` form outside the supported vocabularies", () => {
       expect(() =>
         decomposeSchema({
           properties: { x: { $ref: "#" } },
@@ -339,10 +340,31 @@ describe("schema-decompose", () => {
       expect(() =>
         decomposeSchema({
           properties: {
-            x: { $ref: "https://commonfabric.org/schemas/vdom.json" },
+            x: { $ref: "https://example.invalid/not-embedded.json" },
           },
         })
       ).toThrow(SchemaNotDecomposableError);
+    });
+
+    it("passes an embedded schema ref through as document content", () => {
+      const vnodeRef = "https://commonfabric.org/schemas/vnode.json";
+      const uiDef: JSONSchemaObj = {
+        type: "object",
+        properties: { $UI: { $ref: vnodeRef } },
+      };
+      const schema: JSONSchemaObj = {
+        type: "object",
+        properties: { ui: { $ref: "#/$defs/UI" } },
+        $defs: { UI: uiDef },
+      };
+      const decomposed = decomposeSchema(schema);
+      expect(decomposed.documents.get(internSchemaAsTaggedHashString(uiDef)))
+        .toEqual(uiDef);
+      // The embedded ref is content, not closure: no document behind it, and
+      // no external-ref bookkeeping for the document that carries it.
+      expect(decomposed.documents.size).toBe(2);
+      expect(collectExternalSchemaRefHashes(uiDef).size).toBe(0);
+      expectSameDecomposition(decomposed, redecompose(decomposed));
     });
 
     it("throws for a nested `$defs` scope", () => {

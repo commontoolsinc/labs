@@ -18,7 +18,10 @@ import {
 // definition-scope logic, not this flag.)
 const ALL_SUBSCHEMAS: SchemaWalkOptions = { includeUnused: true };
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
+import {
+  embeddedSchemas,
+  isEmbeddedCfcSchemaRef,
+} from "../embedded-schemas.ts";
 import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 import {
   containsExternalSchemaRef,
@@ -31,6 +34,8 @@ import {
   lookupSchemaDocument,
   onSchemaRegistryClear,
 } from "../schema-registry.ts";
+
+export { isEmbeddedCfcSchemaRef };
 
 const logger = getLogger("cfc");
 
@@ -75,17 +80,9 @@ const resolvedRefCache = new WeakMap<
   Map<string, JSONSchema | undefined>
 >();
 
-const embeddedSchemas: Record<string, JSONSchema> = {
-  "https://commonfabric.org/schemas/vdom.json": rendererVDOMSchema,
-  "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
-};
-
 const isRootDefsSchemaPointer = (pathToDef: readonly string[]): boolean =>
   pathToDef.length === 3 && pathToDef[0] === "#" && pathToDef[1] === "$defs" &&
   pathToDef[2].length > 0;
-
-export const isEmbeddedCfcSchemaRef = (schemaRef: string): boolean =>
-  Object.hasOwn(embeddedSchemas, schemaRef);
 
 export const cfcSchemaToObject = (schema?: JSONSchema): JSONSchemaObj =>
   (schema === true || schema === undefined)
@@ -816,7 +813,7 @@ export const resolveCfcSchemaRefsOrThrow = (
     throw new Error(
       `Failed to resolve $ref: ${ref}. ` +
         (typeof ref === "string" && ref.startsWith("http")
-          ? `External $ref URLs must be registered in embeddedSchemas (packages/runner/src/cfc/schema-refs.ts). ` +
+          ? `External $ref URLs must be registered in embeddedSchemas (packages/runner/src/embedded-schemas.ts). ` +
             `If you added a new native type to NATIVE_TYPE_SCHEMAS in ` +
             `packages/schema-generator/src/formatters/native-type-formatter.ts, ` +
             `add its schema to embeddedSchemas as well.`

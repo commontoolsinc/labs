@@ -138,10 +138,20 @@ Because the external refs are part of a document's content, the reference
 closure is a Merkle DAG: the root document's hash pins the exact content of
 every document reachable from it.
 
+An embedded schema ref — a URL in the runtime's static embedded-schema
+table, such as the renderer's
+`https://commonfabric.org/schemas/vnode.json` — is an allowed leaf inside
+a document. Every realm resolves it from the same table, so it hashes as
+ordinary document content and contributes nothing to the closure. The
+embedded table is transitional: the expectation is that its residents
+retire in favor of ordinary `cid:` documents, at which point the table
+goes with them, while documents already carrying the URLs keep resolving
+until then.
+
 Decomposition refuses input it cannot represent faithfully — a `$ref`
-outside the `#/$defs/<name>` and external vocabularies, a dangling local
-ref, a nested `$defs` scope, the deprecated `definitions` keyword, the
-resource-scope keywords (`$id`, `$anchor`, `$dynamicAnchor`,
+outside the `#/$defs/<name>`, external, and embedded vocabularies, a
+dangling local ref, a nested `$defs` scope, the deprecated `definitions`
+keyword, the resource-scope keywords (`$id`, `$anchor`, `$dynamicAnchor`,
 `$dynamicRef`, and the 2019-09 pair `$recursiveAnchor` and
 `$recursiveRef`, whose scoping the rewrite cannot preserve), and an
 external
