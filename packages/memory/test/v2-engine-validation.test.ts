@@ -18,6 +18,7 @@ import {
 } from "../v2/engine.ts";
 import { encodeMemoryBoundary } from "../v2.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 
 const withEngine = async (
   fn: (engine: Engine) => void | Promise<void>,
@@ -295,5 +296,139 @@ Deno.test("rejects a set that changes a content-addressed document", async () =>
         ],
       }),
     });
+  });
+});
+
+Deno.test("validates the schema closure a commit's content references", async () => {
+  await withEngine((engine) => {
+    const leafSchema = { type: "string", title: "closure-leaf" } as const;
+    const leafHash = internSchemaAsTaggedHashString(leafSchema);
+    const rootSchema = {
+      type: "object",
+      properties: { x: { $ref: `cid:${leafHash}` } },
+    } as const;
+    const rootHash = internSchemaAsTaggedHashString(rootSchema);
+    const carrier = (target: string) => ({
+      linked: {
+        "/": {
+          "link@1": {
+            id: target,
+            path: [],
+            schema: { $ref: `cid:${rootHash}` },
+          },
+        },
+      },
+    });
+
+    // A reference nothing backs is rejected outright.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [setOp("of:closure-carrier", carrier("of:t1"))],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The whole closure included in the SAME commit is accepted...
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [
+          setOp("of:closure-carrier", carrier("of:t1")),
+          setOp(`cid:${rootHash}`, rootSchema),
+          setOp(`cid:${leafHash}`, leafSchema),
+        ],
+      }),
+    });
+
+    // ...and once stored, it satisfies later commits by itself.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        operations: [setOp("of:closure-carrier-2", carrier("of:t2"))],
+      }),
+    });
+  });
+});
+
+Deno.test("rejects incomplete or forged closures included in a commit", async () => {
+  await withEngine((engine) => {
+    const leafSchema = { type: "number", title: "partial-leaf" } as const;
+    const leafHash = internSchemaAsTaggedHashString(leafSchema);
+    const rootSchema = {
+      type: "object",
+      properties: { y: { $ref: `cid:${leafHash}` } },
+    } as const;
+    const rootHash = internSchemaAsTaggedHashString(rootSchema);
+
+    // Installing the root without its dependency is an incomplete closure:
+    // the walk is transitive.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [setOp(`cid:${rootHash}`, rootSchema)],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+
+    // Forged content under a referenced id is rejected by the identity
+    // check, so a forged first-install cannot back a reference.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(2, {
+            operations: [
+              setOp(`cid:${rootHash}`, rootSchema),
+              setOp(`cid:${leafHash}`, { type: "boolean", title: "forged" }),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "whose included content does not verify",
+    );
+
+    // A patch's own values introduce requirements too.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        operations: [setOp("of:patched-carrier", { plain: true })],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(4, {
+            operations: [{
+              op: "patch",
+              id: "of:patched-carrier",
+              patches: [{
+                op: "add",
+                path: "/value/linked",
+                value: {
+                  "/": {
+                    "link@1": {
+                      id: "of:patched-target",
+                      path: [],
+                      schema: { $ref: `cid:${rootHash}` },
+                    },
+                  },
+                },
+              }],
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
   });
 });

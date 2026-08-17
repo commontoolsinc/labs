@@ -67,6 +67,19 @@ describe("schema-doc-sync", () => {
     expect(result.ok).toBeDefined();
   };
 
+  const writeDocsResult = async (
+    values: Record<string, FabricValue>,
+  ) => {
+    const tx = writer.edit();
+    for (const [id, value] of Object.entries(values)) {
+      tx.writeValueOrThrow(
+        { space, id: id as URI, scope: "space", path: [] },
+        value,
+      );
+    }
+    return await tx.commit();
+  };
+
   const writeSchemaDocs = (decomposed: DecomposedSchema): Promise<void> =>
     writeDocs(Object.fromEntries(
       [...decomposed.documents].map((
@@ -237,7 +250,7 @@ describe("schema-doc-sync", () => {
     expect(stored).toBeDefined();
   });
 
-  it("fails a sync whose frame delivers a document with a broken external ref, and completes once the closure lands", async () => {
+  it("rejects a commit installing a schema document without its closure, and delivers once complete", async () => {
     const schema: JSONSchemaObj = {
       type: "object",
       properties: { brokenRef: { $ref: "#/$defs/BrokenRefLeaf" } },
@@ -253,33 +266,28 @@ describe("schema-doc-sync", () => {
     const leafHash = [...decomposed.documents.keys()]
       .find((hash) => hash !== rootHash)!;
 
-    // Only the root exists, so the closure cannot be assembled — the
-    // server's result-assembly pass must fail the query loudly, never
-    // deliver a result with a hole in it.
-    await writeDocs({
+    // The root references the leaf, so installing it alone is an
+    // incomplete closure the commit boundary refuses.
+    const partial = await writeDocsResult({
       [`cid:${rootHash}`]: decomposed.documents.get(rootHash)! as FabricValue,
     });
+    expect(String(partial.error?.message)).toContain(
+      "neither included in the commit nor stored in the space",
+    );
+
+    // The complete closure commits, and a sync delivers it whole.
+    await writeSchemaDocs(decomposed);
     const provider = readerStorage.open(space);
-    const first = await provider.sync(`cid:${rootHash}` as URI, {
+    const synced = await provider.sync(`cid:${rootHash}` as URI, {
       path: [],
       schema: false,
     });
-    expect(String(first.error?.message)).toContain(
-      "not stored in this space",
-    );
-    expect(isSchemaDocumentClosureComplete(rootHash)).toBe(false);
-
-    // The leaf lands late. A fresh sync (differently selected, so coverage
-    // does not elide it) delivers the now-complete closure.
-    await writeDocs({
-      [`cid:${leafHash}`]: decomposed.documents.get(leafHash)! as FabricValue,
-    });
-    const second = await provider.sync(`cid:${rootHash}` as URI, {
-      path: [],
-      schema: true,
-    });
-    expect(second.error).toBeUndefined();
+    expect(synced.error).toBeUndefined();
     expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
+    const stored = (provider as unknown as {
+      get: (uri: URI) => unknown;
+    }).get(`cid:${leafHash}` as URI);
+    expect(stored).toBeDefined();
   });
 
   it("delivers the closure behind a document's embedded refs on a schema-less pull", async () => {
@@ -382,12 +390,12 @@ describe("schema-doc-sync", () => {
     }
   });
 
-  it("fails a pull whose carrier embeds a link schema ref that no document backs", async () => {
+  it("rejects a commit whose carrier references a schema document nothing backs", async () => {
     const missing = internSchemaAsTaggedHashString({
       type: "object",
       properties: { danglingCarrierRef: { type: "string" } },
     });
-    await writeDocs({
+    const result = await writeDocsResult({
       "of:dangling-carrier": {
         linked: {
           "/": {
@@ -400,17 +408,12 @@ describe("schema-doc-sync", () => {
         },
       } as FabricValue,
     });
-
-    const result = await readerStorage.open(space).sync(
-      "of:dangling-carrier" as URI,
-      { path: [], schema: false },
-    );
     expect(String(result.error?.message)).toContain(
-      "not stored in this space",
+      "neither included in the commit nor stored in the space",
     );
   });
 
-  it("fails a pull whose stored dependency is forged even though the realm registry holds a valid copy", async () => {
+  it("rejects a commit backing a reference with forged schema content", async () => {
     const schema: JSONSchemaObj = {
       type: "object",
       properties: { forgedDep: { $ref: "#/$defs/ForgedDepLeaf" } },
@@ -425,20 +428,12 @@ describe("schema-doc-sync", () => {
     const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
     const leafHash = [...decomposed.documents.keys()]
       .find((hash) => hash !== rootHash)!;
-    await writeDocs({
+    const result = await writeDocsResult({
       [`cid:${rootHash}`]: decomposed.documents.get(rootHash)! as FabricValue,
       [`cid:${leafHash}`]: { type: "number", title: "forged dep" },
     });
-    // The realm registry holds the valid leaf (as if another space
-    // delivered it); assembly must still fail on THIS space's forgery.
-    registerSchemaDocument(leafHash, decomposed.documents.get(leafHash)!);
-
-    const result = await readerStorage.open(space).sync(
-      `cid:${rootHash}` as URI,
-      { path: [], schema: false },
-    );
     expect(String(result.error?.message)).toContain(
-      "did not verify in this space",
+      "whose included content does not verify",
     );
   });
 
@@ -496,169 +491,6 @@ describe("schema-doc-sync", () => {
     await updated.promise;
     cancel();
     expect(getDoc(`cid:${rootHash}` as URI)).toBeDefined();
-  });
-
-  it("skips a broken session's frames (logged) and delivers once the store heals", async () => {
-    const decomposed = decomposeSchema({
-      type: "object",
-      properties: { brokenClosure: { $ref: "#/$defs/BrokenClosureLeaf" } },
-      $defs: {
-        BrokenClosureLeaf: {
-          type: "object",
-          properties: { brokenClosureLeaf: { type: "string" } },
-        },
-      },
-    });
-    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
-    const leafHash = [...decomposed.documents.keys()]
-      .find((hash) => hash !== rootHash)!;
-    await writeDocs({
-      "of:broken-closure-carrier": { plain: "v1" } as FabricValue,
-    });
-    const provider = readerStorage.open(space);
-    const first = await provider.sync("of:broken-closure-carrier" as URI, {
-      path: [],
-      schema: false,
-    });
-    expect(first.error).toBeUndefined();
-
-    // The carrier gains a ref but only PART of the closure is written —
-    // the write-side guarantee deliberately violated. The push refresh
-    // logs the failure and skips this session's frame; the session keeps
-    // its consistent pre-break view.
-    await writeDocs({
-      [`cid:${rootHash}`]: decomposed.documents.get(rootHash)! as FabricValue,
-      "of:broken-closure-carrier": {
-        linked: {
-          "/": {
-            [LINK_V1_TAG]: {
-              id: "of:broken-closure-target",
-              path: [],
-              schema: { $ref: decomposed.rootRef },
-            },
-          },
-        },
-      } as FabricValue,
-    });
-    await server.idle();
-
-    // A fresh session's initial query fails against the hole, with the
-    // assembly diagnostic answering the request.
-    const probeStorage = EmulatedStorageManager.connectTo(server, {
-      as: await Identity.fromPassphrase("schema-doc-sync"),
-    });
-    try {
-      const probe = await probeStorage.open(space).sync(
-        "of:broken-closure-carrier" as URI,
-        { path: [], schema: false },
-      );
-      expect(String(probe.error?.message)).toContain(
-        "not stored in this space",
-      );
-    } finally {
-      await probeStorage.close();
-    }
-
-    // Installing the missing document is an ordinary first write; the
-    // next refresh that touches the carrier evaluates cleanly and the
-    // SAME session's watch delivers what it missed.
-    const healed = defer<void>();
-    const cancel = (provider as unknown as {
-      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
-    }).sink("of:broken-closure-carrier" as URI, (doc: unknown) => {
-      if (
-        doc !== null && typeof doc === "object" && doc !== undefined &&
-        (doc as { value?: { repaired?: unknown } }).value?.repaired === true
-      ) {
-        healed.resolve();
-      }
-    });
-    await writeDocs({
-      [`cid:${leafHash}`]: decomposed.documents.get(leafHash)! as FabricValue,
-      "of:broken-closure-carrier": {
-        repaired: true,
-        linked: {
-          "/": {
-            [LINK_V1_TAG]: {
-              id: "of:broken-closure-target",
-              path: [],
-              schema: { $ref: decomposed.rootRef },
-            },
-          },
-        },
-      } as FabricValue,
-    });
-    await healed.promise;
-    cancel();
-    const getDoc = (provider as unknown as {
-      get: (uri: URI) => unknown;
-    }).get.bind(provider);
-    expect(getDoc(`cid:${rootHash}` as URI)).toBeDefined();
-    expect(getDoc(`cid:${leafHash}` as URI)).toBeDefined();
-    expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
-  });
-
-  it("skips only the affected session's frame: an unrelated watch keeps receiving updates", async () => {
-    await writeDocs({
-      "of:isolated-broken-carrier": { plain: "v1" } as FabricValue,
-      "of:isolated-bystander": { counter: 1 } as FabricValue,
-    });
-    const bystanderStorage = EmulatedStorageManager.connectTo(server, {
-      as: await Identity.fromPassphrase("schema-doc-sync"),
-    });
-    try {
-      const brokenProvider = readerStorage.open(space);
-      const bystanderProvider = bystanderStorage.open(space);
-      const firstBroken = await brokenProvider.sync(
-        "of:isolated-broken-carrier" as URI,
-        { path: [], schema: false },
-      );
-      expect(firstBroken.error).toBeUndefined();
-      const firstBystander = await bystanderProvider.sync(
-        "of:isolated-bystander" as URI,
-        { path: [], schema: false },
-      );
-      expect(firstBystander.error).toBeUndefined();
-
-      // The first session's carrier gains a ref no document backs; its
-      // delivery is held. The bystander session's watch must keep
-      // flowing — this hangs if one session's hole freezes the space.
-      const missing = internSchemaAsTaggedHashString({
-        type: "object",
-        properties: { isolatedMissing: { type: "string" } },
-      });
-      await writeDocs({
-        "of:isolated-broken-carrier": {
-          linked: {
-            "/": {
-              [LINK_V1_TAG]: {
-                id: "of:isolated-broken-target",
-                path: [],
-                schema: { $ref: `cid:${missing}` },
-              },
-            },
-          },
-        } as FabricValue,
-      });
-      const bystanderSaw = defer<void>();
-      const cancel = (bystanderProvider as unknown as {
-        sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
-      }).sink("of:isolated-bystander" as URI, (doc: unknown) => {
-        if (
-          doc !== null && typeof doc === "object" && doc !== undefined &&
-          (doc as { value?: { counter?: unknown } }).value?.counter === 2
-        ) {
-          bystanderSaw.resolve();
-        }
-      });
-      await writeDocs({
-        "of:isolated-bystander": { counter: 2 } as FabricValue,
-      });
-      await bystanderSaw.promise;
-      cancel();
-    } finally {
-      await bystanderStorage.close();
-    }
   });
 
   it("keeps registrations alive past one manager's close while another session holds its lease", async () => {

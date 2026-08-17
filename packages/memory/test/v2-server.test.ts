@@ -2423,11 +2423,8 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = nextResponse<{ sessionId: string; sessionToken: string }>(
-      messages,
-    );
+    const opened = nextResponse<{ sessionId: string }>(messages);
     const sessionId = opened.ok!.sessionId;
-    const sessionToken = opened.ok!.sessionToken;
 
     await connection.receive(encodeMemoryBoundary({
       type: "transact",
