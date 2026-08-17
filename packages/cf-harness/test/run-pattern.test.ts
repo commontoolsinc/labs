@@ -1089,7 +1089,7 @@ describe("run-pattern", () => {
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("cancelled");
       expect(output.message).toBe(
-        'run_pattern was cancelled; the name "doubling-report" was already being assigned and is not withdrawn, so it resolves to the created piece, which is stopped and no longer listed',
+        'run_pattern was cancelled; the name "doubling-report" was being assigned when the run was cancelled and is not withdrawn, so it may still resolve to the created piece, which is stopped and no longer listed',
       );
       // The assignment really committed after the cancelled output, so the
       // name resolves below because the run kept it rather than because the
@@ -1144,8 +1144,12 @@ describe("run-pattern", () => {
 
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("cancelled");
-      expect(output.message).toContain("cancelled");
       expect(result.runState.status).toBe("completed");
+      // The detail reports the list as this path left it rather than as the
+      // path intended: the removal was attempted and refused, so the piece is
+      // still listed and the message says so.
+      expect(output.message).toContain("was left listed");
+      expect(output.message).not.toContain("no longer listed");
       // The removal really was attempted and really did fail, so the
       // cancellation above stands despite it rather than beside it.
       expect(removeCalls).toBe(1);

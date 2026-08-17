@@ -819,6 +819,7 @@ export const runPatternTool: HarnessToolDefinition<
       // Nothing withdraws the assignment, so the name the run had begun
       // taking is a name it keeps.
       let slugAssignmentBegun = false;
+      let delistedPiece = false;
       const publishing = (async () => {
         try {
           // The registry join goes first, so a space with no piece list to
@@ -855,15 +856,25 @@ export const runPatternTool: HarnessToolDefinition<
             // cancelled run hands back no `resultRef`, so a piece left listed
             // under no slug is one the caller was given no way to reach —
             // except where the abort landed inside the slug assignment, whose
-            // name goes on reaching it, which is why the output below says so.
+            // name may go on reaching it, which is why the output below says so.
             await pieces.remove(piece.getCell());
+            delistedPiece = true;
           } catch {
-            // Best-effort: the cancelled output stands either way.
+            // Best-effort. The cancelled output stands either way, and reports
+            // the piece as left listed rather than claiming a removal that did
+            // not happen.
           }
         }
+        // The detail reports what this path observed and nothing beyond it. An
+        // assignment that had started may or may not have committed — the abort
+        // races the write rather than waiting on it — so the name is described
+        // as one that may still resolve, and the piece's presence in the list
+        // is stated from the removal actually performed.
         return cancelledOutput(
           slugAssignmentBegun
-            ? `the name "${registrationSlug}" was already being assigned and is not withdrawn, so it resolves to the created piece, which is stopped and no longer listed`
+            ? `the name "${registrationSlug}" was being assigned when the run was cancelled and is not withdrawn, so it may still resolve to the created piece, which is stopped and ${
+              delistedPiece ? "no longer listed" : "was left listed"
+            }`
             : undefined,
         );
       }
