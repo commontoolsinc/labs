@@ -28,10 +28,13 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * - `encodeToBytes(value, env?)` -- as `encode()`, to UTF-8 bytes
  * - `decodeFromBytes(bytes, env)` -- as `decode()`, from UTF-8 bytes
  *
- * The machinery beneath is not public: tag wrapping, byte conversion and
- * the tree walkers are `protected` where a subclass overrides them and
- * private where nothing does. Per-type encoding and decoding is delegated
- * to the `FabricCodec`s in the `CodecRegistry`.
+ * The machinery beneath is not public, and divides in two. The tree
+ * walkers, the tag wrapper and the context factories are `protected`:
+ * that is the surface a second engine extends, whether or not this one
+ * overrides any given member of it. This class's own helpers -- byte
+ * conversion, wire-text parsing, tag unwrapping and the container decode
+ * arms -- are `#`-private. Per-type encoding and decoding is delegated to
+ * the `FabricCodec`s in the `CodecRegistry`.
  *
  * **Cycles are refused** and **shared references are flattened**, per Section
  * 1.6 of the formal spec, which requires an engine to say which of these it
