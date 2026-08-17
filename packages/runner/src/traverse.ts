@@ -2184,7 +2184,27 @@ function reportMissingLinkTarget(
 function getTrackerKey(
   address: IMemorySpaceAddress,
 ): string {
-  return `${address.space}/${address.scope ?? "space"}/${address.id}`;
+  return schemaTrackerKey(address.space, address.id, address.scope);
+}
+
+/**
+ * Key under which a document's reached selectors are recorded in a schema
+ * tracker. An absent scope keys as `space`, matching how storage defaults one.
+ *
+ * Every writer of a tracker key builds it here, as does the query side that
+ * looks one up. `isLinkedDocumentCovered` is the exception: it builds its
+ * lookup key from a link's own `scope` without that default, so a link whose
+ * scope is absent looks up a key no writer produces and the coverage check
+ * answers "not covered". That is why it is spelled out there rather than
+ * calling this — routing it through here changes which documents a traversal
+ * re-walks, which is a behavioral change rather than a tidy-up.
+ */
+export function schemaTrackerKey(
+  space: string,
+  id: string,
+  scope?: CellScope | null,
+): `${string}/${CellScope}/${string}` {
+  return `${space}/${scope ?? "space"}/${id}`;
 }
 
 /**
