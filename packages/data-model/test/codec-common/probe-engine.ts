@@ -411,7 +411,11 @@ export function newProbeEngine(
     record?: HostRecord;
     extraCodecs?: readonly FabricCodec<ProbeValue>[];
   },
-): { engine: ProbeEngine; record: HostRecord } {
+): {
+  engine: ProbeEngine;
+  record: HostRecord;
+  registry: CodecRegistry<ProbeValue>;
+} {
   const record = options?.record ?? newRecord();
   const registry = new CodecRegistry<ProbeValue>(PROBE_FORMAT);
 
@@ -434,6 +438,7 @@ export function newProbeEngine(
   Object.freeze(registry);
 
   return {
+    registry,
     engine: new ProbeEngine({ registry, lenient: options?.lenient ?? false }),
     record,
   };

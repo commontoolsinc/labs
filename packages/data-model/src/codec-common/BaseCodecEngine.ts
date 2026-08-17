@@ -105,6 +105,11 @@ export abstract class BaseCodecEngine<
    * has nothing for a marker to distinguish it from. A format that carries one
    * says what it is, and one that does not says why not.
    *
+   * `env` is what a codec would reach the running system through, and is
+   * carried on the context this call mints. A caller that names none gets
+   * `NULL_LIVE_ENVIRONMENT`, so a codec asking such an environment for a
+   * cell fails by name rather than on `undefined`.
+   *
    * @throws If `value` holds something the format cannot carry: a
    *   `FabricSpecialObject` whose class no codec in the registry claims, a
    *   cycle, or an object that is no kind of `FabricValue` at all.

@@ -25,11 +25,13 @@ export class EncodeContext {
   /**
    * Constructs an instance.
    *
-   * The environment is held for the same reason the decode side holds one: a
-   * codec may need to reach the running system to encode a value, and the
-   * alternative is threading it beside the context through every walk method.
-   * An engine whose caller named none passes the null environment, so a codec
-   * that does reach for one fails by name rather than by `undefined`.
+   * The environment is held here rather than threaded beside the context
+   * through every walk method, matching the decode side. Nothing on the
+   * encode path reads it yet -- a codec is handed a value, not a context --
+   * and it is here so that a format whose codecs come to need the running
+   * system has somewhere for it to be. An engine whose caller named no
+   * environment passes the null one, which fails by name when asked for a
+   * cell.
    */
   constructor(env: LiveEnvironment) {
     this.#env = env;

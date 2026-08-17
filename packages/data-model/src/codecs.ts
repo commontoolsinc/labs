@@ -71,7 +71,7 @@ const jsonCodecEngine = newDefaultJsonCodecEngine();
  * Encodes a fabric value to a JSON string in the standard `FabricValue`
  * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  * If no live environment is given, {@link NULL_LIVE_ENVIRONMENT} is
- * substituted, which throws if any codec reaches for one.
+ * substituted, which throws if anything asks it for a cell.
  */
 export function jsonFromFabricValue(
   value: FabricValue,

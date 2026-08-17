@@ -22,7 +22,7 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from
  * the formal spec (Section 5).
  *
- * Public surface, two directions and two boundary types:
+ * Public instance surface, two directions and two boundary types:
  * - `encode(value, env?)` -- full pipeline: tree-encode + stringify
  * - `decode(data, env)` -- full pipeline: parse + tree-decode
  * - `encodeToBytes(value, env?)` -- as `encode()`, to UTF-8 bytes
@@ -35,6 +35,11 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * conversion, wire-text parsing, tag unwrapping and the container decode
  * arms -- are `#`-private. Per-type encoding and decoding is delegated to
  * the `FabricCodec`s in the `CodecRegistry`.
+ *
+ * Three statics are public besides: `seemsLikeEncoded()`, and the
+ * `wrapEncodedValueForTesting()` / `unwrapEncodedValueForTesting()` pair
+ * that lets a test build and take apart this format's tagged form without
+ * reaching into the private wrapper.
  *
  * **Cycles are refused** and **shared references are flattened**, per Section
  * 1.6 of the formal spec, which requires an engine to say which of these it

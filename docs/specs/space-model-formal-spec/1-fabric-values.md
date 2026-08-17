@@ -2516,9 +2516,10 @@ export type JsonCodecValue =
 ### 4.3 Public Boundary
 
 An engine's public surface is `encode()` and `decode()`, parameterized by the
-boundary type — `string` for JSON, `Uint8Array` for a binary format. All
-internal machinery (tag wrapping, tree walking, codec dispatch) is private to
-the engine implementation.
+boundary type — `string` for JSON, `Uint8Array` for a binary format. The
+machinery beneath (tag wrapping, tree walking, codec dispatch) is not public.
+Much of it is `protected` rather than private, that being the surface a
+second engine extends — including the two factories below.
 
 Each act of encoding or decoding carries a context, minted per call by a
 factory the engine's subclass supplies:
@@ -2547,7 +2548,7 @@ wire marker minted per call, subclasses the context and carries it there.
 
 `JsonCodecEngine` supplies both directions:
 
-- `encode(value)` encodes a `FabricValue` into the `/<Type>@<Version>`
+- `encode(value, env?)` encodes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
 - `decode(data, env)` parses a JSON string, then decodes tagged
   forms back into runtime types.
