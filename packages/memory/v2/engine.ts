@@ -5185,8 +5185,15 @@ const applyCommitTransaction = (
   //
   // The same pass collects every schema reference the commit's content
   // introduces — a link schema anywhere in a set's document, a patch's
-  // own values (the only way a patch adds refs), and an installed schema
-  // document's own refs — for the closure validation below.
+  // own values, and an installed schema document's own refs — for the
+  // closure validation below. Known gap: a patch that edits INSIDE an
+  // existing link's schema (replacing a `$ref` string at a sub-path, say)
+  // introduces a reference no patch value carries as a whole link, so
+  // only a scan of the post-patch document would see it — a cost this
+  // validation deliberately does not pay. The gap closes when links
+  // become opaque FabricPrimitive Link objects instead of patchable
+  // plain JSON; until then such a reference escapes commit-time
+  // validation and read-side assembly catches it.
   let cidSetsInCommit: Map<string, unknown> | null = null;
   const requiredSchemaRefs = new Set<string>();
   const collectLinkSchemaRefs = (content: unknown): void => {

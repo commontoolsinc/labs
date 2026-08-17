@@ -319,6 +319,15 @@ writer's obligation to install the closure atomically with the referrer
 remains normative — the boundary is its enforcement, not a substitute
 for it.
 
+One patch shape escapes the collection: an edit INSIDE an existing
+link's schema (replacing a `$ref` string at a sub-path) introduces a
+reference no patch value carries as a whole link, and only a scan of
+the post-patch document would see it — a cost the validation
+deliberately does not pay. The gap closes when links become opaque
+`FabricPrimitive` Link objects instead of patchable plain JSON; until
+then such a reference is caught by read-side assembly rather than at
+commit time.
+
 Resolution demands the whole closure: a registered document whose
 transitive closure is not fully registered resolves as a miss, exactly
 like an unregistered document. Resolving it partially would let derived
