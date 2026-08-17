@@ -20,13 +20,13 @@ Deno.test("selectPatternTestFiles assigns every file by stable FNV-1a hash", () 
   ];
 
   const expected = [
-    ["packages/patterns/lunch-poll/multi-user.test.tsx"],
     [
-      "packages/patterns/lunch-poll/main.test.tsx",
+      "packages/patterns/lunch-poll/multi-user.test.tsx",
       "packages/patterns/notes/note.test.tsx",
+      "packages/patterns/record-module-fields.test.tsx",
     ],
-    ["packages/patterns/record-module-fields.test.tsx"],
     ["packages/patterns/record.test.tsx"],
+    ["packages/patterns/lunch-poll/main.test.tsx"],
     ["packages/patterns/notes/notebook.test.tsx"],
   ];
 
@@ -38,9 +38,9 @@ Deno.test("selectPatternTestFiles assigns every file by stable FNV-1a hash", () 
   ) {
     assertEquals(
       Array.from(
-        { length: 5 },
+        { length: 4 },
         (_, index) =>
-          selectPatternTestFiles(paths, { index: index + 1, total: 5 }),
+          selectPatternTestFiles(paths, { index: index + 1, total: 4 }),
       ),
       expected,
     );
