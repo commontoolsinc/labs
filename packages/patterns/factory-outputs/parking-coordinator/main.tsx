@@ -18,7 +18,6 @@ import {
 import {
   type AdminManagerCredential,
   adminManagerCredentialIsActive,
-  adminRegistryEntries,
 } from "../../cfc/admin/mod.ts";
 import {
   formatVehicle,
@@ -95,19 +94,27 @@ export type ParkingAdminList = RequiresIntegrity<
   readonly [typeof PARKING_ADMIN_MANAGER_INTEGRITY]
 >;
 
-type TrustedParkingAdminRole = AddIntegrity<
-  ParkingAdminRole,
-  readonly [typeof PARKING_ADMIN_MANAGER_INTEGRITY]
+export interface ParkingAdminChange extends ParkingAdminRoleAssignment {
+  admin: boolean;
+}
+
+type TrustedParkingAdminChange = AddIntegrity<
+  ParkingAdminChange,
+  readonly [
+    typeof PARKING_ADMIN_INTEGRITY,
+    typeof PARKING_ADMIN_MANAGER_INTEGRITY,
+  ]
 >;
-type TrustedParkingAdminList = RequiresIntegrity<
+type TrustedParkingAdminChangeList = RequiresIntegrity<
   TrustedActionWrite<
-    TrustedParkingAdminRole[],
+    TrustedParkingAdminChange[],
     typeof commitTrustedParkingAdminToggle,
     typeof TRUSTED_PARKING_ADMIN_ACTION,
     typeof TRUSTED_PARKING_ADMIN_SURFACE
   >,
   readonly [typeof PARKING_ADMIN_MANAGER_INTEGRITY]
 >;
+type EffectiveParkingAdminRole = ParkingAdminRole | TrustedParkingAdminChange;
 
 export interface ParkingAdminRegistryStoredValue {
   admins?: ParkingAdminList;
@@ -117,14 +124,17 @@ export type ParkingAdminRegistryValue = Default<
   ParkingAdminRegistryStoredValue
 >;
 export type ParkingAdminRegistryCell = Writable<ParkingAdminRegistryValue>;
-type TrustedParkingAdminRegistryValue = Default<{
-  admins?: TrustedParkingAdminList;
-}>;
-type TrustedParkingAdminRegistryCell = Writable<
-  TrustedParkingAdminRegistryValue
->;
 type ParkingAdminRegistryReader = {
   get(): ParkingAdminRegistryValue | undefined;
+};
+type TrustedParkingAdminChangeRegistryValue = Default<{
+  changes?: TrustedParkingAdminChangeList;
+}>;
+type TrustedParkingAdminChangeRegistryCell = Writable<
+  TrustedParkingAdminChangeRegistryValue
+>;
+type TrustedParkingAdminChangeRegistryReader = {
+  get(): TrustedParkingAdminChangeRegistryValue | undefined;
 };
 export type ParkingAdminManagerCredentialCell = Writable<
   ParkingAdminManagerCredential | null
@@ -160,6 +170,7 @@ export interface ParkingCoordinatorInput {
   people?: PerSpace<PeopleCell>;
   requests?: PerSpace<RequestsCell>;
   adminRegistry?: PerSpace<ParkingAdminRegistryCell>;
+  adminChanges?: PerSpace<TrustedParkingAdminChangeRegistryCell>;
 }
 
 export interface ParkingCoordinatorOutput {
@@ -173,6 +184,7 @@ export interface ParkingCoordinatorOutput {
   requestDate: string;
   requestResult: string;
   adminRegistry: PerSpace<ParkingAdminRegistryCell>;
+  adminChanges: PerSpace<TrustedParkingAdminChangeRegistryCell>;
   currentPersonIsAdmin: boolean;
   currentUserCanManageAdmins: boolean;
   enableAdminManager: Stream<void>;
@@ -294,24 +306,47 @@ const parkingAdminSubject = (personName: string): ParkingAdminSubject => ({
 
 const parkingAdminRolesValue = (
   registry: ParkingAdminRegistryReader,
-): ParkingAdminRole[] => adminRegistryEntries<ParkingAdminRole>(registry);
+  changeRegistry: TrustedParkingAdminChangeRegistryReader,
+): EffectiveParkingAdminRole[] => {
+  const stored = registry.get() as ParkingAdminRegistryStoredValue | undefined;
+  const changeStored = changeRegistry.get() as
+    | { changes?: TrustedParkingAdminChangeList }
+    | undefined;
+  return Array.from(changeStored?.changes ?? []).reduce(
+    (roles: EffectiveParkingAdminRole[], change) =>
+      change.admin
+        ? [
+          ...roles.filter((role) =>
+            role.subject.personName !== change.subject.personName
+          ),
+          change,
+        ]
+        : roles.filter((role) =>
+          role.subject.personName !== change.subject.personName
+        ),
+    Array.from(stored?.admins ?? []),
+  );
+};
 
 const parkingAdminRoleForPerson = (
   registry: ParkingAdminRegistryReader,
+  changeRegistry: TrustedParkingAdminChangeRegistryReader,
   personName: string | undefined,
-): ParkingAdminRole | undefined => {
+): EffectiveParkingAdminRole | undefined => {
   const trimmedName = (personName ?? "").trim();
   return trimmedName === ""
     ? undefined
-    : parkingAdminRolesValue(registry).find((role) =>
+    : parkingAdminRolesValue(registry, changeRegistry).find((role) =>
       role.subject.personName === trimmedName
     );
 };
 
 const personIsParkingAdmin = (
   registry: ParkingAdminRegistryReader,
+  changeRegistry: TrustedParkingAdminChangeRegistryReader,
   personName: string | undefined,
-): boolean => parkingAdminRoleForPerson(registry, personName) !== undefined;
+): boolean =>
+  parkingAdminRoleForPerson(registry, changeRegistry, personName) !== undefined;
 
 // Demo-only identity model: the selected person name stands in for the actor.
 // Do not copy this for production authorization; use a stable user/profile cell.
@@ -322,11 +357,13 @@ const currentActorName = (
 
 const currentParkingAdminRole = (
   registry: ParkingAdminRegistryReader,
+  changeRegistry: TrustedParkingAdminChangeRegistryReader,
   selectedPersonName: Writable<string>,
   people: PeopleCell,
-): ParkingAdminRole | undefined =>
+): EffectiveParkingAdminRole | undefined =>
   parkingAdminRoleForPerson(
     registry,
+    changeRegistry,
     currentActorName(selectedPersonName, people),
   );
 
@@ -337,28 +374,19 @@ const currentUserCanManageParkingAdmins = (
 const prepareParkingAdminToggle = (
   credential: ParkingAdminManagerCredential | null | undefined,
   registry: ParkingAdminRegistryReader,
+  changeRegistry: TrustedParkingAdminChangeRegistryReader,
   rawName: string,
-): ParkingAdminRole[] | null => {
+): ParkingAdminChange | null => {
   const personName = rawName.trim();
   if (!adminManagerCredentialIsActive(credential) || personName === "") {
     return null;
   }
 
-  const adminRoles = parkingAdminRolesValue(registry);
-  const nextRoles = adminRoles.filter((role) =>
-    role.subject.personName !== personName
-  );
-  if (nextRoles.length !== adminRoles.length) {
-    return nextRoles;
-  }
-
-  return [
-    ...nextRoles,
-    {
-      subject: parkingAdminSubject(personName),
-      displayName: personName,
-    } as TrustedParkingAdminRole,
-  ];
+  return {
+    subject: parkingAdminSubject(personName),
+    displayName: personName,
+    admin: !personIsParkingAdmin(registry, changeRegistry, personName),
+  };
 };
 
 interface ParkingAdminToggleEvent {
@@ -373,21 +401,28 @@ export const commitTrustedParkingAdminToggle = handler<
   ParkingAdminToggleEvent,
   {
     adminManagerCredential: ParkingAdminManagerCredentialCell;
-    adminRegistry: TrustedParkingAdminRegistryCell;
+    adminRegistry: ParkingAdminRegistryCell;
+    adminChanges: TrustedParkingAdminChangeRegistryCell;
   }
 >((event, {
   adminManagerCredential,
   adminRegistry,
+  adminChanges,
 }) => {
   const name = event?.name ?? event?.target?.dataset?.parkingAdminToggle ??
     event?.target?.name ?? "";
-  const nextAdmins = prepareParkingAdminToggle(
+  const change = prepareParkingAdminToggle(
     adminManagerCredential.get(),
     adminRegistry,
+    adminChanges,
     name,
   );
-  if (nextAdmins === null) return;
-  adminRegistry.key("admins").set(nextAdmins as TrustedParkingAdminList);
+  if (change === null) return;
+  const changes = adminChanges.key("changes");
+  changes.set([
+    ...Array.from(changes.get() ?? []),
+    change,
+  ] as TrustedParkingAdminChangeList);
 });
 
 const commuteIcon = (mode: CommuteMode): string => {
@@ -466,6 +501,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       spots: inputSpots,
       people: inputPeople,
       requests: inputRequests,
+      adminRegistry: inputAdminRegistry,
+      adminChanges: inputAdminChanges,
     },
   ) => {
     const defaultSpots = Writable.perSpace.of<TrustedParkingSpotList>(
@@ -474,9 +511,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const spots: TrustedSpotsCell = (inputSpots as never) ?? defaultSpots;
     const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
     const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
-    const adminRegistry = new Writable.perSpace<
-      TrustedParkingAdminRegistryValue
-    >({} as TrustedParkingAdminRegistryValue);
+    const defaultAdminRegistry = new Writable.perSpace<
+      ParkingAdminRegistryValue
+    >({} as ParkingAdminRegistryValue);
+    const adminRegistry: ParkingAdminRegistryCell = inputAdminRegistry ??
+      defaultAdminRegistry;
+    const defaultAdminChanges = new Writable.perSpace<
+      TrustedParkingAdminChangeRegistryValue
+    >({} as TrustedParkingAdminChangeRegistryValue);
+    const adminChanges: TrustedParkingAdminChangeRegistryCell =
+      inputAdminChanges ?? defaultAdminChanges;
     const adminManagerCredential = new Writable.perUser<
       ParkingAdminManagerCredential | null
     >(null);
@@ -580,24 +624,35 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     });
 
     const togglePersonAdmin = action<{ name: string }>(({ name }) => {
-      const nextAdmins = prepareParkingAdminToggle(
+      const change = prepareParkingAdminToggle(
         adminManagerCredential.get(),
         adminRegistry,
+        adminChanges,
         name,
       );
-      if (nextAdmins === null) {
+      if (change === null) {
         return;
       }
-      adminRegistry.set({ admins: nextAdmins as TrustedParkingAdminList });
+      const changes = adminChanges.key("changes");
+      changes.set([
+        ...Array.from(changes.get() ?? []),
+        change,
+      ] as TrustedParkingAdminChangeList);
     });
     const trustedTogglePersonAdmin = commitTrustedParkingAdminToggle({
       adminManagerCredential,
       adminRegistry,
+      adminChanges,
     });
 
     const toggleAdminMode = action(() => {
       if (
-        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        !currentParkingAdminRole(
+          adminRegistry,
+          adminChanges,
+          selectedPersonName,
+          people,
+        )
       ) {
         adminMode.set(false);
         return;
@@ -817,14 +872,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         );
         if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
           adminRegistry.set({
-            admins: parkingAdminRolesValue(adminRegistry).map((role) =>
+            admins: parkingAdminRolesValue(adminRegistry, adminChanges).map((
+              role,
+            ) =>
               role.subject.personName === originalName
                 ? {
                   subject: parkingAdminSubject(trimName),
                   displayName: trimName,
                 } as ParkingAdminRole
                 : role
-            ) as TrustedParkingAdminList,
+            ) as ParkingAdminList,
           });
         }
       }
@@ -836,9 +893,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       people.set(people.get().filter((p) => p.name !== name));
       if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
         adminRegistry.set({
-          admins: parkingAdminRolesValue(adminRegistry).filter((role) =>
-            role.subject.personName !== name
-          ) as TrustedParkingAdminList,
+          admins: parkingAdminRolesValue(adminRegistry, adminChanges).filter((
+            role,
+          ) => role.subject.personName !== name) as ParkingAdminList,
         });
       }
       if (selectedPersonName.get() === name) {
@@ -890,7 +947,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       { spotNumber: string; label: string; notes: string }
     >((event) => {
       if (
-        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        !currentParkingAdminRole(
+          adminRegistry,
+          adminChanges,
+          selectedPersonName,
+          people,
+        )
       ) {
         return;
       }
@@ -932,7 +994,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       }
     >((event) => {
       if (
-        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        !currentParkingAdminRole(
+          adminRegistry,
+          adminChanges,
+          selectedPersonName,
+          people,
+        )
       ) {
         return;
       }
@@ -980,7 +1047,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const removeSpot = action<{ spotNumber: string }>(
       ({ spotNumber: spotNumArg3 }) => {
         if (
-          !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+          !currentParkingAdminRole(
+            adminRegistry,
+            adminChanges,
+            selectedPersonName,
+            people,
+          )
         ) {
           return;
         }
@@ -997,7 +1069,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       { spotNumber: string; date: string; personName: string }
     >(({ spotNumber, date, personName }) => {
       if (
-        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        !currentParkingAdminRole(
+          adminRegistry,
+          adminChanges,
+          selectedPersonName,
+          people,
+        )
       ) {
         return;
       }
@@ -1293,8 +1370,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     );
 
     const currentPersonIsAdmin = computed(() =>
-      currentParkingAdminRole(adminRegistry, selectedPersonName, people) !==
-        undefined
+      currentParkingAdminRole(
+        adminRegistry,
+        adminChanges,
+        selectedPersonName,
+        people,
+      ) !== undefined
     );
 
     const adminModeEnabled = computed(() =>
@@ -1316,7 +1397,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       (people.get() ?? []).map((person) => ({
         name: person.name,
         email: person.email,
-        isAdmin: personIsParkingAdmin(adminRegistry, person.name),
+        isAdmin: personIsParkingAdmin(
+          adminRegistry,
+          adminChanges,
+          person.name,
+        ),
         canManageAdmins: currentUserCanManageAdmins === true,
       }))
     );
@@ -2951,6 +3036,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       people,
       requests,
       adminRegistry: adminRegistry as PerSpace<ParkingAdminRegistryCell>,
+      adminChanges: adminChanges as PerSpace<
+        TrustedParkingAdminChangeRegistryCell
+      >,
       adminMode: adminModeEnabled,
       currentPersonIsAdmin,
       currentUserCanManageAdmins,
