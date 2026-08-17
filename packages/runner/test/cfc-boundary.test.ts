@@ -5318,6 +5318,49 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("accepts the first value schema after ambient-only initialization", async () => {
+    const { runtime, storageManager } = createRuntime(
+      "enforce-explicit",
+      "persist",
+    );
+    const id = "cfc-ambient-before-value-schema";
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { $NAME: { type: "string" } },
+      required: ["$NAME"],
+    };
+    try {
+      const initialize = runtime.edit();
+      const initialized = runtime.getCell(
+        signer.did(),
+        id,
+        undefined,
+        initialize,
+      );
+      initialized.set({});
+      const target = initialized.getAsNormalizedFullLink();
+      initialize.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...target, path: [] },
+        schema: {
+          ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+        },
+      });
+      initialize.prepareCfc();
+      expect((await initialize.commit()).ok).toBeDefined();
+
+      const write = runtime.edit();
+      runtime.getCell(signer.did(), id, schema, write).set({
+        $NAME: "First shaped value",
+      });
+      write.prepareCfc();
+      expect((await write.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not re-check existing trusted-event claims for unrelated schema candidates", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

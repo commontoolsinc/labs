@@ -1106,6 +1106,9 @@ const candidateSchemasByTarget = (
       schema,
       input.target.space,
     );
+    const existingAmbientConfidentiality = existing === undefined
+      ? undefined
+      : ambientSpaceRootConfidentiality(existing, input.target.space);
     const retainedAmbientConfidentiality = ambientConfidentiality ??
       retainedAmbientSpaceRootConfidentiality(existing, input.target.space) ??
       retainedAmbientSpaceRootConfidentiality(stored, input.target.space);
@@ -1147,6 +1150,10 @@ const candidateSchemasByTarget = (
         : ambientConfidentiality !== undefined
         ? internSchema(
           addRootConfidentiality(existing, ambientConfidentiality),
+        )
+        : existingAmbientConfidentiality !== undefined
+        ? internSchema(
+          addRootConfidentiality(candidate, existingAmbientConfidentiality),
         )
         : schemasEqualIgnoringWriterStamp(existing, candidate)
         ? existing
@@ -7052,10 +7059,18 @@ export const prepareBoundaryCommit = (
       mergedSchema = storedSchema;
     } else if (stored.status === "loaded") {
       storedSchema = stored.schema;
+      const storedAmbientConfidentiality = ambientSpaceRootConfidentiality(
+        storedSchema,
+        space,
+      );
       try {
         mergedSchema = schemasEqualIgnoringWriterStamp(storedSchema, schema) ||
             storedSchemaCoversCandidateEnvelope(storedSchema, schema)
           ? storedSchema
+          : storedAmbientConfidentiality !== undefined
+          ? internSchema(
+            addRootConfidentiality(schema, storedAmbientConfidentiality),
+          )
           : mergeCfcSchemaEnvelopes(storedSchema, schema, {
             generatedOutputPaths: generatedOutputPaths.get(key),
             allowAddIntegrityWeakening: sourceSchemaMigration,
