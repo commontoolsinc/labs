@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { warnDeprecatedPieceSpelling } from "../commands/piece.ts";
 import { cf, stripAnsi } from "./utils.ts";
 
 /**
@@ -58,25 +59,45 @@ describe("piece-data-spellings", () => {
     }
   });
 
-  it("refuses a configuration-free run identically under both spellings", async () => {
+  it("refuses a configuration-free run identically, except the 6a notice", async () => {
     // End to end through real Cliffy parsing in a subprocess with no fabric
     // configuration: the refusal text and exit code are the behavior a
-    // script sees first, and the two spellings must not diverge in it. The
+    // script sees first. Since step 6a the piece-mounted spelling warns and
+    // the top-level spelling does not — the ONE respect in which the two
+    // mounts may differ. The comparison stays exact by naming that line and
+    // removing exactly it, so every other divergence still fails here. The
     // deno task banner echoes the argv and so differs by construction.
-    const refusal = (stderr: string[]) =>
+    const notice = (name: string) => {
+      let line = "";
+      warnDeprecatedPieceSpelling(`piece ${name}`, {
+        writeError: (text) => line = text,
+      });
+      return line;
+    };
+    const stderrLines = (stderr: string[]) =>
       stderr.map((line) => stripAnsi(line))
-        .filter((line) => !line.startsWith("Task "))
-        .join("\n");
+        .filter((line) => !line.startsWith("Task "));
     for (const name of SPELLINGS) {
-      const top = await cf(name);
-      const nested = await cf(`piece ${name}`);
+      // `call` gets a callable name so the refusal happens inside the
+      // action: the 6a notice attaches to invocations, and a grammar error
+      // (missing argument) is refused by Cliffy before any action — and so
+      // before any notice — under both spellings alike.
+      const tail = name === "call" ? " someCallable" : "";
+      const top = await cf(`${name}${tail}`);
+      const nested = await cf(`piece ${name}${tail}`);
       expect(top.code).toBe(nested.code);
-      expect(refusal(top.stderr)).toBe(refusal(nested.stderr));
+      const topLines = stderrLines(top.stderr);
+      const nestedLines = stderrLines(nested.stderr);
+      expect(nestedLines).toContain(notice(name));
+      expect(topLines).not.toContain(notice(name));
+      expect(topLines).toEqual(
+        nestedLines.filter((line) => line !== notice(name)),
+      );
       // `get` and `set` refuse on the missing identity, `call` on the
       // missing callable argument — either way a refusal happened, which is
       // what keeps the equality above from passing vacuously on two silent
       // successes.
-      expect(refusal(top.stderr)).toContain("Missing");
+      expect(topLines.join("\n")).toContain("Missing");
     }
   });
 });

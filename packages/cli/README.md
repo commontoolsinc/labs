@@ -100,8 +100,12 @@ rather than resolved.
 Those three commands are also mounted at top level as `cf get`, `cf set`, and
 `cf call`: reading and writing cells is not a piece-management concern, and the
 spelling says so. Each pair is one definition mounted twice, so the two
-spellings take the same flags, behave identically, and complete identically;
-both keep working.
+spellings take the same flags, behave identically, and complete identically. The
+piece-mounted spellings are deprecated: each invocation prints a stderr notice
+naming the top-level spelling and the literal date the old spelling stops
+working (`PIECE_DATA_SPELLING_END_DATE` in `commands/piece.ts`, the one source
+of that date). Until then both keep working, and the notice never touches stdout
+— `get` and `call` reserve it for machine output.
 
 A canonical reference may also end in `#argument`, which selects the piece's
 arguments cell the way `--input` does. Only commands that take `--input` accept
