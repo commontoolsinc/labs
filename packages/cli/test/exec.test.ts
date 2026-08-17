@@ -530,6 +530,117 @@ describe("parseExecArgs edge cases", () => {
     expect(() => parseExecArgs(spec, ["--query"])).toThrow(/Missing value/);
   });
 
+  it("reads a field a conjunction declares, on every flag surface", () => {
+    // `properties` alone missed what an `allOf` member contributes, while the
+    // payload door read it — so one door judged a field the other could not
+    // see. A caller was refused at dispatch for omitting something no surface
+    // had shown them.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" } },
+      required: ["note"],
+      allOf: [{
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+      }],
+    });
+
+    // The flag parses, and to its DECLARED type rather than a string.
+    expect(
+      parseExecArgs(spec, ["invoke", "--note", "hi", "--count", "5"]).input,
+    )
+      .toEqual({ note: "hi", count: 5 });
+
+    // Required is enforced from the member that declares it.
+    expect(() => parseExecArgs(spec, ["invoke", "--note", "hi"]))
+      .toThrow(/Missing required flag --count/);
+
+    // And the help page lists it, which is the half a caller reads first.
+    const help = renderExecHelp("/mnt/x.handler", spec, {});
+    expect(help).toMatch(/--count/);
+  });
+
+  it("follows a reference into the definition a conjunction names", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" } },
+      allOf: [{ $ref: "#/$defs/Extra" }],
+      $defs: {
+        Extra: {
+          type: "object",
+          properties: { count: { type: "number" } },
+          required: ["count"],
+        },
+      },
+    });
+    expect(parseExecArgs(spec, ["invoke", "--note", "a", "--count", "2"]).input)
+      .toEqual({ note: "a", count: 2 });
+  });
+
+  it("does not pull a field out of a disjunction", () => {
+    // A payload satisfies ONE branch of an `anyOf`, so no single flag list
+    // describes the position and no branch's `required` binds it. Offering
+    // `--only-here` would advertise a flag that fits one branch and breaks the
+    // other.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" } },
+      allOf: [{
+        anyOf: [{
+          type: "object",
+          properties: { onlyHere: { type: "string" } },
+          required: ["onlyHere"],
+        }],
+      }],
+    });
+
+    // It is not in the DECLARED vocabulary: the help page does not advertise
+    // it, and its `required` does not bind a payload that omits it.
+    const help = renderExecHelp("/mnt/x.handler", spec, {});
+    expect(help).not.toMatch(/--only-here/);
+    expect(parseExecArgs(spec, ["invoke", "--note", "a"]).input)
+      .toEqual({ note: "a" });
+
+    // A disjunction leaves the position unjudgeable, so BOTH doors fail open
+    // and take an unnamed flag rather than refusing what they cannot assess.
+    // Agreeing is the property worth pinning; which way they agree follows
+    // from the design's "a call wrongly refused cannot be made at all".
+    expect(parseExecArgs(spec, ["invoke", "--only-here", "x"]).input)
+      .toEqual({ "only-here": "x" });
+    expect(undeclaredVerbFieldError({ onlyHere: "x" }, spec.inputSchema))
+      .toBeUndefined();
+  });
+
+  it("leaves a conjunction over a scalar on the single-value path", () => {
+    // `allOf` earns the object path by CONTRIBUTING fields. A conjunction
+    // constraining a scalar contributes none, and routing it through flag
+    // parsing would offer a single-value verb a vocabulary of nothing.
+    const spec = makeSpec("tool", { allOf: [{ type: "string" }] });
+    expect(parseExecArgs(spec, ["run", "--value", "hi"]).input).toBe("hi");
+    expect(() => parseExecArgs(spec, ["run", "--anything", "x"]))
+      .toThrow(/is not a flag this verb takes/);
+  });
+
+  it("keeps the flags beside a disjunction it cannot express", () => {
+    // A root `anyOf` adds constraints no flag list can express, but the
+    // properties beside it are still declared and still typed. Reporting none
+    // because a disjunction is present would take away flags that already
+    // worked — the disjunction is stepped over, not treated as a veto.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { note: { type: "string" }, count: { type: "number" } },
+      anyOf: [
+        { required: ["note"] },
+        { required: ["count"] },
+      ],
+    });
+
+    expect(parseExecArgs(spec, ["invoke", "--note", "a", "--count", "2"]).input)
+      .toEqual({ note: "a", count: 2 });
+    expect(renderExecHelp("/mnt/x.handler", spec, {})).toMatch(/--note/);
+  });
+
   it("accepts an undeclared flag exactly where the payload door accepts the field", () => {
     // The two doors are one gate asked in two spellings, so what they let
     // through must not depend on which the caller reached for. Both

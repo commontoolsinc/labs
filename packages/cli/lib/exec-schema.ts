@@ -4,7 +4,10 @@ import { schemaToTypeString } from "@commonfabric/runner";
 import { cliCommand } from "./cli-name.ts";
 // A value import back to callable.ts, whose own import of this module is
 // type-only and therefore erased — so this creates no runtime cycle.
-import { eventSchemaJudgesRootFields } from "./callable.ts";
+import {
+  declaredEventFields,
+  eventSchemaJudgesRootFields,
+} from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 
 export interface ExecCommandSpec {
@@ -79,26 +82,28 @@ function isSchemaObject(schema: JSONSchema): schema is Record<string, unknown> {
     !Array.isArray(schema);
 }
 
+/**
+ * The fields a verb declares, as every flag-facing surface reads them.
+ *
+ * Delegates to `declaredEventFields`, which merges what a conjunction's
+ * members contribute and follows a `$ref` into the definition that carries
+ * them. Reading `schema.properties` alone — which this did — made an
+ * `allOf`-declared field invisible here while the payload door judged it: the
+ * help page omitted it, `required` did not enforce it, and a flag naming it
+ * was refused as undeclared. One reader is what keeps the two doors from
+ * disagreeing about what a verb declares.
+ *
+ * `null` still means "not a position with fields", which is the signal the
+ * single-value paths key off.
+ */
 function objectProperties(
   schema: JSONSchema,
 ): Record<string, JSONSchema> | null {
-  if (!isSchemaObject(schema)) return null;
-  if (schema.type !== "object" && !schema.properties) return null;
-  const properties = schema.properties;
-  if (
-    typeof properties !== "object" || properties === null ||
-    Array.isArray(properties)
-  ) {
-    return {};
-  }
-  return properties as Record<string, JSONSchema>;
+  return declaredEventFields(schema)?.properties ?? null;
 }
 
 function requiredFlags(schema: JSONSchema): Set<string> {
-  if (!isSchemaObject(schema) || !Array.isArray(schema.required)) {
-    return new Set();
-  }
-  return new Set(schema.required as string[]);
+  return declaredEventFields(schema)?.required ?? new Set();
 }
 
 function schemaType(schema: JSONSchema): string | undefined {
