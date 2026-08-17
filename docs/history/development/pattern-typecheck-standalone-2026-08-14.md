@@ -46,11 +46,18 @@ it is `JSX.Element`, which is the broader `JSXElement` union. And the classic-JS
 
 **Reserved `[UI]` typed `unknown` (2 errors, cfc-render-policy-demo).** The
 demo's sub-patterns declared their reserved `[UI]` output as `unknown`. When a
-pattern result is placed in JSX, the runtime renders it through `[UI]`, so the
-type system treats it as `UIRenderable`, whose `[UI]` must be a `VNode`.
-`unknown` is not a `VNode`. This is a genuine under-specification, wrong in
-either environment; classic JSX happened not to exercise it. Fixed by typing the
-outputs as `VNode`.
+pattern result is placed in JSX, the runtime renders it through `[UI]`, so under
+automatic JSX the type system treats it as `UIRenderable`, whose `[UI]` must be a
+`VNode`; `unknown` is not one. The type is under-specified — at runtime the value
+is always a `VNode` — and classic JSX accepts it, so the pattern compiles and the
+update gate passes on it as written. Tightening it is not free: the schema
+generator derives a pattern's result schema from these types, and typing the
+trusted disclosure surface's `[UI]` as `VNode` shifts the information-flow label
+the schema records for a sibling capability field (`revealSensitive`), which the
+pattern-update compatibility gate rejects as a backward-incompatible change to a
+recorded contract. The demo is left as written. The lesson is that a reserved
+output type feeds the deployed schema, so an `[UI]: unknown` a standalone check
+flags cannot always be tightened without breaking the pattern's update contract.
 
 **Bare pattern factory as a JSX child (12 errors, cfc-trusted-component-
 examples).** The galleries embedded each sub-gallery as `<div>{SendPublishExamples}
@@ -60,8 +67,12 @@ text, and the reactive builder never wires the sub-pattern in. Automatic JSX
 rejects this (a `PatternFactory` is not a `RenderNode`); classic JSX's looser `h`
 typing lets it through. This is a real defect the standalone check caught and the
 compile environment missed. Fixed by instantiating each sub-gallery at the render
-site, which then exposed the same `[UI]: unknown` under-specification one level
-down, fixed the same way.
+site, which then exposed the same `[UI]: unknown` under-specification in the
+sub-patterns whose result is rendered without a cast; those are typed `VNode`,
+since they are inner patterns the update gate does not track. One gallery had to
+be made renderable a different way — its default export gained the empty input
+parameter its siblings carry — which changed its own contract compatibly, and its
+new baseline was recorded.
 
 **Writable scoped inputs with defaults (6 errors, scoped-group-chat/
 main-with-writable-inputs).** This pattern types its inputs as
@@ -83,10 +94,12 @@ compile under would not make anything more correct.
 `deno task cfcheck` is the authoritative standalone type-check for patterns: it
 reads the authored source in the JSX and library environment the patterns
 compile under. A `deno check` over pattern source is a second, mismatched lens.
-It is worth keeping — it caught the two real defects above that the compile
-environment's looser JSX typing missed — but its extra errors are not all real,
-and the writable-scoped-inputs case shows it producing false positives on
-advanced pattern types. Where the two disagree on such a type, `cfcheck` wins.
+It is worth keeping — it caught the bare-factory defect above that the compile
+environment's looser JSX typing missed — but its extra errors are not all real.
+The writable-scoped-inputs case is a false positive on correct code, and the
+`[UI]: unknown` case is an under-specification that cannot be tightened without
+breaking the pattern's update contract. Where the standalone lens disagrees with
+the compile environment on such a type, `cfcheck` and the update gate win.
 
 ## The `deno task check` coverage gap
 
