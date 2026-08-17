@@ -16,11 +16,11 @@
 # line that ran cannot drift apart. What a reader sees is what they can retype,
 # given the two environment variables the header names.
 #
-# Two acts are marked PENDING. They print the command and the result they will
-# produce, without running it, because the capability is sequenced and not yet
-# built (docs/plans/references-as-arguments.md). They are deliberately visible —
-# a demo that quietly omits what does not work teaches a surface that does not
-# exist.
+# No act is marked PENDING today. `pending` stays for the next capability
+# that is sequenced but unbuilt: it prints the command and the result it will
+# produce, without running it, so what does not work yet stays deliberately
+# visible — a demo that quietly omits what does not work teaches a surface
+# that does not exist.
 #
 # No act is marked BROKEN today. `broken` stays for the next one that is: it
 # checks that the defect an act claims still answers to its own signature, so
@@ -229,9 +229,10 @@ say "The same answer. A projection is a question you may ask twice, which is"
 say "what makes any of the reads above safe to put in a script — as here: the"
 say "child the next acts drive is taken from the answer just shown."
 # From the run the reader watched, not from a hidden second read: acts 8 and 9
-# drive this child, and its address sits in $OUT under the title it was filed
-# with.
+# drive the first child, act 12 relates it to the second, and both addresses
+# sit in $OUT under the titles they were filed with.
 KID=$(printf '%s' "$OUT" | jq -r '.[] | select(.title=="Session cookies")."$link"')
+CSRF=$(printf '%s' "$OUT" | jq -r '.[] | select(.title=="CSRF tokens")."$link"')
 
 act "7 · A verb returns what only the pattern could compute"
 say "The note's timestamp is the pattern's; the caller never supplied one."
@@ -286,30 +287,24 @@ say "One shape of answer from both ends: what was wrong, the position it sat at,
 say "what that position accepts, and the nearest thing you probably meant. The"
 say "call was turned down before an invocation was spent."
 
-act "12 · Relate two items — PENDING"
+act "12 · Relate two items"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
-# The capability landed (#5880): a hand-assembled link envelope dispatches, and
-# the edge that comes back is the target rather than a copy. What this act
-# waits for is the spelling it teaches everywhere else — the address exactly as
-# a read printed it. That string is still refused in an argument position, and
-# a demo that assembled the envelope would be teaching assembly, not carrying.
-pending "cf call -s $SPACE <cookies-address> blockOn -- --on <csrf-address>" \
-  "the address a read emits cannot yet be a verb argument (references-as-arguments.md)" \
-  '{
-  "status": "settled",
-  "result": {
-    "blocked":         { "$link": "/of:fid1:…", "title": "Session cookies" },
-    "on":              { "$link": "/of:fid1:…", "title": "CSRF tokens" },
-    "blockedOnCount":  1
-  }
-}'
+say "The spelling this session taught throughout — the address as printed — is"
+say "the one thing still refused here (references-as-arguments.md)."
+refused "the address a read emits, as a verb argument" \
+  cf call -s "$SPACE" "$KID" blockOn -- --on "$CSRF"
+say "The capability itself landed: wrap the same address in the link envelope"
+say "by hand, and the edge that lands is the target rather than a copy. The"
+say "assembly is the workaround; the refusal above is this act's claim that it"
+say "is still needed, and the day it stops being refused, this act says so."
+run cf call -s "$SPACE" --select blocked@,on@,blockedOnCount "$KID" blockOn "{\"on\":{\"/\":{\"link@1\":{\"id\":\"${CSRF#/}\"}}}}"
 
-act "13 · One item, two paths, one address — PENDING"
-say "This is what addresses are for: the same item under a parent AND as a blocker,"
-say "and a caller can tell it is one item rather than two copies."
-pending "cf get -s $SPACE --piece board items --select title,children@,blockedOn@" \
-  "needs the edge from act 12" \
-  'the same of:fid1:… appears under one item'"'"'s children and another'"'"'s blockedOn'
+act "13 · One item, two paths, one address"
+say "This is what addresses are for: the same item under a parent AND as a"
+say "blocker, and a caller can tell it is one item rather than two copies."
+run cf get -s "$SPACE" "$EPIC" children --select @,title,blockedOn@
+say "One address, two positions: the same string sits in the row that holds"
+say "the item and in the blockedOn of the item that waits on it."
 
 printf '\n%s━━ %s %s\n' "$B" "What just happened" "$N"
 say "No tool was written for this tracker. Every flag, type, listing and result"
@@ -321,9 +316,11 @@ say "is the composition the verb surface exists for. On those lines the flags"
 say "that remain name the space and shape the answer; the slug keeps --piece,"
 say "and a verb's own flags stay the verb's."
 say ""
-say "Acts 12 and 13 are the graph half, sequenced as references-as-arguments."
-say "verb-session-gaps.sh asserts both, and fails the day either one starts"
-say "working — so this demo cannot quietly go stale."
+say "Acts 12 and 13 are the graph half, live minus one spelling: the printed"
+say "address is still refused as an argument, and the envelope assembly beside"
+say "that refusal retires the day it stops being refused — act 12 and"
+say "verb-session-gaps.sh both report that day, so this demo cannot quietly"
+say "go stale."
 
 if [ "$UNEXPECTED" != "0" ]; then
   printf '\n%s━━ %d act(s) failed that this demo says work%s\n' \
