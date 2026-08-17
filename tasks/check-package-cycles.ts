@@ -30,9 +30,13 @@
  * (`@commonfabric/runner`, or a subpath export of it) or by a relative path
  * that climbs out of its own package (`../../runner/src/cell.ts`). Both spell
  * the same dependency, and the second is common enough here that ignoring it
- * would leave a hole. Package names come from each member's own config rather
- * than from its directory name, which are not always the same:
- * `packages/background-piece-service` publishes `@commonfabric/background-piece`.
+ * would leave a hole. Which package a file or a specifier belongs to is decided
+ * by the workspace member list rather than by the shape of the path, because
+ * neither follows from the other. A member's directory name is not its package
+ * name — `packages/background-piece-service` publishes
+ * `@commonfabric/background-piece` — and a member can sit inside another
+ * member's directory, as `packages/connectors/agents` does, so the longest
+ * matching member owns a file rather than the first path segment.
  *
  * A type-only import counts. It disappears before the code runs, so it cannot
  * deadlock a module graph, but it still means one package's source cannot be
@@ -133,20 +137,44 @@ export function extractSpecifiers(source: string): string[] {
 }
 
 /**
- * Reports whether a repo-relative path is production source of some package.
+ * The workspace member holding a repo-relative path, as its directory under
+ * `packages/`, or undefined for a path in no member.
+ *
+ * The longest matching member wins, because a member can sit inside another
+ * member's directory: `packages/connectors/agents` is its own package, and a
+ * file of its own is not a file of anything named `connectors`.
+ */
+export function packageOfPath(
+  path: string,
+  members: readonly string[],
+): string | undefined {
+  let found: string | undefined;
+  for (const dir of members) {
+    if (!path.startsWith(`packages/${dir}/`)) continue;
+    if (found === undefined || dir.length > found.length) found = dir;
+  }
+  return found;
+}
+
+/**
+ * Reports whether a repo-relative path is production source of some member.
  * Everything under a package's test directories, and every file named for a
  * test or a benchmark, is excluded wherever it sits.
  */
-export function isProductionSource(path: string): boolean {
-  if (!path.startsWith("packages/")) return false;
+export function isProductionSource(
+  path: string,
+  members: readonly string[],
+): boolean {
+  const dir = packageOfPath(path, members);
+  if (dir === undefined) return false;
   const dot = path.lastIndexOf(".");
   if (dot === -1 || !CODE_EXTENSIONS.has(path.slice(dot))) return false;
-  const segments = path.split("/");
-  const base = segments[segments.length - 1];
+  // Only the segments below the package decide this, so a member whose own
+  // directory is named `test` does not exclude itself.
+  const inside = path.slice(`packages/${dir}/`.length).split("/");
+  const base = inside[inside.length - 1];
   if (/\.(test|bench)\.[^.]+$/.test(base)) return false;
-  // segments[0] is "packages" and segments[1] is the package directory, so a
-  // package named "test" does not exclude itself.
-  return !segments.slice(2, -1).some((s) => TEST_DIRECTORIES.has(s));
+  return !inside.slice(0, -1).some((s) => TEST_DIRECTORIES.has(s));
 }
 
 /**
@@ -163,51 +191,61 @@ export function resolveRelative(fromPath: string, specifier: string): string {
   return segments.join("/");
 }
 
-/** The workspace members, as directory names under `packages/`. */
-export async function readPackageNames(
-  root: string,
-): Promise<Map<string, string>> {
+/** The workspace, as this check needs to see it. */
+export interface Workspace {
+  /** Every member's directory under `packages/`, which may itself be nested. */
+  readonly members: readonly string[];
+  /** Package name to member directory, for the members that declare a name. */
+  readonly names: ReadonlyMap<string, string>;
+}
+
+/** Reads the workspace members named by the root config. */
+export async function readWorkspace(root: string): Promise<Workspace> {
   const config = parseJsonc(
     await Deno.readTextFile(resolve(root, "deno.jsonc")),
   ) as { workspace?: unknown } | null;
-  const members = Array.isArray(config?.workspace) ? config.workspace : [];
-  // Package name to directory name. A member with no `name` is reachable only
-  // by relative path, which needs no entry here.
+  const listed = Array.isArray(config?.workspace) ? config.workspace : [];
+  const members: string[] = [];
+  // A member with no `name` is reachable only by relative path, which needs no
+  // entry in the name map.
   const names = new Map<string, string>();
-  for (const member of members) {
+  for (const member of listed) {
     if (typeof member !== "string") continue;
-    const dir = member.replace(/^\.\//, "").replace(/^packages\//, "");
+    const dir = member.replace(/^\.\//, "");
+    if (!dir.startsWith("packages/")) continue;
+    const packageDir = dir.slice("packages/".length);
+    members.push(packageDir);
     for (const file of ["deno.jsonc", "deno.json"]) {
       let text: string;
       try {
-        text = await Deno.readTextFile(resolve(root, "packages", dir, file));
+        text = await Deno.readTextFile(resolve(root, dir, file));
       } catch {
         continue;
       }
       const parsed = parseJsonc(text) as { name?: unknown } | null;
-      if (typeof parsed?.name === "string") names.set(parsed.name, dir);
+      if (typeof parsed?.name === "string") names.set(parsed.name, packageDir);
       break;
     }
   }
-  return names;
+  return { members, names };
 }
 
 /** The package a specifier names, or undefined when it names none. */
 export function targetPackage(
   fromPath: string,
   specifier: string,
-  names: ReadonlyMap<string, string>,
+  workspace: Workspace,
 ): string | undefined {
   if (specifier.startsWith(".")) {
     const resolved = resolveRelative(fromPath, specifier);
-    return /^packages\/([^/]+)\//.exec(resolved)?.[1];
+    return packageOfPath(resolved, workspace.members);
   }
   const parts = specifier.split("/");
   // Package names in this workspace are scoped, so the name is the first two
   // segments; an unscoped name would be the first.
   for (const length of [2, 1]) {
     const candidate = parts.slice(0, length).join("/");
-    const dir = names.get(candidate);
+    const dir = workspace.names.get(candidate);
     if (dir !== undefined) return dir;
   }
   return undefined;
@@ -244,12 +282,12 @@ async function walkFiles(root: string): Promise<string[]> {
 
 /** Every import edge between two different packages' production source. */
 export async function buildEdges(root: string): Promise<Edge[]> {
-  const names = await readPackageNames(root);
+  const workspace = await readWorkspace(root);
   const paths = (await gitTrackedFiles(root) ?? await walkFiles(root))
-    .filter(isProductionSource);
+    .filter((path) => isProductionSource(path, workspace.members));
   const edges: Edge[] = [];
   for (const path of paths) {
-    const from = /^packages\/([^/]+)\//.exec(path)?.[1];
+    const from = packageOfPath(path, workspace.members);
     if (from === undefined) continue;
     let source: string;
     try {
@@ -258,7 +296,7 @@ export async function buildEdges(root: string): Promise<Edge[]> {
       continue; // a tracked path that is not readable here, such as a symlink
     }
     for (const specifier of extractSpecifiers(source)) {
-      const to = targetPackage(path, specifier, names);
+      const to = targetPackage(path, specifier, workspace);
       if (to === undefined || to === from) continue;
       edges.push({ from, to, file: path, specifier });
     }

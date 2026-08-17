@@ -13,7 +13,8 @@ import {
   isProductionSource,
   isStronglyConnected,
   main,
-  readPackageNames,
+  packageOfPath,
+  readWorkspace,
   resolveRelative,
   scan,
   targetPackage,
@@ -83,6 +84,15 @@ const tree = async (
   return root;
 };
 
+const MEMBERS = [
+  "runner",
+  "html",
+  "ui",
+  "patterns",
+  "integration",
+  "connectors/agents",
+];
+
 describe("check-package-cycles", () => {
   afterEach(async () => {
     for (const root of trees.splice(0)) {
@@ -128,48 +138,63 @@ describe("check-package-cycles", () => {
 
   describe("isProductionSource()", () => {
     it("returns true for a source file inside a package", () => {
-      expect(isProductionSource("packages/runner/src/cell.ts")).toBe(true);
+      expect(isProductionSource("packages/runner/src/cell.ts", MEMBERS)).toBe(
+        true,
+      );
     });
 
     it("returns true for a `.tsx` source file", () => {
-      expect(isProductionSource("packages/html/src/view.tsx")).toBe(true);
+      expect(isProductionSource("packages/html/src/view.tsx", MEMBERS)).toBe(
+        true,
+      );
     });
 
     it("returns false for a file under a package's `test` directory", () => {
-      expect(isProductionSource("packages/runner/test/cell.test.ts"))
+      expect(isProductionSource("packages/runner/test/cell.test.ts", MEMBERS))
         .toBe(false);
     });
 
     it("returns false for a file under a package's `integration` directory", () => {
-      expect(isProductionSource("packages/runner/integration/setup.ts"))
+      expect(
+        isProductionSource("packages/runner/integration/setup.ts", MEMBERS),
+      )
         .toBe(false);
     });
 
     it("returns false for a file nested below a `test` directory", () => {
-      expect(isProductionSource("packages/runner/test/support/fake.ts"))
+      expect(
+        isProductionSource("packages/runner/test/support/fake.ts", MEMBERS),
+      )
         .toBe(false);
     });
 
     it("returns false for a `.test.tsx` file sitting beside its subject", () => {
-      expect(isProductionSource("packages/ui/src/cf-card/cf-card.test.tsx"))
+      expect(
+        isProductionSource("packages/ui/src/cf-card/cf-card.test.tsx", MEMBERS),
+      )
         .toBe(false);
     });
 
     it("returns false for a `.bench.ts` file", () => {
-      expect(isProductionSource("packages/runner/src/cell.bench.ts"))
+      expect(isProductionSource("packages/runner/src/cell.bench.ts", MEMBERS))
         .toBe(false);
     });
 
     it("returns true for source in a package whose own name is `integration`", () => {
-      expect(isProductionSource("packages/integration/src/mod.ts")).toBe(true);
+      expect(isProductionSource("packages/integration/src/mod.ts", MEMBERS))
+        .toBe(true);
     });
 
     it("returns false for a file outside `packages/`", () => {
-      expect(isProductionSource("tasks/check-package-cycles.ts")).toBe(false);
+      expect(isProductionSource("tasks/check-package-cycles.ts", MEMBERS)).toBe(
+        false,
+      );
     });
 
     it("returns false for a file with no code extension", () => {
-      expect(isProductionSource("packages/runner/README.md")).toBe(false);
+      expect(isProductionSource("packages/runner/README.md", MEMBERS)).toBe(
+        false,
+      );
     });
   });
 
@@ -191,19 +216,25 @@ describe("check-package-cycles", () => {
   });
 
   describe("targetPackage()", () => {
-    const names = new Map([
-      ["@commonfabric/runner", "runner"],
-      ["@commonfabric/background-piece", "background-piece-service"],
-    ]);
+    const workspace = {
+      members: ["runner", "background-piece-service", "a", "connectors/agents"],
+      names: new Map([
+        ["@commonfabric/runner", "runner"],
+        ["@commonfabric/background-piece", "background-piece-service"],
+        ["@commonfabric/agents-connector", "connectors/agents"],
+      ]),
+    };
 
     it("returns the package a bare specifier names", () => {
-      expect(targetPackage("packages/a/x.ts", "@commonfabric/runner", names))
+      expect(
+        targetPackage("packages/a/x.ts", "@commonfabric/runner", workspace),
+      )
         .toBe("runner");
     });
 
     it("returns the package a subpath export names", () => {
       expect(
-        targetPackage("packages/a/x.ts", "@commonfabric/runner/cfc", names),
+        targetPackage("packages/a/x.ts", "@commonfabric/runner/cfc", workspace),
       ).toBe("runner");
     });
 
@@ -212,28 +243,54 @@ describe("check-package-cycles", () => {
         targetPackage(
           "packages/a/x.ts",
           "@commonfabric/background-piece",
-          names,
+          workspace,
         ),
       ).toBe("background-piece-service");
     });
 
+    it("returns the nested member a bare specifier names", () => {
+      expect(
+        targetPackage(
+          "packages/a/x.ts",
+          "@commonfabric/agents-connector",
+          workspace,
+        ),
+      ).toBe("connectors/agents");
+    });
+
+    it("returns the nested member a relative specifier climbs into", () => {
+      expect(
+        targetPackage(
+          "packages/a/src/x.ts",
+          "../../connectors/agents/src/y.ts",
+          workspace,
+        ),
+      ).toBe("connectors/agents");
+    });
+
     it("returns the package a relative specifier climbs into", () => {
       expect(
-        targetPackage("packages/a/src/x.ts", "../../runner/src/cell.ts", names),
+        targetPackage(
+          "packages/a/src/x.ts",
+          "../../runner/src/cell.ts",
+          workspace,
+        ),
       ).toBe("runner");
     });
 
     it("returns the importing package for a specifier that stays inside it", () => {
-      expect(targetPackage("packages/a/src/x.ts", "./y.ts", names)).toBe("a");
+      expect(targetPackage("packages/a/src/x.ts", "./y.ts", workspace)).toBe(
+        "a",
+      );
     });
 
     it("returns undefined for a specifier naming no workspace package", () => {
-      expect(targetPackage("packages/a/x.ts", "@std/path", names))
+      expect(targetPackage("packages/a/x.ts", "@std/path", workspace))
         .toBe(undefined);
     });
 
     it("returns undefined for an npm specifier", () => {
-      expect(targetPackage("packages/a/x.ts", "npm:typescript", names))
+      expect(targetPackage("packages/a/x.ts", "npm:typescript", workspace))
         .toBe(undefined);
     });
   });
@@ -315,18 +372,53 @@ describe("check-package-cycles", () => {
     });
   });
 
-  describe("readPackageNames()", () => {
+  describe("readWorkspace()", () => {
     it("returns the package name declared by each workspace member", async () => {
       const root = await tree({ alpha: { "src/mod.ts": "" } });
-      expect(await readPackageNames(root))
+      const workspace = await readWorkspace(root);
+      expect(workspace.members).toEqual(["alpha"]);
+      expect(workspace.names)
         .toEqual(new Map([["@commonfabric/alpha", "alpha"]]));
     });
 
-    it("omits a member that declares no name", async () => {
+    it("returns a nested member under its full directory", async () => {
+      const root = await tree({ "connectors/agents": { "src/mod.ts": "" } });
+      const workspace = await readWorkspace(root);
+      expect(workspace.members).toEqual(["connectors/agents"]);
+      expect(workspace.names).toEqual(
+        new Map([["@commonfabric/connectors/agents", "connectors/agents"]]),
+      );
+    });
+
+    it("omits a member that declares no name but keeps its directory", async () => {
       const root = await tree({
         alpha: { "deno.jsonc": "{}", "src/mod.ts": "" },
       });
-      expect(await readPackageNames(root)).toEqual(new Map());
+      const workspace = await readWorkspace(root);
+      expect(workspace.members).toEqual(["alpha"]);
+      expect(workspace.names).toEqual(new Map());
+    });
+  });
+
+  describe("packageOfPath()", () => {
+    it("returns the member holding the file", () => {
+      expect(packageOfPath("packages/runner/src/cell.ts", MEMBERS))
+        .toBe("runner");
+    });
+
+    it("returns the nested member rather than the directory containing it", () => {
+      expect(packageOfPath("packages/connectors/agents/src/x.ts", MEMBERS))
+        .toBe("connectors/agents");
+    });
+
+    it("returns undefined for a path in no member", () => {
+      expect(packageOfPath("packages/connectors/README.md", MEMBERS))
+        .toBe(undefined);
+    });
+
+    it("returns undefined for a path outside `packages/`", () => {
+      expect(packageOfPath("tasks/check-package-cycles.ts", MEMBERS))
+        .toBe(undefined);
     });
   });
 
