@@ -1959,18 +1959,18 @@ export interface LiveEnvironment {
 
   /**
    * Output-contract directive: when `true`, every codec `decode()`
-   * implementation that consults this context must produce a deep-frozen
+   * implementation that consults this live environment must produce a deep-frozen
    * result; when `false`, a mutable result is acceptable. Same contract as
    * the `frozen` argument to `cloneIfNecessary()` (see
    * `packages/data-model/value-clone.ts`): `shouldDeepFreeze === true`
    * corresponds to `cloneIfNecessary(value, { frozen: true })`.
    *
-   * Required (not optional): every context declares it. A shared
+   * Required (not optional): every live environment declares it. A shared
    * `BaseLiveEnvironment`
    * (`packages/data-model/src/codec-interface/BaseLiveEnvironment.ts`)
    * centralizes the getter with a `true` default, mirroring
-   * `cloneIfNecessary()`'s default; contexts opt out by overriding. An
-   * `NullLiveEnvironment` (same directory) covers context-less
+   * `cloneIfNecessary()`'s default; environments opt out by overriding. An
+   * `NullLiveEnvironment` (same directory) covers environment-less
    * decodes: its `getCell()` throws with a configurable message.
    */
   readonly shouldDeepFreeze: boolean;
@@ -2108,7 +2108,7 @@ codec system:
 2. Encodes that state (recursively handling any nested `FabricValue`s)
    and wraps it with the tag from `codec.tagForValue(value)`.
 3. On decoding, routes the tag back to the codec and calls
-   `codec.decode(tag, state, context)` to produce a real `Temperature`
+   `codec.decode(tag, state, env)` to produce a real `Temperature`
    instance with its methods intact.
 
 **Reference types and `LiveEnvironment`.** The `Temperature` example
@@ -2171,7 +2171,7 @@ aligns with the reactive system's assumption that values don't mutate in place.
 
 ### 3.1 Overview
 
-When decoding, a context may encounter a type tag it doesn't recognize —
+When decoding, an engine may encounter a type tag it doesn't recognize —
 for example, data written by a newer version of the system. Unknown types are
 **passed through** rather than rejected, preserving forward compatibility.
 
@@ -2220,7 +2220,7 @@ tag-routed on decode like any other, and its `encode()` returns a record of the
 three preserved facts (`tag`, `state`, `error`). One consequence is worth
 stating, because it is the only place a returned `ProblematicValue` does not
 mean a refusal: this codec's *successful* product is a `ProblematicValue`, so
-the rule in Section 4.5 that turns one into a raise under a strict context does
+the rule in Section 4.5 that turns one into a raise under a strict engine does
 not apply to it. Reading back a record of a past failure is not a failure of
 that read, and without the carve-out a strict reader could never read one at
 all.
@@ -2543,7 +2543,7 @@ decode direction:
 
 - `encode(value)` encodes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
-- `decode(data, context)` parses a JSON string, then decodes tagged
+- `decode(data, env)` parses a JSON string, then decodes tagged
   forms back into runtime types.
 
 > **Why the boundary is this narrow.** Tag wrapping and unwrapping are
@@ -2880,9 +2880,9 @@ recognizer for text in it, live one layer down in
 export function jsonFromFabricValue(value: FabricValue): string;
 
 /**
- * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
- * `context` is omitted, a shared decode-framed empty context is
- * substituted, which throws if any decoding is needed.
+ * Decodes a string in the `FabricValue` JSON-embedded encoding format. If no
+ * live environment is given, {@link NULL_LIVE_ENVIRONMENT} is substituted,
+ * which throws if any decoding is needed.
  */
 export function fabricFromJsonValue(
   json: string,
@@ -2919,7 +2919,7 @@ The `memory` package wraps these at its encoding boundary
 - **Write path:** `encodeMemoryBoundary(value)` calls
   `jsonFromFabricValue(value)`.
 - **Read path:** `decodeMemoryBoundary(source)` calls
-  `fabricFromJsonValue(source, context)` with a memory `LiveEnvironment`.
+  `fabricFromJsonValue(source, env)` with a memory `LiveEnvironment`.
 
 ### 4.9 Fabric Value Conversion
 
@@ -3435,7 +3435,7 @@ This applies at every point where decoded data is consumed:
 - **JSON-side codec decoding** (Section 3 of `3-json-encoding.md`) must
   validate the format of its state before processing. Malformed input must
   be rejected rather than silently producing garbage; a codec rejects by
-  throwing or by returning a `ProblematicValue`, and the encoding context
+  throwing or by returning a `ProblematicValue`, and the engine
   settles the two against its `lenient` setting (Section 4.5).
 
 - **Hashing** (Section 6.3) may operate on values that have been
@@ -3996,7 +3996,7 @@ spec from being implementable.
 
 - **`LiveEnvironment` extensibility**: The minimal interface defined in
   Section 2.5 covers `Cell` decoding. Other future fabric types may
-  need additional context methods. Should the interface be extended, or should
+  need additional environment methods. Should the interface be extended, or should
   types cast to a broader interface? Recommendation: extend the interface as
   needed; the indirection through an interface (rather than depending on
   `Runtime` directly) makes this straightforward.

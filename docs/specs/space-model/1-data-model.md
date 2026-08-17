@@ -412,8 +412,8 @@ contracts.
 `decode()` lives on the codec rather than being a constructor for two
 reasons:
 
-1. **Decoding-specific context**: It receives a `LiveEnvironment`
-   (and potentially other context) which shouldn't be mandated in a regular
+1. **Decoding-specific environment**: It receives a `LiveEnvironment`
+   (and potentially more besides) which shouldn't be mandated in a regular
    constructor's signature.
 2. **Instance interning**: It can return existing instances rather than always
    creating new ones — essential for types like `Cell` where identity matters.
@@ -447,7 +447,7 @@ class Cell<T> extends FabricInstance {
       state: FabricValue,
       env: LiveEnvironment,
     ): Cell<unknown> {
-      return context.getCell(state as CellState);
+      return env.getCell(state as CellState);
     }
   })();
 
