@@ -651,6 +651,21 @@ export function preflightQueuedEventDependencies(state: {
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
   depTx.setReadOnly?.("scheduler.populateDependencies()");
+  // A SERVED event's dependency probe reads AS the event's server-stamped
+  // actor (server-execution v2 stage A — OW17's tx→replica identity seam,
+  // LD1): the handler run will read that actor's instances of every
+  // scoped input, so the probe must name the SAME instances — its absent
+  // reads then kick instance-named loads, and the pending-load park below
+  // holds the head event on exactly those loads (an at-most-once handler
+  // must not run against the service instance's empty draft — the R7
+  // wall). Absent on every client-side event, byte-identical there.
+  const firedAt = queuedEvent.served?.firedAt;
+  if (firedAt?.user !== undefined) {
+    depTx.tx.scopeKeyIdentity = {
+      principal: firedAt.user,
+      sessionId: firedAt.session === "server" ? undefined : firedAt.session,
+    } as never;
+  }
   let stepStart = performance.now();
   logger.timeStart(
     "scheduler",
@@ -1012,7 +1027,21 @@ export async function dispatchQueuedEvent(state: {
   // surface as the handler's own read failure, not silently drop the event.
   if (typeof handler.presyncInputs === "function") {
     try {
-      await handler.presyncInputs(eventValue);
+      // A served event's presync loads the event actor's instances (stage
+      // A — see EventHandler.presyncInputs); a client-side event passes
+      // nothing, byte-identical to before.
+      const firedAt = queuedEvent.served?.firedAt;
+      await handler.presyncInputs(
+        eventValue,
+        firedAt?.user !== undefined
+          ? {
+            principal: firedAt.user,
+            sessionId: firedAt.session === "server"
+              ? undefined
+              : firedAt.session,
+          } as never
+          : undefined,
+      );
     } catch (error) {
       logger.warn(
         "scheduler",

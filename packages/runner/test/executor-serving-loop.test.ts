@@ -2979,9 +2979,14 @@ describe("stage F serving loop", () => {
       ),
     ).toBe(true);
 
-    // Basis rows key per (action, INSTANCE): the demanded run's rows
-    // land under alice's instance key (serving-loop.md §3b's
-    // action_scope_key), never only the wave identity's.
+    // Basis rows key per (action, INSTANCE) — the run's TRUE instance
+    // (S4, server-execution v2 stage A): the demanded run's DISCOVERED
+    // scope resolved against its identity. This derivation reads only the
+    // SPACE-scoped `n`, so its rows land under `space` and the demand's
+    // `user:<alice>` STAMP is cleared (the over-keyed row F10 named), not
+    // recorded — a demanded run that reads scoped state keys under alice's
+    // instance (`executor-instance-keyed-replica.test.ts` pins that
+    // shape). Pre-stage-A the stamp was recorded verbatim.
     const basisKeys = new Set(
       (engine.database.prepare(
         `SELECT DISTINCT action_scope_key FROM scheduler_basis`,
@@ -2989,6 +2994,7 @@ describe("stage F serving loop", () => {
         row.action_scope_key
       ),
     );
-    expect(basisKeys.has(expectedInstanceKey)).toBe(true);
+    expect(basisKeys.has("space")).toBe(true);
+    expect(basisKeys.has(expectedInstanceKey)).toBe(false);
   });
 });

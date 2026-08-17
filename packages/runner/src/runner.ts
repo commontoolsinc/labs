@@ -73,7 +73,11 @@ import { sendValueToBinding } from "./pattern-binding.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
+import {
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import { waveRunContextOf } from "./executor/wave.ts";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import {
@@ -6124,7 +6128,7 @@ export class Runner {
     // behind link VALUES like a builtin's result handle. Steady-state this is
     // ~free: covered selectors resolve without a server round trip.
     const presyncInputs = module.argumentSchema !== undefined
-      ? async (event: any): Promise<void> => {
+      ? async (event: any, identity?: ScopeKeyIdentity): Promise<void> => {
         const eventInputs = {
           ...(inputs as Record<string, any>),
           $event: event,
@@ -6140,7 +6144,16 @@ export class Runner {
         const collect = (value: unknown, depth: number): void => {
           if (depth > 16) return;
           if (isCell(value)) {
-            promises.push(value.sync());
+            promises.push(
+              identity === undefined
+                ? value.sync()
+                // A served event's presync loads the ACTOR's instances of
+                // the handler's scoped inputs (stage A — the runner's
+                // explicit-instance read; see EventHandler.presyncInputs).
+                : this.runtime.storageManager.syncCell(value, {
+                  scopeKeyIdentity: identity,
+                }),
+            );
             return;
           }
           // NOTE: materialized records all carry the back-to-cell symbol, so

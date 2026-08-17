@@ -4,7 +4,11 @@ import {
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model/schema-utils";
 import type { MIME } from "@commonfabric/memory/interface";
-import type { CellScope, ScopeKeyIdentity } from "@commonfabric/memory/v2";
+import type {
+  CellScope,
+  ScopeKey,
+  ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
@@ -12,7 +16,14 @@ import type { SchemaPathSelector } from "@commonfabric/api";
 import type { PullError, Result, Unit, URI } from "./interface.ts";
 
 const DOCUMENT_MIME = "application/json" as const;
-type ScopedWatchAddress = { id: URI; type: MIME; scope?: CellScope };
+type ScopedWatchAddress = {
+  id: URI;
+  type: MIME;
+  scope?: CellScope;
+  /** The explicit scope INSTANCE an instance-named load targets
+   * (server-execution v2 stage A); absent = the session's own. */
+  scopeKey?: ScopeKey;
+};
 
 export const normalizeSyncSelector = (
   selector: SchemaPathSelector | undefined,
@@ -49,6 +60,7 @@ export const compactWatchEntries = (
       type: DOCUMENT_MIME,
       path: [],
       scope: address.scope ?? "space",
+      ...(address.scopeKey !== undefined ? { scopeKey: address.scopeKey } : {}),
     };
     const [superset] = tracker.getSupersetSelector(
       baseAddress,
@@ -88,5 +100,9 @@ export const watchIdForEntry = (
       scope: address.scope ?? "space",
       type: DOCUMENT_MIME,
       selector: selectorIdentity(selector),
+      // The explicit instance (stage A) is watch identity: two instances
+      // of one doc are two watches, never merged by id. Absent from the
+      // hashed object when unnamed, so the OFF-arm id is byte-identical.
+      ...(address.scopeKey !== undefined ? { scopeKey: address.scopeKey } : {}),
     })
   }`;

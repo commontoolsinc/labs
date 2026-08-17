@@ -4,10 +4,14 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import type {
-  CommitPrecondition,
-  PatchOp,
-  SqliteOperation,
+import {
+  canResolveScopeKey,
+  type CommitPrecondition,
+  type PatchOp,
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
+  type SqliteOperation,
 } from "@commonfabric/memory/v2";
 import {
   encodePointer,
@@ -143,6 +147,7 @@ type WritableDocumentEntry = {
 type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
 
 type SpaceBranch = {
+  space: MemorySpace;
   replica: ReturnType<IStorageManager["open"]>["replica"];
   docs: Map<string, DocumentEntry>;
 };
@@ -827,6 +832,47 @@ class V2TransactionJournal implements ITransactionJournal {
 export class V2StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
   immediate?: boolean;
+  /**
+   * The scope INSTANCE identity this transaction's scoped reads and
+   * writes resolve against (IStorageTransaction.scopeKeyIdentity —
+   * server-execution v2 stage A, OW17's tx→replica identity seam). Set
+   * ONCE by the wave run stamp before the first read; a later different
+   * value throws, and a change after a document was loaded throws too:
+   * the transaction's document cache is name-keyed, so one transaction
+   * serves exactly one identity (the runner mints one per instance run).
+   */
+  get scopeKeyIdentity(): ScopeKeyIdentity | undefined {
+    return this.#scopeKeyIdentity;
+  }
+  set scopeKeyIdentity(identity: ScopeKeyIdentity | undefined) {
+    if (identity === undefined) return;
+    const current = this.#scopeKeyIdentity;
+    if (current !== undefined) {
+      if (
+        current.principal !== identity.principal ||
+        current.sessionId !== identity.sessionId
+      ) {
+        throw new Error(
+          "storage transaction already carries a different scope-key " +
+            "identity: one transaction serves one identity (server-execution " +
+            "v2 stage A, OW17's tx→replica seam — mint one transaction per " +
+            "instance run)",
+        );
+      }
+      return;
+    }
+    if (this.#loadedUnderIdentity) {
+      throw new Error(
+        "storage transaction already loaded documents under the storage " +
+          "manager's own identity; a scope-key identity must be set before " +
+          "the first read (server-execution v2 stage A, OW17's tx→replica " +
+          "seam)",
+      );
+    }
+    this.#scopeKeyIdentity = identity;
+  }
+  #scopeKeyIdentity: ScopeKeyIdentity | undefined;
+  #loadedUnderIdentity = false;
 
   readonly journal = new V2TransactionJournal(this);
 
@@ -2383,6 +2429,26 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#reactivityLogCache = undefined;
   }
 
+  /**
+   * The explicit instance a logged scoped address names when this
+   * transaction carries a run identity (server-execution v2 stage A):
+   * the scheduler's dependency/trigger keys then key the read to THAT
+   * instance (`entityKey` prefers it), so one node's N instance runs
+   * register N distinct reads of one doc and a change to one instance
+   * wakes exactly its readers. Absent for space-scope addresses (one
+   * instance) and for every transaction without a run identity — the
+   * logged address is then byte-identical to before.
+   */
+  #instanceOf(scope: CellScope | undefined): ScopeKey | undefined {
+    const identity = this.#scopeKeyIdentity;
+    if (identity === undefined) return undefined;
+    const name = normalizeCellScope(scope);
+    if (name === "space" || !canResolveScopeKey(name, identity)) {
+      return undefined;
+    }
+    return resolveScopeKey(name, identity);
+  }
+
   private buildReactivityLog(): TransactionReactivityLog {
     const reads: IMemorySpaceAddress[] = [];
     const shallowReads: IMemorySpaceAddress[] = [];
@@ -2394,10 +2460,12 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
 
+      const instance = this.#instanceOf(read.scope);
       const address = {
         space: read.space,
         scope: read.scope,
         id: read.id,
+        ...(instance !== undefined ? { scopeKey: instance } : {}),
         path: read.path,
       };
 
@@ -2434,6 +2502,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           }
         }
 
+        const instance = this.#instanceOf(scope);
         for (
           const path of [...reactivityPaths.values()].sort(compareDocPaths)
         ) {
@@ -2441,6 +2510,7 @@ export class V2StorageTransaction implements IStorageTransaction {
             space,
             scope,
             id,
+            ...(instance !== undefined ? { scopeKey: instance } : {}),
             path,
           });
         }
@@ -2483,6 +2553,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     let branch = this.#branches.get(space);
     if (!branch) {
       branch = {
+        space,
         replica: this.storage.open(space).replica,
         docs: new Map(),
       };
@@ -2545,16 +2616,59 @@ export class V2StorageTransaction implements IStorageTransaction {
       return loaded.ok as RootAttestation;
     }
 
+    // The tx→replica identity seam (server-execution v2 stage A, OW17):
+    // a served per-instance run reads ITS instance of a scoped doc — the
+    // replica holds one local doc per instance. Absent (every client,
+    // the OFF arm) the replica resolves its own, exactly as before.
+    this.#loadedUnderIdentity = true;
+    const identity = this.#scopeKeyIdentity;
     const value = toTransactionDocumentValue(
-      branch.replica.getDocument(address.id, address.scope),
+      branch.replica.getDocument(address.id, address.scope, identity),
     );
+    // The runner's explicit-instance read, transaction layer (stage A): a
+    // per-instance run's read of a scoped instance the replica has NEVER
+    // seen kicks an instance-named load — the serving replica only ever
+    // receives the SERVICE's instances through its own watches (the
+    // memory server resolves a root's scoped links against the loopback
+    // session), so a demander's instance arrives only when a read names
+    // it. The read itself stays absent; the read is logged under that
+    // instance, so the reader re-runs when the doc lands. Reserved once
+    // per (space, instance, id) per manager (`shouldPullDoc`), like the
+    // link-target kick in `Runtime.ensureLinkedDocLoaded`. Never on the
+    // OFF arm (no identity) — byte-identical read path.
+    if (
+      value === undefined && identity !== undefined &&
+      normalizeCellScope(address.scope) !== "space" &&
+      typeof this.storage.syncInstance === "function" &&
+      this.storage.shouldPullDoc?.(
+          branch.space,
+          address.id,
+          address.scope,
+          identity,
+        ) === true
+    ) {
+      this.storage.trackUntilSettled(
+        this.storage.syncInstance(
+          { space: branch.space, id: address.id, scope: address.scope },
+          identity,
+        ).catch(() => {
+          // A failed load surfaces through the sync-failure log and the
+          // pending-load ledger; the kick reservation was handed back.
+        }),
+      );
+    }
 
+    // The root address names the loaded INSTANCE (stage A) so the
+    // commit-time claim re-reads exactly it (`claim` → `replica.get`);
+    // absent for the manager's own identity — byte-identical address.
+    const instance = this.#instanceOf(address.scope);
     return {
       address: {
         id: address.id,
         type,
         path: [],
         scope: normalizeCellScope(address.scope),
+        ...(instance !== undefined ? { scopeKey: instance } : {}),
       },
       value,
     };
@@ -2568,7 +2682,11 @@ export class V2StorageTransaction implements IStorageTransaction {
         if (firstDocument !== undefined) {
           const { address, value: expected } = firstDocument.initial;
           const actual = toTransactionDocumentValue(
-            currentReplica.getDocument(address.id as URI, address.scope),
+            currentReplica.getDocument(
+              address.id as URI,
+              address.scope,
+              this.#scopeKeyIdentity,
+            ),
           );
           return {
             error: StateInconsistency({
@@ -2594,7 +2712,11 @@ export class V2StorageTransaction implements IStorageTransaction {
         if (!doc.validated) {
           continue;
         }
-        const result = claim(doc.initial, branch.replica);
+        const result = claim(
+          doc.initial,
+          branch.replica,
+          this.#scopeKeyIdentity,
+        );
         if (result.error) {
           return { error: result.error };
         }

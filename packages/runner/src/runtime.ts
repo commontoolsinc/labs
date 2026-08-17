@@ -2059,17 +2059,23 @@ export class Runtime {
   ensureLinkedDocLoaded(
     link: NormalizedFullLink,
     sourceSpace?: MemorySpace,
+    /** The reading run's identity when the read is a served per-instance
+     * run's (server-execution v2 stage A — the runner's explicit-instance
+     * read): the load then NAMES that principal's instance, keyed apart
+     * from the runtime's own. Absent = the runtime's own identity, the
+     * pre-stage-A path byte for byte. */
+    identity?: ScopeKeyIdentity,
   ): void {
     const { space, id, scope } = link;
     // Kick keys are per scope INSTANCE (key-vocabulary.md §5's stage-F
     // serving-hazard list): name-keyed, A's kick suppressed B's load and
     // B's absent read never healed at cardinality > 1. Resolved against
     // the runtime's own identity — the OFF arm's one identity, so the
-    // partition is unchanged at cardinality 1 (key-vocabulary.md §2);
-    // served per-run reads arrive with stage F's run contexts and pull
-    // through the demand path, not this dedup set.
+    // partition is unchanged at cardinality 1 (key-vocabulary.md §2) — or
+    // against the served run's identity for a per-instance read (stage
+    // A): each demanded instance's absent read kicks its own load.
     const key = `${space}\0${
-      resolveScopeKey(scope, this.scopeKeyIdentity)
+      resolveScopeKey(scope, identity ?? this.scopeKeyIdentity)
     }\0${id}`;
     if (this.missingDocLoadKicks.has(key)) return;
     // A same-space target the replica already has state for (or a manager
@@ -2077,17 +2083,25 @@ export class Runtime {
     const sameSpace = sourceSpace === space;
     const mgr = this.storageManager;
     const reserved = sameSpace &&
-      mgr.shouldPullDoc?.(space, id, scope) === true;
+      mgr.shouldPullDoc?.(space, id, scope, identity) === true;
     if (sameSpace && !reserved) return;
     this.missingDocLoadKicks.add(key);
+    const load = identity === undefined
+      ? this.getCellFromLink(link).sync()
+      // The instance-named load: the storage manager names the run's
+      // instance on the wire (lease-holder-only at admission) and lands
+      // the doc under it; an own-identity run takes the ordinary sync.
+      : mgr.syncCell(this.getCellFromLink(link), {
+        scopeKeyIdentity: identity,
+      });
     mgr.trackUntilSettled(
-      this.getCellFromLink(link).sync().catch(() => {
+      load.catch(() => {
         // Allow a retry on failure (e.g. transient disconnect): clear this
         // dedup set, and hand back the storage manager's reservation when
         // THIS kick took it — a cross-space kick never reserved, and must
         // not clear a reservation a concurrent same-space read holds.
         this.missingDocLoadKicks.delete(key);
-        if (reserved) mgr.retractDocPullKick?.(space, id, scope);
+        if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
       }),
     );
   }

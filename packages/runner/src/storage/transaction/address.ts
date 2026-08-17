@@ -11,13 +11,15 @@ import { normalizeCellScope } from "../../scope.ts";
  * acting identity of the transaction/notification context the address
  * belongs to — one action tx may carry writes to several instances of one
  * doc (its own narrow instance plus the broad redirect slot), and those
- * must not collapse to one entry. No space segment: the string is
- * per-space by construction.
+ * must not collapse to one entry. An address that NAMES its instance
+ * (`scopeKey`, server-execution v2 stage A — a keyed notification address
+ * on a serving replica) is keyed by it; the identity resolves the rest.
+ * No space segment: the string is per-space by construction.
  */
 export const toString = (address: IMemoryAddress, identity: ScopeKeyIdentity) =>
-  `/${resolveScopeKey(address.scope, identity)}/${address.id}/${
-    JSON.stringify(address.path)
-  }`;
+  `/${
+    address.scopeKey ?? resolveScopeKey(address.scope, identity)
+  }/${address.id}/${JSON.stringify(address.path)}`;
 
 /**
  * Returns true if `candidate` address references location within the

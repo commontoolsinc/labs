@@ -1235,7 +1235,22 @@ export class SpaceServer implements TransactionSealDestination {
         const { promise, resolve } = Promise.withResolvers<
           SealedCommitVerdict
         >();
-        const sealed = replica.sealNative(native, source, promise);
+        // Stage A (OW17): the completion's local pending layer lands on
+        // the CARRIAGE identity's instances — the same instances its
+        // engine rows are annotated with below — so the demanded run's
+        // instance sees the served result locally at verdict, not only
+        // through the wire. Residual, FLAGGED (not filled): the writeback
+        // transaction itself is unstamped, so its hash-guard READS resolve
+        // against the service's instances; a per-instance node's effect
+        // completion is unpinned in this stage.
+        const sealed = replica.sealNative(
+          native,
+          source,
+          promise,
+          carriage?.scopeKeyIdentity !== undefined
+            ? { identity: carriage.scopeKeyIdentity }
+            : undefined,
+        );
         sealedSpaces.push({ space, sealed, resolveVerdict: resolve });
         return Promise.resolve({ ok: {} });
       },

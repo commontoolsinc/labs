@@ -1,0 +1,557 @@
+// Server-execution v2 fan-out stage A — OW17's instance-keyed serving
+// replica, wire, and tx→replica identity seam, END TO END against a real
+// memory server, a live ExecutorHost, and TWO flag-ON clients (Alice,
+// Bob):
+//
+// - the serving replica holds BOTH principals' instances of one scoped
+//   doc, and each demanded run reads ITS instance — divergent per-user
+//   inputs land divergent per-instance engine rows with the RIGHT
+//   values (the OW17 VALUE half; pre-stage-A both runs read the one
+//   scope-NAME-keyed local doc, the service's collapsed instance);
+// - the R7 wall: Alice's authored per-user draft plus her save event →
+//   the served handler runs AS Alice, reads HER draft (not the service
+//   instance's empty one), and writes her per-user consequence with the
+//   typed value (pre-stage-A: consequenced with zero writes);
+// - the resubscribe path is instance-aware: after both instances ran,
+//   BOB's input change wakes the node (the N-run loop resubscribes once
+//   to the UNION of the instance logs — pre-stage-A the last instance's
+//   subscription replaced the others);
+// - S4 (basis rows keyed by the FULL instance address): a demand stamp
+//   broader or narrower than the run's discovered instance leaves no
+//   stranded rows — a session-scoped watch on a user-discovering node
+//   records `user:<p>` rows, never `session:<p>:<s>` (the ragged case's
+//   zombie), and a space-discovering node records `space`.
+
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import * as Engine from "@commonfabric/memory/v2/engine";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+  type StreamEventsDocValue,
+} from "@commonfabric/memory/v2";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { MemorySpace } from "../src/storage/interface.ts";
+import { ExecutorHost } from "../src/executor/host.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
+
+const spaceSigner = await Identity.fromPassphrase("instance-keyed replica");
+const space = spaceSigner.did() as MemorySpace;
+const serviceSigner = await Identity.fromPassphrase(
+  "instance-keyed replica service",
+);
+const aliceSigner = await Identity.fromPassphrase(
+  "instance-keyed replica alice",
+);
+const bobSigner = await Identity.fromPassphrase("instance-keyed replica bob");
+
+const waitUntil = async (
+  predicate: () => boolean,
+  label: string | (() => string),
+  timeoutMs = 20_000,
+): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      const rendered = typeof label === "function" ? label() : label;
+      throw new Error(`timed out waiting for ${rendered}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+
+/** A piece with per-user state on both sides of the run: a PerUser
+ * draft the derivations READ, a PerUser save slot the handler WRITES,
+ * and one space-only derivation (`label`) whose basis rows must key
+ * `space` regardless of who demanded it. */
+const PER_USER_PATTERN = [
+  "import { computed, Default, handler, pattern, PerUser, Stream, Writable } from 'commonfabric';",
+  "type Draft = Writable<string | Default<''>>;",
+  "const draftText = (draft: Draft): string =>",
+  "  (draft.get() as string | undefined) ?? '';",
+  "const save = handler<unknown, { draft: Draft; saved: Draft }>(",
+  "  (_ev, { draft, saved }) => {",
+  "    const text = draftText(draft).trim();",
+  "    if (text.length > 0) saved.set('saved:' + text);",
+  "  },",
+  ");",
+  "export default pattern<",
+  "  { draft?: PerUser<Draft>; saved?: PerUser<Draft>; n?: number },",
+  "  { echo: string; savedEcho: string; label: string; save: Stream<unknown> }",
+  ">(({ draft, saved, n }) => {",
+  "  const draftCell: Draft = draft!;",
+  "  const savedCell: Draft = saved!;",
+  "  return {",
+  "    echo: computed(() => 'echo:' + draftText(draftCell)),",
+  "    savedEcho: computed(() => 'saved-echo:' + draftText(savedCell)),",
+  "    label: computed(() => 'label:' + String(n ?? 0)),",
+  "    save: save({ draft: draftCell, saved: savedCell }),",
+  "  };",
+  "});",
+].join("\n");
+
+const sidecarIdsIn = (engine: Engine.Engine): string[] =>
+  (engine.database.prepare(
+    `SELECT id FROM head WHERE id LIKE 'of:stream-events:%' AND op != 'delete'`,
+  ).all() as Array<{ id: string }>).map((row) => row.id);
+
+/** Every current row of one scope INSTANCE: id → document value. */
+const rowsUnder = (
+  engine: Engine.Engine,
+  scopeKey: string,
+): Map<string, unknown> => {
+  const rows = engine.database.prepare(
+    `SELECT id FROM head WHERE scope_key = :scope_key AND op != 'delete'`,
+  ).all({ scope_key: scopeKey }) as Array<{ id: string }>;
+  const out = new Map<string, unknown>();
+  for (const { id } of rows) {
+    out.set(id, Engine.read(engine, { id, scopeKey } as never)?.value);
+  }
+  return out;
+};
+
+const instanceHolds = (
+  engine: Engine.Engine,
+  scopeKey: string,
+  needle: string,
+): boolean =>
+  [...rowsUnder(engine, scopeKey).values()].some((value) =>
+    JSON.stringify(value ?? null).includes(needle)
+  );
+
+const basisKeys = (engine: Engine.Engine): Set<string> =>
+  new Set(
+    (engine.database.prepare(
+      `SELECT DISTINCT action_scope_key FROM scheduler_basis`,
+    ).all() as Array<{ action_scope_key: string }>).map((row) =>
+      row.action_scope_key
+    ),
+  );
+
+describe("stage A: the instance-keyed serving replica (OW17)", () => {
+  let server: MemoryV2Server.Server;
+  let host: ExecutorHost | undefined;
+  let managers: EmulatedStorageManager[];
+  let runtimes: Runtime[];
+  let servingRuntime: Runtime | undefined;
+
+  const newHost = (): ExecutorHost =>
+    new ExecutorHost({
+      server,
+      serviceIdentity: serviceSigner.did(),
+      // deno-lint-ignore require-await
+      createRuntime: async () => {
+        const manager = EmulatedStorageManager.connectTo(server, {
+          as: serviceSigner,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: manager,
+          servingPosture: true,
+          experimental: {
+            serverExecution: true,
+            systemPatternAutoUpdate: false,
+          },
+        });
+        servingRuntime = runtime;
+        return {
+          runtime,
+          dispose: async () => {
+            await runtime.dispose();
+            await manager.close();
+          },
+        };
+      },
+      policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
+    });
+
+  beforeEach(() => {
+    server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
+    managers = [];
+    runtimes = [];
+    servingRuntime = undefined;
+  });
+
+  afterEach(async () => {
+    await host?.close();
+    host = undefined;
+    for (const runtime of runtimes) await runtime.dispose();
+    for (const manager of managers) await manager.close();
+    await server.close();
+  });
+
+  const openClient = (signer: Identity): Runtime => {
+    const manager = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+      experimental: { serverExecution: true },
+    });
+    managers.push(manager);
+    runtimes.push(runtime);
+    return runtime;
+  };
+
+  /** Alice stands the piece up; Bob joins it. Each principal registers
+   * BOTH demand halves: the space watch (the value pull) and an
+   * identity-bearing scoped watch on the result doc (the demand row the
+   * run supply consumes — P2-F's existing supply, which is how stage A
+   * reaches cardinality 2 without stage B's space-root demanders). Each
+   * writes a DIVERGENT per-user draft through the argument schema (the
+   * narrowing write lands it in that principal's instance). */
+  const standUpTwoUsers = async (options: {
+    bobScope: "user" | "session";
+    names: { arg: string; result: string };
+  }) => {
+    // The host first: activation is triggered by session open / admission
+    // (serving-loop.md §1), so the clients open against a live host.
+    host = newHost();
+    const alice = openClient(aliceSigner);
+    const bob = openClient(bobSigner);
+    const engine = await server.engineForSpace(space);
+
+    const compiled = await alice.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: PER_USER_PATTERN }],
+    }, { space });
+    const aliceArg = alice.getCell<Record<string, unknown>>(
+      space,
+      options.names.arg,
+      undefined,
+    );
+    const aliceResult = alice.getCell<Record<string, unknown>>(
+      space,
+      options.names.result,
+      compiled.resultSchema,
+    );
+    await aliceArg.sync();
+    await aliceResult.sync();
+    {
+      const seed = alice.edit();
+      aliceArg.withTx(seed).set({ n: 1 });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = alice.edit();
+      alice.run(tx, compiled, aliceArg, aliceResult);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await alice.idle();
+    await alice.storageManager.synced();
+    const argId = aliceArg.getAsNormalizedFullLink().id;
+    const resultId = aliceResult.getAsNormalizedFullLink().id;
+
+    // Demand FIRST (P2-F's supply — stage B's arrival re-arm is what
+    // would let a demander who arrives after a clean run be served; here
+    // the input change below is what re-runs the node): the space watch
+    // (value pull) plus the identity-bearing scoped watch per principal.
+    const bobResult = bob.getCell<Record<string, unknown>>(
+      space,
+      options.names.result,
+      undefined,
+    );
+    await bobResult.sync();
+    const cancelAlice = aliceResult.sink(() => {});
+    const cancelBob = bobResult.sink(() => {});
+    await alice.getCellFromLink<unknown>({
+      ...aliceResult.getAsNormalizedFullLink(),
+      scope: "user",
+    }).sync();
+    await bob.getCellFromLink<unknown>({
+      ...bobResult.getAsNormalizedFullLink(),
+      scope: options.bobScope,
+    }).sync();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space activation",
+    );
+    await waitUntil(
+      () => {
+        const demanded = host!.spaceServer(space)?.demandedIdentitiesOf(
+          resultId,
+        ) ?? [];
+        return demanded.some((i) => i.principal === aliceSigner.did()) &&
+          demanded.some((i) => i.principal === bobSigner.did());
+      },
+      "both demanders in the registry",
+    );
+
+    // Divergent per-user drafts, written THROUGH the argument schema so
+    // the PerUser slot narrows into each writer's own instance. Each is
+    // an authored input change that re-runs the demanded node — once
+    // per demanded instance.
+    const typedAliceArg = alice.getCell<{ draft: string; saved: string }>(
+      space,
+      options.names.arg,
+      compiled.argumentSchema,
+    );
+    {
+      const tx = alice.edit();
+      typedAliceArg.key("draft").withTx(tx).set("A");
+      // Alice's `saved` slot exists in HER instance before any handler
+      // touches it: a handler-only write to a never-written PerUser slot
+      // lands at the slot's base scope (pre-existing OFF behavior — the
+      // handler's handle carries no scope cap until the slot redirects;
+      // flagged in the stage-A report, not stage A's), while a write to
+      // an already-narrowed slot follows the sticky redirect into the
+      // writer's instance (scopes.md §2 Permanence) — the group-chat
+      // shape, where the client types the draft first.
+      typedAliceArg.key("saved").withTx(tx).set("");
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const typedBobArg = bob.getCell<{ draft: string }>(
+      space,
+      options.names.arg,
+      compiled.argumentSchema,
+    );
+    await typedBobArg.sync();
+    {
+      const tx = bob.edit();
+      typedBobArg.key("draft").withTx(tx).set("B");
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await alice.idle();
+    await bob.idle();
+    await alice.storageManager.synced();
+    await bob.storageManager.synced();
+    const aliceKey = resolveScopeKey("user", { principal: aliceSigner.did() });
+    const bobKey = resolveScopeKey("user", { principal: bobSigner.did() });
+    await waitUntil(
+      () =>
+        instanceHolds(engine, aliceKey, '"A"') &&
+        instanceHolds(engine, bobKey, '"B"'),
+      "both per-user drafts to land in their own instances",
+    );
+
+    return {
+      alice,
+      bob,
+      engine,
+      compiled,
+      argId,
+      resultId,
+      aliceKey,
+      bobKey,
+      aliceResult,
+      bobResult,
+      typedAliceArg,
+      typedBobArg,
+      cancel: () => {
+        cancelAlice();
+        cancelBob();
+      },
+    };
+  };
+
+  it("two demanded runs read their OWN per-user inputs through the instance-keyed replica: divergent inputs land divergent per-instance derived rows with the right values, and the serving replica holds both instances of the doc (OW17's value half; the R7 read shape)", async () => {
+    const setup = await standUpTwoUsers({
+      bobScope: "user",
+      names: { arg: "ika-a-arg", result: "ika-a-result" },
+    });
+    const { engine, aliceKey, bobKey, argId } = setup;
+
+    // THE ARBITRATION: each principal's instance of the echo doc holds
+    // ITS OWN input's echo. Pre-stage-A both instance runs read the one
+    // scope-NAME-keyed local doc — the service instance's (empty)
+    // draft — and wrote "echo:" under both keys.
+    await waitUntil(
+      () =>
+        instanceHolds(engine, aliceKey, '"echo:A"') &&
+        instanceHolds(engine, bobKey, '"echo:B"'),
+      () =>
+        "each instance's echo of its own draft (alice: " +
+        `${instanceHolds(engine, aliceKey, '"echo:A"')}, bob: ${
+          instanceHolds(engine, bobKey, '"echo:B"')
+        })`,
+    );
+    // Never the sibling's value, never the collapsed empty one.
+    expect(instanceHolds(engine, aliceKey, '"echo:B"')).toBe(false);
+    expect(instanceHolds(engine, bobKey, '"echo:A"')).toBe(false);
+    // The service identity's instance never received a DEMANDED run's
+    // value (a pre-demand wave-level fallback run may have left the
+    // empty "echo:" there — stage B's B5 residual; never a demander's).
+    const serviceKey = resolveScopeKey("user", {
+      principal: serviceSigner.did(),
+    });
+    expect(instanceHolds(engine, serviceKey, '"echo:A"')).toBe(false);
+    expect(instanceHolds(engine, serviceKey, '"echo:B"')).toBe(false);
+
+    // The serving replica HOLDS both instances of the argument doc,
+    // keyed apart, each with its own draft — the read seam's premise.
+    const replica = servingRuntime!.storageManager.open(space).replica;
+    const readDraft = (identity: ScopeKeyIdentity | undefined) => {
+      const doc = replica.getDocument(argId as never, "user", identity);
+      return (doc?.value as { draft?: string } | undefined)?.draft;
+    };
+    expect(readDraft({ principal: aliceSigner.did() })).toBe("A");
+    expect(readDraft({ principal: bobSigner.did() })).toBe("B");
+    // And the replica's OWN (service) instance is not either of them.
+    expect(readDraft(undefined)).not.toBe("A");
+    expect(readDraft(undefined)).not.toBe("B");
+
+    setup.cancel();
+  });
+
+  it("R7: Alice's authored per-user draft + her save event → the served handler runs AS Alice, reads HER draft through the instance-keyed replica, and writes her per-user consequence with the typed value (pre-stage-A: consequenced with zero writes)", async () => {
+    const setup = await standUpTwoUsers({
+      bobScope: "user",
+      names: { arg: "ika-r7-arg", result: "ika-r7-result" },
+    });
+    const { engine, aliceKey, bobKey, alice, aliceResult } = setup;
+    // Let the derivations settle first (the save reads the same draft
+    // instance the echo run already loaded — and the handler must read
+    // it correctly whether or not a prior load happened).
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"echo:A"'),
+      "alice's echo before the save",
+    );
+
+    const before = Engine.serverSeq(engine);
+    (aliceResult.key("save") as unknown as { send(value: unknown): unknown })
+      .send({});
+    await alice.idle();
+    await alice.storageManager.synced();
+
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the save event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        return (value?.entries?.length ?? 0) >= 1 &&
+          value!.entries!.every((entry) => entry.consequenced === true);
+      },
+      "the save event to consequence",
+    );
+    const entries =
+      (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
+        .entries!;
+    expect(entries[0].firedAt?.user).toBe(aliceSigner.did());
+    expect(entries[0].error).toBeUndefined();
+
+    // THE R7 ARBITRATION: the consequence exists, under Alice's instance,
+    // with the value she typed — the handler read HER draft, not the
+    // service instance's empty one (which writes nothing).
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"saved:A"'),
+      "alice's saved consequence under her instance",
+    );
+    // Under HER instance exactly: the arg doc's user instance holds both
+    // her draft and the typed consequence; the space slot holds the
+    // redirect, never the value.
+    expect(rowsUnder(engine, aliceKey).get(setup.argId)).toEqual({
+      draft: "A",
+      saved: "saved:A",
+    });
+    expect(
+      (rowsUnder(engine, "space").get(setup.argId) as { saved?: unknown })
+        ?.saved,
+    ).not.toBe("saved:A");
+    expect(instanceHolds(engine, bobKey, '"saved:')).toBe(false);
+    // The consequence rode a derived commit after the append.
+    const consequenceRows = engine.database.prepare(
+      `SELECT seq FROM "commit"
+       WHERE seq > :from_seq AND class = 'derived'
+         AND consequence_of IS NOT NULL`,
+    ).all({ from_seq: before }) as Array<{ seq: number }>;
+    expect(consequenceRows.length).toBeGreaterThanOrEqual(1);
+    // And the per-user derivation over the SAVED slot re-derived for
+    // Alice from her new instance value.
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"saved-echo:saved:A"'),
+      "alice's saved-echo derived from her consequence",
+    );
+    setup.cancel();
+  });
+
+  it("the resubscribe path is instance-aware: after both instances ran, BOB's input change wakes the node and his instance re-derives (the union of instance logs; pre-stage-A the last instance's subscription won)", async () => {
+    const setup = await standUpTwoUsers({
+      bobScope: "user",
+      names: { arg: "ika-resub-arg", result: "ika-resub-result" },
+    });
+    const { engine, aliceKey, bobKey, bob, typedBobArg } = setup;
+    await waitUntil(
+      () =>
+        instanceHolds(engine, aliceKey, '"echo:A"') &&
+        instanceHolds(engine, bobKey, '"echo:B"'),
+      "both instances derived once",
+    );
+    // Both instances ran; whichever ran LAST holds the subscription
+    // under the pre-stage-A "last instance wins" replacement. Change the
+    // input of BOTH, one at a time, and require each to re-derive: the
+    // one whose run was NOT last is the mutation target.
+    {
+      const tx = bob.edit();
+      typedBobArg.key("draft").withTx(tx).set("B2");
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await bob.idle();
+    await bob.storageManager.synced();
+    await waitUntil(
+      () => instanceHolds(engine, bobKey, '"echo:B2"'),
+      "bob's instance to re-derive from his changed draft",
+    );
+    expect(instanceHolds(engine, aliceKey, '"echo:B2"')).toBe(false);
+    {
+      const tx = setup.alice.edit();
+      setup.typedAliceArg.key("draft").withTx(tx).set("A2");
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await setup.alice.idle();
+    await setup.alice.storageManager.synced();
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"echo:A2"'),
+      "alice's instance to re-derive from her changed draft",
+    );
+    expect(instanceHolds(engine, bobKey, '"echo:A2"')).toBe(false);
+    setup.cancel();
+  });
+
+  it("S4: basis rows key by the run's FULL instance address — a session-scoped demand on a user-discovering node records user rows and NO session-keyed zombie; a space-discovering node records `space` under any demand stamp", async () => {
+    const setup = await standUpTwoUsers({
+      bobScope: "session",
+      names: { arg: "ika-s4-arg", result: "ika-s4-result" },
+    });
+    const { engine, aliceKey, bobKey } = setup;
+    await waitUntil(
+      () =>
+        instanceHolds(engine, aliceKey, '"echo:A"') &&
+        instanceHolds(engine, bobKey, '"echo:B"'),
+      "both instances derived",
+    );
+    await waitUntil(
+      () => {
+        const keys = basisKeys(engine);
+        return keys.has(aliceKey) && keys.has(bobKey) && keys.has("space");
+      },
+      () => `basis keys ${[...basisKeys(engine)].join(", ")}`,
+    );
+    const keys = basisKeys(engine);
+    // Bob demanded through a SESSION-scoped watch: his runs are STAMPED
+    // `session:<bob>:<s>`, but every node he ran discovered `user` (the
+    // per-user draft) or `space` (`label`) — nothing session-scoped — so
+    // no row is recorded under a session key (the ragged case's zombie:
+    // rows a departed session could never overwrite).
+    expect([...keys].some((key) => key.startsWith("session:"))).toBe(false);
+    // The user-discovering derivations recorded rows under each
+    // principal's USER instance — the address they actually served.
+    expect(keys.has(aliceKey)).toBe(true);
+    expect(keys.has(bobKey)).toBe(true);
+    // The space-only `label` derivation recorded `space` (never
+    // over-keyed under a demander's stamp).
+    expect(keys.has("space")).toBe(true);
+    // No row under the service identity's user instance: no demanded
+    // node ran as the service.
+    expect(
+      keys.has(resolveScopeKey("user", { principal: serviceSigner.did() })),
+    ).toBe(false);
+    setup.cancel();
+  });
+});

@@ -11,6 +11,7 @@ import type {
   EntityIdListOptions,
   EntityIdListResult,
   PatchOp,
+  ScopeKey,
   ScopeKeyIdentity,
   SqliteDbRef,
   SqliteOperation,
@@ -292,7 +293,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * the link-resolution hop loop). Optional: managers without lazy remote
    * replication (e.g. test mocks) simply don't implement it.
    */
-  shouldPullDoc?(space: MemorySpace, id: URI, scope?: CellScope): boolean;
+  shouldPullDoc?(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+    /** The reading run's identity when it is not the manager's own
+     * (server-execution v2 stage A): the reservation and the "has this
+     * replica seen the doc" check are then per that INSTANCE. */
+    identity?: ScopeKeyIdentity,
+  ): boolean;
 
   /**
    * Undo a `shouldPullDoc` reservation after the kicked sync FAILED, so a
@@ -301,7 +310,12 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * taken before the async pull settles). No-op when the doc was never
    * reserved. Callers pair it with the failure path of the sync they kicked.
    */
-  retractDocPullKick?(space: MemorySpace, id: URI, scope?: CellScope): void;
+  retractDocPullKick?(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): void;
 
   /**
    * Wait for the currently pending cross-space promises (and any they
@@ -345,7 +359,35 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    *
    * @returns Promise that resolves when the cell sync is complete.
    */
-  syncCell<T>(cell: Cell<T>): Promise<Cell<T>>;
+  syncCell<T>(
+    cell: Cell<T>,
+    options?: {
+      /** The reading run's identity when it is not the manager's own
+       * (server-execution v2 stage A — the runner's explicit-instance
+       * read): the load NAMES that instance on the wire
+       * (`GraphQueryRoot.entityScopeKey`, lease-holder-only) and lands
+       * it in the replica under that instance's key. Absent (every
+       * client, the OFF arm), the load resolves from the manager's own
+       * session exactly as before. */
+      scopeKeyIdentity?: ScopeKeyIdentity;
+    },
+  ): Promise<Cell<T>>;
+
+  /**
+   * Load ONE scope INSTANCE of a document by address (server-execution v2
+   * stage A — the runner's explicit-instance read at the transaction
+   * layer): a served per-instance run's read of a scoped doc that its
+   * identity's instance has never been loaded for kicks this — the load
+   * names that instance on the wire (lease-holder-only at admission) and
+   * lands it under that instance's key, registered as a pending load like
+   * `syncCell` (so the event preflight can park on it) and tracked until
+   * settled. Optional: managers without lazy remote replication (test
+   * mocks) simply don't implement it; the OFF arm never calls it.
+   */
+  syncInstance?(
+    address: { space: MemorySpace; id: URI; scope?: CellScope },
+    identity: ScopeKeyIdentity,
+  ): Promise<void>;
 }
 
 export interface IRemoteStorageProviderSettings {
@@ -376,6 +418,13 @@ export interface IStorageProvider {
     uri: URI,
     selector?: SchemaPathSelector,
     scope?: CellScope,
+    /** The explicit scope INSTANCE to load (server-execution v2 stage A):
+     * a serving runtime's per-instance read names an instance other than
+     * the manager's own; the watch root then carries
+     * `entityScopeKey` (lease-holder-only on the wire) and the replica
+     * keys the arriving doc under that instance. Absent = the manager's
+     * own instance, exactly as before. */
+    instance?: ScopeKey,
   ): Promise<Result<Unit, Error>>;
 
   /**
@@ -743,6 +792,20 @@ export interface IStorageTransaction {
    * across instances.
    */
   sourceAction?: object;
+  /**
+   * The scope INSTANCE identity this transaction's scoped reads and writes
+   * resolve against when it is NOT the storage manager's own session
+   * (server-execution v2 stage A — OW17's tx→replica identity seam,
+   * scopes.md §5: a served per-instance run reads and writes ITS instance
+   * of every scoped doc, not the service's and not a sibling's). Set once,
+   * by the wave run stamp (`stampWaveRunContext`), before the run's first
+   * read; absent for every client transaction and the whole OFF arm, where
+   * the manager's own identity applies as before. ONE identity per
+   * transaction: the transaction's own document cache is name-keyed, so a
+   * transaction may never serve two identities (the runner mints one
+   * transaction per instance run — `runOnce`).
+   */
+  scopeKeyIdentity?: ScopeKeyIdentity;
   /**
    * Opt the transaction into writing to more than one memory space. By default
    * a transaction may write to a single space only. When enabled, commit()
@@ -1860,6 +1923,26 @@ export type IMemoryAddress = {
    */
   scope?: CellScope;
   /**
+   * The explicit scope INSTANCE this address names (server-execution v2
+   * stage A — OW17's instance-keyed replica and wire; key-vocabulary.md
+   * §5). ABSENT everywhere off the serving path: an address without one
+   * resolves its instance from the ambient identity (the runtime's own
+   * authenticated session in the OFF arm — key-vocabulary.md §2), exactly
+   * as before the field existed, so no key, frame, or serialized
+   * notification moves by a byte when it is absent. SET only where a
+   * serving runtime knows the instance is not the ambient one: a
+   * per-instance run's logged reads/writes (its transaction carries the
+   * demand-supplied identity), the replica's notification differentials
+   * for a keyed instance, and instance-named loads. Every consumer that
+   * builds a key from an address PREFERS this over resolving `scope`
+   * against its identity (`entityKey`, the replica's doc keys, the
+   * selector tracker, the differential's address identity). It is a
+   * resolved key — never a positional index or a "current user" (the §4
+   * tripwires) — and it must never enter a persisted value (links carry
+   * scope NAMES; instances resolve at the reader).
+   */
+  scopeKey?: ScopeKey;
+  /**
    * Intra-value path to the {@link FabricValue} being referenced by this
    * address. It is a path within the `is` field of the fact in memory protocol.
    */
@@ -1931,7 +2014,20 @@ export interface ISpaceReplica extends ISpace {
    */
   get(entry: BaseMemoryAddress): State | undefined;
 
-  getDocument(id: URI, scope?: CellScope): EntityDocument | undefined;
+  /**
+   * The doc's visible document (confirmed + this replica's pending
+   * overlay). `identity` (server-execution v2 stage A — OW17's instance-
+   * keyed replica): the reading run's identity when it is not the
+   * replica's own; the replica holds one local doc PER INSTANCE, so a run
+   * stamped as one principal reads that principal's instance and never
+   * the service's or a sibling's. Absent = the replica's own identity,
+   * exactly the pre-stage-A read.
+   */
+  getDocument(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): EntityDocument | undefined;
 
   commitNative?(
     transaction: NativeStorageCommit,
@@ -1966,6 +2062,13 @@ export interface ISpaceReplica extends ISpace {
        * (reset sweeps and origin-drop cascades reach it) — is the
        * ordinary sealed-commit machinery. */
       readonly speculative?: boolean;
+      /** Server-execution v2 stage A (OW17's tx→replica identity seam):
+       * the sealing run's identity when it is not the replica's own. Its
+       * operations apply to — and its verdict promotes or rolls back —
+       * THAT identity's local instances of every scoped doc, and its
+       * read set is built against those instances' pending stacks.
+       * Absent = the replica's own identity, exactly as before. */
+      readonly identity?: ScopeKeyIdentity;
     },
   ): SealedNativeCommit;
 

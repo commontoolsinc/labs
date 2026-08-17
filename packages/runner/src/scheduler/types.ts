@@ -1,5 +1,5 @@
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import type { ScopeKey } from "@commonfabric/memory/v2";
+import type { ScopeKey, ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { Module, Pattern } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type {
@@ -69,9 +69,19 @@ export type EventHandler =
      * inputs (e.g. a SqliteDb handle) synchronously from the local replica;
      * the scheduler awaits this before dispatching the event so those reads
      * don't race the doc-carrying storage responses. The event is passed so
-     * inputs reachable only through the event can be covered too.
+     * inputs reachable only through the event can be covered too. A SERVED
+     * event's dispatch passes the event's server-stamped actor as
+     * `identity` (server-execution v2 stage A — the runner's
+     * explicit-instance read): the handler runs AS that actor (LD1) and
+     * reads that actor's instances of its scoped inputs, so the presync
+     * loads THOSE instances — the served save handler must find the
+     * actor's own draft, not the service instance's empty one (the R7
+     * wall). Absent on every client-side event.
      */
-    presyncInputs?: (event: any) => Promise<void>;
+    presyncInputs?: (
+      event: any,
+      identity?: ScopeKeyIdentity,
+    ) => Promise<void>;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 

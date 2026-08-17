@@ -1020,9 +1020,14 @@ describe("stage G SpaceServer recovery seams", () => {
       ),
     ).toBe(true);
 
-    // The same run's basis rows key under the demander's INSTANCE
-    // (serving-loop.md §3b's action_scope_key) — the supply reached
-    // keys, not only stamps.
+    // The same run's basis rows key under the run's TRUE instance (S4,
+    // server-execution v2 stage A): its DISCOVERED scope resolved against
+    // the demander's identity. This derivation reads only space-scoped
+    // input, so its rows key `space` and the demand's `user:<demander>`
+    // stamp is cleared rather than recorded (the F10 over-keyed row);
+    // the supply's identity is witnessed by the acting annotations above,
+    // and a scoped-reading demanded run keys under the demander's
+    // instance (`executor-instance-keyed-replica.test.ts`).
     const expectedInstanceKey = resolveScopeKey("user", demander as never);
     const basisKeys = new Set(
       (engine.database.prepare(
@@ -1031,7 +1036,8 @@ describe("stage G SpaceServer recovery seams", () => {
         row.action_scope_key
       ),
     );
-    expect(basisKeys.has(expectedInstanceKey)).toBe(true);
+    expect(basisKeys.has("space")).toBe(true);
+    expect(basisKeys.has(expectedInstanceKey)).toBe(false);
 
     // The argument-doc demand RESOLVED (started through the owning
     // root) — it neither terminalized nor failed.
@@ -1233,9 +1239,7 @@ describe("stage G SpaceServer recovery seams", () => {
       );
       // And the userless arm never manufactured an actor anywhere.
       expect(
-        actingAnnotations().every((a) =>
-          a.actingUser === demander.principal
-        ),
+        actingAnnotations().every((a) => a.actingUser === demander.principal),
       ).toBe(true);
     } finally {
       for (const cancel of cancels) cancel();

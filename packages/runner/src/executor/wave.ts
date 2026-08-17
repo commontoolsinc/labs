@@ -55,6 +55,7 @@ import type {
 } from "../storage/interface.ts";
 import { parsePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { normalizeCellScope, scopeRank } from "../scope.ts";
 
 const logger = getLogger("wave-accumulator", {
   enabled: true,
@@ -167,6 +168,17 @@ export function stampWaveRunContext(
   context: WaveRunContext,
 ): void {
   waveRunContexts.set(tx, context);
+  // The tx→replica identity seam (server-execution v2 stage A, OW17): the
+  // run's demand-supplied identity rides the STORAGE transaction too, so
+  // its scoped reads resolve against ITS instance in the replica (one
+  // local doc per instance) and its logged addresses name that instance
+  // for the scheduler's per-instance dependency keys. Set exactly once
+  // per transaction, before the run's first read (the storage tx
+  // enforces both). A context without an identity — the wave-level
+  // fallback, bookkeeping — leaves the manager's own in force.
+  if (context.scopeKeyIdentity !== undefined) {
+    tx.tx.scopeKeyIdentity = context.scopeKeyIdentity;
+  }
 }
 
 export function waveRunContextOf(
@@ -402,6 +414,13 @@ interface WaveContribution {
    * ride (its event replays and re-emits, the model's committed-only
    * `cascadesCross` fold). */
   outboundAppends: OutboxAppendRow[];
+  /** The run's DISCOVERED scope at seal (scopes.md §2 S1 — the
+   * transaction's read-scope ratchet, learned by running): the narrowest
+   * scope of anything the run read, its diff bases and redirect slots
+   * included. With the run identity it names the FULL instance address
+   * the run actually served, which keys its basis rows (S4 —
+   * server-execution v2 stage A). */
+  discoveredScope: CellScope;
 }
 
 interface SealedSpaceContribution {
@@ -457,6 +476,7 @@ interface PendingAssembly {
   context: WaveRunContext | undefined;
   spaces: SealedSpaceContribution[];
   readOnlyReadKeys: Set<string>;
+  discoveredScope: CellScope;
 }
 
 /**
@@ -702,6 +722,10 @@ export class WaveAccumulator
       context,
       spaces: [],
       readOnlyReadKeys: new Set(),
+      // Read BEFORE sealInto: the seal's own bookkeeping reads nothing
+      // scoped, and the ratchet is complete once the action body and its
+      // result write have run.
+      discoveredScope: normalizeCellScope(tx.getNarrowestReadScope?.()),
     };
     try {
       const result = await inner.sealInto(this);
@@ -770,6 +794,7 @@ export class WaveAccumulator
         // Copied: a (refused) post-seal enqueue must not be able to
         // mutate the sealed contribution through the shared array.
         outboundAppends: [...pendingAppends],
+        discoveredScope: assembly.discoveredScope,
       });
       waveSettlements.set(
         tx,
@@ -1032,7 +1057,17 @@ export class WaveAccumulator
       });
     }
     const { promise, resolve } = Promise.withResolvers<SealedCommitVerdict>();
-    const sealed = replica.sealNative(native, source, promise);
+    // The tx→replica identity seam (server-execution v2 stage A, OW17):
+    // the run's ops apply to ITS identity's local instances — the
+    // replica's own when the context carries none (the wave-level
+    // fallback, bookkeeping), byte-identical to before.
+    const identity = assembly.context?.scopeKeyIdentity;
+    const sealed = replica.sealNative(
+      native,
+      source,
+      promise,
+      identity !== undefined ? { identity } : undefined,
+    );
     assembly.spaces.push({
       space,
       native,
@@ -1886,12 +1921,44 @@ export class WaveAccumulator
       // Every survivor lands its basis rows — including one whose writes
       // were dropped per-doc as superseded: its reads are true, and no
       // recompute-owed mark exists (§3d, RULED 2026-08-05).
-      const actionScopeKey = context.actionScopeKey ?? "space";
-      basisInstances.set(`${context.actionId} ${actionScopeKey}`, {
+      //
+      // S4 (serving-loop.md §3b; server-execution v2 stage A — basis
+      // rows keyed by the FULL instance address the run served): the
+      // rows land under the run's DISCOVERED scope resolved against its
+      // identity — the instance address the run actually computed —
+      // rather than under the demand's stamp. A user-scoped watch stamps
+      // `user:<p>` on a node that discovered `space` (over-keyed rows,
+      // F10), and a session-scoped watch stamps `session:<p>:<s>` on a
+      // node that discovered `user` — the RAGGED case (narrowing below
+      // the space→user hop is per principal, scopes.md §2 as amended
+      // 2026-08-16): a departed session then leaves rows no run can ever
+      // overwrite, a zombie the re-mark re-dirties at every activation.
+      // The stamped key and every BROADER key on the run's own chain
+      // (`space`, and `user:<p>` under a session instance) that differ
+      // from the true key are cleared with an EMPTY replacement in the
+      // SAME wave transaction — the "narrowing DELETES the rows it
+      // stranded" rule, sound in both directions by monotonicity at the
+      // top hop and within one principal (an instance narrower than
+      // `space` for anyone is narrower for everyone; a principal's
+      // sessions narrow together). A real row set already recorded in
+      // this wave under a key is never overwritten by a clearance (map
+      // insertion below is guarded), so in-wave order cannot lose rows.
+      const trueKey = this.#trueBasisKey(contribution);
+      basisInstances.set(`${context.actionId} ${trueKey}`, {
         action: context.actionId,
-        actionScopeKey,
+        actionScopeKey: trueKey,
         rows: this.#basisRowsFor(contribution),
       });
+      for (const stranded of this.#strandedBasisKeys(contribution, trueKey)) {
+        const clearanceKey = `${context.actionId} ${stranded}`;
+        if (!basisInstances.has(clearanceKey)) {
+          basisInstances.set(clearanceKey, {
+            action: context.actionId,
+            actionScopeKey: stranded,
+            rows: [],
+          });
+        }
+      }
     }
     // Same-space emitted entries (LT1): every surviving op that appends
     // a seq-LESS entry into a stream sidecar carries a NEW event — the
@@ -2148,13 +2215,60 @@ export class WaveAccumulator
     return [...batches.entries()].map(([key, batch]) => ({ key, batch }));
   }
 
+  /**
+   * The basis-row instance key of a contribution (S4, stage A): the run's
+   * DISCOVERED scope resolved against its identity — the full instance
+   * address it served. `space` for a run that read nothing scoped; the
+   * stamped identity's user or session instance otherwise. A discovered
+   * scope the identity cannot resolve (a session-scoped read under a
+   * sessionless actor — events.md §2's sessionless-actor shape) falls
+   * back to the stamped key: the run could not have served an instance
+   * it cannot name.
+   */
+  #trueBasisKey(contribution: WaveContribution): ScopeKey {
+    const context = contribution.context;
+    const stamped = context.actionScopeKey ?? "space";
+    const identity = context.scopeKeyIdentity ?? this.#scopeKeyIdentity;
+    try {
+      return resolveScopeKey(contribution.discoveredScope, identity);
+    } catch {
+      return stamped;
+    }
+  }
+
+  /** The keys S4 clears for a contribution whose true key differs from
+   * what the demand stamped (see commitWave): the stamp itself, and every
+   * strictly-broader key on the run's own chain. */
+  #strandedBasisKeys(
+    contribution: WaveContribution,
+    trueKey: ScopeKey,
+  ): ScopeKey[] {
+    const context = contribution.context;
+    const stranded = new Set<ScopeKey>();
+    const stamped = context.actionScopeKey ?? "space";
+    if (stamped !== trueKey) stranded.add(stamped);
+    const identity = context.scopeKeyIdentity ?? this.#scopeKeyIdentity;
+    const discovered = contribution.discoveredScope;
+    if (scopeRank(discovered) > scopeRank("space")) stranded.add("space");
+    if (scopeRank(discovered) > scopeRank("user")) {
+      try {
+        stranded.add(resolveScopeKey("user", identity));
+      } catch {
+        // an unresolvable user instance has no rows to strand
+      }
+    }
+    stranded.delete(trueKey);
+    return [...stranded];
+  }
+
   /** Basis rows (§3b) for one surviving contribution: doc-granular
    * ids + seqs from the sealed commit's read set — confirmed reads carry
    * their store version; in-wave pending reads share the wave's own
-   * commit seq (`seq: null`, filled by the sink). */
+   * commit seq (`seq: null`, filled by the sink). Keyed by the run's
+   * TRUE instance key (S4, stage A — see #trueBasisKey). */
   #basisRowsFor(contribution: WaveContribution): SchedulerBasisRow[] {
     const context = contribution.context;
-    const actionScopeKey = context.actionScopeKey ?? "space";
+    const actionScopeKey = this.#trueBasisKey(contribution);
     const rows = new Map<string, SchedulerBasisRow>();
     for (const spaceContribution of contribution.spaces) {
       const reads = spaceContribution.sealed.commit.reads;

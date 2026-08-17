@@ -20,6 +20,7 @@ import type {
   State,
 } from "../interface.ts";
 import { unclaimed } from "@commonfabric/memory/fact";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
@@ -139,6 +140,10 @@ export const attest = (
 export const claim = (
   { address, value: expected }: IAttestation,
   replica: ISpaceReplica,
+  // The reading transaction's scope-instance identity (server-execution v2
+  // stage A — OW17's tx→replica seam): the claim re-reads the SAME instance
+  // the load came from; absent = the replica's own, as before.
+  identity?: ScopeKeyIdentity,
 ): Result<State, IStorageTransactionInconsistent> => {
   const type = address.type ?? "application/json";
   const state = replica.get(address) ??
@@ -148,7 +153,7 @@ export const claim = (
       address.path.length === 0 &&
       typeof replica.getDocument === "function"
     ? toTransactionDocumentValue(
-      replica.getDocument(address.id, address.scope),
+      replica.getDocument(address.id, address.scope, identity),
     )
     : read(source, address)?.ok?.value;
 

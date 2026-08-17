@@ -5,7 +5,7 @@ import {
 } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import { entityKey } from "./keys.ts";
+import { entityNameKey } from "./keys.ts";
 import type { Action, SpaceScopeAndURI } from "./types.ts";
 
 export interface WriterIndexState {
@@ -41,7 +41,20 @@ export class SchedulerWriteIndex
   // Current-known writes are the action's static declared write surface.
   readonly currentKnownWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Index: entity -> actions that write to it (for fast dependency lookup).
-  // Updated from the active scheduling write set.
+  // Updated from the active scheduling write set. Keyed by scope NAME
+  // (entityNameKey — server-execution v2 stage A, the instance-AGNOSTIC
+  // writer index): the reader→writer relation is a NODE-level topology
+  // relation — under C11b one node writes ALL instances of its declared
+  // surface — so a reader whose logged read names one principal's
+  // instance must still find the writer whose surface declares the scope
+  // by name. An instance-keyed index would drop that edge the moment
+  // reads carry non-own instances (today both sides collapse to the
+  // runtime's own instance and match by accident). Cost of the fan-in:
+  // any instance's change re-dirties the (singular) node, so all N
+  // instances re-run — O(N) per input change, equality cutoffs absorb the
+  // unchanged siblings; instance-precise dirtiness is stage B's B7 and
+  // is never a correctness need here (dirtiness/dependency keys stay per
+  // instance via entityKey).
   readonly writersByEntity = new Map<SpaceScopeAndURI, Set<Action>>();
   // Reverse index: action -> entities it writes to (for cleanup).
   readonly actionWriteEntities = new WeakMap<
@@ -76,9 +89,8 @@ export class SchedulerWriteIndex
     const addedEntities = new Set<SpaceScopeAndURI>();
     const removedEntities = new Set<SpaceScopeAndURI>();
 
-    const identity = this.scopeKeyIdentity();
     for (const write of nextSchedulingWrites) {
-      const entity = entityKey(write, identity);
+      const entity = entityNameKey(write);
       nextEntities.add(entity);
       if (!existingEntities.has(entity)) {
         addedEntities.add(entity);
@@ -219,12 +231,13 @@ export function forEachOverlappingWriter(
     readonly onCandidate?: (writer: Action) => void;
   } = {},
 ): void {
-  const identity = state.scopeKeyIdentity();
   const scan = (
     read: IMemorySpaceAddress,
     shallow: boolean,
   ): boolean => {
-    const writers = state.writersByEntity.get(entityKey(read, identity));
+    // Looked up by NAME (see writersByEntity): the read's instance is
+    // irrelevant to WHICH node writes the doc.
+    const writers = state.writersByEntity.get(entityNameKey(read));
     if (!writers) return false;
     for (const writer of writers) {
       if (hooks.filter && !hooks.filter(writer)) continue;

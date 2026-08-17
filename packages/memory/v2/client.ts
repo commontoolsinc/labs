@@ -92,11 +92,17 @@ const reconnectDelayMs = (attempt: number): number => {
   );
 };
 
+// The view's entity key: per scope INSTANCE where the frame names one
+// (server-execution v2 stage A, OW17's wire leg — lease-holder frames
+// carry `scopeKey`, and such a session may hold two instances of one
+// (branch, id, scope) at once), else per scope NAME as always. An unkeyed
+// frame's key text is byte-identical to before.
 const watchKey = (
   branch: string,
   id: string,
   scope: string | undefined,
-): string => `${branch}\0${scope ?? "space"}\0${id}`;
+  scopeKey?: string,
+): string => `${branch}\0${scopeKey ?? scope ?? "space"}\0${id}`;
 
 const compareEntitySnapshot = (
   left: EntitySnapshot,
@@ -1489,18 +1495,29 @@ export class WatchView {
   applySync(sync: SessionSync, emit: boolean): void {
     const upserts = new Map<string, EntitySnapshot>();
     for (const upsert of sync.upserts) {
-      upserts.set(watchKey(upsert.branch, upsert.id, upsert.scope), {
-        branch: upsert.branch,
-        id: upsert.id,
-        ...(upsert.scope !== undefined ? { scope: upsert.scope } : {}),
-        seq: upsert.seq,
-        document: upsert.doc ?? null,
-      });
+      upserts.set(
+        watchKey(upsert.branch, upsert.id, upsert.scope, upsert.scopeKey),
+        {
+          branch: upsert.branch,
+          id: upsert.id,
+          ...(upsert.scope !== undefined ? { scope: upsert.scope } : {}),
+          ...(upsert.scopeKey !== undefined
+            ? { scopeKey: upsert.scopeKey }
+            : {}),
+          seq: upsert.seq,
+          document: upsert.doc ?? null,
+        },
+      );
     }
 
     const removeKeys = new Set<string>();
     for (const remove of sync.removes) {
-      const key = watchKey(remove.branch, remove.id, remove.scope);
+      const key = watchKey(
+        remove.branch,
+        remove.id,
+        remove.scope,
+        remove.scopeKey,
+      );
       removeKeys.add(key);
     }
 

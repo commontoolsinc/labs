@@ -31,14 +31,34 @@ interface Memory {
   get(entry: IMemoryAddress): State | undefined;
 }
 
+type ScopedState = State & Pick<IMemoryAddress, "scope" | "scopeKey">;
+
 const stateScope = (state: State) =>
-  normalizeCellScope((state as State & Pick<IMemoryAddress, "scope">).scope);
+  normalizeCellScope((state as ScopedState).scope);
+
+// The explicit scope INSTANCE a state names (server-execution v2 stage A,
+// OW17's instance-keyed replica): a serving replica that holds several
+// instances of one doc snapshots each with its key, so one notification
+// batch keeps them apart and its change addresses carry the instance to
+// the scheduler's per-instance dependency keys. Absent everywhere else
+// (every client, the OFF arm): the batch identity resolves the name, and
+// the change address is byte-identical to before.
+const stateScopeKey = (state: State): string | undefined =>
+  (state as ScopedState).scopeKey;
 
 const unclaimedWithScope = (state: State): State =>
-  ({ ...unclaimed(state), scope: stateScope(state) }) as State;
+  ({
+    ...unclaimed(state),
+    scope: stateScope(state),
+    ...(stateScopeKey(state) !== undefined
+      ? { scopeKey: stateScopeKey(state) }
+      : {}),
+  }) as State;
 
 const toKey = (state: State, identity: ScopeKeyIdentity) =>
-  `/${resolveScopeKey(stateScope(state), identity)}/${state.the}/${state.of}`;
+  `/${
+    stateScopeKey(state) ?? resolveScopeKey(stateScope(state), identity)
+  }/${state.the}/${state.of}`;
 const toAddress = (
   state: State,
   path: readonly string[] = [],
@@ -46,6 +66,9 @@ const toAddress = (
   id: state.of,
   type: state.the,
   scope: stateScope(state),
+  ...(stateScopeKey(state) !== undefined
+    ? { scopeKey: stateScopeKey(state) as IMemoryAddress["scopeKey"] }
+    : {}),
   path: [...path],
 });
 

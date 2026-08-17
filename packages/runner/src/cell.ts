@@ -2768,7 +2768,19 @@ export class CellImpl<T extends FabricValue>
   sync(): Promise<Cell<T>> {
     this.synced = true;
     logger.info("sync", this.link);
-    return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
+    // The runner's explicit-instance read (server-execution v2 stage A —
+    // OW17's tx→replica seam): a cell read inside a SERVED per-instance
+    // run — its transaction carries the demand-supplied identity — loads
+    // THAT principal's instance of a scoped doc, keyed apart in the
+    // serving replica; a cell with no run identity (every client, the OFF
+    // arm) loads exactly as before. The manager decides whether the
+    // identity names anything (own identity and space scope name
+    // nothing).
+    const identity = this.tx?.tx?.scopeKeyIdentity;
+    return this.runtime.storageManager.syncCell<T>(
+      this as unknown as Cell<T>,
+      identity !== undefined ? { scopeKeyIdentity: identity } : undefined,
+    );
   }
 
   sinkMeta(

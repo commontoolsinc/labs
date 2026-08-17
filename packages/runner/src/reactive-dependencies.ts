@@ -43,11 +43,19 @@ export function sortAndCompactPaths(
 ): IMemorySpaceAddress[] {
   if (unsorted.length === 0) return [];
 
+  // The instance segment: an address that NAMES its instance
+  // (`scopeKey`, server-execution v2 stage A — a served per-instance
+  // run's logged read) compares by that key, so the union of one node's
+  // N instance runs' logs keeps N reads of one doc apart instead of
+  // compacting them into one; an address without one compares by scope
+  // NAME as before (byte-identical ordering and compaction OFF).
+  const instanceOf = (address: IMemorySpaceAddress): string =>
+    address.scopeKey ?? normalizeCellScope(address.scope);
   const sorted = unsorted.toSorted((a, b) => {
     if (a.space !== b.space) return a.space < b.space ? -1 : 1;
     if (a.id !== b.id) return a.id < b.id ? -1 : 1;
-    const aScope = normalizeCellScope(a.scope);
-    const bScope = normalizeCellScope(b.scope);
+    const aScope = instanceOf(a);
+    const bScope = instanceOf(b);
     if (aScope !== bScope) return aScope < bScope ? -1 : 1;
     return comparePaths(a.path, b.path);
   });
@@ -57,8 +65,7 @@ export function sortAndCompactPaths(
     if (
       sorted[i].space === previous.space &&
       sorted[i].id === previous.id &&
-      normalizeCellScope(sorted[i].scope) ===
-        normalizeCellScope(previous.scope) &&
+      instanceOf(sorted[i]) === instanceOf(previous) &&
       // Is the previous path a prefix of the current path?
       previous.path.every((value, index) => value === sorted[i].path[index]) &&
       // If we compactifyChildren, or the paths are identical, skip this

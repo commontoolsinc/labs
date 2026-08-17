@@ -57,6 +57,11 @@ installFakeClock({
     // The Phase-3 serving-side events-down suite drives a live
     // ExecutorHost under the same wall-clock policies.
     "executor-events-down",
+    // The fan-out stage-A suite (OW17's instance-keyed replica) drives a
+    // live ExecutorHost with two flag-ON clients under the same
+    // wall-clock policies; it waits on store/replica edges with bounded
+    // timeouts.
+    "executor-instance-keyed-replica",
     // The Phase-4 client-effect-channel suite drives a live
     // ExecutorHost (the served navigateTo → intent → enact/ack →
     // retirement journeys) under the same wall-clock policies — the

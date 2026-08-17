@@ -275,6 +275,15 @@ export type TrackGraphOptions = {
   readSeq?: number;
   principal?: string;
   sessionId?: string;
+  /**
+   * `queryGraph` only (server-execution v2 stage A, OW17's wire leg):
+   * annotate every returned snapshot with its scope INSTANCE
+   * (`EntitySnapshot.scopeKey`). Set for a session whose lease-holder
+   * read exemption is live — the one session class whose result may
+   * legitimately hold two instances of one (branch, id, scope) — and
+   * never otherwise, so the OFF-arm result shape is unchanged.
+   */
+  keyedSnapshots?: boolean;
 };
 
 export const cloneTrackedGraphState = (
@@ -567,9 +576,15 @@ export const queryGraph = (
     ...options,
     readSeq: query.atSeq,
   });
+  const entities = options.keyedSnapshots === true
+    ? [...tracked.state.entities.entries()].map(([key, snapshot]) => ({
+      ...snapshot,
+      scopeKey: fromDocKey(key as QueryDocKey).scopeKey,
+    }))
+    : [...tracked.state.entities.values()];
   return {
     serverSeq: tracked.serverSeq,
-    entities: [...tracked.state.entities.values()]
+    entities: entities
       .toSorted((left, right) => left.id.localeCompare(right.id)),
   };
 };

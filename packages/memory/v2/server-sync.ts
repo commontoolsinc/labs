@@ -7,6 +7,7 @@ import {
   type ScopeKey,
   type ScopeKeyIdentity,
   type SessionSync,
+  type SessionSyncRemove,
   type SessionSyncUpsert,
   type WatchSpec,
 } from "../v2.ts";
@@ -100,9 +101,18 @@ export const trackedIdsFromEntries = (
  * receive keys). Every path that puts cache entries into a `SessionSync`
  * frame goes through this, so the instance keying stays server-internal
  * and the OFF-arm wire is byte-identical.
+ *
+ * `keyed` (server-execution v2 stage A, OW17's wire leg): a frame to a
+ * session whose lease-holder read exemption is LIVE keeps the instance
+ * key on every entry — that session may hold two instances of one
+ * (branch, id, scope) at once (its explicit-instance reads name them),
+ * and the scope name alone cannot tell them apart. The field is added
+ * AFTER the pre-existing fields, so a keyed frame is the byte-identical
+ * unkeyed frame plus one field per entry; an unkeyed frame is unchanged.
  */
 export const toWireUpsert = (
   entry: SessionCacheEntry,
+  keyed = false,
 ): SessionSyncUpsert => {
   // Field order matches the pre-instance-keying cache entry exactly
   // (branch, id, scope, seq, then deleted|doc), so serialized frames are
@@ -114,6 +124,7 @@ export const toWireUpsert = (
       scope: entry.scope,
       seq: entry.seq,
       deleted: true,
+      ...(keyed ? { scopeKey: entry.scopeKey } : {}),
     };
   }
   return {
@@ -122,8 +133,21 @@ export const toWireUpsert = (
     scope: entry.scope,
     seq: entry.seq,
     ...(entry.doc === undefined ? {} : { doc: entry.doc }),
+    ...(keyed ? { scopeKey: entry.scopeKey } : {}),
   };
 };
+
+/** The wire form of a removed cache entry — `keyed` as on
+ * {@link toWireUpsert}. */
+export const toWireRemove = (
+  entry: SessionCacheEntry,
+  keyed = false,
+): SessionSyncRemove => ({
+  branch: entry.branch,
+  id: entry.id,
+  scope: entry.scope,
+  ...(keyed ? { scopeKey: entry.scopeKey } : {}),
+});
 
 const compareSyncAddress = (
   left: { branch: string; id: string; scope?: CellScope },
@@ -200,6 +224,8 @@ export const buildFullSync = (
   next: ReadonlyMap<string, SessionCacheEntry>,
   fromSeq: number,
   toSeq: number,
+  // Lease-holder frames carry instance keys (see toWireUpsert).
+  keyed = false,
 ): SessionSync => {
   const removes = [...previous.values()]
     .filter((entry) =>
@@ -207,14 +233,10 @@ export const buildFullSync = (
         cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
       )
     )
-    .map((entry) => ({
-      branch: entry.branch,
-      id: entry.id,
-      scope: entry.scope,
-    }))
+    .map((entry) => toWireRemove(entry, keyed))
     .sort(compareSyncAddress);
   const upserts = [...next.values()].sort(compareSyncAddress)
-    .map(toWireUpsert);
+    .map((entry) => toWireUpsert(entry, keyed));
   return {
     type: "sync",
     fromSeq,
@@ -238,6 +260,8 @@ export const buildDiffSync = (
     upserts: SessionCacheEntry[];
     removes: SessionCacheEntry[];
   },
+  // Lease-holder frames carry instance keys (see toWireUpsert).
+  keyed = false,
 ): SessionSync => {
   const upserts: SessionCacheEntry[] = [];
   for (const [key, current] of next.entries()) {
@@ -249,11 +273,7 @@ export const buildDiffSync = (
     .filter(([key]) => !next.has(key))
     .map(([, entry]) => entry);
   const removes = removedEntries
-    .map((entry) => ({
-      branch: entry.branch,
-      id: entry.id,
-      scope: entry.scope,
-    }))
+    .map((entry) => toWireRemove(entry, keyed))
     .sort(compareSyncAddress);
   if (delivered !== undefined) {
     delivered.upserts.push(...upserts);
@@ -263,7 +283,9 @@ export const buildDiffSync = (
     type: "sync",
     fromSeq,
     toSeq,
-    upserts: upserts.toSorted(compareSyncAddress).map(toWireUpsert),
+    upserts: upserts.toSorted(compareSyncAddress).map((entry) =>
+      toWireUpsert(entry, keyed)
+    ),
     removes,
   };
 };

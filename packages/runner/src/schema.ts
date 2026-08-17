@@ -1331,24 +1331,32 @@ export function validateAndTransform(
 
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
+  // The traversal's acting identity (key-vocabulary.md §1 sites 5-6): a
+  // served run's DEMAND-SUPPLIED identity when the wave run context
+  // carries one (M1's per-run threading, server-execution v2 Phase 2) —
+  // or when the STORAGE transaction carries one (stage A: the event
+  // preflight's dependency probe runs under the event's actor without a
+  // wave stamp) — else the runtime's own session. `runIdentity` stays
+  // undefined for an own-identity traversal, so its absent-target loads
+  // take the ordinary path.
+  const runIdentity =
+    waveRunContextOf(tx as IExtendedStorageTransaction)?.scopeKeyIdentity ??
+      (tx as IExtendedStorageTransaction).tx?.scopeKeyIdentity;
   const traverser = new SchemaObjectTraverser<any>(
     tx!,
     selector,
     createDefaultTraversalContext(
-      // The traversal's acting identity (key-vocabulary.md §1 sites
-      // 5-6): a served run's DEMAND-SUPPLIED identity when the wave run
-      // context carries one (M1's per-run threading, server-execution
-      // v2 Phase 2), else the runtime's own session.
-      waveRunContextOf(tx as IExtendedStorageTransaction)
-        ?.scopeKeyIdentity ?? runtime.scopeKeyIdentity,
+      runIdentity ?? runtime.scopeKeyIdentity,
       options?.traverseCells ?? false,
       undefined,
       undefined,
       // Absent link targets get an async load kicked (cross-space always;
       // same-space only when the replica has never seen the doc); the
-      // tracked read re-runs the reader on arrival.
+      // tracked read re-runs the reader on arrival. A served per-instance
+      // run's absent target loads AS that run's instance (stage A — the
+      // runner's explicit-instance read).
       (missing, sourceSpace) =>
-        runtime.ensureLinkedDocLoaded(missing, sourceSpace),
+        runtime.ensureLinkedDocLoaded(missing, sourceSpace, runIdentity),
     ),
     objectCreator,
   );

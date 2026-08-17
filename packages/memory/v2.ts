@@ -971,6 +971,17 @@ export type EntitySnapshot = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+  /**
+   * The scope INSTANCE this snapshot is of (server-execution v2 stage A,
+   * OW17's wire leg): present ONLY in responses to a lease-holder session
+   * that named explicit instances (`GraphQueryRoot.entityScopeKey`), so
+   * two instances of one (branch, id, scope) — which such a session may
+   * legitimately hold at once — stay distinguishable. Every other
+   * session's responses carry scope NAMES only and resolve instances from
+   * their own identity as always (protocol.md §1); the OFF-arm wire is
+   * byte-identical.
+   */
+  scopeKey?: ScopeKey;
   seq: number;
   document: EntityDocument | null;
 };
@@ -1018,6 +1029,19 @@ export type SessionSyncUpsert = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+  /**
+   * The scope INSTANCE this upsert is of (server-execution v2 stage A,
+   * OW17's wire leg — the ONE write-side addition to the frame shape).
+   * Populated ONLY on frames to a session whose lease-holder read
+   * exemption is live (`SessionState.leaseHolderReads`, armed by an
+   * admitted `entityScopeKey` read — protocol.md §2's read row): that
+   * session legitimately receives EVERY instance it serves, including
+   * two instances of one (branch, id, scope), which the scope NAME alone
+   * cannot distinguish. Every other session's frames carry names only
+   * and resolve instances from their own identity as always
+   * (protocol.md §1, §3); the OFF-arm wire is byte-identical.
+   */
+  scopeKey?: ScopeKey;
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
@@ -1027,6 +1051,8 @@ export type SessionSyncRemove = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+  /** As on {@link SessionSyncUpsert}: the instance, lease-holder frames only. */
+  scopeKey?: ScopeKey;
 };
 
 export type SessionSync = {

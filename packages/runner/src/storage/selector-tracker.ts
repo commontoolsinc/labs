@@ -90,8 +90,11 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     this.#identity = identity;
   }
 
-  private toKey({ id, scope }: BaseMemoryAddress): string {
-    return `${resolveScopeKey(scope, this.#identity())}\0${id}`;
+  private toKey({ id, scope, scopeKey }: BaseMemoryAddress): string {
+    // An address that NAMES its instance (server-execution v2 stage A —
+    // an instance-named load) keys by it; else the bound identity
+    // resolves the scope name as before.
+    return `${scopeKey ?? resolveScopeKey(scope, this.#identity())}\0${id}`;
   }
 
   add(

@@ -3,7 +3,7 @@ import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import { entityKey } from "./keys.ts";
+import { entityNameKey } from "./keys.ts";
 import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 
@@ -60,9 +60,13 @@ export class SchedulerMaterializers implements MaterializerIndexState {
     this.writeEnvelopes.set(action, writes);
 
     const entities = new Set<SpaceScopeAndURI>();
-    const identity = this.scopeKeyIdentity();
+    // Reader→writer TOPOLOGY, keyed by scope NAME (server-execution v2
+    // stage A; see entityNameKey): a materializer's envelope covers every
+    // instance of its declared surface, so a reader running as any
+    // principal must find it. Overlap is decided by name (readsOverlapWrites)
+    // as before; only the index key stops resolving an instance.
     for (const write of writes) {
-      const entity = entityKey(write, identity);
+      const entity = entityNameKey(write);
       entities.add(entity);
       let materializers = this.materializersByEntity.get(entity);
       if (!materializers) {
@@ -108,10 +112,9 @@ export function collectMaterializerWritersForLog(
 ): Set<Action> {
   const writers = new Set<Action>();
   const reads = [...log.reads, ...log.shallowReads];
-  const identity = state.scopeKeyIdentity();
   for (const read of reads) {
     const candidates = state.materializersByEntity.get(
-      entityKey(read, identity),
+      entityNameKey(read),
     );
     if (!candidates) continue;
 

@@ -846,8 +846,18 @@ export function normalizeAndDiff(
       // cell skip it — the check would otherwise run on EVERY defaulted-cell
       // serialization, a measurable hot-path cost (the CI perf check caught
       // +22–36% on the CLI integration suites for the unmemoized version).
+      // The memo keys per INSTANCE under the RUN's identity (server-
+      // execution v2 stage A — key-vocabulary.md §1 site 4's audit): a
+      // served per-instance run's tx carries its demand-supplied
+      // identity, so Alice's presence check memoizes under Alice's
+      // instance and never suppresses Bob's seed of HIS default (one
+      // user's presence must not suppress another's). Absent identity —
+      // every client, the OFF arm — resolves the runtime's own, as before.
       !seededDocs(runtime).has(
-        seedMemoKey(seedTarget, runtime.scopeKeyIdentity),
+        seedMemoKey(
+          seedTarget,
+          tx.tx.scopeKeyIdentity ?? runtime.scopeKeyIdentity,
+        ),
       )
     ) {
       // Don't subscribe the serializing action to the seed doc — mirror
@@ -857,7 +867,10 @@ export function normalizeAndDiff(
       }) === undefined;
       if (!absent) {
         seededDocs(runtime).add(
-          seedMemoKey(seedTarget, runtime.scopeKeyIdentity),
+          seedMemoKey(
+            seedTarget,
+            tx.tx.scopeKeyIdentity ?? runtime.scopeKeyIdentity,
+          ),
         );
       }
       if (absent) {

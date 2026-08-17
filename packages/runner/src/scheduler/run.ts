@@ -404,6 +404,18 @@ export async function runSchedulerAction(
       ? demandedInstances
       : [undefined];
 
+  // The N-run loop's subscription (server-execution v2 stage A — OW17's
+  // scheduler leg): with several instance runs, each run's log is
+  // COLLECTED and the node resubscribes ONCE to their union after the
+  // last instance — never per run, which replaced the subscription each
+  // time so only the LAST instance's reads survived ("last instance
+  // wins": Bob's input change would not wake the node once Alice's run
+  // ran after his). The single-run path — every client, the OFF arm, and
+  // a served action with one or no demanded instance — resubscribes
+  // inside its own finalize exactly as before.
+  const unionSubscription = runs.length > 1;
+  const instanceLogs: ReactivityLog[] = [];
+
   const runOnce = (
     instance: ServerRunInstance | undefined,
   ): Promise<unknown> => {
@@ -455,6 +467,9 @@ export async function runSchedulerAction(
           result,
           error,
           resolve,
+          ...(unionSubscription
+            ? { collectLog: (log: ReactivityLog) => instanceLogs.push(log) }
+            : {}),
         });
       };
 
@@ -487,6 +502,23 @@ export async function runSchedulerAction(
     for (const instance of runs) {
       lastResult = await runOnce(instance);
     }
+    if (unionSubscription && instanceLogs.length > 0) {
+      // The union of the instance runs' logs: each read carries ITS
+      // instance (the transaction's stamped identity puts the scope key
+      // on scoped addresses), so the trigger index registers N reads of
+      // one doc — one per instance — and any instance's change wakes the
+      // node. sortAndCompactPaths keeps them apart by instance.
+      logger.timeStart("scheduler", "run", "resubscribe");
+      try {
+        state.resubscribe(action, {
+          reads: instanceLogs.flatMap((log) => log.reads),
+          shallowReads: instanceLogs.flatMap((log) => log.shallowReads),
+          writes: instanceLogs.flatMap((log) => log.writes),
+        });
+      } finally {
+        logger.timeEnd("scheduler", "run", "resubscribe");
+      }
+    }
     return lastResult;
   })();
   state.setRunningPromise(nextRunningPromise);
@@ -508,6 +540,11 @@ function finalizeSchedulerAction(
     readonly result: unknown;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
+    /** Present for one run of an N-instance loop (stage A): the run's
+     * committed log is handed here and the loop resubscribes once to
+     * the union after its last instance, instead of this run
+     * resubscribing (which would replace the previous instances'). */
+    readonly collectLog?: (log: ReactivityLog) => void;
   },
 ): void {
   // Record action execution time for cycle-aware scheduling
@@ -600,6 +637,7 @@ function finalizeReactiveActionCommit(
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
     readonly resolve: (value: unknown) => void;
+    readonly collectLog?: (log: ReactivityLog) => void;
   },
   elapsed: number,
 ): void {
@@ -684,11 +722,17 @@ function finalizeReactiveActionCommit(
 
   recordOptionalActionRunDiagnostics(state, args, committedLog, elapsed);
 
-  logger.timeStart("scheduler", "run", "resubscribe");
-  try {
-    state.resubscribe(args.action, committedLog);
-  } finally {
-    logger.timeEnd("scheduler", "run", "resubscribe");
+  if (args.collectLog !== undefined) {
+    // One run of an N-instance loop: the loop resubscribes once to the
+    // union after its last instance (see runSchedulerAction).
+    args.collectLog(committedLog);
+  } else {
+    logger.timeStart("scheduler", "run", "resubscribe");
+    try {
+      state.resubscribe(args.action, committedLog);
+    } finally {
+      logger.timeEnd("scheduler", "run", "resubscribe");
+    }
   }
   args.resolve(args.result);
 }

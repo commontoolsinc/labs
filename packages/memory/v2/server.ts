@@ -2900,6 +2900,12 @@ export class Server {
           {
             principal: session.principal,
             sessionId: message.sessionId,
+            // Stage A (OW17's wire leg): a live lease holder's snapshots
+            // carry their instance key (it may name two instances of one
+            // doc); every other session's result is byte-identical.
+            ...(session.leaseHolderReads === true
+              ? { keyedSnapshots: true }
+              : {}),
           },
         ),
       };
@@ -3135,6 +3141,12 @@ export class Server {
         entities,
         session.seenSeq,
         serverSeq,
+        // Stage A (OW17's wire leg): a session whose lease-holder read
+        // exemption is live receives instance-KEYED frames — it may
+        // name two instances of one (branch, id, scope), which the
+        // scope name alone cannot distinguish. Every other session's
+        // frames are byte-identical to before.
+        session.leaseHolderReads === true,
       );
       session.watches = message.watches;
       session.graphs = graphs;
@@ -3356,7 +3368,11 @@ export class Server {
             upserts: upserts.toSorted((left, right) =>
               left.branch.localeCompare(right.branch) ||
               left.id.localeCompare(right.id)
-            ).map(toWireUpsert),
+            ).map((entry) =>
+              // Keyed for a live lease-holder session (stage A, OW17's
+              // wire leg; see watchSet).
+              toWireUpsert(entry, session.leaseHolderReads === true)
+            ),
             removes: [],
           },
         },
@@ -3377,7 +3393,11 @@ export class Server {
     query: GraphQuery,
     engine?: Engine.Engine,
     reuse?: QueryGraphReuseContext,
-    scopeContext: { principal?: string; sessionId?: string } = {},
+    scopeContext: {
+      principal?: string;
+      sessionId?: string;
+      keyedSnapshots?: boolean;
+    } = {},
   ): Promise<GraphQueryResult> {
     const startedAt = performance.now();
     const result = queryGraph(
@@ -3521,7 +3541,10 @@ export class Server {
       return;
     }
     for (const upsert of sync.upserts) {
-      const scopeKey = instanceKeyFor(upsert.scope);
+      // A keyed frame (stage A: lease-holder frames carry the instance)
+      // names its own instance; the session-identity recovery is the
+      // fallback for unkeyed frames.
+      const scopeKey = upsert.scopeKey ?? instanceKeyFor(upsert.scope);
       if (scopeKey === undefined) continue;
       session.entities.delete(
         cacheKeyForEntity(upsert.branch, upsert.id, scopeKey),
@@ -3545,7 +3568,7 @@ export class Server {
       // emits removes, so only a full re-diff (tombstone present, entity
       // absent) regenerates the removal for the client.
       const scope = declaredScope(remove.scope);
-      const scopeKey = instanceKeyFor(remove.scope);
+      const scopeKey = remove.scopeKey ?? instanceKeyFor(remove.scope);
       if (scopeKey === undefined) continue;
       session.entities.set(
         cacheKeyForEntity(remove.branch, remove.id, scopeKey),
@@ -3813,7 +3836,14 @@ export class Server {
               upserts: upserts.toSorted((left, right) =>
                 left.branch.localeCompare(right.branch) ||
                 left.id.localeCompare(right.id)
-              ).map(toWireUpsert),
+              ).map((entry) =>
+                // Keyed exactly when the exemption is LIVE this pass
+                // (stage A, OW17's wire leg): the exempt session receives
+                // every instance it serves, and the key is what keeps two
+                // instances of one (branch, id, scope) apart in its
+                // replica. Non-exempt frames are byte-identical to before.
+                toWireUpsert(entry, leaseHolderExempt)
+              ),
               removes: [],
             });
             // The wire frame strips instance keys; retain the frame's
@@ -3843,7 +3873,11 @@ export class Server {
           // is keyed on CURRENT holdership — a former holder's foreign
           // entries are dropped here, and their previously delivered
           // predecessors diff out as removes below.
-          if (!(await this.#currentLeaseHolderExemption(space, session))) {
+          const fullEvalExempt = await this.#currentLeaseHolderExemption(
+            space,
+            session,
+          );
+          if (!fullEvalExempt) {
             const identity = this.#sessionScopeIdentity(session);
             for (const [key, entry] of [...entities]) {
               if (!scopeKeyApplicableTo(entry.scopeKey, identity)) {
@@ -3861,6 +3895,9 @@ export class Server {
             session.lastSyncedSeq,
             serverSeq,
             delivered,
+            // Keyed for a live lease-holder session (stage A, OW17's wire
+            // leg; see the incremental branch above).
+            fullEvalExempt,
           );
           // As above: commit the re-evaluated watch state only once the
           // frame is built, so a throw leaves the diff recomputable. The
@@ -4199,15 +4236,24 @@ export class Server {
     // microtask boundary — the request's authorization and evaluation
     // keep sharing one engine turn (the ACL revocation-race invariant).
     let named = false;
-    // The wire collapse guard: frames and query results carry scope
-    // NAMES, so two instances of one (branch, id, scope) are
-    // indistinguishable on the wire and the client cache keeps only one
-    // (WatchView keys by branch/id/scope). Refuse the shape loudly at
-    // admission instead of silently losing an instance. Keyless roots
-    // resolve to the session's own instance, so an explicit key equal to
-    // it is fine — only two DIFFERENT effective instances conflict.
+    // The wire collapse guard, NON-holders only (server-execution v2
+    // stage A, OW17's wire leg): a non-holder's frames and query results
+    // carry scope NAMES, so two instances of one (branch, id, scope)
+    // would be indistinguishable on its wire and its client cache would
+    // keep only one (WatchView keys by branch/id/scope) — refused loudly
+    // at admission instead of silently losing an instance. A LIVE lease
+    // holder is exempt: its frames carry `scope_key` per entry (the
+    // exemption armed below is what keys them), and its query results
+    // carry `scopeKey` per snapshot, so it may legitimately name two
+    // instances of one doc — that IS the serving replica holding both
+    // the service instance and a demander's instance of one doc.
+    // Keyless roots resolve to the session's own instance, so an
+    // explicit key equal to it is fine — only two DIFFERENT effective
+    // instances conflict. Evaluated synchronously (before the holdership
+    // await) and RAISED only on the non-holder arm.
     const identity = this.#sessionScopeIdentity(session);
     const instanceByAddress = new Map<string, string>();
+    let collapse: V2Error | undefined;
     for (const { branch, root } of entries) {
       if (root.entityScopeKey !== undefined) {
         named = true;
@@ -4219,6 +4265,7 @@ export class Server {
           );
         }
       }
+      if (collapse !== undefined) continue;
       const scopeName = root.scope ?? "space";
       const instanceKey = root.entityScopeKey ??
         (canResolveScopeKey(root.scope, identity)
@@ -4230,16 +4277,18 @@ export class Server {
       if (existing === undefined) {
         instanceByAddress.set(addressKey, instanceKey);
       } else if (existing !== instanceKey) {
-        return toError(
+        collapse = toError(
           "ProtocolError",
           `read set resolves two instances of (${root.id}, ${scopeName}) ` +
-            `— "${existing}" and "${instanceKey}" — which the wire ` +
-            "cannot distinguish (frames carry scope names, protocol.md " +
-            "§1); name one instance per (branch, id, scope)",
+            `— "${existing}" and "${instanceKey}" — which this session's ` +
+            "wire cannot distinguish (frames carry scope names for a " +
+            "non-holder, protocol.md §1); name one instance per (branch, " +
+            "id, scope), or hold the execution lease (protocol.md §2's " +
+            "read row: lease-holder frames carry scope_key)",
         );
       }
     }
-    if (!named) return undefined;
+    if (!named) return collapse;
     if (!getServerExecutionConfig()) {
       return toError(
         "ProtocolError",
@@ -4261,7 +4310,9 @@ export class Server {
       (session.principal !== undefined &&
         this.#liveCoHostedLeaseSpaceFor(session.principal) !== undefined);
     if (!holdsCoHosted) {
-      return toError(
+      // The collapse refusal is the more specific message for a
+      // non-holder whose read set is ambiguous on its (unkeyed) wire.
+      return collapse ?? toError(
         "ProtocolError",
         "read naming an entity_scope_key rejected: requester does not " +
           "hold a live execution_lease on this memory server " +

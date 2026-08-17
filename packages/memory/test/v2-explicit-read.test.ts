@@ -592,33 +592,65 @@ Deno.test("the persisted lease-holder exemption does not survive session resume 
 // spec, never silently the same watch.
 // ---------------------------------------------------------------------------
 
-Deno.test("a read resolving two instances of one (branch, id, scope) is refused: the wire cannot express the distinction", async () => {
-  const server = newServer("memory://explicit-read-ambiguous");
+// ---------------------------------------------------------------------------
+// OW17's wire leg (server-execution v2 stage A, 2026-08-16): a LIVE lease
+// holder may name two instances of one (branch, id, scope) — its frames and
+// query results carry the instance key (`scopeKey`) per entry, so the two
+// stay apart on its wire and in its replica (the serving replica holding
+// BOTH the service instance and a demander's instance of one doc). The
+// wire collapse guard stays for everyone else: a NON-holder's wire carries
+// scope names only, so its ambiguous read set is still refused loudly.
+// ---------------------------------------------------------------------------
+
+Deno.test("stage A: a lease holder names two instances of one (branch, id, scope) and receives BOTH, keyed — watch.set, watch.add, graph.query, and the push frame; the collapse guard still refuses a non-holder (OW17's wire leg)", async () => {
+  const server = newServer("memory://explicit-read-two-instances");
   setServerExecutionConfig(true);
   try {
+    // Alice's and Bob's own instances of one doc.
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+    const bob = await connect(server);
+    const { sessionId: bobSession } = await openSession(bob, BOB);
+    const bobWrite = await server.transact({
+      type: "transact",
+      requestId: nextRequestId("bob-write"),
+      space: SPACE,
+      sessionId: bobSession,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:profile",
+          scope: "user",
+          value: { value: { name: "bob" } },
+        }],
+      },
+    });
+    assertExists(bobWrite.ok, JSON.stringify(bobWrite.error));
+
     const service = await connect(server);
     const { sessionId: serviceSession } = await openSession(service, SERVICE);
     const engine = await server.engineForSpace(SPACE);
     const holder = executionLeaseHolder(SERVICE);
     assertEquals(
-      // Long TTL: a test lease is never renewed, and assertions about a
-      // LIVE holder must not race the wall clock.
       acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
       true,
     );
     const aliceKey = resolveScopeKey("user", { principal: ALICE });
     const bobKey = resolveScopeKey("user", { principal: BOB });
 
-    // Two explicit instances of the same (id, scope) in ONE watch set:
-    // both frames would serialize as (branch, id, scope: "user") and the
-    // client cache keeps only one. Refused loudly instead.
-    const ambiguous = await server.watchSet({
+    // watch.set naming BOTH instances of one (id, scope): admitted; the
+    // full sync carries two upserts, each KEYED with its instance and
+    // carrying that instance's document.
+    const both = await server.watchSet({
       type: "session.watch.set",
-      requestId: nextRequestId("ambiguous"),
+      requestId: nextRequestId("both"),
       space: SPACE,
       sessionId: serviceSession,
       watches: [{
-        id: "w-ambiguous",
+        id: "w-both",
         kind: "graph",
         query: {
           roots: [
@@ -638,40 +670,46 @@ Deno.test("a read resolving two instances of one (branch, id, scope) is refused:
         },
       }],
     }) as ResponseMessage<WatchSetResult>;
-    assertEquals(ambiguous.error?.name, "ProtocolError");
+    assertExists(both.ok, JSON.stringify(both.error));
+    const byKey = new Map(
+      both.ok.sync.upserts.map((upsert) => [upsert.scopeKey, upsert]),
+    );
+    assertEquals([...byKey.keys()].toSorted(), [aliceKey, bobKey].toSorted());
+    assertEquals(byKey.get(aliceKey)?.doc?.value, { name: "alice" });
+    assertEquals(byKey.get(bobKey)?.doc?.value, { name: "bob" });
+    // Every keyed upsert still carries the scope NAME (the pre-existing
+    // fields are untouched; the key is an addition).
+    for (const upsert of both.ok.sync.upserts) {
+      assertEquals(upsert.scope, "user");
+      assertEquals(upsert.id, "of:profile");
+    }
 
     // The same ambiguity split across an existing watch and a watch.add
-    // is refused too: the session's watch SET is the delivery unit.
-    const first = await server.watchSet(
-      watchAliceInstance(serviceSession, aliceKey, "w-first"),
-    ) as ResponseMessage<WatchSetResult>;
-    assertExists(first.ok, JSON.stringify(first.error));
+    // is admitted for the holder too (the delivery unit is keyed).
     const added = await server.watchAdd({
       type: "session.watch.add",
-      requestId: nextRequestId("add-ambiguous"),
+      requestId: nextRequestId("add-second"),
       space: SPACE,
       sessionId: serviceSession,
       watches: [{
-        id: "w-second",
+        id: "w-alice-again",
         kind: "graph",
         query: {
           roots: [{
             id: "of:profile",
             scope: "user",
-            entityScopeKey: bobKey,
+            entityScopeKey: aliceKey,
             selector: { path: [], schema: false },
           }],
         },
       }],
     });
-    assertEquals(added.error?.name, "ProtocolError");
+    assertExists(added.ok, JSON.stringify(added.error));
 
-    // A graph.query naming both instances at once is the same wire
-    // collapse (GraphQueryResult entities key by (branch, id, scope) in
-    // the client's WatchView) — refused identically.
+    // graph.query naming both: two snapshots, each keyed.
     const query = await server.graphQuery({
       type: "graph.query",
-      requestId: nextRequestId("query-ambiguous"),
+      requestId: nextRequestId("query-both"),
       space: SPACE,
       sessionId: serviceSession,
       query: {
@@ -690,10 +728,117 @@ Deno.test("a read resolving two instances of one (branch, id, scope) is refused:
           },
         ],
       },
+    }) as ResponseMessage<GraphQueryResult>;
+    assertExists(query.ok, JSON.stringify(query.error));
+    assertEquals(
+      query.ok.entities.map((entity) => entity.scopeKey).toSorted(),
+      [aliceKey, bobKey].toSorted(),
+    );
+
+    // The PUSH frame after Bob's next write names his instance — the
+    // holder's replica can tell whose doc moved.
+    const before = service.messages.length;
+    const bobAgain = await server.transact({
+      type: "transact",
+      requestId: nextRequestId("bob-write-2"),
+      space: SPACE,
+      sessionId: bobSession,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:profile",
+          scope: "user",
+          value: { value: { name: "bob-2" } },
+        }],
+      },
     });
-    assertEquals(query.error?.name, "ProtocolError");
+    assertExists(bobAgain.ok, JSON.stringify(bobAgain.error));
+    await drainDelivery(
+      server,
+      () => effectUpsertIds(service.messages, before).length > 0,
+    );
+    const pushed = service.messages.slice(before)
+      .filter((message) =>
+        (message as { type?: string }).type ===
+          "session/effect"
+      )
+      .flatMap((message) =>
+        (message as {
+          effect?: { upserts?: Array<{ scopeKey?: string; doc?: unknown }> };
+        }).effect?.upserts ?? []
+      );
+    assertEquals(pushed.length, 1);
+    assertEquals(pushed[0].scopeKey, bobKey);
+    assertEquals(
+      (pushed[0].doc as { value?: unknown } | undefined)?.value,
+      { name: "bob-2" },
+    );
+
+    // The collapse guard is UNCHANGED for a non-holder: Bob's own session
+    // naming two instances is refused with the collapse message (his wire
+    // carries names only, and he could not name a foreign instance
+    // anyway).
+    const refused = await server.watchSet({
+      type: "session.watch.set",
+      requestId: nextRequestId("non-holder-both"),
+      space: SPACE,
+      sessionId: bobSession,
+      watches: [{
+        id: "w-bob-both",
+        kind: "graph",
+        query: {
+          roots: [
+            {
+              id: "of:profile",
+              scope: "user",
+              entityScopeKey: aliceKey,
+              selector: { path: [], schema: false },
+            },
+            {
+              id: "of:profile",
+              scope: "user",
+              entityScopeKey: bobKey,
+              selector: { path: [], schema: false },
+            },
+          ],
+        },
+      }],
+    }) as ResponseMessage<WatchSetResult>;
+    assertEquals(refused.error?.name, "ProtocolError");
+    assertEquals(
+      refused.error?.message.includes("resolves two instances"),
+      true,
+    );
+
+    // And a non-holder's UNKEYED frames stay byte-identical: no
+    // `scopeKey` field anywhere in Bob's own watch of his own instance.
+    const bobOwn = await server.watchSet({
+      type: "session.watch.set",
+      requestId: nextRequestId("bob-own"),
+      space: SPACE,
+      sessionId: bobSession,
+      watches: [{
+        id: "w-bob-own",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:profile",
+            scope: "user",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }) as ResponseMessage<WatchSetResult>;
+    assertExists(bobOwn.ok, JSON.stringify(bobOwn.error));
+    assertEquals(bobOwn.ok.sync.upserts.length, 1);
+    assertEquals("scopeKey" in bobOwn.ok.sync.upserts[0], false);
+    assertEquals(bobOwn.ok.sync.upserts[0].doc?.value, { name: "bob-2" });
 
     service.connection.close();
+    alice.connection.close();
+    bob.connection.close();
   } finally {
     resetServerExecutionConfig();
     await server.close();

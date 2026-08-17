@@ -16,6 +16,7 @@ import { assert, unclaimed } from "@commonfabric/memory/fact";
 import { aclDocId } from "@commonfabric/memory/acl";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
+  canResolveScopeKey,
   type CellScope,
   type ClientCommit,
   type CommitPrecondition,
@@ -28,6 +29,7 @@ import {
   getServerExecutionConfig,
   type PatchOp,
   resolveScopeKey,
+  type ScopeKey,
   type ScopeKeyIdentity,
   type SessionSync,
   type SqliteDbRef,
@@ -1325,11 +1327,17 @@ export class StorageManager implements IStorageManager {
     }
   }
 
-  shouldPullDoc(space: MemorySpace, id: URI, scope?: CellScope): boolean {
+  shouldPullDoc(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean {
     if (hasDataUriScheme(id)) {
       return false;
     }
-    const key = `${space}\0${this.#pullKickKey(id, scope)}`;
+    const instance = this.#foreignInstanceKey(scope, identity);
+    const key = `${space}\0${this.#pullKickKey(id, scope, instance)}`;
     if (this.#docPullKicks.has(key)) {
       return false;
     }
@@ -1342,20 +1350,63 @@ export class StorageManager implements IStorageManager {
       id,
       type: DOCUMENT_MIME as MIME,
       scope,
+      ...(instance !== undefined ? { scopeKey: instance } : {}),
     }) === undefined;
   }
 
-  retractDocPullKick(space: MemorySpace, id: URI, scope?: CellScope): void {
-    this.#docPullKicks.delete(`${space}\0${this.#pullKickKey(id, scope)}`);
+  retractDocPullKick(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): void {
+    this.#docPullKicks.delete(
+      `${space}\0${
+        this.#pullKickKey(id, scope, this.#foreignInstanceKey(scope, identity))
+      }`,
+    );
   }
 
   /** Pull-kick keys are per scope INSTANCE (key-vocabulary.md §5's
    * M4-coupled list, stage F): name-keyed, A's kick suppressed B's pull
    * and B's doc never loaded at cardinality > 1. Resolved against the
    * manager's own identity — partition-unchanged at cardinality 1
-   * (key-vocabulary.md §2). */
-  #pullKickKey(id: URI, scope?: CellScope): string {
-    return `${resolveScopeKey(scope, this.scopeKeyIdentity())}\0${id}`;
+   * (key-vocabulary.md §2) — or the explicit foreign instance a served
+   * per-instance read names (server-execution v2 stage A). */
+  #pullKickKey(id: URI, scope?: CellScope, instance?: ScopeKey): string {
+    return `${
+      instance ?? resolveScopeKey(scope, this.scopeKeyIdentity())
+    }\0${id}`;
+  }
+
+  /**
+   * The explicit instance a read under `identity` names when — and only
+   * when — it differs from this manager's own resolution of `scope`
+   * (server-execution v2 stage A — the runner's explicit-instance read):
+   * a served per-instance run's read of a scoped doc names THAT
+   * principal's instance on the wire and in the replica; an own-identity
+   * read (every client, the OFF arm, and a served run whose identity IS
+   * the service's) names nothing and keeps the fast own-instance path.
+   * Undefined for `space` (one instance) and for a scope the identity
+   * cannot resolve (the anonymous-session name fallback).
+   */
+  #foreignInstanceKey(
+    scope: CellScope | undefined,
+    identity: ScopeKeyIdentity | undefined,
+  ): ScopeKey | undefined {
+    if (identity === undefined) return undefined;
+    const name = normalizeCellScope(scope);
+    if (name === "space" || !canResolveScopeKey(name, identity)) {
+      return undefined;
+    }
+    const instance = resolveScopeKey(name, identity);
+    const own = this.scopeKeyIdentity();
+    if (
+      canResolveScopeKey(name, own) && resolveScopeKey(name, own) === instance
+    ) {
+      return undefined;
+    }
+    return instance;
   }
 
   addCrossSpacePromise(promise: Promise<void>): void {
@@ -1379,7 +1430,12 @@ export class StorageManager implements IStorageManager {
   #pendingLoads = new Map<string, {
     count: number;
     generation: number;
-    address: { space: MemorySpace; scope: CellScope; id: URI };
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    };
     failure: unknown;
     waiters: Set<(failure: unknown) => void>;
   }>();
@@ -1391,7 +1447,15 @@ export class StorageManager implements IStorageManager {
   #loggedSyncFailures = new Set<string>();
 
   private registerPendingLoad(
-    address: { space: MemorySpace; scope: CellScope; id: URI },
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      /** The explicit instance an instance-named load targets (stage A);
+       * the key — and the address the scheduler's park machinery
+       * cross-matches — is then per THAT instance. */
+      scopeKey?: ScopeKey;
+    },
   ): (failure?: unknown) => void {
     const key = entityKey(address, this.scopeKeyIdentity());
     const entry = this.#pendingLoads.get(key) ??
@@ -1444,6 +1508,7 @@ export class StorageManager implements IStorageManager {
     space: MemorySpace;
     scope: CellScope;
     id: URI;
+    scopeKey?: ScopeKey;
   }[] {
     return [...this.#pendingLoads.values()].map((entry) => entry.address);
   }
@@ -1501,7 +1566,10 @@ export class StorageManager implements IStorageManager {
     this.#subscription.unsubscribe(subscription);
   }
 
-  async syncCell<T>(cell: Cell<T>): Promise<Cell<T>> {
+  async syncCell<T>(
+    cell: Cell<T>,
+    options?: { scopeKeyIdentity?: ScopeKeyIdentity },
+  ): Promise<Cell<T>> {
     const { space, id, schema, scope } = cell.getAsNormalizedFullLink();
     if (!space) {
       throw new Error("No space set");
@@ -1512,17 +1580,29 @@ export class StorageManager implements IStorageManager {
     }
 
     const provider = this.open(space);
+    // The runner's explicit-instance read (server-execution v2 stage A):
+    // a served per-instance run's load of a scoped doc NAMES that
+    // principal's instance — the load registers, travels, and lands per
+    // instance. Own-identity loads (every client, the OFF arm) name
+    // nothing and take exactly the pre-stage-A path.
+    const instance = this.#foreignInstanceKey(scope, options?.scopeKeyIdentity);
     const releaseLoad = this.registerPendingLoad({
       space,
       scope: normalizeCellScope(scope),
       id,
+      ...(instance !== undefined ? { scopeKey: instance } : {}),
     });
     let loadFailure: unknown;
     try {
-      const result = await provider.sync(id, {
-        path: cell.path.map((segment) => segment.toString()),
-        schema: schema ?? false,
-      }, scope);
+      const result = await provider.sync(
+        id,
+        {
+          path: cell.path.map((segment) => segment.toString()),
+          schema: schema ?? false,
+        },
+        scope,
+        instance,
+      );
       loadFailure = result.error;
       const schemaFailure = await this.syncCfcSchemaDocument(
         space,
@@ -1542,6 +1622,52 @@ export class StorageManager implements IStorageManager {
       return cell;
     } catch (error) {
       loadFailure = error;
+      throw error;
+    } finally {
+      releaseLoad(loadFailure);
+    }
+  }
+
+  /**
+   * The explicit-instance load by address (IStorageManager.syncInstance —
+   * server-execution v2 stage A): the transaction layer's kick for a
+   * served per-instance run's read of a scoped instance the replica has
+   * never seen. Registered like syncCell's load (the preflight park
+   * cross-matches the instance-keyed address) and named on the wire.
+   * Own-identity or space-scope addresses name nothing and take the
+   * ordinary root pull; a load that fails hands back the pull-kick
+   * reservation so a later read may retry.
+   */
+  async syncInstance(
+    address: { space: MemorySpace; id: URI; scope?: CellScope },
+    identity: ScopeKeyIdentity,
+  ): Promise<void> {
+    if (hasDataUriScheme(address.id)) return;
+    const scope = normalizeCellScope(address.scope);
+    const instance = this.#foreignInstanceKey(scope, identity);
+    const provider = this.open(address.space);
+    const releaseLoad = this.registerPendingLoad({
+      space: address.space,
+      scope,
+      id: address.id,
+      ...(instance !== undefined ? { scopeKey: instance } : {}),
+    });
+    let loadFailure: unknown;
+    try {
+      const result = await provider.sync(
+        address.id,
+        { path: [], schema: false },
+        scope,
+        instance,
+      );
+      loadFailure = result.error;
+      if (loadFailure !== undefined) {
+        this.logSyncLoadFailure(address.space, address.id, loadFailure);
+        this.retractDocPullKick(address.space, address.id, scope, identity);
+      }
+    } catch (error) {
+      loadFailure = error;
+      this.retractDocPullKick(address.space, address.id, scope, identity);
       throw error;
     } finally {
       releaseLoad(loadFailure);
@@ -1803,6 +1929,8 @@ type ProviderSyncRequest = {
   uri: URI;
   selector: SchemaPathSelector;
   scope?: CellScope;
+  /** The explicit instance an instance-named load targets (stage A). */
+  instance?: ScopeKey;
 };
 
 /**
@@ -1856,9 +1984,12 @@ class Provider implements IStorageProvider {
     uri: URI,
     selector?: SchemaPathSelector,
     scope?: CellScope,
+    instance?: ScopeKey,
   ): Promise<Result<Unit, Error>> {
     const normalizedSelector = normalizeSyncSelector(selector);
-    const key = docKey(uri, scope);
+    // Replay requests are per (doc, instance): an instance-named load
+    // (stage A) must replay as that instance on a replacement replica.
+    const key = docKey(uri, instance ?? normalizeCellScope(scope));
     let requests = this.#syncRequests.get(key);
     if (requests === undefined) {
       requests = new Map();
@@ -1868,8 +1999,14 @@ class Provider implements IStorageProvider {
       uri,
       selector: normalizedSelector,
       scope,
+      ...(instance !== undefined ? { instance } : {}),
     });
-    return this.replica.sync(uri, normalizedSelector, scope) as Promise<
+    return this.replica.sync(
+      uri,
+      normalizedSelector,
+      scope,
+      instance,
+    ) as Promise<
       Result<Unit, Error>
     >;
   }
@@ -1879,8 +2016,9 @@ class Provider implements IStorageProvider {
     uri: URI,
     selector: SchemaPathSelector,
     scope?: CellScope,
+    instance?: ScopeKey,
   ): Promise<Result<Unit, PullError>> {
-    const result = await replica.sync(uri, selector, scope);
+    const result = await replica.sync(uri, selector, scope, instance);
     if (result.error !== undefined || uri.startsWith("cid:")) {
       return result;
     }
@@ -1925,16 +2063,16 @@ class Provider implements IStorageProvider {
     this.#routeAbort = new AbortController();
     const replacement = this.createReplica();
     this.replica = replacement;
-    previous.redirectOverlappingReadsTo((uri, selector, scope) =>
-      this.replaySync(replacement, uri, selector, scope)
+    previous.redirectOverlappingReadsTo((uri, selector, scope, instance) =>
+      this.replaySync(replacement, uri, selector, scope, instance)
     );
     previous.reset();
     previous.closeNow();
     const requests = [...this.#syncRequests.values()]
       .flatMap((bySelector) => [...bySelector.values()]);
     await Promise.all(
-      requests.map(({ uri, selector, scope }) =>
-        this.replaySync(replacement, uri, selector, scope)
+      requests.map(({ uri, selector, scope, instance }) =>
+        this.replaySync(replacement, uri, selector, scope, instance)
       ),
     );
   }
@@ -2024,17 +2162,22 @@ class Provider implements IStorageProvider {
   }
 }
 
+type WatchAddress = {
+  id: URI;
+  type: MIME;
+  scope?: CellScope;
+  /** The explicit instance an instance-named load targets (stage A). */
+  scopeKey?: ScopeKey;
+};
+
 type SyncTask = {
-  entries: [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector][];
+  entries: [WatchAddress, SchemaPathSelector][];
   promise: Promise<Result<Unit, PullError>>;
 };
 
 type WatchRefreshBatch = {
   type: "pull" | "integrate";
-  entries: Map<
-    string,
-    [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
-  >;
+  entries: Map<string, [WatchAddress, SchemaPathSelector]>;
   pending: PromiseWithResolvers<Result<Unit, PullError>>;
 };
 
@@ -2086,6 +2229,10 @@ type InFlightCommit = {
   readonly operations: NativeCommitOperation[];
   readonly source?: IStorageTransaction;
   readonly commit: ClientCommit;
+  /** The identity the commit's operations were applied under (a served
+   * per-instance run's; absent = the replica's own) — its verdict
+   * promotes or drops exactly those instances' pending layers. */
+  readonly identity?: ScopeKeyIdentity;
   /**
    * Resolves when a rejection is fabricated locally for this commit (a
    * pending dependency was dropped, or the replica reset). Raced against the
@@ -2103,13 +2250,39 @@ type InFlightCommit = {
   settled: boolean;
 };
 
-const docKey = (id: URI, scope?: CellScope): string =>
-  `${normalizeCellScope(scope)}\0${id}`;
+/**
+ * The replica's local doc key: per scope INSTANCE (server-execution v2
+ * stage A — OW17's instance-keyed serving replica; key-vocabulary.md §5).
+ * `instance` is the shared `scope_key` — `space`, `user:<p>`,
+ * `session:<p>:<s>` — resolved by the caller through
+ * {@link SpaceReplica.instanceKey}: from an explicit key (a keyed frame,
+ * a keyed address), else from the reading/sealing run's identity, else
+ * from the replica's own identity. At cardinality 1 (every client, the
+ * whole OFF arm) every key resolves from the replica's own identity, so
+ * the re-keyed string partitions the local docs exactly as the scope-NAME
+ * string did (key-vocabulary.md §2's argument): nothing distinct merges,
+ * nothing merged separates. On a serving runtime the replica can now hold
+ * BOTH the service instance and per-principal instances of one doc, and a
+ * per-instance run reads and writes ITS instance. The one name-keyed
+ * fallback: a scope the identity cannot resolve (an anonymous session's
+ * user-scoped read) keys by the scope NAME, exactly as before.
+ */
+const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
+
+/** A local address the replica keys: the scope name plus, where the
+ * caller knows it, the explicit instance key. */
+type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
   readonly #scopeKeyIdentity: () => ScopeKeyIdentity;
+  /** The replica's OWN instance keys per scope name, resolved once (the
+   * manager's identity is stable for the manager's live span — `close()`
+   * ends it and the replicas with it): the doc-key hot path resolves an
+   * own-identity address with a map lookup, never a per-read
+   * `resolveScopeKey`. A scope the identity cannot resolve keys by NAME. */
+  #ownInstanceKeys: Map<string, string> | undefined;
   readonly #createSession: () => Promise<{
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
@@ -2289,6 +2462,7 @@ class SpaceReplica implements ISpaceReplica {
       uri: URI,
       selector: SchemaPathSelector,
       scope?: CellScope,
+      instance?: ScopeKey,
     ) => Promise<Result<Unit, PullError>>)
     | undefined;
 
@@ -2318,39 +2492,122 @@ class SpaceReplica implements ISpaceReplica {
     return this.#space;
   }
 
+  /**
+   * The scope INSTANCE key a local address keys under (see `docKey`):
+   * the address's explicit `scopeKey` when it names one; else the scope
+   * name resolved against `identity` (a served run's demand-supplied
+   * identity — the tx→replica seam) when given; else against the
+   * replica's own identity (every client, the OFF arm). An unresolvable
+   * scope keys by NAME.
+   */
+  instanceKey(
+    scope: CellScope | undefined,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): string {
+    if (explicit !== undefined) return explicit;
+    const name = normalizeCellScope(scope);
+    if (identity !== undefined) {
+      return canResolveScopeKey(name, identity)
+        ? resolveScopeKey(name, identity)
+        : name;
+    }
+    return this.#ownInstanceKey(name);
+  }
+
+  #ownInstanceKey(name: CellScope): string {
+    let keys = this.#ownInstanceKeys;
+    if (keys === undefined) {
+      keys = new Map();
+      const own = this.#scopeKeyIdentity();
+      for (const scope of ["space", "user", "session"] as const) {
+        keys.set(
+          scope,
+          canResolveScopeKey(scope, own) ? resolveScopeKey(scope, own) : scope,
+        );
+      }
+      this.#ownInstanceKeys = keys;
+    }
+    return keys.get(name) ?? name;
+  }
+
+  /** The doc key of a local address under `identity` (see instanceKey). */
+  #docKeyOf(address: LocalDocAddress, identity?: ScopeKeyIdentity): string {
+    return docKey(
+      address.id,
+      this.instanceKey(address.scope, identity, address.scopeKey),
+    );
+  }
+
+  /**
+   * The touched-doc entries of one operation batch (seal, verdict, frame):
+   * each carries the instance it applies to, so the notification
+   * differential snapshots THAT instance and the change addresses carry
+   * it. The key is attached only where the batch names an instance
+   * explicitly (an explicit run identity, a keyed frame) AND the scope is
+   * not `space` — never for own-identity batches, so an OFF-arm
+   * notification address is byte-identical to before.
+   */
+  #touchedOf(
+    operations: readonly { id: URI; scope?: CellScope; scopeKey?: ScopeKey }[],
+    identity?: ScopeKeyIdentity,
+  ): LocalDocAddress[] {
+    return operations.map((operation) => {
+      const explicit = operation.scopeKey ??
+        (identity !== undefined &&
+            normalizeCellScope(operation.scope) !== "space"
+          ? this.instanceKey(operation.scope, identity) as ScopeKey
+          : undefined);
+      return explicit === undefined
+        ? { id: operation.id, scope: operation.scope }
+        : { id: operation.id, scope: operation.scope, scopeKey: explicit };
+    });
+  }
+
   redirectOverlappingReadsTo(
     replacementRead: (
       uri: URI,
       selector: SchemaPathSelector,
       scope?: CellScope,
+      instance?: ScopeKey,
     ) => Promise<Result<Unit, PullError>>,
   ): void {
     this.#replacementRead = replacementRead;
   }
 
   get(entry: IMemoryAddress): State | undefined {
-    return this.getState(entry.id as URI, entry.scope);
+    return this.getState(
+      entry.id as URI,
+      entry.scope,
+      undefined,
+      entry.scopeKey,
+    );
   }
 
   async sync(
     uri: URI,
     selector?: SchemaPathSelector,
     scope?: CellScope,
+    instance?: ScopeKey,
   ): Promise<Result<Unit, PullError>> {
     const replacementAtStart = this.#replacementRead;
-    const result = await this.pull([[
-      { id: uri, type: DOCUMENT_MIME as MIME, scope },
-      selector,
-    ]]);
+    // An instance-named load (stage A) carries its instance on the pull
+    // entry's address, so the watch root names it on the wire and the
+    // arriving doc keys under it; a plain load carries none.
+    const address = {
+      id: uri,
+      type: DOCUMENT_MIME as MIME,
+      scope,
+      ...(instance !== undefined ? { scopeKey: instance } : {}),
+    };
+    const result = await this.pull([[address, selector]]);
     const replacement = this.#replacementRead;
     if (replacementAtStart === undefined && replacement !== undefined) {
       return await replacement(
         uri,
-        normalizeSyncEntries([[
-          { id: uri, type: DOCUMENT_MIME, scope },
-          selector,
-        ]])[0][1],
+        normalizeSyncEntries([[address, selector]])[0][1],
         scope,
+        instance,
       );
     }
     return result;
@@ -2360,7 +2617,7 @@ class SpaceReplica implements ISpaceReplica {
     uri: URI,
     callback: (document: EntityDocument | undefined) => void,
   ): Cancel {
-    const key = docKey(uri);
+    const key = docKey(uri, "space");
     let subscribers = this.#sinks.get(key);
     if (!subscribers) {
       subscribers = new Set();
@@ -2556,15 +2813,19 @@ class SpaceReplica implements ISpaceReplica {
     );
   }
 
-  getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {
-    return this.visibleDocument(uri, scope);
+  getDocument(
+    uri: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): EntityDocument | undefined {
+    return this.visibleDocument(uri, scope, identity);
   }
 
   /** Whether an optimistic local write for this doc is still pending — not
    *  yet promoted into the confirmed mirror (a parked accept keeps it
    *  pending until its marker arrives; CT-1927). */
   hasPendingWrite(id: URI, scope?: CellScope): boolean {
-    const record = this.#docs.get(docKey(id, scope));
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }));
     return record !== undefined && record.pending.length > 0;
   }
 
@@ -2576,7 +2837,7 @@ class SpaceReplica implements ISpaceReplica {
     id: URI,
     scope?: CellScope,
   ): { confirmedSeq: number; pendingLocalSeqs: number[] } {
-    const record = this.#docs.get(docKey(id, scope));
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }));
     if (record === undefined) {
       return { confirmedSeq: 0, pendingLocalSeqs: [] };
     }
@@ -2903,13 +3164,12 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async load(
-    entries: [
-      { id: URI; type: MIME; scope?: CellScope },
-      SchemaPathSelector | undefined,
-    ][],
+    entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
     const known = entries
-      .map(([address]) => this.getState(address.id, address.scope))
+      .map(([address]) =>
+        this.getState(address.id, address.scope, undefined, address.scopeKey)
+      )
       .filter((state): state is State => state !== undefined);
     this.#subscription.next({
       type: "load",
@@ -2920,10 +3180,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async pull(
-    entries: [
-      { id: URI; type: MIME; scope?: CellScope },
-      SchemaPathSelector | undefined,
-    ][],
+    entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
     if (entries.length === 0) {
       return { ok: {} };
@@ -2973,6 +3230,10 @@ class SpaceReplica implements ISpaceReplica {
         normalizeCellScope(address.scope) ?? null,
         selector === undefined ? null : selector.path,
         selector?.schema === undefined ? null : hashStringOf(selector.schema),
+        // The explicit instance (stage A) is part of the sync identity:
+        // two instances of one doc are two syncs. `null` for the
+        // universal keyless case keeps the OFF-arm key text identical.
+        address.scopeKey ?? null,
       ]),
     );
     const existing = this.#syncTasks.get(key);
@@ -2997,6 +3258,9 @@ class SpaceReplica implements ISpaceReplica {
         id: address.id,
         type: DOCUMENT_MIME,
         scope: normalizeCellScope(address.scope),
+        ...(address.scopeKey !== undefined
+          ? { scopeKey: address.scopeKey }
+          : {}),
       };
       const [superset, supersetPromise] = this.#watchSelectorTracker
         .getSupersetSelector(
@@ -3039,6 +3303,9 @@ class SpaceReplica implements ISpaceReplica {
         id: address.id,
         type: DOCUMENT_MIME,
         scope: normalizeCellScope(address.scope),
+        ...(address.scopeKey !== undefined
+          ? { scopeKey: address.scopeKey }
+          : {}),
       };
       // The tracker promise is what FUTURE pulls covered by these selectors
       // await: their data is available once THIS fetch lands, independent of
@@ -3065,6 +3332,9 @@ class SpaceReplica implements ISpaceReplica {
             id: address.id,
             type: DOCUMENT_MIME,
             scope: normalizeCellScope(address.scope),
+            ...(address.scopeKey !== undefined
+              ? { scopeKey: address.scopeKey }
+              : {}),
           };
           this.#watchSelectorTracker.delete(
             baseAddress,
@@ -3198,15 +3468,25 @@ class SpaceReplica implements ISpaceReplica {
     preconditions: readonly CommitPrecondition[],
     sqliteOps: readonly SqliteOperation[],
     verdict: Promise<SealedCommitVerdict>,
-    options?: { readonly speculative?: boolean },
+    options?: {
+      readonly speculative?: boolean;
+      readonly identity?: ScopeKeyIdentity;
+    },
   ): SealedNativeCommit {
+    // The tx→replica identity seam (server-execution v2 stage A, OW17): a
+    // served per-instance run seals under ITS identity — its ops apply to
+    // that identity's local instances, its read set is built against
+    // those instances' pending stacks, and its verdict settles exactly
+    // them (the in-flight entry remembers the identity). Absent = the
+    // replica's own, byte-identical to before.
+    const identity = options?.identity;
     const localSeq = this.#nextLocalSeq++;
     if (source !== undefined) {
       recordCommitLocalSeq(source, this.#space, localSeq);
     }
     const commit: ClientCommit = {
       localSeq,
-      reads: this.buildReads(source, localSeq),
+      reads: this.buildReads(source, localSeq, identity),
       // Cell ops first, folded SQLite ops last — the same commit shape
       // commitOperations builds, so the wave batch is made of ordinary
       // client commits.
@@ -3237,10 +3517,7 @@ class SpaceReplica implements ISpaceReplica {
         ? { preconditions: [...preconditions] }
         : {}),
     };
-    const touched = operations.map((operation) => ({
-      id: operation.id,
-      scope: operation.scope,
-    }));
+    const touched = this.#touchedOf(operations, identity);
     const hasSemanticOperations = operations.length > 0;
     const shouldNotifySubscribers = hasSemanticOperations &&
       this.hasNotificationSubscribers();
@@ -3249,13 +3526,15 @@ class SpaceReplica implements ISpaceReplica {
     const before = shouldNotifySubscribers
       ? Differential.checkout(
         this,
-        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        touched.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
         this.#scopeKeyIdentity(),
       )
       : undefined;
 
     for (const operation of operations) {
-      this.applyPending(operation, localSeq);
+      this.applyPending(operation, localSeq, identity);
     }
 
     if (before !== undefined) {
@@ -3279,6 +3558,7 @@ class SpaceReplica implements ISpaceReplica {
       commit,
       source,
       verdict,
+      identity,
     );
     if (options?.speculative !== true) {
       // Durable sealed commits (the wave's) join the synced() barrier
@@ -3320,6 +3600,7 @@ class SpaceReplica implements ISpaceReplica {
     commit: ClientCommit,
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
+    identity?: ScopeKeyIdentity,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     // Registered unconditionally — unlike a pushed commit, a sealed commit
     // needs the entry even with zero pending reads: reset() sweeps
@@ -3332,7 +3613,7 @@ class SpaceReplica implements ISpaceReplica {
       operations,
       commit,
       source,
-      { alwaysRegister: true },
+      { alwaysRegister: true, identity },
     )!;
     try {
       const outcome = await Promise.race([
@@ -3372,6 +3653,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           source,
           outcome.rejection,
+          identity,
         );
       }
       const v = outcome.verdict;
@@ -3390,6 +3672,7 @@ class SpaceReplica implements ISpaceReplica {
             localSeq,
             operations,
             source,
+            identity,
           );
         }
         return await this.finalizeRejection(
@@ -3397,6 +3680,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           source,
           this.makeLocalRejection(commit, v.withdrawn.message),
+          identity,
         );
       }
       // Locally-committed verdicts confirm IMMEDIATELY — never parked
@@ -3426,7 +3710,7 @@ class SpaceReplica implements ISpaceReplica {
         seq: v.committed.seq,
         branch: commit.branch ?? DEFAULT_BRANCH,
         revisions: [],
-      });
+      }, identity);
       return { ok: {} };
     } finally {
       this.settleInFlightCommit(localSeq);
@@ -3460,9 +3744,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private async refreshWatchSet(
-    entries: Iterable<
-      [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
-    >,
+    entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
   ): Promise<Result<Unit, PullError>> {
     try {
@@ -3524,6 +3806,16 @@ class SpaceReplica implements ISpaceReplica {
           roots: [{
             id: address.id,
             scope: normalizeCellScope(address.scope),
+            // The runner's explicit-instance read (server-execution v2
+            // stage A): an instance-named load names its instance on the
+            // wire — lease-holder-only at admission (protocol.md §2's
+            // read row), which is exactly who issues one (a serving
+            // runtime's per-instance run). Own-identity loads name
+            // nothing: byte-identical roots, the no-key admission fast
+            // path.
+            ...(address.scopeKey !== undefined
+              ? { entityScopeKey: address.scopeKey }
+              : {}),
             selector,
           }],
         },
@@ -3558,7 +3850,7 @@ class SpaceReplica implements ISpaceReplica {
 
   private enqueueWatchRefresh(
     type: "pull" | "integrate",
-    entries: [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector][],
+    entries: [WatchAddress, SchemaPathSelector][],
   ): Promise<Result<Unit, PullError>> {
     if (this.#queuedWatchRefresh !== null) {
       for (const [address, selector] of entries) {
@@ -3574,10 +3866,7 @@ class SpaceReplica implements ISpaceReplica {
       type,
       entries: new Map(entries.map(([address, selector]) => [
         watchIdForEntry(address, selector, ""),
-        [address, selector] as [
-          { id: URI; type: MIME; scope?: CellScope },
-          SchemaPathSelector,
-        ],
+        [address, selector] as [WatchAddress, SchemaPathSelector],
       ])),
       pending: Promise.withResolvers<Result<Unit, PullError>>(),
     };
@@ -3762,7 +4051,9 @@ class SpaceReplica implements ISpaceReplica {
       }
       return { error: rejection };
     }
-    const touched = operations.map((operation) => ({
+    // A pushed commit is the replica's own identity's (every client, the
+    // OFF arm): touched entries carry no explicit instance.
+    const touched: LocalDocAddress[] = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
     }));
@@ -3777,7 +4068,9 @@ class SpaceReplica implements ISpaceReplica {
         shouldNotifySubscribers
           ? Differential.checkout(
             this,
-            touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+            touched.map(({ id, scope, scopeKey }) =>
+              snapshotState(this, id, scope, scopeKey)
+            ),
             this.#scopeKeyIdentity(),
           )
           : undefined,
@@ -3847,7 +4140,7 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     commit: ClientCommit,
     source?: IStorageTransaction,
-    options: { alwaysRegister?: boolean } = {},
+    options: { alwaysRegister?: boolean; identity?: ScopeKeyIdentity } = {},
   ): InFlightCommit | undefined {
     if (
       commit.reads.pending.length === 0 && options.alwaysRegister !== true
@@ -3870,6 +4163,7 @@ class SpaceReplica implements ISpaceReplica {
       operations,
       source,
       commit,
+      ...(options.identity !== undefined ? { identity: options.identity } : {}),
       localRejection: Promise.withResolvers<StorageTransactionRejected>(),
       settled: false,
     };
@@ -4286,11 +4580,9 @@ class SpaceReplica implements ISpaceReplica {
     localSeq: number,
     operations: NativeCommitOperation[],
     _source: IStorageTransaction | undefined,
+    identity?: ScopeKeyIdentity,
   ): Result<Unit, StorageTransactionRejected> {
-    const touched = operations.map((operation) => ({
-      id: operation.id,
-      scope: operation.scope,
-    }));
+    const touched = this.#touchedOf(operations, identity);
     const hasSemanticOperations = operations.length > 0;
     const shouldNotifySubscribers = hasSemanticOperations &&
       this.hasNotificationSubscribers();
@@ -4299,7 +4591,9 @@ class SpaceReplica implements ISpaceReplica {
     const before = shouldNotifySubscribers
       ? Differential.checkout(
         this,
-        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        touched.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
         this.#scopeKeyIdentity(),
       )
       : undefined;
@@ -4330,6 +4624,7 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
+    identity?: ScopeKeyIdentity,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     // The fate is sealed here. The verdict-gated effect layer (verdict
     // callbacks, outbox clearing) fires on this notification; the
@@ -4338,10 +4633,7 @@ class SpaceReplica implements ISpaceReplica {
     if (source !== undefined) {
       notifyCommitRejected(source, rejection);
     }
-    const touched = operations.map((operation) => ({
-      id: operation.id,
-      scope: operation.scope,
-    }));
+    const touched = this.#touchedOf(operations, identity);
     const hasSemanticOperations = operations.length > 0;
     const shouldNotifySubscribers = hasSemanticOperations &&
       this.hasNotificationSubscribers();
@@ -4350,7 +4642,9 @@ class SpaceReplica implements ISpaceReplica {
     const before = shouldNotifySubscribers
       ? Differential.checkout(
         this,
-        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        touched.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
         this.#scopeKeyIdentity(),
       )
       : undefined;
@@ -4389,6 +4683,9 @@ class SpaceReplica implements ISpaceReplica {
   private buildReads(
     source: IStorageTransaction | undefined,
     localSeq: number,
+    // The reading run's identity (a served per-instance seal): each read's
+    // pending layers and confirmed seq come from THAT instance's record.
+    identity?: ScopeKeyIdentity,
   ) {
     const confirmed: ConfirmedCommitRead[] = [];
     const pending: PendingCommitRead[] = [];
@@ -4421,7 +4718,9 @@ class SpaceReplica implements ISpaceReplica {
       nonRecursive: boolean,
       confirmedSeq?: number,
     ) => {
-      const record = this.#docs.get(docKey(id, scope));
+      const record = this.#docs.get(
+        docKey(id, this.instanceKey(scope, identity)),
+      );
       // The read's materialized view sat on EVERY lower pending layer, not
       // just the nearest one: name them ALL (ascending; the last element is
       // the doc's top-of-stack below this commit) so a dropped deeper layer
@@ -4591,14 +4890,20 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
 
-    const touched = [
+    // A keyed frame (a lease-holder session's — server-execution v2 stage
+    // A, OW17's wire leg) names each entry's instance; the replica keys
+    // the doc under it. An unkeyed frame resolves from the replica's own
+    // identity exactly as before.
+    const touched: LocalDocAddress[] = [
       ...sync.upserts.map((upsert) => ({
         id: upsert.id as URI,
         scope: upsert.scope,
+        ...(upsert.scopeKey !== undefined ? { scopeKey: upsert.scopeKey } : {}),
       })),
       ...sync.removes.map((remove) => ({
         id: remove.id as URI,
         scope: remove.scope,
+        ...(remove.scopeKey !== undefined ? { scopeKey: remove.scopeKey } : {}),
       })),
     ];
 
@@ -4607,13 +4912,20 @@ class SpaceReplica implements ISpaceReplica {
     const before = shouldNotifySubscribers
       ? Differential.checkout(
         this,
-        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        touched.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
         this.#scopeKeyIdentity(),
       )
       : undefined;
 
     for (const upsert of sync.upserts) {
-      const record = this.record(upsert.id as URI, upsert.scope);
+      const record = this.record(
+        upsert.id as URI,
+        upsert.scope,
+        undefined,
+        upsert.scopeKey,
+      );
       // Watch refreshes can arrive after local confirmations. Never move the
       // confirmed base backwards; pending replay depends on monotonic bases.
       if (upsert.seq < record.confirmed.seq) {
@@ -4625,7 +4937,10 @@ class SpaceReplica implements ISpaceReplica {
         upsert.deleted === true ? undefined : upsert.doc,
       );
       record.materialized = undefined;
-      const key = docKey(upsert.id as URI, upsert.scope);
+      const key = docKey(
+        upsert.id as URI,
+        this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
+      );
       this.#watchedIds.add(key);
       // The settle input barrier's shadow case (Phase 2 revisit (a)):
       // a FOREIGN value integrating UNDER an own pending write is
@@ -4672,10 +4987,13 @@ class SpaceReplica implements ISpaceReplica {
     }
     for (const remove of sync.removes) {
       const id = remove.id as URI;
-      const record = this.record(id, remove.scope);
+      const record = this.record(id, remove.scope, undefined, remove.scopeKey);
       record.confirmed = confirmedVersion(0, undefined);
       record.materialized = undefined;
-      const key = docKey(id, remove.scope);
+      const key = docKey(
+        id,
+        this.instanceKey(remove.scope, undefined, remove.scopeKey),
+      );
       this.#watchedIds.delete(key);
       if (record.pending.length > 0) {
         // A shadowed remove carries no seq on the wire: the sentinel 1
@@ -4719,7 +5037,7 @@ class SpaceReplica implements ISpaceReplica {
   // server stages as the post-conflict catch-up point for these ids.
   private recordStaleFloor(commit: ClientCommit, localSeq: number): void {
     const mark = (id: string, scope?: CellScope) => {
-      const key = docKey(id as URI, scope);
+      const key = this.#docKeyOf({ id: id as URI, scope });
       const current = this.#staleFloor.get(key);
       if (current === undefined || current < localSeq) {
         this.#staleFloor.set(key, localSeq);
@@ -4747,7 +5065,9 @@ class SpaceReplica implements ISpaceReplica {
     }
     let threshold: number | undefined;
     const consider = (id: string, scope?: CellScope) => {
-      const floor = this.#staleFloor.get(docKey(id as URI, scope));
+      const floor = this.#staleFloor.get(
+        this.#docKeyOf({ id: id as URI, scope }),
+      );
       if (floor !== undefined && floor > this.#caughtUpLocalSeq) {
         threshold = threshold === undefined
           ? floor
@@ -4972,8 +5292,13 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private record(id: URI, scope?: CellScope): DocumentRecord {
-    const key = docKey(id, scope);
+  private record(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): DocumentRecord {
+    const key = docKey(id, this.instanceKey(scope, identity, explicit));
     let record = this.#docs.get(key);
     if (!record) {
       record = {
@@ -4989,9 +5314,10 @@ class SpaceReplica implements ISpaceReplica {
   private applyPending(
     operation: NativeCommitOperation,
     localSeq: number,
+    identity?: ScopeKeyIdentity,
   ): void {
     const { id, scope, ...pending } = operation;
-    const record = this.record(id, scope);
+    const record = this.record(id, scope, identity);
     record.pending.push(pendingVersion(localSeq, pending));
   }
 
@@ -5031,7 +5357,7 @@ class SpaceReplica implements ISpaceReplica {
     // echo intact — r3739139487), or a quiet serving loop would clamp
     // W forever against its own echo.
     for (const operation of operations) {
-      const key = docKey(operation.id, operation.scope);
+      const key = this.#docKeyOf(operation);
       const seqs = this.#shadowedForeignSeqs.get(key);
       if (seqs !== undefined && seqs.delete(applied.seq) && seqs.size === 0) {
         this.#shadowedForeignSeqs.delete(key);
@@ -5123,14 +5449,17 @@ class SpaceReplica implements ISpaceReplica {
     localSeq: number,
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
+    // The identity the operations were sealed under (F1a's sealed-commit
+    // confirm; a pushed commit's is the replica's own).
+    identity?: ScopeKeyIdentity,
   ): void {
     // The accept is being applied (immediately at verdict, or promoted
     // off the parked set): release any read-barrier waiter (whenApplied).
     this.resolveAppliedWaiter(localSeq);
     const keys = new Map(
-      operations.map((operation) => [
-        docKey(operation.id, operation.scope),
-        { id: operation.id, scope: operation.scope },
+      this.#touchedOf(operations, identity).map((touched) => [
+        this.#docKeyOf(touched),
+        touched,
       ]),
     );
     // The settle input barrier's SHADOW FLIP (Phase 2 revisit (a), flag
@@ -5157,12 +5486,14 @@ class SpaceReplica implements ISpaceReplica {
     const shadowBefore = shouldNotifyShadowSubscribers
       ? Differential.checkout(
         this,
-        shadowTouched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        shadowTouched.map(({ id, scope, scopeKey }) =>
+          snapshotState(this, id, scope, scopeKey)
+        ),
         this.#scopeKeyIdentity(),
       )
       : undefined;
-    for (const { id, scope } of keys.values()) {
-      const record = this.record(id, scope);
+    for (const { id, scope, scopeKey } of keys.values()) {
+      const record = this.record(id, scope, undefined, scopeKey);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
       );
@@ -5303,11 +5634,18 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private visibleVersion(id: URI, scope?: CellScope): {
+  private visibleVersion(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): {
     record: DocumentRecord;
     version: MaterializedVersion;
   } | undefined {
-    const record = this.#docs.get(docKey(id, scope));
+    const record = this.#docs.get(
+      docKey(id, this.instanceKey(scope, identity, explicit)),
+    );
     if (!record) {
       return undefined;
     }
@@ -5321,16 +5659,25 @@ class SpaceReplica implements ISpaceReplica {
     };
   }
 
-  private visibleValue(id: URI, scope?: CellScope): FabricValue | undefined {
-    const visible = this.visibleVersion(id, scope);
+  private visibleValue(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): FabricValue | undefined {
+    const visible = this.visibleVersion(id, scope, identity);
     if (!visible) {
       return undefined;
     }
     return transactionValueForVersion(visible.version);
   }
 
-  private getState(id: URI, scope?: CellScope): State | undefined {
-    const visible = this.visibleVersion(id, scope);
+  private getState(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+    explicit?: ScopeKey,
+  ): State | undefined {
+    const visible = this.visibleVersion(id, scope, identity, explicit);
     if (!visible) {
       return undefined;
     }
@@ -5346,6 +5693,10 @@ class SpaceReplica implements ISpaceReplica {
         cause: null,
       }),
       scope: normalizeCellScope(scope),
+      // The explicit instance rides the state ONLY when the caller named
+      // one, so the differential keys and addresses it per instance; an
+      // own-identity read's state is byte-identical to before.
+      ...(explicit !== undefined ? { scopeKey: explicit } : {}),
       since: visible.record.confirmed.seq,
     } as State;
   }
@@ -5353,26 +5704,36 @@ class SpaceReplica implements ISpaceReplica {
   private visibleDocument(
     id: URI,
     scope?: CellScope,
+    identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined {
-    return this.visibleVersion(id, scope)?.version.value;
+    return this.visibleVersion(id, scope, identity)?.version.value;
   }
 
   private notifySinks(changes: IMergedChanges): void {
-    const touched = new Map<string, { id: URI; scope?: CellScope }>();
+    const touched = new Map<string, LocalDocAddress>();
     for (const change of changes) {
       const id = change.address.id as URI;
       const scope = change.address.scope;
-      touched.set(docKey(id, scope), { id, scope });
+      const scopeKey = change.address.scopeKey;
+      touched.set(
+        this.#docKeyOf({ id, scope, scopeKey }),
+        scopeKey === undefined ? { id, scope } : { id, scope, scopeKey },
+      );
     }
     this.notifySinksForIds(touched.values());
   }
 
   private notifySinksForIds(
-    entries: Iterable<{ id: URI; scope?: CellScope }>,
+    entries: Iterable<LocalDocAddress>,
   ): void {
-    for (const { id, scope } of entries) {
-      const current = this.visibleDocument(id, scope);
-      for (const callback of this.#sinks.get(docKey(id, scope)) ?? []) {
+    for (const { id, scope, scopeKey } of entries) {
+      const current = this.visibleVersion(id, scope, undefined, scopeKey)
+        ?.version.value;
+      for (
+        const callback
+          of this.#sinks.get(this.#docKeyOf({ id, scope, scopeKey })) ??
+            []
+      ) {
         try {
           callback(current);
         } catch (error) {
@@ -5393,10 +5754,10 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private hasSinkSubscribers(
-    entries: Iterable<{ id: URI; scope?: CellScope }>,
+    entries: Iterable<LocalDocAddress>,
   ): boolean {
-    for (const { id, scope } of entries) {
-      if ((this.#sinks.get(docKey(id, scope))?.size ?? 0) > 0) {
+    for (const entry of entries) {
+      if ((this.#sinks.get(this.#docKeyOf(entry))?.size ?? 0) > 0) {
         return true;
       }
     }
@@ -5460,11 +5821,19 @@ const snapshotState = (
   replica: SpaceReplica,
   id: URI,
   scope?: CellScope,
+  scopeKey?: ScopeKey,
 ): State => {
-  return replica.get({ id, type: DOCUMENT_MIME, path: [], scope }) ??
+  return replica.get({
+    id,
+    type: DOCUMENT_MIME,
+    path: [],
+    scope,
+    ...(scopeKey !== undefined ? { scopeKey } : {}),
+  }) ??
     ({
       ...unclaimed({ of: id, the: DOCUMENT_MIME }),
       scope: normalizeCellScope(scope),
+      ...(scopeKey !== undefined ? { scopeKey } : {}),
     } as State);
 };
 
