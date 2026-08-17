@@ -1434,7 +1434,7 @@ representation: the codec vocabulary lives in its own module area
 (`codec-interface/`), separate again from the machinery that reads it
 (`codec-common/`), and the dependency-free `interface.ts` carries no
 codec machinery at all. Two motivations drove this shape: the seam
-between `FabricValue`'s encoding/decoding and the JSON-layer encoding
+between `FabricValue`'s encoding/decoding and the JSON-layer serialization
 had grown rough and needed harmonizing, and the previous design had no clean
 affordance for legacy-data migration/import (see the decode-only tag
 discussion in Section 2.4).

@@ -13,8 +13,8 @@ Draft — based on codebase investigation.
 
 ### Overview
 
-The system stores **fabric values** — data that can be encoded to JSON with
-some extensions. All persistent data and in-flight messages use this
+The system stores **fabric values** — data that can be serialized to JSON
+text with some extensions. All persistent data and in-flight messages use this
 representation.
 
 ### Base Types
