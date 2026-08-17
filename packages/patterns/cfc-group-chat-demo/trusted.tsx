@@ -748,15 +748,7 @@ export const commitTrustedAdminToggle = handler<
       | ChatAdminRegistryStoredValue
       | undefined;
     adminRegistry.set({
-      ...(currentRegistry?.admins !== undefined
-        ? { admins: currentRegistry.admins }
-        : {}),
-      ...(currentRegistry?.bootstrapAdmin !== undefined
-        ? { bootstrapAdmin: currentRegistry.bootstrapAdmin }
-        : {}),
-      ...(currentRegistry?.everyoneIsAdmin !== undefined
-        ? { everyoneIsAdmin: currentRegistry.everyoneIsAdmin }
-        : {}),
+      ...currentRegistry,
       ...(nextPolicy.admins !== undefined
         ? { admins: nextPolicy.admins as ChatAdminList }
         : {}),
@@ -779,13 +771,8 @@ export const commitTrustedAdminToggle = handler<
       | ChatAdminRegistryStoredValue
       | undefined;
     adminRegistry.set({
+      ...currentRegistry,
       admins: nextPolicy.admins as ChatAdminList,
-      ...(currentRegistry?.bootstrapAdmin !== undefined
-        ? { bootstrapAdmin: currentRegistry.bootstrapAdmin }
-        : {}),
-      ...(currentRegistry?.everyoneIsAdmin !== undefined
-        ? { everyoneIsAdmin: currentRegistry.everyoneIsAdmin }
-        : {}),
     });
   }
 });

@@ -972,6 +972,19 @@ the two policy declarations at their exact paths and compare the second merge
 structurally with the first. A second regression proves that a constrained
 object is not handled by the special matcher.
 
+## 41. Preserve open admin-registry extensions
+
+The group-chat registry schema permits stored fields beyond the three fields
+currently understood by this version of the pattern. Reconstructing the whole
+registry from only those known fields would remove a valid extension written
+by another version or another participant.
+
+Start both whole-registry writes with the current stored object. Override only
+the fields supplied by the admin action. This keeps unknown fields as well as
+the known bootstrap and everyone-is-admin fields while still presenting the
+complete object schema required by strict preparation. Record the changed
+pattern contract as another compatible baseline.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an
