@@ -489,6 +489,76 @@ describe("piece schema compatibility", () => {
     ).toThrow(/not stable under default insertion/);
   });
 
+  it("accepts removed argument defaults below default-unstable constraints", () => {
+    const resultSchema: JSONSchema = {
+      type: "object",
+      properties: {},
+    };
+    const previousArgument: JSONSchema = {
+      type: "object",
+      properties: {
+        x: { type: "number", default: 0 },
+        y: { type: "number" },
+      },
+      maxProperties: 1,
+    };
+    const candidateArgument: JSONSchema = {
+      ...previousArgument,
+      properties: {
+        x: { type: "number" },
+        y: { type: "number" },
+      },
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(previousArgument, resultSchema),
+        pattern(candidateArgument, resultSchema),
+      )
+    ).not.toThrow();
+
+    const changedArgument: JSONSchema = {
+      ...previousArgument,
+      properties: {
+        x: { type: "number", default: 1 },
+        y: { type: "number" },
+      },
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(previousArgument, resultSchema),
+        pattern(changedArgument, resultSchema),
+      )
+    ).toThrow(/not stable under default insertion/);
+  });
+
+  it("rejects removed result defaults below default-unstable constraints", () => {
+    const argumentSchema: JSONSchema = {
+      type: "object",
+      properties: {},
+    };
+    const previousResult: JSONSchema = {
+      type: "object",
+      properties: {
+        x: { type: "number", default: 0 },
+        y: { type: "number" },
+      },
+      maxProperties: 1,
+    };
+    const candidateResult: JSONSchema = {
+      ...previousResult,
+      properties: {
+        x: { type: "number" },
+        y: { type: "number" },
+      },
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(argumentSchema, previousResult),
+        pattern(argumentSchema, candidateResult),
+      )
+    ).toThrow(/not stable under default insertion/);
+  });
+
   it("accepts optional and defaulted fields plus wider argument unions", () => {
     const candidate = pattern(
       {

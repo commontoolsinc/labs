@@ -985,6 +985,22 @@ the known bootstrap and everyone-is-admin fields while still presenting the
 complete object schema required by strict preparation. Record the changed
 pattern contract as another compatible baseline.
 
+## 42. Permit removal of eagerly materialized argument defaults
+
+Pattern evolution compares defaults below constraints that can observe
+recursive default insertion. Adding or changing a default below one of those
+constraints remains unsafe. Removing an argument default is different. The
+runner already materialized the previous default in every stored piece, so an
+update does not remove that value from an existing argument. New pieces use
+the candidate pattern's own initialization path.
+
+Permit an evolution comparison only when the candidate argument's extracted
+default is an unchanged subset of the previous extracted default. Treat links,
+arrays, primitives, and Fabric special values as indivisible. Continue to
+reject added defaults, changed values, and removed result defaults. Focused
+compatibility tests cover the permitted argument removal and both rejected
+directions.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an

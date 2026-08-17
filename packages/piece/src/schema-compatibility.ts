@@ -1,6 +1,7 @@
 import {
   deepEqual,
   extractDefaultValues,
+  isLink,
   type JSONSchema,
   type Pattern,
   schemaHasDefaultValue,
@@ -17,6 +18,7 @@ import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type FabricValue,
+  isFabricPlainObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 
@@ -436,7 +438,8 @@ function schemaSubsetIssue(
   if (
     !context.allowEvolutionDefaults &&
     context.defaultComparison === "evolution" &&
-    !schemaDefaultsResolveEqually(source, target, context)
+    !schemaDefaultsResolveEqually(source, target, context) &&
+    !argumentEvolutionOnlyRemovesDefaults(source, target, context)
   ) {
     return `${path}: defaults changed below a constraint that is not stable under default insertion`;
   }
@@ -1214,6 +1217,43 @@ function schemaDefaultsResolveEqually(
         extractDefaultValues(source, context.sourceRoot),
         extractDefaultValues(target, context.targetRoot),
       ));
+}
+
+function argumentEvolutionOnlyRemovesDefaults(
+  source: JSONSchema,
+  target: JSONSchema,
+  context: CompatibilityContext,
+): boolean {
+  if (context.role !== "argument") return false;
+
+  const candidateHasDefault = schemaHasDefaultValue(
+    target,
+    context.targetRoot,
+  );
+  if (!candidateHasDefault) return true;
+  if (!schemaHasDefaultValue(source, context.sourceRoot)) return false;
+
+  return defaultValueOnlyRemovesFields(
+    extractDefaultValues(target, context.targetRoot),
+    extractDefaultValues(source, context.sourceRoot),
+  );
+}
+
+function defaultValueOnlyRemovesFields(
+  candidate: FabricValue,
+  previous: FabricValue,
+): boolean {
+  if (fabricAwareEqual(candidate, previous)) return true;
+  if (
+    !isFabricPlainObject(candidate) || !isFabricPlainObject(previous) ||
+    isLink(candidate) || isLink(previous)
+  ) {
+    return false;
+  }
+  return Object.entries(candidate).every(([key, value]) =>
+    Object.hasOwn(previous, key) &&
+    defaultValueOnlyRemovesFields(value, previous[key])
+  );
 }
 
 type ActiveSchemasByStability = WeakMap<
