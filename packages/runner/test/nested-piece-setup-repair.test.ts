@@ -17,13 +17,11 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 // instantiation re-runs the pinned pattern's OWN setup on that failure and
 // retries — the same repair the home ROOT gets in startEnsuredDefaultPattern,
 // here for the nested pieces that never pass through the PieceController.
-// Like the root repair (whose flag-off posture
-// check-update-default-pattern.test.ts pins), it is not gated on
-// systemPatternAutoUpdate: the flag governs the UPDATE family (identity
-// moves); a same-identity self-repair also runs in default deployments,
-// where the flag is unset and is a nested piece's only heal. The root itself
-// is EXCLUDED (the controller owns it); a nested piece is never a space's
-// defaultPattern, so it heals here.
+// The repair is not gated by `systemPatternAutoUpdate`: that flag governs
+// updates which move the durable identity pointer, while this setup replays
+// the pattern the pointer already names. The root itself is excluded because
+// its controller owns the repair; a nested piece is never a space's
+// `.defaultPattern`, so it heals here.
 
 const signer = await Identity.fromPassphrase("nested-piece-setup-repair");
 const space = signer.did();
@@ -165,9 +163,8 @@ describe("nested-piece cold-start setup repair", () => {
   };
 
   it("heals with systemPatternAutoUpdate off (repair is not update)", async () => {
-    // The flag-off posture is the one every default deployment runs
-    // (experimental defaults omit the flag). An aged nested piece heals there
-    // too, as the root does via the controller's cold-start repair.
+    // Disabling pattern auto-update proves the same-identity repair is
+    // independent of the host's update posture.
     const rt = newRuntime(false);
     try {
       const { cell, v3Ref } = await brickedNestedPiece(rt);
