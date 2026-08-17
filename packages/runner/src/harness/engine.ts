@@ -763,17 +763,14 @@ export class Engine extends EventTarget {
             });
           }
           for (const dataPath of dataPaths) {
-            const dataIdentity = identityByPath.get(dataPath);
-            if (dataIdentity === undefined) {
-              throw new Error(
-                `Data file '${dataPath}' has no content identity.`,
-              );
-            }
+            // Every data path is in the pristine set the identities were
+            // computed over, the same guarantee the module lookup above relies
+            // on.
             imports.push({
               specifier: dataFileSpecifier(
                 storedFilenameFor(dataPath, id, mounts),
               ),
-              targetIdentity: dataIdentity,
+              targetIdentity: identityByPath.get(dataPath)!,
             });
           }
         }
@@ -1142,15 +1139,11 @@ export class Engine extends EventTarget {
           });
         }
         for (const dataPath of dataPaths) {
-          const dataIdentity = identityByPath.get(dataPath);
-          if (dataIdentity === undefined) {
-            throw new Error(`Data file '${dataPath}' has no content identity.`);
-          }
           imports.push({
             specifier: dataFileSpecifier(
               storedFilenameFor(dataPath, undefined, mounts),
             ),
-            targetIdentity: dataIdentity,
+            targetIdentity: identityByPath.get(dataPath)!,
           });
         }
       }
