@@ -15,7 +15,7 @@ import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import {
   JSON_CODEC,
   REALM_CODEC,
-  type ReconstructionContext,
+  type DecodeContext,
   type TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
@@ -69,7 +69,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
       decode(
         typeTag: string,
         state: JsonCodecValue,
-        _context: ReconstructionContext,
+        _context: DecodeContext,
       ): FabricValue {
         if (typeof state !== "string") {
           return new ProblematicValue(
@@ -115,7 +115,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
       decode(
         typeTag: string,
         state: RealmCodecValue,
-        _context: ReconstructionContext,
+        _context: DecodeContext,
       ): FabricValue {
         if (typeof state !== "bigint") {
           return new ProblematicValue(

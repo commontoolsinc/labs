@@ -14,7 +14,7 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   JSON_CODEC,
   REALM_CODEC,
-  ReconstructionContext,
+  DecodeContext,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 
@@ -132,7 +132,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       decode(
         typeTag: string,
         state: JsonCodecValue,
-        _context: ReconstructionContext,
+        _context: DecodeContext,
       ): FabricBytes | ProblematicValue {
         if (typeof state !== "string") {
           return new ProblematicValue(
@@ -199,7 +199,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       decode(
         typeTag: string,
         state: RealmCodecValue,
-        _context: ReconstructionContext,
+        _context: DecodeContext,
       ): FabricValue {
         if (!(state instanceof ArrayBuffer)) {
           return new ProblematicValue(

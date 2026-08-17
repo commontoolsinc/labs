@@ -6,8 +6,8 @@ export {
   JSON_CODEC,
   type NonterminalCodec,
   REALM_CODEC,
-  type ReconstructionContext,
-  type SerializationContext,
+  type DecodeContext,
+  type EncodeContext,
   type TerminalCodec,
   type WireFormat,
 } from "./interface.ts";
@@ -19,8 +19,8 @@ export { BaseFabricCodec } from "./BaseFabricCodec.ts";
 export { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
 export { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 
-export { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
+export { BaseDecodeContext } from "./BaseDecodeContext.ts";
 export {
-  EMPTY_RECONSTRUCTION_CONTEXT,
-  EmptyReconstructionContext,
-} from "./EmptyReconstructionContext.ts";
+  EMPTY_DECODE_CONTEXT,
+  EmptyDecodeContext,
+} from "./EmptyDecodeContext.ts";

@@ -4,7 +4,7 @@ import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import type { DecodeContext } from "@/codec-interface/interface.ts";
 import {
   REALM_FORMAT_VERSION,
   type RealmCodecValue,
@@ -115,7 +115,7 @@ export class RealmCodecEngine
    */
   override decode(
     data: RealmEncodedValue,
-    context: ReconstructionContext,
+    context: DecodeContext,
   ): FabricValue {
     if (!Array.isArray(data) || (data.length !== 2)) {
       return this.reportMalformed(
@@ -280,7 +280,7 @@ export class RealmCodecEngine
    */
   protected override decodeValue(
     data: RealmCodecValue,
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen?: Set<object>,
   ): FabricValue {
     // Self-representing primitives pass straight through. A `symbol` and a
@@ -354,7 +354,7 @@ export class RealmCodecEngine
    */
   #decodeArray(
     data: readonly RealmCodecValue[],
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen: Set<object> | undefined,
   ): FabricValue {
     const length = data.length;
@@ -394,7 +394,7 @@ export class RealmCodecEngine
    */
   #decodePlainObject(
     data: Record<string, RealmCodecValue>,
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen: Set<object> | undefined,
   ): FabricValue {
     const keys = Object.keys(data);

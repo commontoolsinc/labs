@@ -174,7 +174,7 @@ export function realmFromFabricValue(value: FabricValue): RealmEncodedValue {
 
 /**
  * Decodes a value in the realm-crossing transport form. If `context` is
- * omitted, {@link EMPTY_RECONSTRUCTION_CONTEXT} is substituted, which throws
+ * omitted, {@link EMPTY_DECODE_CONTEXT} is substituted, which throws
  * if any reconstruction is needed.
  *
  * `data` is ceded to this function, which retains what it likes of it and
@@ -183,7 +183,7 @@ export function realmFromFabricValue(value: FabricValue): RealmEncodedValue {
  */
 export function fabricFromRealmValue(
   data: RealmEncodedValue,
-  context?: ReconstructionContext | undefined,
+  context?: DecodeContext | undefined,
 ): FabricValue {
-  return realmCodecEngine.decode(data, context ?? EMPTY_RECONSTRUCTION_CONTEXT);
+  return realmCodecEngine.decode(data, context ?? EMPTY_DECODE_CONTEXT);
 }
