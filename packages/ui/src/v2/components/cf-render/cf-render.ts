@@ -716,12 +716,17 @@ export class CFRender extends BaseElement {
 
     const container = this._containerRef.value;
     if (container) {
-      container.innerHTML =
-        `<div style="color: var(--cf-theme-color-error, var(--cf-colors-error, #ff6057))">Error rendering content: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }</div>`;
+      // The message can carry anything a failing pattern put in it, so it goes
+      // in as text rather than as markup.
+      const message = document.createElement("div");
+      message.style.color =
+        "var(--cf-theme-color-error, var(--cf-colors-error, #ff6057))";
+      message.textContent = `Error rendering content: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`;
+      container.replaceChildren(message);
       this._cleanup = () => {
-        container.innerHTML = "";
+        container.replaceChildren();
       };
     }
   }

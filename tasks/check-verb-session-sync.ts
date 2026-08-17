@@ -31,8 +31,10 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 export const DEMO_PATH = "packages/cli/integration/verb-session-demo.sh";
 export const WALKTHROUGH_PATH = "docs/common/verb-session-walkthrough.md";
 
-/** The comment that exempts the next `cf` line in a walkthrough bash block. */
-const EXEMPTION = /^#.*not in the demo/;
+/** The comment that exempts the next `cf` line in a walkthrough bash block.
+ * The marker alone is not enough: an exemption without a reason is one
+ * nobody can review, so a word has to follow the phrase. */
+const EXEMPTION = /^#.*not in the demo\W*\w/;
 
 /** Joins backslash-continued lines into one logical line each. */
 export function joinContinuations(text: string): string[] {

@@ -1,10 +1,12 @@
-# A field typed `unknown` reads back as undefined
+# A field typed `unknown` reads back as a reference
 
 **Symptom:** a field holds a real value — another piece, a nested object — and
-every read of it through the declaring type is `undefined`. No compile error, no
-runtime error, no warning. Rendering the same path still works, which is what
-makes this confusing: `<cf-render $cell={entry.piece} />` shows the piece while
-`entry.piece.label` right beside it is undefined.
+every read of it through the declaring type carries none of that value: it is
+truthy and compares equal to what it names, but every property of it is
+`undefined`. No compile error, no runtime error, no warning. Rendering the same
+path still works, which is what makes this confusing:
+`<cf-render $cell={entry.piece} />` shows the piece while `entry.piece.label`
+right beside it is undefined.
 
 ```typescript
 // Shown at module scope.
@@ -14,22 +16,26 @@ interface Entry {
 }
 ```
 
-**Why:** `unknown` lowers to the schema `{ type: "unknown" }`, and the runner's
-traversal will not materialize an **object or array** read under it: those two
-arms short-circuit to `undefined` (`runner/src/traverse.ts`,
-`_traverseWithSchemaInner`). A primitive is unaffected — the string, number,
-boolean and null arms treat the same schema as a match and return the value — so
-a field typed `unknown` that holds a string reads back fine, and only one that
-holds an object or a list goes quiet. An `asCell` alongside it also still
-produces a cell; `{ type: ["unknown", …] }` and an `anyOf` with an unknown branch
-behave like the bare form.
+**Why:** `unknown` lowers to the schema `{ type: "unknown" }`, which declares a
+reference rather than a value, and neither read path descends into one. What
+comes back answers presence and identity: it is truthy when something is there,
+`equals()` compares it to the cell it names, and writing it back stores a link.
+It carries no properties, so reading one yields `undefined`.
 
-The path survives even when the value does not, which is why cells and rendering
-still work: a `$cell` binding passes the path, and the renderer reads it under a
-schema of its own (`asSchema(rendererVDOMSchema)` — `runner/src/runner.ts` on the
-mainline path, `shell/src/views/BodyView.ts`, and `html/src/in-process.ts` when
-the reconciler runs in the caller's own process), while every read of the
-*value* comes back empty.
+That holds whatever sits behind the position — a stored string is as opaque as
+a stored object — and it holds on both read paths, the eager traversal and the
+lazy view a lift's argument goes through. An `asCell` alongside it still
+produces a cell. A concrete type declared beside it, as in
+`{ type: ["unknown", "string"] }`, is a reader asking for the value and gets
+it; so does a branch of an `anyOf` that declares the property, which no longer
+loses to a sibling branch that declines to look.
+
+The path survives even though the value is not carried, which is why cells and
+rendering still work: a `$cell` binding passes the path, and the renderer reads
+it under a schema of its own (`asSchema(rendererVDOMSchema)` —
+`runner/src/runner.ts` on the mainline path, `shell/src/views/BodyView.ts`, and
+`html/src/in-process.ts` when the reconciler runs in the caller's own process),
+while every read of the *value* comes back empty.
 
 Two transformer diagnostics cover neighboring cases and neither catches this
 one: `reactive-capture:unknown-type` reports a closure capture whose inferred
@@ -134,7 +140,8 @@ deno task cf check <pattern>.tsx --show-transformed --no-run
 ```
 
 A field you expect to read shows as `{ type: "unknown" }` when the read will
-come back undefined, and as the shape you named when it will materialize.
+stop at a reference — the field itself is there and truthy, its properties are
+not — and as the shape you named when it will materialize.
 
 ## Where this has bitten
 

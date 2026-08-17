@@ -12,7 +12,8 @@
  * The label half is asserted through the entry's own `label` field. The chosen
  * label is recorded on the SubPieceEntry at creation time; the label on the
  * sub-piece itself is not readable, because SubPieceEntry.piece is typed
- * `unknown`, whose schema the runner reads back as undefined. Successive adds of
+ * `unknown`, whose schema declares a reference the runner does not read
+ * through. Successive adds of
  * the same type walk the standard label list (email: Personal, Work, School,
  * Other), a different type starts its own sequence, and an explicit label in
  * initialData overrides the default. Replacing getNextUnusedLabel's body with

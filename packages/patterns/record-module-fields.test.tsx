@@ -4,9 +4,9 @@
  * A Record shows things that live on the modules it holds rather than on its
  * own list: the icon a record-icon module carries, the aliases the nickname
  * modules carry, and each module's instance label. Reading them means reaching
- * through `SubPieceEntry.piece`, which is typed `unknown`; that schema is the
- * one the runner reads back as undefined instead of materializing the value, so
- * every such read saw nothing. The reads now go through `readDisplayFields`,
+ * through `SubPieceEntry.piece`, which is typed `unknown`; that schema
+ * declares a reference the runner stops at instead of materializing what it
+ * names, so every such read saw nothing. The reads now go through `readDisplayFields`,
  * whose operand names the fields, and the runner materializes them by following
  * the entry's link into the module.
  *

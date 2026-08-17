@@ -1131,9 +1131,72 @@ export function targetOptions(
 }
 
 /**
+ * The day the `cf piece get`, `cf piece set`, and `cf piece call` spellings
+ * stop working: two weeks after step 6a reached main
+ * (docs/plans/cli-surface-shape.md). A literal rather than a window computed
+ * at runtime, because a caller who reads the warning today and acts on it
+ * next week must be told the same date both times. Step 6b removes the
+ * spellings and their notices on this day.
+ */
+export const PIECE_DATA_SPELLING_END_DATE = "2026-08-31";
+
+/**
+ * The 6a deprecation notice for a piece-mounted data spelling. stderr and
+ * never stdout: `get` and `call` reserve stdout for machine-readable
+ * output, and a notice on stdout would corrupt exactly the piping scripts
+ * this notice exists to migrate. Unconditional rather than behind
+ * `--quiet`, because a quiet script is the caller most in need of the date.
+ */
+export function warnDeprecatedPieceSpelling(
+  spelling: string,
+  deps: { writeError?: (text: string) => void } = {},
+): void {
+  const writeError = deps.writeError ?? console.error;
+  const short = spelling.replace(/^piece /, "");
+  writeError(
+    `'cf ${spelling}' is deprecated; spell it 'cf ${short}'. The ` +
+      `'cf ${spelling}' spelling stops working on ` +
+      `${PIECE_DATA_SPELLING_END_DATE}.`,
+  );
+}
+
+/**
+ * An action wrapped with the 6a notice. The `this` binding passes through
+ * untouched because `call`'s action reads `this.getLiteralArgs()`.
+ */
+export function withDeprecatedSpellingWarning<
+  // deno-lint-ignore no-explicit-any
+  F extends (this: any, ...args: any[]) => unknown,
+>(spelling: string, action: F): F {
+  // deno-lint-ignore no-explicit-any
+  return function (this: any, ...args: any[]) {
+    warnDeprecatedPieceSpelling(spelling);
+    return action.apply(this, args);
+  } as F;
+}
+
+/**
+ * The action a data-command builder mounts: the piece-mounted spelling
+ * warns (step 6a), the top-level spelling does not. Decided here, on the
+ * one definition both mounts share, because a per-mount implementation is
+ * how the two surfaces drift — and this is the single respect in which
+ * they are allowed to differ (test/piece-data-spellings.test.ts pins
+ * exactly that).
+ */
+export function dataCommandAction<
+  // deno-lint-ignore no-explicit-any
+  F extends (this: any, ...args: any[]) => unknown,
+>(spelling: string, action: F): F {
+  return spelling.startsWith("piece ")
+    ? withDeprecatedSpellingWarning(spelling, action)
+    : action;
+}
+
+/**
  * The one definition of `get`, mounted under `cf piece` and, through
  * {@link pieceDataCommand}, at top level as `cf get`. `spelling` is only
- * how the command names itself in its own help.
+ * how the command names itself in its own help — and, since 6a, whether
+ * its action carries the deprecation notice.
  */
 // deno-lint-ignore no-explicit-any
 function buildGetCommand(spelling = "piece get"): Command<any> {
@@ -1245,7 +1308,7 @@ the way --input does.`,
       { conflicts: ["select"] },
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(getCellValueFromCommand);
+    .action(dataCommandAction(spelling, getCellValueFromCommand));
 }
 
 /**
@@ -1295,7 +1358,7 @@ counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
         '"#argument" reference suffix spells the same selection)',
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(setCellValueFromCommand);
+    .action(dataCommandAction(spelling, setCellValueFromCommand));
 }
 
 /**
@@ -1457,7 +1520,7 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
     )
     .stopEarly()
     .arguments("<callable:string> [tail...:string]")
-    .action(async function (
+    .action(dataCommandAction(spelling, async function (
       // Spelled out because this builder stands alone: the target options
       // arrive as `piece` globals on one mount and as own options on the
       // other, so neither inference sees the whole surface.
@@ -1560,16 +1623,18 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
       } catch (error) {
         exitPieceCallFailure(observer, error, invocationId, phase);
       }
-    });
+    }));
 }
 
 /**
  * A top-level instance of a piece data command: the same builder the
  * `piece` chain mounts under the same name, carrying the target options
  * itself. `cf get`, `cf set`, and `cf call` are these — one definition per
- * command, two spellings that parse and behave identically
- * (docs/plans/cli-surface-shape.md, step 5). Deprecating the `cf piece`
- * spellings later means touching the piece-mounted instances only.
+ * command, two spellings that parse and behave identically in every
+ * respect but one: the piece-mounted spelling is deprecated (step 6a) and
+ * its invocations print the dated stderr notice `dataCommandAction`
+ * attaches, until {@link PIECE_DATA_SPELLING_END_DATE} removes it with the
+ * spelling (docs/plans/cli-surface-shape.md, steps 5–6).
  */
 // deno-lint-ignore no-explicit-any
 export function pieceDataCommand(name: "get" | "set" | "call"): Command<any> {

@@ -137,7 +137,8 @@ the commands that take `--input` (`get` and `set` here), a trailing
 `call` takes no `--input` and refuses the suffix. The three are the piece
 data commands mounted at top level — reading and writing cells is not
 really a piece-management concern, and the spelling says so. `cf piece
-get`, `cf piece set`, and `cf piece call` are the same commands and keep
+get`, `cf piece set`, and `cf piece call` are the same commands, deprecated
+as spellings: each still works and warns on stderr with the date it stops
 working.
 
 One subtlety: neither `piece set` nor `piece call` refreshes *computed*

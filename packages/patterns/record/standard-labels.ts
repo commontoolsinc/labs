@@ -25,7 +25,8 @@ export const STANDARD_LABELS: Record<string, string[]> = {
 // The label is read from the entry, which records the label chosen when the
 // module was created. The label on the sub-piece itself is not readable here:
 // SubPieceEntry.piece is typed `unknown`, whose schema (`{ type: "unknown" }`)
-// the runner reads back as undefined rather than materializing.
+// declares a reference, so a read of it stops there rather than materializing
+// what it names.
 export function getNextUnusedLabel(
   type: string,
   existingPieces: readonly SubPieceEntry[],

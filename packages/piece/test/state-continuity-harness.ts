@@ -700,11 +700,11 @@ export function comparableState(value: unknown): unknown {
  * `required` dropped so one property that does not resolve cannot hide the
  * rest of the object.
  *
- * A schema-driven read resolves nothing at a `{"type": "unknown"}` position —
- * `schemaTypeValidity` in `traverse.ts` returns `Unknown` there, and the value
- * comes back `undefined` WHATEVER the document holds. That is the right answer
+ * A schema-driven read carries nothing at a `{"type": "unknown"}` position —
+ * `schemaTypeValidity` in `traverse.ts` returns `Unknown` there, so the read
+ * stops at a reference WHATEVER the document holds. That is the right answer
  * for a reader; it is the wrong one for this comparison, because "the schema
- * did not resolve it" then reads exactly like "the document does not hold it",
+ * declined to look" then reads exactly like "the document does not hold it",
  * and `isPreserved` treats the second as nothing to lose.
  *
  * It is not a corner. Measured on the committed fixtures, `unknown` is what a
@@ -712,8 +712,8 @@ export function comparableState(value: unknown): unknown {
  * as `additionalProperties: {"type": "unknown"}` — and `default-app.tsx`
  * declares `[key: string]: unknown` on its output. Its root holds `recentPieces`,
  * `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream);
- * under the stored schema verbatim all three read `undefined`, and a change
- * that stranded any of them would have replayed clean.
+ * under the stored schema verbatim all three read back carrying none of their
+ * contents, and a change that stranded any of them would have replayed clean.
  *
  * `required` goes for a different reason, measured on the committed topics
  * fixture. A schema-driven read returns `undefined` for the WHOLE object when a

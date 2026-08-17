@@ -1,4 +1,10 @@
-import { Renderer, TextRenderer, type Token, type Tokens } from "marked";
+import {
+  Parser,
+  type Renderer,
+  TextRenderer,
+  type Token,
+  type Tokens,
+} from "marked";
 
 // marked emitted an id on every heading until version 5, under a `headerIds`
 // option that defaulted to on. Version 5 deprecated the option and a later
@@ -143,19 +149,21 @@ class HeadingSlugger {
 }
 
 /**
- * A marked renderer that gives every heading an id.
+ * The ids for the headings of one rendered document.
  *
  * Each instance slugs against its own set of seen headings, so one is created
- * per parse and the suffixes restart at each render.
+ * per render and the suffixes restart each time.
  */
-export class HeadingIdRenderer extends Renderer {
+export class HeadingIds {
   #slugger = new HeadingSlugger();
+  #parser = new Parser();
 
-  override heading({ tokens, depth }: Tokens.Heading): string {
-    const text = this.parser.parseInline(tokens);
-    const raw = unescape(
-      this.parser.parseInline(tokens, new SlugTextRenderer(this.parser)),
+  /** The id for a heading, given the tokens of its text. */
+  idFor(tokens: Token[]): string {
+    return this.#slugger.slug(
+      unescape(
+        this.#parser.parseInline(tokens, new SlugTextRenderer(this.#parser)),
+      ),
     );
-    return `<h${depth} id="${this.#slugger.slug(raw)}">${text}</h${depth}>\n`;
   }
 }
