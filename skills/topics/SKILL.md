@@ -98,8 +98,8 @@ exact known fields or numeric ranges to shrink the corpus, then inspect the
 small result. Always combine a Topic-list filter with `--select`; filter alone
 returns every property of each match.
 
-Address a selected Topic by the address its own `index` row carries result.
-Filter and project that computed index too:
+Address a selected Topic by the address its own `index` row carries. Project
+that computed index to ask for it:
 
 ```bash
 deno task cf get --url "$TOPICS_BOARD_URL" index --step \
@@ -217,25 +217,26 @@ trying to revise earlier comments.
 Add every relevant pull request explicitly with `addLink` and `kind: "pr"`;
 mentioning it only in prose is not enough.
 
-A connection to another Topic is a **reference**, not a string. Record it with
-`mention`, which takes the piece itself — writing the fid into the body does
-nothing, because nothing scans prose for addresses:
+A connection to another Topic is a **reference**, not a string. `mention` takes
+the piece itself, and `unmention` removes every entry naming that piece —
+writing the fid into the body does nothing, because nothing scans prose for
+addresses.
 
-```bash
-deno task cf call --url "$TOPIC_URL" mention '{"topic":"<other topic>"}'
-deno task cf call --url "$TOPIC_URL" unmention '{"topic":"<other topic>"}'
-```
+Reach them from the topic's own page rather than the CLI. An inline call
+argument is parsed as plain JSON, so an address written in one arrives as the
+string it looks like rather than as the topic it names: the call settles, and
+the reference it stored points at the text. Record a connection through the
+References card, whose @-mention picker hands the verb the piece.
 
-`mention` appends the reference; `unmention` removes every entry naming that
-piece. A person can retract one from the topic's own page too — the References
-card lists what was added this way, each row with a remove control. A mention
-written into the prose is not listed there: it is removed by editing the prose.
-Both are mergeable, so concurrent callers all land, and mentioning the same
-piece twice is still one edge — the graph asks whether anything names a topic,
-not how often. Each Topic publishes what it points at as `mentions`, and who
-points at it as `referencedBy` — both derived, so retracting a mention removes
-the edge and nothing is left behind in the target. An `addLink` whose URL names
-a piece also becomes a reference; one that names a web page stays a web page.
+A person retracts one from the same place — the References card lists what was
+added this way, each row with a remove control. A mention written into the prose
+is not listed there: it is removed by editing the prose. Both are mergeable, so
+concurrent callers all land, and mentioning the same piece twice is still one
+edge — the graph asks whether anything names a topic, not how often. Each Topic
+publishes what it points at as `mentions`, and who points at it as
+`referencedBy` — both derived, so retracting a mention removes the edge and
+nothing is left behind in the target. An `addLink` whose URL names a piece also
+becomes a reference; one that names a web page stays a web page.
 
 ## Persistence and computed results
 
