@@ -999,6 +999,7 @@ describe("cli piece parsing", () => {
     expect(newFlags).toContain("--root");
     expect(newFlags).toContain("--repository");
     expect(newFlags).toContain("--test");
+    expect(newFlags).toContain("--datafile");
     expect(newFlags).toContain("--dangerously-allow-incompatible-schema");
 
     for (const command of ["setsrc", "set-home"]) {
@@ -1006,6 +1007,7 @@ describe("cli piece parsing", () => {
       expect(flags).toContain("--root");
       expect(flags).toContain("--repository");
       expect(flags).toContain("--test");
+      expect(flags).toContain("--datafile");
     }
     expect(optionFlags("setsrc")).toContain(
       "--dangerously-allow-incompatible-schema",
@@ -1996,18 +1998,33 @@ describe("cli piece parsing", () => {
     ])).rejects.toThrow("Cannot use --test with --reset");
   });
 
+  it("rejects attached data files when resetting the home pattern", async () => {
+    const { piece: command } = await import(
+      "../commands/piece.ts?test-reset-datafile"
+    );
+    command.throwErrors();
+    await expect(command.parse([
+      "set-home",
+      "--reset",
+      "--datafile",
+      "/repo/data/cities.json",
+    ])).rejects.toThrow("Cannot use --datafile with --reset");
+  });
+
   it("builds repository-aware entries from deployment flags", () => {
     expect(localPatternEntry("/repo/pattern.tsx", {
       mainExport: "named",
       repository: "https://github.com/commontoolsinc/labs",
       root: "/repo",
       test: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
+      datafile: ["/repo/data/cities.json"],
     })).toEqual({
       mainPath: "/repo/pattern.tsx",
       mainExport: "named",
       repository: "https://github.com/commontoolsinc/labs",
       rootPath: "/repo",
       testPaths: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
+      dataFilePaths: ["/repo/data/cities.json"],
     });
   });
 

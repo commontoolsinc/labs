@@ -9,7 +9,10 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { createSession, isDID, Session } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
+  FileSystemProgramResolver,
+  readDataFileSource,
+} from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
 import {
   assignSlug,
@@ -106,6 +109,8 @@ export interface EntryConfig {
   rootPath?: string;
   /** Test entry paths whose resolved source closures travel with the piece. */
   testPaths?: string[];
+  /** Data file paths stored with the piece and never compiled. */
+  dataFilePaths?: string[];
 }
 
 export interface SpaceConfig {
@@ -598,8 +603,12 @@ export async function getProgramFromFile(
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
   const entryPaths = [entry.mainPath, ...(entry.testPaths ?? [])];
+  const dataPaths = entry.dataFilePaths ?? [];
   const rootPath = entry.rootPath ??
-    join(common(entryPaths.map((path) => dirname(path))), ".");
+    join(
+      common([...entryPaths, ...dataPaths].map((path) => dirname(path))),
+      ".",
+    );
   const programs: RuntimeProgram[] = await Promise.all(
     entryPaths.map((path) =>
       pieces.runtime.harness.resolve(
@@ -620,12 +629,29 @@ export async function getProgramFromFile(
       files.set(file.name, file);
     }
   }
+  // Data files are read directly rather than resolved: nothing imports them, so
+  // there is no closure to follow, and their bytes are never parsed.
+  const dataFiles: string[] = [];
+  for (const path of dataPaths) {
+    const source = readDataFileSource(path, rootPath);
+    if (dataFiles.includes(source.name)) continue;
+    // The entry or one of its tests reaches this name through an import, so the
+    // package would have to both compile it and store it uninterpreted.
+    if (files.has(source.name)) {
+      throw new Error(
+        `Data file "${source.name}" is also a source module of this package.`,
+      );
+    }
+    files.set(source.name, source);
+    dataFiles.push(source.name);
+  }
   const program: RuntimeProgram = {
     main: mainProgram.main,
     files: [...files.values()],
     ...(testPrograms.length === 0
       ? {}
       : { sourceRoots: testPrograms.map((test) => test.main) }),
+    ...(dataFiles.length === 0 ? {} : { dataFiles }),
   };
   if (entry.mainExport) {
     program.mainExport = entry.mainExport;

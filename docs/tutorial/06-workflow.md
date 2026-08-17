@@ -105,6 +105,46 @@ infers the common directory that contains the main entry and every test entry.
 An explicit `--root` applies to all of them. A test-only change creates a new
 source revision, so history and recovery keep each test package separate.
 
+Files that hold data rather than code — a fixture, a table, a list of names —
+travel the same way, under a repeatable `--datafile` flag:
+
+```bash
+deno task cf piece setsrc pattern.tsx \
+  --test pattern.test.tsx \
+  --datafile data/cities.json \
+  --piece fid1:abc... -s myspace
+```
+
+A data file is stored verbatim beside the source. Deployment never parses,
+type-checks, or compiles it, and no pattern can import it. It must be UTF-8
+text, and it must sit inside the deployment root, which the CLI infers to cover
+the main entry, every test entry, and every data file. Like a test entry, a data
+file is part of the source revision's identity, so changing one creates a new
+revision, and each revision keeps its own bytes. Repeat the complete set of
+`--datafile` flags on every `setsrc`.
+
+The pattern reads one with `dataFile`, naming the path the file is stored
+under:
+
+```tsx
+// Shown for illustration only.
+import { dataFile, pattern } from "commonfabric";
+
+export default pattern(() => ({
+  cities: JSON.parse(dataFile("/data/cities.json")).cities,
+}));
+```
+
+The bytes travel with the pattern's code, so the read is immediate and returns
+the same text on every load of a given revision. Reading at module scope rather
+than inside a pattern produces a top-level value like any other, so it takes
+the usual `__cf_data` snapshot.
+
+Data files also travel for whoever reads the source next — you on another
+machine, a teammate running `cf piece getsrc`, a tool reading the FUSE `.src/`
+view. They are fixed at deploy time: data that changes while the pattern runs
+belongs in its cells.
+
 ## Drive a deployed piece from the CLI
 
 Everything a pattern exports (Chapter 3) is drivable without a browser:

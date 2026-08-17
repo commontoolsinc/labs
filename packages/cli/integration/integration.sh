@@ -1128,9 +1128,65 @@ run_wish() {
   echo "Successfully ran CLI wish integration tests for ${API_URL}."
 }
 
+run_piece_data_files() {
+  setup_space
+
+  local data_pattern="$SCRIPT_DIR/pattern/data-reader.tsx"
+  local data_file="$SCRIPT_DIR/pattern/data/cities.json"
+  local data_dir="$WORK_DIR/datafiles"
+  mkdir -p "$data_dir"
+
+  # Deploy with the data file attached. The pattern reads it while it runs, so
+  # a successful read is what puts the bytes in the result cell below.
+  DATA_PIECE_ID=$(cf piece new $SPACE_ARGS \
+    --root "$SCRIPT_DIR/pattern" \
+    --datafile "$data_file" \
+    "$data_pattern")
+  echo "Created data-file piece: $DATA_PIECE_ID"
+
+  CITIES=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID cities)
+  assert_json_eq "$CITIES" '["Oslo", "Lima"]' \
+    "Pattern should read the attached data file, got: $CITIES"
+
+  # The bytes reaching the runtime must be the authored bytes, not a reserialized
+  # form. The fixture's spacing is deliberately not what a formatter would
+  # produce, so a re-serialization anywhere in the path shows up here.
+  RAW=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID raw)
+  EXPECTED_RAW=$(jq -Rs . < "$data_file")
+  assert_json_eq "$RAW" "$EXPECTED_RAW" \
+    "Attached data file should reach the pattern verbatim, got: $RAW"
+
+  # The data file comes back with the source package.
+  cf piece getsrc $SPACE_ARGS --piece $DATA_PIECE_ID "$data_dir"
+  if [ ! -f "$data_dir/data/cities.json" ]; then
+    error "Data file was not retrieved with the source from $DATA_PIECE_ID"
+  fi
+  if ! diff -u "$data_file" "$data_dir/data/cities.json" > /dev/null; then
+    error "Retrieved data file does not match the deployed bytes"
+  fi
+
+  # Redeploy from the recovered checkout, which `getsrc` laid out with the same
+  # relative paths the piece was built from. A data-only edit is a complete new
+  # source revision, so the pattern must read the new bytes — that is what shows
+  # the runtime is not serving a stale copy.
+  printf '{"cities":["Oslo","Lima","Accra"]}\n' > "$data_dir/data/cities.json"
+  cf piece setsrc $SPACE_ARGS --piece $DATA_PIECE_ID \
+    --root "$data_dir" \
+    --datafile "$data_dir/data/cities.json" \
+    "$data_dir/data-reader.tsx"
+  cf piece step $SPACE_ARGS --piece $DATA_PIECE_ID
+
+  UPDATED=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID cities)
+  assert_json_eq "$UPDATED" '["Oslo", "Lima", "Accra"]' \
+    "Pattern should read the updated data file, got: $UPDATED"
+
+  echo "Successfully ran CLI data-file integration tests for ${API_URL}."
+}
+
 case "$SECTION" in
   all)
     run_piece_values
+    run_piece_data_files
     run_piece_links
     run_piece_call
     run_piece_call_retry
@@ -1144,6 +1200,7 @@ case "$SECTION" in
     ;;
   piece-values)
     run_piece_values
+    run_piece_data_files
     run_spelling_parity
     ;;
   spelling-parity)
