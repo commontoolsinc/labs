@@ -612,6 +612,16 @@ describe("parseExecArgs edge cases", () => {
       .toBeUndefined();
   });
 
+  it("leaves a conjunction over a scalar on the single-value path", () => {
+    // `allOf` earns the object path by CONTRIBUTING fields. A conjunction
+    // constraining a scalar contributes none, and routing it through flag
+    // parsing would offer a single-value verb a vocabulary of nothing.
+    const spec = makeSpec("tool", { allOf: [{ type: "string" }] });
+    expect(parseExecArgs(spec, ["run", "--value", "hi"]).input).toBe("hi");
+    expect(() => parseExecArgs(spec, ["run", "--anything", "x"]))
+      .toThrow(/is not a flag this verb takes/);
+  });
+
   it("keeps the flags beside a disjunction it cannot express", () => {
     // A root `anyOf` adds constraints no flag list can express, but the
     // properties beside it are still declared and still typed. Reporting none

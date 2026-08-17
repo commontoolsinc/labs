@@ -713,12 +713,8 @@ export function declaredEventFields(
   // where its fields live. A root `$ref` is deliberately NOT resolved here:
   // doing so would give flags to verbs that have never had them, which is a
   // wider change than reading a conjunction and belongs to whoever wants it.
-  if (
-    schema.type !== "object" && !schema.properties &&
-    !Array.isArray(schema.allOf)
-  ) {
-    return null;
-  }
+  const statesItsOwnFields = schema.type === "object" || !!schema.properties;
+  if (!statesItsOwnFields && !Array.isArray(schema.allOf)) return null;
   // A disjunction BESIDE properties is not a reason to report none. It adds
   // constraints the flag surfaces cannot express, but the properties it sits
   // next to are still declared and still typed, and refusing to name them
@@ -726,6 +722,13 @@ export function declaredEventFields(
   // conjunction and steps over the disjunction, which is the whole of what is
   // wanted here — a root check would only discard the fields beside it.
   const declared = declaredFieldsAt(schema, cfcSchemaChildRoot(schema, schema));
+  // A conjunction earns the object path only by CONTRIBUTING fields. `allOf:
+  // [{type: "string"}]` constrains a scalar, and admitting it here would route
+  // a single-value verb through flag parsing and offer it a vocabulary of
+  // none. A schema that states its own fields keeps the path either way, even
+  // when it names no field — that is a fields position that happens to be
+  // empty, which is a different thing from not being one.
+  if (!statesItsOwnFields && declared.sources.length === 0) return null;
   const properties: Record<string, JSONSchema> = {};
   for (const source of declared.sources) {
     for (const [name, property] of Object.entries(source.properties)) {
