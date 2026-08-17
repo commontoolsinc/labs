@@ -22,6 +22,7 @@ import {
 } from "../src/schema-registry.ts";
 import { resolveSchema } from "../src/schema.ts";
 import { LINK_V1_TAG, type URI } from "../src/sigil-types.ts";
+import { defer } from "@commonfabric/utils/defer";
 
 // Two managers on one shared loopback server model two real sessions: what
 // the writer commits reaches the reader only through an explicit sync, so
@@ -252,9 +253,9 @@ describe("schema-doc-sync", () => {
     const leafHash = [...decomposed.documents.keys()]
       .find((hash) => hash !== rootHash)!;
 
-    // Only the root exists, so the server cannot deliver the closure — a
-    // delivery-guarantee violation the arrival hook must surface loudly,
-    // never quietly repair.
+    // Only the root exists, so the closure cannot be assembled — the
+    // server's result-assembly pass must fail the query loudly, never
+    // deliver a result with a hole in it.
     await writeDocs({
       [`cid:${rootHash}`]: decomposed.documents.get(rootHash)! as FabricValue,
     });
@@ -263,7 +264,7 @@ describe("schema-doc-sync", () => {
       path: [],
       schema: false,
     });
-    expect(String(first.error?.message)).toContain("broken external ref");
+    expect(String(first.error?.message)).toContain("not stored in this space");
     expect(isSchemaDocumentClosureComplete(rootHash)).toBe(false);
 
     // The leaf lands late. A fresh sync (differently selected, so coverage
@@ -325,6 +326,172 @@ describe("schema-doc-sync", () => {
       }).get(`cid:${hash}` as URI);
       expect(stored).toBeDefined();
     }
+  });
+
+  it("delivers the closures behind both branches of one carrier document", async () => {
+    const left = decomposeSchema({
+      type: "object",
+      properties: { leftBranch: { type: "string" } },
+    });
+    const right = decomposeSchema({
+      type: "object",
+      properties: { rightBranch: { type: "number" } },
+    });
+    await writeSchemaDocs(left);
+    await writeSchemaDocs(right);
+    await writeDocs({
+      "of:two-branch-carrier": {
+        left: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:two-branch-a",
+              path: [],
+              schema: { $ref: left.rootRef },
+            },
+          },
+        },
+        right: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:two-branch-b",
+              path: [],
+              schema: { $ref: right.rootRef },
+            },
+          },
+        },
+      } as FabricValue,
+    });
+
+    // The scan is document-granular: one delivery of the carrier collects
+    // the refs of every branch, whichever path a traversal selected.
+    const provider = readerStorage.open(space);
+    const result = await provider.sync("of:two-branch-carrier" as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(result.error).toBeUndefined();
+    for (const decomposed of [left, right]) {
+      for (const hash of decomposed.documents.keys()) {
+        const stored = (provider as unknown as {
+          get: (uri: URI) => unknown;
+        }).get(`cid:${hash}` as URI);
+        expect(stored).toBeDefined();
+      }
+    }
+  });
+
+  it("fails a pull whose carrier embeds a link schema ref that no document backs", async () => {
+    const missing = internSchemaAsTaggedHashString({
+      type: "object",
+      properties: { danglingCarrierRef: { type: "string" } },
+    });
+    await writeDocs({
+      "of:dangling-carrier": {
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:dangling-target",
+              path: [],
+              schema: { $ref: `cid:${missing}` },
+            },
+          },
+        },
+      } as FabricValue,
+    });
+
+    const result = await readerStorage.open(space).sync(
+      "of:dangling-carrier" as URI,
+      { path: [], schema: false },
+    );
+    expect(String(result.error?.message)).toContain("not stored in this space");
+  });
+
+  it("fails a pull whose stored dependency is forged even though the realm registry holds a valid copy", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { forgedDep: { $ref: "#/$defs/ForgedDepLeaf" } },
+      $defs: {
+        ForgedDepLeaf: {
+          type: "object",
+          properties: { forgedDepLeaf: { type: "string" } },
+        },
+      },
+    };
+    const decomposed = decomposeSchema(schema);
+    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    const leafHash = [...decomposed.documents.keys()]
+      .find((hash) => hash !== rootHash)!;
+    await writeDocs({
+      [`cid:${rootHash}`]: decomposed.documents.get(rootHash)! as FabricValue,
+      [`cid:${leafHash}`]: { type: "number", title: "forged dep" },
+    });
+    // The realm registry holds the valid leaf (as if another space
+    // delivered it); assembly must still fail on THIS space's forgery.
+    registerSchemaDocument(leafHash, decomposed.documents.get(leafHash)!);
+
+    const result = await readerStorage.open(space).sync(
+      `cid:${rootHash}` as URI,
+      { path: [], schema: false },
+    );
+    expect(String(result.error?.message)).toContain(
+      "did not verify in this space",
+    );
+  });
+
+  it("delivers the closure behind a ref a document gains after the watch was established", async () => {
+    const decomposed = decomposeSchema({
+      type: "object",
+      properties: { lateRefMarker: { type: "string" } },
+    });
+    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    await writeDocs({
+      "of:late-ref-carrier": { plain: "v1" } as FabricValue,
+    });
+    const provider = readerStorage.open(space);
+    const first = await provider.sync("of:late-ref-carrier" as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(first.error).toBeUndefined();
+    const getDoc = (provider as unknown as {
+      get: (uri: URI) => unknown;
+    }).get.bind(provider);
+    expect(getDoc(`cid:${rootHash}` as URI)).toBeUndefined();
+
+    // The carrier gains a ref, closure written with it (the write-side
+    // guarantee). The watch refresh must scan the NEW version and deliver
+    // the closure in the same frame, even though the selector was already
+    // covered and re-traversal is elided.
+    const updated = defer<void>();
+    const cancel = (provider as unknown as {
+      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
+    }).sink("of:late-ref-carrier" as URI, (doc: unknown) => {
+      if (
+        doc !== undefined && typeof doc === "object" && doc !== null &&
+        "value" in doc &&
+        typeof (doc as { value?: unknown }).value === "object" &&
+        (doc as { value: { linked?: unknown } }).value?.linked !== undefined
+      ) {
+        updated.resolve();
+      }
+    });
+    await writeSchemaDocs(decomposed);
+    await writeDocs({
+      "of:late-ref-carrier": {
+        linked: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:late-ref-target",
+              path: [],
+              schema: { $ref: decomposed.rootRef },
+            },
+          },
+        },
+      } as FabricValue,
+    });
+    await updated.promise;
+    cancel();
+    expect(getDoc(`cid:${rootHash}` as URI)).toBeDefined();
   });
 
   it("keeps registrations alive past one manager's close while another session holds its lease", async () => {

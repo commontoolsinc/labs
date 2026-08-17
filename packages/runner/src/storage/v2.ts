@@ -41,6 +41,7 @@ import {
   applyPatchToDocument,
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -3010,7 +3011,15 @@ class SpaceReplica implements ISpaceReplica {
       }
 
       this.#watchView = view;
-      this.applySessionSync(sync, type);
+      try {
+        this.applySessionSync(sync, type);
+      } catch (error) {
+        // The frame failed validation, so this refresh's view never gets a
+        // consumer; without a close it leaks when a later refresh
+        // overwrites `#watchView`.
+        view.close();
+        throw error;
+      }
       if (this.#updatePromises.size === 0) {
         this.#subscribedWatchView = view;
         const updates = this.consumeUpdates(view.subscribeSync())
@@ -4229,52 +4238,91 @@ class SpaceReplica implements ISpaceReplica {
   /**
    * Registers the `cid:` schema documents a sync frame delivered
    * (`docs/specs/content-addressed-schemas.md`) and validates the read-side
-   * delivery guarantee over them: every external ref a registered document
-   * carries must reach a document this replica already stores — delivered
-   * by this frame or an earlier one. A broken ref throws, because it is a
-   * delivery consistency bug to surface, never a hole to quietly repair;
-   * the asynchronous closure pull for callers who ask for a closure by
-   * hash lives in `syncSchemaDocumentClosure`. Direct refs suffice: a
-   * stored dependency was itself validated when it arrived.
+   * delivery guarantee over the WHOLE frame: every schema ref a delivered
+   * document embeds — a registered schema document's own refs, or a link
+   * schema anywhere in an ordinary document's value — must reach a
+   * VERIFIED schema document this replica stores, delivered by this frame
+   * or an earlier one. A broken ref throws, because it is a delivery
+   * consistency bug to surface, never a hole to quietly repair; the
+   * asynchronous closure pull for callers who ask for a closure by hash
+   * lives in `syncSchemaDocumentClosure`. Direct refs suffice: a stored
+   * verified dependency was itself validated when it arrived, and a
+   * locally written one carried its closure in its own transaction.
    *
    * Which arrived `cid:` documents are schema documents is decided by
-   * content-addressed identity, the classifier the traversal loader also
-   * uses: a document is a schema document exactly when its id is the
-   * schema interning of its value. Any other `cid:` class — a blob, or a
-   * forged document, which resolution fails closed on when reached
-   * through a schema ref — is not this hook's concern.
+   * content-addressed identity, the classifier the server's assembly pass
+   * also uses: a document is a schema document exactly when its id is the
+   * schema interning of its value. Validation applies the same identity
+   * check to each dependency — mere presence under the id is not delivery,
+   * and a forged local copy fails even when the realm registry holds a
+   * valid twin from another space.
    */
   #registerArrivedSchemaDocuments(upserts: SessionSync["upserts"]): void {
     const registered: [string, JSONSchema][] = [];
+    // Dependency hash → the id of the first delivered document that
+    // embeds it, for the violation report.
+    const embedded = new Map<string, string>();
     for (const upsert of upserts) {
       if (upsert.deleted === true) continue;
       const id = upsert.id;
-      if (typeof id !== "string" || !id.startsWith("cid:")) continue;
-      const value = isObjectOrArray(upsert.doc)
-        ? (upsert.doc as { value?: unknown }).value
-        : undefined;
-      if (!isSubschema(value)) continue;
-      const hash = id.slice("cid:".length);
-      if (internSchemaAsTaggedHashString(value as JSONSchema) !== hash) {
-        continue;
+      if (typeof id !== "string") continue;
+      const doc = upsert.doc;
+      if (!isObjectOrArray(doc)) continue;
+      if (id.startsWith("cid:")) {
+        const value = (doc as { value?: unknown }).value;
+        const hash = id.slice("cid:".length);
+        if (
+          isSubschema(value) &&
+          internSchemaAsTaggedHashString(value as JSONSchema) === hash
+        ) {
+          registered.push([
+            id,
+            registerSchemaDocument(hash, value as JSONSchema),
+          ]);
+          // A schema document's value is a schema — it carries no links,
+          // so the link scan below has nothing to find in it.
+          continue;
+        }
       }
-      registered.push([id, registerSchemaDocument(hash, value as JSONSchema)]);
+      mapLinkSchemas(doc as FabricValue, (schema) => {
+        for (
+          const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+        ) {
+          if (!embedded.has(hash)) embedded.set(hash, id);
+        }
+        return schema;
+      });
+    }
+    for (const [id, document] of registered) {
+      for (const dep of collectExternalSchemaRefHashes(document)) {
+        if (!embedded.has(dep)) embedded.set(dep, id);
+      }
     }
     // Validation runs after the whole frame's registrations: a dependency
     // may follow its dependent within the frame, and intra-frame order must
     // not matter.
-    for (const [id, document] of registered) {
-      for (const dep of collectExternalSchemaRefHashes(document)) {
-        if (this.getDocument(`cid:${dep}` as URI) === undefined) {
-          throw new Error(
-            `Schema document ${id} was delivered with a broken external ` +
-              `ref: cid:${dep} is not stored in this replica. Every ` +
-              `delivered document's refs must resolve within the delivered ` +
-              `set (docs/specs/content-addressed-schemas.md).`,
-          );
-        }
+    for (const [dep, referrer] of embedded) {
+      if (!this.#isVerifiedSchemaDocStored(dep)) {
+        throw new Error(
+          `Document ${referrer} was delivered with a broken schema ref: ` +
+            `cid:${dep} is not stored and verified in this replica. Every ` +
+            `delivered document's refs must resolve within the delivered ` +
+            `set (docs/specs/content-addressed-schemas.md).`,
+        );
       }
     }
+  }
+
+  /**
+   * Whether this replica stores content under `cid:<hash>` that IS the
+   * schema document that id names — the identity check, not presence.
+   */
+  #isVerifiedSchemaDocStored(hash: string): boolean {
+    const doc = this.getDocument(`cid:${hash}` as URI);
+    if (!isObjectOrArray(doc)) return false;
+    const value = (doc as { value?: unknown }).value;
+    return isSubschema(value) &&
+      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
   }
 
   private applySessionSync(

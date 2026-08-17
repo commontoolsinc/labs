@@ -6,7 +6,6 @@ import {
   type IAttestation,
   type IMemorySpaceValueAttestation,
   loadMetaLinkedDocs,
-  loadSchemaDocsForDeliveredValue,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
   type ObjectStorageManager,
@@ -17,10 +16,18 @@ import {
 } from "@commonfabric/runner/traverse";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
+import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import { registerSchemaDocument } from "../../runner/src/schema-registry.ts";
+import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
-import { internPathSelector } from "@commonfabric/data-model/schema-utils";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import {
+  internPathSelector,
+  REJECTING_SELECTOR,
+} from "@commonfabric/data-model/schema-utils";
+import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   type CellScope,
   type EntitySnapshot,
@@ -281,6 +288,151 @@ const entitiesFromTracker = (
   return entities;
 };
 
+// Per-version cache of document scans for embedded schema refs: the same
+// version of the same document is scanned at most once per engine, however
+// many sessions, queries, or refreshes deliver it.
+const schemaRefScanCaches = new WeakMap<
+  Engine.Engine,
+  Map<QueryDocKey, { seq: number; refs: ReadonlySet<string> }>
+>();
+
+const EMPTY_SCHEMA_REFS: ReadonlySet<string> = new Set();
+
+/**
+ * The external schema-ref hashes a delivered document carries: every link
+ * schema anywhere in its value, and — for a delivered schema document —
+ * the document's own hash, so the closure walk verifies it and follows
+ * its refs. Which `cid:` documents are schema documents is decided by
+ * content-addressed identity (`cid:` also holds blobs): a document is a
+ * schema document exactly when its id is the schema interning of its
+ * value.
+ */
+const scanSnapshotSchemaRefs = (
+  engine: Engine.Engine,
+  key: QueryDocKey,
+  snapshot: EntitySnapshot,
+): ReadonlySet<string> => {
+  let cache = schemaRefScanCaches.get(engine);
+  if (cache === undefined) {
+    cache = new Map();
+    schemaRefScanCaches.set(engine, cache);
+  }
+  const cached = cache.get(key);
+  if (cached !== undefined && cached.seq === snapshot.seq) {
+    return cached.refs;
+  }
+  const refs = new Set<string>();
+  const doc = snapshot.document;
+  if (isObjectNotArray(doc)) {
+    const { id } = fromDocKey(key);
+    if (id.startsWith("cid:")) {
+      const hash = id.slice("cid:".length);
+      const inner = (doc as { value?: unknown }).value;
+      if (
+        isSubschema(inner) &&
+        internSchemaAsTaggedHashString(inner as JSONSchema) === hash
+      ) {
+        refs.add(hash);
+      }
+    }
+    mapLinkSchemas(doc as FabricValue, (schema) => {
+      for (
+        const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+      ) {
+        refs.add(hash);
+      }
+      return schema;
+    });
+  }
+  const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;
+  cache.set(key, { seq: snapshot.seq, refs: result });
+  return result;
+};
+
+/**
+ * The read-side delivery guarantee, enforced at the result-assembly
+ * boundary: every schema reference embedded in the documents being
+ * delivered — a link schema anywhere in a document's value, or a delivered
+ * schema document's own refs — must resolve to a verified schema document
+ * in this space, and the whole closure joins the delivered set and the
+ * watch set. A missing or forged closure document fails the query loudly:
+ * the write-side guarantee installs closures with their referrers, so a
+ * hole is a consistency bug to surface, never to repair around.
+ *
+ * Verification is against THIS space's stored content — a verified copy in
+ * the realm registry never stands in for the space's own (the
+ * space-boundary rule in `docs/specs/content-addressed-schemas.md`).
+ *
+ * Returns the closure documents that were not already delivered or
+ * watched; the caller merges them into its result set. Documents the
+ * tracker already covers are watched sessions' prior deliveries and are
+ * not re-sent.
+ */
+const assembleSchemaDocClosures = (
+  space: string,
+  engine: Engine.Engine,
+  manager: EngineObjectManager,
+  branch: string,
+  tracker: MapSetStringToPathSelectors,
+  delivered: ReadonlyMap<QueryDocKey, EntitySnapshot>,
+): Map<QueryDocKey, EntitySnapshot> => {
+  const additions = new Map<QueryDocKey, EntitySnapshot>();
+  const pending: string[] = [];
+  const seen = new Set<string>();
+  const enqueue = (hash: string) => {
+    if (!seen.has(hash)) {
+      seen.add(hash);
+      pending.push(hash);
+    }
+  };
+  for (const [key, snapshot] of delivered) {
+    for (const hash of scanSnapshotSchemaRefs(engine, key, snapshot)) {
+      enqueue(hash);
+    }
+  }
+  while (pending.length > 0) {
+    const hash = pending.pop()!;
+    const id = `cid:${hash}`;
+    const key = toDocKey(space, id, DEFAULT_SCOPE);
+    const loaded = manager.load({
+      id,
+      scope: DEFAULT_SCOPE,
+      type: "application/json",
+    });
+    const doc = loaded?.value;
+    const inner = isObjectNotArray(doc)
+      ? (doc as { value?: unknown }).value
+      : undefined;
+    if (inner === undefined) {
+      throw new Error(
+        `Query result requires schema document ${id}, which is not stored ` +
+          `in this space. Every embedded schema ref must resolve within ` +
+          `the delivered set (docs/specs/content-addressed-schemas.md).`,
+      );
+    }
+    if (internSchemaAsTaggedHashString(inner as JSONSchema) !== hash) {
+      throw new Error(
+        `Schema document ${id} did not verify in this space: its stored ` +
+          `content does not hash to its id.`,
+      );
+    }
+    const interned = registerSchemaDocument(hash, inner as JSONSchema);
+    for (const dep of collectExternalSchemaRefHashes(interned)) {
+      enqueue(dep);
+    }
+    if (!tracker.has(key)) {
+      tracker.add(key, REJECTING_SELECTOR);
+      if (!delivered.has(key)) {
+        const snapshot = snapshotForDocKey(space, manager, branch, key);
+        if (snapshot !== null) {
+          additions.set(key, snapshot);
+        }
+      }
+    }
+  }
+  return additions;
+};
+
 export const trackGraph = (
   space: string,
   engine: Engine.Engine,
@@ -349,6 +501,20 @@ export const trackGraph = (
     }
   }
 
+  const entities = entitiesFromTracker(space, schemaTracker, manager, branch);
+  for (
+    const [key, snapshot] of assembleSchemaDocClosures(
+      space,
+      engine,
+      manager,
+      branch,
+      schemaTracker,
+      entities,
+    )
+  ) {
+    entities.set(key, snapshot);
+  }
+
   stats.managerReads = manager.readCount - readCountBefore;
 
   return {
@@ -356,12 +522,7 @@ export const trackGraph = (
     state: {
       branch,
       tracker: schemaTracker,
-      entities: entitiesFromTracker(
-        space,
-        schemaTracker,
-        manager,
-        branch,
-      ),
+      entities,
       memo: sharedMemo,
       manager,
     },
@@ -431,6 +592,20 @@ export const extendTrackedGraph = (
     if (snapshot === null) {
       continue;
     }
+    state.entities.set(key, snapshot);
+    updates.set(key, snapshot);
+  }
+
+  for (
+    const [key, snapshot] of assembleSchemaDocClosures(
+      space,
+      engine,
+      manager,
+      state.branch,
+      state.tracker,
+      updates,
+    )
+  ) {
     state.entities.set(key, snapshot);
     updates.set(key, snapshot);
   }
@@ -564,6 +739,20 @@ export const refreshTrackedGraph = (
     updates.set(key, snapshot);
   }
 
+  for (
+    const [key, snapshot] of assembleSchemaDocClosures(
+      space,
+      engine,
+      manager,
+      state.branch,
+      state.tracker,
+      updates,
+    )
+  ) {
+    state.entities.set(key, snapshot);
+    updates.set(key, snapshot);
+  }
+
   for (const [scope, ids] of invalidations) {
     state.manager.invalidateIds(ids, scope);
   }
@@ -621,16 +810,6 @@ const loadFactsForDoc = (
     }),
   );
   const document = fact.value as { value: FabricValue };
-  // Delivery-keyed collection (the read-side delivery guarantee): the
-  // delivered document's embedded external schema refs travel with it, a
-  // rejecting pull included — this path is the only traversal entry a
-  // schema-less pull takes, so the scan happens here, not in traverse().
-  loadSchemaDocsForDeliveredValue(
-    tx,
-    { ...fact.address, space: space as MemorySpace, path: [] },
-    fact.value as FabricValue,
-    traversalContext,
-  );
   const factValue: IMemorySpaceValueAttestation = {
     address: { ...fact.address, space: space as MemorySpace, path: ["value"] },
     value: document.value,

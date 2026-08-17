@@ -251,43 +251,6 @@ describe("traverse-schema-docs", () => {
     expect(resolveSchema({ $ref: decomposed.rootRef })).not.toBe(false);
   });
 
-  it("collects the closure behind a delivered document's embedded refs even under a rejecting selector", () => {
-    const schema: JSONSchemaObj = {
-      type: "object",
-      properties: { rejectingMarker: { type: "string" } },
-      title: "rejecting-delivery fixture",
-    };
-    const decomposed = decomposeSchema(schema);
-    const store = new Map<string, Revision<State>>();
-    putSchemaDocs(store, decomposed);
-    const rootValue = {
-      carried: {
-        "/": {
-          [LINK_V1_TAG]: {
-            id: "of:rejecting-target",
-            path: [],
-            schema: { $ref: decomposed.rootRef },
-          },
-        },
-      },
-    };
-    putDoc(store, "of:rejecting-root", rootValue);
-
-    // A schema:false selector delivers the document without traversing it —
-    // the delivery guarantee still requires its embedded refs' closures to
-    // ride the same result.
-    const { context } = traverse(
-      store,
-      "of:rejecting-root",
-      rootValue,
-      false,
-    );
-    const keys = trackedKeys(context);
-    for (const hash of decomposed.documents.keys()) {
-      expect(keys).toContain(`${space}/space/cid:${hash}`);
-    }
-  });
-
   it("does not accept availability collected in another space", () => {
     const schema: JSONSchemaObj = {
       type: "object",

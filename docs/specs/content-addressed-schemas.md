@@ -322,28 +322,42 @@ exactly two guarantees, both about delivery rather than about values:
   does not hold — the guarantee is the only path through the API.
 - **The read-side guarantee.** A query result is self-sufficient: every
   schema reference embedded in delivered documents resolves within the
-  delivered set. The traversal loader collects each referenced closure
-  from the traversed space (reads at the canonical `"space"` scope,
-  tracked into the query result and watch set), and a schema whose closure
-  the space does not hold selects nothing — the gate sits at the two
-  places a schema enters a traversal, the selector and a link, and
-  availability is closure-transitive, so interior resolution needs no
-  per-lookup scoping. Selecting by an uncollectable schema would produce a
-  result whose shape the receiving client could never reproduce from what
-  arrives. A `cid:` schema document delivered directly is itself such a
-  carrier: its own refs are embedded refs of a delivered document, and
-  its closure is collected through the document's own hash.
+  delivered set. Enforcement sits at the result-assembly boundary: after
+  traversal establishes the documents being delivered, the server scans
+  each complete document — a link schema anywhere in its value, or a
+  delivered schema document's own refs — verifies each referenced
+  closure against the delivering space's own store, and joins the whole
+  closure to the delivered set and watch set. A missing or forged
+  closure document fails the query loudly: the write-side guarantee
+  installed closures with their referrers, so a hole is a consistency
+  bug to surface, never to repair around. Scans are document-granular
+  (delivery is), so no selected path can shadow another, and their
+  results are cached per document version, so the same version is
+  scanned at most once however many sessions or refreshes deliver it.
+  Traversal keeps its own gate where a schema enters it — the selector
+  and a link: a schema whose closure the space does not hold selects
+  nothing, since selecting by an uncollectable schema would produce a
+  result whose shape the receiving client could never reproduce from
+  what arrives.
 
-Arrival enforces the read-side guarantee rather than repairing around it:
-as a sync frame's `cid:` documents register, every external ref a
-registered document carries must reach a document the replica already
-stores — delivered by that frame or an earlier one — and a broken ref
-fails the sync loudly, because it is a delivery consistency bug to
-surface, never a hole to quietly fill. The repair paths that do exist
-serve callers, not arrival: the loader's reads are tracked (arrival
-re-runs the reader), the missing-target kick requests the fetch, and
-`syncSchemaDocumentClosure` completes a closure by hash within its own
-space — never satisfied by realm-registry presence alone.
+Arrival mirrors the assembly pass rather than trusting it: as a frame
+applies, every schema ref its documents embed — a registered `cid:`
+schema document's own refs, or a link schema anywhere in an ordinary
+document's value — must reach a document the replica stores whose
+content passes the identity check. Verified content, never mere
+presence: a forged local copy fails even when the realm registry holds a
+valid twin from another space. A broken ref fails the sync loudly. The
+repair paths that do exist serve callers, not arrival: the traversal
+loader's reads are tracked (arrival re-runs the reader), the
+missing-target kick requests the fetch, and `syncSchemaDocumentClosure`
+completes a closure by hash within its own space — never satisfied by
+realm-registry presence alone.
+
+Walking delivered values is a transitional cost: the intended end state
+moves each document's embedded-ref information into a meta field
+maintained at write time, so assembly consults an index instead of
+scanning content, with the per-version scan cache bounding the cost
+until then.
 
 Outside a traversal — direct runtime resolution of an already-read
 schema — a reader MAY reuse an identical, hash-verified schema another
