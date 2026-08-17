@@ -405,7 +405,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
 
 - **Discriminated union detection:** Check `"action" in step` vs `"assertion" in step`
 - **Cell access via `.key()`:** Access test steps through reactive cell interface
-- **Void stream `.send()`:** No argument required for `Stream<void>`
+- **Action payload:** The step's `event` reaches the stream as authored — an
+  object arrives as an object — and a `trustedUi` step wraps it in the DOM
+  provenance a renderer would attach. A plain void action carries no `event`
+  and sends `undefined`.
 - **Explicit VDOM demand:** A `render` step mounts the worker reconciler only
   for that step; DOM operations are discarded and demand is cleaned up
 
