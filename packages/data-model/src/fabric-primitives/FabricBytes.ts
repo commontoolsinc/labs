@@ -12,9 +12,9 @@ import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
+  DecodeContext,
   JSON_CODEC,
   REALM_CODEC,
-  DecodeContext,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 

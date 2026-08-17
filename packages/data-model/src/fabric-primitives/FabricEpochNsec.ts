@@ -13,9 +13,9 @@ import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import {
+  type DecodeContext,
   JSON_CODEC,
   REALM_CODEC,
-  type DecodeContext,
   type TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";

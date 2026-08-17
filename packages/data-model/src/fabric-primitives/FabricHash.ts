@@ -16,10 +16,10 @@ import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts"
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
+  type DecodeContext,
   JSON_CODEC,
   type NonterminalCodec,
   REALM_CODEC,
-  type DecodeContext,
   type TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";

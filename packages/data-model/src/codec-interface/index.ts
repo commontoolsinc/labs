@@ -1,13 +1,13 @@
 export {
   CODEC,
   type CodecForFormat,
+  type DecodeContext,
+  type EncodeContext,
   type FabricClassWithNonterminalCodec,
   type FabricCodec,
   JSON_CODEC,
   type NonterminalCodec,
   REALM_CODEC,
-  type DecodeContext,
-  type EncodeContext,
   type TerminalCodec,
   type WireFormat,
 } from "./interface.ts";
