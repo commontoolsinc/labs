@@ -141,16 +141,18 @@ EPIC=$(echo "$R" | jq -r '.links["/item"] // empty')
 if [ -n "$EPIC" ]; then ok "the result names its document: $EPIC"; else
   bad "no link for /item"
 fi
-# The receiver axis: call the verb ON the thing you were just handed. The
-# children count below proves the writes landed; each call's exit code is
-# checked too, because the readback runs after the write commits — a readback
-# failure leaves the count intact, and only the exit code shows it.
+# The receiver axis: call the verb ON the thing you were just handed, once in
+# each spelling — --piece, and the address standing positional the way the
+# demo teaches, with every flag ahead of it. The children count below proves
+# the writes landed; each call's exit code is checked too, because the
+# readback runs after the write commits — a readback failure leaves the count
+# intact, and only the exit code shows it.
 $CF piece call --quiet --piece "$EPIC" $ARGS \
   addChild '{"title":"Session cookies"}' >/dev/null 2>&1 ||
   bad "addChild (Session cookies) exited nonzero"
-$CF piece call --quiet --piece "$EPIC" $ARGS \
+$CF piece call --quiet $ARGS "$EPIC" \
   addChild '{"title":"CSRF tokens"}' >/dev/null 2>&1 ||
-  bad "addChild (CSRF tokens) exited nonzero"
+  bad "addChild (CSRF tokens, positional address) exited nonzero"
 KIDS=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"type":"object","properties":{"title":true}}}' \
   2>/dev/null)

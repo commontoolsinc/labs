@@ -375,8 +375,8 @@ needs.
 ## 4. Create, and carry the address forward **[today]**
 
 ```bash
-EPIC=$(cf piece call --piece board addItem -- --title "Login rewrite" \
-       --select 'item@' | jq -r '.result.item."$link"')
+EPIC=$(cf piece call --piece board --select 'item@' addItem -- \
+       --title "Login rewrite" | jq -r '.result.item."$link"')
 
 cf piece call "$EPIC" addChild -- --title "Session cookie handling"
 cf piece call "$EPIC" recordNote -- --body "Blocked on the cookie spec"
