@@ -287,6 +287,7 @@ export {
   isSlugAddress,
   slugCause,
   slugIdForSpace,
+  slugIndexIdForSpace,
   validateSlug,
 } from "./slugs.ts";
 export {

@@ -44,6 +44,7 @@ import {
   LinkValidationError,
   listPieceCallables,
   listPieces,
+  listSpaceSlugs,
   MapFormat,
   newPiece,
   partitionVerbListing,
@@ -260,6 +261,36 @@ export function renderPieceSummaries(
       piece.id,
       piece.error ? `<error: ${piece.error}>` : (piece.name ?? "<unnamed>"),
       piece.error ? "" : formatPatternRef(piece.patternRef),
+    ]),
+  ];
+  if (rows.length > 1) render(Table.from(rows).toString());
+}
+
+/** `cf piece slugs` output: one row per indexed name, the piece it resolves
+ * to where it resolves to one, and the resolution's own error where it does
+ * not. The error rides the JSON too — a machine reader has no table to read
+ * a `<error: …>` marker off. */
+export function renderSlugSummaries(
+  slugs: Array<{ slug: string; piece?: string; error?: string }>,
+  json: boolean,
+): void {
+  if (json) {
+    render(
+      slugs.map((entry) => ({
+        slug: entry.slug,
+        piece: entry.piece ?? null,
+        ...(entry.error !== undefined ? { error: entry.error } : {}),
+      })),
+      { json: true },
+    );
+    return;
+  }
+
+  const rows = [
+    ["SLUG", "PIECE"],
+    ...slugs.map((entry) => [
+      entry.slug,
+      entry.error !== undefined ? `<error: ${entry.error}>` : entry.piece!,
     ]),
   ];
   if (rows.length > 1) render(Table.from(rows).toString());
@@ -1672,6 +1703,20 @@ export const piece = targetOptions(
   )
   .option("--json", "Output machine-readable JSON.")
   .action(listPiecesFromCommand)
+  /* piece slugs */
+  .command(
+    "slugs",
+    "List the space's slugs and the piece each resolves to. The index " +
+      "covers slugs assigned since it existed; an older slug still " +
+      "resolves but is not listed.",
+  )
+  .usage(spaceUsage)
+  .example(
+    cliText(`cf piece slugs ${EX_ID} ${EX_COMP}`),
+    `List the slugs of "${RAW_EX_COMP.space}".`,
+  )
+  .option("--json", "Output machine-readable JSON.")
+  .action(listSlugsFromCommand)
   /* piece search */
   .command("search", "Search input and result data in registered pieces.")
   .usage(`${spaceUsage} <query>`)
@@ -2676,6 +2721,21 @@ export async function listPiecesFromCommand(
     parseSpaceOptions(options),
   );
   (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
+}
+
+export interface SlugListCommandDependencies {
+  listSpaceSlugs?: typeof listSpaceSlugs;
+  renderSlugSummaries?: typeof renderSlugSummaries;
+}
+
+export async function listSlugsFromCommand(
+  options: PieceSummaryCLIOptions,
+  deps: SlugListCommandDependencies = {},
+): Promise<void> {
+  const slugs = await (deps.listSpaceSlugs ?? listSpaceSlugs)(
+    parseSpaceOptions(options),
+  );
+  (deps.renderSlugSummaries ?? renderSlugSummaries)(slugs, !!options.json);
 }
 
 export interface PieceSearchCommandDependencies {

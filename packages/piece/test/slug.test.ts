@@ -10,6 +10,7 @@ import { pieceId } from "../src/piece-id.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import {
   assignSlug,
+  listSlugs,
   resolvePieceAddress,
   resolveSlugTargetCell,
   setSlugLink,
@@ -68,6 +69,23 @@ describe("piece slugs", () => {
     expect(readRootMeta(id, "slug")).toBe("demo");
     expect(readRootMeta(slugId, "slug")).toBe("demo");
     expect(await resolvePieceAddress(pieces, "demo")).toBe(id);
+  });
+
+  it("lists every assigned slug, once, however many times a name is set", async () => {
+    const piece = await createPiece("index-target");
+    const other = await createPiece("index-other");
+
+    await assignSlug(pieces, piece, "board");
+    await setSlugLink(pieces, "tracker", other);
+    // Repointing a name changes where it resolves, never how it is listed.
+    await setSlugLink(pieces, "board", other);
+
+    expect(await listSlugs(pieces)).toEqual(["board", "tracker"]);
+    expect(await resolvePieceAddress(pieces, "board")).toBe(pieceId(other)!);
+  });
+
+  it("lists no slugs for a space that assigned none", async () => {
+    expect(await listSlugs(pieces)).toEqual([]);
   });
 
   it("sets slug redirects to arbitrary cell links", async () => {

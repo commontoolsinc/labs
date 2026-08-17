@@ -1,3 +1,4 @@
+import type { JSONSchema } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
 import {
   entityIdFrom,
@@ -5,6 +6,7 @@ import {
   isSlugAddress,
   resolveSlugTargetCell as resolveRuntimeSlugTargetCell,
   slugIdForSpace,
+  slugIndexIdForSpace,
   SlugResolutionError,
   validateSlug,
 } from "@commonfabric/runner";
@@ -12,6 +14,39 @@ import { pieceId } from "./piece-id.ts";
 import type { PiecesController } from "./ops/pieces-controller.ts";
 
 export { SlugResolutionError };
+
+/** The slug index's shape: names to `true`. Written one key at a time, so
+ * two clients assigning different slugs merge as two keys rather than two
+ * whole maps racing. The names are the whole content — where a name points
+ * stays the slug cell's own answer, because a copy of the target here would
+ * be a second answer able to disagree with it. */
+const SLUG_INDEX_SCHEMA = {
+  type: "object",
+  additionalProperties: { type: "boolean" },
+} as const satisfies JSONSchema;
+
+function slugIndexCell(pieces: PiecesController) {
+  return pieces.runtime.getCellFromEntityId(
+    pieces.getSpace(),
+    entityIdFrom(slugIndexIdForSpace(pieces.getSpace())),
+  ).asSchema(SLUG_INDEX_SCHEMA);
+}
+
+/**
+ * Every slug name the space's index records, in sorted order — the slug
+ * alphabet is lowercase ASCII, so lexicographic and byte order agree.
+ *
+ * A lower bound with one boundary it cannot detect: the index lists slugs
+ * assigned since it existed, so a slug written by an older client still
+ * resolves but is not named here. Nothing can find such a slug to report it —
+ * a slug cell's id is derived from its name, and that unenumerability is the
+ * reason the index exists at all.
+ */
+export async function listSlugs(pieces: PiecesController): Promise<string[]> {
+  const index = await slugIndexCell(pieces).pull();
+  if (index === undefined) return [];
+  return Object.keys(index).filter((slug) => index[slug] === true).sort();
+}
 
 export async function assignSlug(
   pieces: PiecesController,
@@ -46,6 +81,9 @@ export async function setSlugLink(
     entityIdFrom(slugIdForSpace(pieces.getSpace(), validSlug)),
   );
 
+  const indexCell = slugIndexCell(pieces);
+  await indexCell.sync();
+
   await pieces.runtime.editWithRetry((tx) => {
     const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
@@ -63,6 +101,9 @@ export async function setSlugLink(
     slugWithTx.setRawUntyped(
       targetWithTx.getAsWriteRedirectLink({ base: slugWithTx }),
     );
+    // The index entry rides the slug's own transaction, so a listing can
+    // never see a name without its slug or a slug without its name.
+    indexCell.withTx(tx).key(validSlug).set(true);
   });
 
   await pieces.runtime.idle();

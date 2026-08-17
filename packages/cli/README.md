@@ -118,6 +118,12 @@ positional path spelling.
 the default pattern and starts each registered piece to obtain its name and
 pattern metadata. It does not enumerate every stored piece root.
 
+`cf piece slugs` lists the space's slug index: every name assigned through
+`--slug` or `set-slug`, each resolved to the piece it names. The index records
+assignments made since it existed, so a slug written by an older client still
+resolves but is not listed — a slug document's id is derived from its name, and
+nothing can enumerate names it was never told.
+
 `cf piece search` also starts from the registry. It searches readable input and
 result data, but returns registered pieces only. `cf piece map` likewise shows
 connections among registered pieces rather than walking the complete stored
