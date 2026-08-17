@@ -7,3 +7,4 @@ export {
   setSlugLink,
   SlugResolutionError,
 } from "./slugs.ts";
+export type { SlugAssignment } from "./slugs.ts";
