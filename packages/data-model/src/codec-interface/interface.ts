@@ -255,16 +255,3 @@ export interface LiveEnvironment {
    */
   get shouldDeepFreeze(): boolean;
 }
-
-/**
- * Public boundary interface for encoding a fabric value into a serialized
- * form, ready to cross whatever boundary the format exists for. The type
- * parameter `SerializedForm` is the boundary type: `string` for JSON,
- * `Uint8Array` for a binary format.
- *
- * Internal tree-walking machinery is private to the implementation.
- */
-export interface EncodeContext<SerializedForm = unknown> {
-  /** Encodes a fabric value into serialized form for boundary crossing. */
-  encode(value: FabricValue): SerializedForm;
-}

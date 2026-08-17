@@ -66,7 +66,7 @@ wrapper classes (Section 1.4).
 > `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
 > `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
 > carries them (Section 8.6). The codec vocabulary (the `CODEC`
-> symbol, `FabricCodec`, `LiveEnvironment`, `EncodeContext`)
+> symbol, `FabricCodec`, `LiveEnvironment`, `EncodeContext`, `DecodeContext`)
 > lives in `codec-interface/` (Section 2), the machinery that acts on it in
 > `codec-common/`, and the conversion functions in `native-conversion.ts`
 > (Section 8).
@@ -2512,34 +2512,37 @@ export type JsonCodecValue =
   | { readonly [key: string]: JsonCodecValue };
 ```
 
-### 4.3 Public Boundary Interface
+### 4.3 Public Boundary
 
-The public interface for encoding is parameterized by the boundary type —
-`string` for JSON contexts, `Uint8Array` for binary contexts. External callers
-use only `encode()` and the engine's `decode()`; all internal machinery (tag
-wrapping, tree walking, codec dispatch) is private to the engine
-implementation.
+An engine's public surface is `encode()` and `decode()`, parameterized by the
+boundary type — `string` for JSON, `Uint8Array` for a binary format. All
+internal machinery (tag wrapping, tree walking, codec dispatch) is private to
+the engine implementation.
+
+Each act of encoding or decoding carries a context, minted per call by a
+factory the engine's subclass supplies:
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/codec-interface/interface.ts
+// file: packages/data-model/codec-common/BaseCodecEngine.ts
 
-/**
- * Public boundary interface for encoding a fabric value into a serialized
- * form, ready to cross whatever boundary the format exists for. The type
- * parameter `SerializedForm` is the boundary type: `string` for JSON
- * contexts, `Uint8Array` for binary contexts.
- *
- * Internal tree-walking machinery is private to the implementation.
- */
-export interface EncodeContext<SerializedForm = unknown> {
-  /** Encodes a fabric value into serialized form for boundary crossing. */
-  encode(value: FabricValue): SerializedForm;
+abstract class ExampleEngine {
+  protected abstract newEncodeContext(): EncodeContext;
+  protected abstract newDecodeContext(
+    env: LiveEnvironment,
+  ): DecodeContext;
 }
 ```
 
-`JsonCodecEngine` implements `EncodeContext<string>`, and supplies the matching
-decode direction:
+The context is what the walk threads from node to node: the values whose
+encoding or decoding is in progress, and on the decode side the caller's
+`LiveEnvironment`. Holding it per call rather than on the engine is what lets
+a codec reach back through a public entry point while a walk is already
+running — the inner act gets its own bookkeeping instead of corrupting the
+outer one's. A format needing more than the base class knows about, such as a
+wire marker minted per call, subclasses the context and carries it there.
+
+`JsonCodecEngine` supplies both directions:
 
 - `encode(value)` encodes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
@@ -3312,7 +3315,7 @@ boundary-only encoding and the three-layer architecture:
    (Section 8).
 5. Remove early conversion points (e.g., `convertCellsToLinks()`,
    legacy `Error` wrapping as `{ "@Error": ... }`).
-6. Introduce `EncodeContext` at each boundary (Section 4.7).
+6. Introduce a codec engine at each boundary (Section 4.7).
 7. Update internal code to work with `FabricValue` types rather than JSON
    shapes or raw native objects.
 

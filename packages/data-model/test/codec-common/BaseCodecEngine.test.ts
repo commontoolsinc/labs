@@ -13,6 +13,7 @@ import { isDeepFrozen } from "@/deep-freeze.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import {
   Marker,
@@ -260,6 +261,72 @@ describe("BaseCodecEngine", () => {
 
       expect(result).toEqual({ deep: { n: 1 } });
       expect(isDeepFrozen(result)).toBe(true);
+    });
+  });
+
+  describe("per-act contexts", () => {
+    it("mints a fresh encode context for each `encode()` call", () => {
+      const { engine } = newProbeEngine();
+      const seen: unknown[] = [];
+
+      // The factory is `protected`, so it is reached the way the engine
+      // reaches it. What is asserted is that two calls do not share one.
+      const probe = engine as unknown as {
+        newEncodeContext(): unknown;
+      };
+      seen.push(probe.newEncodeContext(), probe.newEncodeContext());
+
+      expect(seen[0]).not.toBe(seen[1]);
+    });
+
+    it("gives a re-entrant encode its own in-progress set", () => {
+      // The property the per-act context exists for, and it needs a genuinely
+      // nested call to show: sequential calls prove nothing, since the set is
+      // empty again by the time the second one starts. With walk state on the
+      // engine rather than per act, an encode reached from INSIDE another one
+      // shares the outer walk's set, so entering a container the outer walk is
+      // currently inside reports a cycle that is not there.
+      class Reentrant {}
+
+      const outer: FabricValue[] = [];
+      let reentered = false;
+      let innerResult: unknown;
+
+      const codec =
+        new (class ReentrantCodec extends BaseTerminalCodec<ProbeValue> {
+          constructor() {
+            super("Reentrant@1", Reentrant);
+          }
+
+          encode(): ProbeValue {
+            if (!reentered) {
+              reentered = true;
+              innerResult = engine.encode(outer as unknown as FabricValue);
+            }
+            return 1;
+          }
+
+          decode(): FabricValue {
+            return 1;
+          }
+        })();
+
+      const { engine } = newProbeEngine({ extraCodecs: [codec] });
+      outer.push(new Reentrant() as unknown as FabricValue);
+
+      expect(() => engine.encode(outer as unknown as FabricValue)).not
+        .toThrow();
+      expect(reentered).toBe(true);
+      expect(innerResult).toBeDefined();
+    });
+
+    it("carries the live environment on the decode context", () => {
+      const { engine } = newProbeEngine();
+      const probe = engine as unknown as {
+        newDecodeContext(env: unknown): { env: unknown };
+      };
+
+      expect(probe.newDecodeContext(ENV).env).toBe(ENV);
     });
   });
 

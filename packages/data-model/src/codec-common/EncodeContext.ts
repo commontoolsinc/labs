@@ -1,0 +1,48 @@
+/**
+ * The state of one act of encoding.
+ *
+ * An engine mints one of these per `encode()` call, through a factory its
+ * subclass supplies, and threads it through the walk. What belongs here is
+ * whatever the walk carries from node to node and nothing a caller hands in:
+ * a format needing more than this class's own bookkeeping -- a wire marker,
+ * say -- subclasses it and holds that alongside.
+ *
+ * Per call rather than per engine, because an engine may be re-entered: a
+ * codec can reach back through a public entry point while a walk is already in
+ * progress, and state held on the engine would be shared between the two.
+ */
+export class EncodeContext {
+  /**
+   * The values whose encoding is in progress, or `undefined` before the first
+   * container is entered.
+   */
+  #seen: Set<object> | undefined;
+
+  /**
+   * Enters a value, refusing a repeat visit.
+   *
+   * The set behind this is created here rather than in the constructor, so
+   * that encoding a lone self-representing value -- much the commonest case,
+   * and the one where a fixed cost shows up most -- allocates nothing beyond
+   * the context itself.
+   *
+   * @throws If `value` is already being encoded. A cycle has no encoding at
+   *   all, so this refuses rather than reporting, unlike its decode-side
+   *   counterpart: what is being refused is a local caller's own value, not
+   *   data off a channel.
+   */
+  enter(value: object): void {
+    const seen = this.#seen ??= new Set();
+
+    if (seen.has(value)) {
+      throw new Error("Circular reference detected during encoding");
+    }
+
+    seen.add(value);
+  }
+
+  /** Leaves a value, its encoding being finished. */
+  leave(value: object): void {
+    this.#seen?.delete(value);
+  }
+}
