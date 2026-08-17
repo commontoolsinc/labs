@@ -525,7 +525,7 @@ export type FabricErrorState = {
  * Like all `FabricInstance`s, a `FabricError` is wholeheartedly mutable
  * until frozen and immutable thereafter. Every mutator -- the slot setters
  * along with `setExtra` / `deleteExtra` -- throws once the instance is
- * `Object.freeze`'d. The serialization layer handles `FabricError` via its
+ * `Object.freeze`'d. The codec layer handles `FabricError` via its
  * static `[CODEC]`, which is the source of truth for the encoded form.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
@@ -1935,7 +1935,7 @@ Key contracts:
   each in `fabric-primitives/` and `fabric-instances/`), not by ad-hoc
   registration scattered across the codebase. See Section 4.5.
 
-### 2.5 Reconstruction Context
+### 2.5 Decode Context
 
 ```typescript
 // Shown at module scope.
@@ -1953,7 +1953,7 @@ Key contracts:
 export interface DecodeContext {
   /**
    * Resolves a cell reference. Used by types that need to intern or look
-   * up existing instances during reconstruction.
+   * up existing instances during decoding.
    */
   getCell(ref: { id: string; path: string[]; space: string }): FabricInstance;
 
@@ -2244,8 +2244,8 @@ import { deepFreeze } from '../deep-freeze';
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When
- * the serialization system meets a tag no codec claims during
- * deserialization, it wraps the tag and state here; on re-serialization,
+ * the codec system finds a tag no codec claims during
+ * decoding, it wraps the tag and state here; on re-encoding,
  * the preserved pair reproduces the original wire form.
  */
 export class UnknownValue extends BaseFabricInstance {
@@ -2352,7 +2352,7 @@ import { toReportableTag } from './toReportableTag';
 import { deepFreeze } from '../deep-freeze';
 
 /**
- * Container for a value whose deconstruction or reconstruction failed.
+ * Container for a value whose encoding or decoding failed.
  * Preserves the tag and raw state at fault, for round-tripping and
  * debugging. Used in lenient mode to allow graceful degradation rather
  * than hard failures.
@@ -2490,17 +2490,17 @@ is not part of the public boundary interface.
 
 /**
  * JSON-compatible codec value. This is the intermediate tree
- * representation used during serialization tree walking -- NOT the final
+ * representation used during encode tree walking -- NOT the final
  * serialized form (which is `string`). Internal to the JSON implementation.
  *
- * Deep-frozen invariant on the deserialize side: every such tree that
- * enters deserialization is deep-frozen, enforced at the two construction
+ * Deep-frozen invariant on the decode side: every such tree that
+ * enters decoding is deep-frozen, enforced at the two construction
  * sites that feed it (`decode()` and `#fromBytes()`, unified in
  * `#parseWireText()`). This is what lets the tag-unwrap and `/quote` arms
  * hand back extracted sub-trees directly without further copying. The
- * serialize-side trees are transient (`JSON.stringify`-ed and discarded)
+ * encode-side trees are transient (`JSON.stringify`-ed and discarded)
  * and are not covered by this invariant. The `readonly` on the array and
- * object arms of the union expresses the deserialize-side contract at the
+ * object arms of the union expresses the decode-side contract at the
  * type level. See Section 8.6.
  */
 export type JsonCodecValue =
@@ -2882,7 +2882,7 @@ export function jsonFromFabricValue(value: FabricValue): string;
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
  * `context` is omitted, a shared decode-framed empty context is
- * substituted, which throws if any reconstruction is needed.
+ * substituted, which throws if any decoding is needed.
  */
 export function fabricFromJsonValue(
   json: string,
@@ -3961,7 +3961,7 @@ values cross from internal serialization machinery to callers:
   further copying because the input tree is already deep-frozen.
 
 - **Codec `decode()` implementations honoring `shouldDeepFreeze`.** When a
-  reconstruction call's `DecodeContext.shouldDeepFreeze` is
+  decode call's `DecodeContext.shouldDeepFreeze` is
   `true` (Section 2.5; the safe default), each codec `decode()`
   implementation produces a deep-frozen result (typically via the
   instance's own `[DEEP_FREEZE]`, recursing through `deepFreeze()`).

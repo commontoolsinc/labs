@@ -74,7 +74,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     return this.decodeValue(parsed, context);
   }
 
-  /** Serializes a fabric value to UTF-8 JSON bytes. */
+  /** Encodes a fabric value to UTF-8 JSON bytes. */
   encodeToBytes(value: FabricValue): Uint8Array {
     return JsonCodecEngine.#toBytes(this.encodeValue(value));
   }
@@ -392,7 +392,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       .extend(UnknownValue[CODEC], ProblematicValue[CODEC]);
 
   /**
-   * Reconstruction context for the throwaway checks in the testing helpers
+   * Decode context for the throwaway checks in the testing helpers
    * below. Deep-freezes, as the ordinary decode path does. Paired with a
    * lenient codec context, a cell reference degrades to a `ProblematicValue`
    * rather than throwing.
