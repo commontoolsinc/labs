@@ -257,10 +257,18 @@ export type RuntimeTelemetryMarker = {
   reads: string[]; // cell paths this action reads
   writes: string[]; // cell paths this action writes
 } | {
+  // Emitted for every settle episode whose convergence budget deferred work,
+  // and for a busy window that crosses the wall-clock heuristic. The deferred
+  // fields are present on the convergence-budget path and carry the labels of
+  // the actions the pass held back. A wave that converges over several passes
+  // exhausts a budget too, so a marker reports a bounded pass rather than a
+  // graph that will never settle.
   type: "scheduler.non-settling";
   busyTime: number;
   windowDuration: number;
   busyRatio: number;
+  deferredActions?: string[];
+  deferredActionCount?: number;
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {

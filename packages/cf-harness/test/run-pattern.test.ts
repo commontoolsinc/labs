@@ -33,6 +33,17 @@ const DOUBLING_PATTERN_SOURCE = [
   "",
 ].join("\n");
 
+const NAMED_DOUBLING_PATTERN_SOURCE = [
+  "import { computed, NAME, pattern } from 'commonfabric';",
+  "interface Input { n: number; }",
+  "interface Output { doubled: number; $NAME: string; }",
+  "export default pattern<Input, Output>(({ n }) => ({",
+  "  [NAME]: 'Doubler',",
+  "  doubled: computed(() => n * 2),",
+  "}));",
+  "",
+].join("\n");
+
 const DOUBLED_RESULT_SCHEMA = {
   type: "object",
   properties: { doubled: { type: "number" } },
@@ -163,6 +174,74 @@ describe("run-pattern", () => {
       expect(output.pieceId.length).toBeGreaterThan(0);
       expect((output.value as { doubled: number }).doubled).toBe(42);
       expect(output.linkedStringCount).toBe(0);
+    });
+
+    it("keeps a computed number when the result carries framework keys the schema does not declare", async () => {
+      // Every pattern result carries the framework's own keys, and a schema
+      // describing only what the pattern computes declares none of them. The
+      // sanitizer seals a whole object over one unmodeled key, so without the
+      // framework keys being dropped first the number goes over as an opaque
+      // link along with everything else.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect((output.rawValue as Record<string, unknown>)["$NAME"]).toBe(
+        "Doubler",
+      );
+      expect(output.value).toEqual({ doubled: 42 });
+      expect(output.linkedStringCount).toBe(0);
+    });
+
+    it("refuses a result the schema rejects for what it carries under a framework key", async () => {
+      // The raw result is what the schema measures. A branch that asks what
+      // `$NAME` holds gets the answer the pattern gave, so a result that does
+      // not match is refused — projecting the framework keys out before
+      // validating would hand the branch the rest of the result and accept it.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: {
+          oneOf: [{
+            type: "object",
+            properties: {
+              doubled: { type: "number" },
+              $NAME: { type: "string", const: "Approved" },
+            },
+            required: ["doubled", "$NAME"],
+          }],
+        },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toBeUndefined();
+      expect(output.valueError).toBeDefined();
+    });
+
+    it("keeps a framework key the schema declares through a composed branch", async () => {
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: {
+          oneOf: [{
+            type: "object",
+            properties: {
+              doubled: { type: "number" },
+              $NAME: { type: "string", const: "Doubler" },
+            },
+            required: ["doubled", "$NAME"],
+          }],
+        },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ doubled: 42, $NAME: "Doubler" });
     });
 
     it("passes a whole-string LLM-friendly link input as a live cell reference", async () => {

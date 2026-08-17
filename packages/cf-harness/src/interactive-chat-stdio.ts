@@ -20,6 +20,7 @@ import {
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
 import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import { BUILTIN_TOOLS } from "./tools/registry.ts";
 import {
   createHarnessInteractiveChatService,
   type HarnessInteractiveChatService,
@@ -198,17 +199,12 @@ const SUPPORTED_TURN_STATUSES = new Set([
   "completed",
   "failed",
 ]);
-const SUPPORTED_POLICY_TOOL_IDS = new Set<BuiltinToolId>([
-  "bash",
-  "bash-no-sandbox",
-  "read_file",
-  "view_image",
-  "web_fetch",
-  "read_skill_resource",
-  "edit_file",
-  "write_file",
-  "delegate_task",
-]);
+// Every tool the harness defines, taken from the registry that defines them:
+// a client naming a tool this build offers is submitting a policy this build
+// can honour, and a second list here would refuse one the run advertises.
+const SUPPORTED_POLICY_TOOL_IDS = new Set<BuiltinToolId>(
+  BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId),
+);
 const SUPPORTED_POLICY_SUBAGENT_PROFILES = new Set<HarnessSubagentProfile>(
   HARNESS_SUBAGENT_PROFILES,
 );

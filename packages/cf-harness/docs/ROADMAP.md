@@ -37,9 +37,7 @@ permanently growing implementation plan.
 
 ## 4. Tighten delegation and artifacts
 
-- Cover denial-path tool messages with the session handle table's swapping, and
-  define cross-agent handle semantics for `delegate_task` arguments, whose
-  tokens currently reach a child verbatim as inert text.
+- Cover denial-path tool messages with the session handle table's swapping.
 - Add value handles (`cfh:v:`, reserved in the token grammar) with a
   materialization story, and an explicit release/readback mechanism for
   parent/model-facing artifact references.

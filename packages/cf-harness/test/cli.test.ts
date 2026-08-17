@@ -3359,6 +3359,46 @@ Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool 
     }),
     'assistant -> tools: read_file(path="/workspace/README.md")\n',
   );
+  // A `describe_handle` call is summarized by the token it asks about, which
+  // is what tells a transcript reader which reference the model checked.
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-3",
+          type: "function",
+          function: {
+            name: "describe_handle",
+            arguments: '{"token":"cfh:a:abcde"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: describe_handle(token="cfh:a:abcde")\n',
+  );
+  // A call whose token is not a string has no summary to show, so the tool
+  // name stands alone rather than a summary of something unread.
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-4",
+          type: "function",
+          function: {
+            name: "describe_handle",
+            arguments: '{"token":42}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    "assistant -> tools: describe_handle\n",
+  );
   assertEquals(
     formatCfHarnessTranscriptEvent({
       message: {
@@ -5482,4 +5522,88 @@ Deno.test("local Loom binding conflicts become structured provider mismatches be
   assertEquals(failure.type, "cf-harness.host-failure");
   assertEquals(failure.error.code, "provider-mismatch");
   assertStringIncludes(failure.error.message, "provider");
+});
+
+Deno.test("a startup fault is internal, and only bad argv is an invalid request", async () => {
+  const workspace = await Deno.makeTempDir();
+
+  const rejected = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["--model-provider", "unsupported", "hello"], {
+      cwd: workspace,
+      env: {},
+      io: rejected.io,
+      structuredHostFailures: true,
+    }),
+    1,
+  );
+  assertEquals(JSON.parse(rejected.stderr[0]).error.code, "invalid-request");
+
+  // The argv is well-formed and the binding holds; only building the run
+  // fails. A host that retries on `internal-error` and gives up on
+  // `invalid-request` needs this one classified as the transient it is.
+  const startup = createIoBuffers();
+  let promptLoopsCreated = 0;
+  assertEquals(
+    await runCfHarnessCli(
+      [
+        "--workspace",
+        workspace,
+        "--model-provider",
+        "openai-codex",
+        "--cfc-enforcement-mode",
+        "disabled",
+        "hello",
+      ],
+      {
+        cwd: workspace,
+        env: {},
+        io: startup.io,
+        structuredHostFailures: true,
+        createModelClient: () =>
+          Promise.reject(new Error("artifact store unavailable")),
+        createPromptLoop: () => {
+          promptLoopsCreated += 1;
+          throw new Error("must not construct a prompt loop");
+        },
+      },
+    ),
+    1,
+  );
+  assertEquals(promptLoopsCreated, 0);
+  assertEquals(startup.stdout, []);
+  const failure = JSON.parse(startup.stderr[0]);
+  assertEquals(failure.error.code, "internal-error");
+  assertEquals(JSON.stringify(failure).includes("artifact store"), false);
+});
+
+Deno.test("a resume reads a missing run as bad argv and an unreadable one as internal", async () => {
+  const workspace = await Deno.makeTempDir();
+  const run = async (
+    error: Error,
+  ): Promise<{ code: string; message: string }> => {
+    const buffers = createIoBuffers();
+    assertEquals(
+      await runCfHarnessCli(["--resume-run", "/runs/one"], {
+        cwd: workspace,
+        env: {},
+        io: buffers.io,
+        structuredHostFailures: true,
+        readRunArtifacts: () => Promise.reject(error),
+      }),
+      1,
+    );
+    return JSON.parse(buffers.stderr[0]).error;
+  };
+
+  // Naming a run that was never written is the caller's mistake, and no retry
+  // will change it. A run that exists and will not read is the host's problem,
+  // and the argv that asked for it was fine.
+  assertEquals(
+    (await run(new Deno.errors.NotFound("no such run"))).code,
+    "invalid-request",
+  );
+  const unreadable = await run(new Deno.errors.PermissionDenied("run-state"));
+  assertEquals(unreadable.code, "internal-error");
+  assertEquals(unreadable.message.includes("run-state"), false);
 });

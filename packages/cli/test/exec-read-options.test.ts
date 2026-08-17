@@ -280,11 +280,10 @@ describe("cf exec read options", () => {
     // handling settled to.
     expect(result.invocation?.status).toBe("settled");
     expect(result.invocation?.id).toBeTruthy();
-    expect(result.invocation?.receipt).toEqual({
-      id: "of:receipt-cell",
-      space: "did:key:test-home",
-      scope: "space",
-    });
+    // The address is the one canonical reference string `--piece` takes back
+    // in, and the call's own space is the one it targeted, so it carries no
+    // `@did` prefix.
+    expect(result.invocation?.receipt).toBe("/of:receipt-cell");
   });
 
   it("reaches the committed phase before a selection can fail the call", async () => {
@@ -365,19 +364,21 @@ describe("cf exec read options", () => {
       { write: (text) => out.push(text), writeError: (text) => err.push(text) },
     );
 
-    // stdout stays exactly the tool's result; the address rides stderr in the
-    // `<id>@<scope>` form `--piece` parses, rather than the prose spelling
-    // `<id> (space <space>, scope <scope>)` that no command accepts.
+    // stdout stays exactly the tool's result; the address rides stderr as the
+    // canonical `/@<space>/<id>@<scope>` reference `--piece` parses, rather
+    // than the prose spelling `<id> (space <space>, scope <scope>)` that no
+    // command accepts.
     expect(out).toEqual(["{}"]);
     expect(err).toHaveLength(1);
-    expect(err[0]).toContain("of:tool-result@user");
     expect(err[0]).not.toContain("(space ");
-    // All three parts of the address, each where the reading command takes it.
-    // Dropping the space leaves a command that runs and reads whichever space
-    // the caller happens to have configured, which is the failure a spelling
-    // no command accepts at least could not cause.
+    // All three parts of the address inside the one token. Dropping the space
+    // leaves a command that runs and reads whichever space the caller happens
+    // to have configured — `cf exec` takes its space from the mount, so the
+    // two need not agree. The token carrying it is what lets the suggested
+    // command name no `--space` at all.
+    expect(err[0]).not.toContain("--space");
     expect(err[0]).toContain(
-      "cf piece get --space did:key:test-home --piece of:tool-result@user",
+      "cf piece get --piece /@did:key:test-home/of:tool-result@user",
     );
   });
 
@@ -397,7 +398,7 @@ describe("cf exec read options", () => {
     );
 
     expect(err[0]).toContain(
-      "cf piece get --space did:key:test-home --piece of:tool-result`)",
+      "cf piece get --piece /@did:key:test-home/of:tool-result`)",
     );
     expect(err[0]).not.toContain("@space");
   });

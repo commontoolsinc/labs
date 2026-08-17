@@ -987,4 +987,129 @@ describe("verb-undeclared-field", () => {
       });
     });
   });
+
+  describe("a reference a caller names", () => {
+    const link = {
+      "/": {
+        "link@1": {
+          id: "of:fid1:target",
+          space: "did:key:zTest",
+          path: [],
+          scope: "space",
+        },
+      },
+    };
+    // The schema the CLI actually holds: the handler's narrowed read of the
+    // event, which carries no `asCell` — so nothing here says the position is
+    // a reference, and nothing needs to.
+    const narrowed: JSONSchema = {
+      type: "object",
+      properties: { on: { $ref: "#/$defs/Item" } },
+      required: ["on"],
+      $defs: {
+        Item: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        },
+      },
+    };
+
+    it("accepts a link at a position carrying no marker at all", () => {
+      // The runtime accepts one anywhere (`acceptOpaqueValue: isCellLink`,
+      // unconditional), so a CLI that refused it was the stricter of two
+      // gates on the same payload.
+      expect(verbInputSchemaError({ on: link }, narrowed)).toBeUndefined();
+    });
+
+    it("does not read the envelope's own key as an undeclared field", () => {
+      // `/` is the envelope's structure, not a name the caller chose. Reading
+      // it as a field is what produced `"/" at <event>.on is not a field this
+      // verb declares` for every reference ever named.
+      expect(verbInputSchemaError({ on: link }, narrowed) ?? "")
+        .not.toMatch(/"\/"/);
+    });
+
+    it("still refuses a field the verb does not declare, beside a link", () => {
+      // Accepting links is not accepting anything.
+      expect(verbInputSchemaError({ on: link, titel: "x" }, narrowed))
+        .toMatch(/"titel" at <event> is not a field this verb declares/);
+    });
+
+    it("still refuses a declared field of the wrong type, beside a link", () => {
+      const both: JSONSchema = {
+        type: "object",
+        properties: { on: { $ref: "#/$defs/Item" }, count: { type: "number" } },
+        required: ["on"],
+        $defs: { Item: { type: "object", properties: {} } },
+      };
+      expect(verbInputSchemaError({ on: link, count: "no" }, both))
+        .toMatch(/count/);
+    });
+
+    it("accepts the link forms that carry no id", () => {
+      // A relative link legitimately has only a path, and an id alone is a
+      // complete address. Requiring an `id` would be tighter and wrong.
+      expect(verbInputSchemaError(
+        { on: { "/": { "link@1": { id: "of:fid1:x" } } } },
+        narrowed,
+      )).toBeUndefined();
+      expect(verbInputSchemaError(
+        { on: { "/": { "link@1": { path: ["a"] } } } },
+        narrowed,
+      )).toBeUndefined();
+    });
+
+    it("refuses an envelope whose payload is not a record", () => {
+      // `isLink` answers on the envelope's SHAPE and says nothing about what
+      // rides inside, so it is true of all three of these. Bypassing the walk
+      // on that answer would let malformed data through as a reference and
+      // normalize to an empty relative link rather than being refused.
+      for (
+        const payload of ["nope", [1], null, 42] as const
+      ) {
+        expect(
+          verbInputSchemaError(
+            { on: { "/": { "link@1": payload } } },
+            narrowed,
+          ),
+          `payload ${JSON.stringify(payload)} must not pass as a reference`,
+        ).toBeDefined();
+      }
+    });
+
+    it("treats a live cell as opaque without inspecting a payload", async () => {
+      // A `Cell` satisfies `isLink` while carrying no envelope at all, so the
+      // payload check has nothing to read. It reaches this gate from code
+      // rather than from a caller's JSON, and there is nothing to malform.
+      const signer = await Identity.fromPassphrase("undeclared-field-cell");
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+      });
+      try {
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "opaque-probe",
+          undefined,
+          tx,
+        );
+        cell.set({ title: "held" });
+        await tx.commit();
+        expect(verbInputSchemaError({ on: cell }, narrowed)).toBeUndefined();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("still refuses a non-link object that does not fit its position", () => {
+      // The link is what is opaque, not the position. A plain object at the
+      // same place is judged exactly as before.
+      expect(verbInputSchemaError({ on: { wrong: 1 } }, narrowed))
+        .toMatch(/is not a field this verb declares|title/);
+    });
+  });
 });

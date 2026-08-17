@@ -78,7 +78,12 @@ Commands that take a piece accept two textual reference forms:
   `/[@did:.../]of:fid1:<id>[@scope][/path]`. This is the one reference syntax of
   the fabric — the same string names the same cell in patterns, in the shell,
   and here. A path embedded in a canonical `--piece` reference prefixes the
-  command's positional path argument.
+  command's positional path argument. A space embedded in it names the target
+  space: it supplies the space when `--space` is absent, and when both are given
+  they must agree — a mismatch is refused rather than resolved, at parse time
+  against a `--space` DID and once the session opens against a `--space` name.
+  An address printed by one command therefore composes into the next with no
+  flag beside it, whatever space the reader has configured.
 - The CLI's bare form: `pieceId[@scope]`, `pieceId[@scope]/path` at link
   endpoints, and slugs. This is a convenience alias for interactive use.
 
@@ -426,36 +431,36 @@ cf piece get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
 ```
 
 ```json
-[{
-  "$link": {
-    "id": "of:fid1:…",
-    "space": "did:key:…",
-    "scope": "space",
-    "path": []
-  }
-}]
+[{ "$link": "/of:fid1:…" }]
 ```
 
-All four fields are always present, so a caller indexes them without branching:
-`id` keeps its scheme, `space` and `scope` are filled in even when they match
-the reader's own, and `path` is `[]` at a document's root. No schema is inlined
-and no write-redirect flag rides along. The rendered `id` is what
-`cf piece call --piece` and `cf piece get --piece` accept, scheme included, and
-`space` is what their `--space` takes. Both travel together or neither does: the
-`id` alone names a cell in whichever space the reading command already has
-configured, which is the emitting one only by coincidence.
+The address is one string in the fabric's canonical reference syntax —
+`/[@did/]<id>[@scope][/path]` — which is exactly what `cf piece call --piece`
+and `cf piece get --piece` accept, scheme included, so an address emitted by one
+command composes into the next unchanged, without being reassembled. The space
+rides in front as `@did:key:…` only when it differs from the space the command
+targeted, the scope follows the id as `@user`/`@session` only when it is not the
+default, and the path follows as ordinary segments. No schema is inlined and no
+write-redirect flag rides along.
+
+**Every address this CLI publishes is that one string** — a `$link` marker's
+value, a `--select` suffix's, a `--show-links` entry's, and the Invocation
+JSON's `receipt`. A caller that reaches into an address for an `id`, a `space`,
+or a `scope` reads the string whole instead, and passes it on whole. The failure
+mode is quiet: these values usually arrive inside an `unknown` or a `JSONValue`,
+so code that indexes them merges cleanly, type-checks, and then reads
+`undefined` at runtime against a real fabric.
 
 The address names the deepest stored link crossed on the way to the marked
 position, plus the segments that remain below that link. Marking `title` under
 each element of a `notes` array whose entries are links returns the note's own
-`id` with `path` `["title"]`, not the board's `id` with `path`
-`["notes","0","title"]`: a link is a durable identity, while a position in a
-containing document is a slot, and reordering the collection above it leaves the
-same path naming a different value. Where the stored link carries a path of its
-own, that path comes first and the segments below it follow — a link to
-`{"path":["content"]}` marked at `title` renders `["content","title"]`. Where
-nothing is linked on the way, the value lives in the source document itself and
-the address is its position there.
+id followed by `/title`, not the board's id followed by `/notes/0/title`: a link
+is a durable identity, while a position in a containing document is a slot, and
+reordering the collection above it leaves the same path naming a different
+value. Where the stored link carries a path of its own, that path comes first
+and the segments below it follow — a link to `{"path":["content"]}` marked at
+`title` renders `/content/title`. Where nothing is linked on the way, the value
+lives in the source document itself and the address is its position there.
 
 The marker sits beside a projection when both are wanted —
 `{"$link":true,"type":"object","properties":{"title":true}}` returns the address
@@ -471,7 +476,7 @@ cf piece get --piece ID --select 'topic@,topic.title'
 ```
 
 ```json
-{ "topic": { "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" } }
+{ "topic": { "$link": "/of:fid1:…", "title": "First note" } }
 ```
 
 The two paths union into the one position, and `topic@.title` says the same
@@ -490,15 +495,15 @@ cf piece get --piece ID --select 'notes@'
 ```
 
 ```json
-{ "notes": [{ "$link": { "id": "of:fid1:…", "…": "…" } }] }
+{ "notes": [{ "$link": "/of:fid1:…" }] }
 ```
 
 Those element documents are what a caller cannot work out for themselves; the
 array position's own address is only the source address plus the path they just
 typed. Where the marked position holds anything else, `topic@` among them, the
 address is that position's own. Marking below an array — `notes.title@` — is
-element-wise for the same reason, and answers with each note's own `id` and
-`path` `["title"]`.
+element-wise for the same reason, and answers with each note's own id followed
+by `/title`.
 
 A path that is only `@` names the position the read is already at, which no
 field path reaches because it sits above every field:
@@ -508,7 +513,7 @@ cf piece get --piece ID topic --select '@,title'
 ```
 
 ```json
-{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }
+{ "$link": "/of:fid1:…", "title": "First note" }
 ```
 
 It composes exactly as a suffix one level down does: `@` alone replaces the
@@ -585,7 +590,7 @@ position renders its address and everything else reads as it always did.
     "title": "Rotate signing key",
     "status": "open",
     "children": [],
-    "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+    "parent": { "$link": "/of:fid1:…/parent" }
   }
 }
 ```

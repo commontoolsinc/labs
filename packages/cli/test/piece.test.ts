@@ -390,6 +390,33 @@ describe("cli piece parsing", () => {
     });
   });
 
+  it("parseSpaceOptions() takes the space a canonical reference carries when --space is absent", () => {
+    const base = { apiUrl: API_URL, identity: ID };
+    expect(parseSpaceOptions({
+      ...base,
+      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+    })).toMatchObject({
+      space: SPACE_DID,
+      piece: LLM_HANDLE,
+      embeddedSpaces: [SPACE_DID],
+    });
+    // The scope suffix and embedded path ride the same space-carrying token.
+    expect(parsePieceOptions(
+      { ...base, piece: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0` },
+      { acceptsPath: true },
+    )).toMatchObject({
+      space: SPACE_DID,
+      piece: LLM_HANDLE,
+      pieceScope: "user",
+      piecePath: ["items", 0],
+    });
+    // A reference that names no space supplies none: the requirement stands.
+    expect(() => parseSpaceOptions({ ...base, piece: `/${LLM_HANDLE}` }))
+      .toThrow(/--space/);
+    expect(() => parseSpaceOptions({ ...base, piece: PIECE }))
+      .toThrow(/--space/);
+  });
+
   it("parsePieceOptions() throws on incomplete input", () => {
     expect(() =>
       parsePieceOptions({

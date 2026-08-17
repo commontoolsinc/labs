@@ -1372,78 +1372,94 @@ export class Runtime {
   async dispose(
     { closeStorage = true }: { closeStorage?: boolean } = {},
   ): Promise<void> {
-    // A kept store keeps RECORDING, so this path drains what could still write
-    // into it. In-flight async builtin work is that shape: a fetch / llm call or
-    // a sqlite RPC runs from a post-commit outbox flush and writes its result
-    // back when it lands, and `trackAsyncWork` exists because neither `idle()`
-    // nor `synced()` waits for it. `settled()` is the barrier that does. The
-    // closing path skips it because a caller who let the store close has no
-    // reader left to mislead, and waiting on the network in every teardown is a
-    // real cost; here the caller is about to read what this runtime wrote.
-    //
-    // BEFORE the cancellation below, not after: `stopAll()` and
-    // `scheduler.dispose()` would cut a writeback's reactive cascade midway,
-    // leaving the store holding part of a result — which is worse than either
-    // extreme for a reader trying to learn what state this runtime reached.
-    //
-    // UNCAPPED, deliberately. `settled()`'s default 50 rounds falls out of the
-    // loop and returns — silently, with work still outstanding — which is
-    // exactly the hole this drain exists to close, one layer down. Measured: 60
-    // generations of chained tracked work, and a capped drain returned at
-    // generation 50 while the chain kept running and writing. `settledFor`'s
-    // JSDoc gives the reason a cap is wrong for this question and why removing
-    // it cannot spin: every round awaits real promises, so a runtime that keeps
-    // working keeps the barrier open rather than busy-looping.
-    if (!closeStorage) await this.settled(Infinity);
-    // Abort any pending (not-yet-started) queued jobs so they don't start
-    // after storage is torn down.
-    for (const queue of this.queues.values()) {
-      queue.abortPending();
+    try {
+      // A kept store keeps RECORDING, so this path drains what could still write
+      // into it. In-flight async builtin work is that shape: a fetch / llm call or
+      // a sqlite RPC runs from a post-commit outbox flush and writes its result
+      // back when it lands, and `trackAsyncWork` exists because neither `idle()`
+      // nor `synced()` waits for it. `settled()` is the barrier that does. The
+      // closing path skips it because a caller who let the store close has no
+      // reader left to mislead, and waiting on the network in every teardown is a
+      // real cost; here the caller is about to read what this runtime wrote.
+      //
+      // BEFORE the cancellation below, not after: `stopAll()` and
+      // `scheduler.dispose()` would cut a writeback's reactive cascade midway,
+      // leaving the store holding part of a result — which is worse than either
+      // extreme for a reader trying to learn what state this runtime reached.
+      //
+      // UNCAPPED, deliberately. `settled()`'s default 50 rounds falls out of the
+      // loop and returns — silently, with work still outstanding — which is
+      // exactly the hole this drain exists to close, one layer down. Measured: 60
+      // generations of chained tracked work, and a capped drain returned at
+      // generation 50 while the chain kept running and writing. `settledFor`'s
+      // JSDoc gives the reason a cap is wrong for this question and why removing
+      // it cannot spin: every round awaits real promises, so a runtime that keeps
+      // working keeps the barrier open rather than busy-looping.
+      if (!closeStorage) await this.settled(Infinity);
+      // Abort any pending (not-yet-started) queued jobs so they don't start
+      // after storage is torn down.
+      for (const queue of this.queues.values()) {
+        queue.abortPending();
+      }
+      this.queues.clear();
+      // Stop all running docs
+      this.runner.stopAll();
+
+      // Background source checks are deliberately outside the scheduler. Abort
+      // and settle them before the storage sessions they may write through close.
+      await this.patternUpdater.dispose();
+
+      // Same contract for the runner's unloadable-pointer roll-forward commits
+      // (CT-1923): settle before their storage sessions close. Commits only —
+      // never the watcher pattern LOADS, which can be held/wedged arbitrarily
+      // long and are lifecycle-epoch-guarded instead.
+      await this.runner.settlePointerCommits();
+
+      // Scheduler background work can still be using storage, for example the
+      // lifecycle-guarded boot-time persistent-state listing. Let that finish
+      // before tearing down storage sessions.
+      await this.scheduler.idle();
+
+      // Clear module registry
+      this.moduleRegistry.clear();
+
+      // Cancel all storage operations
+      if (closeStorage) await this.storageManager.close();
+
+      // Wait for any pending operations
+      await this.scheduler.idle();
+    } finally {
+      // Released whatever happened above. `storageManager.close()` can reject
+      // — through a provider's `replica.close()` — and it is the one await here
+      // that can. Every statement below is synchronous field-clearing that
+      // cannot fail in turn, so running them on the error path costs nothing
+      // while skipping them strands the process: the config resets are
+      // PROCESS-GLOBAL, and one skipped leaves a non-default experimental flag
+      // set for every runtime built afterwards, with nothing to put it back.
+      //
+      // The error still propagates. What changes is how much has been released
+      // by the time it does, not whether disposal fails.
+      //
+      // The unsubscribes come last, and after the final `idle()` above, because
+      // a subscriber removed earlier would miss notifications the settling work
+      // still depends on.
+      this.scheduler.dispose();
+      this.runner.dispose();
+
+      // Pop the default frame
+      if (this.defaultFrame) {
+        popFrame(this.defaultFrame);
+        this.defaultFrame = undefined;
+      }
+
+      // Dispose the Engine (clears compiler/runtime state and the console hook)
+      this.harness.dispose();
+
+      // Reset experimental config to defaults.
+      resetModernCellRepConfig();
+      resetPersistentSchedulerStateConfig();
+      resetCommitPreconditionsConfig();
     }
-    this.queues.clear();
-    // Stop all running docs
-    this.runner.stopAll();
-
-    // Background source checks are deliberately outside the scheduler. Abort
-    // and settle them before the storage sessions they may write through close.
-    await this.patternUpdater.dispose();
-
-    // Same contract for the runner's unloadable-pointer roll-forward commits
-    // (CT-1923): settle before their storage sessions close. Commits only —
-    // never the watcher pattern LOADS, which can be held/wedged arbitrarily
-    // long and are lifecycle-epoch-guarded instead.
-    await this.runner.settlePointerCommits();
-
-    // Scheduler background work can still be using storage, for example the
-    // lifecycle-guarded boot-time persistent-state listing. Let that finish
-    // before tearing down storage sessions.
-    await this.scheduler.idle();
-
-    // Clear module registry
-    this.moduleRegistry.clear();
-
-    // Cancel all storage operations
-    if (closeStorage) await this.storageManager.close();
-
-    // Wait for any pending operations
-    await this.scheduler.idle();
-
-    // Clean up scheduler timers
-    this.scheduler.dispose();
-
-    // Pop the default frame
-    if (this.defaultFrame) {
-      popFrame(this.defaultFrame);
-      this.defaultFrame = undefined;
-    }
-
-    // Dispose the Engine (clears compiler/runtime state and the console hook)
-    this.harness.dispose();
-
-    // Reset experimental config to defaults.
-    resetModernCellRepConfig();
-    resetPersistentSchedulerStateConfig();
-    resetCommitPreconditionsConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

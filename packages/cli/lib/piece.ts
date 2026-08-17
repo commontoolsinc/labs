@@ -2052,18 +2052,38 @@ export function declaredVerbProse(
 ): Map<string, DeclaredVerbProse> {
   const prose = new Map<string, DeclaredVerbProse>();
   const resultSchema = pattern?.resultSchema;
-  if (
-    !isObjectOrArray(resultSchema) || !isObjectOrArray(resultSchema.properties)
-  ) {
+  if (!isObjectOrArray(resultSchema)) return prose;
+  // The ROOT may itself be a reference. A pattern whose result is a named type
+  // compiles to `{$ref: "#/$defs/T", $defs: {T: {properties: …}}}`, and the
+  // properties then live in the definition rather than on the root. That is
+  // every piece a verb CREATES, because a created piece's result is the named
+  // type its author declared — so reading `properties` off the root without
+  // resolving reported every such verb as having no prose at all, while a root
+  // piece, whose result is written inline, kept its own. The `$defs` sit on the
+  // root, so the root is what the reference resolves against.
+  const declared = typeof resultSchema.$ref === "string"
+    ? resolveCfcSchemaRefs(resultSchema, resultSchema as JSONSchema)
+    : resultSchema;
+  if (!isObjectOrArray(declared) || !isObjectOrArray(declared.properties)) {
     return prose;
   }
-  for (const [name, property] of Object.entries(resultSchema.properties)) {
+  // The scope a property's own references resolve in. A `$defs` closure is
+  // local: the definition the root names may carry definitions of its own, and
+  // a reference inside it names THOSE. Resolving at the outer root finds
+  // nothing, or — worse — a same-named definition belonging to someone else.
+  // `cfcSchemaChildRoot` opens the inner scope where there is one and hands
+  // back the outer root where there is not.
+  const declaredRoot = cfcSchemaChildRoot(
+    declared as JSONSchema,
+    resultSchema as JSONSchema,
+  );
+  for (const [name, property] of Object.entries(declared.properties)) {
     if (!isObjectOrArray(property)) continue;
     const description = typeof property.description === "string"
       ? property.description
       : undefined;
     const eventSchema = typeof property.$ref === "string"
-      ? resolveCfcSchemaRefs(property, resultSchema as JSONSchema)
+      ? resolveCfcSchemaRefs(property, declaredRoot)
       : property as JSONSchema;
     if (description === undefined && eventSchema === undefined) continue;
     prose.set(name, {

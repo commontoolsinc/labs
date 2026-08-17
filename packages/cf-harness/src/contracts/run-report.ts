@@ -42,7 +42,8 @@ export interface HarnessToolActivity {
   endedAt: string;
   toolCallId: string;
   toolId: string;
-  effectClass: HarnessToolEffectClass;
+  /** Absent when the call named a tool the run offers no descriptor for. */
+  effectClass?: HarnessToolEffectClass;
   cfcEnforcementMode: CfcEnforcementMode;
   policyDecision: HarnessToolPolicyDecision;
   executionStatus: HarnessToolExecutionStatus;

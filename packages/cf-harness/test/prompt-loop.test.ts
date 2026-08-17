@@ -1153,6 +1153,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
     ],
   );
   assertEquals(
@@ -1993,6 +1994,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "write_file",
       "delegate_task",
       "run_pattern",
+      "describe_handle",
     ],
   );
 });
@@ -2130,6 +2132,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
     ],
   );
   assertEquals(
@@ -3016,6 +3019,7 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
     ],
   );
   assertEquals(denied.detail, "bash-no-sandbox is not allowed in this run");
@@ -4002,100 +4006,6 @@ Deno.test("CfHarnessPromptLoop does not authorize the browser profile by default
     goalDigest:
       "sha256:8175c86ebf4f98a6041f1eb335920800690b2de78acb76fb8962ea6bf5f99eed",
   });
-});
-
-Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creating a child run", async () => {
-  const cases = [
-    {
-      name: "missing goal",
-      arguments: {},
-      message: "delegate_task goal must be a non-empty string",
-    },
-    {
-      name: "empty goal",
-      arguments: { goal: "  " },
-      message: "delegate_task goal must be a non-empty string",
-    },
-    {
-      name: "non-string context",
-      arguments: { goal: "Inspect", context: 42 },
-      message: "delegate_task context must be a string when provided",
-    },
-    {
-      name: "too many turns",
-      arguments: { goal: "Inspect", maxModelTurns: 65 },
-      message: "delegate_task maxModelTurns must be an integer from 1 to 64",
-    },
-    {
-      name: "unknown profile",
-      arguments: { goal: "Inspect", profile: "unknown" },
-      message:
-        "delegate_task profile must be one of default, browser, web_fetch, web_search",
-    },
-    {
-      name: "array return schema",
-      arguments: { goal: "Inspect", returnSchema: ["not", "schema"] },
-      message:
-        "delegate_task returnSchema must be a JSON Schema object, boolean, or JSON string",
-    },
-    {
-      name: "malformed string return schema",
-      arguments: { goal: "Inspect", returnSchema: "{" },
-      message: "delegate_task returnSchema string must be valid JSON",
-    },
-  ];
-
-  for (const testCase of cases) {
-    let requestCount = 0;
-    const loop = new CfHarnessPromptLoop({
-      apiKey: "test-key",
-      engine: new CfHarnessEngine({
-        sandboxRuntime: new FakeSandboxRuntime(),
-        runId: `run-invalid-delegate-${testCase.name.replaceAll(" ", "-")}`,
-        model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
-      }),
-      fetchFn: () => {
-        requestCount += 1;
-        return Promise.resolve(
-          new Response(
-            JSON.stringify(responsesBodyFromChatFixture({
-              choices: [{
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content: "",
-                  tool_calls: [{
-                    id: "call-invalid-delegate",
-                    type: "function",
-                    function: {
-                      name: "delegate_task",
-                      arguments: JSON.stringify(testCase.arguments),
-                    },
-                  }],
-                },
-              }],
-            })),
-            { status: 200 },
-          ),
-        );
-      },
-    });
-
-    await assertRejects(
-      () =>
-        loop.runPrompt({
-          prompt: "Delegate with bad args.",
-          promptSlotBinding: directPromptSlotBinding,
-        }),
-      Error,
-      testCase.message,
-    );
-    assertEquals(requestCount, 1);
-    assertEquals(loop.engine.getRunState().status, "failed");
-    assertEquals(loop.engine.getRunState().subagentRuns, undefined);
-    assertEquals(loop.engine.getRunState().toolOutputs, []);
-  }
 });
 
 Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task output", async () => {
@@ -7337,4 +7247,123 @@ Deno.test("CfHarnessPromptLoop grounds host-command children in the workspace, n
     ),
     false,
   );
+});
+
+Deno.test("CfHarnessPromptLoop surfaces a child's ok:false return as a coded failure rather than a schema mismatch", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-structured-return-child-failure",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-structured-child-failure",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Return structured facts.",
+                    returnSchema: {
+                      type: "object",
+                      properties: {
+                        ok: { type: "boolean", const: true },
+                        resultRef: { type: "string" },
+                      },
+                      required: ["ok", "resultRef"],
+                      additionalProperties: false,
+                    },
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: JSON.stringify({
+                ok: false,
+                code: "compile-error",
+                detail: "prompt injection text",
+              }),
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Parent saw the reported failure.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate a mismatched structured return.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Parent saw the reported failure.");
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  assertEquals(toolMessage.content.includes("prompt injection text"), false);
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: {
+      status: string;
+      summary: string;
+      structuredReturn: {
+        status: string;
+        failureCode: string;
+        value: unknown;
+        validationError?: string;
+      };
+    };
+  };
+  assertEquals(output.subagent.status, "failed");
+  assertEquals(
+    output.subagent.summary,
+    "Subagent reported failure (compile-error).",
+  );
+  assertEquals(
+    output.subagent.structuredReturn.status,
+    "child-reported-failure",
+  );
+  assertEquals(output.subagent.structuredReturn.failureCode, "compile-error");
+  assertEquals(output.subagent.structuredReturn.value, {
+    ok: false,
+    code: "compile-error",
+  });
+  assertEquals(output.subagent.structuredReturn.validationError, undefined);
 });

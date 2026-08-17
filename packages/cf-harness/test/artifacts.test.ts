@@ -551,6 +551,7 @@ Deno.test({
           "edit_file",
           "write_file",
           "delegate_task",
+          "describe_handle",
         ],
       });
       assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
@@ -696,7 +697,7 @@ Deno.test({
         {
           model: "gpt-5.4",
           messageCount: 1,
-          toolCount: 7,
+          toolCount: 8,
         },
       );
       assert(
@@ -1423,7 +1424,9 @@ Deno.test({
       assertEquals(parentFailure.kind, "tool_not_allowed");
       assertEquals(parentFailure.source, "policy_event");
       assertEquals(parentFailure.toolId, "bash");
-      assertEquals(parentFailure.toolCallId, "call-child-bash-failure");
+      // The call id is the child model's own text, so it stays in the audit
+      // artifacts rather than reaching the parent model.
+      assertEquals("toolCallId" in parentFailure, false);
       assertEquals("outputId" in parentFailure, false);
       assertEquals("commandName" in parentFailure, false);
       assertEquals("exitCode" in parentFailure, false);

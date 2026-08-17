@@ -50,7 +50,8 @@ export function buildActionEvent(
     return event;
   }
   const eventValue = {
-    ...(isRecord(event) ? event : { type: "click" }),
+    type: "click",
+    ...(isRecord(event) ? event : {}),
     provenance: {
       origin: "dom",
       trusted: true,
