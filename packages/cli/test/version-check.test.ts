@@ -1,5 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
+  addProcessUnloadListener,
+  processExitCode,
   resetDeferredSkewNoteForTest,
   SKIP_VERSION_CHECK_ENV,
   startVersionCheck,
@@ -270,6 +272,17 @@ Deno.test("startVersionCheck", async (t) => {
       exit.code = 1;
       unloadHandlers[0]!();
       assertEquals(warnings.length, 1);
+    },
+  );
+
+  await t.step(
+    "the production seams read a real code and register a real hook",
+    () => {
+      // The deferral's default deps, exercised directly: the exit-code read
+      // returns the live process value, and the registration accepts a
+      // handler that will fire at this test process's own (clean) unload.
+      assertEquals(typeof processExitCode(), "number");
+      addProcessUnloadListener(() => {});
     },
   );
 

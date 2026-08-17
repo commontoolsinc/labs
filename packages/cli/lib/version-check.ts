@@ -74,6 +74,17 @@ export function resetDeferredSkewNoteForTest(): void {
   unloadHookInstalled = false;
 }
 
+/** The production reading of the code the process is ending with; a test
+ * injects its own. `Deno.exit(n)` dispatches "unload" with this readable. */
+export function processExitCode(): number {
+  return Deno.exitCode;
+}
+
+/** The production hook registration; a test injects its own. */
+export function addProcessUnloadListener(handler: () => void): void {
+  globalThis.addEventListener("unload", handler);
+}
+
 /**
  * Hold `note` and print it only if the process ends with a nonzero exit
  * code — the one moment the mismatch is evidence of anything. Every CLI path
@@ -86,9 +97,8 @@ export function deferSkewNoteUntilFailureExit(
   deps: VersionCheckDeps = {},
 ): void {
   const warn = deps.warn ?? console.error;
-  const exitCode = deps.exitCode ?? (() => Deno.exitCode);
-  const addUnloadListener = deps.addUnloadListener ??
-    ((handler) => globalThis.addEventListener("unload", handler));
+  const exitCode = deps.exitCode ?? processExitCode;
+  const addUnloadListener = deps.addUnloadListener ?? addProcessUnloadListener;
   pendingSkewNote = note;
   if (unloadHookInstalled) return;
   unloadHookInstalled = true;
@@ -194,13 +204,16 @@ export function startVersionCheck(deps: VersionCheckDeps = {}): VersionCheck {
         apiUrl,
         relation,
       );
-      if (!warning) return;
-      // The proven-mild direction defers to a failure exit; every other
-      // relation warns now — see the module comment for the split.
-      if (relation.kind === "cli-ahead") {
-        deferSkewNoteUntilFailureExit(warning, { ...deps, warn });
-      } else {
-        warn(warning);
+      // Non-null here by construction: the warning is null only for the pair
+      // shapes the early return above already left on. The proven-mild
+      // direction defers to a failure exit; every other relation warns now —
+      // see the module comment for the split.
+      if (warning !== null) {
+        if (relation.kind === "cli-ahead") {
+          deferSkewNoteUntilFailureExit(warning, { ...deps, warn });
+        } else {
+          warn(warning);
+        }
       }
     },
   };
