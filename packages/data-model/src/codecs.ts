@@ -41,7 +41,7 @@ import { codecClasses as instanceClasses } from "./fabric-instances/index.ts";
  * `UnknownValue` and `ProblematicValue` are among them, but their codecs
  * recognize no single wire tag: the encode path resolves an instance's tag
  * with `tagForValue()`, and an unrecognized tag on decode is wrapped in an
- * `UnknownValue` by the encoding context rather than tag-routed.
+ * `UnknownValue` by the engine rather than tag-routed.
  */
 export function createDefaultJsonRegistry(): CodecRegistry<JsonCodecValue> {
   return createBaseJsonRegistry().extend(
@@ -78,7 +78,7 @@ export function jsonFromFabricValue(value: FabricValue): string {
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format, which is
  * expected to be a plain object. Throws if it turns out to be something else.
- * If `context` is omitted, a shared decode-framed empty context is
+ * If no live environment is given, {@link NULL_LIVE_ENVIRONMENT} is
  * substituted (via `fabricFromJsonValue()`), which throws if any decoding
  * is needed.
  */
@@ -106,8 +106,8 @@ export function plainObjectFromJson<T extends object = object>(
 }
 
 /**
- * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
- * `context` is omitted, {@link NULL_LIVE_ENVIRONMENT} is substituted,
+ * Decodes a string in the `FabricValue` JSON-embedded encoding format. If no
+ * live environment is given, {@link NULL_LIVE_ENVIRONMENT} is substituted,
  * which throws if any decoding is needed.
  */
 export function fabricFromJsonValue(

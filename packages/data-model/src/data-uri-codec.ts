@@ -75,7 +75,7 @@ const textDecoder = new TextDecoder();
 /**
  * `LiveEnvironment` for decoding `data:` URI payloads. Links at this
  * boundary are sigil (plain) data rather than cell references, so no cell
- * decoding is ever needed; this context exists so that an unexpected
+ * decoding is ever needed; this environment exists so that an unexpected
  * cell reference produces a message that names the boundary.
  */
 const dataUriLiveEnvironment = new NullLiveEnvironment(

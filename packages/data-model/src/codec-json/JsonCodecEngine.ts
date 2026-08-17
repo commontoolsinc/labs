@@ -394,7 +394,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   /**
    * Live environment for the throwaway checks in the testing helpers
    * below. Deep-freezes, as the ordinary decode path does. Paired with a
-   * lenient codec context, a cell reference degrades to a `ProblematicValue`
+   * lenient engine, a cell reference degrades to a `ProblematicValue`
    * rather than throwing.
    */
   static readonly #testingLiveEnvironment = Object.freeze(

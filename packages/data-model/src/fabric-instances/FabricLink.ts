@@ -120,7 +120,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
       /** @inheritDoc */
       encode(value: FabricLink): FabricValue {
         // The payload IS the encoded state; its nested values are recursively
-        // encoded by the encoding context.
+        // encoded by the engine.
         return value.#payload;
       }
 
