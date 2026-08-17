@@ -273,7 +273,12 @@ describe("snapshot memo", () => {
     const dropped = resolveLink(runtime, tx, link, "writeRedirect");
 
     expect(preserved.overwrite).toBe("redirect");
-    expect(dropped.overwrite).toBeUndefined();
+    // The key is deleted, not set to `undefined`, and a result carrying
+    // `overwrite: undefined` is a shape a reader spreading it into a link
+    // would carry along. `Object.hasOwn` is what decides that: reading the
+    // property answers `undefined` either way, and `toHaveProperty` counts a
+    // present-but-undefined key as absent.
+    expect(Object.hasOwn(dropped, "overwrite")).toBe(false);
   });
 
   it("hands back the traces the transaction recorded for this resolution", () => {

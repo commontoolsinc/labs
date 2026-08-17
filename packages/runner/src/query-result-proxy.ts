@@ -266,21 +266,21 @@ function createViewProxy<T>(
   // read-only one refuses; `depth` and `pinned` are not, because `byLink`
   // conflates the first and the second changes nothing about what a view of
   // this link against this transaction is.
-  const viewMemo = viewTx.getSnapshotMemo?.();
-  const viewKey = viewMemo !== undefined && resolved.memoKey !== undefined &&
-      cfcLabelView === undefined
-    // A caller-supplied label view would have to be part of the key, and
-    // serializing one costs more than the read it saves. Those reads take the
-    // long way; a label view arrives only where a document carries stored CFC
-    // labels.
-    ? `view:${writable ? 1 : 0}|${resolved.memoKey}`
+  //
+  // A caller-supplied label view would have to be part of the key, and
+  // serializing one costs more than the read it saves. Those reads take the
+  // long way; a label view arrives only where a document carries stored CFC
+  // labels.
+  const viewMemo = cfcLabelView === undefined && resolved.memoKey !== undefined
+    ? viewTx.getSnapshotMemo?.()
     : undefined;
-  if (viewKey !== undefined) {
-    const cached = viewMemo!.get(viewKey) as { view: unknown } | undefined;
-    if (cached !== undefined) return cached.view as T;
-  }
+  const viewKey = viewMemo === undefined
+    ? ""
+    : `view:${writable ? 1 : 0}|${resolved.memoKey}`;
+  const cached = viewMemo?.get(viewKey) as { view: unknown } | undefined;
+  if (cached !== undefined) return cached.view as T;
   const remember = <V>(view: V): V => {
-    if (viewKey !== undefined) viewMemo!.set(viewKey, { view });
+    viewMemo?.set(viewKey, { view });
     return view;
   };
 

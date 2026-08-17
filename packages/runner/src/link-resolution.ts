@@ -372,24 +372,24 @@ export function resolveLinkTracingDereferences(
   // The walk needs this to detect cycles; the memo needs it to name the entry.
   let addressKey = linkAddressKey(link);
   const memo = tx.getSnapshotMemo?.();
-  const memoKey = memo &&
-    resolutionMemoVariant(link, lastNode, options.preserveOverwrite === true) +
-      addressKey;
-  if (memoKey !== undefined) {
-    const cached = memo!.get(memoKey) as LinkResolutionRecord | undefined;
-    if (cached !== undefined) {
-      for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
-      for (const target of cached.crossSpaceTargets) {
-        kickDocPull(runtime, target, false);
-      }
-      return {
-        // A copy, so a caller that mutates what it got back cannot reach into
-        // the entry the next resolution will serve.
-        link: { ...cached.result } as unknown as ResolvedFullLink,
-        traces: cached.traces,
-        memoKey,
-      };
+  const memoKey = memo === undefined ? "" : resolutionMemoVariant(
+    link,
+    lastNode,
+    options.preserveOverwrite === true,
+  ) + addressKey;
+  const cached = memo?.get(memoKey) as LinkResolutionRecord | undefined;
+  if (cached !== undefined) {
+    for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
+    for (const target of cached.crossSpaceTargets) {
+      kickDocPull(runtime, target, false);
     }
+    return {
+      // A copy, so a caller that mutates what it got back cannot reach into
+      // the entry the next resolution will serve.
+      link: { ...cached.result } as unknown as ResolvedFullLink,
+      traces: cached.traces,
+      memoKey,
+    };
   }
 
   const seen = new Set<string>();
@@ -624,10 +624,10 @@ export function resolveLinkTracingDereferences(
     delete result.overwrite;
   }
 
-  if (memoKey !== undefined && memoizable) {
+  if (memoizable) {
     // The entry keeps its own copy, for the same reason a hit hands one out:
     // this caller owns what it is about to be returned.
-    memo!.set(
+    memo?.set(
       memoKey,
       {
         result: { ...result },
@@ -642,7 +642,7 @@ export function resolveLinkTracingDereferences(
   return {
     link: result as unknown as ResolvedFullLink,
     traces,
-    memoKey: memoizable ? memoKey : undefined,
+    memoKey: memo !== undefined && memoizable ? memoKey : undefined,
   };
 }
 
