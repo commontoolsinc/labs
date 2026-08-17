@@ -25,12 +25,21 @@ import { UnknownValue } from "./UnknownValue.ts";
  * that consults the codec registry and acts on what it says; what a subclass
  * supplies is everything specific to how its format writes a container down.
  *
- * Two type parameters, because a format's transport tree is not necessarily
- * what crosses its public boundary. `Encoded` is the tree the walk and the
- * codecs work in; `SerializedForm` is what `encode()` returns and `decode()`
- * accepts. JSON's differ -- a `JsonCodecValue` tree, reduced to a `string` by
- * a stringify step -- and a format whose tree is what crosses leaves the
- * second parameter to default to the first.
+ * Four type parameters, of which a format states as many as it needs.
+ *
+ * The first two are about the wire, and are two because a format's transport
+ * tree is not necessarily what crosses its public boundary. `Encoded` is the
+ * tree the walk and the codecs work in; `SerializedForm` is what `encode()`
+ * returns and `decode()` accepts. JSON's differ -- a `JsonCodecValue` tree,
+ * reduced to a `string` by a stringify step -- and a format whose tree is
+ * what crosses leaves the second to default to the first.
+ *
+ * The other two are the contexts one act of encoding or decoding carries,
+ * and default to the base classes, so a format needing no more than the
+ * walk's own bookkeeping names neither. A format that does -- one whose
+ * tagged form carries a marker minted per call, say -- subclasses a context
+ * and binds it here. Its overrides then receive the narrowed type by
+ * construction: the signatures match exactly, so nothing needs a cast.
  *
  * The division is between what a format decides and what it must not:
  *
@@ -129,13 +138,25 @@ export abstract class BaseCodecEngine<
     env: LiveEnvironment,
   ): FabricValue;
 
-  /** Encodes an array, which is this format's business entirely. */
+  /**
+   * Encodes an array, which is this format's business entirely.
+   *
+   * An implementation owes `ctx` one thing, the same thing the decode side
+   * owes it: the container goes in through `ctx.enter()` and comes back out
+   * through `ctx.leave()` however the descent ends, a throw included. The
+   * context outlives a throw, being the act's rather than the node's, so an
+   * entry left behind makes a later visit to the same value report a cycle
+   * that is not there.
+   */
   protected abstract encodeArray(
     value: readonly FabricValue[],
     ctx: EncCtx,
   ): Encoded;
 
-  /** Encodes a plain object, which is this format's business entirely. */
+  /**
+   * Encodes a plain object, which is this format's business entirely. Owes
+   * `ctx` the same enter/leave discipline {@link #encodeArray} states.
+   */
   protected abstract encodePlainObject(
     value: Record<string, FabricValue>,
     ctx: EncCtx,
@@ -483,13 +504,22 @@ export abstract class BaseCodecEngine<
     // A terminal codec's state is already in this format's domain, so it is
     // final; a nonterminal codec's is made of fabric values, which this walk
     // has yet to expand.
-    const tag = matched.tagForValue(value);
-    const state = (matched instanceof BaseTerminalCodec)
-      ? (matched as TerminalCodec<Encoded>).encode(value)
-      : this.encodeValue((matched as NonterminalCodec).encode(value), ctx);
+    let tag: string;
+    let state: Encoded;
 
-    if (isObject) {
-      ctx.leave(value as object);
+    try {
+      tag = matched.tagForValue(value);
+      state = (matched instanceof BaseTerminalCodec)
+        ? (matched as TerminalCodec<Encoded>).encode(value)
+        : this.encodeValue((matched as NonterminalCodec).encode(value), ctx);
+    } finally {
+      // Left in a `finally` because `tagForValue()` and a codec's
+      // `encode()` can both throw. The context outlives a throw -- it is
+      // the act's, not this node's -- so an entry left behind would make a
+      // later visit to the same value report a cycle that is not there.
+      if (isObject) {
+        ctx.leave(value as object);
+      }
     }
 
     return this.wrapTag(tag, state, ctx);

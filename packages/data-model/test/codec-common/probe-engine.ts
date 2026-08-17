@@ -336,9 +336,11 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
     ctx: EncodeContext,
   ): ProbeValue {
     ctx.enter(value);
-    const result = value.map((v) => this.encodeValue(v, ctx));
-    ctx.leave(value);
-    return result;
+    try {
+      return value.map((v) => this.encodeValue(v, ctx));
+    } finally {
+      ctx.leave(value);
+    }
   }
 
   protected override encodePlainObject(
@@ -346,12 +348,15 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
     ctx: EncodeContext,
   ): ProbeValue {
     ctx.enter(value);
-    const result: Record<string, ProbeValue> = {};
-    for (const [k, v] of Object.entries(value)) {
-      result[k] = this.encodeValue(v, ctx);
+    try {
+      const result: Record<string, ProbeValue> = {};
+      for (const [k, v] of Object.entries(value)) {
+        result[k] = this.encodeValue(v, ctx);
+      }
+      return result;
+    } finally {
+      ctx.leave(value);
     }
-    ctx.leave(value);
-    return result;
   }
 
   protected override decodeValue(

@@ -14,6 +14,7 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import { EncodeContext } from "@/codec-common/EncodeContext.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import {
   Marker,
@@ -318,6 +319,39 @@ describe("BaseCodecEngine", () => {
         .toThrow();
       expect(reentered).toBe(true);
       expect(innerResult).toBeDefined();
+    });
+
+    it("leaves a value even when its codec throws", () => {
+      // The context outlives a throw, being the act's rather than the node's,
+      // so a value left entered would make a later visit report a cycle that
+      // is not there. The differential is the message: with the leave in a
+      // `finally` the second visit fails the same way the first did; without
+      // it, the second fails as a circular reference instead.
+      class Boom {}
+
+      const codec = new (class BoomCodec extends BaseTerminalCodec<ProbeValue> {
+        constructor() {
+          super("Boom@1", Boom);
+        }
+
+        encode(): ProbeValue {
+          throw new Error("codec refused");
+        }
+
+        decode(): FabricValue {
+          return 1;
+        }
+      })();
+
+      const { engine } = newProbeEngine({ extraCodecs: [codec] });
+      const boom = new Boom() as unknown as FabricValue;
+      const ctx = new EncodeContext(ENV);
+      const probe = engine as unknown as {
+        encodeValue(value: FabricValue, ctx: EncodeContext): unknown;
+      };
+
+      expect(() => probe.encodeValue(boom, ctx)).toThrow("codec refused");
+      expect(() => probe.encodeValue(boom, ctx)).toThrow("codec refused");
     });
 
     it("carries the live environment on the encode context", () => {

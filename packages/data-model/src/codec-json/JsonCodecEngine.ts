@@ -22,8 +22,8 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from
  * the formal spec (Section 5).
  *
- * Public surface: `EncodeContext<string>`, plus the matching decode direction.
- * - `encode(value)` -- full pipeline: tree-encode + stringify
+ * Public surface, both directions:
+ * - `encode(value, env?)` -- full pipeline: tree-encode + stringify
  * - `decode(data, env)` -- full pipeline: parse + tree-decode
  *
  * All internal machinery (tag wrapping, tree walking, byte conversion) is
@@ -135,6 +135,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   protected override wrapTag(
     tag: string,
     state: JsonCodecValue,
+    _ctx: EncodeContext,
   ): JsonCodecValue {
     return { [`/${tag}`]: state } as JsonCodecValue;
   }
@@ -152,22 +153,27 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     ctx.enter(value);
 
     const result: JsonCodecValue[] = [];
-    let i = 0;
-    while (i < value.length) {
-      if (!(i in value)) {
-        let count = 0;
-        while (i < value.length && !(i in value)) {
-          count++;
+    try {
+      let i = 0;
+      while (i < value.length) {
+        if (!(i in value)) {
+          let count = 0;
+          while (i < value.length && !(i in value)) {
+            count++;
+            i++;
+          }
+          result.push(
+            Object.freeze(this.wrapTag(CODEC_META_TAGS.hole, count, ctx)),
+          );
+        } else {
+          result.push(this.encodeValue(value[i]!, ctx));
           i++;
         }
-        result.push(Object.freeze(this.wrapTag(CODEC_META_TAGS.hole, count)));
-      } else {
-        result.push(this.encodeValue(value[i]!, ctx));
-        i++;
       }
+    } finally {
+      ctx.leave(value);
     }
 
-    ctx.leave(value);
     return result as JsonCodecValue;
   }
 
@@ -193,15 +199,18 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
     const result: Record<string, JsonCodecValue> = {};
     let anySlashKey = false;
-    for (const key of utf8SortedKeysOf(value)) {
-      JsonCodecEngine.assertEncodableKey(key);
+    try {
+      for (const key of utf8SortedKeysOf(value)) {
+        JsonCodecEngine.assertEncodableKey(key);
 
-      if (key.startsWith("/")) {
-        anySlashKey = true;
+        if (key.startsWith("/")) {
+          anySlashKey = true;
+        }
+        result[key] = this.encodeValue(value[key]!, ctx);
       }
-      result[key] = this.encodeValue(value[key]!, ctx);
+    } finally {
+      ctx.leave(value);
     }
-    ctx.leave(value);
 
     if (anySlashKey) {
       if (Object.values(result).every((v) => JsonCodecEngine.#isQuoteSafe(v))) {
@@ -212,9 +221,11 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
             ) => [k, JsonCodecEngine.#unquote(v)]),
           ),
         );
-        return Object.freeze(this.wrapTag(CODEC_META_TAGS.quote, unquoted));
+        return Object.freeze(
+          this.wrapTag(CODEC_META_TAGS.quote, unquoted, ctx),
+        );
       }
-      return Object.freeze(this.wrapTag(CODEC_META_TAGS.object, result));
+      return Object.freeze(this.wrapTag(CODEC_META_TAGS.object, result, ctx));
     }
 
     return result as JsonCodecValue;

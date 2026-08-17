@@ -65,11 +65,12 @@ wrapper classes (Section 1.4).
 > (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`) are declared in
 > `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
 > `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
-> carries them (Section 8.6). The codec vocabulary (the `CODEC`
-> symbol, `FabricCodec`, `LiveEnvironment`, `EncodeContext`, `DecodeContext`)
-> lives in `codec-interface/` (Section 2), the machinery that acts on it in
-> `codec-common/`, and the conversion functions in `native-conversion.ts`
-> (Section 8).
+> carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
+> `FabricCodec`, `LiveEnvironment`) lives in `codec-interface/` (Section 2),
+> and the machinery that acts on it in `codec-common/` -- including
+> `EncodeContext` and `DecodeContext`, which are classes the walk carries
+> rather than contracts a caller implements. The conversion functions are in
+> `native-conversion.ts` (Section 8).
 >
 > **Where a thing is declared is not where it is imported from**, and the
 > modules named here divide on that point. `interface.ts` and
