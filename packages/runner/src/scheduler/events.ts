@@ -8,6 +8,7 @@ import {
   type NormalizedFullLink,
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
   IExtendedStorageTransaction,
   IPreconditionFailedError,
@@ -578,6 +579,14 @@ export interface SchedulerEventExecutionState {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+  /** The transient-demander preflight (fan-out stage B, review F2):
+   * re-arm the fanned-out nodes in a served handler's closure whose
+   * instance for the actor is not current. Undefined off the serving
+   * posture. */
+  readonly rearmNotCurrentFanOutForActor?: (
+    deps: ReactivityLog,
+    actor: ScopeKeyIdentity,
+  ) => Action[];
   readonly setEventPassDemandRefresh: (
     refresh: ((demand: Set<Action>) => void) | undefined,
   ) => void;
@@ -621,6 +630,16 @@ export function preflightQueuedEventDependencies(state: {
     deps: ReactivityLog,
     invalidDeps: Set<Action>,
   ) => boolean;
+  /** The transient-demander preflight (server-execution v2 fan-out
+   * stage B, review F2): re-arm the fanned-out nodes in a served
+   * handler's closure whose instance for the ACTOR is not current, so
+   * the actor's own per-user derivation is materialized before the
+   * handler reads it. Returns the re-armed nodes (the event waits on
+   * them). Undefined off the serving posture. */
+  readonly rearmNotCurrentFanOutForActor?: (
+    deps: ReactivityLog,
+    actor: ScopeKeyIdentity,
+  ) => Action[];
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
     deps: ReactivityLog,
@@ -797,6 +816,46 @@ export function preflightQueuedEventDependencies(state: {
     scheduleMs = performance.now() - stepStart;
   }
 
+  // The transient-demander preflight (server-execution v2 fan-out stage B,
+  // design §B5's motivating case; independent review F2). A SERVED event's
+  // actor whose handler reads a per-user DERIVATION she does not watch has
+  // no instance of that node — the node is node-level CLEAN (it ran for
+  // the watchers), so the invalid-upstream pass above found nothing, and
+  // the handler would read the actor's MISSING instance (its argument
+  // fails the schema, the run is silently skipped, the entry marked
+  // consequenced with no error — silent event loss). B7 made cleanliness
+  // per instance: re-arm the fanned-out nodes in the handler's closure
+  // whose instance for THIS actor is not current, materializing her own
+  // instance (as her transient demand) before the handler runs. The
+  // handler then reads a current instance instead of losing its event.
+  // Runs even when the node-level pass already skipped (a dirty input can
+  // coexist with a never-run actor instance — the review's dirty-input
+  // variant); the two schedule the same node, and the fan-out loop runs
+  // both the dirty watcher instance and the actor's uncomputed one. Off
+  // the serving posture `rearmNotCurrentFanOutForActor` is undefined and
+  // this is inert.
+  const actorFiredAt = queuedEvent.served?.firedAt;
+  if (
+    !shouldSkipEvent && actorFiredAt?.user !== undefined &&
+    state.rearmNotCurrentFanOutForActor !== undefined
+  ) {
+    const actor: ScopeKeyIdentity = {
+      principal: actorFiredAt.user,
+      ...(actorFiredAt.session !== undefined &&
+          actorFiredAt.session !== "server"
+        ? { sessionId: actorFiredAt.session as never }
+        : {}),
+    };
+    const rearmed = state.rearmNotCurrentFanOutForActor(deps, actor);
+    if (rearmed.length > 0) {
+      for (const dep of rearmed) {
+        state.pendingActions.add(dep);
+        state.eventBlockingDeps.add(dep);
+      }
+      shouldSkipEvent = true;
+    }
+  }
+
   // Replica-staleness gate (CT-1795): with no invalid upstream left, an
   // address the closure depends on may still have a load in flight — the
   // wish shape, where a computation settles CLEAN on a provisional value
@@ -903,6 +962,11 @@ export async function processPullQueuedEventDuringExecute(
           deps,
           invalidDeps,
         ),
+      ...(state.rearmNotCurrentFanOutForActor !== undefined
+        ? {
+          rearmNotCurrentFanOutForActor: state.rearmNotCurrentFanOutForActor,
+        }
+        : {}),
       collectPendingLoadParkKeys: (event, deps) =>
         state.collectPendingLoadParkKeys(event, deps),
       parkHeadEventForLoads: (event, keys) =>

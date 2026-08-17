@@ -58,6 +58,7 @@ import {
   stopSchedulerDiagnosis,
 } from "./diagnosis.ts";
 import {
+  collectDirectWritersForLog,
   type DependencyGraphState,
   isLive,
   notifyNodeLivenessChange,
@@ -65,6 +66,7 @@ import {
   setNodeProvisionalDemand,
   updateDependentEdgesForLog,
 } from "./dependency-graph.ts";
+import { keyAtRatchet } from "./fan-out.ts";
 import { SchedulerMaterializers } from "./materializers.ts";
 import {
   CELL_GROUP_PREFIX,
@@ -899,6 +901,68 @@ export class Scheduler {
       });
     }
     return demanders;
+  }
+
+  /**
+   * The transient-demander PREFLIGHT (server-execution v2 fan-out stage
+   * B, design §B5's motivating case; independent review F2): before a
+   * SERVED event's handler runs, re-arm every fanned-out node in the
+   * handler's dependency closure whose instance FOR THE ACTOR is NOT
+   * CURRENT — never run at the node's ratchet for that principal. B7 made
+   * cleanliness per instance, so a node the watchers made node-level
+   * clean can still be missing the actor's instance entirely; the
+   * node-level preflight (`collectInvalidUpstreamForLog`) asks only
+   * whether the NODE is invalid, so the actor's own per-user derivation
+   * was never materialized and her handler read an empty instance —
+   * refused as a schema mismatch and marked consequenced with no error
+   * (silent event loss). This is the arrival re-arm applied to the
+   * event's transient demander (already folded into the demanders by
+   * `transientEventDemandersFor`, pinned by (j)): mark the node invalid
+   * KEEPING the sibling instances clean, so its next run derives the
+   * instance set — now including the actor's transient demand — and runs
+   * only the actor's uncomputed instance (B7). Returns the re-armed
+   * nodes; the caller holds the event until they run (its handler then
+   * reads a current instance). Empty when the actor's instances are all
+   * current (or the actor cannot key an instance — a sessionless actor
+   * at session depth, which resolveScopeKey fails closed on downstream).
+   *
+   * Direct writers of the handler's reads only — the shape the ruling
+   * names (a handler reading a per-user derivation). A per-user node
+   * TRANSITIVELY upstream of the handler's closure (read through an
+   * intervening derivation) is not reached here; that broader cone is
+   * the node-level path's inverted walk, which this does not duplicate
+   * (the transitive not-current-for-actor case stays a documented gap,
+   * scopes.md §2 — narrow in practice, the watchers' walk covers the
+   * rendering shape). No-op off the serving posture: only a served
+   * event carries an actor, and only a served node has a `fanOut`
+   * record.
+   */
+  rearmNotCurrentFanOutForActor(
+    deps: ReactivityLog,
+    actor: ScopeKeyIdentity,
+  ): Action[] {
+    const directWriters = collectDirectWritersForLog({
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
+      writersByEntity: this.writeIndex.writersByEntity,
+      effects: this.nodes.effects,
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+    }, deps);
+    const rearmed: Action[] = [];
+    for (const writer of directWriters) {
+      const record = this.nodes.get(writer);
+      if (record?.fanOut === undefined) continue;
+      const actorKey = keyAtRatchet(record.fanOut, actor);
+      if (actorKey === undefined) continue;
+      // Current for the actor: her instance ran at the ratchet and no
+      // cause dirtied it — nothing to materialize.
+      if (record.fanOut.clean.has(actorKey)) continue;
+      this.markActionInvalid(writer, undefined, { fanOutInstances: "keep" });
+      this.pending.add(writer);
+      rearmed.push(writer);
+    }
+    if (rearmed.length > 0) this.queueExecution();
+    return rearmed;
   }
 
   /** DIAGNOSTIC (tests): a node's fan-out record — the known-scope
@@ -2146,6 +2210,17 @@ export class Scheduler {
           deps,
           invalidDeps,
         ),
+      // The transient-demander preflight (fan-out stage B, review F2):
+      // only a serving runtime has fan-out records and served actors, so
+      // the OFF arm and a flag-ON client leave this undefined (inert).
+      ...(this.runtime.servingPosture
+        ? {
+          rearmNotCurrentFanOutForActor: (
+            deps: ReactivityLog,
+            actor: ScopeKeyIdentity,
+          ) => this.rearmNotCurrentFanOutForActor(deps, actor),
+        }
+        : {}),
       setEventPassDemandRefresh: (refresh) => {
         this.eventPassDemandRefresh = refresh;
       },

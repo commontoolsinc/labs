@@ -35,7 +35,12 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
-import { decodeMemoryBoundary, resolveScopeKey } from "@commonfabric/memory/v2";
+import {
+  decodeMemoryBoundary,
+  resolveScopeKey,
+  streamEntriesDocId,
+  type StreamEventsDocValue,
+} from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -105,6 +110,36 @@ const GUARDED_PATTERN = [
   "  const guarded = computed(() => 'guarded:' + text(draftCell));",
   "  const on = computed(() => flagCell.get() === true);",
   "  return { view: ifElse(on, guarded, 'off') };",
+  "});",
+].join("\n");
+
+/** The transient demander's motivating shape (k): a `type` handler
+ * writing the actor's PerUser draft, and a `save` handler that reads the
+ * `echo` DERIVATION of the draft (the actor's instance) and writes her
+ * PerUser `saved`. */
+const TYPE_SAVE_PATTERN = [
+  "import { computed, Default, handler, pattern, PerUser, Stream, Writable } from 'commonfabric';",
+  "type Draft = Writable<string | Default<''>>;",
+  "const draftText = (draft: Draft): string =>",
+  "  (draft.get() as string | undefined) ?? '';",
+  "const type = handler<{ text: string }, { draft: Draft }>(",
+  "  (ev, { draft }) => { draft.set(ev.text); },",
+  ");",
+  "const save = handler<unknown, { echo: string; saved: Draft }>(",
+  "  (_ev, { echo, saved }) => { saved.set('saved:' + String(echo ?? '<undefined>')); },",
+  ");",
+  "export default pattern<",
+  "  { draft?: PerUser<Draft>; saved?: PerUser<Draft>; n?: number },",
+  "  { echo: string; type: Stream<{ text: string }>; save: Stream<unknown> }",
+  ">(({ draft, saved, n }) => {",
+  "  const draftCell: Draft = draft!;",
+  "  const savedCell: Draft = saved!;",
+  "  const echo = computed(() => 'echo:' + draftText(draftCell));",
+  "  return {",
+  "    echo,",
+  "    type: type({ draft: draftCell }),",
+  "    save: save({ echo, saved: savedCell }),",
+  "  };",
   "});",
 ].join("\n");
 
@@ -833,6 +868,225 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     }
     setup.cancel();
   });
+
+  // (k) — the transient demander's MOTIVATING case (design §B5, RULED
+  // 2026-08-16 "include"; independent review F2): a NON-watching actor
+  // fires an event whose handler reads a PER-USER DERIVATION. The node is
+  // CLEAN at the node level (it ran for the watchers) and has NO instance
+  // for the actor, so the node-level preflight found nothing to run and
+  // the handler read a missing instance: its argument failed the schema,
+  // the run was silently skipped, and the entry was marked consequenced
+  // with NO error — silent event loss. B7 made cleanliness per instance;
+  // the preflight must ask the per-instance question for the actor: an
+  // input not current for HER (never run at the ratchet) is materialized
+  // — as her transient demand — before the handler runs.
+  for (
+    const variant of ["two-drains", "same-drain", "dirty-input"] as const
+  ) {
+    it(`(k) [${variant}] a NON-watching actor's served event whose handler reads a per-user DERIVATION: the actor's instance is materialized before the handler runs — the consequence lands under HER instance, the entry is consequenced clean, the watcher's instance is untouched`, async () => {
+      const names = {
+        arg: `fo-k-${variant}-arg`,
+        result: `fo-k-${variant}-result`,
+      };
+      // The creator's session must PRUNE so Alice is not a demander.
+      server = await (async () => {
+        await server.close();
+        return newSharedServer({
+          subscriptionRefreshDelayMs: 0,
+          sessionTtlMs: 250,
+        });
+      })();
+      const engine = await server.engineForSpace(space);
+      let compiled: Awaited<
+        ReturnType<Runtime["patternManager"]["compilePattern"]>
+      >;
+      let argId: string;
+      let resultId: string;
+      {
+        const manager = EmulatedStorageManager.connectTo(server, {
+          as: aliceSigner,
+        });
+        const creator = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: manager,
+          experimental: { serverExecution: true },
+        });
+        compiled = await creator.patternManager.compilePattern({
+          main: "/main.tsx",
+          files: [{ name: "/main.tsx", contents: TYPE_SAVE_PATTERN }],
+        }, { space });
+        const arg = creator.getCell<Record<string, unknown>>(
+          space,
+          names.arg,
+          undefined,
+        );
+        const result = creator.getCell<Record<string, unknown>>(
+          space,
+          names.result,
+          compiled.resultSchema,
+        );
+        await arg.sync();
+        await result.sync();
+        {
+          const seed = creator.edit();
+          arg.withTx(seed).set({ n: 1 });
+          expect((await seed.commit()).error).toBeUndefined();
+        }
+        {
+          // The declared-scope slots are pre-narrowed at instantiation
+          // (RULED 2026-08-17): nothing here narrows them by hand.
+          const tx = creator.edit();
+          creator.run(tx, compiled, arg, result);
+          expect((await tx.commit()).error).toBeUndefined();
+        }
+        await creator.idle();
+        await creator.storageManager.synced();
+        argId = arg.getAsNormalizedFullLink().id;
+        resultId = result.getAsNormalizedFullLink().id;
+        await creator.dispose();
+        await manager.close();
+      }
+      const aliceKey = resolveScopeKey("user", {
+        principal: aliceSigner.did(),
+      });
+      const bobKey = resolveScopeKey("user", { principal: bobSigner.did() });
+      await waitUntil(
+        () =>
+          !server.watchedRootsForSpace(space, {
+            excludePrincipal: serviceSigner.did(),
+          }).some((root) => root.identity?.principal === aliceSigner.did()),
+        "alice's ephemeral session to prune",
+      );
+      host = newHost();
+      // Bob watches the root — the piece is served, echo narrows for Bob.
+      const bob = openClient(bobSigner);
+      const bobResult = bob.getCell<Record<string, unknown>>(
+        space,
+        names.result,
+        compiled.resultSchema,
+      );
+      await bobResult.sync();
+      const cancel = bobResult.sink(() => {});
+      await waitUntil(
+        () => host!.spaceServer(space)?.active === true,
+        "activation",
+      );
+      await waitUntil(
+        () => instanceHolds(engine, bobKey, '"echo:"'),
+        "bob's echo instance",
+      );
+      // Alice is NOT a demander of the piece.
+      expect(
+        (servingRuntime!.serverRunDemandersFor([resultId]) ?? []).some((d) =>
+          d.principal === aliceSigner.did()
+        ),
+      ).toBe(false);
+
+      const resultDoc = Engine.read(engine, { id: resultId })?.value as {
+        save?: { "/": { "link@1": { id?: string; path?: string[] } } };
+        type?: { "/": { "link@1": { id?: string; path?: string[] } } };
+      };
+      const streamOf = (key: "save" | "type") => ({
+        id: resultDoc?.[key]?.["/"]?.["link@1"]?.id ?? resultId,
+        path: resultDoc?.[key]?.["/"]?.["link@1"]?.path ?? [key],
+      });
+      // Alice raw-appends: a NON-rendering actor (no client, no watch).
+      const append = async (key: "save" | "type", payload: unknown) => {
+        const manager = EmulatedStorageManager.connectTo(server, {
+          as: aliceSigner,
+        });
+        try {
+          const stream = streamOf(key);
+          const delivery = await manager.open(space).replica
+            .enqueueEventAppend!({
+              sidecarId: streamEntriesDocId(stream as never),
+              stream,
+              eventId: `evt:${crypto.randomUUID()}:${resultId}`,
+              payload: payload as never,
+            });
+          expect(delivery.delivered).toBe(true);
+        } finally {
+          await manager.close();
+        }
+      };
+      const sidecarEntries = () =>
+        (engine.database.prepare(
+          `SELECT id FROM head WHERE id LIKE 'of:stream-events:%' AND op != 'delete'`,
+        ).all() as Array<{ id: string }>).flatMap(({ id }) =>
+          ((Engine.read(engine, { id })?.value as
+            | StreamEventsDocValue
+            | undefined)
+            ?.entries ?? []).map((entry) => ({
+              consequenced: entry.consequenced,
+              error: entry.error,
+            }))
+        );
+      const allConsequenced = () =>
+        sidecarEntries().length >= 1 &&
+        sidecarEntries().every((entry) => entry.consequenced === true);
+
+      await append("type", { text: "A" });
+      if (variant === "two-drains") {
+        // The type dispatches and its wave settles before the save is
+        // even appended: whatever the type dirtied has been recomputed
+        // (for the watchers) with nothing queued for Alice.
+        await waitUntil(
+          () => instanceHolds(engine, aliceKey, '"A"'),
+          "alice's typed draft under her instance",
+        );
+        await waitUntil(allConsequenced, "type consequenced");
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+      if (variant === "dirty-input") {
+        // Bob types right before Alice's save: the save's preflight meets
+        // a node that is invalid at the NODE level too — the ruled
+        // "dirty at preflight" shape — with Alice a transient demander.
+        await waitUntil(allConsequenced, "type consequenced");
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        const bobTyped = bob.getCell<{ draft: string }>(
+          space,
+          names.arg,
+          compiled.argumentSchema,
+        );
+        await bobTyped.sync();
+        const tx = bob.edit();
+        bobTyped.key("draft").withTx(tx).set("B2");
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      await append("save", {});
+      await waitUntil(allConsequenced, "both events consequenced", 20_000);
+      // THE consequence: Alice's save read HER echo instance and wrote
+      // HER saved slot — before the fix the handler was refused ("action
+      // argument is undefined … not running"), the entry consequenced
+      // with no error, and nothing landed.
+      const diag = () =>
+        `alice row=${JSON.stringify(rowsUnder(engine, aliceKey).get(argId))}` +
+        ` entries=${JSON.stringify(sidecarEntries())}` +
+        ` echoFanOut=${
+          JSON.stringify(
+            servingRuntime!.scheduler.getActionRunTrace()
+              .filter((entry) => entry.instanceKey !== undefined)
+              .map((entry) =>
+                servingRuntime!.scheduler.fanOutStateOf(entry.actionId)
+              )
+              .filter((state) => state !== undefined)
+              .slice(-3),
+          )
+        }`;
+      await waitUntil(
+        () => instanceHolds(engine, aliceKey, '"saved:echo:A"'),
+        () => `the saved consequence to land under alice — ${diag()}`,
+        8_000,
+      );
+      // Consequenced CLEAN: no error on any entry.
+      expect(sidecarEntries().every((entry) => entry.error === undefined))
+        .toBe(true);
+      // Bob's instance is untouched by Alice's events: his echo never
+      // carries her draft.
+      expect(instanceHolds(engine, bobKey, '"echo:A"')).toBe(false);
+      cancel();
+    });
+  }
 
   it("(h) B7 scaling probe — N users × M narrowed nodes: ONE user's input change re-runs only that user's M instances, never the other users' (precise per-instance dirtiness); the node count stays independent of N (C11b)", async () => {
     const M = 3;
