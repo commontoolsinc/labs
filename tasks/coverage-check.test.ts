@@ -370,8 +370,9 @@ Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   const overrides = parseMergedBaselineOverrides(
     {
       number: 123,
-      // "job: Check" is not a coverage-debt metric, so accepting it throws.
-      body: "ACCEPT_COVERAGE_DEBT: job: Check = 7 lines",
+      // A directory below the group level names no source group, so accepting
+      // it throws.
+      body: "ACCEPT_COVERAGE_DEBT: packages/runner/src +7 lines",
     },
     (message) => warnings.push(message),
   );
@@ -379,23 +380,39 @@ Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   assertEquals(overrides, null);
   assertEquals(warnings.length, 1);
   assertStringIncludes(warnings[0], "merged PR #123");
-  assertStringIncludes(
-    warnings[0],
-    "only coverage-debt metrics can be accepted",
-  );
+  assertStringIncludes(warnings[0], "name a coverage source group");
 });
 
 Deno.test("valid merged PR baseline override metadata is parsed", () => {
   const overrides = parseMergedBaselineOverrides({
     number: 124,
-    body:
-      "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 7 lines",
+    body: "ACCEPT_COVERAGE_DEBT: packages/runner +7 lines",
   });
 
   assertEquals(
     overrides?.metrics.get("coverage-debt: packages/runner uncovered lines"),
     7,
   );
+});
+
+Deno.test("a merged PR's unreadable acceptance leaves the rest of it standing", () => {
+  // A description that merged before the acceptance form changed cannot be
+  // rewritten to suit this parser, so the marker it carries is passed over and
+  // the reset marker beside it is still read.
+  const warnings: string[] = [];
+  const overrides = parseMergedBaselineOverrides(
+    {
+      number: 126,
+      body:
+        "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 7 lines\n" +
+        "NEW_COVERAGE_BASELINE",
+    },
+    (message) => warnings.push(message),
+  );
+
+  assertEquals(overrides?.metrics.size, 0);
+  assertEquals(overrides?.coverageBaselineReset, true);
+  assertEquals(warnings, []);
 });
 
 Deno.test("merged PR legacy coverage-debt acceptance is honored", () => {
@@ -2066,13 +2083,13 @@ Deno.test("buildCoverageRows leaves a group the PR did not change alone", () => 
   assertEquals([...ungatedGroups], []);
 });
 
-Deno.test("buildCoverageRows honors a per-metric acceptance and a reset", () => {
+Deno.test("buildCoverageRows honors a per-group acceptance and a reset", () => {
   const accepted = rowsFor(
     { [RUNNER_METRIC]: 5800 },
     { [RUNNER_METRIC]: { value: 5746, comparable: true } },
     {
       overrides: {
-        metrics: new Map([[RUNNER_METRIC, 5800]]),
+        metrics: new Map([[RUNNER_METRIC, 54]]),
         coverageBaselineReset: false,
       },
     },
@@ -2089,6 +2106,57 @@ Deno.test("buildCoverageRows honors a per-metric acceptance and a reset", () => 
   );
   assertEquals(reset.rows[0].status, "ovrd");
   assertEquals(reset.failures, []);
+});
+
+Deno.test("buildCoverageRows measures an acceptance from the baseline", () => {
+  const overrides = {
+    metrics: new Map([[RUNNER_METRIC, 54]]),
+    coverageBaselineReset: false,
+  };
+
+  // 5746 + 54 is the most the group may reach, and one line more fails.
+  const atLimit = rowsFor(
+    { [RUNNER_METRIC]: 5800 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+    { overrides },
+  );
+  assertEquals(atLimit.rows[0].status, "ovrd");
+
+  const overLimit = rowsFor(
+    { [RUNNER_METRIC]: 5801 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+    { overrides },
+  );
+  assertEquals(overLimit.rows[0].status, "OVER");
+  assertEquals(overLimit.failures.length, 1);
+});
+
+Deno.test("buildCoverageRows accepts the same rise after the baseline moves", () => {
+  // What a rebase does: the base branch uncovers 30 lines of its own, so both
+  // the baseline and this run's count rise by 30. The pull request still adds
+  // the 54 lines it accepted, and the same acceptance line still passes it.
+  const overrides = {
+    metrics: new Map([[RUNNER_METRIC, 54]]),
+    coverageBaselineReset: false,
+  };
+
+  const rebased = rowsFor(
+    { [RUNNER_METRIC]: 5830 },
+    { [RUNNER_METRIC]: { value: 5776, comparable: true } },
+    { overrides },
+  );
+  assertEquals(rebased.rows[0].status, "ovrd");
+  assertEquals(rebased.failures, []);
+
+  // And a rebase onto a base branch that covered 30 lines of its own does not
+  // hand the pull request room to add 84.
+  const tightened = rowsFor(
+    { [RUNNER_METRIC]: 5800 },
+    { [RUNNER_METRIC]: { value: 5716, comparable: true } },
+    { overrides },
+  );
+  assertEquals(tightened.rows[0].status, "OVER");
+  assertEquals(tightened.failures.length, 1);
 });
 
 Deno.test("buildCoverageRows bootstraps a metric with no baseline", () => {
@@ -2122,6 +2190,32 @@ Deno.test("buildCoverageRows bootstraps a metric with no baseline", () => {
     { overrides: { metrics: new Map(), coverageBaselineReset: true } },
   );
   assertEquals(reset.rows[0].status, "ovrd");
+
+  // A metric with no baseline is held to zero, so an acceptance is measured
+  // from there and the whole of it is available.
+  const accepted = rowsFor(
+    { [RUNNER_METRIC]: 12 },
+    { [RUNNER_METRIC]: { comparable: true } },
+    {
+      overrides: {
+        metrics: new Map([[RUNNER_METRIC, 12]]),
+        coverageBaselineReset: false,
+      },
+    },
+  );
+  assertEquals(accepted.rows[0].status, "ovrd");
+
+  const short = rowsFor(
+    { [RUNNER_METRIC]: 13 },
+    { [RUNNER_METRIC]: { comparable: true } },
+    {
+      overrides: {
+        metrics: new Map([[RUNNER_METRIC, 12]]),
+        coverageBaselineReset: false,
+      },
+    },
+  );
+  assertEquals(short.rows[0].status, "OVER");
 });
 
 Deno.test("buildCoverageRows reports a rise from a zero baseline as complete", () => {
