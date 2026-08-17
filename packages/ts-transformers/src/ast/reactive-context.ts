@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getCallArgumentPosition } from "./call-arguments.ts";
 import { detectCallKind } from "./call-kind.ts";
 import { getCallbackBoundarySemantics } from "../policy/callback-boundary.ts";
 
@@ -84,13 +85,9 @@ function getMarkedSyntheticCallbackContext(
       }
 
       if (lookup?.isSyntheticComputeCallback?.(current)) {
-        const callParent = current.parent;
-        if (
-          callParent &&
-          ts.isCallExpression(callParent) &&
-          callParent.arguments.includes(current)
-        ) {
-          const callKind = detectCallKind(callParent, checker);
+        const position = getCallArgumentPosition(current);
+        if (position) {
+          const callKind = detectCallKind(position.call, checker);
           if (callKind?.kind === "lift-applied") {
             return { kind: "compute", owner: "lift-applied", inJsxExpression };
           }
@@ -117,11 +114,9 @@ export function findEnclosingCallbackContext(
   let current: ts.Node | undefined = resolveContextAnchor(node).parent;
   while (current) {
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      const parent: ts.Node | undefined = current.parent;
-      if (parent && ts.isCallExpression(parent)) {
-        if (parent.arguments.includes(current as ts.Expression)) {
-          return { callback: current, call: parent };
-        }
+      const position = getCallArgumentPosition(current);
+      if (position) {
+        return { callback: current, call: position.call };
       }
     }
     current = current.parent;
