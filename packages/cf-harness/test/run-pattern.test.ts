@@ -1027,6 +1027,78 @@ describe("run-pattern", () => {
       );
     });
 
+    it("refuses a `register` slug that already names a piece, creating no piece and leaving the address where it pointed", async () => {
+      // Assigning a slug is a blind write, so a second run naming the same
+      // slug would repoint an address a person already opens at whatever it
+      // had just written. The refusal is a pre-flight one, so the attempt
+      // costs a message and nothing else.
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+      const engine = createEngine();
+      const first = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      });
+      const held = first.output as RunPatternToolSuccessOutput;
+      expect(held.status).toBe("ok");
+
+      const spy = spyOnRunPersistent();
+      const second = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 22 },
+        register: { slug: "doubling-report" },
+      });
+
+      const output = second.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("doubling-report");
+      expect(spy.calls).toBe(0);
+      // The address still names the piece it named before, so the refusal
+      // protected the name rather than merely reporting on it.
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        held.pieceId,
+      );
+    });
+
+    it("registers a second piece under a slug the space does not yet hold", async () => {
+      // The control for the refusal above: the availability check refuses a
+      // taken name, not a second registration.
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+      const engine = createEngine();
+      const first = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      });
+      const second = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 22 },
+        register: { slug: "doubling-report-again" },
+      });
+
+      const held = first.output as RunPatternToolSuccessOutput;
+      const output = second.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.registration?.slug).toBe("doubling-report-again");
+      expect(output.registrationError).toBeUndefined();
+      expect(await resolvePieceAddress(pieces, "doubling-report-again")).toBe(
+        output.pieceId,
+      );
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        held.pieceId,
+      );
+    });
+
     it("returns the registered slug and an openable URL composed from the session's API URL and space name", async () => {
       const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
         input: { pieceRegistry: [] },

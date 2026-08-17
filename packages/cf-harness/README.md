@@ -687,12 +687,40 @@ text crosses, but that exactly one kind does — the kind that carries structure
 and that a reader of a reported schema should treat property names as coming
 from whoever wrote the schema.
 
+Being the one channel that crosses, they are also the one channel that is
+bounded. At most 200 properties of a single object are named, a property name
+longer than 128 characters is not named at all, and an object that omitted any
+of its properties for either reason reports `additionalProperties: true` — so a
+shortened list is never presented as the whole of them. A name past the limit is
+omitted rather than shortened: a truncated name is the name of nothing, and code
+written against it would read a field that does not exist. Both bounds sit far
+above any schema a person writes; they are there so that an arbitrarily wide one
+cannot fill a model's context with names, not as a boundary on what may be
+disclosed.
+
+The reply is also scrubbed of bare fabric identifiers, exactly as
+`run_pattern`'s diagnostics are, and the scrub reaches property names at every
+depth as well as the reply's own text. A property name is author-chosen, so a
+document whose schema names a field with a DID or a bare tagged hash would
+otherwise put that identifier into model context through the one channel that
+crosses.
+
 Disclosing shape is permissive and fixed rather than configurable: a run that
 holds a token gets an answer for any address in the session's own space, and
-there is no setting that says otherwise. A reference outside that space is not
-followed — the session's authority ends at its space — and an address the
-session can state no shape for is reported as shapeless rather than as a failed
-call.
+there is no setting that says otherwise. The handle's own address is checked
+against the session's space, and an address outside it is not read at all — the
+session's authority ends at its space. That check is on the address, not on
+everything reachable from it: reading the document's declared schema resolves
+whatever links the document itself carries, and link resolution is not
+space-bounded. What bounds it in practice is that the model chooses the handle
+and never the path taken from it, and that whatever comes back is reduced to
+structure before any of it crosses. An address the session can state no shape
+for is reported as shapeless rather than as a failed call.
+
+`describe_handle` is declared `effectClass: "read"` and reads no value, but
+answering from the fabric establishes the run's fabric session — loading the
+identity key and opening a remote connection. The first call in a run therefore
+carries that cost and that effect.
 
 Shape is also what makes a chain of steps checkable. An orchestrator that passes
 a reference from one step to the next can confirm the reference is the kind of
@@ -829,16 +857,23 @@ without putting the cancellation back behind the operation it escaped.
 `register` is how a run publishes its result to a person. It takes one required
 field, `slug` — the named address the piece is reachable at, in the same
 lowercase-hyphen form every fabric slug uses — and asks for the piece to join
-the space's piece list. The slug is validated before anything is compiled, so an
-unusable one is a structured error that persists no piece. Registration itself
-runs after the pattern has settled: the piece joins the space's registry through
-the default pattern, and the slug is then pointed at it, the same two steps
-`cf piece new` performs. A space with no default pattern has no registry to
-join; `run_pattern` reports that as `registrationError` on an otherwise `ok`
-output rather than bootstrapping the space's root, so the computation and its
-`resultRef` survive a failed publish. `register` sets the address, not the
-title: what the piece list displays is the pattern's own `NAME` result, so a
-pattern that wants a title sets `NAME` in its source.
+the space's piece list. The slug is validated, and then checked for
+availability, before anything is compiled, so an unusable slug and a slug
+already in use are both structured errors that persist no piece. That second
+check is what stops a run from taking over a name a person already opens:
+assigning a slug is a blind write, so without it a model naming `home` would
+repoint `home` at whatever it had just written. It is a check and not a lock —
+resolution and assignment are not atomic, so a slug that becomes taken in
+between is still overwritten — and it closes the case that arises rather than a
+race against a concurrent writer. Registration itself runs after the pattern has
+settled: the piece joins the space's registry through the default pattern, and
+the slug is then pointed at it, the same two steps `cf piece new` performs. A
+space with no default pattern has no registry to join; `run_pattern` reports
+that as `registrationError` on an otherwise `ok` output rather than
+bootstrapping the space's root, so the computation and its `resultRef` survive a
+failed publish. `register` sets the address, not the title: what the piece list
+displays is the pattern's own `NAME` result, so a pattern that wants a title
+sets `NAME` in its source.
 
 Every `run_pattern` invocation persists a piece in the configured space,
 registered or not. A cancelled run stops its piece, but no piece is ever

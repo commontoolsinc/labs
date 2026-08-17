@@ -1373,6 +1373,47 @@ const stripInternalCfcFields = (output: unknown): unknown => {
   return publicOutput;
 };
 
+/**
+ * Applies the model-boundary scrub to every string a value carries at every
+ * depth, its object KEYS included.
+ *
+ * Scrubbing the free-text fields a tool declares is enough only for a tool
+ * whose author-controlled text sits in named fields. It is not enough for one
+ * whose output is a structure whose own shape is author-controlled — a
+ * disclosed JSON Schema most of all, where the property names are the point of
+ * the disclosure and are arbitrary text whoever wrote the schema chose. So the
+ * walk reaches keys as well as values.
+ *
+ * The scrub itself is {@link scrubBareFabricIdentifiers}; this decides only
+ * where it lands. A key that scrubs to the same text as a sibling collapses
+ * into it, which is the honest outcome: two names differing only in an
+ * identifier this boundary refuses to disclose are not distinguishable on the
+ * model's side of it either.
+ */
+const scrubBareFabricIdentifiersDeep = (value: unknown): unknown => {
+  if (typeof value === "string") {
+    return scrubBareFabricIdentifiers(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubBareFabricIdentifiersDeep(entry));
+  }
+  if (isObjectRecord(value)) {
+    const scrubbed: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      // `defineProperty` rather than assignment, so a scrubbed key of
+      // `__proto__` becomes an own property instead of reaching the prototype.
+      Object.defineProperty(scrubbed, scrubBareFabricIdentifiers(key), {
+        value: scrubBareFabricIdentifiersDeep(entry),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    return scrubbed;
+  }
+  return value;
+};
+
 const toolOutputNeedsSandboxMediation = (
   toolId: BuiltinToolId,
   output: unknown,
@@ -3205,6 +3246,17 @@ export class CfHarnessPromptLoop {
         }
       }
       return { output: stripInternalCfcFields(scrubbed) };
+    }
+    if (toolId === "describe_handle") {
+      // A disclosed schema's property names are whoever authored the schema's
+      // own text, and the shape reduction passes them through deliberately —
+      // code cannot be written over data without the names of its fields. That
+      // makes a property name a route for a bare fabric identifier into model
+      // context, at any depth of the schema, so the whole reply is scrubbed
+      // keys and all rather than field by field.
+      return {
+        output: scrubBareFabricIdentifiersDeep(stripInternalCfcFields(output)),
+      };
     }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
       return { output: stripInternalCfcFields(output) };

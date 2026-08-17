@@ -11,6 +11,23 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { normalize } from "@std/path/posix";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
+import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import { createHarnessRunState } from "../src/run-state.ts";
+import {
+  MAX_DISCLOSED_PROPERTIES,
+  MAX_PROPERTY_NAME_LENGTH,
+} from "../src/schema-shape.ts";
+import type {
+  SandboxCommandRequest,
+  SandboxCommandResult,
+  SandboxRuntime,
+  SandboxRuntimeDescription,
+  SandboxShellRequest,
+} from "../src/sandbox/types.ts";
+import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
 import { describeHandleTool } from "../src/tools/describe-handle.ts";
 import { runPatternTool } from "../src/tools/run-pattern.ts";
 import type { RunPatternToolSuccessOutput } from "../src/tools/run-pattern.ts";
@@ -27,6 +44,57 @@ const signer = await Identity.fromPassphrase("cf-harness describe-handle");
 
 const HASH_A = "A".repeat(43);
 const REF_A = `/of:fid1:${HASH_A}/summary`;
+
+/**
+ * A tagged hash and a DID, each in the position a schema's author controls
+ * outright: the name of a property. Neither is a schemed link form, so the
+ * handle boundary does not swap them — the scrub is what keeps them out.
+ */
+const SCRUB_HASH = "C".repeat(43);
+const HOSTILE_HASH_NAME = `fid1:${SCRUB_HASH}`;
+const HOSTILE_DID_NAME = "did:key:z6MkfffDescribeHandleScrubbing";
+
+/** The sandbox members the prompt loop reaches on a run with no shell work. */
+class FakeSandboxRuntime implements SandboxRuntime {
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
+
+  resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
+    return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
+  }
+
+  isPathWithinWorkspace(path: string): boolean {
+    return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
+  }
+
+  defaultWorkingDirectory(): string {
+    return "/workspace";
+  }
+
+  run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+
+  runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
+    if (request.command.includes(CAPABILITY_PROBE_SENTINEL)) {
+      return Promise.resolve({
+        stdout: "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
+        stderr: "",
+        exitCode: 0,
+      });
+    }
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+}
 
 const DOUBLED_SCHEMA = {
   type: "object",
@@ -293,6 +361,138 @@ describe("describe_handle", () => {
     }
   });
 
+  describe("bounding the property-name channel", () => {
+    /** A schema whose single object declares `count` numbered properties. */
+    const objectWithProperties = (
+      count: number,
+      name = (index: number) => `field${index}`,
+    ) => ({
+      type: "object" as const,
+      properties: Object.fromEntries(
+        Array.from({ length: count }, (_, index) => [name(index), {
+          type: "number" as const,
+        }]),
+      ),
+    });
+
+    const describeSchema = async (schema: Record<string, unknown>) => {
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        REF_A,
+        { schema },
+      );
+      return await describeHandleTool.invoke(
+        contextWith(minted.table),
+        { token: minted.token },
+      );
+    };
+
+    it("discloses every property of an object at the disclosure bound", async () => {
+      const output = await describeSchema(
+        objectWithProperties(MAX_DISCLOSED_PROPERTIES),
+      );
+
+      const schema = output.schema as {
+        properties: Record<string, unknown>;
+        additionalProperties?: unknown;
+      };
+      expect(Object.keys(schema.properties).length).toBe(
+        MAX_DISCLOSED_PROPERTIES,
+      );
+      // The whole list is disclosed, so nothing claims otherwise.
+      expect(schema.additionalProperties).toBeUndefined();
+    });
+
+    it("omits the properties of an object past the disclosure bound and reports the shape as open", async () => {
+      const output = await describeSchema(
+        objectWithProperties(MAX_DISCLOSED_PROPERTIES + 5),
+      );
+
+      const schema = output.schema as {
+        properties: Record<string, unknown>;
+        additionalProperties?: unknown;
+      };
+      expect(Object.keys(schema.properties).length).toBe(
+        MAX_DISCLOSED_PROPERTIES,
+      );
+      expect(Object.hasOwn(
+        schema.properties,
+        `field${MAX_DISCLOSED_PROPERTIES}`,
+      )).toBe(false);
+      // What a reader of the shortened list sees: an explicit statement that
+      // it does not name every property, rather than a short list presented
+      // as the whole of them.
+      expect(schema.additionalProperties).toBe(true);
+    });
+
+    it("discloses a property name at the length bound", async () => {
+      const name = "n".repeat(MAX_PROPERTY_NAME_LENGTH);
+
+      const output = await describeSchema(objectWithProperties(1, () => name));
+
+      const schema = output.schema as {
+        properties: Record<string, unknown>;
+        additionalProperties?: unknown;
+      };
+      expect(Object.keys(schema.properties)).toEqual([name]);
+      expect(schema.additionalProperties).toBeUndefined();
+    });
+
+    it("omits a property name past the length bound rather than shortening it", async () => {
+      // A shortened name is the name of nothing, and code written against it
+      // would read a field that does not exist.
+      const name = "n".repeat(MAX_PROPERTY_NAME_LENGTH + 1);
+
+      const output = await describeSchema({
+        type: "object",
+        properties: {
+          kept: { type: "number" },
+          [name]: { type: "number" },
+        },
+        required: ["kept", name],
+      });
+
+      const schema = output.schema as {
+        properties: Record<string, unknown>;
+        required?: string[];
+        additionalProperties?: unknown;
+      };
+      expect(Object.keys(schema.properties)).toEqual(["kept"]);
+      expect(schema.additionalProperties).toBe(true);
+      // A name no property declares is not structure, so the over-long name
+      // does not come back through `required` either.
+      expect(schema.required).toEqual(["kept"]);
+      expect(JSON.stringify(output)).not.toContain(name);
+    });
+
+    it("bounds the properties of a nested object as well as a root one", async () => {
+      const output = await describeSchema({
+        type: "object",
+        properties: {
+          rows: {
+            type: "array",
+            items: objectWithProperties(MAX_DISCLOSED_PROPERTIES + 5),
+          },
+        },
+      });
+
+      const items = (output.schema as {
+        properties: {
+          rows: {
+            items: {
+              properties: Record<string, unknown>;
+              additionalProperties?: unknown;
+            };
+          };
+        };
+      }).properties.rows.items;
+      expect(Object.keys(items.properties).length).toBe(
+        MAX_DISCLOSED_PROPERTIES,
+      );
+      expect(items.additionalProperties).toBe(true);
+    });
+  });
+
   describe("against a fabric session", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
@@ -489,6 +689,114 @@ describe("describe_handle", () => {
 
       expect(output.known).toBe(true);
       expect(output.hasSchema).toBe(false);
+    });
+  });
+
+  describe("at the prompt-loop model boundary", () => {
+    it("scrubs bare fabric identifiers out of disclosed property names at every depth", async () => {
+      // Property names are the one channel of author-chosen text this tool
+      // discloses, so they are a route for a bare fabric identifier into
+      // model context — the handle boundary swaps only the schemed link
+      // forms, and a name is neither. The names here sit two and three levels
+      // down, so a scrub that reached only the reply's top-level strings
+      // would leave them standing.
+      const runId = "run-describe-scrub";
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        REF_A,
+        {
+          schema: {
+            type: "object",
+            properties: {
+              rows: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { [HOSTILE_DID_NAME]: { type: "string" } },
+                },
+              },
+              report: {
+                type: "object",
+                properties: { [HOSTILE_HASH_NAME]: { type: "number" } },
+              },
+            },
+          },
+        },
+      );
+      let calls = 0;
+      const fetchFn: typeof fetch = () => {
+        calls += 1;
+        const payload = calls === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-1",
+                  type: "function",
+                  function: {
+                    name: "describe_handle",
+                    arguments: JSON.stringify({ token: minted.token }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "Done." },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runState: createHarnessRunState({
+            runId,
+            cfcEnforcementMode: "disabled",
+            currentDir: "/workspace",
+            model: "gpt-5.4",
+            handleTable: minted.table,
+          }),
+        }),
+        fetchFn,
+      });
+
+      const result = await loop.runTranscript({
+        transcript: [{ role: "user", content: "Describe the handle." }],
+        model: "gpt-5.4",
+      });
+
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).toBeDefined();
+      const content = toolMessage!.content!;
+      const parsed = JSON.parse(content) as {
+        schema: {
+          properties: {
+            rows: { items: { properties: Record<string, unknown> } };
+            report: { properties: Record<string, unknown> };
+          };
+        };
+      };
+      expect(Object.keys(parsed.schema.properties.rows.items.properties))
+        .toEqual(["[fabric-id]"]);
+      expect(Object.keys(parsed.schema.properties.report.properties))
+        .toEqual(["[fabric-id]"]);
+      // Stated again over the whole reply, so an identifier that escapes into
+      // some other field fails this too.
+      expect(content).not.toContain("did:key:");
+      expect(content).not.toContain(SCRUB_HASH);
     });
   });
 });

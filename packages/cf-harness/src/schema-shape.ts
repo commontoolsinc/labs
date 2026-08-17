@@ -21,6 +21,13 @@
  * `d0`, `d1`, … and every `$ref` that resolves to one is rewritten to match. A
  * `$ref` that resolves to nothing is dropped rather than disclosed, since a
  * dangling pointer is a string its author chose and nothing else.
+ *
+ * Because property names are the one channel that crosses, they are the one
+ * channel that has to be bounded. A name past
+ * {@link MAX_PROPERTY_NAME_LENGTH}, and every property past
+ * {@link MAX_DISCLOSED_PROPERTIES} of one object, is omitted, and an object
+ * that omitted any of its properties reports `additionalProperties: true` so
+ * the shortened list is never read as the whole of them.
  */
 
 import type { JSONSchema, JSONSchemaTypes } from "@commonfabric/api";
@@ -156,9 +163,15 @@ const rootDefinitionNames = (schema: JSONSchema): DefinitionNames => {
       if (!isSchemaRecord(map as JSONSchema)) {
         continue;
       }
-      Object.keys(map as Record<string, unknown>).forEach((name, index) => {
-        names[key].set(name, canonicalDefinitionName(index));
-      });
+      // Only the entries the walk will actually emit get a name, so a `$ref`
+      // into one past the bound resolves to nothing and is dropped rather than
+      // left dangling. The slice and the walk take the map in the same order,
+      // so the two agree on which entries those are.
+      Object.keys(map as Record<string, unknown>)
+        .slice(0, MAX_DISCLOSED_PROPERTIES)
+        .forEach((name, index) => {
+          names[key].set(name, canonicalDefinitionName(index));
+        });
     }
   }
   return names;
@@ -229,6 +242,41 @@ const reduceType = (
  * reaches and far below what the walk's own recursion costs.
  */
 const MAX_SHAPE_DEPTH = 100;
+
+/**
+ * How many entries of one `properties`, `$defs`, or `definitions` map are
+ * disclosed. Past this the remainder is omitted, and an object that omitted
+ * any of its properties reports `additionalProperties: true` — the schema
+ * vocabulary's own way of saying there are further properties here this shape
+ * does not name. A reader of a truncated shape therefore sees the names it can
+ * write code against and an explicit statement that the list is not the whole
+ * of them; it never sees a short list presented as complete.
+ *
+ * 200 is far above what an authored schema declares on a single object — a
+ * pattern's result schema and a document's schema run to a handful of fields,
+ * a generated one to a few dozen — and far below a count at which one object's
+ * property names could crowd out a model's context. This is a
+ * denial-of-context guard, not a security boundary: property names are
+ * disclosed on purpose, and the bound only stops an unbounded number of them
+ * from being disclosed at once. It bounds one map, not the whole shape;
+ * nesting still multiplies, to the {@link MAX_SHAPE_DEPTH} levels of it the
+ * walk describes.
+ */
+export const MAX_DISCLOSED_PROPERTIES = 200;
+
+/**
+ * How long a single disclosed property name may be, in UTF-16 code units. A
+ * longer name is OMITTED rather than truncated, and its omission is reported
+ * the way any other omission is, through `additionalProperties: true`. A
+ * truncated name is the name of nothing: an agent writing code against it
+ * would read a field that does not exist, which is worse than an agent that
+ * can see a field is there and unnamed.
+ *
+ * 128 code units is an order of magnitude beyond the longest field name
+ * anything here declares, and short enough that a name cannot be repurposed as
+ * the prose channel a shape-only disclosure exists to close.
+ */
+export const MAX_PROPERTY_NAME_LENGTH = 128;
 
 /**
  * Reduces `schema` to structure, dropping every keyword outside the
@@ -309,19 +357,37 @@ const reduceSchema = (
       const children = source[key];
       if (isSchemaRecord(children as JSONSchema)) {
         const reduced: Record<string, JSONSchema> = {};
+        let disclosed = 0;
+        let omitted = false;
         for (
           const [name, child] of Object.entries(
             children as Record<string, JSONSchema>,
           )
         ) {
+          if (
+            disclosed >= MAX_DISCLOSED_PROPERTIES ||
+            name.length > MAX_PROPERTY_NAME_LENGTH
+          ) {
+            omitted = true;
+            continue;
+          }
           Object.defineProperty(reduced, name, {
             value: reduceSchema(child, active, names, depth + 1),
             writable: true,
             enumerable: true,
             configurable: true,
           });
+          disclosed += 1;
         }
         shape[key] = reduced;
+        if (omitted) {
+          // Written after the `additionalProperties` the subschema pass may
+          // have put here, and deliberately over it: what the disclosed shape
+          // has to say at this point is that it does not name every property,
+          // which is true whatever the source schema said about undeclared
+          // ones.
+          shape.additionalProperties = true;
+        }
       }
     }
 
@@ -329,16 +395,16 @@ const reduceSchema = (
       const children = source[key];
       if (isSchemaRecord(children as JSONSchema)) {
         const reduced: Record<string, JSONSchema> = {};
-        Object.values(children as Record<string, JSONSchema>).forEach(
-          (child, index) => {
+        Object.values(children as Record<string, JSONSchema>)
+          .slice(0, MAX_DISCLOSED_PROPERTIES)
+          .forEach((child, index) => {
             reduced[canonicalDefinitionName(index)] = reduceSchema(
               child,
               active,
               names,
               depth + 1,
             );
-          },
-        );
+          });
         shape[key] = reduced;
       }
     }

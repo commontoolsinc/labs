@@ -11,7 +11,7 @@ import {
   matchLLMFriendlyLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
-import { assignSlug } from "@commonfabric/piece";
+import { assignSlug, resolvePieceAddress } from "@commonfabric/piece";
 import {
   PieceController,
   type PiecesController,
@@ -169,7 +169,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         required: ["slug"],
         additionalProperties: false,
         description:
-          "Ask for the piece to be registered in the space's piece list at this address, so a person can open it. Omit it and the piece stays out of the list, which is what pure computation wants. The output then carries `registration.slug` and, when the space is configured by name, `registration.url` — the link to hand a person. To give the piece a title in that list, set `NAME` in the pattern source; nothing outside the pattern writes it.",
+          "Ask for the piece to be registered in the space's piece list at this address, so a person can open it. Omit it and the piece stays out of the list, which is what pure computation wants. A slug that already names a piece is refused rather than repointed, so pick an unused one. The output then carries `registration.slug` and, when the space is configured by name, `registration.url` — the link to hand a person. To give the piece a title in that list, set `NAME` in the pattern source; nothing outside the pattern writes it.",
       },
     },
     required: ["sourceText"],
@@ -369,6 +369,38 @@ const parseRegistrationSlug = (
 };
 
 /**
+ * Whether `slug` already names a piece in the session's space.
+ *
+ * Assignment is a blind write: the slug document is pointed at the new piece
+ * whatever it held before, and last writer wins. So without asking first, a
+ * `register` request naming a slug a person already opens would repoint that
+ * name at whatever the model just wrote.
+ *
+ * A slug that resolves to nothing is free, and so is one whose document
+ * resolves to something that is not a piece — `resolvePieceAddress` refuses
+ * both the same way, and a registration only ever competes with a piece.
+ */
+const slugNamesAPiece = async (
+  pieces: PiecesController,
+  slug: string,
+): Promise<boolean> => {
+  try {
+    await resolvePieceAddress(pieces, slug);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * What the model is told when the slug it asked for is already in use. A
+ * model-correctable error: it names the slug and says what to do instead, and
+ * the run persists nothing.
+ */
+const takenSlugRefusal = (slug: string): string =>
+  `run_pattern register slug "${slug}" already names a piece in this space, and registering would repoint that address at the new piece. Choose another slug, or omit \`register\` to leave the piece unlisted.`;
+
+/**
  * The URL a person opens for a registered piece, or `undefined` when none can
  * be composed without inventing one. The address is the session's API URL,
  * then the space, then the slug — the same shape `cf piece new` prints. Only a
@@ -488,6 +520,24 @@ export const runPatternTool: HarnessToolDefinition<
     const signal = context.signal;
     if (signal?.aborted) {
       return cancelledOutput();
+    }
+    // Availability is asked as soon as there is a session to ask, and before
+    // anything is compiled or created, so a taken slug costs a refusal and
+    // nothing else.
+    //
+    // Resolution and assignment are not atomic, and nothing here makes them
+    // so: a slug that becomes taken between this check and the assignment
+    // below is still overwritten by it. This is a check, not a lock. It
+    // refuses the case that arises — a model asking for a name already in use
+    // — and it does not close a race against a writer working concurrently in
+    // the same space.
+    if (registrationSlug !== undefined) {
+      if (await slugNamesAPiece(pieces, registrationSlug)) {
+        return errorOutput("error", takenSlugRefusal(registrationSlug));
+      }
+      if (signal?.aborted) {
+        return cancelledOutput();
+      }
     }
     // Whole-string LLM-friendly links become live cell references; the
     // prompt loop has already resolved any handle tokens, so the strings

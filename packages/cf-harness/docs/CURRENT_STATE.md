@@ -93,8 +93,13 @@ The current package provides:
   harness-derived schema the mint recorded. Whatever the source, the reported
   schema is rebuilt from an allowlist of structural keywords at every depth, so
   `const`, `enum`, `default`, `examples`, and free-text annotations never leave
-  the tool. Disclosing shape is a policy-governed read whose current default is
-  permissive, bounded to addresses in the session's own space;
+  the tool. Property names do cross, since code cannot be written over data
+  without them, so they are bounded in count and length and the model-facing
+  reply is scrubbed of bare fabric identifiers at every depth, keys included.
+  Disclosing shape is a policy-governed read whose current default is
+  permissive, bounded to addresses in the session's own space; answering from
+  the fabric establishes the run's fabric session despite the tool's `read`
+  effect class;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
   environment fallbacks): compiles and runs an inline `sourceText` pattern
@@ -103,17 +108,18 @@ The current package provides:
   construction; passes whole-string LLM-friendly link inputs as live cells,
   refusing links into another space, inputs the compiled pattern declares no
   argument for, input values that carry a sealed opaque link anywhere within
-  them, and values that mismatch the compiled argument schema whether a live
-  cell or plain JSON supplies them, all before any piece exists; honors the
+  them, values that mismatch the compiled argument schema whether a live cell or
+  plain JSON supplies them, and a `register` slug that is unusable or that
+  already names a piece in the space, all before any piece exists; honors the
   run's abort signal by stopping the created piece and returning a structured
   `cancelled` error; scrubs bare fabric identifiers from model-facing
   diagnostics; returns the result cell's canonical reference plus an optionally
-  schema-sanitized value, and leaves the piece detached (no recorded origin) and
-  out of the space's registered piece list, with run→piece provenance carried by
-  the run's persisted artifacts; without the session configuration the tool is
-  absent from the tool surface, for a `default`- or `pattern-author`-profile
-  subagent as much as for the parent — a child shares the one session the parent
-  built;
+  schema-sanitized value, and leaves the piece detached (no recorded origin)
+  and, unless `register` asked for a named address, out of the space's
+  registered piece list, with run→piece provenance carried by the run's
+  persisted artifacts; without the session configuration the tool is absent from
+  the tool surface, for a `default`- or `pattern-author`-profile subagent as
+  much as for the parent — a child shares the one session the parent built;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable
