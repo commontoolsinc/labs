@@ -599,7 +599,8 @@ Diagnostics emitted in all modes:
     `computed(() => ...)`, module-scope `lift()`, or a helper.
 - **Error** `pattern-context:patterntool-requires-pattern`
   - `patternTool(fn, ...)` where the first argument is a bare callback (arrow /
-    function expression) rather than a `pattern(...)`. The runtime/transformer
+    function expression, read through transparent parentheses) rather than a
+    `pattern(...)`. The runtime/transformer
     auto-wrapping (`pattern(fn)`) and auto-capture were removed in CT-1655;
     authors now wrap explicitly: `patternTool(pattern(fn), extraParams?)`. The
     diagnostic is reported on the bare-callback argument.
@@ -1015,6 +1016,10 @@ Transform eligibility:
   the read itself is the thing being lowered, and the expression-site
   machinery owns it (§6.5); inside standalone hardened functions the eager
   `<cell>.get().filter(...)` spelling stays untouched plain JavaScript
+- the inline callback argument is read through transparent parentheses:
+  `receiver.map(((r) => ...))` lowers exactly like the bare spelling
+  (target-language spec §5.7 paren-invariance; fixture
+  `map-paren-wrapped-callback` pins the emission)
 - transformed callbacks are marked in `mapCallbackRegistry` and become
   pattern-callback contexts for downstream classification
 - synthetic compute-owned array-method nodes assert that stale pattern ownership

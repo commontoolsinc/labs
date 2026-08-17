@@ -125,7 +125,7 @@ function rewriteAssertCall(
   node: ts.CallExpression,
   context: TransformationContext,
 ): ts.Node | undefined {
-  const callback = node.arguments[0];
+  const callback = node.arguments[0] && unwrapExpression(node.arguments[0]);
   if (
     !callback ||
     (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))

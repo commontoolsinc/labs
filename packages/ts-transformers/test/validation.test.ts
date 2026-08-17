@@ -4414,6 +4414,29 @@ Deno.test("Standalone Function Validation", async (t) => {
   );
 
   await t.step(
+    "errors when patternTool's first argument is a parenthesized bare callback",
+    async () => {
+      const source =
+        `      import { patternTool, computed, Cell } from "commonfabric";
+
+      declare const multiplier: Cell<number>;
+
+      const tool = patternTool((({ query }: { query: string }) => {
+        return computed(() => query.length * multiplier.get());
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(
+        errors,
+        "pattern-context:patterntool-requires-pattern",
+      );
+    },
+  );
+
+  await t.step(
     "keeps unresolved patternTool callbacks in compute context",
     async () => {
       const source = `      const helpers: Record<string, unknown> = {};

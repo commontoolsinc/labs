@@ -3751,7 +3751,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "builder" && callKind.builderName === "lift") {
         const factory = transformation.factory;
 
-        const firstArgument = node.arguments[0];
+        const firstArgument = node.arguments[0] &&
+          unwrapExpression(node.arguments[0]);
         if (firstArgument && isToSchemaCall(firstArgument)) {
           const argumentType = firstArgument.typeArguments?.[0];
           const liftCallback = resolveFunctionLikeExpression(
