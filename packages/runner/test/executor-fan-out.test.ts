@@ -653,6 +653,8 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // Both type a draft; only ALICE sets her flag.
     await setup.writeDraft(alice, "A");
     await setup.writeDraft(bob, "B");
+    const traceBeforeFlag = servingRuntime!.scheduler.getActionRunTrace()
+      .length;
     {
       const arg = alice.getCell<{ flag: boolean }>(
         space,
@@ -666,17 +668,83 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       await alice.idle();
       await alice.storageManager.synced();
     }
-    // THE COVERAGE: Alice's guarded value exists server-side under HER
-    // instance — the walk, running as Alice, followed her `view` into
-    // the guarded computed and pulled it. A single service walk (the
-    // pre-stage-B sink) stopped at the first redirect: `view` for the
-    // service is 'off', and the guarded subtree was live for nobody.
+    // THE COVERAGE, two halves. (1) Alice's guarded value exists
+    // server-side under HER instance: the guarded computed was PULLED
+    // live by a run reading as Alice — her instance of `view` (the
+    // ifElse), or her instance of the walk — and then ran for her. A
+    // single service run (the pre-stage-B sink) stopped at the first
+    // redirect: `view` for the service is 'off', and the guarded
+    // subtree was live for nobody.
     await waitUntil(
       () => instanceHolds(engine, aliceKey, '"guarded:A"'),
       () =>
         "alice's guarded value under her instance (rows: " +
         JSON.stringify([...rowsUnder(engine, aliceKey).values()]) + ")",
     );
+    // (2) The WALK itself runs per demander (design §B4: an effect node
+    // whose demand root is the watched root, fanned out by the ordinary
+    // supply): its reads follow EACH demander's redirects, so it narrows
+    // like any node and the trace shows the result root's walk stamped
+    // with Alice's key and with Bob's (the probe run that discovered
+    // the narrowing is stamped `space` and re-keyed clean as the min
+    // demander's instance, so the FIRST keyed run of that demander
+    // arrives with their next dirtiness — Alice's flag write here — a
+    // moment after the value it re-walks; the wait is bounded). A walk
+    // registered without its demand root (the mutation this half kills)
+    // runs once, unkeyed, as the service — and reaches per-user
+    // structure only when a client happens to dereference it first.
+    // A further keyed change under Alice's chain — her draft — that her
+    // walk instance (which now reads `guarded` through her `view`) must
+    // observe: her instance re-runs keyed even if the flag cascade's
+    // re-run raced the wait above.
+    await setup.writeDraft(alice, "A2");
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"guarded:A2"'),
+      "alice's second draft under her instance",
+    );
+    const resultWalk = `demand-walk:${space}/${setup.resultId}`;
+    const resultWalkKeys = () =>
+      new Set(
+        servingRuntime!.scheduler.getActionRunTrace()
+          .filter((entry) => entry.actionId === resultWalk)
+          .map((entry) => entry.instanceKey),
+      );
+    const short = (key: string | undefined) =>
+      key === aliceKey ? "alice" : key === bobKey ? "bob" : key ?? "∅";
+    await waitUntil(
+      () => resultWalkKeys().has(aliceKey) && resultWalkKeys().has(bobKey),
+      () => {
+        // On failure: the walk node's fan-out record and every run since
+        // the flag write (which instance ran, what it wrote).
+        const state = servingRuntime!.scheduler.fanOutStateOf(resultWalk);
+        const since = servingRuntime!.scheduler.getActionRunTrace()
+          .slice(traceBeforeFlag).map((entry) => [
+            entry.actionId.startsWith("demand-walk:")
+              ? "walk:" + entry.actionId.slice(-8)
+              : entry.actionId.slice(0, 40),
+            short(entry.instanceKey),
+            entry.actualWrites.map((w) =>
+              w.entityId.slice(-8) + "/" + w.path.join(".")
+            ).join(","),
+          ]);
+        return "the result root's walk to have run as BOTH demanders (keys " +
+          `so far: ${JSON.stringify([...resultWalkKeys()].map(short))}; ` +
+          `node: ${
+            state === undefined ? "no fan-out record" : JSON.stringify({
+              narrowed: state.narrowed,
+              instances: state.instanceKeys.map(short),
+              clean: state.cleanKeys.map(short),
+            })
+          }; runs since the flag write: ${JSON.stringify(since)})`;
+      },
+    );
+    const walkKeys = resultWalkKeys();
+    console.log(
+      `[walk coverage] result-walk instance keys: ${
+        JSON.stringify([...walkKeys].map(short))
+      }`,
+    );
+    expect(walkKeys.has(undefined)).toBe(false);
     // Never Bob's value in Alice's instance.
     expect(instanceHolds(engine, aliceKey, '"guarded:B"')).toBe(false);
     // Bob's `view` is 'off'; his instance of the guarded node — if it
