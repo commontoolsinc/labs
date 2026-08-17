@@ -320,6 +320,15 @@ describe("BaseCodecEngine", () => {
       expect(innerResult).toBeDefined();
     });
 
+    it("carries the live environment on the encode context", () => {
+      const { engine } = newProbeEngine();
+      const probe = engine as unknown as {
+        newEncodeContext(env: unknown): { env: unknown };
+      };
+
+      expect(probe.newEncodeContext(ENV).env).toBe(ENV);
+    });
+
     it("carries the live environment on the decode context", () => {
       const { engine } = newProbeEngine();
       const probe = engine as unknown as {

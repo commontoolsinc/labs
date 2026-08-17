@@ -2527,16 +2527,18 @@ factory the engine's subclass supplies:
 // file: packages/data-model/codec-common/BaseCodecEngine.ts
 
 abstract class ExampleEngine {
-  protected abstract newEncodeContext(): EncodeContext;
+  protected abstract newEncodeContext(
+    env: LiveEnvironment,
+  ): EncodeContext;
   protected abstract newDecodeContext(
     env: LiveEnvironment,
   ): DecodeContext;
 }
 ```
 
-The context is what the walk threads from node to node: the values whose
-encoding or decoding is in progress, and on the decode side the caller's
-`LiveEnvironment`. Holding it per call rather than on the engine is what lets
+The context is what the walk threads from node to node: the caller's
+`LiveEnvironment`, and the values whose encoding or decoding is in
+progress. Holding it per call rather than on the engine is what lets
 a codec reach back through a public entry point while a walk is already
 running — the inner act gets its own bookkeeping instead of corrupting the
 outer one's. A format needing more than the base class knows about, such as a

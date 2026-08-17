@@ -21,6 +21,7 @@ import type {
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { DecodeContext } from "@/codec-common/DecodeContext.ts";
 import { EncodeContext } from "@/codec-common/EncodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
@@ -292,8 +293,11 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
   // Instance members
   //
 
-  override encode(value: FabricValue): ProbeValue {
-    return this.encodeValue(value, this.newEncodeContext());
+  override encode(
+    value: FabricValue,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): ProbeValue {
+    return this.encodeValue(value, this.newEncodeContext(env));
   }
 
   override decode(
@@ -304,8 +308,8 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
   }
 
   /** @inheritDoc */
-  protected override newEncodeContext(): EncodeContext {
-    return new EncodeContext();
+  protected override newEncodeContext(env: LiveEnvironment): EncodeContext {
+    return new EncodeContext(env);
   }
 
   /**

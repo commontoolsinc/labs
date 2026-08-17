@@ -6,6 +6,7 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { DecodeContext } from "@/codec-common/DecodeContext.ts";
 import { EncodeContext } from "@/codec-common/EncodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { CODEC, type LiveEnvironment } from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
@@ -42,8 +43,8 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   //
 
   /** @inheritDoc */
-  protected override newEncodeContext(): EncodeContext {
-    return new EncodeContext();
+  protected override newEncodeContext(env: LiveEnvironment): EncodeContext {
+    return new EncodeContext(env);
   }
 
   /**
@@ -63,9 +64,12 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * Walks the value into the `/<Type>@<Version>` tagged tree, stringifies it,
    * and prefixes the format tag.
    */
-  override encode(value: FabricValue): string {
+  override encode(
+    value: FabricValue,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): string {
     return ENCODING_PREFIX_TAG +
-      JSON.stringify(this.encodeValue(value, this.newEncodeContext()));
+      JSON.stringify(this.encodeValue(value, this.newEncodeContext(env)));
   }
 
   /**
@@ -93,9 +97,12 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   }
 
   /** Encodes a fabric value to UTF-8 JSON bytes. */
-  encodeToBytes(value: FabricValue): Uint8Array {
+  encodeToBytes(
+    value: FabricValue,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): Uint8Array {
     return JsonCodecEngine.#toBytes(
-      this.encodeValue(value, this.newEncodeContext()),
+      this.encodeValue(value, this.newEncodeContext(env)),
     );
   }
 

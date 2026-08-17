@@ -100,7 +100,7 @@ export abstract class BaseCodecEngine<
    *   `FabricSpecialObject` whose class no codec in the registry claims, a
    *   cycle, or an object that is no kind of `FabricValue` at all.
    */
-  abstract encode(value: FabricValue): SerializedForm;
+  abstract encode(value: FabricValue, env?: LiveEnvironment): SerializedForm;
 
   /**
    * Decodes this format's serialized form back into a fabric value.
@@ -177,11 +177,12 @@ export abstract class BaseCodecEngine<
   ): FabricValue;
 
   /**
-   * Constructs the context for one act of encoding. Called once per
-   * `encode()`, and the hook by which a format carries more through its walk
-   * than the base class knows about.
+   * Constructs the context for one act of encoding, around the live
+   * environment the caller gave. Called once per `encode()`, and the hook by
+   * which a format carries more through its walk than the base class knows
+   * about.
    */
-  protected abstract newEncodeContext(): EncCtx;
+  protected abstract newEncodeContext(env: LiveEnvironment): EncCtx;
 
   /**
    * Constructs the context for one act of decoding, around the live
