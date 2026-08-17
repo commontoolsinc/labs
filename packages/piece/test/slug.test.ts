@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import {
-  type CommitError,
-  entityIdFrom,
-  Runtime,
-  type URI,
-} from "@commonfabric/runner";
+import { entityIdFrom, Runtime, type URI } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
@@ -15,7 +10,6 @@ import { pieceId } from "../src/piece-id.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import {
   assignSlug,
-  releaseSlug,
   resolvePieceAddress,
   resolveSlugTargetCell,
   setSlugLink,
@@ -53,13 +47,6 @@ describe("piece slugs", () => {
       { value },
     ) => ({ value }));
     return await pieces.runPersistent(piecePattern, { value: 1 }, cause);
-  }
-
-  function slugCellFor(slug: string) {
-    return runtime.getCellFromEntityId(
-      pieces.getSpace(),
-      entityIdFrom(slugIdForSpace(pieces.getSpace(), slug)),
-    );
   }
 
   function readRootMeta(id: string, key: string): unknown {
@@ -229,131 +216,6 @@ describe("piece slugs", () => {
     await assignSlug(pieces, second, "demo");
 
     expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(second));
-  });
-
-  it("clears an assigned slug back to not found", async () => {
-    const piece = await createPiece("slug-release-target");
-    await assignSlug(pieces, piece, "demo");
-    // The assignment really landed, so the rejection below is a clear rather
-    // than a name that was never taken.
-    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(piece));
-
-    await releaseSlug(pieces, "demo", piece);
-
-    await expect(resolvePieceAddress(pieces, "demo")).rejects.toThrow(
-      /Slug "demo" not found/,
-    );
-  });
-
-  it("leaves a slug that now redirects elsewhere alone", async () => {
-    const first = await createPiece("slug-release-first");
-    const second = await createPiece("slug-release-second");
-    await assignSlug(pieces, first, "demo");
-    await assignSlug(pieces, second, "demo");
-
-    await releaseSlug(pieces, "demo", first);
-
-    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(second));
-  });
-
-  it("returns `undefined` as the replaced value for a name that held nothing", async () => {
-    const piece = await createPiece("slug-replaced-free");
-
-    const assignment = await assignSlug(pieces, piece, "demo");
-
-    expect(assignment.replaced).toBe(undefined);
-  });
-
-  it("returns the redirect it overwrote as the replaced value", async () => {
-    const first = await createPiece("slug-replaced-first");
-    const second = await createPiece("slug-replaced-second");
-    await assignSlug(pieces, first, "demo");
-    const heldByFirst = slugCellFor("demo").getRawUntyped();
-
-    const assignment = await assignSlug(pieces, second, "demo");
-
-    expect(assignment.replaced).toEqual(heldByFirst);
-  });
-
-  it("clears the slug when released with what an assignment to a free name replaced", async () => {
-    const piece = await createPiece("slug-restore-free");
-    const assignment = await assignSlug(pieces, piece, "demo");
-    // The assignment really landed, so the rejection below is a clear rather
-    // than a name that was never taken.
-    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(piece));
-
-    await releaseSlug(pieces, "demo", piece, {
-      restore: assignment.replaced,
-    });
-
-    await expect(resolvePieceAddress(pieces, "demo")).rejects.toThrow(
-      /Slug "demo" not found/,
-    );
-  });
-
-  it("restores another writer's redirect when released with what the assignment replaced", async () => {
-    const other = await createPiece("slug-restore-other");
-    const ours = await createPiece("slug-restore-ours");
-    // The name is taken between the availability check and the assignment,
-    // so the assignment below overwrites an address that is not its own.
-    await assignSlug(pieces, other, "demo");
-    const heldByOther = slugCellFor("demo").getRawUntyped();
-
-    const assignment = await assignSlug(pieces, ours, "demo");
-    // The clobber really happened, so the restore below gives something back
-    // rather than reinstating a redirect that was never displaced.
-    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(ours));
-
-    await releaseSlug(pieces, "demo", ours, { restore: assignment.replaced });
-
-    expect(slugCellFor("demo").getRawUntyped()).toEqual(heldByOther);
-    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(other));
-  });
-
-  it("leaves a same-target link that is not a write redirect alone", async () => {
-    const piece = await createPiece("slug-release-plain-link");
-    const slugCell = slugCellFor("demo");
-    // A plain link points where this piece's redirect would point, so the
-    // release is decided by the shape of the link rather than its target.
-    await runtime.editWithRetry((tx) => {
-      const slugWithTx = slugCell.withTx(tx);
-      slugWithTx.setRawUntyped(
-        piece.withTx(tx).getAsLink({ base: slugWithTx }),
-      );
-    });
-    const planted = slugCell.getRawUntyped();
-
-    await releaseSlug(pieces, "demo", piece);
-
-    expect(slugCell.getRawUntyped()).toEqual(planted);
-  });
-
-  it("returns the error when the clear's commit is rejected", async () => {
-    const piece = await createPiece("slug-release-rejected");
-    await assignSlug(pieces, piece, "demo");
-
-    const rejection: CommitError = {
-      name: "StorageTransactionAborted",
-      message: "commit refused",
-      reason: undefined,
-    };
-    const originalEdit = runtime.editWithRetry.bind(runtime);
-    runtime.editWithRetry = (() =>
-      Promise.resolve({
-        ok: undefined,
-        error: rejection,
-      })) as Runtime["editWithRetry"];
-    let released: Awaited<ReturnType<typeof releaseSlug>>;
-    try {
-      released = await releaseSlug(pieces, "demo", piece);
-    } finally {
-      runtime.editWithRetry = originalEdit;
-    }
-
-    expect(released.error?.message).toBe("commit refused");
-    // And the name really is still assigned, which is what a caller trusting
-    // a silent resolution would have been wrong about.
-    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(piece));
   });
 
   it("reports missing and malformed slug documents", async () => {

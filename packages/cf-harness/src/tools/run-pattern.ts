@@ -13,11 +13,9 @@ import {
 } from "@commonfabric/runner/shared";
 import {
   assignSlug,
-  releaseSlug,
   resolvePieceAddress,
   SlugResolutionError,
 } from "@commonfabric/piece";
-import type { SlugAssignment } from "@commonfabric/piece";
 import {
   PieceController,
   type PiecesController,
@@ -513,8 +511,19 @@ export const runPatternTool: HarnessToolDefinition<
       status: RunPatternToolErrorOutput["status"],
       message: string,
     ): RunPatternToolErrorOutput => ({ outputId, status, message });
-    const cancelledOutput = (): RunPatternToolErrorOutput =>
-      errorOutput("cancelled", "run_pattern was cancelled");
+    /**
+     * `detail` is what the cancellation left behind that the caller would
+     * otherwise have to discover by looking: a durable effect the run had
+     * already made and does not undo. The cancelled output carries no fields
+     * beyond `message`, so it is said there.
+     */
+    const cancelledOutput = (detail?: string): RunPatternToolErrorOutput =>
+      errorOutput(
+        "cancelled",
+        detail === undefined
+          ? "run_pattern was cancelled"
+          : `run_pattern was cancelled; ${detail}`,
+      );
     if (context.getFabricSession === undefined) {
       return errorOutput(
         "error",
@@ -787,6 +796,10 @@ export const runPatternTool: HarnessToolDefinition<
     // run's outcome. An abort during it is not: the caller asked to stop, so
     // the piece is stopped, whatever it had joined is undone, and the run
     // reports `cancelled`, exactly as an abort during the settle barrier does.
+    // A slug assignment already under way is the one thing the abort does not
+    // undo — the redirect it writes carries no mark saying which caller wrote
+    // it, so nothing could tell this run's assignment from an identical one a
+    // later writer made — and the cancelled output names the slug instead.
     let registration: RunPatternRegistration | undefined;
     let registrationError: string | undefined;
     if (registrationSlug !== undefined) {
@@ -797,9 +810,15 @@ export const runPatternTool: HarnessToolDefinition<
       // Set by the cancellation path before it returns. Losing the race does
       // not stop the publishing continuation — it keeps running after the
       // cancelled output is handed back — so the continuation reads this mark
-      // at each point it is between operations, and a cancelled run neither
-      // takes the slug nor leaves the piece listed.
+      // at each point it is between operations, so a cancelled run leaves the
+      // piece unlisted and starts no assignment it had not already started.
       let cancelled = false;
+      // Set as the assignment is entered, and read by the cancellation path,
+      // which cannot wait for an assignment in flight to find out how it
+      // ended without going back behind the operation the abort escaped.
+      // Nothing withdraws the assignment, so the name the run had begun
+      // taking is a name it keeps.
+      let slugAssignmentBegun = false;
       const publishing = (async () => {
         try {
           // The registry join goes first, so a space with no piece list to
@@ -815,61 +834,11 @@ export const runPatternTool: HarnessToolDefinition<
             await pieces.remove(piece.getCell());
             return;
           }
-          // What the name held at the instant this run took it. Stays
-          // undefined when the assignment never reported, which is also when
-          // it wrote nothing there is anything to give back.
-          let assignment: SlugAssignment | undefined;
-          try {
-            assignment = await assignSlug(
-              pieces,
-              piece.getCell(),
-              registrationSlug,
-            );
-          } finally {
-            // The abort can land while the assignment is in flight, and the
-            // cancellation path does not wait to find out how it ended — that
-            // would put it back behind the operation it escaped. So the
-            // continuation, which is already behind it, gives back the name
-            // the assignment may have taken. The availability check found the
-            // name free, but it is a check rather than a claim: a concurrent
-            // writer can take the name between the check and the assignment,
-            // and the assignment then overwrites their redirect. So what the
-            // name is restored to is what the assignment itself replaced —
-            // nothing, in the ordinary case where the name really was free,
-            // and that writer's own redirect otherwise, because a run
-            // cleaning up after itself must not delete somebody else's
-            // address on the way out. `releaseSlug` writes nothing when the
-            // document does not hold this run's redirect, so an assignment
-            // that never landed and a name a later writer has taken are both
-            // left as they are.
-            if (cancelled) {
-              const releaseFailure = await releaseSlug(
-                pieces,
-                registrationSlug,
-                piece.getCell(),
-                { restore: assignment?.replaced },
-              ).then(
-                ({ error }) => error === undefined ? undefined : error.message,
-                errorMessage,
-              );
-              if (releaseFailure !== undefined && assignment !== undefined) {
-                // The run still reports `cancelled`: the caller asked it to
-                // stop, and the verdict on the cleanup behind that is not an
-                // answer to the question they asked. But a name this run is
-                // still holding after saying it stopped is a fact about the
-                // space that nothing else will surface, so it is reported
-                // here rather than passing for a rollback that happened.
-                //
-                // Reported only where the assignment itself reported, which
-                // is where the name is known to be this run's to give back.
-                // An assignment that never got that far took nothing a failed
-                // release is leaving behind.
-                console.warn(
-                  `run_pattern: cancelled run could not release slug "${registrationSlug}": ${releaseFailure}`,
-                );
-              }
-            }
-          }
+          // Marked and entered together, with no await between them, so the
+          // cancellation path never reads `false` for an assignment that has
+          // started.
+          slugAssignmentBegun = true;
+          await assignSlug(pieces, piece.getCell(), registrationSlug);
         } catch (error) {
           failure = { error };
         }
@@ -884,16 +853,19 @@ export const runPatternTool: HarnessToolDefinition<
             // Stopping a piece leaves it in the list it joined — removal is a
             // separate operation — so the cancellation path performs it. A
             // cancelled run hands back no `resultRef`, so a piece left listed
-            // under no slug is one the caller was given no way to reach. An
-            // abort landing inside the slug assignment reaches here too: the
-            // piece is removed from the list here, and the continuation clears
-            // the slug once the assignment it is behind has settled.
+            // under no slug is one the caller was given no way to reach —
+            // except where the abort landed inside the slug assignment, whose
+            // name goes on reaching it, which is why the output below says so.
             await pieces.remove(piece.getCell());
           } catch {
             // Best-effort: the cancelled output stands either way.
           }
         }
-        return cancelledOutput();
+        return cancelledOutput(
+          slugAssignmentBegun
+            ? `the name "${registrationSlug}" was already being assigned and is not withdrawn, so it resolves to the created piece, which is stopped and no longer listed`
+            : undefined,
+        );
       }
       if (failure !== undefined) {
         registrationError = errorMessage(failure.error);

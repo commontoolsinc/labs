@@ -850,9 +850,21 @@ the signal is the only cancellation source — there is no timeout. Stopping a
 piece does not remove it from the space's piece list, so an abort that lands
 between the registry join and the slug assignment removes it too: a cancelled
 run hands back no `resultRef`, so a piece left listed under no slug would be one
-nothing addresses. The one join that is not undone is one still in flight when
-the abort won, which is not known to have happened and cannot be waited on
-without putting the cancellation back behind the operation it escaped.
+nothing addresses. A join still in flight when the abort won is undone by the
+publishing continuation instead, which reads the cancellation mark the moment
+the join returns, so exactly one of the two paths performs the removal.
+
+A slug assignment already under way when the abort lands is the one durable
+effect a cancelled run does not undo, and the `cancelled` message names the slug
+so a person is told rather than left to discover it. The redirect an assignment
+writes is a pure function of its target and the slug document it is based on, so
+two writers pointing the same name at the same piece write byte-identical
+values, and the document carries no per-assignment identity by which a
+withdrawal could tell this run's assignment from a later writer's. Recording one
+would mean a marker inside a shared on-disk format kept solely for a cleanup
+path, so the assignment stands: the name goes on resolving to the created piece,
+which is stopped and no longer listed. This matches how cancellation treats the
+run's other durable effects — the piece itself is stopped, never deleted.
 
 `register` is how a run publishes its result to a person. It takes one required
 field, `slug` — the named address the piece is reachable at, in the same

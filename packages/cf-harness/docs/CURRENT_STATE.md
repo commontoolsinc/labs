@@ -111,15 +111,19 @@ The current package provides:
   them, values that mismatch the compiled argument schema whether a live cell or
   plain JSON supplies them, and a `register` slug that is unusable or that
   already names a piece in the space, all before any piece exists; honors the
-  run's abort signal by stopping the created piece and returning a structured
-  `cancelled` error; scrubs bare fabric identifiers from model-facing
-  diagnostics; returns the result cell's canonical reference plus an optionally
-  schema-sanitized value, and leaves the piece detached (no recorded origin)
-  and, unless `register` asked for a named address, out of the space's
-  registered piece list, with run→piece provenance carried by the run's
-  persisted artifacts; without the session configuration the tool is absent from
-  the tool surface, for a `default`- or `pattern-author`-profile subagent as
-  much as for the parent — a child shares the one session the parent built;
+  run's abort signal by stopping the created piece, removing it from the space's
+  piece list if it had joined, and returning a structured `cancelled` error that
+  names a slug the assignment had already begun taking — that assignment is not
+  withdrawn, because its redirect carries no per-assignment identity a
+  withdrawal could match, so the name keeps resolving to the created piece;
+  scrubs bare fabric identifiers from model-facing diagnostics; returns the
+  result cell's canonical reference plus an optionally schema-sanitized value,
+  and leaves the piece detached (no recorded origin) and, unless `register`
+  asked for a named address, out of the space's registered piece list, with
+  run→piece provenance carried by the run's persisted artifacts; without the
+  session configuration the tool is absent from the tool surface, for a
+  `default`- or `pattern-author`-profile subagent as much as for the parent — a
+  child shares the one session the parent built;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable

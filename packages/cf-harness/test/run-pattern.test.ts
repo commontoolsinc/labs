@@ -991,12 +991,14 @@ describe("run-pattern", () => {
         .toThrow();
     });
 
-    it("leaves the registration slug resolving to nothing when the signal aborts while the slug assignment is in flight", async () => {
-      // The window the cancellation path cannot cover on its own: the
-      // assignment is already under way when the abort lands, and waiting for
-      // it there would put the cancellation path back behind the operation the
-      // abort escaped. So the assignment commits after the cancelled output,
-      // and the continuation behind it clears the name it took.
+    it("names the slug it kept in the cancelled output when the abort lands inside the assignment", async () => {
+      // The one durable effect a cancelled run does not undo. The redirect an
+      // assignment writes is a pure function of the target and the slug
+      // document, so nothing in it says which caller wrote it, and a
+      // withdrawal could not tell this run's assignment from an identical one
+      // a later writer made. The name goes on resolving to the created piece,
+      // and the output says so rather than leaving a person to find out by
+      // opening it.
       const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
         input: { pieceRegistry: [] },
       });
@@ -1011,11 +1013,11 @@ describe("run-pattern", () => {
       const toolReturned = new Promise<void>((resolve) => {
         releaseAssignment = resolve;
       });
-      // Resolves once the continuation's clear has committed, so the
-      // assertions read the state it left rather than one it has not reached.
-      let clearLanded!: () => void;
-      const slugCleared = new Promise<void>((resolve) => {
-        clearLanded = resolve;
+      // Resolves once the held write has committed, so the assertions read
+      // the state the assignment left rather than one it has not reached.
+      let assignmentLanded!: () => void;
+      const assignmentCommitted = new Promise<void>((resolve) => {
+        assignmentLanded = resolve;
       });
 
       const slugEntity = JSON.stringify(
@@ -1025,15 +1027,13 @@ describe("run-pattern", () => {
       // check's own read of the slug document earlier in the run is not
       // mistaken for the assignment's.
       let armed = false;
-      let phase: "assigning" | "releasing" | "done" = "assigning";
+      let createdPieceId: string | undefined;
       let holdAssignmentEdit = false;
-      let clearEditPending = false;
-      let slugCell: { getRawUntyped: () => unknown } | undefined;
-      let rawBeforeClear: unknown;
 
       const originalAdd = pieces.add.bind(pieces);
       pieces.add = async (cells) => {
         await originalAdd(cells);
+        createdPieceId = pieceId(cells[0]);
         armed = true;
       };
       const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
@@ -1041,20 +1041,13 @@ describe("run-pattern", () => {
         ...args: Parameters<Runtime["getCellFromEntityId"]>
       ) => {
         const cell = originalGetCell(...args);
-        if (!armed || JSON.stringify(args[1]) !== slugEntity) {
-          return cell;
-        }
-        if (phase === "assigning") {
+        if (armed && JSON.stringify(args[1]) === slugEntity) {
           // `setSlugLink` fetches the slug document and then, with no await in
           // between, opens the transaction that writes it — so the abort here
           // lands inside the assignment, ahead of its write, every run.
-          phase = "releasing";
-          slugCell = cell;
+          armed = false;
           holdAssignmentEdit = true;
           controller.abort();
-        } else if (phase === "releasing") {
-          phase = "done";
-          clearEditPending = true;
         }
         return cell;
       }) as Runtime["getCellFromEntityId"];
@@ -1062,253 +1055,17 @@ describe("run-pattern", () => {
       runtime.editWithRetry = ((
         ...args: Parameters<Runtime["editWithRetry"]>
       ) => {
-        if (holdAssignmentEdit) {
-          holdAssignmentEdit = false;
-          return toolReturned.then(() => originalEdit(...args));
+        if (!holdAssignmentEdit) {
+          return originalEdit(...args);
         }
-        if (clearEditPending) {
-          clearEditPending = false;
-          rawBeforeClear = slugCell?.getRawUntyped();
-          return originalEdit(...args).then((result) => {
-            clearLanded();
-            return result;
+        holdAssignmentEdit = false;
+        return toolReturned
+          .then(() => originalEdit(...args))
+          .then((committed) => {
+            assignmentLanded();
+            return committed;
           });
-        }
-        return originalEdit(...args);
       }) as Runtime["editWithRetry"];
-
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      }, { signal: controller.signal });
-
-      expect((result.output as RunPatternToolErrorOutput).status).toBe(
-        "cancelled",
-      );
-      releaseAssignment();
-      await slugCleared;
-      runtime.getCellFromEntityId = originalGetCell;
-      runtime.editWithRetry = originalEdit;
-      pieces.add = originalAdd;
-
-      // The assignment really committed after the cancelled output, so the
-      // slug below names nothing because it was cleared rather than because it
-      // was never taken.
-      expect(rawBeforeClear).not.toBe(undefined);
-      await expect(resolvePieceAddress(pieces, "doubling-report")).rejects
-        .toThrow(/not found/);
-    });
-
-    it("gives the registration slug back to the writer holding it when the signal aborts while the assignment is in flight", async () => {
-      // The availability check is a check rather than a claim: another writer
-      // can take the name between it and the assignment, and the assignment
-      // then overwrites their redirect. A cancelled run undoing itself has to
-      // hand that address back — clearing the name would delete somebody
-      // else's address on the way out.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-
-      const controller = new AbortController();
-      // Held until the other writer's redirect is in place, so the run's
-      // assignment provably overwrites it rather than an empty document.
-      let releaseAssignment!: () => void;
-      const otherWriterLanded = new Promise<void>((resolve) => {
-        releaseAssignment = resolve;
-      });
-      // Resolves once the continuation's restore has committed, so the
-      // assertions read the state it left rather than one it has not reached.
-      let restoreLanded!: () => void;
-      const slugRestored = new Promise<void>((resolve) => {
-        restoreLanded = resolve;
-      });
-
-      const slugEntityId = entityIdFrom(
-        slugIdForSpace(pieces.getSpace(), "doubling-report"),
-      );
-      const slugEntity = JSON.stringify(slugEntityId);
-      // Armed only once the registry join has landed, so the availability
-      // check's own read of the slug document earlier in the run is not
-      // mistaken for the assignment's.
-      let armed = false;
-      let phase: "assigning" | "releasing" | "done" = "assigning";
-      let holdAssignmentEdit = false;
-      let restoreEditPending = false;
-
-      const originalAdd = pieces.add.bind(pieces);
-      pieces.add = async (cells) => {
-        await originalAdd(cells);
-        armed = true;
-      };
-      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
-      runtime.getCellFromEntityId = ((
-        ...args: Parameters<Runtime["getCellFromEntityId"]>
-      ) => {
-        const cell = originalGetCell(...args);
-        if (!armed || JSON.stringify(args[1]) !== slugEntity) {
-          return cell;
-        }
-        if (phase === "assigning") {
-          // `setSlugLink` fetches the slug document and then, with no await in
-          // between, opens the transaction that writes it — so the abort here
-          // lands inside the assignment, ahead of its write, every run.
-          phase = "releasing";
-          holdAssignmentEdit = true;
-          controller.abort();
-        } else if (phase === "releasing") {
-          phase = "done";
-          restoreEditPending = true;
-        }
-        return cell;
-      }) as Runtime["getCellFromEntityId"];
-      const originalEdit = runtime.editWithRetry.bind(runtime);
-      runtime.editWithRetry = ((
-        ...args: Parameters<Runtime["editWithRetry"]>
-      ) => {
-        if (holdAssignmentEdit) {
-          holdAssignmentEdit = false;
-          return otherWriterLanded.then(() => originalEdit(...args));
-        }
-        if (restoreEditPending) {
-          restoreEditPending = false;
-          return originalEdit(...args).then((result) => {
-            restoreLanded();
-            return result;
-          });
-        }
-        return originalEdit(...args);
-      }) as Runtime["editWithRetry"];
-
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        inputs: { n: 21 },
-        register: { slug: "doubling-report" },
-      }, { signal: controller.signal });
-
-      expect((result.output as RunPatternToolErrorOutput).status).toBe(
-        "cancelled",
-      );
-
-      // The other writer claims the name while the run's assignment is held.
-      // Written through the unhooked runtime so the phase machine above still
-      // describes only the run's own reads and writes.
-      const slugCell = originalGetCell(pieces.getSpace(), slugEntityId);
-      await originalEdit((tx) => {
-        const slugWithTx = slugCell.withTx(tx);
-        slugWithTx.setRawUntyped(
-          defaultRoot.getCell().withTx(tx).getAsWriteRedirectLink({
-            base: slugWithTx,
-          }),
-        );
-      });
-      const heldByOtherWriter = slugCell.getRawUntyped();
-
-      releaseAssignment();
-      await slugRestored;
-      runtime.getCellFromEntityId = originalGetCell;
-      runtime.editWithRetry = originalEdit;
-      pieces.add = originalAdd;
-
-      // Their redirect is what the name holds, so the cancelled run put back
-      // what it took instead of clearing the document it had clobbered.
-      expect(slugCell.getRawUntyped()).toEqual(heldByOtherWriter);
-      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
-        pieceId(defaultRoot.getCell()),
-      );
-    });
-
-    it("reports a rejected slug release and still returns `cancelled`", async () => {
-      // The run's outcome is the cancellation the caller asked for, whatever
-      // the cleanup behind it decided. But a name the run is still holding
-      // after saying it stopped is a fact about the space that nothing else
-      // surfaces, so the failure is named rather than swallowed.
-      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
-        input: { pieceRegistry: [] },
-      });
-      await pieces.linkDefaultPattern(defaultRoot.getCell());
-      await runtime.idle();
-      await pieces.synced();
-
-      const controller = new AbortController();
-      // Held until the tool has returned, so the slug write provably commits
-      // after the cancelled output rather than before it.
-      let releaseAssignment!: () => void;
-      const toolReturned = new Promise<void>((resolve) => {
-        releaseAssignment = resolve;
-      });
-      // Resolves when the continuation reports the failed release, which is
-      // the last thing it does.
-      let warningLanded!: () => void;
-      const warned = new Promise<void>((resolve) => {
-        warningLanded = resolve;
-      });
-      const warnings: string[] = [];
-
-      const slugEntity = JSON.stringify(
-        entityIdFrom(slugIdForSpace(pieces.getSpace(), "doubling-report")),
-      );
-      let armed = false;
-      let phase: "assigning" | "releasing" | "done" = "assigning";
-      let holdAssignmentEdit = false;
-      let releaseEditPending = false;
-
-      const originalAdd = pieces.add.bind(pieces);
-      pieces.add = async (cells) => {
-        await originalAdd(cells);
-        armed = true;
-      };
-      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
-      runtime.getCellFromEntityId = ((
-        ...args: Parameters<Runtime["getCellFromEntityId"]>
-      ) => {
-        const cell = originalGetCell(...args);
-        if (!armed || JSON.stringify(args[1]) !== slugEntity) {
-          return cell;
-        }
-        if (phase === "assigning") {
-          phase = "releasing";
-          holdAssignmentEdit = true;
-          controller.abort();
-        } else if (phase === "releasing") {
-          phase = "done";
-          releaseEditPending = true;
-        }
-        return cell;
-      }) as Runtime["getCellFromEntityId"];
-      const originalEdit = runtime.editWithRetry.bind(runtime);
-      runtime.editWithRetry = ((
-        ...args: Parameters<Runtime["editWithRetry"]>
-      ) => {
-        if (holdAssignmentEdit) {
-          holdAssignmentEdit = false;
-          return toolReturned.then(() => originalEdit(...args));
-        }
-        if (releaseEditPending) {
-          // The clear is refused, so the name stays assigned to a run that
-          // has already reported it stopped.
-          releaseEditPending = false;
-          return Promise.resolve({
-            ok: undefined,
-            error: {
-              name: "StorageTransactionAborted",
-              message: "clear refused",
-              reason: undefined,
-            },
-          });
-        }
-        return originalEdit(...args);
-      }) as Runtime["editWithRetry"];
-      const originalWarn = console.warn;
-      console.warn = (...args: unknown[]) => {
-        warnings.push(args.map(String).join(" "));
-        warningLanded();
-      };
 
       let result;
       try {
@@ -1320,28 +1077,30 @@ describe("run-pattern", () => {
         }, { signal: controller.signal });
 
         releaseAssignment();
-        await warned;
+        await assignmentCommitted;
       } finally {
-        console.warn = originalWarn;
         runtime.getCellFromEntityId = originalGetCell;
         runtime.editWithRetry = originalEdit;
         pieces.add = originalAdd;
       }
+      await runtime.idle();
+      await pieces.synced();
 
-      // The cancellation is still the run's answer.
-      expect((result.output as RunPatternToolErrorOutput).status).toBe(
-        "cancelled",
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("cancelled");
+      expect(output.message).toBe(
+        'run_pattern was cancelled; the name "doubling-report" was already being assigned and is not withdrawn, so it resolves to the created piece, which is stopped and no longer listed',
       );
-      // And the refused clear names itself, rather than passing for a
-      // rollback that happened.
-      expect(warnings).toEqual([
-        'run_pattern: cancelled run could not release slug "doubling-report": clear refused',
-      ]);
-      // The name really is still the run's, which is the state the report
-      // above is about.
-      expect(await resolvePieceAddress(pieces, "doubling-report")).not.toBe(
-        pieceId(defaultRoot.getCell()),
+      // The assignment really committed after the cancelled output, so the
+      // name resolves below because the run kept it rather than because the
+      // write beat the abort.
+      expect(createdPieceId).toEqual(expect.any(String));
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        createdPieceId,
       );
+      // And the piece the name reaches really is delisted, which is the state
+      // the message describes.
+      expect(await pieces.getRegisteredPieces()).toEqual([]);
     });
 
     it("still returns `cancelled` when removing the piece from the space's piece list fails", async () => {

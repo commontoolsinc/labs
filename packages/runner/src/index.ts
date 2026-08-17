@@ -56,7 +56,6 @@ export type {
 } from "./scheduler.ts";
 export type {
   ChangeGroup,
-  CommitError,
   IExtendedStorageTransaction,
   MemorySpace,
   TransactionCommitOptions,
