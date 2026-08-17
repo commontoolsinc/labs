@@ -66,11 +66,13 @@ export interface RecordOutput {
   }>;
   /** Writes a structured summary of every module into the result cell. */
   getSummary?: Stream<{ result?: Writable<unknown> }>;
-  /** Sets a directly-settable field on the module at the given index. */
+  /** Sets a directly-settable field on the module at the given index. The
+   * value is written into that field, so it is declared as the scalars a
+   * module field holds rather than as `unknown`, which declares a reference. */
   updateModule?: Stream<{
     index: number;
     field: string;
-    value: unknown;
+    value: string | number | boolean | null;
     result?: Writable<unknown>;
   }>;
   /** Moves the module at the given index to the trash. */
@@ -660,8 +662,16 @@ const handleAddModule = handler<
 // index: module index in subPieces array
 // field: field name to update
 // value: new value
+// `value` is written into the addressed field, so it is declared as the
+// scalars a module field holds. `unknown` is the declaration for a reference
+// nobody reads through, and this one is read on its way into the piece.
 const handleUpdateModule = handler<
-  { index: number; field: string; value: unknown; result?: Writable<unknown> },
+  {
+    index: number;
+    field: string;
+    value: string | number | boolean | null;
+    result?: Writable<unknown>;
+  },
   { subPieces: Writable<SubPieceEntryHandle[]> }
 >(({ index, field, value, result }, { subPieces: sc }) => {
   const current = sc.get() || [];
