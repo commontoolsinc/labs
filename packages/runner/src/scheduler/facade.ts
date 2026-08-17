@@ -552,7 +552,7 @@ export class Scheduler {
   private unsubscribeState!: SchedulerUnsubscribeActionState;
   /** The storage subscriber registered in the constructor, kept so `dispose`
    * can hand it back. */
-  private readonly storageSubscription: IStorageSubscription;
+  readonly #storageSubscription: IStorageSubscription;
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
@@ -626,8 +626,8 @@ export class Scheduler {
     // Subscribe to storage notifications. The subscriber is retained because
     // `subscribe` returns nothing — the argument is the only handle disposal
     // will ever have to hand back, and one built inline is unreachable.
-    this.storageSubscription = this.createStorageSubscription();
-    this.runtime.storageManager.subscribe(this.storageSubscription);
+    this.#storageSubscription = this.createStorageSubscription();
+    this.runtime.storageManager.subscribe(this.#storageSubscription);
 
     // Set up harness event listeners
     this.runtime.harness.addEventListener("console", (e: Event) => {
@@ -1869,7 +1869,7 @@ export class Scheduler {
     // `{ done: true }` is the only self-cancelling answer the contract has.
     // `unsubscribe` is optional on the capability, so a manager without one is
     // left as it was rather than crashing a disposal.
-    this.runtime.storageManager.unsubscribe?.(this.storageSubscription);
+    this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
     this.headEventLoadPark = null;
     this.headEventLoadParkHistory = null;
     this.disposed = true;
