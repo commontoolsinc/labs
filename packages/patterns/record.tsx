@@ -96,8 +96,8 @@ const seedRecord = lift<{
   currentPieces: SubPieceEntry[]; // Unwrapped value, used only for the guard
   subPieces: Writable<SubPieceEntry[]>;
   // The pieces the seeder stores on the entries. Typed as cells so the handle
-  // survives the lift boundary; a plain `unknown` is read back as undefined and
-  // the module is lost.
+  // survives the lift boundary with something to write; a plain `unknown` is
+  // read back as a reference carrying nothing, and the module is lost.
   notesPiece: Cell<NoteOutput>;
   typePickerPiece: Cell<TypePickerOutput>;
   isInitialized: Writable<boolean>;
@@ -139,9 +139,10 @@ const seedRecord = lift<{
 // ===== Reading a sub-piece's own fields =====
 //
 // SubPieceEntry.piece is typed `unknown`, which lowers to `{ type: "unknown" }`,
-// and an object read under that schema comes back as undefined rather than
-// materialized. So `entry.piece.label` and its siblings read as undefined
-// wherever the entry carries its declared schema. What materializes a read is
+// and a read under that schema stops at the reference rather than
+// materializing what it names. So `entry.piece.label` and its siblings read as
+// undefined wherever the entry carries its declared schema. What materializes
+// a read is
 // the schema of the operand it is read into, so the lifts below name the fields
 // they want: the read then follows the entry's link into the sub-piece and
 // materializes them, and re-runs when the sub-piece changes them. The call sites

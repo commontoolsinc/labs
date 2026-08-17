@@ -7,8 +7,9 @@ import { type JSONSchema } from "@commonfabric/runner/shared";
 export interface MentionRef {
   /**
    * The mention's destination. Typed `unknown` because a mention may address
-   * any piece; read it through `asSchema` before naming fields on it, since an
-   * object read under an unknown schema comes back undefined.
+   * any piece; read it through `asSchema` before naming fields on it, since a
+   * read under an unknown schema stops at the reference and carries none of
+   * the piece's fields.
    */
   destination: unknown;
   /**

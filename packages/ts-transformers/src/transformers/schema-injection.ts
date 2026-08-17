@@ -1544,8 +1544,10 @@ function visitReactiveConditional(
 
   const argTypes = args.map(typeOf);
   // Only the condition is checked. It is materialized here to choose a branch,
-  // so an unknown condition silently reads back as undefined at this boundary.
-  // The branches are result values that flow outward unmaterialized — an unknown
+  // so an unknown condition silently reads back as a reference at this
+  // boundary — which is truthy whenever the position holds anything, so a
+  // condition that was meant to be `false` picks the other branch. The
+  // branches are result values that flow outward unmaterialized — an unknown
   // branch is not lost here; it propagates as the call's unknown result and is
   // reported where that result is consumed (captured).
   reportUnknownReactiveType(context, args[0]!, argTypes[0], "condition");

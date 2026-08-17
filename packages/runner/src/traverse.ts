@@ -5128,7 +5128,9 @@ function schemaTypeValidity(
       }
     } else if (isString(schemaObj["type"])) {
       const type = schemaObj["type"];
-      // type unknown matches anything
+      // `unknown` admits anything, and alone in the scalar form it is the whole
+      // declaration, so it decides. The list form above is where a concrete
+      // type can sit beside it and win.
       if (type === "unknown") {
         typeValidity = TypeValidity.Unknown;
       } else if (!schemaTypeMatchesValueType(type, valueType)) {
