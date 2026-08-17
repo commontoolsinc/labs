@@ -20,7 +20,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { resolveScopeKey } from "@commonfabric/memory/v2";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime, type ServerRunInfo } from "../src/runtime.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
@@ -77,9 +80,11 @@ describe("stage A: instance keying — unit pins", () => {
       `${space}/user:x/of:stagea-doc`,
     );
     // The name-keyed twin (the writer/materializer index) ignores both.
-    expect(entityNameKey({ ...address, scopeKey: "user:x" })).toBe(
-      `${space}/user/of:stagea-doc`,
-    );
+    expect(
+      entityNameKey(
+        { ...address, scopeKey: "user:x" } as IMemorySpaceAddress,
+      ),
+    ).toBe(`${space}/user/of:stagea-doc`);
     expect(entityNameKey(address)).toBe(entityNameKey({ ...address }));
 
     // Compaction: two name-equal reads compact as before; two reads of
@@ -178,7 +183,7 @@ describe("stage A: instance keying — unit pins", () => {
     ownCell.withTx(ownTx).set({ value: "own" });
     expect((await ownTx.commit()).error).toBeUndefined();
     const docId = ownCell.getAsNormalizedFullLink().id;
-    const readAs = (identity: typeof alice | undefined) =>
+    const readAs = (identity: ScopeKeyIdentity | undefined) =>
       (replica.getDocument(docId, "user", identity)?.value as
         | { value?: string }
         | undefined)?.value;
