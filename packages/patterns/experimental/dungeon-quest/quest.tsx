@@ -2,22 +2,16 @@ import {
   action,
   CHIP_UI,
   computed,
-  type Default,
   equals,
-  handler,
   NAME,
   pattern,
   TILE_UI,
   UI,
-  type Writable,
 } from "commonfabric";
 
 import type {
   JoinQuestEvent,
-  QuestCharacter,
-  QuestEvidence,
   QuestInput,
-  QuestObjectiveDefinition,
   QuestObjectiveProgress,
   QuestOutput,
   QuestStatus,
@@ -25,20 +19,6 @@ import type {
   RecordQuestEvidenceResult,
 } from "./schemas.tsx";
 import { DUNGEON_THEME } from "./theme.ts";
-
-const reportObjective = handler<void, {
-  objective: QuestObjectiveDefinition;
-  participants: Writable<QuestCharacter[] | Default<[]>>;
-  evidence: Writable<QuestEvidence[] | Default<[]>>;
-}>((_, { objective, participants, evidence }) => {
-  const actors = [...participants.get()];
-  if (actors.length === 0) return;
-  evidence.push({
-    kind: objective.evidenceKind,
-    actors,
-    note: `Reported from the quest ledger: ${objective.title}`,
-  });
-});
 
 /**
  * Collaborative quest ledger whose progress derives from participant-linked
@@ -132,8 +112,13 @@ export default pattern<QuestInput, QuestOutput>(
       return { accepted: true, reason: "accepted" };
     });
 
+    const reset = action(() => {
+      participants.set([]);
+      evidence.set([]);
+    });
+
     return {
-      [NAME]: title,
+      [NAME]: computed(() => title),
       [UI]: (
         <cf-theme theme={DUNGEON_THEME}>
           <cf-vstack gap="4">
@@ -185,19 +170,13 @@ export default pattern<QuestInput, QuestOutput>(
                       <cf-text variant="caption" tone="muted">
                         Evidence: {objective.evidenceKind}
                       </cf-text>
-                      <cf-button
-                        size="sm"
-                        aria-label={`Mark ${objective.title} complete`}
-                        disabled={objective.status !== "active" ||
-                          !hasParticipants}
-                        onClick={reportObjective({
-                          objective,
-                          participants,
-                          evidence,
-                        })}
-                      >
-                        Mark complete
-                      </cf-button>
+                      <cf-text variant="caption" tone="muted">
+                        {objective.status === "completed"
+                          ? `${objective.contributors.length} contributor(s)`
+                          : objective.status === "active"
+                          ? "Ready for an expedition action"
+                          : "Complete the previous scene first"}
+                      </cf-text>
                     </cf-hstack>
                   </cf-vstack>
                 </cf-card>
@@ -267,6 +246,7 @@ export default pattern<QuestInput, QuestOutput>(
       completedObjectiveCount,
       join,
       recordEvidence,
+      reset,
     };
   },
 );

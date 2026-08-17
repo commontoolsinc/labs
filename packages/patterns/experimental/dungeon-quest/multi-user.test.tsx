@@ -24,14 +24,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   });
 
   const action_report_party = action(() => {
-    const alara = adventure.characters?.[0];
-    const bram = adventure.characters?.[1];
-    if (alara && bram) {
-      adventure.recordQuestEvidence.send({
-        kind: "party.assembled",
-        actors: [alara, bram],
-      });
-    }
+    adventure.attemptAdventureAction.send({ action: "assemble-party" });
   });
 
   const assert_alara_created = assert(() =>
@@ -63,6 +56,8 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       { label: "party-reported" },
       { await: "door-reported" },
       { assertion: assert_concurrent_evidence_landed },
+      { label: "alice-done" },
+      { await: "bob-done" },
     ],
   };
 });
@@ -79,15 +74,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     if (bram) adventure.enlistCharacter.send({ character: bram });
   });
 
-  const action_report_door = action(() => {
-    const alara = adventure.characters?.[0];
+  const action_move_bram_to_hall = action(() => {
     const bram = adventure.characters?.[1];
-    if (alara && bram) {
-      adventure.recordQuestEvidence.send({
-        kind: "door.opened",
-        actors: [alara, bram],
-      });
-    }
+    if (bram) bram.moveTo.send({ location: "Moonlit Hall" });
+  });
+
+  const action_report_door = action(() => {
+    adventure.attemptAdventureAction.send({ action: "open-sealed-door" });
   });
 
   const assert_sees_alara = assert(() =>
@@ -114,10 +107,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { action: action_enlist_bram },
       { assertion: assert_bram_created },
       { label: "bram-ready" },
+      { await: "party-reported" },
+      { action: action_move_bram_to_hall },
       { action: action_report_door },
       { label: "door-reported" },
-      { await: "party-reported" },
       { assertion: assert_concurrent_evidence_landed },
+      { label: "bob-done" },
+      { await: "alice-done" },
     ],
   };
 });

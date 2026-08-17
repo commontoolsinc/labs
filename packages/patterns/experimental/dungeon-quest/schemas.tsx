@@ -24,6 +24,14 @@ export interface MoveCharacterEvent {
   location: string;
 }
 
+export interface DamageCharacterEvent {
+  amount?: number;
+}
+
+export interface AddInventoryItemEvent {
+  item: string;
+}
+
 /**
  * The narrow character role that other dungeon patterns may retain.
  *
@@ -45,6 +53,10 @@ export interface CharacterInput {
   name?: PerSpace<Writable<string | Default<"Unnamed adventurer">>>;
   archetype?: PerSpace<Writable<string | Default<"Adventurer">>>;
   location?: PerSpace<Writable<string | Default<"Antechamber">>>;
+  health?: PerSpace<Writable<number | Default<10>>>;
+  maxHealth?: PerSpace<Writable<number | Default<10>>>;
+  power?: PerSpace<Writable<number | Default<2>>>;
+  inventory?: PerSpace<Writable<string[] | Default<[]>>>;
 }
 
 export interface CharacterOutput extends CharacterPiece {
@@ -52,6 +64,13 @@ export interface CharacterOutput extends CharacterPiece {
   [UI]: VNode;
   [CHIP_UI]: VNode;
   [TILE_UI]: VNode;
+  health: number;
+  maxHealth: number;
+  power: number;
+  inventory: string[];
+  takeDamage: Stream<DamageCharacterEvent>;
+  rest: Stream<void>;
+  addItem: Stream<AddInventoryItemEvent>;
 }
 
 /**
@@ -137,6 +156,7 @@ export interface QuestOutput extends QuestPiece {
   [UI]: VNode;
   [CHIP_UI]: VNode;
   [TILE_UI]: VNode;
+  reset: Stream<void>;
 }
 
 export interface CreateCharacterEvent {
@@ -146,6 +166,29 @@ export interface CreateCharacterEvent {
 
 export interface CreateCharacterResult {
   character: CharacterPiece;
+}
+
+export type AdventureActionKind =
+  | "assemble-party"
+  | "open-sealed-door"
+  | "defeat-sentinel"
+  | "open-sunken-gate";
+
+export type AdventureActionReason =
+  | "accepted"
+  | "already-completed"
+  | "prerequisite-incomplete"
+  | "insufficient-party"
+  | "wrong-location";
+
+export interface AttemptAdventureActionEvent {
+  action: AdventureActionKind;
+}
+
+export interface AttemptAdventureActionResult {
+  accepted: boolean;
+  reason: AdventureActionReason;
+  actorCount: number;
 }
 
 export interface AdventureInput {
@@ -163,6 +206,11 @@ export interface AdventureOutput {
   quest: QuestPiece;
   createCharacter: Stream<CreateCharacterEvent, CreateCharacterResult>;
   enlistCharacter: Stream<JoinQuestEvent>;
+  attemptAdventureAction: Stream<
+    AttemptAdventureActionEvent,
+    AttemptAdventureActionResult
+  >;
+  restartQuest: Stream<void>;
   recordQuestEvidence: Stream<
     RecordQuestEvidenceEvent,
     RecordQuestEvidenceResult

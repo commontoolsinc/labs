@@ -1,6 +1,6 @@
 import { action, assert, pattern, TESTS, UI } from "commonfabric";
 
-import { findNodeByProp, hasText, propsOf } from "../../test/vnode-helpers.ts";
+import { hasText } from "../../test/vnode-helpers.ts";
 import Quest from "./quest.tsx";
 
 export default pattern(() => {
@@ -28,29 +28,29 @@ export default pattern(() => {
     evidence: [],
   });
 
-  const action_mark_first_from_ui = action(() => {
-    const button = findNodeByProp(
-      quest[UI],
-      "aria-label",
-      "Mark First gate complete",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
+  const action_record_first = action(() => {
+    const participant = quest.participants?.[0];
+    if (participant) {
+      quest.recordEvidence.send({
+        kind: "gate.first",
+        actors: [participant],
+        note: "The first mechanism yields.",
+      });
     }
   });
 
-  const action_mark_second_from_ui = action(() => {
-    const button = findNodeByProp(
-      quest[UI],
-      "aria-label",
-      "Mark Second gate complete",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
+  const action_record_second = action(() => {
+    const participant = quest.participants?.[0];
+    if (participant) {
+      quest.recordEvidence.send({
+        kind: "gate.second",
+        actors: [participant],
+        note: "The second mechanism yields.",
+      });
     }
   });
+
+  const action_reset = action(() => quest.reset.send());
 
   const assert_initial_ledger = assert(() =>
     quest.status === "active" &&
@@ -71,14 +71,25 @@ export default pattern(() => {
     quest.evidence?.length === 2
   );
 
+  const assert_reset = assert(() =>
+    quest.status === "available" &&
+    quest.progress?.[0]?.status === "active" &&
+    quest.progress?.[1]?.status === "locked" &&
+    quest.completedObjectiveCount === 0 &&
+    quest.participants?.length === 0 &&
+    quest.evidence?.length === 0
+  );
+
   return {
     [TESTS]: [
       { render: quest[UI] },
       { assertion: assert_initial_ledger },
-      { action: action_mark_first_from_ui },
+      { action: action_record_first },
       { assertion: assert_second_gate_unlocked },
-      { action: action_mark_second_from_ui },
+      { action: action_record_second },
       { assertion: assert_completed_from_ledger },
+      { action: action_reset },
+      { assertion: assert_reset },
     ],
   };
 });
