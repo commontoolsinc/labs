@@ -16,7 +16,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
@@ -184,7 +184,7 @@ describe("FabricBytes", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricBytes[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Bytes;
-      const context = EMPTY_DECODE_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Bytes` wire type tag", () => {
@@ -215,7 +215,7 @@ describe("FabricBytes", () => {
 
       describe("decode()", () => {
         it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 42, context);
+          const decoded = codec.decode(expectedTag, 42, env);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
@@ -223,7 +223,7 @@ describe("FabricBytes", () => {
           const decoded = codec.decode(
             expectedTag,
             "not valid base64!!",
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -235,7 +235,7 @@ describe("FabricBytes", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(fb),
-            context,
+            env,
           ) as unknown as FabricBytes;
           expect(decoded).toBeInstanceOf(FabricBytes);
           expect(decoded.slice()).toEqual(new Uint8Array([10, 20, 30, 40]));
@@ -246,7 +246,7 @@ describe("FabricBytes", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(fb),
-            context,
+            env,
           ) as unknown as FabricBytes;
           expect(decoded).toBeInstanceOf(FabricBytes);
           expect(decoded.length).toBe(0);

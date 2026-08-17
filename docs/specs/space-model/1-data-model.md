@@ -373,7 +373,7 @@ interface FabricCodec<Encoded> {
   decode(                                    // shallow
     typeTag: string,
     state: Encoded,
-    context: DecodeContext,
+    env: LiveEnvironment,
   ): FabricValue;
 }
 
@@ -412,8 +412,8 @@ contracts.
 `decode()` lives on the codec rather than being a constructor for two
 reasons:
 
-1. **Decoding-specific context**: It receives a `DecodeContext`
-   (and potentially other context) which shouldn't be mandated in a regular
+1. **Decoding-specific environment**: It receives a `LiveEnvironment`
+   (and potentially more besides) which shouldn't be mandated in a regular
    constructor's signature.
 2. **Instance interning**: It can return existing instances rather than always
    creating new ones — essential for types like `Cell` where identity matters.
@@ -445,9 +445,9 @@ class Cell<T> extends FabricInstance {
     decode(
       _typeTag: string,
       state: FabricValue,
-      context: DecodeContext,
+      env: LiveEnvironment,
     ): Cell<unknown> {
-      return context.getCell(state as CellState);
+      return env.getCell(state as CellState);
     }
   })();
 
@@ -574,7 +574,7 @@ The flow becomes:
 Encode: codec.encode(instance) → state
         → wrap(codec.tagForValue(instance), state) → wire
 Decode: wire → unwrap() → { tag, state }
-        → registry.codecFromTag(tag).decode(tag, state, ctx)
+        → registry.codecFromTag(tag).decode(tag, state, env)
         → instance
 ```
 
@@ -608,20 +608,20 @@ function encodeValue(value: FabricValue): JsonCodecValue {
 // At boundary entry (inside the engine's decode walk)
 function decodeValue(
   data: JsonCodecValue,
-  ctx: DecodeContext,
+  env: LiveEnvironment,
 ): FabricValue {
   const unwrapped = unwrapTag(data);
   if (unwrapped) {
     const { tag, state } = unwrapped;
     const codec = registry.codecFromTag(tag);
-    if (codec) return codec.decode(tag, decodeValue(state, ctx), ctx);
-    return new UnknownValue(tag, decodeValue(state, ctx));
+    if (codec) return codec.decode(tag, decodeValue(state, env), env);
+    return new UnknownValue(tag, decodeValue(state, env));
   }
   // Handle primitives, arrays, plain objects recursively...
 }
 ```
 
-The decode path needs runtime context (`DecodeContext`) to
+The decode path needs a live environment (`LiveEnvironment`) to
 reconstitute rich types (e.g., looking up existing Cell instances rather
 than creating duplicates).
 
@@ -644,7 +644,7 @@ This makes identity hashing independent of any particular wire encoding.
 #### Trade-offs
 
 - **Migration complexity**: Existing code assumes JSON forms internally
-- **Runtime context required**: Decoding needs access to the runtime
+- **Live environment required**: Decoding needs access to the runtime
 - **Comparison semantics**: Must define equality for rich types (by identity?
   by encoded state?)
 - **Not "zero transformations"**: Late encoding eliminates encoding

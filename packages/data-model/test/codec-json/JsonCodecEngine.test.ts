@@ -47,18 +47,18 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
-import { BaseDecodeContext } from "@/codec-interface/BaseDecodeContext.ts";
+import { BaseLiveEnvironment } from "@/codec-interface/BaseLiveEnvironment.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
 /**
- * Shared test `DecodeContext`: `getCell()` always throws (no test
+ * Shared test `LiveEnvironment`: `getCell()` always throws (no test
  * here reaches it); `shouldDeepFreeze` is inherited from
- * `BaseDecodeContext` (defaults to `true`).
+ * `BaseLiveEnvironment` (defaults to `true`).
  */
-class TestDecodeContext extends BaseDecodeContext {
+class TestLiveEnvironment extends BaseLiveEnvironment {
   constructor() {
     super(true);
   }
@@ -109,7 +109,7 @@ const ENCODING_PREFIX = "fvj1:";
 /** Creates a standard test codec (non-lenient) and a mock runtime. */
 function makeTestCodec() {
   const jsonCodecEngine = newDefaultJsonCodecEngine();
-  const runtime = new TestDecodeContext();
+  const runtime = new TestLiveEnvironment();
   return { jsonCodecEngine, runtime };
 }
 
@@ -146,7 +146,7 @@ function fromEncodedFormat(
   // to the wrap helper, whose own validity check is a strict decode, and so
   // rejects exactly the payloads these cases are made of.
   const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
-  const runtime = new TestDecodeContext();
+  const runtime = new TestLiveEnvironment();
   return jsonCodecEngine.decode(
     JsonCodecEngine.wrapEncodedValueForTesting(
       JSON.stringify(data),
@@ -184,7 +184,7 @@ describe("JsonCodecEngine", () => {
 
       const result = jsonCodecEngine.decode(
         encoded,
-        new TestDecodeContext(),
+        new TestLiveEnvironment(),
       );
 
       expect(result).toBeInstanceOf(UnknownValue);
@@ -315,7 +315,7 @@ describe("JsonCodecEngine", () => {
           JSON.stringify({ [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" } }),
           true,
         ),
-        new TestDecodeContext(),
+        new TestLiveEnvironment(),
       );
 
       expect(probe.received).toEqual({ "/Bytes@1": "AQID" });
@@ -334,7 +334,7 @@ describe("JsonCodecEngine", () => {
           JSON.stringify({ "/BigInt@1": { "/Undefined@1": "bad" } }),
           true, // Undecodable on purpose; that is what this test is about.
         ),
-        new TestDecodeContext(),
+        new TestLiveEnvironment(),
       );
 
       expect(result).toBeInstanceOf(ProblematicValue);
@@ -357,7 +357,7 @@ describe("JsonCodecEngine", () => {
             JSON.stringify({ "/BigInt@1": { "/Undefined@1": "bad" } }),
             true, // Undecodable on purpose; that is what this test is about.
           ),
-          new TestDecodeContext(),
+          new TestLiveEnvironment(),
         );
         throw new Error("Should have thrown.");
       } catch (e) {
@@ -373,7 +373,7 @@ describe("JsonCodecEngine", () => {
             JSON.stringify({ "/BigInt@1": { "/Undefined@1": "bad" } }),
             true,
           ),
-          new TestDecodeContext(),
+          new TestLiveEnvironment(),
         );
 
         expect(lenient).toBeInstanceOf(ProblematicValue);
@@ -389,7 +389,7 @@ describe("JsonCodecEngine", () => {
           JSON.stringify({ [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" } }),
           true,
         ),
-        new TestDecodeContext(),
+        new TestLiveEnvironment(),
       );
 
       expect(probe.received).toBeInstanceOf(FabricBytes);
@@ -748,7 +748,7 @@ describe("JsonCodecEngine", () => {
     function decodeArray(entries: JsonCodecValue[]): FabricValue {
       // Lenient; see `fromEncodedFormat()` above.
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
-      const runtime = new TestDecodeContext();
+      const runtime = new TestLiveEnvironment();
       return jsonCodecEngine.decode(
         JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify(entries),
@@ -1535,7 +1535,7 @@ describe("JsonCodecEngine", () => {
 
     it("lenient mode wraps failed handler decoding", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
-      const runtime = new TestDecodeContext();
+      const runtime = new TestLiveEnvironment();
 
       // BigInt@1 with a non-string state produces ProblematicValue
       // in lenient mode because the handler validates the state type.
@@ -1568,7 +1568,7 @@ describe("JsonCodecEngine", () => {
           JSON.stringify(data),
           true, // Undecodable on purpose; that is what this test is about.
         ),
-        new TestDecodeContext(),
+        new TestLiveEnvironment(),
       );
 
       expect(result).toBeInstanceOf(ProblematicValue);
@@ -1587,7 +1587,7 @@ describe("JsonCodecEngine", () => {
 
       const result = jsonCodecEngine.decode(
         JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(data), true),
-        new TestDecodeContext(),
+        new TestLiveEnvironment(),
       );
 
       expect(isDeepFrozen(result)).toBe(true);
@@ -1595,7 +1595,7 @@ describe("JsonCodecEngine", () => {
 
     it("lenient mode wraps failed class-registry decoding", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
-      const runtime = new TestDecodeContext();
+      const runtime = new TestLiveEnvironment();
 
       // Map@1's codec always throws on decode ("not yet implemented"),
       // triggering lenient wrapping.
@@ -1689,7 +1689,7 @@ describe("JsonCodecEngine", () => {
       // so the contract deep-freezes it (not a crash: it is the value
       // lenient mode produces precisely to avoid crashing).
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
-      const runtime = new TestDecodeContext();
+      const runtime = new TestLiveEnvironment();
       const result = jsonCodecEngine.decode(
         JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify({ "/BigInt@1": 42 }),
@@ -1837,7 +1837,7 @@ describe("JsonCodecEngine", () => {
 
     it("`decode()` parses a prefixed JSON string back to a value", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine();
-      const runtime = new TestDecodeContext();
+      const runtime = new TestLiveEnvironment();
       const result = jsonCodecEngine.decode(
         JsonCodecEngine.wrapEncodedValueForTesting("42"),
         runtime,
@@ -1847,7 +1847,7 @@ describe("JsonCodecEngine", () => {
 
     it("`encode()`/`decode()` round-trip for tagged types", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine();
-      const runtime = new TestDecodeContext();
+      const runtime = new TestLiveEnvironment();
       const se = FabricError.fromNativeError(new Error("test"));
       const encoded = jsonCodecEngine.encode(se);
       const decoded = jsonCodecEngine.decode(encoded, runtime);
@@ -1857,7 +1857,7 @@ describe("JsonCodecEngine", () => {
 
     it("`encodeToBytes()`/`decodeFromBytes()` round-trip", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine();
-      const runtime = new TestDecodeContext();
+      const runtime = new TestLiveEnvironment();
       const data = {
         name: "test",
         error: FabricError.fromNativeError(new Error("fail")),
@@ -1907,7 +1907,7 @@ describe("JsonCodecEngine", () => {
               JSON.stringify(encoded),
               true, // Malformed on purpose; that is what these are about.
             ),
-            new TestDecodeContext(),
+            new TestLiveEnvironment(),
           )
         ).toThrow(message);
       });
@@ -2017,7 +2017,7 @@ describe("JsonCodecEngine", () => {
           JsonCodecEngine.wrapEncodedValueForTesting(
             JsonCodecEngine.unwrapEncodedValueForTesting(encoded),
           ),
-          new TestDecodeContext(),
+          new TestLiveEnvironment(),
         ) as Record<string, number>;
         expect(Object.is(rebuilt.z, -0)).toBe(true);
         expect(Number.isNaN(rebuilt.n)).toBe(true);

@@ -1,7 +1,7 @@
 /**
  * The codec layer's contracts, written without naming any wire format: what a
- * codec is, the two things its state can mean to a walker, and the context
- * objects carried through an encode or a decode.
+ * codec is, the two things its state can mean to a walker, and what an
+ * encode or a decode carries alongside the data.
  *
  * The distinction running through all of it is that a codec's type does not
  * say what its state is for. Every codec has the same members whatever domain
@@ -120,7 +120,7 @@ export interface FabricCodec<Encoded> {
   decode(
     typeTag: string,
     state: Encoded,
-    context: DecodeContext,
+    env: LiveEnvironment,
   ): FabricValue;
 
   /**
@@ -229,7 +229,7 @@ export interface FabricClassWithNonterminalCodec {
  * avoid a circular dependency between the fabric protocol and the runner.
  * See Section 2.5 of the formal spec.
  */
-export interface DecodeContext {
+export interface LiveEnvironment {
   /**
    * Resolves a cell reference, for a type that needs to intern or look up an
    * existing instance during decoding.
@@ -246,8 +246,8 @@ export interface DecodeContext {
    * `shouldDeepFreeze === true` corresponds to
    * `cloneIfNecessary(value, { frozen: true })`.
    *
-   * Required (not optional): every context declares it. Contexts get it for
-   * free by extending `BaseDecodeContext`, which centralizes the
+   * Required (not optional): every live environment declares it, and gets it
+   * for free by extending `BaseLiveEnvironment`, which centralizes the
    * getter; the `cloneIfNecessary`-style `true` default lives there.
    *
    * Enforcement: each codec's `decode()` queries this and abides by it,
@@ -259,8 +259,8 @@ export interface DecodeContext {
 /**
  * Public boundary interface for encoding a fabric value into a serialized
  * form, ready to cross whatever boundary the format exists for. The type
- * parameter `SerializedForm` is the boundary type: `string` for JSON
- * contexts, `Uint8Array` for binary contexts.
+ * parameter `SerializedForm` is the boundary type: `string` for JSON,
+ * `Uint8Array` for a binary format.
  *
  * Internal tree-walking machinery is private to the implementation.
  */

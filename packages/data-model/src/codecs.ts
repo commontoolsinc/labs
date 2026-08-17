@@ -17,8 +17,8 @@
 import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "./fabric-value.ts";
-import type { DecodeContext } from "./codec-interface/interface.ts";
-import { EMPTY_DECODE_CONTEXT } from "./codec-interface/EmptyDecodeContext.ts";
+import type { LiveEnvironment } from "./codec-interface/interface.ts";
+import { NULL_LIVE_ENVIRONMENT } from "./codec-interface/NullLiveEnvironment.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodecEngine } from "./codec-json/JsonCodecEngine.ts";
@@ -41,7 +41,7 @@ import { codecClasses as instanceClasses } from "./fabric-instances/index.ts";
  * `UnknownValue` and `ProblematicValue` are among them, but their codecs
  * recognize no single wire tag: the encode path resolves an instance's tag
  * with `tagForValue()`, and an unrecognized tag on decode is wrapped in an
- * `UnknownValue` by the encoding context rather than tag-routed.
+ * `UnknownValue` by the engine rather than tag-routed.
  */
 export function createDefaultJsonRegistry(): CodecRegistry<JsonCodecValue> {
   return createBaseJsonRegistry().extend(
@@ -78,15 +78,15 @@ export function jsonFromFabricValue(value: FabricValue): string {
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format, which is
  * expected to be a plain object. Throws if it turns out to be something else.
- * If `context` is omitted, a shared decode-framed empty context is
+ * If no live environment is given, {@link NULL_LIVE_ENVIRONMENT} is
  * substituted (via `fabricFromJsonValue()`), which throws if any decoding
  * is needed.
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
-  context?: DecodeContext,
+  env?: LiveEnvironment,
 ): T {
-  const result = fabricFromJsonValue(json, context);
+  const result = fabricFromJsonValue(json, env);
 
   if ((result === null) || (typeof result !== "object")) {
     throw new Error(
@@ -106,13 +106,13 @@ export function plainObjectFromJson<T extends object = object>(
 }
 
 /**
- * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
- * `context` is omitted, {@link EMPTY_DECODE_CONTEXT} is substituted,
+ * Decodes a string in the `FabricValue` JSON-embedded encoding format. If no
+ * live environment is given, {@link NULL_LIVE_ENVIRONMENT} is substituted,
  * which throws if any decoding is needed.
  */
 export function fabricFromJsonValue(
   json: string,
-  context?: DecodeContext | undefined,
+  env?: LiveEnvironment | undefined,
 ): FabricValue {
-  return jsonCodecEngine.decode(json, context ?? EMPTY_DECODE_CONTEXT);
+  return jsonCodecEngine.decode(json, env ?? NULL_LIVE_ENVIRONMENT);
 }
