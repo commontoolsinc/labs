@@ -966,7 +966,7 @@ export function mergeDefaults(
  * is first shallow-cloned. It is up to callers to ensure that mutable and
  * unbound `value`s are indeed appropriate to be mutated.
  */
-function annotateWithBackToCellSymbols(
+export function annotateWithBackToCellSymbols(
   value: any,
   runtime: Runtime,
   link: NormalizedFullLink,

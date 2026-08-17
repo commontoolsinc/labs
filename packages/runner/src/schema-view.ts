@@ -57,7 +57,11 @@ import {
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { isSigilLink, type NormalizedFullLink } from "./link-utils.ts";
 import { type Runtime } from "./runtime.ts";
-import { processDefaultValue, validateAndTransform } from "./schema.ts";
+import {
+  annotateWithBackToCellSymbols,
+  processDefaultValue,
+  validateAndTransform,
+} from "./schema.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   canBranchMatch,
@@ -498,6 +502,26 @@ export function materializeSchemaView(
     if (opaqueLeafMissesRequired(schema, value)) {
       return mismatch("opaque leaf is missing a required property");
     }
+  }
+
+  // PROBE: an opaque (`type: "unknown"`) container answers presence and stops,
+  // the way eager traversal does, instead of building a view over it.
+  if (
+    isObjectOrArray(value) && !(value instanceof FabricPrimitive) &&
+    isObjectOrArray(schema) && schema.type !== undefined &&
+    (Array.isArray(schema.type)
+      ? schema.type.includes("unknown")
+      : schema.type === "unknown")
+  ) {
+    tx.readValueOrThrow(link, { nonRecursive: true });
+    return annotateWithBackToCellSymbols(
+      {},
+      runtime,
+      link,
+      tx,
+      synced,
+      cfcLabelView,
+    );
   }
 
   // A primitive, and a `FabricPrimitive` with it, is a leaf: the type check
