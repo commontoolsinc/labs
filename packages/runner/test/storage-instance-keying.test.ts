@@ -820,7 +820,9 @@ describe("stage A: instance keying — unit pins", () => {
     const readSeed = (tx: IExtendedStorageTransaction) =>
       tx.readValueOrThrow({ ...seedLink, path: [] });
 
-    // Alice's run serializes the cell: her instance is seeded.
+    // Alice's run: her instance is already PRESENT (she wrote it), so the
+    // serialization's presence check finds it and MEMOIZES — under HER
+    // instance key (the memo records presence, never a seed it wrote).
     const aliceTx = runtime.edit();
     stampWaveRunContext(aliceTx, {
       actionId: "stagea-seed-alice",
@@ -828,14 +830,16 @@ describe("stage A: instance keying — unit pins", () => {
       scopeKeyIdentity: alice,
       actionScopeKey: resolveScopeKey("user", alice),
     });
+    seedCell.withTx(aliceTx).set("alice-wrote-this");
     holder.withTx(aliceTx).set({ slot: seedCell });
-    expect(readSeed(aliceTx)).toBe("hello");
+    expect(readSeed(aliceTx)).toBe("alice-wrote-this");
 
     // Bob's run serializes the same cell: HIS instance is absent, so it
-    // must be seeded too. Pre-fix the memo keyed under the runtime's own
-    // identity for every run — Alice's presence check had already
-    // memoized the doc, Bob's check was skipped, and his default never
-    // landed (the panel's Lens 2d hazard).
+    // must be seeded. Pre-fix the memo keyed under the runtime's own
+    // identity for every run — Alice's presence check had memoized the
+    // doc under that one key, Bob's check was skipped, and his default
+    // never landed (the panel's Lens 2d hazard: one user's presence
+    // suppressing another's seed).
     const bobTx = runtime.edit();
     stampWaveRunContext(bobTx, {
       actionId: "stagea-seed-bob",
