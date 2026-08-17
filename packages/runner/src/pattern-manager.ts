@@ -1129,6 +1129,9 @@ export class PatternManager {
         // security boundary — skip redundant SES body re-verification.
         {
           sourceFiles: program.files,
+          ...(program.dataFiles === undefined
+            ? {}
+            : { dataFiles: program.dataFiles }),
           trustedBodies: true,
           ...(patternCoverage ? { patternCoverage } : {}),
         },

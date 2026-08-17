@@ -547,19 +547,20 @@ export function verifySourceDocs(
     }
   }
 
-  // Data documents, named by the whole closure rather than by one view. A data
-  // file hashes as a leaf over its own bytes, and reaching that verdict must not
-  // depend on which document a view happens to be rooted at — a data document
-  // rooted in its own view names nothing itself. A forged data edge does not buy
-  // anything: it changes the identity of the document that carries it, and
-  // hashing a real module as a leaf changes that module's identity too, so both
-  // diverge from their keys here.
-  const dataFilenames = new Set<string>();
+  // Data documents, collected across the whole closure by IDENTITY. Reaching
+  // the verdict "this is data" must not depend on which document a view happens
+  // to be rooted at, since a data document rooted in its own view names nothing
+  // itself. Identity rather than filename is what makes that safe: one closure
+  // may legally hold several generations of a filename, so a filename set would
+  // condemn a code module that merely shares a name with data elsewhere.
+  // A forged data edge buys nothing: it changes the identity of the document
+  // carrying it, and hashing a real module as a leaf changes that module's
+  // identity too, so both diverge from their keys here.
+  const dataIdentities = new Set<string>();
   for (const doc of docsByIdentity.values()) {
     for (const imp of doc.imports) {
       if (!imp.specifier.startsWith(DATA_FILE_SPECIFIER)) continue;
-      const target = docsByIdentity.get(imp.identity);
-      if (target !== undefined) dataFilenames.add(target.filename);
+      if (docsByIdentity.has(imp.identity)) dataIdentities.add(imp.identity);
     }
   }
 
@@ -620,8 +621,12 @@ export function verifySourceDocs(
         additionalInternalDeps.set(doc.filename, packageEdges);
       }
     }
+    // Within one view, filenames are unique by construction, so mapping the
+    // view's data identities to their filenames is unambiguous here.
     const viewDataFiles = new Set(
-      files.map((file) => file.name).filter((name) => dataFilenames.has(name)),
+      viewIds
+        .filter((id) => dataIdentities.has(id))
+        .map((id) => docsByIdentity.get(id)!.filename),
     );
     const recomputed = computeModuleHashes(
       { main: rootDoc.filename, files },

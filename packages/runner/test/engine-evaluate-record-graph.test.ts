@@ -244,7 +244,7 @@ describe("Engine.evaluateRecordGraph()", () => {
       '{"cities": ["Oslo", "Lima"]}',
     );
     expect(stored.get("/data/cities.json")?.isData).toBe(true);
-    expect(stored.get("/main.tsx")?.isData).toBeUndefined();
+    expect(stored.get("/main.tsx")).not.toHaveProperty("isData");
     expect(stored.get("/data/notes.txt")?.imports).toEqual([]);
 
     const entry = modules.find((m) => m.identity === entryIdentity)!;
@@ -314,6 +314,36 @@ describe("Engine.evaluateRecordGraph()", () => {
     await expect(engine.compileAndEvaluateModules(program)).rejects.toThrow(
       'No attached data file "/data/absent.json". Attached: /data/cities.json.',
     );
+  });
+
+  it("separates identities for data files differing only in line endings", async () => {
+    // A data file's bytes are the payload a pattern reads, so CRLF and LF are
+    // different content — unlike source text, where they are formatting.
+    const compile = (contents: string) =>
+      engine.compileToRecordGraph({
+        main: "/main.tsx",
+        dataFiles: ["/data/rows.csv"],
+        files: [
+          { name: "/main.tsx", contents: "export default 42;" },
+          { name: "/data/rows.csv", contents },
+        ],
+      });
+
+    const lf = await compile("a,b\nc,d\n");
+    const crlf = await compile("a,b\r\nc,d\r\n");
+
+    expect(lf.entryIdentity).not.toBe(crlf.entryIdentity);
+    const dataIdentity = (r: Awaited<ReturnType<typeof compile>>) =>
+      r.modules.find((m) => m.filename === "/data/rows.csv")!.identity;
+    expect(dataIdentity(lf)).not.toBe(dataIdentity(crlf));
+  });
+
+  it("refuses a program naming its entry as a data file", async () => {
+    await expect(engine.compileToRecordGraph({
+      main: "/main.tsx",
+      dataFiles: ["/main.tsx"],
+      files: [{ name: "/main.tsx", contents: "export default 42;" }],
+    })).rejects.toThrow("cannot be a data file");
   });
 
   it("refuses an import that lands on a data file", async () => {

@@ -83,7 +83,11 @@ export function readDataFileSource(
   const bytes = Deno.readFileSync(realDataPath);
   let contents: string;
   try {
-    contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    // `ignoreBOM` keeps a leading byte order mark in `contents` instead of
+    // consuming it. A data file is stored byte-for-byte, so dropping the mark
+    // would deploy something other than the authored file.
+    contents = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+      .decode(bytes);
   } catch {
     throw new Error(
       `Data file "${dataPath}" is not valid UTF-8 text.`,

@@ -209,9 +209,14 @@ function canonicalDataFiles(
   main: string,
   dataFiles: readonly string[] | undefined,
 ): string[] {
-  return [...new Set(dataFiles ?? [])]
-    .filter((dataFile) => dataFile !== main)
-    .sort();
+  const paths = [...new Set(dataFiles ?? [])].sort();
+  // Unlike a source root, which the entry trivially is, an entry named as data
+  // is a contradiction: it is the module the program executes. Dropping it
+  // would silently compile a file the caller asked to store uninterpreted.
+  if (paths.includes(main)) {
+    throw new Error(`The program entry '${main}' cannot be a data file.`);
+  }
+  return paths;
 }
 
 /**
@@ -1611,10 +1616,13 @@ export class Engine extends EventTarget {
     // — load the deferred compiler stack first. The warm-cache boot path
     // always carries the surface (runtimeVersion fingerprints the extractor),
     // so the steady boot stays compiler-free.
+    // A data entry has no record surface and is never parsed, so it must not
+    // drag the compiler onto the warm boot path.
     if (
       modules.some((m) =>
-        m.exportNames === undefined || m.starTargetSpecs === undefined ||
-        m.importSpecs === undefined
+        !m.isData &&
+        (m.exportNames === undefined || m.starTargetSpecs === undefined ||
+          m.importSpecs === undefined)
       )
     ) {
       await ensureCompilerStack();

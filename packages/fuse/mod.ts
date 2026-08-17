@@ -1729,7 +1729,19 @@ export async function main(argv: string[] = Deno.args) {
 
       if (writeTarget?.kind === "source") {
         const { piece, relPath, srcIno } = writeTarget.target;
-        const text = new TextDecoder().decode(buffer);
+        // A source package holds text. Decoding strictly refuses a write that
+        // is not valid UTF-8 rather than storing replacement characters in
+        // place of the bytes, which would silently deploy something other than
+        // what was written — the same refusal `--datafile` makes on the CLI.
+        let text: string;
+        try {
+          text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+            .decode(buffer);
+        } catch {
+          console.error(`[source] Write to ${relPath} is not valid UTF-8 text`);
+          markExistingFailed("write is not valid UTF-8 text");
+          return EINVAL;
+        }
 
         // Optimistically update the file content in the tree
         let fileIno: bigint | undefined = srcIno;

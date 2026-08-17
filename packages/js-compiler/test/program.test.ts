@@ -164,6 +164,21 @@ describe("readDataFileSource", () => {
     }
   });
 
+  it("keeps a byte order mark in the contents", async () => {
+    const root = await Deno.makeTempDir();
+    const bytes = new Uint8Array([0xef, 0xbb, 0xbf, 0x7b, 0x7d]);
+    await Deno.writeFile(`${root}/bom.json`, bytes);
+
+    try {
+      // The mark is part of the file, and a data file is stored byte-for-byte.
+      expect(readDataFileSource(`${root}/bom.json`, root).contents).toBe(
+        "\uFEFF{}",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
   it("rejects a data file outside the root", async () => {
     const root = await Deno.makeTempDir();
     const outside = await Deno.makeTempDir();

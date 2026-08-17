@@ -167,9 +167,13 @@ export function computeModuleHashes(
         );
       }
     }
+    // A data file's bytes are the payload the runtime hands to a pattern, so
+    // line endings are content rather than formatting: two data files differing
+    // only in them are different files and must not share an identity.
+    const isData = options.dataFiles?.has(file.name) === true;
     nodes.set(file.name, {
       path: file.name,
-      src: normalizeSource(file.contents),
+      src: isData ? file.contents : normalizeSource(file.contents),
       internalDeps: [...internalDeps, ...additionalInternalDeps],
       externalDeps,
     });
@@ -245,7 +249,8 @@ export function findInternalTarget(
 
 function normalizeSource(contents: string): string {
   // Identity is over authored source; the only normalization is line endings,
-  // so a CRLF/LF difference does not change a module's hash.
+  // so a CRLF/LF difference does not change a module's hash. Data files are
+  // excluded from this: their bytes are content, not source text.
   return contents.replace(/\r\n/g, "\n");
 }
 
