@@ -9,7 +9,10 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
-import { createCell } from "../src/cell.ts";
+import {
+  createCell,
+  recordRelevantSchemaWritePolicyInput,
+} from "../src/cell.ts";
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
@@ -41,6 +44,7 @@ import { Runtime } from "../src/runtime.ts";
 import { ignoreReadForScheduling } from "../src/scheduler.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
 import * as V2Storage from "../src/storage/v2.ts";
 import {
@@ -2078,6 +2082,464 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(result.error?.message).toContain(
         "writeAuthorizedBy requires a trusted builtin identity",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps an elided ancestor policy beside a separate sibling write", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          protected: {
+            type: "string",
+            ifc: { writeAuthorizedBy: ["trusted-handler"] },
+          },
+          other: { type: "boolean" },
+        },
+        required: ["protected", "other"],
+      };
+      const value = { protected: "same", other: false };
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "cfc-noop-ancestor-with-sibling-write",
+        {
+          type: "object",
+          properties: {
+            protected: { type: "string" },
+            other: { type: "boolean" },
+          },
+          required: ["protected", "other"],
+        },
+        seed,
+      ).set(value);
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-noop-ancestor-with-sibling-write",
+        schema,
+        tx,
+      );
+      cell.set(value);
+      cell.key("other").set(true);
+      tx.prepareCfc();
+      expect((await tx.commit()).error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps an ancestor write ahead of a redundant child attempt", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          protected: {
+            type: "string",
+            ifc: { writeAuthorizedBy: ["trusted-handler"] },
+          },
+          other: { type: "boolean" },
+        },
+        required: ["protected", "other"],
+      };
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "cfc-ancestor-write-before-child-noop",
+        {
+          type: "object",
+          properties: {
+            protected: { type: "string" },
+            other: { type: "boolean" },
+          },
+          required: ["protected", "other"],
+        },
+        seed,
+      ).set({ protected: "same", other: false });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-ancestor-write-before-child-noop",
+        schema,
+        tx,
+      );
+      cell.set({ protected: "same", other: true });
+      cell.key("other").set(true);
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps a direct sibling write separate from an ancestor no-op", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          protected: {
+            type: "string",
+            ifc: { writeAuthorizedBy: ["trusted-handler"] },
+          },
+          other: { type: "boolean" },
+        },
+        required: ["protected", "other"],
+      };
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "cfc-ancestor-noop-before-direct-sibling",
+        {
+          type: "object",
+          properties: {
+            protected: { type: "string" },
+            other: { type: "boolean" },
+          },
+          required: ["protected", "other"],
+        },
+        seed,
+      ).set({ protected: "same", other: false });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-ancestor-noop-before-direct-sibling",
+        schema,
+        tx,
+      );
+      cell.set({ protected: "same", other: false });
+      tx.writeValueOrThrow({
+        ...cell.getAsNormalizedFullLink(),
+        path: ["other"],
+      }, true);
+      tx.prepareCfc();
+      expect((await tx.commit()).error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps independent schema attempts beside logical writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          protected: {
+            type: "string",
+            ifc: { writeAuthorizedBy: ["trusted-handler"] },
+          },
+          other: { type: "boolean" },
+        },
+        required: ["protected", "other"],
+      };
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "cfc-independent-schema-attempt",
+        {
+          type: "object",
+          properties: {
+            protected: { type: "string" },
+            other: { type: "boolean" },
+          },
+          required: ["protected", "other"],
+        },
+        seed,
+      ).set({ protected: "same", other: false });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-independent-schema-attempt",
+        schema,
+        tx,
+      );
+      cell.applyCfcSchemaToExistingValue();
+      cell.key("other").set(true);
+      tx.prepareCfc();
+      expect((await tx.commit()).error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps independent schema attempts beside direct writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          protected: {
+            type: "string",
+            ifc: { writeAuthorizedBy: ["trusted-handler"] },
+          },
+          other: { type: "boolean" },
+        },
+        required: ["protected", "other"],
+      };
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "cfc-independent-schema-attempt-direct-write",
+        {
+          type: "object",
+          properties: {
+            protected: { type: "string" },
+            other: { type: "boolean" },
+          },
+          required: ["protected", "other"],
+        },
+        seed,
+      ).set({ protected: "same", other: false });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-independent-schema-attempt-direct-write",
+        schema,
+        tx,
+      );
+      cell.applyCfcSchemaToExistingValue();
+      tx.writeValueOrThrow({
+        ...cell.getAsNormalizedFullLink(),
+        path: ["other"],
+      }, true);
+      tx.prepareCfc();
+      expect((await tx.commit()).error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps logical attempts that follow redirects into another document", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          protected: {
+            type: "string",
+            ifc: { writeAuthorizedBy: ["trusted-handler"] },
+          },
+          other: { type: "boolean" },
+        },
+        required: ["protected", "other"],
+      };
+      const seed = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-cross-document-attempt-target",
+        {
+          type: "object",
+          properties: {
+            protected: { type: "string" },
+            other: { type: "boolean" },
+          },
+          required: ["protected", "other"],
+        },
+        seed,
+      );
+      target.set({ protected: "same", other: false });
+      runtime.getCell(
+        signer.did(),
+        "cfc-cross-document-attempt-redirect",
+        schema,
+        seed,
+      ).setRaw(target.getAsWriteRedirectLink());
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      runtime.getCell(
+        signer.did(),
+        "cfc-cross-document-attempt-redirect",
+        schema,
+        tx,
+      ).set({ protected: "same", other: false });
+      runtime.getCell(
+        signer.did(),
+        "cfc-cross-document-attempt-target",
+        schema,
+        tx,
+      ).key("other").set(true);
+      tx.prepareCfc();
+      expect((await tx.commit()).error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps anchored-child sibling writes inside their logical attempt", async () => {
+    const { runtime, storageManager } = createRuntime("disabled");
+    try {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                protected: {
+                  type: "string",
+                  ifc: { writeAuthorizedBy: ["trusted-handler"] },
+                },
+                other: { type: "boolean" },
+              },
+              required: ["protected", "other"],
+            },
+          },
+        },
+        required: ["items"],
+      };
+      const apply = (
+        tx: IExtendedStorageTransaction,
+        value: { items: { protected: string; other: boolean }[] },
+      ) => {
+        const link = runtime.getCell(
+          signer.did(),
+          "cfc-anchored-child-sibling",
+          schema,
+          tx,
+        ).getAsNormalizedFullLink();
+        recordRelevantSchemaWritePolicyInput(tx, link, schema, "output");
+        diffAndUpdate(
+          runtime,
+          tx,
+          link,
+          value,
+          "stable-context",
+          { schemaRole: "output" },
+          () => 0,
+        );
+      };
+
+      const seed = runtime.edit();
+      apply(seed, { items: [{ protected: "same", other: false }] });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const stabilize = runtime.edit();
+      apply(stabilize, { items: [{ protected: "same", other: false }] });
+      stabilize.prepareCfc();
+      expect((await stabilize.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      apply(tx, { items: [{ protected: "same", other: true }] });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("evaluates wildcard policy for exact and ancestor no-op writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const value = { items: [{ value: "same" }] };
+      const plainSchema: JSONSchema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { value: { type: "string" } },
+              required: ["value"],
+            },
+          },
+        },
+        required: ["items"],
+      };
+      const protectedSchema: JSONSchema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                value: {
+                  type: "string",
+                  ifc: { writeAuthorizedBy: ["trusted-handler"] },
+                },
+              },
+              required: ["value"],
+            },
+          },
+        },
+        required: ["items"],
+      };
+
+      for (const attemptedPath of ["exact", "ancestor"] as const) {
+        const name = `cfc-wildcard-noop-policy-${attemptedPath}`;
+        const seed = runtime.edit();
+        seed.setCfcEnforcementMode("enforce-explicit");
+        runtime.getCell(signer.did(), name, plainSchema, seed).set(value);
+        seed.prepareCfc();
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-explicit");
+        const cell = runtime.getCell(
+          signer.did(),
+          name,
+          protectedSchema,
+          tx,
+        );
+        if (attemptedPath === "exact") {
+          cell.key("items").key(0).key("value").set("same");
+        } else {
+          cell.set(value);
+        }
+        tx.prepareCfc();
+        expect((await tx.commit()).error?.message).toContain(
+          "writeAuthorizedBy requires a trusted builtin identity",
+        );
+      }
     } finally {
       await runtime.dispose();
       await storageManager.close();

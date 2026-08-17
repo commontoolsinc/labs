@@ -43,6 +43,7 @@ import {
   isInternalVerifierRead,
   isLinkResolutionProbe,
   isMachineryRead,
+  isReadMarkedAsAttemptedWrite,
   isSchedulerDependencyRead,
 } from "../storage/reactivity-log.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
@@ -122,6 +123,7 @@ import {
   type LabelObservationClass,
   type WritePolicyInput,
 } from "./types.ts";
+import { getCfcLogicalWriteAttempts } from "./write-attempts.ts";
 import {
   pathPatternMatches,
   recordedTrustedEventProvenanceMatchesUiContract,
@@ -3640,9 +3642,151 @@ const ifcEntryAppliesToAttemptedWrite = (
   root?: JSONSchema,
   unevaluableMatches = true,
 ): boolean => {
+  const targetWrites = [...(tx.getWriteDetails?.(target.space) ?? [])].filter(
+    (write) =>
+      write.address.id === target.id &&
+      normalizeCellScope(write.address.scope) === target.scope &&
+      (write.address.path.length === 0 || write.address.path[0] === "value"),
+  );
+  type TargetAttemptedWrite = {
+    path: readonly string[];
+    journalIndex?: number;
+    writes?: readonly {
+      path: readonly string[];
+      journalIndex: number;
+    }[];
+  };
+  const isTargetAddress = (write: {
+    space: MemorySpace;
+    id: string;
+    scope?: Parameters<typeof normalizeCellScope>[0];
+  }): boolean =>
+    write.space === target.space &&
+    write.id === target.id &&
+    normalizeCellScope(write.scope) === target.scope;
+  const logicalWriteAttempts = getCfcLogicalWriteAttempts(tx);
+  const groupedReadJournalIndices = new Set<number>();
+  const groupedUnorderedReadPaths = new Map<string, number>();
+  for (const attempt of logicalWriteAttempts) {
+    for (const read of attempt.reads) {
+      if (!isReadMarkedAsAttemptedWrite(read.meta) || !isTargetAddress(read)) {
+        continue;
+      }
+      if (read.journalIndex !== undefined) {
+        groupedReadJournalIndices.add(read.journalIndex);
+      } else {
+        const pathKey = JSON.stringify(canonicalizeLogicalPath(read.path));
+        groupedUnorderedReadPaths.set(
+          pathKey,
+          (groupedUnorderedReadPaths.get(pathKey) ?? 0) + 1,
+        );
+      }
+    }
+  }
+  const orderedAttemptedWrites: TargetAttemptedWrite[] = [
+    ...(tx.getReadActivities?.() ?? []),
+  ].filter((read) => {
+    if (!isReadMarkedAsAttemptedWrite(read.meta) || !isTargetAddress(read)) {
+      return false;
+    }
+    if (
+      read.journalIndex !== undefined &&
+      groupedReadJournalIndices.has(read.journalIndex)
+    ) {
+      return false;
+    }
+    if (read.journalIndex === undefined) {
+      const pathKey = JSON.stringify(canonicalizeLogicalPath(read.path));
+      const remaining = groupedUnorderedReadPaths.get(pathKey) ?? 0;
+      if (remaining > 0) {
+        groupedUnorderedReadPaths.set(pathKey, remaining - 1);
+        return false;
+      }
+    }
+    return true;
+  }).map((read) => ({
+    path: canonicalizeLogicalPath(read.path),
+    ...(read.journalIndex !== undefined
+      ? { journalIndex: read.journalIndex }
+      : {}),
+    writes: [],
+  })).filter((write) => !write.path.includes("*"));
+  const logicalAttemptedWrites: TargetAttemptedWrite[] = logicalWriteAttempts
+    .flatMap((attempt) => {
+      const writes = attempt.writes.filter((write) =>
+        isTargetAddress(write) &&
+        (write.path.length === 0 || write.path[0] === "value")
+      ).map((write) => ({
+        path: canonicalizeLogicalPath(write.path),
+        journalIndex: write.journalIndex,
+      }));
+      const reads = attempt.reads.filter((read) =>
+        isReadMarkedAsAttemptedWrite(read.meta) && isTargetAddress(read)
+      ).map((read) => ({
+        path: canonicalizeLogicalPath(read.path),
+        ...(read.journalIndex === undefined
+          ? {}
+          : { journalIndex: read.journalIndex }),
+        writes,
+      }));
+      if (isTargetAddress(attempt.target)) {
+        const targetPath = canonicalizeLogicalPath(attempt.target.path);
+        if (
+          !reads.some((read) =>
+            read.path.length === targetPath.length &&
+            read.path.every((segment, index) => segment === targetPath[index])
+          )
+        ) {
+          reads.push({ path: targetPath, writes });
+        }
+      }
+      return reads;
+    }).filter((write) => !write.path.includes("*"));
+  const groupedAttemptedWrites = [
+    ...logicalAttemptedWrites,
+    ...orderedAttemptedWrites,
+  ].map((write, order) => ({ write, order })).sort((left, right) => {
+    const leftIndex = left.write.journalIndex;
+    const rightIndex = right.write.journalIndex;
+    if (leftIndex === undefined && rightIndex === undefined) {
+      return left.order - right.order;
+    }
+    if (leftIndex === undefined) return -1;
+    if (rightIndex === undefined) return 1;
+    return leftIndex - rightIndex;
+  }).map(({ write }) => write);
+  const targetAttemptedWrites: TargetAttemptedWrite[] =
+    groupedAttemptedWrites.length > 0 ? groupedAttemptedWrites : [
+      ...(tx.getReactivityLog?.().writes ?? []),
+      ...(tx.getReactivityLog?.().attemptedWrites ?? []),
+    ].filter(isTargetAddress).map((write) => ({
+      path: canonicalizeLogicalPath(write.path),
+    })).filter((write) => !write.path.includes("*"));
+  const detailPath = (write: TransactionWriteDetail): readonly string[] =>
+    write.address.path.length === 0
+      ? []
+      : write.address.path.slice(1).map(String);
+  const attemptedAncestorWasFullyElided = (
+    attemptedWrite: TargetAttemptedWrite,
+  ): boolean => {
+    const attemptedPath = attemptedWrite.path;
+    if (attemptedWrite.writes !== undefined) {
+      return !attemptedWrite.writes.some((write) =>
+        concretePathHasPrefix(write.path, attemptedPath)
+      );
+    }
+    return !targetWrites.some((write) => {
+      const writtenPath = detailPath(write);
+      if (!concretePathHasPrefix(writtenPath, attemptedPath)) return false;
+      return !targetAttemptedWrites.some((otherAttempt) =>
+        otherAttempt.path.length > attemptedPath.length &&
+        concretePathHasPrefix(writtenPath, otherAttempt.path)
+      );
+    });
+  };
+
   const wildcardIndex = path.indexOf("*");
   if (wildcardIndex === -1) {
-    const writes = [...(tx.getWriteDetails?.(target.space) ?? [])];
     let touched = false;
     const valueAtOwnPath = (
       value: unknown,
@@ -3659,11 +3803,8 @@ const ifcEntryAppliesToAttemptedWrite = (
       }
       return { present: true, value: current };
     };
-    for (const write of writes) {
-      if (write.address.id !== target.id) continue;
-      if (normalizeCellScope(write.address.scope) !== target.scope) continue;
+    for (const write of targetWrites) {
       const documentRootWrite = write.address.path.length === 0;
-      if (!documentRootWrite && write.address.path[0] !== "value") continue;
       const writePath = documentRootWrite
         ? []
         : write.address.path.slice(1).map((entry) => String(entry));
@@ -3713,21 +3854,17 @@ const ifcEntryAppliesToAttemptedWrite = (
       }
     }
     if (!touched) {
-      const reactiveWrites = [
-        ...(tx.getReactivityLog?.().writes ?? []),
-        ...(tx.getReactivityLog?.().attemptedWrites ?? []),
-      ];
-      touched = reactiveWrites.some((write) => {
-        if (write.space !== target.space) return false;
-        if (write.id !== target.id) return false;
-        if (normalizeCellScope(write.scope) !== target.scope) return false;
-        const writePath = canonicalizeLogicalPath(write.path);
+      touched = targetAttemptedWrites.some((attemptedWrite) => {
+        const writePath = attemptedWrite.path;
         // An exact or descendant attempt targets this policy even when the
-        // storage layer elides it as a no-op. An ancestor attempt targets the
-        // entry only when its write details show that the entry changed; that
-        // comparison happens above. Container-level attempts emitted while a
-        // sibling changes do not authorize every protected child.
-        return concretePathHasPrefix(writePath, path);
+        // storage layer elides it as a no-op. A fully elided ancestor attempt
+        // also targets the policy. A detail below an ancestor is attributed to
+        // a more specific attempt when one exists. An unexplained descendant
+        // detail means the ancestor write changed that subtree, so the detail
+        // comparison above decides whether this policy was touched.
+        return concretePathHasPrefix(writePath, path) ||
+          (concretePathHasPrefix(path, writePath) &&
+            attemptedAncestorWasFullyElided(attemptedWrite));
       });
     }
     if (!touched) {
@@ -3779,28 +3916,18 @@ const ifcEntryAppliesToAttemptedWrite = (
       );
   }
 
-  const exactAttemptedPaths = [
-    ...(tx.getReactivityLog?.().writes ?? []),
-    ...(tx.getReactivityLog?.().attemptedWrites ?? []),
-  ].map((write) => ({
-    write,
-    path: canonicalizeLogicalPath(write.path),
-  })).filter(({ write, path: writePath }) =>
-    write.space === target.space &&
-    write.id === target.id &&
-    normalizeCellScope(write.scope) === target.scope &&
-    pathPatternMatches(path, writePath) &&
-    !writePath.includes("*")
-  ).map(({ path }) => path);
+  const exactAttemptedPaths = targetAttemptedWrites.map((write) => write.path)
+    .filter((writePath) => pathPatternMatches(path, writePath));
   if (exactAttemptedPaths.length > 0) {
     return exactAttemptedPaths.some((writePath) => {
       const pathTarget = { ...target, path: writePath };
-      if (writeValuePresenceForTarget(tx, pathTarget) === true) {
+      const current = policyValueForTarget(tx, pathTarget);
+      if (current.resolved) {
         return wildcardPolicyMatchesValue(
           tx,
           target,
           schema,
-          writeValueForTarget(tx, pathTarget),
+          current.value,
           root,
           unevaluableMatches,
         );
@@ -3818,15 +3945,9 @@ const ifcEntryAppliesToAttemptedWrite = (
     });
   }
 
-  const writes = [...(tx.getWriteDetails?.(target.space) ?? [])];
-  let sawTargetWrite = false;
   const prefix = path.slice(0, wildcardIndex);
-  for (const write of writes) {
-    if (write.address.id !== target.id) continue;
-    if (normalizeCellScope(write.address.scope) !== target.scope) continue;
-    if (write.address.path[0] !== "value") continue;
-    sawTargetWrite = true;
-    const writePath = write.address.path.slice(1).map((entry) => String(entry));
+  for (const write of targetWrites) {
+    const writePath = detailPath(write);
     if (pathPatternMatches(path, writePath)) {
       // TODO(danfuzz): `deepEqual` calls two same-class fabric values equal
       // regardless of contents, so a genuine change to a fabric-valued slot
@@ -3890,15 +4011,19 @@ const ifcEntryAppliesToAttemptedWrite = (
     }
   }
 
-  if (sawTargetWrite) {
+  const hasAncestorAttempt = targetAttemptedWrites.some((write) =>
+    concretePathHasPrefix(prefix, write.path) &&
+    attemptedAncestorWasFullyElided(write)
+  );
+  if (!hasAncestorAttempt) {
     return false;
   }
-
-  const value = writeValueForTarget(tx, { ...target, path: prefix });
-  if (value === undefined) {
-    return false;
-  }
-  const matches = valuesAtPatternPath(value, path.slice(wildcardIndex));
+  const current = policyValueForTarget(tx, { ...target, path: prefix });
+  if (!current.resolved) return false;
+  const matches = valuesAtPatternPath(
+    current.value,
+    path.slice(wildcardIndex),
+  );
   return matches.some((match) =>
     wildcardPolicyMatchesValue(
       tx,
@@ -4544,9 +4669,7 @@ const verifyInputRequirements = (
   }
 
   for (const entry of cfcSchemaEntries(schema)) {
-    if (
-      !cfcSchemaEntryAppliesToAttemptedWrite(tx, target, entry)
-    ) {
+    if (!cfcSchemaEntryAppliesToAttemptedWrite(tx, target, entry)) {
       continue;
     }
     const ifc = isObjectOrArray(entry.schema) ? entry.schema.ifc : undefined;

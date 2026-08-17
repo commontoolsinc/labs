@@ -29,6 +29,7 @@ import {
   getCarriedCfcLabelView,
 } from "./cfc/label-view-state.ts";
 import { recordGeneratedWritePolicyForLink } from "./cfc/generated-write-policy.ts";
+import { recordCfcLogicalWriteAttempt } from "./cfc/write-attempts.ts";
 import { addRootConfidentiality } from "./cfc/schema-merge.ts";
 import { spaceRootConfidentiality } from "./cfc/space-root-policy.ts";
 import {
@@ -437,6 +438,8 @@ export function diffAndUpdate(
   options?: DiffAndUpdateOptions,
   anchorIds?: () => string | number,
 ): boolean {
+  const readAttemptOffset = [...(tx.getReadActivities?.() ?? [])].length;
+  const writeAttemptOffset = tx.getWriteAttemptLog?.().length ?? 0;
   if (options?.schemaRole === "output") {
     recordGeneratedWritePolicyForLink(
       tx,
@@ -481,6 +484,11 @@ export function diffAndUpdate(
     () => `[diffAndUpdate] changes: ${toCompactDebugString(changes)}`,
   );
   applyChangeSet(tx, changes);
+  recordCfcLogicalWriteAttempt(tx, {
+    target: cfcAddressFromLink(link),
+    reads: [...(tx.getReadActivities?.() ?? [])].slice(readAttemptOffset),
+    writes: (tx.getWriteAttemptLog?.() ?? []).slice(writeAttemptOffset),
+  });
   return changes.length > 0;
 }
 

@@ -827,11 +827,21 @@ heal the compiled namespace instead of evaluating the partial graph.
 An exact or descendant write attempt remains subject to the matching policy
 when storage elides it as a no-op. A fully elided ancestor attempt must also
 reach descendant policies because there are no write details that identify a
-narrower changed path.
+narrower changed path. For wildcard entries, read the stored current value to
+evaluate both an exact concrete attempt and an ancestor attempt that storage
+fully elided.
 
 Once any value in the document changes, use the resulting write details to
 select affected descendants. This prevents a container attempt that changed
 one field from demanding authority for every unchanged protected sibling.
+Record the concrete writes produced by each logical write call. A later
+redundant child attempt must not take ownership of an earlier ancestor write.
+A later direct write must not make an earlier no-op attempt appear non-elided.
+Keep attempted-write markers recorded outside those logical write calls as
+independent attempts, even when another logical write touches the same document.
+Later direct writes remain separate from those independent attempts as well.
+Reconstruct each logical call for every document it visits through a redirect,
+scope boundary, or anchored value.
 
 ## 34. Reject isolated cross-space metadata writes cleanly
 
