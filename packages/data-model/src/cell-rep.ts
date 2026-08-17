@@ -6,6 +6,7 @@
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
+  isObjectNotArray,
   isObjectOrArray,
   isPlainObject,
   isUnsafeObjectKey,
@@ -82,7 +83,7 @@ export function entityRefFrom(hash: FabricHash): EntityRef {
 export function isEntityRef(value: unknown): value is EntityRef {
   return modernCellRepEnabled
     ? value instanceof FabricHash
-    : isObjectOrArray(value) && typeof value["/"] === "string";
+    : isObjectNotArray(value) && typeof value["/"] === "string";
 }
 
 /**
