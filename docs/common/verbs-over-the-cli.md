@@ -166,7 +166,7 @@ cf piece call --piece <board> addTopic \
 {
   "invocation": "0f4c…",
   "status": "settled",
-  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" },
+  "receipt": "/of:fid1:…",
   "result": { "topic": { "$NAME": "Ship the thing", "…": "…" } }
 }
 ```
@@ -181,11 +181,12 @@ or derives structured authorship from the event returns those in its record;
 the caller could not have computed them.
 
 The `receipt` is where that outcome lives: the address of the cell this
-handling wrote it to. Keep it and the result is re-readable without calling
-anything again —
+handling wrote it to, written as one string in the canonical reference syntax
+`--piece` reads. Keep it and the result is re-readable without calling anything
+again —
 
 ```bash
-cf piece get --piece <the receipt id>
+cf piece get --piece "$(echo "$RESULT" | jq -r .receipt)"
 ```
 
 — which is an ordinary read, so the verb's body does not run a second time.
@@ -443,11 +444,11 @@ durable, and only the readback is skipped. The envelope still carries the
 {
   "invocation": "add-1",
   "status": "committed",
-  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" }
+  "receipt": "/of:fid1:…"
 }
 ```
 
-— and collecting the outcome later is `cf piece get --piece <the receipt id>`.
+— and collecting the outcome later is `cf piece get --piece <that string>`.
 Replaying the same id and session recovers it too, but that re-runs the handler
 body: a verb that sends mail or spends a model call does it again. Reading the
 address does not.

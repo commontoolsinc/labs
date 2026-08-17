@@ -95,6 +95,7 @@ import {
   type SchedulerSettleLoopState,
   type SchedulerSettleResult,
   type SettlingTracker,
+  summarizeNonSettlingWindow,
 } from "./execution.ts";
 import { SchedulerGates } from "./gates.ts";
 import {
@@ -2011,19 +2012,28 @@ export class Scheduler {
     settleResult: SchedulerSettleResult,
   ): void {
     if (!settleResult.backoffApplied) return;
-    const nonSettlingTelemetry = markNonSettlingEpisode(this.settlingTracker);
-    if (!nonSettlingTelemetry) return;
 
+    const deferredActions = this.describeDeferredActions(
+      settleResult.backoffActions,
+    );
     this.runtime.telemetry.submit({
       type: "scheduler.non-settling",
-      ...nonSettlingTelemetry,
+      ...summarizeNonSettlingWindow(this.settlingTracker),
+      deferredActions,
+      deferredActionCount: settleResult.backoffActions.length,
     });
-    this.warnNonSettlingActions(settleResult.backoffActions);
+
+    // The marker carries every episode; the warning is a latched
+    // summary so a permanently non-converging graph does not flood the log.
+    if (markNonSettlingEpisode(this.settlingTracker)) {
+      this.warnNonSettlingActions(settleResult.backoffActions, deferredActions);
+    }
   }
 
-  private warnNonSettlingActions(actions: readonly Action[]): void {
+  /** Labels the first few deferred actions, readable name first when known. */
+  private describeDeferredActions(actions: readonly Action[]): string[] {
     const maxListedActions = 10;
-    const labels = actions.slice(0, maxListedActions).map((action) => {
+    return actions.slice(0, maxListedActions).map((action) => {
       const actionId = this.getActionId(action);
       const info = getSchedulerActionTelemetryInfo(action);
       const readableName = info?.moduleName ?? info?.patternName;
@@ -2031,6 +2041,12 @@ export class Scheduler {
         ? `${readableName} (${actionId})`
         : actionId;
     });
+  }
+
+  private warnNonSettlingActions(
+    actions: readonly Action[],
+    labels: readonly string[],
+  ): void {
     const omittedCount = actions.length - labels.length;
     const actionList = labels.length > 0
       ? labels.join(", ") +

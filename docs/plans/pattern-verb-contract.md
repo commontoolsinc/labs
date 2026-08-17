@@ -799,8 +799,8 @@ $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
 $ cf piece call --url "$TOPICS_BOARD_URL" summarize \
     --topic fid1:abc --no-wait
 { "invocation": "inv_9c1b", "status": "committed",
-  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" } }
-$ cf piece get --piece of:fid1:… summary
+  "receipt": "/of:fid1:…" }
+$ cf piece get --piece /of:fid1:… summary
 "..."
 ```
 
