@@ -8370,11 +8370,25 @@ export const prepareBoundaryCommit = (
       ...deriveLabelMetadataTemplateEntries(persistedLabelEntries),
     );
 
-    const manifestFailures = installCarriedPolicyManifests(
-      tx,
-      space,
-      persistedLabelEntries,
-    );
+    let manifestFailures: string[];
+    try {
+      manifestFailures = installCarriedPolicyManifests(
+        tx,
+        space,
+        persistedLabelEntries,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.name === "StorageTransactionWriteIsolationError"
+      ) {
+        reasons.push(
+          `cannot persist CFC metadata for ${id}: ${error.message}`,
+        );
+        continue;
+      }
+      throw error;
+    }
     if (manifestFailures.length > 0) {
       reasons.push(...manifestFailures);
       continue;
@@ -8430,22 +8444,35 @@ export const prepareBoundaryCommit = (
       continue;
     }
 
-    ensureSchemaDocument(
-      tx,
-      space,
-      schemaAndHash.taggedHashString,
-      schemaAndHash.schema,
-    );
-    tx.writeOrThrow({
-      space,
-      id,
-      scope,
-      type: "application/json",
-      path: ["cfc"],
-      // System-owned embedded metadata write. Boundary evaluation is driven by
-      // user-surface reads/writes plus explicit policy inputs, not by recursive
-      // attempted-target tracking of this internal metadata update.
-    }, metadata);
+    try {
+      ensureSchemaDocument(
+        tx,
+        space,
+        schemaAndHash.taggedHashString,
+        schemaAndHash.schema,
+      );
+      tx.writeOrThrow({
+        space,
+        id,
+        scope,
+        type: "application/json",
+        path: ["cfc"],
+        // System-owned embedded metadata write. Boundary evaluation is driven by
+        // user-surface reads/writes plus explicit policy inputs, not by recursive
+        // attempted-target tracking of this internal metadata update.
+      }, metadata);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.name === "StorageTransactionWriteIsolationError"
+      ) {
+        reasons.push(
+          `cannot persist CFC metadata for ${id}: ${error.message}`,
+        );
+        continue;
+      }
+      throw error;
+    }
   }
   reasons.push(...verifySinkRequestCeilings(tx));
   // Single-use grant consumption (design §2.2): stage every claim the

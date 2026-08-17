@@ -848,14 +848,15 @@ scope boundary, or anchored value.
 CFC preparation can discover that a schema policy input needs metadata in a
 different space after an ordinary write has already opened the transaction's
 single-space writer. Do not opt the transaction into broader write authority on
-the basis of verifier-owned metadata. Convert the storage-isolation error into
-an ordinary CFC preparation reason instead. Enforcing modes reject the commit,
-observe modes diagnose it, and the scheduler can finish the action without an
-uncaught preparation exception.
+the basis of verifier-owned metadata. This includes module-policy manifests
+carried beside the labels that refer to them. Convert the storage-isolation
+error into an ordinary CFC preparation reason instead. Enforcing modes reject
+the commit, observe modes diagnose it, and the scheduler can finish the action
+without an uncaught preparation exception.
 
-Keep other storage failures exceptional. A direct regression test proves that
-preparation reports the second-space metadata target without throwing or
-widening the transaction.
+Keep other storage failures exceptional. Direct regression tests prove that
+preparation reports second-space label metadata and module-policy manifests
+without throwing or widening the transaction.
 
 ## 35. Establish value schemas after ambient initialization
 

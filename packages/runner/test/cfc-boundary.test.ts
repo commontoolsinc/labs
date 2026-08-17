@@ -3,7 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
-import { cfcAtom } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -17,6 +17,7 @@ import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
 } from "../src/cfc/metadata.ts";
+import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
 import type { IFCLabel } from "../src/cfc/mod.ts";
 import {
   canonicalizeCfcMetadata,
@@ -2656,6 +2657,133 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         readTx,
       );
       expect(readCell.get()).toEqual({ secret: "hello" });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects cross-space metadata persistence without widening the transaction", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const otherSpace = (await Identity.fromPassphrase(
+      "runner-cfc-boundary-tests-other-space",
+    )).did();
+    try {
+      const tx = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "cfc-cross-space-metadata-primary",
+        undefined,
+        tx,
+      ).set("primary write");
+      recordRelevantSchemaWritePolicyInput(
+        tx,
+        runtime.getCell(
+          otherSpace,
+          "cfc-cross-space-metadata-secondary",
+          undefined,
+          tx,
+        ).getAsNormalizedFullLink(),
+        {
+          type: "string",
+          ifc: { confidentiality: ["second-space-policy"] },
+        },
+      );
+
+      expect(() => tx.prepareCfc()).not.toThrow();
+      const preparation = tx.getCfcState().prepare;
+      expect(preparation.status).toBe("invalidated");
+      expect(
+        preparation.status === "invalidated" &&
+          preparation.reasons.length === 1,
+      ).toBe(true);
+      expect(
+        preparation.status === "invalidated" &&
+          preparation.reasons[0].startsWith(
+            "cannot persist CFC metadata for of:",
+          ),
+      ).toBe(true);
+      expect(
+        preparation.status === "invalidated" &&
+          preparation.reasons[0].startsWith(
+            "cannot persist CFC metadata for of:",
+          ),
+      ).toBe(true);
+      expect(
+        preparation.status === "invalidated" &&
+          preparation.reasons[0].includes(
+            "because transaction has writer open for",
+          ),
+      ).toBe(true);
+      tx.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects cross-space manifest persistence without widening the transaction", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const otherSpace = (await Identity.fromPassphrase(
+      "runner-cfc-boundary-tests-manifest-space",
+    )).did();
+    const artifact = buildCfcPolicyArtifactManifest({
+      formatVersion: 1,
+      moduleIdentity: "sha256:cross-space-boundary-module",
+      symbol: "releaseRules",
+      template: {
+        templateVersion: 1,
+        exchangeRules: [],
+        dependencies: { authorityOnly: [], dataBearing: [] },
+        integrityRequirements: {},
+      },
+    });
+    try {
+      runtime.registerCfcPolicyManifests(undefined, [artifact]);
+      const tx = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "cfc-cross-space-manifest-primary",
+        undefined,
+        tx,
+      ).set("primary write");
+      recordRelevantSchemaWritePolicyInput(
+        tx,
+        runtime.getCell(
+          otherSpace,
+          "cfc-cross-space-manifest-secondary",
+          undefined,
+          tx,
+        ).getAsNormalizedFullLink(),
+        {
+          type: "string",
+          ifc: {
+            confidentiality: [{
+              type: CFC_ATOM_TYPE.Policy,
+              policyRefKind: "module",
+              moduleIdentity: artifact.manifest.moduleIdentity,
+              symbol: artifact.manifest.symbol,
+              policyDigest: artifact.policyDigest,
+              subject: otherSpace,
+            }],
+          },
+        },
+      );
+
+      expect(() => tx.prepareCfc()).not.toThrow();
+      const preparation = tx.getCfcState().prepare;
+      expect(preparation.status).toBe("invalidated");
+      expect(
+        preparation.status === "invalidated" &&
+          preparation.reasons.length === 1,
+      ).toBe(true);
+      expect(
+        preparation.status === "invalidated" &&
+          preparation.reasons[0].includes(
+            "because transaction has writer open for",
+          ),
+      ).toBe(true);
+      tx.abort();
     } finally {
       await runtime.dispose();
       await storageManager.close();
