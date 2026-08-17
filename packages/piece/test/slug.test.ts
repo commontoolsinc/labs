@@ -10,6 +10,7 @@ import { pieceId } from "../src/piece-id.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import {
   assignSlug,
+  releaseSlug,
   resolvePieceAddress,
   resolveSlugTargetCell,
   setSlugLink,
@@ -214,6 +215,31 @@ describe("piece slugs", () => {
 
     await assignSlug(pieces, first, "demo");
     await assignSlug(pieces, second, "demo");
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(second));
+  });
+
+  it("clears an assigned slug back to not found", async () => {
+    const piece = await createPiece("slug-release-target");
+    await assignSlug(pieces, piece, "demo");
+    // The assignment really landed, so the rejection below is a clear rather
+    // than a name that was never taken.
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(piece));
+
+    await releaseSlug(pieces, "demo", piece);
+
+    await expect(resolvePieceAddress(pieces, "demo")).rejects.toThrow(
+      /Slug "demo" not found/,
+    );
+  });
+
+  it("leaves a slug that now redirects elsewhere alone", async () => {
+    const first = await createPiece("slug-release-first");
+    const second = await createPiece("slug-release-second");
+    await assignSlug(pieces, first, "demo");
+    await assignSlug(pieces, second, "demo");
+
+    await releaseSlug(pieces, "demo", first);
 
     expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(second));
   });

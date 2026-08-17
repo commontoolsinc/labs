@@ -1,6 +1,7 @@
 export { pieceId } from "./piece-id.ts";
 export {
   assignSlug,
+  releaseSlug,
   resolvePieceAddress,
   resolveSlugTargetCell,
   setSlugLink,

@@ -13,6 +13,7 @@ import {
 } from "@commonfabric/runner/shared";
 import {
   assignSlug,
+  releaseSlug,
   resolvePieceAddress,
   SlugResolutionError,
 } from "@commonfabric/piece";
@@ -813,7 +814,27 @@ export const runPatternTool: HarnessToolDefinition<
             await pieces.remove(piece.getCell());
             return;
           }
-          await assignSlug(pieces, piece.getCell(), registrationSlug);
+          try {
+            await assignSlug(pieces, piece.getCell(), registrationSlug);
+          } finally {
+            // The abort can land while the assignment is in flight, and the
+            // cancellation path does not wait to find out how it ended — that
+            // would put it back behind the operation it escaped. So the
+            // continuation, which is already behind it, clears the name the
+            // assignment may have taken. The availability check established
+            // the slug was free before anything was written, so free is what
+            // it is restored to; `releaseSlug` writes nothing when the
+            // document does not redirect to this piece, so an assignment that
+            // never landed and a name a later writer has taken are both left
+            // as they are.
+            if (cancelled) {
+              try {
+                await releaseSlug(pieces, registrationSlug, piece.getCell());
+              } catch {
+                // Best-effort: the cancelled output stands either way.
+              }
+            }
+          }
         } catch (error) {
           failure = { error };
         }
@@ -829,10 +850,9 @@ export const runPatternTool: HarnessToolDefinition<
             // separate operation — so the cancellation path performs it. A
             // cancelled run hands back no `resultRef`, so a piece left listed
             // under no slug is one the caller was given no way to reach. An
-            // abort landing inside the slug assignment itself is the one case
-            // neither path covers: the assignment is already under way, and
-            // waiting to find out how it ended would put the cancellation path
-            // back behind the operation the abort escaped.
+            // abort landing inside the slug assignment reaches here too: the
+            // piece is removed from the list here, and the continuation clears
+            // the slug once the assignment it is behind has settled.
             await pieces.remove(piece.getCell());
           } catch {
             // Best-effort: the cancelled output stands either way.

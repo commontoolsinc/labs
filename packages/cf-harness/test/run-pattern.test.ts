@@ -991,6 +991,116 @@ describe("run-pattern", () => {
         .toThrow();
     });
 
+    it("leaves the registration slug resolving to nothing when the signal aborts while the slug assignment is in flight", async () => {
+      // The window the cancellation path cannot cover on its own: the
+      // assignment is already under way when the abort lands, and waiting for
+      // it there would put the cancellation path back behind the operation the
+      // abort escaped. So the assignment commits after the cancelled output,
+      // and the continuation behind it clears the name it took.
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+
+      const controller = new AbortController();
+      // Held until the tool has returned, so the slug write provably commits
+      // after the cancelled output rather than before it.
+      let releaseAssignment!: () => void;
+      const toolReturned = new Promise<void>((resolve) => {
+        releaseAssignment = resolve;
+      });
+      // Resolves once the continuation's clear has committed, so the
+      // assertions read the state it left rather than one it has not reached.
+      let clearLanded!: () => void;
+      const slugCleared = new Promise<void>((resolve) => {
+        clearLanded = resolve;
+      });
+
+      const slugEntity = JSON.stringify(
+        entityIdFrom(slugIdForSpace(pieces.getSpace(), "doubling-report")),
+      );
+      // Armed only once the registry join has landed, so the availability
+      // check's own read of the slug document earlier in the run is not
+      // mistaken for the assignment's.
+      let armed = false;
+      let phase: "assigning" | "releasing" | "done" = "assigning";
+      let holdAssignmentEdit = false;
+      let clearEditPending = false;
+      let slugCell: { getRawUntyped: () => unknown } | undefined;
+      let rawBeforeClear: unknown;
+
+      const originalAdd = pieces.add.bind(pieces);
+      pieces.add = async (cells) => {
+        await originalAdd(cells);
+        armed = true;
+      };
+      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
+      runtime.getCellFromEntityId = ((
+        ...args: Parameters<Runtime["getCellFromEntityId"]>
+      ) => {
+        const cell = originalGetCell(...args);
+        if (!armed || JSON.stringify(args[1]) !== slugEntity) {
+          return cell;
+        }
+        if (phase === "assigning") {
+          // `setSlugLink` fetches the slug document and then, with no await in
+          // between, opens the transaction that writes it — so the abort here
+          // lands inside the assignment, ahead of its write, every run.
+          phase = "releasing";
+          slugCell = cell;
+          holdAssignmentEdit = true;
+          controller.abort();
+        } else if (phase === "releasing") {
+          phase = "done";
+          clearEditPending = true;
+        }
+        return cell;
+      }) as Runtime["getCellFromEntityId"];
+      const originalEdit = runtime.editWithRetry.bind(runtime);
+      runtime.editWithRetry = ((
+        ...args: Parameters<Runtime["editWithRetry"]>
+      ) => {
+        if (holdAssignmentEdit) {
+          holdAssignmentEdit = false;
+          return toolReturned.then(() => originalEdit(...args));
+        }
+        if (clearEditPending) {
+          clearEditPending = false;
+          rawBeforeClear = slugCell?.getRawUntyped();
+          return originalEdit(...args).then((result) => {
+            clearLanded();
+            return result;
+          });
+        }
+        return originalEdit(...args);
+      }) as Runtime["editWithRetry"];
+
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      }, { signal: controller.signal });
+
+      expect((result.output as RunPatternToolErrorOutput).status).toBe(
+        "cancelled",
+      );
+      releaseAssignment();
+      await slugCleared;
+      runtime.getCellFromEntityId = originalGetCell;
+      runtime.editWithRetry = originalEdit;
+      pieces.add = originalAdd;
+
+      // The assignment really committed after the cancelled output, so the
+      // slug below names nothing because it was cleared rather than because it
+      // was never taken.
+      expect(rawBeforeClear).not.toBe(undefined);
+      await expect(resolvePieceAddress(pieces, "doubling-report")).rejects
+        .toThrow(/not found/);
+    });
+
     it("still returns `cancelled` when removing the piece from the space's piece list fails", async () => {
       // The removal is best effort: the caller asked to stop, and a run that
       // reported the removal's failure instead of the cancellation would be
