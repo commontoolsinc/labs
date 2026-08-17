@@ -4,7 +4,6 @@ import {
   type ComparableCell,
   computed,
   Default,
-  entityRefToString,
   equals,
   handler,
   lift,
@@ -455,29 +454,6 @@ export const topicAuthorLabel = (
  * text), since stored data may predate the write guard. */
 export const isSafeLinkUrl = (url: string): boolean =>
   /^https?:\/\//i.test((url ?? "").trim());
-
-/** The payload of a `fid1:…` tagged hash string; "" for anything else. The
- * length floor is what distinguishes a real address (43 chars of base64url
- * hash) from a string that merely starts with the tag. */
-export const fidPayload = (fid: string): string => {
-  const m = /^fid1:([A-Za-z0-9_-]{20,})$/.exec((fid ?? "").trim());
-  return m ? m[1] : "";
-};
-
-/** A Topic destination rendered as data, not as a pattern-owned handler.
- * `cf-cell-link` resolves the fid in the active space and delegates ordinary
- * and Cmd/Ctrl-click navigation to the shell. This remains usable after a
- * cold load because the persisted VDOM contains no ephemeral event stream. */
-export const topicCellLink = (fid: string, label: string) =>
-  fid
-    ? (
-      <cf-cell-link
-        link={`/of:${fid}`}
-        label={label}
-        static
-      />
-    )
-    : null;
 
 const LINK_KIND_ITEMS = [
   { label: "Web", value: "web" },

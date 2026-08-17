@@ -66,6 +66,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260807T190842Z-SD0Ii3eK0ZnJnIhs",
       "20260810T212206Z-cIIz70jbLbbPc-F3",
       "20260812T003521Z-Jy37T5qk4KSHkgQe",
+      "20260814T233350Z-jHoJZsDa5eUdWU-B",
     ],
     // `argument.topics[]` is every change to `TopicPiece` seen from the board's
     // list: each stored topic's defaults moved, which the proof cannot show is
@@ -76,13 +77,15 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "result.crossrefs",
       "result.crossrefs[].fid",
       "result.crossrefs[].commentCount",
+      "result.index[].fid",
     ],
     reason:
       "Topics' reference graph was removed and then rebuilt on cell identity. " +
       "The board still publishes `crossrefs`, but as a `{ topic, mentionedBy }` " +
       "pivot rather than the old summary-bearing graph row, so the old row's " +
-      "fields go. `index` is the full-board survey surface and carries each " +
-      "row's canonical fid.",
+      "fields go. `index` is the full-board survey surface, and its rows ARE " +
+      "the topics: a row's own address is the topic's, so the copied `fid` " +
+      "field goes with the copy.",
   },
   {
     // The same removal seen from a topic: its own `crossrefs` row, and the

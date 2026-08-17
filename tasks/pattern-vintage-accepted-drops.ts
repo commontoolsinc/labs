@@ -57,6 +57,11 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       // summaries. The summaries themselves are untouched.
       "index[].refsOut",
       "index[].referencedBy",
+      // An index row IS its topic now, so the title-only reference that used to
+      // sit beside it goes; the row's own address is the topic's. The copied
+      // `fid` field goes with it, and needs no entry here: no replayed vintage
+      // holds a resolved one.
+      "index[].topic",
       // The retired per-topic edge row, seen through each of the board's two
       // lists of children.
       "topics[].crossrefs",
@@ -66,7 +71,8 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "Topics' reference graph was rebuilt on cell identity — see the matching " +
       "entry in tasks/pattern-compat-accepted-breaks.ts. A topic publishes " +
       "`referencedBy` instead of deriving its own edge row, so the old row is " +
-      "gone from every child the board lists.",
+      "gone from every child the board lists. The index rows became the topics " +
+      "themselves, which is what retires their copied address and reference.",
   },
   {
     pattern: "topics/topic.tsx",

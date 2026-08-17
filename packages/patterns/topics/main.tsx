@@ -1,7 +1,6 @@
 import {
   action,
   Default,
-  entityRefToString,
   equals,
   handler,
   lift,
@@ -18,19 +17,16 @@ import {
 } from "commonfabric";
 
 import Topic, {
-  fidPayload,
   rejectMutation,
   snippet,
   type TopicAuthor,
   topicAuthorFromAgent,
   topicAuthorFromPerson,
   topicAuthorLabel,
-  topicCellLink,
   type TopicCrossrefRow,
   type TopicMentionSource,
   type TopicPiece,
   TOPICS_THEME,
-  type TopicSummary,
   whenLabel,
 } from "./topic.tsx";
 
@@ -53,7 +49,6 @@ export type {
   TopicMentionRefMap,
   TopicOutput,
   TopicPiece,
-  TopicSummary,
 } from "./topic.tsx";
 
 export interface TopicsInput {
@@ -81,26 +76,19 @@ export interface AddTopicEvent {
 export interface AddTopicResult {
   /** The topic this call created — the piece itself, not a manufactured
    * identifier. It reaches the caller as a link to the child, which the CLI
-   * renders as an address (`cf piece call --show-links`), so a create needs no
-   * authored fid field of its own — unlike an index row, which is read through
-   * `cf piece get` and has no such flag. A caller therefore addresses the new
-   * topic straight from the create, instead of filing it and then searching
-   * the board's index for the topic it just made. */
+   * renders as an address (`cf piece call --show-links`). A caller therefore
+   * addresses the new topic straight from the create, instead of filing it and
+   * then searching the board's index for the topic it just made. */
   topic: TopicPiece;
 }
 
-/** One board row as the board itself holds it: the topic's canonical address,
- * the topic, and the scalars a survey and a card both read.
+/** One row of the board's compact discovery index: the topic itself, declared
+ * through a title-and-scalars schema. The declared schema is the bound, so a
+ * reader surveying the board expands no topic's prose, thread, or verbs.
  *
- * Private to the board. Nothing published is shaped by it — `index` republishes
- * these rows through the tighter `TopicIndexRow`, and the card list reads them
- * through `TopicCard` — which is what leaves `topic` free to be the whole piece
- * here. It is a link, and each reader's own declared schema decides what that
- * link resolves to. */
-interface TopicRow {
-  /** The topic's own fid in tagged form (`fid1:…`); "" until known. */
-  fid: string;
-  topic: TopicPiece;
+ * A row IS the topic it describes, so a row's own address is the topic's
+ * address; nothing here carries a separate copy of it. */
+export interface TopicIndexRow {
   title: string;
   createdAt: number;
   /** Authorship has no honest zero, so absence stays declared rather than
@@ -108,115 +96,9 @@ interface TopicRow {
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
   /** Coalesced to 0 for a cold or older topic whose derived path is absent,
    * so the row itself never carries the mixed-version undefined. */
-  commentCount: number;
-  lastActivityAt: number;
+  commentCount: number | Default<0> | undefined;
+  lastActivityAt: number | Default<0> | undefined;
 }
-
-/** A topic as the compact index carries it: the child reference itself declared
- * through a title-only schema. The declared schema is the bound, so a reader
- * surveying the board cannot expand a topic's prose through this at all. */
-export interface TopicIndexRef {
-  title: string;
-}
-
-/** One row of the board's compact discovery index — the same rows the cards
- * render, declared through the tighter `TopicIndexRef` so one bounded read
- * surveys the whole board. */
-export interface TopicIndexRow {
-  /** The topic's canonical address in tagged form (`fid1:…`); "" until known.
-   *
-   * The row's `topic` is the reference itself, and `cf piece get --select
-   * topic@` resolves that reference's own address — so this field is a
-   * convenience rather than the only way through. It earns its place by
-   * composing with `--filter`, which `@` does not: a filtered array's survivors
-   * no longer say which positions they came from, so finding one topic by title
-   * and learning its address is one read with this field and two without.
-   *
-   * Derived from runtime-only cell surface, so it reads "" for a topic whose
-   * own entity has not resolved yet. */
-  fid: string;
-  topic: TopicIndexRef;
-  title: string;
-  createdAt: number;
-  createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
-  commentCount: number;
-  lastActivityAt: number;
-}
-
-/**
- * The board's rows, one per (non-null) topic. Identity is each entry's resolved
- * result-doc fid, and nothing here is persisted.
- *
- * A `lift` rather than a pattern-body derivation because the declared parameter
- * type is what bounds the read: `TopicSummary` is a title and four scalars, so
- * building every row on the board expands no topic's body, thread, verbs, or
- * rendered UI. An inferred input schema would read each topic whole.
- *
- * HACK: the parameter reads `TopicSummary` but each row's `topic` is declared
- * `TopicPiece`, via an `as`. A reference the lift passes through is a link, and
- * a link resolves to the whole topic no matter how little of it this lift
- * declared — so the cast describes what the row actually holds, while the
- * narrow parameter still bounds what this derivation reads. Both readers of a
- * row need that: `index` projects the link title-only, and a card reads a body
- * snippet and the legacy author name through the same link. Generic lifts that
- * carried an input reference type through to the output would say this without
- * a cast.
- */
-const boardRows = lift(
-  (topics: Writable<TopicSummary[] | Default<[]>>): TopicRow[] => {
-    const list = topics.get();
-    // Each entry's own fid payload ("" while unresolved, e.g. mid-sync).
-    // resolveAsCell/entityId are cell-runtime surface, not on the pattern
-    // Writable type (same cast as notes' appendLink).
-    const payloads = list.map((t, i) => {
-      if (!t) return "";
-      const ref = (topics.key(i) as any).resolveAsCell?.()?.entityId;
-      return ref ? fidPayload(entityRefToString(ref)) : "";
-    });
-    // Built as `unknown[]` because what goes in is a cell and what a reader
-    // receives is the row: the array holds links, and the declared result type
-    // is what a consumer resolves them to. Same shape as the `as TopicPiece`
-    // cast on the reference below, which TypeScript expresses directly only
-    // because those types are structurally related and `Cell<T>`/`T` are not.
-    const rows: unknown[] = [];
-    list.forEach((t, i) => {
-      if (!t) return;
-      // Each row goes in a cell caused by the topic it describes, and the array
-      // holds a LINK to that cell rather than the row inline. That is what the
-      // `map` builtin keys element runs by: it reads each element's normalized
-      // link, so a link resolves to the row's own entity and stays the same
-      // wherever the row sits, while an inline value resolves to the array
-      // position and makes identity positional. The board sorts by activity, so
-      // every append is a prepend — inline rows re-key every card and rebuild
-      // its whole subtree; linked rows keep theirs and the run is reused.
-      //
-      // A topic whose fid has not resolved yet (mid-sync) has no stable cause,
-      // so it falls back to its position — positional identity for exactly the
-      // rows that have no identity yet, which is what they have today anyway.
-      const cause = payloads[i] ? payloads[i] : ["unresolved-topic-row", i];
-      rows.push(
-        Writable.for<TopicRow>(cause).set({
-          fid: payloads[i] ? `fid1:${payloads[i]}` : "",
-          topic: t as TopicPiece,
-          title: t.title,
-          createdAt: t.createdAt,
-          // Copied as a VALUE, not passed through. Every other field here is a
-          // scalar, which can only ever be written inline; `createdBy` is an
-          // object, and handing one straight from a read to a `.set()` writes a
-          // link to where it was read from when it still carries that
-          // provenance and an inline copy when it does not. Both are valid
-          // writes, which is the problem: the same inputs then produce two
-          // different documents and the idempotency recheck fails the pattern.
-          // A row is a snapshot, so the copy is also what this field means.
-          createdBy: t.createdBy ? { ...t.createdBy } : undefined,
-          commentCount: t.commentCount ?? 0,
-          lastActivityAt: t.lastActivityAt ?? 0,
-        }),
-      );
-    });
-    return rows as TopicRow[];
-  },
-);
 
 /**
  * The board's mention pivot: one row per topic, naming the topics that mention
@@ -297,25 +179,19 @@ const crossrefTable = lift(
   },
 );
 
-/** Exactly what one board card renders. Its `topic` is a two-field projection
- * of the row's reference — the body snippet and the legacy author name — so a
- * card can never expand a topic beyond those. Private to the board; nothing
- * published is shaped by it, which is what leaves it free to be this narrow. */
-interface TopicCard {
+/** Exactly what one board card renders: the topic itself, declared through the
+ * handful of fields the card shows. The declared schema is the bound, so a card
+ * can never expand a topic past them. Private to the board; nothing published
+ * is shaped by it, which is what leaves it free to be this narrow. */
+interface TopicCardView {
   // Every field carries a default. The board's card list is lowered to a
-  // mapped sub-pattern, so this is the argument schema a piece holding rows
+  // mapped sub-pattern, so this is the argument schema a piece holding topics
   // written by an older version of this pattern gets updated against — and a
-  // required property that its stored rows lack refuses the update outright
+  // required property that its stored topics lack refuses the update outright
   // (`deno task pattern-vintage` catches exactly that).
-  //
-  // `TopicRow` satisfies this structurally. Declaring it separately is what
-  // stops ordering the board from carrying a whole-piece row schema.
-  fid: string | Default<"">;
   title: string | Default<"">;
-  topic: {
-    body: string | Default<"">;
-    createdByName: string | Default<"">;
-  };
+  body: string | Default<"">;
+  createdByName: string | Default<"">;
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
   commentCount: number | Default<0>;
   lastActivityAt: number | Default<0>;
@@ -324,18 +200,24 @@ interface TopicCard {
 /**
  * The board's cards, most recently active first.
  *
- * Sorts and returns the rows themselves. It does not build a card object per
- * row, and that is the point: a constructed object is a new value with no
+ * Sorts and returns the topics themselves. It does not build a card object per
+ * topic, and that is the point: a constructed object is a new value with no
  * identity, so every render would hand the mapped sub-pattern fresh content
  * and every card's subtree would be re-addressed — new scheduler actions
- * registered and the old ones torn down — for rows whose content never
- * changed. Passing a row through keeps the identity it already has.
+ * registered and the old ones torn down — for topics whose content never
+ * changed. Passing a topic through keeps the identity it already has.
  *
- * Separate from `boardRows` so the published index keeps the board's own order
- * while the cards carry activity order.
+ * HACK: the parameter declares the one field the sort reads, so ordering the
+ * board expands no topic. The elements are links, and the cast hands the card
+ * list the wider view each card resolves its own link through. Generic lifts
+ * that carried an input reference type through to the output would say this
+ * without a cast.
  */
-const cardsByActivity = lift((rows: TopicCard[]): TopicCard[] =>
-  rows.toSorted((a, b) => b.lastActivityAt - a.lastActivityAt)
+const cardsByActivity = lift(
+  (rows: { lastActivityAt: number | Default<0> | undefined }[] | Default<[]>) =>
+    rows.toSorted((a, b) =>
+      (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)
+    ) as TopicCardView[],
 );
 
 /**
@@ -355,10 +237,10 @@ export interface TopicsOutput {
    * wired to the same table the board's own children read — the graph is
    * derived once, here, and never per topic. */
   crossrefs: TopicCrossrefRow[] | Default<[]>;
-  /** The full-board survey surface: one bounded row per topic, carrying its
-   * canonical address, its reference, and the scalars a survey reads. Rows
-   * carry their own `fid`, so consumers never correlate by position — an index
-   * into this array is not a stable address. */
+  /** The full-board survey surface: one bounded row per topic, carrying the
+   * scalars a survey reads. A row IS its topic, so a row's own address is the
+   * topic's — `--select index[].@` reads it, and an index into this array is
+   * not a stable address. */
   index: TopicIndexRow[] | Default<[]>;
   /** Session-local draft for the footer composer (exposed for embedding and
    * headless driving, like the chat exemplar's drafts). */
@@ -371,10 +253,6 @@ export interface TopicsOutput {
   /** Submit the footer composer as the current viewer's canonical Profile. */
   submitTopic: Stream<void>;
 }
-
-// The navigation helper lives with the shared Topic module, beside the fid
-// helper it pairs with.
-export { topicCellLink } from "./topic.tsx";
 
 /** Browser composer submit. Profile wishes are resolved by the pattern and
  * bound into this handler as plain snapshot values, which keeps the mutation
@@ -423,11 +301,10 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   // `.length` — or through a helper this analysis cannot see into — is what
   // puts the whole board back in the read.
   const topicCount = topics.get().length;
-  const rows = boardRows(topics);
-  const cards = cardsByActivity(rows);
+  const cards = cardsByActivity(topics);
   // Derived once for the whole board; every topic reads its own row out of it.
   const crossrefs = crossrefTable({ sources: topics });
-  const hasNoTopics = rows.length === 0;
+  const hasNoTopics = topicCount === 0;
 
   // Browser authorship comes from the current viewer's canonical Profile.
   // CLI streams below remain wish-free: agents sign each mutation in the
@@ -529,23 +406,23 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                     <cf-text block style="font-weight: 600;">
                       {card.title || "(untitled topic)"}
                     </cf-text>
-                    {card.topic.body
+                    {card.body
                       ? (
                         <cf-text tone="muted" block truncate>
-                          {snippet(card.topic.body, 120)}
+                          {snippet(card.body, 120)}
                         </cf-text>
                       )
                       : null}
                     <cf-text variant="caption" tone="muted">
                       {card.commentCount} comments · by {topicAuthorLabel(
                         card.createdBy,
-                        card.topic.createdByName,
+                        card.createdByName,
                       )}
                       {" · "}
                       {whenLabel(card.lastActivityAt)}
                     </cf-text>
                   </cf-vstack>
-                  {topicCellLink(card.fid, "Open")}
+                  <cf-cell-link $cell={card} label="Open" static />
                 </cf-hstack>
               </cf-card>
             ))}
@@ -581,7 +458,10 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     mentionable: topics,
     topicCount,
     crossrefs,
-    index: rows,
+    // The topics themselves, declared through the index's narrow row schema:
+    // a row's address is the topic's address, so a survey and a follow-up read
+    // name the same document.
+    index: topics,
     newTitle,
     addTopic,
     myName,

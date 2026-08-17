@@ -161,25 +161,21 @@ cf piece call --piece <topic> addLink \
   '{"kind":"pr","url":"https://github.com/org/repo/pull/123","label":"PR #123","agentName":"Sol"}'
 ```
 
-**A full-board survey is one bounded read of `index`.** Each row is the topic's
-canonical `fid`, the child reference, and scalar summaries (`title`,
-`createdAt`, `createdBy`, `commentCount`, `lastActivityAt`). The reference is
-declared through a title-only schema, so the read cannot expand a topic's body,
-thread, or verbs no matter how it is projected.
+**A full-board survey is one bounded read of `index`.** Each row IS the topic it
+describes, declared through a schema of scalar summaries (`title`, `createdAt`,
+`createdBy`, `commentCount`, `lastActivityAt`). The declared schema is the
+bound, so the read cannot expand a topic's body, thread, or verbs no matter how
+it is projected.
 
 ```bash
 cf piece get --piece <board> index --step
 ```
 
-The `fid` on a row is the canonical address of the topic that row describes —
-the one to pass as `--piece` for that topic's own reads and verbs. A row's
-`topic` reference resolves to the same address through `--select topic@`, so
-this field is a convenience rather than the only way through. What it buys is
-composition with `--filter`, which `@` does not have: a filtered array's
-survivors no longer say which positions they came from, so finding one topic by
-title and learning where it lives is one read with this field and two without.
-It is derived from runtime-only cell surface and reads `""` for a topic whose
-own entity has not resolved yet.
+A row's own address is the address of the topic it describes — the one to pass
+as `--piece` for that topic's own reads and verbs. `--select index[].@` resolves
+it, and it composes with `--filter`: a filtered array's survivors no longer say
+which positions they came from, so finding one topic by title and learning where
+it lives stays one read.
 
 The board input links to complete Topic objects, including bodies, threads, and
 handlers. Targeted headless discovery beyond the index should therefore combine
@@ -189,7 +185,7 @@ whole corpus:
 ```bash
 cf piece get --piece <board> index --step \
   --filter '.title == "<exact title>"' \
-  --select fid,title,lastActivityAt,commentCount
+  --select @,title,lastActivityAt,commentCount
 cf piece get --piece <board> topics --input \
   --filter '.lastActivityAt >= <epoch-milliseconds>' \
   --select title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
@@ -207,7 +203,7 @@ arbitrary jq pipeline. These transforms execute as a session-scoped computed
 pattern expression, so their CFC metadata behavior matches authored
 filter/map/lift expressions. The durable `topics --input` list remains evidence
 when the computed `index --step` read cannot materialize, but only a successful
-index row supplies the canonical Topic fid.
+index row supplies a Topic's address.
 
 Every agent-authored mutation carries `agentName`; there is no preceding “set
 current name” call. Fabric's operation history retains the authenticated human

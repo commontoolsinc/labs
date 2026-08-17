@@ -48,10 +48,9 @@ set or copy them into agent mutations.
 
 ## Reading Topics
 
-The current pattern exports `index` — a compact discovery result whose rows
-carry each Topic's canonical `fid`, a title-only reference to the Topic, and
-scalar summaries, so one read surveys the whole board without expanding any
-Topic:
+The current pattern exports `index` — a compact discovery result whose rows ARE
+the Topics, declared through scalar summaries, so one read surveys the whole
+board without expanding any Topic:
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" index --step
@@ -99,13 +98,13 @@ exact known fields or numeric ranges to shrink the corpus, then inspect the
 small result. Always combine a Topic-list filter with `--select`; filter alone
 returns every property of each match.
 
-Address a selected Topic by the canonical fid published in the board's `index`
-result. Filter and project that computed index too:
+Address a selected Topic by the address its own `index` row carries result.
+Filter and project that computed index too:
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
   --filter '.title == "<exact title>"' \
-  --select fid,title,lastActivityAt,commentCount
+  --select @,title,lastActivityAt,commentCount
 export TOPIC_URL='https://estuary.saga-castor.ts.net/topics-dev-476ea34f/<topic-fid>'
 deno task cf piece get --url "$TOPIC_URL" title --input
 deno task cf piece get --url "$TOPIC_URL" body --input
@@ -129,24 +128,23 @@ positions they came from — so ask for an address in its own unfiltered read:
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
-  --select fid,topic@
+  --select @,title
 ```
 
-Each index row's `fid` is the canonical address for its `topic`, and `topic@`
-resolves the same address from the reference itself. Prefer either to the
-intermediate wrapper link stored in the board's topics array. Read the existing
-topic's input before changing it, especially its full body, comments, and links.
-Input reads are durable and do not need `--step`; use `--step` on result reads
-that must be current.
+An index row IS its Topic, so the row's own address is the Topic's. Prefer it to
+the intermediate wrapper link stored in the board's topics array. Read the
+existing topic's input before changing it, especially its full body, comments,
+and links. Input reads are durable and do not need `--step`; use `--step` on
+result reads that must be current.
 
 A board too old to publish `index` publishes `crossrefs` instead — the removed
-reference-graph result. Its rows carry the same row-level `fid`, so it answers
-the same question. Search it by `.topic.title` rather than `.title`: the
-row-level `title` was added to `crossrefs` later than `index` was, so a board
-old enough to need this read is one whose rows do not have it, and
-`.topic.title` is the form that works on every generation that publishes
-`crossrefs` at all. On such a board this is the only address source, so reach
-for it there and nowhere else:
+reference-graph result. Its rows carry a row-level `fid`, which is that board's
+address source, so it answers the same question. Search it by `.topic.title`
+rather than `.title`: the row-level `title` was added to `crossrefs` later than
+`index` was, so a board old enough to need this read is one whose rows do not
+have it, and `.topic.title` is the form that works on every generation that
+publishes `crossrefs` at all. On such a board this is the only address source,
+so reach for it there and nowhere else:
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
@@ -156,8 +154,7 @@ deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
 If `topics --input` is non-empty while neither computed read materializes, do
 not infer that the board is empty. The non-null rows from a compact
 `topics --input` search remain valid evidence, but the search does not expose a
-canonical Topic fid, so report the materialization blocker rather than guessing
-an address.
+Topic's address, so report the materialization blocker rather than guessing one.
 
 ## Creating and updating
 
@@ -168,7 +165,7 @@ directly:
 deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic \
   '{"title":"<title>","agentName":"<agent name>"}'
 deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
-  --filter '.title == "<exact title>"' --select fid,title
+  --filter '.title == "<exact title>"' --select @,title
 ```
 
 `addTopic` returns the topic it created, so a board running this source hands

@@ -23,7 +23,6 @@ import {
 import { pattern } from "commonfabric";
 import Topics, {
   submitProfileTopic,
-  topicCellLink,
   type TopicCrossrefRow,
   type TopicPiece,
 } from "./main.tsx";
@@ -31,7 +30,6 @@ import Topic, {
   type AddCommentResult,
   type AddLinkResult,
   dropMention,
-  fidPayload,
   isSafeLinkUrl,
   type MentionEvent,
   saveProfileBody,
@@ -597,34 +595,26 @@ export default pattern(() => {
   // --- index: the board's bounded discovery surface ---
 
   // Address-plus-summary rows mirror the board at the two-topic point: every
-  // fid is a real tagged hash, and the summary scalars answer the survey
-  // questions directly. Pins the fid1-tag assumption addressing relies on — if
-  // entity ids ever stop being fid1-tagged, this fails loudly instead of every
-  // row's address silently going blank.
+  // The summary scalars answer the survey questions directly, off the topic
+  // each row is.
   //
   // Runs while the harness still evaluates the board's card-list computed, so
   // the card branches render (and count as covered), not just the data layer.
   const assert_index_baseline = assert(() =>
     (board.index ?? []).length === 2 &&
-    board.index?.[0]?.fid?.startsWith("fid1:") === true &&
-    (board.index?.[0]?.fid ?? "").length > 25 &&
-    board.index?.[1]?.fid !== board.index?.[0]?.fid &&
     board.index?.[0]?.title === "First topic" &&
-    board.index?.[0]?.topic?.title === "First topic" &&
     (board.index?.[0]?.createdAt ?? 0) > 0 &&
     board.index?.[0]?.createdBy?.kind === "agent" &&
     board.index?.[0]?.createdBy?.name === "Sol" &&
     board.index?.[0]?.commentCount === 1 &&
     (board.index?.[0]?.lastActivityAt ?? 0) >=
       (board.index?.[0]?.createdAt ?? 0) &&
-    board.index?.[1]?.title === "Second topic" &&
-    board.index?.[1]?.topic?.title === "Second topic"
+    board.index?.[1]?.title === "Second topic"
   );
 
   // The bound itself: serializing the whole index carries no expanded piece
   // content (body/comments/links), no verb streams, and no runtime values —
-  // the declared schema, not reader discipline, is the guarantee. Each row's
-  // reference exposes exactly the title-only projection.
+  // the declared schema, not reader discipline, is the guarantee.
   const assert_index_bounded = assert(() => {
     const rows = board.index ?? [];
     if (rows.length < 2) return false;
@@ -635,18 +625,14 @@ export default pattern(() => {
       !serialized.includes('"addComment"') &&
       !serialized.includes('"setBody"') &&
       !serialized.includes('"addLink"') &&
-      !serialized.includes("vnode") &&
-      Object.keys(rows[0]?.topic ?? {}).join(",") === "title" &&
-      Object.keys(rows[1]?.topic ?? {}).join(",") === "title";
+      !serialized.includes("vnode");
   });
 
   // The index tracks the board rather than snapshotting it: a topic added
-  // later gets its own row, with its own address and its own scalars.
+  // later gets its own row, with its own scalars.
   const assert_index_tracks_the_board = assert(() =>
     (board.index ?? []).length === 3 &&
     board.index?.[2]?.title === "Composed topic" &&
-    board.index?.[2]?.fid?.startsWith("fid1:") === true &&
-    board.index?.[2]?.fid !== board.index?.[0]?.fid &&
     board.index?.[2]?.createdBy?.name === "Sol" &&
     // The first topic took a second comment before this one was created, and
     // its row carries the updated count rather than the one it was built with.
@@ -654,28 +640,20 @@ export default pattern(() => {
   );
 
   // Pin the persisted navigation contract directly. A cold renderer must see
-  // ordinary cf-cell-link destinations, never pattern-owned handler streams.
+  // ordinary cf-cell-link destinations, never pattern-owned handler streams —
+  // a card addresses the topic's own cell, so the markup survives a reload
+  // that no ephemeral event stream would.
   const assert_cell_link_markup = assert(() => {
-    const fid = board.index?.[0]?.fid ?? "";
-    if (!fid) return false;
-    const open = topicCellLink(fid, "Open");
-    const openLinks = findAllByTag(open, "cf-cell-link");
-    return open !== null &&
-      openLinks.length === 1 &&
-      propValue(openLinks[0].props.link) === `/of:${fid}` &&
-      propValue(openLinks[0].props.label) === "Open" &&
-      propValue(openLinks[0].props.static) === true &&
-      openLinks[0].props.onClick === undefined &&
-      openLinks[0].props["oncf-click"] === undefined &&
-      // No fid yet (a topic mid-sync) renders nothing rather than a link to
-      // nowhere.
-      topicCellLink("", "Open") === null;
+    const openLinks = findAllByTag(board[UI], "cf-cell-link");
+    if (openLinks.length === 0) return false;
+    return openLinks.every((link) =>
+      propValue(link.props.label) === "Open" &&
+      propValue(link.props.static) === true &&
+      link.props.onClick === undefined &&
+      link.props["oncf-click"] === undefined
+    );
   });
 
-  // The fid helper that turns a resolved entity id into a row's address, over
-  // the tagged form it accepts and the shapes it must reject (storage form,
-  // short payloads, a non-fid hash).
-  const P1 = "A".repeat(43);
   // --- cross-references: the board's mention pivot ---
 
   // Driven entirely through the real board, so the wiring under test is the
@@ -777,15 +755,6 @@ export default pattern(() => {
     (graphBoard.topics?.[2]?.referencedBy ?? []).length === 1
   );
 
-  const assert_fid_payload = assert(() =>
-    fidPayload(`fid1:${P1}`) === P1 &&
-    fidPayload(` fid1:${P1} `) === P1 &&
-    fidPayload("of:fid1:" + P1) === "" &&
-    fidPayload("fid1:tooshort") === "" &&
-    fidPayload("bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy") === "" &&
-    fidPayload("") === ""
-  );
-
   return {
     // UI demand (#4715) over the board: its card list renders through the real
     // reconciler while the suite runs. The cards bind navigation to index-row
@@ -857,7 +826,6 @@ export default pattern(() => {
       { render: legacy[UI] },
       { assertion: assert_legacy_fields_load },
       { assertion: assert_pure_helpers },
-      { assertion: assert_fid_payload },
       { action: action_add_graph_topics },
       { assertion: assert_graph_baseline },
       { action: action_source_mentions_target },
