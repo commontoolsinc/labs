@@ -3905,14 +3905,6 @@ export class Server {
               sessionId,
             },
           );
-          // The tracked dirty keys come from the evaluation BEFORE the
-          // filter below: a lapsed holder's watches still NAME its
-          // foreign instances — only their delivery is withheld — so a
-          // later change to one must still evaluate this session (else
-          // the re-arm above never runs on that change and the update
-          // the lapse withheld never re-delivers). For every other
-          // session the filter removes nothing, so the set is the same.
-          const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
           // protocol.md §3's applicable-set filter on the FULL
           // evaluation path: explicit foreign instances enter `entities`
           // only through admitted lease-holder reads, and the exemption
@@ -3946,6 +3938,12 @@ export class Server {
           // frame is built, so a throw leaves the diff recomputable. The
           // empty-sync branch commits first — its frame carries no doc
           // novelty, and the marker counters are restored by the catch.
+          // (A lapsed holder's retracted foreign entries leave its
+          // tracked set here; the re-arm above runs on the session's
+          // NEXT pass regardless of what dirtied it — every session of
+          // the space is offered every batch — so no tracked key is
+          // needed to bring the withheld instances back.)
+          const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
           const commitWatchState = () => {
             session.graphs = graphs;
             session.entities = entities;

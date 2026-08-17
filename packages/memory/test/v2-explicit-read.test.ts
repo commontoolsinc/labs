@@ -903,7 +903,7 @@ const writeOwnProfile = async (
   assertExists(write.ok, JSON.stringify(write.error));
 };
 
-Deno.test("finding 1 (wire half): a former holder's catch-up RETRACTS a keyed-delivered foreign instance BY KEY — its own instance of the same doc is never named; and a foreign write after the retraction still evaluates the session (the watch stays tracked) so a re-armed lease re-delivers it keyed", async () => {
+Deno.test("finding 1 (wire half): a former holder's catch-up RETRACTS a keyed-delivered foreign instance BY KEY — its own instance of the same doc is never named; and once the lease is back, the next foreign write's pass re-arms and re-delivers the instance keyed (no re-issued watch)", async () => {
   const server = newServer("memory://explicit-read-keyed-retract");
   setServerExecutionConfig(true);
   try {
@@ -1004,11 +1004,11 @@ Deno.test("finding 1 (wire half): a former holder's catch-up RETRACTS a keyed-de
 
     // The lease comes back to the SAME holder (the in-process reacquire).
     // Alice's watch never left the session's watch set — only its
-    // delivery was withheld — so her next write must still EVALUATE the
-    // session (its dirty key stays tracked across the retraction) and,
-    // the lease being live again, re-deliver her instance KEYED. Pre-fix
-    // the retraction also dropped her key from the session's tracked
-    // set, so this write touched nothing and never re-delivered.
+    // delivery was withheld — so her next write's pass finds the lease
+    // live and the session lapsed, RE-ARMS (a full evaluation), and
+    // re-delivers her instance KEYED. Pre-fix the lapse had cleared the
+    // bit for the session's life: this write was filtered again, and
+    // nothing short of a fresh explicit-instance admission re-armed it.
     assertEquals(
       acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
       true,
