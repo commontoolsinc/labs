@@ -241,13 +241,28 @@ export async function runResumeAppendScenario(
       // Update the input list while the per-element results are held. The
       // coordinator's reconcile reads the still-stale sibling result cells, so
       // its commit is rejected as stale and its inline writes are reverted.
-      const edit = await rt2.editWithRetry((tx1) => {
-        const itemsCell = rc2.withTx(tx1).key("items");
-        const cur = (itemsCell.get() ?? []) as unknown[];
-        const nextItems = scenario.updateItems?.(cur) ??
-          [...cur, scenario.appended];
-        itemsCell.set(nextItems);
-      });
+      const pendingTx = rt2.edit();
+      const pendingItemsCell = rc2.withTx(pendingTx).key("items");
+      const cur = (pendingItemsCell.get() ?? []) as unknown[];
+      const nextItems = scenario.updateItems?.(cur) ??
+        [...cur, scenario.appended];
+      pendingItemsCell.set(nextItems);
+      const pendingEdit = await pendingTx.commit();
+      expect(pendingEdit.error?.name).toBe("ConflictError");
+      expect(pendingEdit.error?.message).toContain(
+        "pending dependency not resolved",
+      );
+      const pendingError = pendingEdit.error;
+      if (pendingError === undefined || !("readyToRetry" in pendingError)) {
+        throw new Error("pending dependency conflict has no readiness edge");
+      }
+      const readyToCommit = pendingError.readyToRetry;
+      expect(typeof readyToCommit).toBe("function");
+      await readyToCommit?.();
+
+      const tx1 = rt2.edit();
+      rc2.withTx(tx1).key("items").set(nextItems);
+      const edit = await tx1.commit();
       expect(edit.error).toBeUndefined();
       // Let the coordinator reconcile the input update against the still-held
       // results. idle() drives the scheduler to quiescence without blocking on
