@@ -118,7 +118,7 @@ import { type PieceSourceTransition, Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { isRetryableCommitRejection } from "./storage/rejection.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
+import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
 import {
@@ -402,18 +402,22 @@ export type ServerRunInfo = {
 };
 
 /**
- * One demanded instance of a scoped run (server-execution v2 stage
- * P2-F, the per-(action × instance) run SUPPLY): the demand registry's
- * identity plus the resolved instance key the run serves. The scheduler
- * consults {@link Runtime.serverRunInstancesFor} at its reactive-action
- * choke point and runs the action once per instance — instances live in
- * keys/basis/stamps, never as extra dependency-graph nodes (the
- * spec-model's C11b).
+ * The per-(action × instance) run SUPPLY's demander resolver
+ * (server-execution v2 stage P2-F, reshaped by fan-out stage B): given an
+ * action's DEMAND ROOTS, the (principal, session) pairs whose watches
+ * reach them — at ANY address, a space-scoped root watch included
+ * (scopes.md §2's mechanism sentence: a principal's demand at a broad
+ * address is demand for that principal's instance of every node that
+ * narrows beneath it). The scheduler derives the INSTANCE set from these
+ * demanders and the node's known-scope ratchet (scheduler/fan-out.ts) —
+ * the resolver no longer decides an instance from the demand's own
+ * scope (P2-F's over-keying, F10). Instances live in keys/basis/stamps
+ * and the node's fan-out record, never as extra dependency-graph nodes
+ * (the spec-model's C11b).
  */
-export type ServerRunInstance = {
-  scopeKeyIdentity: ScopeKeyIdentity;
-  actionScopeKey: ScopeKey;
-};
+export type ServerRunDemanderResolver = (
+  pieceRootIds: readonly string[],
+) => readonly ScopeKeyIdentity[];
 
 export interface RuntimeOptions {
   apiUrl: URL;
@@ -807,8 +811,8 @@ export class Runtime {
   // destination, stage P2-F): an action's demand roots (its piece root
   // plus the ancestor roots that instantiated it — Phase 7) → the
   // demanded instances the SpaceServer's registry holds for any of them.
-  #serverRunInstanceResolver:
-    | ((pieceRootIds: readonly string[]) => readonly ServerRunInstance[])
+  #serverRunDemanderResolver:
+    | ServerRunDemanderResolver
     | undefined;
   // The client speculation overlay (server-execution v2 Phase 2,
   // speculation.md): the DEFAULT seal destination of every runtime under
@@ -1935,16 +1939,15 @@ export class Runtime {
         info: ServerRunInfo,
       ) => void;
       /** The per-(action × instance) run SUPPLY (server-execution v2
-       * stage P2-F): resolves a piece root doc id to the demanded
-       * instances the SpaceServer's demand registry holds for it. The
+       * stage P2-F; fan-out stage B): resolves an action's demand roots
+       * to the DEMANDERS the SpaceServer's registry holds for them. The
        * scheduler consults this at its reactive-action choke point and
-       * runs the action once per instance, stamping each run with that
-       * instance's identity (scopes.md §5: the DEMAND supplies the run
-       * identity). Absent (or returning nothing) the run keeps the
-       * wave-level fallback — the Phase-1 cardinality-1 posture. */
-      runInstanceResolver?: (
-        pieceRootIds: readonly string[],
-      ) => readonly ServerRunInstance[];
+       * runs the action once per demanded INSTANCE — derived from the
+       * demanders and the node's known-scope ratchet — stamping each run
+       * with that instance's identity (scopes.md §5: the DEMAND supplies
+       * the run identity). Absent (or returning nothing) the run keeps
+       * the wave-level fallback — the Phase-1 cardinality-1 posture. */
+      runDemanderResolver?: ServerRunDemanderResolver;
     } = {},
   ): void {
     if (this.experimental.serverExecution !== true) {
@@ -1962,7 +1965,7 @@ export class Runtime {
     }
     this.#transactionSealDestination = destination;
     this.#serverRunStamper = options.runStamper;
-    this.#serverRunInstanceResolver = options.runInstanceResolver;
+    this.#serverRunDemanderResolver = options.runDemanderResolver;
   }
 
   /** The installed seal destination (the serving loop), if any —
@@ -1984,25 +1987,27 @@ export class Runtime {
   clearSealDestination(): void {
     this.#transactionSealDestination = undefined;
     this.#serverRunStamper = undefined;
-    this.#serverRunInstanceResolver = undefined;
+    this.#serverRunDemanderResolver = undefined;
   }
 
   /**
-   * The demanded instances a scheduler action's DEMAND ROOTS currently
-   * have (the per-(action × instance) run SUPPLY, stage P2-F): its own
-   * piece root plus every ancestor piece root that instantiated it
-   * (`SchedulerObservationIdentity.demandRootIds`, Phase 7 — a nested
+   * The DEMANDERS a scheduler action's DEMAND ROOTS currently have (the
+   * per-(action × instance) run SUPPLY, stage P2-F / fan-out stage B):
+   * its own piece root plus every ancestor piece root that instantiated
+   * it (`SchedulerObservationIdentity.demandRootIds`, Phase 7 — a nested
    * piece is demanded through the outer piece the client watches).
    * Undefined everywhere except a serving runtime whose SpaceServer
    * installed a resolver — the OFF arm and client speculation pay one
-   * undefined check. The scheduler runs the action once per returned
-   * instance (instances live in keys/basis/stamps, never as extra graph
-   * nodes — C11b); an empty return keeps the single wave-identity run.
+   * undefined check. The scheduler derives the instance set from the
+   * demanders and the node's known-scope ratchet and runs the action once
+   * per instance (instances live in keys/basis/stamps and the node's
+   * fan-out record, never as extra graph nodes — C11b); an empty return
+   * keeps the single wave-identity run.
    */
-  serverRunInstancesFor(
+  serverRunDemandersFor(
     pieceRootIds: readonly string[],
-  ): readonly ServerRunInstance[] | undefined {
-    return this.#serverRunInstanceResolver?.(pieceRootIds);
+  ): readonly ScopeKeyIdentity[] | undefined {
+    return this.#serverRunDemanderResolver?.(pieceRootIds);
   }
 
   /**
@@ -2611,6 +2616,21 @@ export class Runtime {
     const context = tx === undefined ? undefined : waveRunContextOf(tx);
     const principal = context?.scopeKeyIdentity?.principal ??
       context?.acting?.user;
+    if (principal !== undefined && tx !== undefined) {
+      // IDENTITY CONSUMPTION is a user-scoped read (server-execution v2
+      // fan-out stage B, design §F's third ratchet source — RULED
+      // 2026-08-16): resolving WHOSE home space this run targets makes
+      // the run's value per demanding principal by construction — a
+      // served `#profile` wish that reads no scoped doc but provisions
+      // into the demander's home space is a USER-scoped node, so its
+      // scope-derived attribution carries the user and its provisioning
+      // rides the `demanded-run:<user>` carriage. The transaction's
+      // read-scope ratchet is what the seal and the scheduler's
+      // known-scope ratchet learn from; it only ever narrows.
+      if (scopeRank(tx.getNarrowestReadScope()) < scopeRank("user")) {
+        tx.resetNarrowestReadScope("user");
+      }
+    }
     return principal as DID | undefined;
   }
 

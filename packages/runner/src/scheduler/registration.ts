@@ -469,6 +469,10 @@ function clearActionSchedulingState(
   const record = state.nodes.get(action);
   if (record) {
     record.invalidCauses = [];
+    // Stage B: the fan-out record (known-scope ratchet, per-instance
+    // logs) is scheduling state of the LIVE subscription — a re-registered
+    // action starts unnarrowed and re-learns by its probe run.
+    record.fanOut = undefined;
   }
   state.clearInvalid(action);
 }

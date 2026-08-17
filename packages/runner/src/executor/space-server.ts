@@ -245,6 +245,15 @@ export async function selectForeignStaleInstances(
  * structurally futile. Remaining `of:` ids are NOT distinguishable by
  * id class (a not-yet-created piece and a never-a-piece value doc look
  * alike) — the complete terminal-state design is the owed follow-up. */
+/** The dedupe key of a demanding (principal, session) pair in the
+ * registry (stage B): both components, so two sessions of one user are
+ * two demanders (a node beneath the root may narrow to session for that
+ * user). */
+const demanderPairKey = (identity: ScopeKeyIdentity): string =>
+  `${identity.principal ?? ""}\0${
+    identity.sessionId === undefined ? "" : String(identity.sessionId)
+  }`;
+
 const neverAPieceRootId = (id: string): boolean =>
   id === SERVER_EXECUTION_WATERMARK_DOC_ID ||
   // Phase 4: the effects doc is a session-scoped VALUE doc every
@@ -360,13 +369,24 @@ export class SpaceServer implements TransactionSealDestination {
    * upstream"): the sink is what pulls the demanded value through the
    * scheduler's pull-based laziness. Released on park. */
   readonly #demandSinks = new Map<string, () => void>();
-  /** The demanded IDENTITY per scoped demand key (server-execution v2
-   * Phase 2, M1's demand carriage — scopes.md §5: the demand supplies
-   * the run identity). Stage P2-F consumes it as the per-(action ×
-   * instance) run SUPPLY: the scheduler resolves an action's piece root
-   * through `#runInstancesFor` and runs once per demanded instance,
-   * each run stamped from this registry through #stampRun's seam. */
-  readonly #demandedIdentities = new Map<string, ScopeKeyIdentity>();
+  /** The DEMANDERS per demand key (server-execution v2 Phase 2, M1's
+   * demand carriage — scopes.md §5: the demand supplies the run
+   * identity; fan-out stage B: identity on SPACE-scoped demand rows too
+   * — scopes.md §2's mechanism sentence, RULED 2026-08-16: a
+   * principal's demand at a broad address is demand for THAT principal's
+   * instance of every node that narrows beneath it). Keyed by demand key
+   * (one per root INSTANCE the structure load and the demand walk
+   * address), valued with EVERY (principal, session) pair whose watch
+   * names that key — a space root demanded by two users holds both
+   * pairs; a user-scoped root demanded by two sessions of one user holds
+   * both sessions (a node beneath it may narrow to session for that
+   * user). The run SUPPLY reads this: the scheduler resolves an
+   * action's demand roots through `#demandersFor` and derives the
+   * instance set from the demanders and its own known-scope ratchet
+   * (scheduler/fan-out.ts). Anonymous sessions (no principal) register
+   * the key — structure and walk — but own no instance and are not
+   * demanders. */
+  readonly #demandersByKey = new Map<string, Map<string, ScopeKeyIdentity>>();
   /** Demand key → the piece root doc id its structure load RESOLVED to
    * (stage P2-F): a demanded root may be an argument/derived doc whose
    * owning piece `ensurePieceRunning` discovers by following the result
@@ -717,8 +737,8 @@ export class SpaceServer implements TransactionSealDestination {
     // registry through the seam above.
     runtime.installSealDestination(this, {
       runStamper: (tx, info) => this.#stampRun(tx, info),
-      runInstanceResolver: (pieceRootIds) =>
-        this.#runInstancesFor(pieceRootIds),
+      runDemanderResolver: (pieceRootIds) =>
+        this.#demandersFor(pieceRootIds),
     });
 
     // Stage B's renew cadence, finally driven (serving-loop.md §2).
@@ -931,13 +951,14 @@ export class SpaceServer implements TransactionSealDestination {
     return this.#pendingEffectsByWave.size;
   }
 
-  /** DIAGNOSTIC (tests): the demanded identities recorded for a root
-   * doc — M1's demand carriage at scoped cardinality (Phase 2). Two
-   * principals demanding one scoped root yield two entries. */
+  /** DIAGNOSTIC (tests): the demanding identities recorded for a root
+   * doc across its demand keys — M1's demand carriage (Phase 2), space
+   * roots included (stage B). Two principals demanding one root yield
+   * two entries; two sessions of one principal yield two. */
   demandedIdentitiesOf(id: string): ScopeKeyIdentity[] {
     const identities: ScopeKeyIdentity[] = [];
-    for (const [key, identity] of this.#demandedIdentities) {
-      if (key.endsWith(`\0${id}`)) identities.push(identity);
+    for (const [key, demanders] of this.#demandersByKey) {
+      if (key.endsWith(`\0${id}`)) identities.push(...demanders.values());
     }
     return identities;
   }
@@ -960,6 +981,15 @@ export class SpaceServer implements TransactionSealDestination {
         // list builtins' recovery seeds until they stamped bookkeeping.
         onUnstampedSeal: () => {
           this.#options.stats.unstampedSealRefusals += 1;
+        },
+        // Fan-out stage B's counters (stats.ts): the early-emit guard's
+        // fail-closed refusals, and design §B5's accept-and-count
+        // undemanded narrowing runs.
+        onEarlyEmitRefusal: () => {
+          this.#options.stats.earlyEmitRefusals += 1;
+        },
+        onUndemandedNarrowing: () => {
+          this.#options.stats.undemandedNarrowingRuns += 1;
         },
         // The Phase-5 serving posture (serving-loop.md §3d; protocol.md
         // §2b): foreign-space writes are ADMITTED at accumulation IFF
@@ -1012,16 +1042,31 @@ export class SpaceServer implements TransactionSealDestination {
    * `#runInstancesFor` (installed beside this stamper) and runs a
    * demanded action once per instance, filling these fields per run.
    *
-   * ATTRIBUTION rides the same stamp (protocol.md §1, stage P2-F): a
-   * demanded identity with a principal is the run's ACTING (user,
-   * session) pair — the demand supplied the identity the run acts as
-   * (scopes.md §5), so its seal annotations and its emitted events
-   * (LT6) carry it. Never for `bookkeeping`: the loop's own writes are
-   * service-identity writes that carry addressing and NO acting
-   * principal (protocol.md §1's "The SpaceServer's own writes"). */
+   * ATTRIBUTION (protocol.md §1; fan-out stage B, RULED 2026-08-16 —
+   * design §F): a run's RESOLUTION identity and its ATTRIBUTION are two
+   * things. The demand-supplied pair resolves the run's scoped
+   * addresses (a full pair, so a narrower read it discovers still names
+   * a real demanded instance). What the run ACTS AS is derived from the
+   * scope it DISCOVERS by running — space → no actor; user → the user
+   * (`firedAt.session = "server"` on its events); session → the pair —
+   * settled at the seal from the transaction's read-scope ratchet
+   * (wave.ts `settleScopeAttribution`) and, for a mid-run emission, at
+   * the send site from the ratchet so far under the early-emit guard.
+   * So a DERIVATION with a demanded identity is stamped
+   * `attributionFromScope` and NO eager acting: a user-scoped instance
+   * value belongs to all of the user's sessions and carries the user
+   * only; a space node demanded by anyone carries none. HANDLER runs are
+   * unchanged (the event's server-stamped `firedAt` is their explicit
+   * actor — LD1; the in-process LT6 shape inherits the origin's pair).
+   * Never for `bookkeeping`: the loop's own writes are service-identity
+   * writes that carry addressing and NO acting principal (protocol.md
+   * §1's "The SpaceServer's own writes"). */
   #stampRun(tx: IExtendedStorageTransaction, info: ServerRunInfo): void {
     const principal = info.scopeKeyIdentity?.principal;
-    const acting = info.kind !== "bookkeeping" && principal !== undefined
+    const attributionFromScope = info.kind === "derivation" &&
+      info.acting === undefined && principal !== undefined;
+    const acting = info.kind !== "bookkeeping" && !attributionFromScope &&
+        principal !== undefined
       ? {
         user: principal,
         ...(info.scopeKeyIdentity?.sessionId !== undefined
@@ -1047,13 +1092,15 @@ export class SpaceServer implements TransactionSealDestination {
         : {}),
       // Precedence: an EXPLICIT acting carriage (Phase 3's dispatch
       // reads it off the event's server-stamped `firedAt`) is the
-      // event's own durable actor and wins; otherwise the P2-F
-      // derivation above supplies the demanded identity's pair.
+      // event's own durable actor and wins; a HANDLER inheriting a
+      // demanded pair (the in-process LT6 shape) carries it; a
+      // DERIVATION's acting is settled from its discovered scope.
       ...(info.acting !== undefined
         ? { acting: info.acting }
         : acting !== undefined
         ? { acting }
         : {}),
+      ...(attributionFromScope ? { attributionFromScope: true } : {}),
       // Phase 5 (protocol.md §2b's sanctioned crossing): a served run
       // acting AS a principal carries the delegated GRANT alongside its
       // actor, so its provisioning writes (a handler's `.inSpace`
@@ -1066,6 +1113,9 @@ export class SpaceServer implements TransactionSealDestination {
       // loop's own writes carry no acting principal, protocol.md §1),
       // and never without an actor (a carriage-less foreign write
       // refuses at accumulation, by design).
+      // A derivation attributed from its scope mints its
+      // `demanded-run:<user>` carriage at the seal alongside its acting
+      // (settleScopeAttribution) — none while unnarrowed.
       ...(info.kind !== "bookkeeping" &&
           (info.acting !== undefined || acting !== undefined)
         ? {
@@ -1121,38 +1171,57 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
-  /** The per-(action × instance) run supply's resolver (stage P2-F),
-   * installed beside the stamper: the demanded instances of an action's
-   * DEMAND ROOTS — its piece root plus the ancestor piece roots that
-   * instantiated it (Phase 7; `SchedulerObservationIdentity.
-   * demandRootIds`: a nested pattern node or result-as-pattern child is
-   * demanded through the OUTER piece a client watches, and pre-Phase-7
-   * its scoped derivations fell to the service identity's instances) —
-   * from the demand registry: entries whose demand key names one of the
-   * roots directly plus entries whose structure load RESOLVED to one
-   * (`#pieceRootByDemandKey`), deduped per instance key. Space-scope
-   * demands carry no identity and contribute nothing (the wave-level
-   * fallback run). */
-  #runInstancesFor(
-    pieceRootIds: readonly string[],
-  ): Array<{ scopeKeyIdentity: ScopeKeyIdentity; actionScopeKey: ScopeKey }> {
-    const instances = new Map<string, ScopeKeyIdentity>();
+  /** The per-(action × instance) run supply's resolver (stage P2-F,
+   * reshaped by fan-out stage B), installed beside the stamper: the
+   * DEMANDERS of an action's DEMAND ROOTS — its piece root plus the
+   * ancestor piece roots that instantiated it (Phase 7;
+   * `SchedulerObservationIdentity.demandRootIds`: a nested pattern node
+   * or result-as-pattern child is demanded through the OUTER piece a
+   * client watches, and pre-Phase-7 its scoped derivations fell to the
+   * service identity's instances) — from the demand registry: entries
+   * whose demand key names one of the roots directly plus entries whose
+   * structure load RESOLVED to one (`#pieceRootByDemandKey`), every
+   * (principal, session) pair deduped. Space-scoped demand rows carry
+   * their demanders too (stage B): the scheduler derives the instance
+   * set from these pairs and the node's own known-scope ratchet — a
+   * space node runs once (as a demander, never as the service), a
+   * narrowed one per demanding principal or session. Only when NO
+   * principal demands the roots does the run keep the wave-level
+   * fallback (design §B5). Additionally, the current event's actor is a
+   * TRANSIENT demander of the piece its event targets (RULED
+   * 2026-08-16, design §B5): preflight recomputes a dirty scoped input
+   * for the actor's OWN instance even if the actor watches nothing. */
+  #demandersFor(pieceRootIds: readonly string[]): ScopeKeyIdentity[] {
+    const demanders = new Map<string, ScopeKeyIdentity>();
     const roots = new Set(pieceRootIds);
-    for (const [key, identity] of this.#demandedIdentities) {
+    for (const [key, pairs] of this.#demandersByKey) {
       const keyRoot = key.slice(key.indexOf("\0") + 1);
       const resolvedRoot = this.#pieceRootByDemandKey.get(key);
       const matches = roots.has(keyRoot) ||
         (resolvedRoot !== undefined && roots.has(resolvedRoot));
       if (!matches) continue;
-      const instanceKey = key.slice(0, key.indexOf("\0"));
-      if (!instances.has(instanceKey)) instances.set(instanceKey, identity);
+      for (const [pairKey, identity] of pairs) {
+        if (!demanders.has(pairKey)) demanders.set(pairKey, identity);
+      }
     }
-    return [...instances.entries()].map((
-      [actionScopeKey, scopeKeyIdentity],
-    ) => ({
-      scopeKeyIdentity,
-      actionScopeKey: actionScopeKey as ScopeKey,
-    }));
+    // The event actor as a TRANSIENT demander (RULED 2026-08-16, design
+    // §B5 / §I.5): while a served event is queued for dispatch, its
+    // `firedAt` pair counts as a demander of the event's TARGET piece,
+    // so the dispatch's preflight recompute of a dirty scoped input
+    // materializes the ACTOR's own instance even if the actor watches
+    // nothing (the actor is entitled to it — the append was admitted
+    // under their authority; never another principal's — no
+    // reverse-FP2). The scheduler owns the queue and reports the pairs.
+    for (
+      const identity of this.#runtime?.scheduler.transientEventDemandersFor(
+        pieceRootIds,
+      ) ?? []
+    ) {
+      if (identity.principal === undefined) continue;
+      const pairKey = demanderPairKey(identity);
+      if (!demanders.has(pairKey)) demanders.set(pairKey, identity);
+    }
+    return [...demanders.values()];
   }
 
   /**
@@ -2083,10 +2152,13 @@ export class SpaceServer implements TransactionSealDestination {
     );
     // Demand keys are PER INSTANCE (server-execution v2 Phase 2, M1's
     // demand carriage): a scoped root demanded by two principals is two
-    // demand entries, each carrying its demander's identity — the
-    // registry the per-instance run supply (the owed scheduler
-    // follow-up) consumes, and the diagnostic the fan-out tests pin.
-    // A space root has no identity and one entry, exactly as before.
+    // demand entries — the structure load and the demand walk address
+    // each instance. A space root is ONE key. Fan-out stage B: every key
+    // carries its DEMANDERS — the (principal, session) pairs whose
+    // watches name it, space roots included (`watchedRootsForSpace`
+    // returns one row per demanding session) — the registry the
+    // per-instance run supply consumes (`#demandersFor`) and the
+    // diagnostic the fan-out tests pin.
     const keyOf = (root: {
       id: string;
       scope?: string;
@@ -2107,7 +2179,30 @@ export class SpaceServer implements TransactionSealDestination {
         return `${scope}\0${root.id}`;
       }
     };
-    const currentKeys = new Set(roots.map(keyOf));
+    // The demanders per key THIS pass sees, and the roots' first row per
+    // key (the structure/walk address).
+    const demandersNow = new Map<string, Map<string, ScopeKeyIdentity>>();
+    const rootByKey = new Map<string, (typeof roots)[number]>();
+    for (const root of roots) {
+      const key = keyOf(root);
+      if (!rootByKey.has(key)) rootByKey.set(key, root);
+      if (root.identity === undefined) continue;
+      const identity: ScopeKeyIdentity = {
+        ...(root.identity.principal === undefined
+          ? {}
+          : { principal: root.identity.principal }),
+        ...(root.identity.sessionId === undefined
+          ? {}
+          : { sessionId: root.identity.sessionId as never }),
+      };
+      let pairs = demandersNow.get(key);
+      if (pairs === undefined) {
+        pairs = new Map();
+        demandersNow.set(key, pairs);
+      }
+      pairs.set(demanderPairKey(identity), identity);
+    }
+    const currentKeys = new Set(rootByKey.keys());
     for (const [key, cancel] of this.#demandSinks) {
       if (currentKeys.has(key)) continue;
       try {
@@ -2117,8 +2212,42 @@ export class SpaceServer implements TransactionSealDestination {
       }
       this.#demandSinks.delete(key);
       this.#demandedRoots.delete(key);
-      this.#demandedIdentities.delete(key);
+      this.#demandersByKey.delete(key);
       this.#pieceRootByDemandKey.delete(key);
+    }
+    // Reconcile the demanders of every current key: departed pairs
+    // retire (the instance set shrinks on the node's next run — stored
+    // rows stay, scopes.md §8's GC is unchanged); NEW pairs on a KNOWN
+    // key are ARRIVALS — a demander who arrives after the nodes beneath
+    // the root narrowed finds no instance of their own, and a clean node
+    // never re-runs for a demander that did not exist when it last ran
+    // (design §A's arrival re-arm; the OW29 gap): re-arm the narrowed
+    // nodes under the key's roots for that demander after the pass. A
+    // FIRST-demand key's demanders need no re-arm — its structure load
+    // and demand walk below are what serve them.
+    const arrivals = new Set<string>();
+    for (const [key, pairs] of demandersNow) {
+      const known = this.#demandersByKey.get(key);
+      if (known === undefined) {
+        this.#demandersByKey.set(key, new Map(pairs));
+        if (this.#demandedRoots.has(key)) arrivals.add(key);
+        continue;
+      }
+      for (const pairKey of [...known.keys()]) {
+        if (!pairs.has(pairKey)) known.delete(pairKey);
+      }
+      for (const [pairKey, identity] of pairs) {
+        if (known.has(pairKey)) continue;
+        known.set(pairKey, identity);
+        arrivals.add(key);
+      }
+    }
+    for (const key of [...this.#demandersByKey.keys()]) {
+      if (currentKeys.has(key) && !demandersNow.has(key)) {
+        // Every demander of a still-watched key left (anonymous sessions
+        // remain): the key stays, its demander set empties.
+        this.#demandersByKey.get(key)!.clear();
+      }
     }
     // A pending or terminal load whose demand retired stops being
     // tracked (pruned directly against the demanded keys, not via the
@@ -2136,24 +2265,17 @@ export class SpaceServer implements TransactionSealDestination {
     for (const key of this.#rearmedAwaitingSettle) {
       if (!currentKeys.has(key)) this.#rearmedAwaitingSettle.delete(key);
     }
-    for (const root of roots) {
-      const key = keyOf(root);
+    for (const [key, root] of rootByKey) {
       const firstDemand = !this.#demandedRoots.has(key);
       // A known root re-enters this loop ONLY while its structure load
-      // is still owed (the retry arm); its identity entry and demand
-      // sink were installed on first demand and are not re-created.
+      // is still owed (the retry arm); its demander set and demand walk
+      // were installed on first demand and are not re-created (the
+      // demanders are reconciled above on every pass).
       if (!firstDemand && !this.#pendingStructureLoads.has(key)) continue;
       if (firstDemand) {
         this.#demandedRoots.add(key);
-        if (root.identity !== undefined) {
-          this.#demandedIdentities.set(key, {
-            ...(root.identity.principal === undefined
-              ? {}
-              : { principal: root.identity.principal }),
-            ...(root.identity.sessionId === undefined
-              ? {}
-              : { sessionId: root.identity.sessionId as never }),
-          });
+        if (!this.#demandersByKey.has(key)) {
+          this.#demandersByKey.set(key, new Map());
         }
       }
       // A root parked TERMINAL stays parked until a commit touching one
@@ -2264,21 +2386,25 @@ export class SpaceServer implements TransactionSealDestination {
         // from the demanded root is demanded — value-granular pull, at
         // the granularity the wire's watch selector actually names
         // (the whole doc).
-        const cell = runtime.getCellFromLink({
-          space: this.#options.space,
-          id: root.id as never,
-          scope: root.scope ?? "space",
-          path: [],
-        });
-        const demandRead = (value: unknown) => {
-          try {
-            JSON.stringify(value);
-          } catch {
-            // a mid-pull proxy may throw; the re-fire after the pull
-            // settles walks it again
-          }
-        };
-        this.#demandSinks.set(key, cell.sink(demandRead));
+        //
+        // Fan-out stage B (design §B4): the walk runs PER DEMANDER — one
+        // effect node, N runs — through the ordinary run supply: the
+        // action carries the root as its demand root, so
+        // `runSchedulerAction` fans it out over the key's demanders,
+        // each run's transaction stamped with that pair, and the walk
+        // resolves THAT demander's redirects and pulls THAT demander's
+        // subtree (a per-user `ifElse` branch, a per-user child piece).
+        // Walked once as the service — the pre-stage-B sink — the walk
+        // stopped at every redirect once instances were keyed and the
+        // service ran no demanded piece: everything reachable only
+        // through a per-user VALUE was live for nobody. Instances: the
+        // walk narrows to whatever it reads through, so a piece with
+        // per-user state walks per principal (per session below a
+        // session redirect) and a space-only piece walks once.
+        this.#demandSinks.set(
+          key,
+          this.#installDemandWalk(runtime, root),
+        );
       } catch (error) {
         logger.warn("demand-sink-failed", () => [
           `demand sink for ${root.id} failed`,
@@ -2286,6 +2412,65 @@ export class SpaceServer implements TransactionSealDestination {
         ]);
       }
     }
+    if (arrivals.size > 0) {
+      // The ARRIVAL RE-ARM (design §A; RULED 2026-08-16): the narrowed
+      // nodes beneath each arrived key's roots re-run for the arriving
+      // demander only (their per-instance record is kept — B7). The
+      // resolved piece root of an argument-doc demand joins the root
+      // set, so a piece demanded through its argument doc re-arms too.
+      const rootIds = new Set<string>();
+      for (const key of arrivals) {
+        rootIds.add(key.slice(key.indexOf("\0") + 1));
+        const resolved = this.#pieceRootByDemandKey.get(key);
+        if (resolved !== undefined) rootIds.add(resolved);
+      }
+      const rearmed = runtime.scheduler.invalidateActionsForDemandRoots(
+        [...rootIds],
+      );
+      this.#options.stats.demandArrivals += 1;
+      logger.debug?.("demand-arrival", () => [
+        `demanders arrived for ${arrivals.size} root(s); re-armed ` +
+        `${rearmed} narrowed node(s) for them (fan-out stage B)`,
+      ]);
+    }
+  }
+
+  /** The per-demander demand WALK for one demanded root (stage B, design
+   * §B4): an EFFECT node registered through the scheduler with the root
+   * as its demand root, so its runs fan out over the root's demanders
+   * like any demanded action's. Each run reads the root's value through
+   * its own stamped transaction — the demander's instances, redirects,
+   * subtree — and writes nothing. Returns the unsubscribe. */
+  #installDemandWalk(
+    runtime: Runtime,
+    root: { id: string; scope?: string },
+  ): () => void {
+    const link = {
+      space: this.#options.space,
+      id: root.id as never,
+      scope: (root.scope ?? "space") as never,
+      path: [],
+    };
+    const walk = (tx: IExtendedStorageTransaction): void => {
+      try {
+        JSON.stringify(runtime.getCellFromLink(link).withTx(tx).get());
+      } catch {
+        // a mid-pull proxy may throw; the re-fire after the pull
+        // settles walks it again
+      }
+    };
+    Object.defineProperty(walk, "name", {
+      value: `demand-walk:${this.#options.space}/${root.id}`,
+      configurable: true,
+    });
+    return runtime.scheduler.register(walk, undefined, {
+      isEffect: true,
+      observationIdentity: {
+        pieceId: `space:${root.id}`,
+        ownerSpace: this.#options.space,
+        pieceRootId: root.id,
+      },
+    });
   }
 
   /** One structure-load attempt for a demanded root (stage P2-F): the
@@ -2891,7 +3076,7 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#demandSinks.clear();
     this.#demandedRoots.clear();
-    this.#demandedIdentities.clear();
+    this.#demandersByKey.clear();
     this.#pieceRootByDemandKey.clear();
     this.#pendingStructureLoads.clear();
     this.#terminalStructureLoads.clear();

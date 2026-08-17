@@ -47,7 +47,7 @@ import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
 import { mintEventId, scopeCallerEventId } from "./scheduler/event-identity.ts";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
-import { waveRunContextOf } from "./executor/wave.ts";
+import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
@@ -1705,7 +1705,14 @@ export class CellImpl<T extends FabricValue>
           };
           const sidecarId = streamEntriesDocId(stream);
           const emittedId = mintEventId(resolvedToValueLink, this.tx);
-          const acting = context.acting;
+          // Fan-out stage B (design §F's point of use, RULED 2026-08-16):
+          // a demanded DERIVATION's actor derives from the scope it has
+          // discovered SO FAR (never broader than the node's known-scope
+          // ratchet for this principal), and the scope used is recorded
+          // on the run context so an emission the run later out-narrows
+          // is refused at the seal — the early-emit guard, fail-closed.
+          // Handler runs (explicit `firedAt` actor) are unchanged.
+          const acting = actingForEmission(context, this.tx);
           if (resolvedToValueLink.space === this.space) {
             // LT1 same-space carriage: the entry rides the current tx.
             // The engine stamps its stream `seq` at the wave commit

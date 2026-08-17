@@ -1,5 +1,6 @@
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { Cancel } from "../cancel.ts";
 import { getTopFrame } from "../builder/pattern.ts";
 import { ConsoleEvent } from "../harness/console.ts";
@@ -114,6 +115,7 @@ import type { ExecuteContinuationState } from "./continuation.ts";
 import { applyPullExecuteContinuation } from "./continuation.ts";
 import { SchedulerGates } from "./gates.ts";
 import {
+  type MarkInvalidOptions,
   markInvalid as markInvalidRecord,
   type StorageNotificationState,
 } from "./invalidation.ts";
@@ -823,6 +825,98 @@ export class Scheduler {
    */
   invalidateAction(action: Action): void {
     this.markAndScheduleInvalidAction(action);
+  }
+
+  /**
+   * The ARRIVAL RE-ARM (server-execution v2 fan-out stage B, design §A/
+   * §B3): a demander who arrives after a node has narrowed finds no
+   * instance of their own — a clean node never re-runs for a demander
+   * that did not exist when it last ran — so the SpaceServer calls this
+   * when its demand registry gains a (principal, session) pair for a
+   * root. Every NARROWED node whose demand roots intersect `rootIds` is
+   * marked invalid and queued, with its per-instance record KEPT: only
+   * the arriving principal's instances are not clean, so only those run
+   * (B7 — the siblings stay current). A node that has not narrowed needs
+   * nothing (its one output is shared); a node that never ran will run
+   * for everyone when demanded. Returns the number of nodes re-armed.
+   */
+  invalidateActionsForDemandRoots(rootIds: readonly string[]): number {
+    const roots = new Set(rootIds);
+    let rearmed = 0;
+    for (const record of this.nodes.nodes()) {
+      if (record.fanOut === undefined || !record.fanOut.narrowed) continue;
+      const identity = (record.action as Partial<TelemetryAnnotations>)
+        .schedulerObservationIdentity;
+      const demandRootIds = identity?.demandRootIds ??
+        (identity?.pieceRootId !== undefined
+          ? [identity.pieceRootId]
+          : undefined);
+      if (demandRootIds === undefined) continue;
+      if (!demandRootIds.some((id) => roots.has(id))) continue;
+      this.markActionInvalid(record.action, undefined, {
+        fanOutInstances: "keep",
+      });
+      this.pending.add(record.action);
+      rearmed += 1;
+    }
+    if (rearmed > 0) this.queueExecution();
+    return rearmed;
+  }
+
+  /**
+   * The event actor as a TRANSIENT demander (server-execution v2 fan-out
+   * stage B, RULED 2026-08-16 — design §B5/§I.5): the `firedAt` pairs of
+   * the SERVED events currently queued whose handler's demand roots
+   * intersect `rootIds`. The SpaceServer's demander resolver folds them
+   * in, so a dispatch's preflight recompute of a dirty scoped input
+   * materializes the ACTOR's own instance even when the actor watches
+   * nothing (the actor holds append authority on the stream — never
+   * another principal's instance). Empty off the serving posture (no
+   * queued event carries `served`).
+   */
+  transientEventDemandersFor(
+    rootIds: readonly string[],
+  ): ScopeKeyIdentity[] {
+    if (this.eventQueue.length === 0) return [];
+    const roots = new Set(rootIds);
+    const demanders: ScopeKeyIdentity[] = [];
+    for (const queued of this.eventQueue) {
+      const firedAt = queued.served?.firedAt;
+      if (firedAt?.user === undefined) continue;
+      const identity = (queued.handler as Partial<TelemetryAnnotations>)
+        .schedulerObservationIdentity;
+      const demandRootIds = identity?.demandRootIds ??
+        (identity?.pieceRootId !== undefined
+          ? [identity.pieceRootId]
+          : undefined);
+      if (demandRootIds === undefined) continue;
+      if (!demandRootIds.some((id) => roots.has(id))) continue;
+      demanders.push({
+        principal: firedAt.user,
+        ...(firedAt.session !== undefined && firedAt.session !== "server"
+          ? { sessionId: firedAt.session as never }
+          : {}),
+      });
+    }
+    return demanders;
+  }
+
+  /** DIAGNOSTIC (tests): a node's fan-out record — the known-scope
+   * ratchet and per-instance state — or undefined off the fan-out path. */
+  fanOutStateOf(action: Action): {
+    narrowed: boolean;
+    sessionPrincipals: string[];
+    instanceKeys: string[];
+    cleanKeys: string[];
+  } | undefined {
+    const state = this.nodes.get(action)?.fanOut;
+    if (state === undefined) return undefined;
+    return {
+      narrowed: state.narrowed,
+      sessionPrincipals: [...state.sessionPrincipals],
+      instanceKeys: [...state.instances.keys()],
+      cleanKeys: [...state.clean],
+    };
   }
 
   queueExecution(): void {
@@ -2108,7 +2202,8 @@ export class Scheduler {
       markNodeHasRun: (target) => this.markNodeHasRun(target),
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
-      markInvalid: (target) => this.markActionInvalid(target),
+      markInvalid: (target, options) =>
+        this.markActionInvalid(target, undefined, options),
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
         this.executingAction = target;
@@ -2208,10 +2303,11 @@ export class Scheduler {
   private markActionInvalid(
     action: Action,
     cause?: IMemorySpaceAddress,
+    options?: MarkInvalidOptions,
   ): void {
     const record = this.nodes.get(action);
     if (!record) return;
-    markInvalidRecord(this.nodes, action, cause);
+    markInvalidRecord(this.nodes, action, cause, options);
     // Trailing computation debounce re-arms on every invalidation (§8.1:
     // debounceReadyAt resets while gated). Arming here — in the one
     // invalid-setter — covers every path (channel, registration, retry), so

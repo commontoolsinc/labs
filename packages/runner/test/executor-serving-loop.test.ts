@@ -2473,8 +2473,12 @@ describe("stage F serving loop", () => {
     // The ORIGINAL run: stamped through the production seam with the
     // DEMANDED identity (the run supply's output shape), it enqueues
     // the turn's effect. The carriage captured at its seal carries the
-    // demanded scopeKeyIdentity AND the acting pair #stampRun derives
-    // from it (stage P2-F).
+    // demanded scopeKeyIdentity AND the acting the seal SETTLES from the
+    // run's discovered scope (fan-out stage B, RULED 2026-08-16 — design
+    // §F: the run writes a USER-scoped instance, so it acts as the USER;
+    // a user-scoped instance value belongs to all of the user's sessions
+    // and carries no session — pre-stage-B #stampRun stamped the full
+    // pair eagerly).
     const turnKey = "llmDialogTest:t17-turn";
     const turnBase = serving.getCell<{ value?: number }>(
       space,
@@ -2568,8 +2572,9 @@ describe("stage F serving loop", () => {
         decodeMemoryBoundary(row.annotations) as unknown as AnnotationRow[]
       );
 
-    // The turn completion: scoped op under the DEMANDED key, acting
-    // pair on every op (the carriage's identity, not the wave's). TWO
+    // The turn completion: scoped op under the DEMANDED key, the acting
+    // USER on every op (the carriage's identity, not the wave's; a
+    // user-scoped instance carries the user only — §F). TWO
     // demanded-key commits must exist — the wave commit carrying the
     // original run's write AND the completion's own derived commit —
     // so the count is what proves the COMPLETION inherited the
@@ -2587,7 +2592,7 @@ describe("stage F serving loop", () => {
     for (const annotations of demandedKeyCommits()) {
       for (const annotation of annotations) {
         expect(annotation.actingUser).toBe(demanded.principal);
-        expect(annotation.actingSession).toBe("carol-s1");
+        expect(annotation.actingSession).toBeUndefined();
       }
     }
 
@@ -2849,20 +2854,28 @@ describe("stage F serving loop", () => {
     host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
 
     // A real pattern served at activation (the first test's shape): the
-    // demanded root is its RESULT doc.
+    // demanded root is its RESULT doc. Its derivation reads a PER-USER
+    // input (fan-out stage B, RULED 2026-08-16 — design §F: attribution
+    // derives from the scope a run DISCOVERS, so only a node that reads
+    // scoped state acts as anyone; a space-only `n + 1` runs once as the
+    // probe and carries NO acting — pre-stage-B the demand's pair was
+    // stamped on it eagerly, F10's over-keying).
+    let argumentSchema: unknown;
     onServingRuntime = async (runtime) => {
       const compiled = await runtime.patternManager.compilePattern({
         main: "/main.tsx",
         files: [{
           name: "/main.tsx",
           contents: [
-            "import { computed, pattern } from 'commonfabric';",
-            "export default pattern<{ n: number }, { total: number }>(",
-            "  ({ n }) => ({ total: computed(() => n + 1) }),",
+            "import { computed, Default, pattern, PerUser, Writable } from 'commonfabric';",
+            "type Mine = Writable<number | Default<0>>;",
+            "export default pattern<{ n: number; mine?: PerUser<Mine> }, { total: number }>(",
+            "  ({ n, mine }) => { const mineCell: Mine = mine!; return { total: computed(() => n + 1 + ((mineCell.get() as number | undefined) ?? 0)) }; },",
             ");",
           ].join("\n"),
         }],
       }, { space });
+      argumentSchema = compiled.argumentSchema;
       const argument = runtime.getCell<{ n: number }>(
         space,
         "p2f-supply-arg",
@@ -2929,7 +2942,11 @@ describe("stage F serving loop", () => {
     const expectedInstanceKey = resolveScopeKey("user", demanded as never);
 
     // The authored input: wakes the loop; the piece's derivation run
-    // serves alice's demand.
+    // serves alice's demand. Alice's per-user `mine` is written THROUGH
+    // the argument schema, so the PerUser slot narrows into her instance
+    // (the redirect at the space slot is what makes the derivation's
+    // read of it a user-scoped read — a never-written PerUser slot reads
+    // at its base scope, stage A's residual (ii)).
     const clientArg = clientRuntime.getCell<{ n: number }>(
       space,
       "p2f-supply-arg",
@@ -2939,6 +2956,15 @@ describe("stage F serving loop", () => {
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n: 41 });
     expect((await tx.commit()).error).toBeUndefined();
+    const typedArg = clientRuntime.getCell<{ mine: number }>(
+      space,
+      "p2f-supply-arg",
+      argumentSchema as never,
+    );
+    await typedArg.sync();
+    const mineTx = clientRuntime.edit();
+    typedArg.key("mine").withTx(mineTx).set(5);
+    expect((await mineTx.commit()).error).toBeUndefined();
     // No seq-target staging wait here: a serverSeq read after the
     // commit RACES the loop's own wave commit (when the wave lands
     // first, the read includes the wave's own seq, which W never
@@ -2971,22 +2997,25 @@ describe("stage F serving loop", () => {
     const aliceAnnotations = actingRows().filter((a) =>
       a.actingUser === aliceSigner.did()
     );
-    // The SESSION rides with the user (the session-bearing pair LT6
-    // hands to emitted events).
+    // A USER-scoped instance value belongs to all of the user's sessions:
+    // it carries the user and NO session (design §F, RULED 2026-08-16;
+    // a session-scoped instance would carry the pair). Pre-stage-B the
+    // representative session rode every user-instance annotation.
+    expect(aliceAnnotations.length).toBeGreaterThan(0);
     expect(
-      aliceAnnotations.some((a) =>
-        a.actingSession === String(demanded.sessionId)
-      ),
+      aliceAnnotations.every((a) => a.actingSession === undefined),
     ).toBe(true);
+    // No annotation names the service identity as the actor: the
+    // demanded node ran as its demander, never as the service.
+    expect(
+      actingRows().some((a) => a.actingUser === serviceSigner.did()),
+    ).toBe(false);
 
     // Basis rows key per (action, INSTANCE) — the run's TRUE instance
     // (S4, server-execution v2 stage A): the demanded run's DISCOVERED
-    // scope resolved against its identity. This derivation reads only the
-    // SPACE-scoped `n`, so its rows land under `space` and the demand's
-    // `user:<alice>` STAMP is cleared (the over-keyed row F10 named), not
-    // recorded — a demanded run that reads scoped state keys under alice's
-    // instance (`executor-instance-keyed-replica.test.ts` pins that
-    // shape). Pre-stage-A the stamp was recorded verbatim.
+    // scope resolved against its identity. This derivation reads alice's
+    // per-user input, so its rows land under alice's user instance; a
+    // demanded run that reads only space keys `space` (the stage-A pins).
     const basisKeys = new Set(
       (engine.database.prepare(
         `SELECT DISTINCT action_scope_key FROM scheduler_basis`,
@@ -2994,7 +3023,9 @@ describe("stage F serving loop", () => {
         row.action_scope_key
       ),
     );
-    expect(basisKeys.has("space")).toBe(true);
-    expect(basisKeys.has(expectedInstanceKey)).toBe(false);
+    expect(basisKeys.has(expectedInstanceKey)).toBe(true);
+    expect(
+      basisKeys.has(resolveScopeKey("user", { principal: serviceSigner.did() })),
+    ).toBe(false);
   });
 });

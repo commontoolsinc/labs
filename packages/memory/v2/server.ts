@@ -4105,12 +4105,19 @@ export class Server {
     scope?: CellScope;
     /** The DEMANDING session's identity (server-execution v2 Phase 2,
      * scopes.md §5: a derivation runs per demanded instance and the
-     * DEMAND supplies the identity). Present on SCOPED roots only —
-     * a space-scoped root needs no principal, and its entries dedupe
-     * to one. Scoped roots dedupe per RESOLVED INSTANCE, so two
-     * sessions of one user demanding a user-scoped root yield one
-     * entry while two USERS yield two (M1's demand carriage; the
-     * scheduler-side per-instance run supply is the owed follow-up). */
+     * DEMAND supplies the identity; fan-out stage B, RULED 2026-08-16 —
+     * scopes.md §2's mechanism sentence: a principal's demand at a
+     * BROAD address is demand for that principal's instance of every
+     * node that narrows beneath it). Present on EVERY root a
+     * principal-bearing session watches, space-scoped roots included:
+     * one row per (root, scope, principal, session) — the SpaceServer's
+     * registry keeps every demanding pair per root (two sessions of one
+     * user are two demanders — a node beneath the root may narrow to
+     * session for that user; two users are two). Absent only for an
+     * anonymous session's space-scoped root (it names the root — the
+     * structure still loads for it — but owns no instance). A session
+     * that cannot resolve a scoped root's instance (no principal on a
+     * user-scoped root) is not demand for that root. */
     identity?: { principal?: string; sessionId?: string };
   }> {
     const roots = new Map<string, {
@@ -4129,9 +4136,21 @@ export class Server {
         for (const root of watch.query.roots) {
           const scope = root.scope ?? "space";
           if (scope === "space") {
-            const key = `space\0${root.id}`;
+            if (session.principal === undefined) {
+              const key = `space\0${root.id}`;
+              if (!roots.has(key)) {
+                roots.set(key, { id: root.id });
+              }
+              continue;
+            }
+            const key = `space\0${root.id}\0${session.principal}\0${
+              session.id
+            }`;
             if (!roots.has(key)) {
-              roots.set(key, { id: root.id });
+              roots.set(key, {
+                id: root.id,
+                identity: { principal: session.principal, sessionId: session.id },
+              });
             }
             continue;
           }
@@ -4152,7 +4171,7 @@ export class Server {
             // user-scoped root) is not demand for that instance.
             continue;
           }
-          const key = `${instanceKey}\0${root.id}`;
+          const key = `${instanceKey}\0${root.id}\0${session.id}`;
           if (!roots.has(key)) {
             roots.set(key, {
               id: root.id,

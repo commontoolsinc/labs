@@ -122,6 +122,28 @@ export type ServingLoopStats = {
    * cannot open (disk trouble, or a provisioning target with an
    * unusable path). */
   foreignEngineFailures: number;
+  /** Server-execution v2 fan-out stage B (design §B5, RULED 2026-08-16
+   * accept-and-count): derivation runs under the wave-level FALLBACK
+   * identity — an action NOBODY demands with an identity — that
+   * discovered a scope narrower than `space`. Such a run wrote the
+   * SERVICE identity's instance (`user:<serviceDID>`), an inert row no
+   * client's applicable set includes: accepted, counted here, never
+   * delivered as anyone's instance. A demanded piece never lands here
+   * (the service identity runs NO demanded work); a growing count names
+   * an eager/idle-scheduled narrowing node no principal watches. */
+  undemandedNarrowingRuns: number;
+  /** Fan-out stage B's early-emit guard (design §F risk 4, RULED
+   * 2026-08-16 fail-closed): a demanded derivation run that EMITTED an
+   * event before its scope ratchet had moved — the emission carried a
+   * broader (lesser) actor than the run's final discovered scope
+   * implies — is REFUSED at the seal and withdrawn; the node's ratchet
+   * has learned the scope, so the retry emits correctly attributed.
+   * Never silently sessionless. Counted per refusal. */
+  earlyEmitRefusals: number;
+  /** Fan-out stage B's ARRIVAL RE-ARMS (design §A): demand-registry
+   * passes that found a new (principal, session) demander for a root
+   * and re-armed the narrowed nodes beneath it for that demander. */
+  demandArrivals: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
   events: {
@@ -163,6 +185,9 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   reactivationBackoffs: 0,
   foreignWriteRefusals: 0,
   foreignEngineFailures: 0,
+  undemandedNarrowingRuns: 0,
+  earlyEmitRefusals: 0,
+  demandArrivals: 0,
   watermarkLag: 0,
   events: {
     appended: 0,

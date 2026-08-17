@@ -150,9 +150,108 @@ export interface WaveRunContext {
    * carried with the acting identity into the foreign commit's metadata
    * for the target's delegated-capability admission. */
   capabilityRef?: string;
+  /** Server-execution v2 fan-out stage B (RULED 2026-08-16, design §F):
+   * this DERIVATION run's `acting`/`capabilityRef` are DERIVED FROM THE
+   * SCOPE IT DISCOVERS — space → none; user → the user; session → the
+   * pair — settled at the seal from the transaction's read-scope
+   * ratchet ({@link settleScopeAttribution}), and at a mid-run emission
+   * from the ratchet so far ({@link actingForEmission}). Stamped by the
+   * serving loop for a demanded derivation instead of an eager acting
+   * pair. Absent on handler runs (explicit `firedAt` actor — LD1),
+   * bookkeeping, and every context off the serving posture. */
+  attributionFromScope?: boolean;
+  /** The BROADEST scope any emission from this run was attributed at
+   * (the early-emit guard's evidence): set by {@link actingForEmission};
+   * a seal whose final discovered scope is NARROWER than it refuses the
+   * contribution fail-closed (design risk 4 — an under-attributed event
+   * never commits; the retry, at the moved ratchet, attributes it
+   * right). */
+  emissionAttributionScope?: CellScope;
 }
 
 const waveRunContexts = new WeakMap<object, WaveRunContext>();
+
+/** The scope name a run's stamped instance key stands at (`space`,
+ * `user:…`, `session:…`) — the attribution FLOOR of a fanned-out run:
+ * what the node has already learned by running (its known-scope ratchet
+ * for this principal), below which no read of THIS run can be. */
+const scopeOfInstanceKey = (key: ScopeKey | undefined): CellScope =>
+  key === undefined
+    ? "space"
+    : key.startsWith("session:")
+    ? "session"
+    : key.startsWith("user:")
+    ? "user"
+    : "space";
+
+/** The identity components a scope-attributed run ACTS AS at `scope`
+ * (design §F): space → none; user → `{user}` (a user-scoped instance
+ * value belongs to all of the user's sessions — the representative
+ * session was resolution scaffolding); session → `{user, session}`. */
+const actingAtScope = (
+  identity: ScopeKeyIdentity | undefined,
+  scope: CellScope,
+): { user: string; session?: string } | undefined => {
+  if (identity?.principal === undefined || scope === "space") {
+    return undefined;
+  }
+  if (scope === "user" || identity.sessionId === undefined) {
+    return { user: identity.principal };
+  }
+  return { user: identity.principal, session: String(identity.sessionId) };
+};
+
+/**
+ * Settle a scope-attributed derivation run's `acting` and `capabilityRef`
+ * from its FINAL discovered scope, at the seal (server-execution v2
+ * fan-out stage B, RULED 2026-08-16 — design §F): from here on every
+ * consumer of the context — the write annotations, the foreign-write
+ * accept gate, the delegated carriage, the outbox carriage a completion
+ * inherits — reads the settled pair. A run that discovered nothing scoped
+ * carries none (a space node demanded by anyone acts as nobody). No-op
+ * for every other context.
+ */
+export function settleScopeAttribution(
+  context: WaveRunContext,
+  discovered: CellScope,
+): void {
+  if (context.attributionFromScope !== true) return;
+  const acting = actingAtScope(context.scopeKeyIdentity, discovered);
+  if (acting === undefined) {
+    delete context.acting;
+    delete context.capabilityRef;
+    return;
+  }
+  context.acting = acting;
+  context.capabilityRef = `demanded-run:${acting.user}`;
+}
+
+/**
+ * The actor a run's MID-RUN emission carries (the LT6 send site; design
+ * §F's point of use): a scope-attributed derivation derives it from the
+ * broader of the transaction's read-scope ratchet SO FAR and the run's
+ * stamped instance key (the node's known-scope ratchet — what running has
+ * already discovered for this principal), and RECORDS the scope used so
+ * the seal can refuse the contribution if the run later narrows below it
+ * (the early-emit guard, fail-closed — design risk 4). Every other
+ * context returns its stamped `acting` unchanged.
+ */
+export function actingForEmission(
+  context: WaveRunContext,
+  tx: IExtendedStorageTransaction,
+): { user: string; session?: string } | undefined {
+  if (context.attributionFromScope !== true) return context.acting;
+  const soFar = normalizeCellScope(tx.getNarrowestReadScope?.());
+  const floor = scopeOfInstanceKey(context.actionScopeKey);
+  const scope = scopeRank(soFar) >= scopeRank(floor) ? soFar : floor;
+  if (
+    context.emissionAttributionScope === undefined ||
+    scopeRank(scope) < scopeRank(context.emissionAttributionScope)
+  ) {
+    context.emissionAttributionScope = scope;
+  }
+  return actingAtScope(context.scopeKeyIdentity, scope);
+}
 
 /**
  * Stamp the run context onto an action's transaction before the run
@@ -548,6 +647,8 @@ export class WaveAccumulator
   readonly #pendingAppendsByTx = new WeakMap<object, OutboxAppendRow[]>();
   readonly #sealedTxs = new WeakSet<object>();
   readonly #onUnstampedSeal: (() => void) | undefined;
+  readonly #onEarlyEmitRefusal: (() => void) | undefined;
+  readonly #onUndemandedNarrowing: (() => void) | undefined;
 
   constructor(options: {
     /** The home space this wave derives for. */
@@ -571,6 +672,15 @@ export class WaveAccumulator
      * before the refusal throws. The refusal semantics are unchanged
      * — this only makes the storm a counter fact. */
     onUnstampedSeal?: () => void;
+    /** Counted observation of fan-out stage B's early-emit guard (the
+     * serving loop feeds its §7 `earlyEmitRefusals` counter): called
+     * once per contribution refused for an under-attributed emission. */
+    onEarlyEmitRefusal?: () => void;
+    /** Counted observation of design §B5's accept-and-count residual
+     * (the serving loop feeds `undemandedNarrowingRuns`): a derivation
+     * run under the wave-level fallback identity that discovered a
+     * scope narrower than `space`. */
+    onUndemandedNarrowing?: () => void;
     /** Foreign-space writes at ACCUMULATION (serving-loop.md §3d, RULED
      * 2026-08-14 (c) — the lunch-wall trigger's ruled seat): on
      * `"refuse"` (the pre-Phase-5 default), a sealing tx carrying a
@@ -619,6 +729,8 @@ export class WaveAccumulator
     this.#lease = options.lease;
     this.#sealedTenure = options.lease?.tenure ?? 0;
     this.#onUnstampedSeal = options.onUnstampedSeal;
+    this.#onEarlyEmitRefusal = options.onEarlyEmitRefusal;
+    this.#onUndemandedNarrowing = options.onUndemandedNarrowing;
     this.#foreignWrites = options.foreignWrites ?? "refuse";
     this.#foreignWriteGrant = options.foreignWriteGrant;
     if (
@@ -718,6 +830,54 @@ export class WaveAccumulator
           "space (serving-loop.md §3d)",
       );
     }
+    const discoveredScope = normalizeCellScope(tx.getNarrowestReadScope?.());
+    if (context !== undefined) {
+      // Fan-out stage B: a scope-attributed derivation's actor is
+      // settled HERE — before sealInto, so the foreign-write accept gate
+      // and every later consumer read the settled pair.
+      settleScopeAttribution(context, discoveredScope);
+      // The EARLY-EMIT GUARD (RULED 2026-08-16, fail-closed): an emission
+      // this run attributed at a broader scope than it finally
+      // discovered carried LESS actor than the run's true instance —
+      // never commit it. The scheduler learned the discovered scope at
+      // commit kickoff (before this seal), so the retry runs at the
+      // moved ratchet and attributes the emission right.
+      if (
+        context.attributionFromScope === true &&
+        context.emissionAttributionScope !== undefined &&
+        scopeRank(discoveredScope) >
+          scopeRank(context.emissionAttributionScope)
+      ) {
+        this.#onEarlyEmitRefusal?.();
+        logger.warn("early-emit-refused", () => [
+          `run ${context.actionId} emitted an event attributed at scope ` +
+          `${context.emissionAttributionScope} and then discovered ` +
+          `${discoveredScope}; the contribution is refused fail-closed ` +
+          "(protocol.md §1 as amended 2026-08-16; the retry emits at the " +
+          "learned scope)",
+        ]);
+        return {
+          error: {
+            name: "StorageTransactionAborted",
+            message: "early emission under-attributed: the run emitted an " +
+              `event at scope ${context.emissionAttributionScope} before ` +
+              `discovering ${discoveredScope} (fan-out stage B's early-emit ` +
+              "guard; the retry attributes it at the learned scope)",
+            reason: new Error("early-emit-under-attributed"),
+          },
+        };
+      }
+      // Design §B5 (RULED 2026-08-16 accept-and-count): a derivation run
+      // NOBODY demanded with an identity — the wave-level fallback —
+      // that narrowed wrote the service identity's inert instance.
+      if (
+        context.kind === "derivation" &&
+        context.scopeKeyIdentity === undefined &&
+        discoveredScope !== "space"
+      ) {
+        this.#onUndemandedNarrowing?.();
+      }
+    }
     this.#assembly = {
       context,
       spaces: [],
@@ -725,7 +885,7 @@ export class WaveAccumulator
       // Read BEFORE sealInto: the seal's own bookkeeping reads nothing
       // scoped, and the ratchet is complete once the action body and its
       // result write have run.
-      discoveredScope: normalizeCellScope(tx.getNarrowestReadScope?.()),
+      discoveredScope,
     };
     try {
       const result = await inner.sealInto(this);

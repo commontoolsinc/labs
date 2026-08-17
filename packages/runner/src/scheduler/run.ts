@@ -1,5 +1,6 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import type { Runtime, ServerRunInstance } from "../runtime.ts";
+import { resolveScopeKey } from "@commonfabric/memory/v2";
+import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
@@ -29,7 +30,24 @@ import { toActionRunTraceAddress } from "./diagnostics.ts";
 import { txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type { NodeRegistry } from "./node-record.ts";
-import { restoreInvalidCauses, takeInvalidCauses } from "./invalidation.ts";
+import {
+  type MarkInvalidOptions,
+  restoreInvalidCauses,
+  takeInvalidCauses,
+} from "./invalidation.ts";
+import {
+  dirtyFanOutKey,
+  type FanOutInstance,
+  type FanOutNodeState,
+  fanOutInstances,
+  fanOutInstancesToRun,
+  fanOutRunFinished,
+  fanOutRunStarted,
+  fanOutUnionLog,
+  keyAtRatchet,
+  newFanOutNodeState,
+  pruneFanOutInstances,
+} from "./fan-out.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -342,7 +360,7 @@ export interface SchedulerActionRunState {
   readonly markNodeHasRun: (action: Action) => void;
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
-  readonly markInvalid: (action: Action) => void;
+  readonly markInvalid: (action: Action, options?: MarkInvalidOptions) => void;
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
@@ -374,18 +392,25 @@ export async function runSchedulerAction(
   }
 
   // The per-(action × instance) run SUPPLY (server-execution v2 stage
-  // P2-F; scopes.md §5 — the DEMAND supplies the run identity). On a
-  // serving runtime the SpaceServer's installed resolver maps this
-  // action's piece root to its demanded instances, and the action runs
-  // ONCE PER INSTANCE, serially, each run stamped with that instance's
-  // identity (the N-run settle loop over demanded identities).
-  // Instances live in keys, basis rows, and stamps — never as extra
-  // dependency-graph nodes (C11b): the node, its dirtiness, and its
-  // subscription stay singular, and a re-trigger re-runs the current
-  // instance set (equality cutoffs and memo hits make the sibling
-  // recomputes converge). Everywhere else (`serverRunInstancesFor`
-  // undefined or empty) this is exactly the old single
-  // wave-identity run.
+  // P2-F; scopes.md §5 — the DEMAND supplies the run identity; fan-out
+  // stage B — the demanders and the KNOWN-SCOPE RATCHET decide the
+  // instances). On a serving runtime the SpaceServer's installed
+  // resolver returns the DEMANDERS of this action's demand roots — the
+  // (principal, session) pairs whose watches reach the piece, at ANY
+  // address (a space-scoped root watch too: scopes.md §2's mechanism
+  // sentence — a principal's demand at a broad address is demand for
+  // THAT principal's instance of every node that narrows beneath it) —
+  // and the scheduler derives the instance set from what THIS node has
+  // discovered by running (scheduler/fan-out.ts): one PROBE run while
+  // nothing scoped was ever read (a space node runs ONCE regardless of
+  // demander count), one run per demanding principal once it narrowed
+  // to user, one per demanding session for principals it narrowed to
+  // session — ragged per principal. Instances live in keys, basis rows,
+  // stamps and the per-node fan-out record — never as extra
+  // dependency-graph nodes (C11b): the node, its status, and its ONE
+  // subscription (the union of the instance logs) stay singular.
+  // Everywhere else (`serverRunDemandersFor` undefined or empty) this is
+  // exactly the old single wave-identity run.
   // The demand roots: the action's own piece root plus its ancestor
   // chain (Phase 7 — a nested piece's instances resolve through the
   // outer piece the client watches; see
@@ -396,60 +421,63 @@ export async function runSchedulerAction(
     (observationIdentity?.pieceRootId !== undefined
       ? [observationIdentity.pieceRootId]
       : undefined);
-  const demandedInstances = demandRootIds !== undefined
-    ? state.runtime.serverRunInstancesFor(demandRootIds)
+  const demanders = demandRootIds !== undefined
+    ? state.runtime.serverRunDemandersFor(demandRootIds)
     : undefined;
-  const runs: readonly (ServerRunInstance | undefined)[] =
-    demandedInstances !== undefined && demandedInstances.length > 0
-      ? demandedInstances
-      : [undefined];
-
-  // The N-run loop's subscription (server-execution v2 stage A — OW17's
-  // scheduler leg): with several instance runs, each run's log is
-  // COLLECTED and the node resubscribes ONCE to their union after the
-  // last instance — never per run, which replaced the subscription each
-  // time so only the LAST instance's reads survived ("last instance
-  // wins": Bob's input change would not wake the node once Alice's run
-  // ran after his). The single-run path — every client, the OFF arm, and
-  // a served action with one or no demanded instance — resubscribes
-  // inside its own finalize exactly as before.
-  const unionSubscription = runs.length > 1;
-  const instanceLogs: ReactivityLog[] = [];
+  // A one-shot run of an unregistered action (`scheduler.run` on a raw
+  // action — tests, internal probes) has no record to keep the ratchet on
+  // and learns it afresh within this call; a registered node keeps it.
+  const fanOut = demanders !== undefined &&
+      demanders.some((d) => d.principal !== undefined)
+    ? record !== undefined
+      ? (record.fanOut ??= newFanOutNodeState())
+      : newFanOutNodeState()
+    : undefined;
+  if (fanOut === undefined && record?.fanOut !== undefined) {
+    // No demanders any more (or never a resolvable one): the node runs
+    // as the wave-level fallback again and its subscription is that
+    // run's; the ratchet is forgotten with the demand (re-learned by
+    // the next probe — design §B1's "forgotten on park").
+    record.fanOut = undefined;
+  }
 
   const runOnce = (
-    instance: ServerRunInstance | undefined,
-  ): Promise<unknown> => {
+    instance: FanOutInstance | undefined,
+    causes: readonly IMemorySpaceAddress[] | undefined,
+    startGen: number,
+  ): Promise<{ result: unknown; log: ReactivityLog | undefined }> => {
     const tx = state.runtime.edit({
       changeGroup: state.actionChangeGroups.get(action),
     });
     // §8.9.2 trigger reads: hand the addresses whose changes scheduled
     // this run to the transaction so flow-label derivation can taint its
     // writes even when this run's branch never re-reads them. Consumed
-    // once per scheduling; every instance run of that scheduling carries
-    // them (the trigger caused ALL the instance runs). If a run aborts
-    // and is retried (RetryImmediately, commit conflict) the consumed
-    // addresses are restored below so the retry inherits them.
-    if (invalidCauses !== undefined && invalidCauses.length > 0) {
-      tx.addCfcTriggerReads(invalidCauses);
+    // once per scheduling; a fanned-out instance run carries the causes
+    // that dirtied ITS instance (B7) plus the untargeted ones. If a run
+    // aborts and is retried (RetryImmediately, commit conflict) the
+    // consumed addresses are restored below so the retry inherits them.
+    if (causes !== undefined && causes.length > 0) {
+      tx.addCfcTriggerReads(causes);
     }
     (tx.tx as { debugActionId?: string }).debugActionId = actionId;
     tx.tx.sourceAction = action;
     // Server-execution v2 stage F (serving-loop.md §3d): a serving
     // runtime's installed stamper attaches the wave run context here —
     // the reactive-action choke point — so every scheduler-driven
-    // derivation seals stamped. Stage P2-F: a demanded instance's run
-    // carries the demand-supplied identity, so its seal annotations,
-    // basis rows, and scoped addressing classify under the demanding
-    // (user, session) — and its emitted events inherit that actor
-    // (LT6) — instead of falling to the userless wave fallback
-    // (protocol.md §1). A no-op everywhere else (one undefined check).
+    // derivation seals stamped. Stage P2-F/B: a demanded instance's run
+    // carries the demand-supplied RESOLUTION identity and its instance
+    // key, so its scoped addressing and basis rows classify under the
+    // demanding principal's instance — and its ATTRIBUTION derives from
+    // the scope the run discovers (protocol.md §1 as amended; design
+    // §F), never eagerly from the pair. A no-op everywhere else (one
+    // undefined check).
     state.runtime.stampServerRun(tx, {
       actionId,
       kind: "derivation",
       ...(instance !== undefined
         ? {
-          scopeKeyIdentity: instance.scopeKeyIdentity,
-          actionScopeKey: instance.actionScopeKey,
+          scopeKeyIdentity: instance.identity,
+          actionScopeKey: instance.key,
         }
         : {}),
     });
@@ -457,18 +485,28 @@ export async function runSchedulerAction(
 
     let result: any;
     return new Promise((resolve) => {
+      let committedLog: ReactivityLog | undefined;
       const finalizeAction = (error?: unknown) => {
         finalizeSchedulerAction(state, {
           action,
           actionId,
           tx,
           actionStartTime,
-          invalidCauses,
+          invalidCauses: causes,
           result,
           error,
-          resolve,
-          ...(unionSubscription
-            ? { collectLog: (log: ReactivityLog) => instanceLogs.push(log) }
+          resolve: (value) => resolve({ result: value, log: committedLog }),
+          ...(fanOut !== undefined && instance !== undefined
+            ? {
+              fanOutRun: {
+                state: fanOut,
+                instance,
+                startGen,
+                collectLog: (log: ReactivityLog) => {
+                  committedLog = log;
+                },
+              },
+            }
             : {}),
         });
       };
@@ -498,23 +536,51 @@ export async function runSchedulerAction(
   };
 
   const nextRunningPromise = (async () => {
-    let lastResult: unknown;
-    for (const instance of runs) {
-      lastResult = await runOnce(instance);
+    if (fanOut === undefined) {
+      // The single wave-identity run: every client, the OFF arm, and a
+      // served action nobody demands with an identity (the wave-level
+      // fallback — design §B5's residual, counted at the seal when it
+      // narrows).
+      return (await runOnce(undefined, invalidCauses, 0)).result;
     }
-    if (unionSubscription && instanceLogs.length > 0) {
+    // The fan-out loop (design §B2/§B3): derive the instance set from
+    // (ratchet × demanders), run the instances that are not current, and
+    // re-derive after each run — a run that discovers narrowing moves
+    // the ratchet, so its siblings APPEAR in the set and run in this
+    // same pass (the discovery re-arm; W waits on them because they run
+    // inside this running promise, which idle() awaits). Bounded: every
+    // run marks its key clean unless a cause dirtied it meanwhile, the
+    // ratchet moves at most twice per principal, and D is finite.
+    let lastResult: unknown;
+    let ran = false;
+    for (;;) {
+      const currentDemanders = state.runtime.serverRunDemandersFor(
+        demandRootIds!,
+      ) ?? [];
+      const instances = fanOutInstances(fanOut, currentDemanders);
+      pruneFanOutInstances(fanOut, instances);
+      const toRun = fanOutInstancesToRun(fanOut, instances);
+      if (toRun.length === 0) break;
+      const instance = toRun[0];
+      const startGen = fanOutRunStarted(fanOut, instance);
+      const causes = invalidCauses === undefined
+        ? undefined
+        : causesForInstance(invalidCauses, instance);
+      const outcome = await runOnce(instance, causes, startGen);
+      lastResult = outcome.result;
+      ran = true;
+    }
+    if (ran || fanOut.instances.size > 0) {
       // The union of the instance runs' logs: each read carries ITS
       // instance (the transaction's stamped identity puts the scope key
       // on scoped addresses), so the trigger index registers N reads of
       // one doc — one per instance — and any instance's change wakes the
-      // node. sortAndCompactPaths keeps them apart by instance.
+      // node; skipped (clean) instances keep their last log in the union
+      // (B7), departed instances left it in the prune above.
+      // sortAndCompactPaths keeps them apart by instance.
       logger.timeStart("scheduler", "run", "resubscribe");
       try {
-        state.resubscribe(action, {
-          reads: instanceLogs.flatMap((log) => log.reads),
-          shallowReads: instanceLogs.flatMap((log) => log.shallowReads),
-          writes: instanceLogs.flatMap((log) => log.writes),
-        });
+        state.resubscribe(action, fanOutUnionLog(fanOut));
       } finally {
         logger.timeEnd("scheduler", "run", "resubscribe");
       }
@@ -529,6 +595,37 @@ export async function runSchedulerAction(
   });
 }
 
+/** B7: the causes a fanned-out instance run carries as its CFC trigger
+ * reads — those that dirtied ITS instance (a keyed cause resolving on the
+ * instance identity's own chain) plus every untargeted one. */
+function causesForInstance(
+  causes: readonly IMemorySpaceAddress[],
+  instance: FanOutInstance,
+): IMemorySpaceAddress[] {
+  const chain = new Set<string>(["space"]);
+  try {
+    chain.add(resolveScopeKey("user", instance.identity));
+    chain.add(resolveScopeKey("session", instance.identity));
+  } catch {
+    // whatever resolved is the chain
+  }
+  return causes.filter((cause) =>
+    cause.scopeKey === undefined || chain.has(cause.scopeKey)
+  );
+}
+
+/** One run of a fanned-out node (stage B): the node's fan-out record, the
+ * instance this run served, its dirtiness generation at start, and the
+ * sink for its committed log. The loop resubscribes once to the union of
+ * the instance logs after its last run, instead of this run resubscribing
+ * (which would replace the previous instances' reads). */
+interface FanOutRunArgs {
+  readonly state: FanOutNodeState;
+  readonly instance: FanOutInstance;
+  readonly startGen: number;
+  readonly collectLog: (log: ReactivityLog) => void;
+}
+
 function finalizeSchedulerAction(
   state: SchedulerActionRunState,
   args: {
@@ -540,11 +637,7 @@ function finalizeSchedulerAction(
     readonly result: unknown;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
-    /** Present for one run of an N-instance loop (stage A): the run's
-     * committed log is handed here and the loop resubscribes once to
-     * the union after its last instance, instead of this run
-     * resubscribing (which would replace the previous instances'). */
-    readonly collectLog?: (log: ReactivityLog) => void;
+    readonly fanOutRun?: FanOutRunArgs;
   },
 ): void {
   // Record action execution time for cycle-aware scheduling
@@ -593,6 +686,7 @@ function rescheduleActionForImmediateRetry(
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
+    readonly fanOutRun?: FanOutRunArgs;
   },
 ): void {
   if (args.tx.status().status === "ready") args.tx.abort(args.error);
@@ -609,7 +703,14 @@ function rescheduleActionForImmediateRetry(
     ) {
       restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
     }
-    state.markInvalid(args.action);
+    // A fanned-out instance's aborted run re-runs THAT instance (B7):
+    // its key is dirtied, its siblings stay current.
+    if (args.fanOutRun !== undefined) {
+      dirtyFanOutKey(args.fanOutRun.state, args.fanOutRun.instance.key);
+      state.markInvalid(args.action, { fanOutInstances: "keep" });
+    } else {
+      state.markInvalid(args.action);
+    }
     state.pending.add(args.action);
     state.queueExecution();
   } else {
@@ -637,7 +738,7 @@ function finalizeReactiveActionCommit(
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
     readonly resolve: (value: unknown) => void;
-    readonly collectLog?: (log: ReactivityLog) => void;
+    readonly fanOutRun?: FanOutRunArgs;
   },
   elapsed: number,
 ): void {
@@ -662,6 +763,23 @@ function finalizeReactiveActionCommit(
       log = txToReactivityLog(args.tx);
       warnOnWriteSurfaceViolations(state, args, log);
       hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
+      if (args.fanOutRun !== undefined) {
+        // The DISCOVERY half of stage B's ratchet (design §B3): the run's
+        // narrowest read scope — the transaction's ratchet, complete once
+        // the body and its result write ran (the write path's diff-base
+        // read at the narrower instance and identity consumption ratchet
+        // it too) — is what this node has LEARNED. Read here, at commit
+        // kickoff, before the asynchronous seal: a seal the wave refuses
+        // still leaves the lesson (the retry runs at the moved ratchet).
+        // The run's key at the (possibly moved) ratchet is marked clean
+        // — unless a cause dirtied its stamped key while it ran — and
+        // keeps this committed log for the union subscription (B7).
+        fanOutRunFinished(args.fanOutRun.state, args.fanOutRun.instance, {
+          discovered: normalizeCellScope(args.tx.getNarrowestReadScope()),
+          startGen: args.fanOutRun.startGen,
+          log,
+        });
+      }
     },
   });
   if (!log) {
@@ -682,6 +800,7 @@ function finalizeReactiveActionCommit(
     state.runtime.trackAsyncWork(args.tx.postCommitEffectsSettled());
   }
   const committedLog = log;
+  const fanOutRun = args.fanOutRun;
   const handled = watchReactiveActionCommit({
     action: args.action,
     tx: args.tx,
@@ -690,8 +809,26 @@ function finalizeReactiveActionCommit(
     offBudgetRetries: state.offBudgetRetries,
     pending: state.pending,
     commitPromise,
-    resubscribe: state.resubscribe,
-    markInvalid: state.markInvalid,
+    // A fanned-out instance's retry paths (a conflict, a refused seal —
+    // the early-emit guard's fail-closed refusal among them) re-arm THAT
+    // instance: its key is dirtied, its siblings stay current, and the
+    // subscription refreshed here is the UNION of the instance logs (this
+    // run's log is already recorded on the node) — never this one run's
+    // log alone, which would replace the siblings' reads (F9's shape on
+    // the retry paths, closed with B7).
+    resubscribe: fanOutRun === undefined
+      ? state.resubscribe
+      : (target) => state.resubscribe(target, fanOutUnionLog(fanOutRun.state)),
+    markInvalid: fanOutRun === undefined
+      ? state.markInvalid
+      : (target) => {
+        dirtyFanOutKey(
+          fanOutRun.state,
+          keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
+            fanOutRun.instance.key,
+        );
+        state.markInvalid(target, { fanOutInstances: "keep" });
+      },
     queueExecution: state.queueExecution,
     getActionId: state.getActionId,
     restoreInvalidCauses: () => {
@@ -722,10 +859,10 @@ function finalizeReactiveActionCommit(
 
   recordOptionalActionRunDiagnostics(state, args, committedLog, elapsed);
 
-  if (args.collectLog !== undefined) {
-    // One run of an N-instance loop: the loop resubscribes once to the
+  if (args.fanOutRun !== undefined) {
+    // One run of a fanned-out node: the loop resubscribes once to the
     // union after its last instance (see runSchedulerAction).
-    args.collectLog(committedLog);
+    args.fanOutRun.collectLog(committedLog);
   } else {
     logger.timeStart("scheduler", "run", "resubscribe");
     try {

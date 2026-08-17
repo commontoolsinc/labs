@@ -1906,6 +1906,27 @@ export function wish(
   // runtime: unchanged.
   const sidecarIsServed = runtime.experimental.serverExecution === true &&
     !runtime.servingPosture;
+  // The sidecar's DEMAND-ROOT CHAIN (server-execution v2 fan-out stage B,
+  // design §B4 + the panel's Lens 5; the P7 review's finding 4 for the
+  // list builtins): a sidecar piece is instantiated by THIS wish's run
+  // with its own result doc as piece root, which no client watches — a
+  // served sidecar's own actions therefore resolved NO demanders and fell
+  // to the wave-level (service) identity, and the per-demander demand
+  // walk could not reach a per-user wish child. Chaining the sidecar to
+  // the wish's owning piece (`RunnerRunOptions.parentPieceRootId`, as
+  // map/filter/flatMap do) makes its actions demanded through the OUTER
+  // root the client watches — a served `#profile` create surface's nodes
+  // run as demanders. Off the serving posture the chain is inert (the run
+  // supply consults nothing there). FLAGGED, not filled: the sidecar's
+  // instance SET is the chain's demanders (every principal demanding the
+  // outer root), not only the demander the sidecar was minted for
+  // (`sidecarUser`) — a sibling's instance runs of a per-user sidecar's
+  // narrowed nodes are inert (nobody reads them) but not free; pinning a
+  // per-demander sidecar to exactly its own demander is an unstated
+  // semantic recorded in the register (OW29's row).
+  const sidecarRunOptions = {
+    parentPieceRootId: parentCell.getAsNormalizedFullLink().id,
+  };
 
   addCancel(() => {
     cancelled = true;
@@ -2028,22 +2049,24 @@ export function wish(
       ).then(
         (pattern) => {
           if (!cancelled && pattern && slot.resultCell) {
-            runtime.run(
+            runtime.runner.run(
               undefined,
               pattern,
               slot.input,
               slot.resultCell,
+              sidecarRunOptions,
             );
           }
         },
       );
     } else {
       if (!cancelled && slot.resultCell) {
-        runtime.run(
+        runtime.runner.run(
           tx,
           cachedSuggestionPattern,
           slot.input,
           slot.resultCell,
+          sidecarRunOptions,
         );
       }
     }
@@ -2092,7 +2115,13 @@ export function wish(
         actionId: `wish/sidecar-run/${resultCell.sourceURI}`,
         kind: "bookkeeping",
       });
-      runtime.run(runTx, pattern, inputForTx(runTx), resultCell.withTx(runTx));
+      runtime.runner.run(
+        runTx,
+        pattern,
+        inputForTx(runTx),
+        resultCell.withTx(runTx),
+        sidecarRunOptions,
+      );
       runtime.prepareTxForCommit(runTx);
       runTx.commit().then(({ error }) => {
         if (error) {
@@ -2215,11 +2244,12 @@ export function wish(
         },
       );
     } else if (!cancelled && slot.resultCell) {
-      runtime.run(
+      runtime.runner.run(
         tx,
         cachedProfileCreatePattern,
         profileCreateInputForTx(tx),
         slot.resultCell.withTx(tx),
+        sidecarRunOptions,
       );
     }
 
@@ -2353,11 +2383,12 @@ export function wish(
         }
       });
     } else if (!cancelled && slot.resultCell) {
-      runtime.run(
+      runtime.runner.run(
         tx,
         cachedProfilePickerPattern,
         pickerInputForTx(tx),
         slot.resultCell.withTx(tx),
+        sidecarRunOptions,
       );
     }
 

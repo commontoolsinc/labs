@@ -963,14 +963,21 @@ describe("stage G SpaceServer recovery seams", () => {
     let argMetaDocId: string;
     let inputDocId: string;
     try {
+      // The derivation reads a PER-USER slot besides `n` (fan-out stage
+      // B, RULED 2026-08-16 — design §F: attribution derives from the
+      // scope a run DISCOVERS; a space-only `n + 7` runs once as the
+      // probe and acts as nobody). The creator narrows the slot through
+      // the argument schema, so every later read of it follows the
+      // redirect into the reader's own instance.
       const compiled = await creator.patternManager.compilePattern({
         main: "/main.tsx",
         files: [{
           name: "/main.tsx",
           contents: [
-            "import { computed, pattern } from 'commonfabric';",
-            "export default pattern<{ n: number }, { total: number }>(",
-            "  ({ n }) => ({ total: computed(() => n + 7) }),",
+            "import { computed, Default, pattern, PerUser, Writable } from 'commonfabric';",
+            "type Mine = Writable<number | Default<0>>;",
+            "export default pattern<{ n: number; mine?: PerUser<Mine> }, { total: number }>(",
+            "  ({ n, mine }) => { const mineCell: Mine = mine!; return { total: computed(() => n + 7 + ((mineCell.get() as number | undefined) ?? 0)) }; },",
             ");",
           ].join("\n"),
         }],
@@ -991,6 +998,14 @@ describe("stage G SpaceServer recovery seams", () => {
       input.withTx(tx).set({ n: 1 });
       creator.run(tx, compiled, input, root);
       expect((await tx.commit()).error).toBeUndefined();
+      const typedInput = creator.getCell<{ mine: number }>(
+        space,
+        "p2f-argdemand-input",
+        compiled.argumentSchema,
+      );
+      const mineTx = creator.edit();
+      typedInput.key("mine").withTx(mineTx).set(1);
+      expect((await mineTx.commit()).error).toBeUndefined();
       await creator.idle();
       await creator.storageManager.synced();
       pieceRootId = root.getAsNormalizedFullLink().id;
@@ -1041,7 +1056,9 @@ describe("stage G SpaceServer recovery seams", () => {
       );
       await input.sync();
       const pokeTx = poker.edit();
-      input.withTx(pokeTx).set({ n: 2 });
+      // A key write: a whole-doc set would clobber the `mine` slot's
+      // redirect the creator narrowed.
+      input.key("n").withTx(pokeTx).set(2);
       expect((await pokeTx.commit()).error).toBeUndefined();
       await poker.storageManager.synced();
     } finally {
@@ -1079,21 +1096,18 @@ describe("stage G SpaceServer recovery seams", () => {
       "the argument-demand derivation to act as the demanding user",
       15_000,
     );
+    // A USER-scoped instance value carries the user only (design §F,
+    // RULED 2026-08-16): no session on a user-instance run's writes.
     expect(
-      actingRows().some((a) =>
-        a.actingUser === demander.principal &&
-        a.actingSession === demander.sessionId
-      ),
+      actingRows()
+        .filter((a) => a.actingUser === demander.principal)
+        .every((a) => a.actingSession === undefined),
     ).toBe(true);
 
     // The same run's basis rows key under the run's TRUE instance (S4,
     // server-execution v2 stage A): its DISCOVERED scope resolved against
-    // the demander's identity. This derivation reads only space-scoped
-    // input, so its rows key `space` and the demand's `user:<demander>`
-    // stamp is cleared rather than recorded (the F10 over-keyed row);
-    // the supply's identity is witnessed by the acting annotations above,
-    // and a scoped-reading demanded run keys under the demander's
-    // instance (`executor-instance-keyed-replica.test.ts`).
+    // the demander's identity — this derivation reads the demander's
+    // per-user slot, so its rows key under the demander's user instance.
     const expectedInstanceKey = resolveScopeKey("user", demander as never);
     const basisKeys = new Set(
       (engine.database.prepare(
@@ -1102,8 +1116,7 @@ describe("stage G SpaceServer recovery seams", () => {
         row.action_scope_key
       ),
     );
-    expect(basisKeys.has("space")).toBe(true);
-    expect(basisKeys.has(expectedInstanceKey)).toBe(false);
+    expect(basisKeys.has(expectedInstanceKey)).toBe(true);
 
     // The argument-doc demand RESOLVED (started through the owning
     // root) — it neither terminalized nor failed.
@@ -1224,9 +1237,21 @@ describe("stage G SpaceServer recovery seams", () => {
         // The emitting derivation, through the PRODUCTION choke points:
         // scheduler.run → run.ts's demanded-instance fan-out →
         // stampServerRun → the SpaceServer's #stampRun → the
-        // serving-arm send.
+        // serving-arm send. It reads USER-scoped state BEFORE emitting
+        // (fan-out stage B, RULED 2026-08-16 — design §F: a run's actor
+        // derives from the scope it discovers; a derivation that reads
+        // nothing scoped is a space-scope run and its emission carries
+        // no actor whoever demanded it — events.md §2's "a space-scope
+        // run's carries neither").
+        const userProbe = serving.getCellFromLink<{ v?: number }>({
+          space,
+          id: `of:lt6-user-probe-${arm.pieceRootId}` as never,
+          scope: "user",
+          path: [],
+        });
         const action = Object.assign(
           (tx: IExtendedStorageTransaction) => {
+            userProbe.withTx(tx).get();
             streamCell.withTx(tx).send({ ping: 1 } as never);
           },
           {
@@ -1270,8 +1295,12 @@ describe("stage G SpaceServer recovery seams", () => {
       expect(userless.entry.firedAt!.session).toBe("server");
 
       // ARM 2 — the supply LIVE: the demanded root's action runs AS the
-      // demanding (user, session) instance, and its emission carries
-      // that actor on the durable entry.
+      // demanding principal's USER instance (it read user scope), and
+      // its emission carries that actor on the durable entry — the user,
+      // with `session = "server"` (events.md §2: a user-instance run's
+      // event carries the user with session "server"; the pair rides
+      // only a session-instance run's — design §F). Pre-stage-B the
+      // demand's full pair was stamped eagerly.
       const demanded = await runArm({
         stream: "lt6-stream-demanded",
         probe: "lt6-probe-demanded",
@@ -1279,11 +1308,12 @@ describe("stage G SpaceServer recovery seams", () => {
         actionId: "test/lt6-demanded-emitter",
       });
       expect(demanded.entry.firedAt?.user).toBe(demander.principal);
-      expect(demanded.entry.firedAt?.session).toBe(demander.sessionId);
+      expect(demanded.entry.firedAt?.session).toBe("server");
 
       // The classification CARRIES to the handler run (LD1: handlers
       // keep the event's actor): its consequence commit's write
-      // annotations name the demanding pair.
+      // annotations name the demanding user (no session — the event's
+      // chain is user-instance-rooted).
       const actingAnnotations = () =>
         (engine.database.prepare(
           `SELECT annotations FROM "commit"
@@ -1298,7 +1328,7 @@ describe("stage G SpaceServer recovery seams", () => {
         () =>
           actingAnnotations().some((a) =>
             a.actingUser === demander.principal &&
-            a.actingSession === demander.sessionId
+            a.actingSession === undefined
           ),
         "the handler consequence to carry the demanding actor",
         20_000,

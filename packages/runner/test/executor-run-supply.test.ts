@@ -3,11 +3,18 @@
 // level (the serving-loop E2E drives the same machinery through the
 // production demand registry):
 //
-// - the N-run settle loop: a scheduler action whose piece root has
-//   demanded instances runs ONCE PER INSTANCE, each run's transaction
-//   stamped with that instance's identity through the production
-//   choke point (run.ts → stampServerRun → the installed stamper) —
-//   instances live in keys/basis/stamps, never as extra graph nodes;
+// - the N-run settle loop, as reshaped by fan-out stage B (RULED
+//   2026-08-16 — the resolver returns DEMANDERS and the scheduler
+//   derives the instances from its known-scope RATCHET): a scheduler
+//   action whose demand roots have demanders runs as a demander — ONE
+//   probe run while it has read nothing scoped (a space node runs once
+//   regardless of demander count; never as the service identity), and
+//   ONCE PER DEMANDING PRINCIPAL once it discovers user scope (the
+//   discovery re-arm runs the siblings in the same pass), each run's
+//   transaction stamped with its instance's identity through the
+//   production choke point (run.ts → stampServerRun → the installed
+//   stamper) — instances live in keys/basis/stamps and the node's
+//   fan-out record, never as extra graph nodes;
 // - the LT6 inheritance rule (events.md §2, RULED 2026-08-03): an
 //   event emitted by a stamped run hands its acting identity to the
 //   dispatched handler run — a cascade rooted in a demanded
@@ -91,24 +98,27 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     await storageManager.close();
   });
 
-  it("runs a demanded action once per instance, stamping each run with that instance's identity (the N-run settle loop)", async () => {
+  it("runs a demanded action as its demanders: ONE probe run for a node reading nothing scoped, then — once a run discovers user scope — one run per demanding principal in the SAME pass (the known-scope ratchet + the discovery re-arm; fan-out stage B)", async () => {
     const rootId = "of:p2f-fanout-root";
-    const aliceKey = resolveScopeKey("user", alice);
     const bobKey = resolveScopeKey("user", bob);
+    // The registry returns DEMANDERS (stage B's seam): who watches the
+    // root, at any address. The scheduler decides the instances.
     runtime.installSealDestination(passThroughDestination(), {
       runStamper: recordingStamper,
-      runInstanceResolver: (pieceRootIds) =>
-        pieceRootIds.includes(rootId)
-          ? [
-            { scopeKeyIdentity: alice, actionScopeKey: aliceKey },
-            { scopeKeyIdentity: bob, actionScopeKey: bobKey },
-          ]
-          : [],
+      runDemanderResolver: (pieceRootIds) =>
+        pieceRootIds.includes(rootId) ? [alice, bob] : [],
     });
 
     const observedContexts: Array<
       { actionScopeKey?: string; principal?: string } | undefined
     > = [];
+    let readsUserScope = false;
+    const userDoc = runtime.getCellFromLink<{ v?: number }>({
+      space,
+      id: "of:p2f-fanout-user-doc" as never,
+      scope: "user",
+      path: [],
+    });
     const action = Object.assign(
       (tx: IExtendedStorageTransaction) => {
         const context = waveRunContextOf(tx);
@@ -118,6 +128,9 @@ describe("stage P2-F per-(action × instance) run supply", () => {
             principal: context.scopeKeyIdentity?.principal,
           },
         );
+        // Learned by RUNNING (D11: no static analysis): the read is what
+        // narrows the node.
+        if (readsUserScope) userDoc.withTx(tx).get();
       },
       {
         schedulerObservationIdentity: {
@@ -127,34 +140,53 @@ describe("stage P2-F per-(action × instance) run supply", () => {
       },
     );
 
+    // Space node: ONE run — the probe, min(D) = alice, key `space` —
+    // regardless of the two demanders (design §B2/§G B-c; a demanded
+    // piece never runs as the service, mutation: the fallback restored
+    // for demanded work → the stamp carries no identity).
     await runtime.scheduler.run(action);
     await runtime.idle();
-
-    // TWO runs — one per demanded instance, in registry order — each
-    // stamped through the PRODUCTION choke point with its instance's
-    // identity, and each run's transaction carrying that context.
-    const derivationStamps = stamped.filter((info) =>
+    let derivationStamps = stamped.filter((info) =>
       info.kind === "derivation"
     );
+    expect(derivationStamps.length).toBe(1);
+    expect(derivationStamps[0].scopeKeyIdentity?.principal).toBe(
+      alice.principal,
+    );
+    expect(derivationStamps[0].actionScopeKey).toBe("space");
+    expect(observedContexts).toEqual([
+      { actionScopeKey: "space", principal: alice.principal },
+    ]);
+
+    // The node starts reading user scope: the probe run (alice)
+    // discovers `user`, the ratchet narrows, and Bob's instance runs in
+    // the SAME pass — TWO runs, in demander order, each stamped through
+    // the PRODUCTION choke point with its instance's identity.
+    stamped.length = 0;
+    observedContexts.length = 0;
+    readsUserScope = true;
+    await runtime.scheduler.run(action);
+    await runtime.idle();
+    derivationStamps = stamped.filter((info) => info.kind === "derivation");
     expect(derivationStamps.length).toBe(2);
     expect(derivationStamps[0].scopeKeyIdentity?.principal).toBe(
       alice.principal,
     );
-    expect(derivationStamps[0].actionScopeKey).toBe(aliceKey);
+    expect(derivationStamps[0].actionScopeKey).toBe("space");
     expect(derivationStamps[1].scopeKeyIdentity?.principal).toBe(
       bob.principal,
     );
     expect(derivationStamps[1].actionScopeKey).toBe(bobKey);
     expect(observedContexts).toEqual([
-      { actionScopeKey: aliceKey, principal: alice.principal },
+      { actionScopeKey: "space", principal: alice.principal },
       { actionScopeKey: bobKey, principal: bob.principal },
     ]);
   });
 
-  it("keeps the single wave-identity run for an action with no demanded instances", async () => {
+  it("keeps the single wave-identity run for an action with no demanders", async () => {
     runtime.installSealDestination(passThroughDestination(), {
       runStamper: recordingStamper,
-      runInstanceResolver: () => [],
+      runDemanderResolver: () => [],
     });
     let invocations = 0;
     const action = Object.assign(
@@ -185,15 +217,17 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     // derivations ran with NO demanded identity, keyed under the serving
     // session's (the SERVICE identity's) instances, unread by anyone. The
     // chain (`demandRootIds`) resolves the child through its parent.
-    const aliceKey = resolveScopeKey("user", alice);
-    const bobKey = resolveScopeKey("user", bob);
+    // The child reads a PER-USER input (stage B: only a node that
+    // discovers user scope fans out per principal — a space-only child
+    // would run once, as the probe).
     const parentSource = [
-      "import { computed, pattern } from 'commonfabric';",
-      "const child = pattern<{ n: number }, { doubled: number }>(",
-      "  ({ n }) => ({ doubled: computed(() => n * 2) }),",
+      "import { computed, pattern, PerUser, Writable } from 'commonfabric';",
+      "type Mine = Writable<number | undefined>;",
+      "const child = pattern<{ n: number; mine: Mine }, { doubled: number }>(",
+      "  ({ n, mine }) => ({ doubled: computed(() => n * 2 + ((mine.get() as number | undefined) ?? 0)) }),",
       ");",
-      "export default pattern<{ n: number }, { out: number }>(({ n }) => {",
-      "  const c = child({ n });",
+      "export default pattern<{ n: number; mine?: PerUser<Mine> }, { out: number }>(({ n, mine }) => {",
+      "  const c = child({ n, mine: mine! });",
       "  return { out: c.doubled };",
       "});",
       "",
@@ -214,13 +248,8 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     // any resolution through the child's own root alone finds nothing.
     runtime.installSealDestination(passThroughDestination(), {
       runStamper: recordingStamper,
-      runInstanceResolver: (pieceRootIds) =>
-        pieceRootIds.includes(parentRootId)
-          ? [
-            { scopeKeyIdentity: alice, actionScopeKey: aliceKey },
-            { scopeKeyIdentity: bob, actionScopeKey: bobKey },
-          ]
-          : [],
+      runDemanderResolver: (pieceRootIds) =>
+        pieceRootIds.includes(parentRootId) ? [alice, bob] : [],
     });
     const running = runtime.runner.run(
       tx,
@@ -232,9 +261,9 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     await running.pull();
     await runtime.idle();
 
-    // The child's `computed` ran ONCE PER demanded instance of the OUTER
-    // root, each run stamped with that instance's identity — never the
-    // wave-level (service) fallback.
+    // The child's `computed` ran ONCE PER demanding principal of the
+    // OUTER root, each run stamped with that instance's identity — never
+    // the wave-level (service) fallback.
     const childRuns = stamped.filter((info) =>
       info.kind === "derivation" && info.actionId.includes("__cfLift") ||
       (info.kind === "derivation" && info.actionId.includes("computed"))
@@ -271,13 +300,16 @@ describe("stage P2-F per-(action × instance) run supply", () => {
   // action ran per instance (the P7 independent review's probe: alice=0
   // bob=0 fallback=2). Any per-user state inside a list item's sub-piece
   // was mis-keyed under the service identity — at cardinality 1 too.
+  // Stage B: the element sub-piece reads a PER-USER input, so its
+  // derivation discovers user scope and fans out per demanding
+  // principal (a space-only sub-piece would run once, as the probe).
   const LIST_BUILTIN_CHILD_SOURCES: Record<
     "map" | "filter" | "flatMap",
     string
   > = {
     map: [
-      "export default pattern<{ items: number[] }, { out: { doubled: number }[] }>(({ items }) => {",
-      "  const out = items.map((n) => child({ n }));",
+      "export default pattern<{ items: number[]; mine?: PerUser<Mine> }, { out: { doubled: number }[] }>(({ items, mine }) => {",
+      "  const out = items.map((n) => child({ n, mine: mine! }));",
       "  return { out };",
       "});",
     ].join("\n"),
@@ -285,14 +317,14 @@ describe("stage P2-F per-(action × instance) run supply", () => {
       // The predicate reads the sub-piece's derived field directly (an
       // expression around it would be lifted into a computed of the
       // element piece and never instantiate the child).
-      "export default pattern<{ items: number[] }, { out: number[] }>(({ items }) => {",
-      "  const out = items.filter((n) => { const c = child({ n }); return c.keep; });",
+      "export default pattern<{ items: number[]; mine?: PerUser<Mine> }, { out: number[] }>(({ items, mine }) => {",
+      "  const out = items.filter((n) => { const c = child({ n, mine: mine! }); return c.keep; });",
       "  return { out };",
       "});",
     ].join("\n"),
     flatMap: [
-      "export default pattern<{ items: number[] }, { out: { doubled: number }[] }>(({ items }) => {",
-      "  const out = items.flatMap((n) => [child({ n })]);",
+      "export default pattern<{ items: number[]; mine?: PerUser<Mine> }, { out: { doubled: number }[] }>(({ items, mine }) => {",
+      "  const out = items.flatMap((n) => [child({ n, mine: mine! })]);",
       "  return { out };",
       "});",
     ].join("\n"),
@@ -303,12 +335,11 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     >
   ) {
     it(`carries the chain through the LIST builtins' child instantiation: a sub-piece a \`${builtin}\` callback starts resolves its instances through the OUTER demanded root (P7 review finding 4)`, async () => {
-      const aliceKey = resolveScopeKey("user", alice);
-      const bobKey = resolveScopeKey("user", bob);
       const parentSource = [
-        "import { computed, pattern } from 'commonfabric';",
-        "const child = pattern<{ n: number }, { doubled: number; keep: boolean }>(",
-        "  ({ n }) => ({ doubled: computed(() => n * 2), keep: computed(() => n > 1) }),",
+        "import { computed, pattern, PerUser, Writable } from 'commonfabric';",
+        "type Mine = Writable<number | undefined>;",
+        "const child = pattern<{ n: number; mine: Mine }, { doubled: number; keep: boolean }>(",
+        "  ({ n, mine }) => ({ doubled: computed(() => n * 2 + ((mine.get() as number | undefined) ?? 0)), keep: computed(() => n + ((mine.get() as number | undefined) ?? 0) > 1) }),",
         ");",
         LIST_BUILTIN_CHILD_SOURCES[builtin],
         "",
@@ -328,13 +359,8 @@ describe("stage P2-F per-(action × instance) run supply", () => {
       // The registry knows ONLY the outer root (what a browser watches).
       runtime.installSealDestination(passThroughDestination(), {
         runStamper: recordingStamper,
-        runInstanceResolver: (pieceRootIds) =>
-          pieceRootIds.includes(parentRootId)
-            ? [
-              { scopeKeyIdentity: alice, actionScopeKey: aliceKey },
-              { scopeKeyIdentity: bob, actionScopeKey: bobKey },
-            ]
-            : [],
+        runDemanderResolver: (pieceRootIds) =>
+          pieceRootIds.includes(parentRootId) ? [alice, bob] : [],
       });
       const running = runtime.runner.run(
         tx,
@@ -361,18 +387,17 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     // Pinned from the P7 independent review's second probe (it composed
     // at head): a child of a child carries the whole ancestor chain, so
     // demand on the outermost root reaches the grandchild's derivations.
-    const aliceKey = resolveScopeKey("user", alice);
-    const bobKey = resolveScopeKey("user", bob);
     const src = [
-      "import { computed, pattern } from 'commonfabric';",
-      "const grandchild = pattern<{ n: number }, { tripled: number }>(",
-      "  ({ n }) => ({ tripled: computed(() => n * 3) }),",
+      "import { computed, pattern, PerUser, Writable } from 'commonfabric';",
+      "type Mine = Writable<number | undefined>;",
+      "const grandchild = pattern<{ n: number; mine: Mine }, { tripled: number }>(",
+      "  ({ n, mine }) => ({ tripled: computed(() => n * 3 + ((mine.get() as number | undefined) ?? 0)) }),",
       ");",
-      "const child = pattern<{ n: number }, { g: { tripled: number } }>(",
-      "  ({ n }) => ({ g: grandchild({ n }) }),",
+      "const child = pattern<{ n: number; mine: Mine }, { g: { tripled: number } }>(",
+      "  ({ n, mine }) => ({ g: grandchild({ n, mine }) }),",
       ");",
-      "export default pattern<{ n: number }, { out: number }>(({ n }) => {",
-      "  const c = child({ n });",
+      "export default pattern<{ n: number; mine?: PerUser<Mine> }, { out: number }>(({ n, mine }) => {",
+      "  const c = child({ n, mine: mine! });",
       "  return { out: c.g.tripled };",
       "});",
       "",
@@ -391,13 +416,8 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     const parentRootId = parentCell.getAsNormalizedFullLink().id;
     runtime.installSealDestination(passThroughDestination(), {
       runStamper: recordingStamper,
-      runInstanceResolver: (pieceRootIds) =>
-        pieceRootIds.includes(parentRootId)
-          ? [
-            { scopeKeyIdentity: alice, actionScopeKey: aliceKey },
-            { scopeKeyIdentity: bob, actionScopeKey: bobKey },
-          ]
-          : [],
+      runDemanderResolver: (pieceRootIds) =>
+        pieceRootIds.includes(parentRootId) ? [alice, bob] : [],
     });
     const running = runtime.runner.run(tx, parentPattern, { n: 5 }, parentCell);
     expect((await tx.commit()).error).toBeUndefined();

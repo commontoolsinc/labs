@@ -1,4 +1,5 @@
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
+import type { FanOutNodeState } from "./fan-out.ts";
 import type { Action } from "./types.ts";
 
 export type NodeKind = "computation" | "effect";
@@ -37,6 +38,14 @@ export interface SchedulerNode {
   provisionalDemandPass?: number;
   gate: SchedulerGateState;
   passRuns: number;
+  /** Server-execution v2 fan-out stage B: the node's known-scope
+   * ratchet and per-instance record (scheduler/fan-out.ts). Present ONLY
+   * once the serving loop's demand registry supplied demanders for this
+   * node — never on a client, never in the OFF arm — and dropped when
+   * the node runs as the wave-level fallback again or unsubscribes. The
+   * node itself stays singular (C11b): this is a record ON the node, not
+   * a node per instance. */
+  fanOut?: FanOutNodeState;
 }
 
 export class NodeRegistry {
