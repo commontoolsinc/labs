@@ -15,8 +15,12 @@
  * HTML is one token per tag, so `<b>bold</b>` loses the tags and keeps the
  * word between them, while a block of HTML is a single token holding the whole
  * block, so its text goes with it.
+ *
+ * Building a template touches no DOM, but resolving the character references
+ * in a run of text does, so this module runs in a browser.
  */
 
+import { matchLLMFriendlyLink } from "@commonfabric/runtime-client";
 import { html, nothing } from "lit";
 import { live } from "lit/directives/live.js";
 import { Lexer, type Token, type Tokens } from "marked";
@@ -35,13 +39,6 @@ export interface MarkdownCallbacks {
    */
   checkboxToggled(index: number, checked: boolean): void;
 }
-
-/**
- * A link whose target is a cell rather than a document, written as a path that
- * opens with a scheme-like segment: `/of:bafy.../field`. These render as a
- * pill that resolves the cell, not as an anchor.
- */
-const CELL_LINK = /^\/[a-zA-Z0-9]+:/;
 
 /**
  * Resolves the HTML character references in a run of markdown text.
@@ -244,7 +241,11 @@ class MarkdownTemplate {
   #link(token: Tokens.Link): unknown {
     const label = decodeEntities(token.text);
     const link = token.href;
-    if (CELL_LINK.test(link)) {
+    // A link whose target is a cell rather than a document renders as a pill
+    // that resolves the cell. The runner decides what one looks like, in both
+    // the plain `/of:bafy.../field` form and the cross-space
+    // `/@did:key:.../of:bafy.../field` one.
+    if (matchLLMFriendlyLink.test(link)) {
       return html`<cf-cell-link .link=${link} .label=${label}></cf-cell-link>`;
     }
     const content = this.#inline(token.tokens);

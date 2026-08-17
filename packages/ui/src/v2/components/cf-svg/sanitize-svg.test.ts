@@ -228,6 +228,14 @@ Deno.test("sanitizeSvg returns null for source that holds no drawing", function 
   assertEquals(sanitizeSvg("<div>not svg</div>"), null);
 });
 
+Deno.test("sanitizeSvg returns null for a fragment with no svg element", function () {
+  // A bare shape is not a drawing. Nothing paints it: an element by that name
+  // outside the SVG namespace has no geometry, and the HTML parser puts one
+  // there unless an `<svg>` encloses it.
+  assertEquals(sanitizeSvg('<circle cx="50" cy="50" r="40"/>'), null);
+  assertEquals(sanitizeSvg("<g><rect width='10' height='10'/></g>"), null);
+});
+
 Deno.test("sanitizeSvg recovers from an unclosed element", function () {
   const root = sanitized("<svg><circle cx='5' cy='5' r='4'></svg>");
 

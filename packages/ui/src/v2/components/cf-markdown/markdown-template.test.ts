@@ -326,6 +326,17 @@ describe("markdown-template", () => {
       expect(boundText(source)).toEqual(["/of:bafyabc/field", "Name"]);
     });
 
+    it("renders a cell link that names its space as a cf-cell-link", () => {
+      // The cross-space form opens with the space rather than the piece. The
+      // runner's own matcher decides what a cell link looks like, so both
+      // forms reach the pill.
+      const target = "/@did:key:z6MkABC/of:bafyabc/field";
+      const source = `[Name](${target})`;
+
+      expect(markupOf(templateFor(source))).toContain("<cf-cell-link");
+      expect(boundText(source)).toEqual([target, "Name"]);
+    });
+
     it("renders an image the browser may load, with its title", () => {
       const source = '![alt](https://example.test/a.png "the title")';
 
