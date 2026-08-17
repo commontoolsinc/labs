@@ -775,7 +775,18 @@ export const commitTrustedAdminToggle = handler<
   }
 
   if (nextPolicy.admins !== undefined) {
-    adminRegistry.key("admins").set(nextPolicy.admins as ChatAdminList);
+    const currentRegistry = adminRegistry.get() as
+      | ChatAdminRegistryStoredValue
+      | undefined;
+    adminRegistry.set({
+      admins: nextPolicy.admins as ChatAdminList,
+      ...(currentRegistry?.bootstrapAdmin !== undefined
+        ? { bootstrapAdmin: currentRegistry.bootstrapAdmin }
+        : {}),
+      ...(currentRegistry?.everyoneIsAdmin !== undefined
+        ? { everyoneIsAdmin: currentRegistry.everyoneIsAdmin }
+        : {}),
+    });
   }
 });
 type TrustedAdminToggleInput = Parameters<typeof commitTrustedAdminToggle>[0];

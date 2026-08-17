@@ -935,6 +935,26 @@ remain stable when merged with itself. The existing changed-policy regression
 continues to prove that the matched-union case does not permit a policy
 replacement.
 
+## 39. Preserve the complete group-chat admin registry on writes
+
+The group-chat admin registry also uses an empty-or-stored object union. The
+admin-list-only path wrote through `adminRegistry.key("admins")`. Transaction
+preparation therefore compared the complete union from the cell contract with
+a projected object containing only the admin list. The projection did not
+carry enough structure to match the union's stored-value branch, so strict
+preparation rejected an otherwise authorized grant.
+
+Read the current registry and write the complete registry object when the
+admin list changes. Replace the list while retaining the bootstrap role and
+the value-specific everyone-is-admin flag when they are present. This uses the
+same complete schema as the other admin-toggle paths and keeps every existing
+value-specific policy attached to its field.
+
+Record the resulting pattern contract as a new compatible baseline. The
+multi-runtime group-chat integration test proves that a room added by an admin
+reaches another user and that an admin can grant the role to that user while
+strict CFC enforcement is active.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an
