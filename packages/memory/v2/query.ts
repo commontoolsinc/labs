@@ -216,23 +216,11 @@ export type TrackGraphOptions = {
   sessionId?: string;
 };
 
-const cloneTracker = (
-  tracker: MapSetStringToPathSelectors,
-): MapSetStringToPathSelectors => {
-  const clone = new MapSetStringToPathSelectors(true);
-  for (const [key, selectors] of tracker) {
-    for (const selector of selectors) {
-      clone.add(key, selector);
-    }
-  }
-  return clone;
-};
-
 export const cloneTrackedGraphState = (
   engine: Engine.Engine,
   state: TrackedGraphState,
 ): TrackedGraphState => {
-  const tracker = cloneTracker(state.tracker);
+  const tracker = state.tracker.clone();
 
   const manager = new EngineObjectManager(
     engine,
@@ -776,78 +764,85 @@ export const refreshTrackedGraph = (
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
 
-  // Every pre-validation mutation goes to a tracker clone, and
-  // `state.entities` is written only after assembly validates: a failed
-  // refresh leaves the session state exactly as it was, so a repaired
-  // store retries from an uncorrupted baseline.
-  const stagedTracker = cloneTracker(state.tracker);
-  for (const key of affectedDocs.keys()) {
-    stagedTracker.delete(key);
-  }
+  // Every pre-validation tracker mutation is journaled (O(touched keys),
+  // where a full clone costs O(entries) per refresh), and `state.entities`
+  // is written only after assembly validates: a failed refresh rolls the
+  // journal back and leaves the session state exactly as it was, so a
+  // repaired store retries from an uncorrupted baseline.
+  state.tracker.beginStaging();
+  let updates: Map<QueryDocKey, EntitySnapshot>;
+  try {
+    for (const key of affectedDocs.keys()) {
+      state.tracker.delete(key);
+    }
 
-  for (const [key, selectors] of affectedDocs) {
-    const { id, scope } = fromDocKey(key);
-    for (const selector of selectors) {
-      evaluateTrackedDocument(
+    for (const [key, selectors] of affectedDocs) {
+      const { id, scope } = fromDocKey(key);
+      for (const selector of selectors) {
+        evaluateTrackedDocument(
+          space,
+          manager,
+          { id, scope },
+          selector,
+          state.tracker,
+          sharedMemo,
+          stats,
+        );
+      }
+    }
+
+    const touched = new Set<QueryDocKey>(affectedDocs.keys());
+    for (const address of manager.loadedAddresses()) {
+      const key = toDocKey(space, address.id, address.scope);
+      const previous = state.entities.get(key);
+      const detail = manager.detail({ id: address.id, scope: address.scope });
+      if (previous !== undefined && detail?.seq === previous.seq) {
+        continue;
+      }
+      touched.add(key);
+    }
+
+    updates = new Map<QueryDocKey, EntitySnapshot>();
+    for (const key of touched) {
+      if (!state.tracker.has(key)) {
+        continue;
+      }
+      const snapshot = snapshotForDocKey(
         space,
         manager,
-        { id, scope },
-        selector,
-        stagedTracker,
-        sharedMemo,
-        stats,
+        state.branch,
+        key,
       );
+      if (snapshot === null) {
+        continue;
+      }
+      updates.set(key, snapshot);
     }
-  }
 
-  const touched = new Set<QueryDocKey>(affectedDocs.keys());
-  for (const address of manager.loadedAddresses()) {
-    const key = toDocKey(space, address.id, address.scope);
-    const previous = state.entities.get(key);
-    const detail = manager.detail({ id: address.id, scope: address.scope });
-    if (previous !== undefined && detail?.seq === previous.seq) {
-      continue;
-    }
-    touched.add(key);
-  }
-
-  const updates = new Map<QueryDocKey, EntitySnapshot>();
-  for (const key of touched) {
-    if (!stagedTracker.has(key)) {
-      continue;
-    }
-    const snapshot = snapshotForDocKey(
+    // `established` extends validation over the whole previously delivered
+    // state: a deleted or forged dependency fails the refresh even when its
+    // referrer did not change.
+    const staged = assembleSchemaDocClosures(
       space,
+      engine,
       manager,
       state.branch,
-      key,
+      state.tracker,
+      updates,
+      state.entities,
     );
-    if (snapshot === null) {
-      continue;
+    for (const key of staged.trackerAdds) {
+      state.tracker.add(key, REJECTING_SELECTOR);
     }
-    updates.set(key, snapshot);
+    for (const [key, snapshot] of staged.additions) {
+      updates.set(key, snapshot);
+    }
+  } catch (error) {
+    state.tracker.rollbackStaging();
+    throw error;
   }
+  state.tracker.commitStaging();
 
-  // `established` extends validation over the whole previously delivered
-  // state: a deleted or forged dependency fails the refresh even when its
-  // referrer did not change.
-  const staged = assembleSchemaDocClosures(
-    space,
-    engine,
-    manager,
-    state.branch,
-    stagedTracker,
-    updates,
-    state.entities,
-  );
-  for (const key of staged.trackerAdds) {
-    stagedTracker.add(key, REJECTING_SELECTOR);
-  }
-  for (const [key, snapshot] of staged.additions) {
-    updates.set(key, snapshot);
-  }
-
-  state.tracker = stagedTracker;
   for (const [key, snapshot] of updates) {
     state.entities.set(key, snapshot);
   }
