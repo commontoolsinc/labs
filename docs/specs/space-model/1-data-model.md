@@ -280,7 +280,7 @@ wire/storage formats should happen only at boundary crossings.
            ▼                  ▼
     ┌──────────────┐   ┌──────────────┐
     │   Storage    │   │   Network    │
-    │  (encode) │   │  (encode) │
+    │  (serialize) │   │  (serialize) │
     └──────────────┘   └──────────────┘
 ```
 
@@ -571,11 +571,11 @@ This separation enables:
 The flow becomes:
 
 ```
-Encode:   codec.encode(instance) → state
-             → wrap(codec.tagForValue(instance), state) → wire
+Encode: codec.encode(instance) → state
+        → wrap(codec.tagForValue(instance), state) → wire
 Decode: wire → unwrap() → { tag, state }
-             → registry.codecFromTag(tag).decode(tag, state, ctx)
-             → instance
+        → registry.codecFromTag(tag).decode(tag, state, ctx)
+        → instance
 ```
 
 #### Encoding Boundaries
