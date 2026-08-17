@@ -15,9 +15,10 @@ import {
 } from "commonfabric";
 
 import Character from "./character.tsx";
+import Location from "./location.tsx";
+import { resolveAdventureAction } from "./mechanics.ts";
 import Quest from "./quest.tsx";
 import type {
-  AdventureActionKind,
   AdventureInput,
   AdventureOutput,
   AttemptAdventureActionEvent,
@@ -26,7 +27,6 @@ import type {
   CreateCharacterEvent,
   CreateCharacterResult,
   QuestCharacter,
-  QuestEvidence,
 } from "./schemas.tsx";
 import { DUNGEON_THEME } from "./theme.ts";
 
@@ -88,92 +88,6 @@ function makeCharacter(
   });
 }
 
-function resolveAdventureAction(
-  scene: AdventureActionKind,
-  questParticipants: Writable<QuestCharacter[] | Default<[]>>,
-  questEvidence: Writable<QuestEvidence[] | Default<[]>>,
-): AttemptAdventureActionResult {
-  const existingEvidence = questEvidence.get();
-  const party = [...questParticipants.get()];
-  const evidenceKind = scene === "assemble-party"
-    ? "party.assembled"
-    : scene === "open-sealed-door"
-    ? "door.opened"
-    : scene === "defeat-sentinel"
-    ? "encounter.won"
-    : "gate.opened";
-
-  if (existingEvidence.some((entry) => entry.kind === evidenceKind)) {
-    return { accepted: false, reason: "already-completed", actorCount: 0 };
-  }
-
-  const prerequisiteKind = scene === "open-sealed-door"
-    ? "party.assembled"
-    : scene === "defeat-sentinel"
-    ? "door.opened"
-    : scene === "open-sunken-gate"
-    ? "encounter.won"
-    : "";
-  if (
-    prerequisiteKind &&
-    !existingEvidence.some((entry) => entry.kind === prerequisiteKind)
-  ) {
-    return {
-      accepted: false,
-      reason: "prerequisite-incomplete",
-      actorCount: 0,
-    };
-  }
-
-  if (scene === "assemble-party") {
-    if (party.length < 2) {
-      return {
-        accepted: false,
-        reason: "insufficient-party",
-        actorCount: party.length,
-      };
-    }
-    questEvidence.push({
-      kind: evidenceKind,
-      actors: party,
-      note: `${party.length} adventurers set out together.`,
-    });
-    return { accepted: true, reason: "accepted", actorCount: party.length };
-  }
-
-  const requiredLocation = scene === "open-sealed-door"
-    ? "Moonlit Hall"
-    : scene === "defeat-sentinel"
-    ? "Gatehouse"
-    : "Sunken Gate";
-  const actors = party.filter((character) =>
-    character.location === requiredLocation
-  );
-  const requiredActors = scene === "open-sealed-door" ? 1 : 2;
-  if (party.length < requiredActors) {
-    return {
-      accepted: false,
-      reason: "insufficient-party",
-      actorCount: party.length,
-    };
-  }
-  if (actors.length < requiredActors) {
-    return {
-      accepted: false,
-      reason: "wrong-location",
-      actorCount: actors.length,
-    };
-  }
-
-  const note = scene === "open-sealed-door"
-    ? `${actors[0].name} opens the sealed door from the Moonlit Hall.`
-    : scene === "defeat-sentinel"
-    ? `${actors.length} adventurers defeat the gatehouse sentinel.`
-    : `${actors.length} adventurers turn the seals of the Sunken Gate.`;
-  questEvidence.push({ kind: evidenceKind, actors, note });
-  return { accepted: true, reason: "accepted", actorCount: actors.length };
-}
-
 const enlistFromRoster = handler<void, {
   character: QuestCharacter;
   participants: Writable<QuestCharacter[] | Default<[]>>;
@@ -182,31 +96,12 @@ const enlistFromRoster = handler<void, {
   participants.addUnique(character);
 });
 
-const createFromDraft = handler<void, {
-  name: Writable<string>;
-  archetype: Writable<string>;
-  characters: Writable<CharacterPiece[] | Default<[]>>;
-}>((_, { name, archetype, characters }) => {
-  const trimmedName = (name.get() ?? "").trim();
-  if (!trimmedName) return;
-  characters.push(makeCharacter(trimmedName, archetype.get() ?? "Ranger"));
-  name.set("");
-});
-
-const attemptScene = handler<void, {
-  scene: AdventureActionKind;
-  participants: Writable<QuestCharacter[] | Default<[]>>;
-  evidence: Writable<QuestEvidence[] | Default<[]>>;
-}>((_, { scene, participants, evidence }) => {
-  resolveAdventureAction(scene, participants, evidence);
-});
-
 export default pattern<AdventureInput, AdventureOutput>((
   { characters, questParticipants, questEvidence },
 ) => {
   const newCharacterName = new Writable.perSession("");
   const newCharacterArchetype = new Writable.perSession("Ranger");
-  const activeTab = new Writable.perSession("adventure");
+  const activeTab = new Writable.perSession("dungeon");
   const quest = Quest({
     title: "Open the Sunken Gate",
     summary:
@@ -215,6 +110,32 @@ export default pattern<AdventureInput, AdventureOutput>((
     participants: questParticipants,
     evidence: questEvidence,
   });
+  const locations = [
+    Location({
+      locationKey: "antechamber",
+      characters,
+      questParticipants,
+      questEvidence,
+    }),
+    Location({
+      locationKey: "moonlit-hall",
+      characters,
+      questParticipants,
+      questEvidence,
+    }),
+    Location({
+      locationKey: "gatehouse",
+      characters,
+      questParticipants,
+      questEvidence,
+    }),
+    Location({
+      locationKey: "sunken-gate",
+      characters,
+      questParticipants,
+      questEvidence,
+    }),
+  ];
 
   const createCharacter = action<
     CreateCharacterEvent,
@@ -223,6 +144,17 @@ export default pattern<AdventureInput, AdventureOutput>((
     const character = makeCharacter(name, archetype);
     characters.push(character);
     return { character };
+  });
+  const createFromDraft = action(() => {
+    const trimmedName = (newCharacterName.get() ?? "").trim();
+    if (!trimmedName) return;
+    characters.push(
+      makeCharacter(
+        trimmedName,
+        newCharacterArchetype.get() ?? "Ranger",
+      ),
+    );
+    newCharacterName.set("");
   });
 
   const attemptAdventureAction = action<
@@ -233,22 +165,6 @@ export default pattern<AdventureInput, AdventureOutput>((
   );
 
   const hasCharacters = computed(() => characters.get().length > 0);
-  const partyCount = computed(() => questParticipants.get().length);
-  const moonlitHallCount = computed(() =>
-    questParticipants.get().filter((character) =>
-      character.location === "Moonlit Hall"
-    ).length
-  );
-  const gatehouseCount = computed(() =>
-    questParticipants.get().filter((character) =>
-      character.location === "Gatehouse"
-    ).length
-  );
-  const sunkenGateCount = computed(() =>
-    questParticipants.get().filter((character) =>
-      character.location === "Sunken Gate"
-    ).length
-  );
 
   return {
     [NAME]: "Dungeon Quest Prototype",
@@ -278,31 +194,26 @@ export default pattern<AdventureInput, AdventureOutput>((
 
             <cf-tabs $value={activeTab}>
               <cf-tab-list>
-                <cf-tab value="adventure">Adventure</cf-tab>
+                <cf-tab value="dungeon">Dungeon</cf-tab>
                 <cf-tab value="party">Party & characters</cf-tab>
+                <cf-tab value="quest">Quest</cf-tab>
                 <cf-tab value="log">Expedition log</cf-tab>
               </cf-tab-list>
 
-              <cf-tab-panel value="adventure">
+              <cf-tab-panel value="dungeon">
                 <cf-vstack gap="4" py="3">
                   <cf-card>
                     <cf-hstack gap="3" justify="between" align="center" wrap>
                       <cf-vstack gap="1">
-                        <cf-heading level={2}>Expedition controls</cf-heading>
+                        <cf-heading level={2}>Enter the dungeon</cf-heading>
                         <cf-text tone="muted">
-                          Enlist characters, move them from their sheets, then
-                          resolve each shared scene in order.
+                          Every room is a durable piece. Visit one to see who is
+                          there and perform its scene where it happens.
                         </cf-text>
                       </cf-vstack>
-                      <cf-button
-                        aria-label="Restart expedition"
-                        variant="outline"
-                        onClick={quest.reset}
-                      >
-                        {quest.status === "completed"
-                          ? "Begin a new expedition"
-                          : "Restart expedition"}
-                      </cf-button>
+                      <cf-badge color="accent">
+                        {quest.completedObjectiveCount}/4 scenes complete
+                      </cf-badge>
                     </cf-hstack>
                   </cf-card>
 
@@ -314,116 +225,22 @@ export default pattern<AdventureInput, AdventureOutput>((
                       gap: "12px",
                     }}
                   >
-                    <cf-card>
-                      <cf-vstack gap="3">
-                        <cf-hstack gap="2" justify="between" align="center">
-                          <cf-text variant="heading-sm">1 · Assemble</cf-text>
-                          <cf-badge>{quest.progress[0].status}</cf-badge>
-                        </cf-hstack>
-                        <cf-text tone="muted">
-                          At least two enlisted characters must set out
-                          together. Party: {partyCount}/2.
-                        </cf-text>
-                        <cf-button
-                          aria-label="Attempt assemble party"
-                          disabled={quest.progress[0].status !== "active" ||
-                            partyCount < 2}
-                          onClick={attemptScene({
-                            scene: "assemble-party",
-                            participants: questParticipants,
-                            evidence: questEvidence,
-                          })}
-                        >
-                          Set out together
-                        </cf-button>
-                      </cf-vstack>
-                    </cf-card>
-
-                    <cf-card>
-                      <cf-vstack gap="3">
-                        <cf-hstack gap="2" justify="between" align="center">
-                          <cf-text variant="heading-sm">2 · The door</cf-text>
-                          <cf-badge>{quest.progress[1].status}</cf-badge>
-                        </cf-hstack>
-                        <cf-text tone="muted">
-                          Move one enlisted character to Moonlit Hall. Present:
-                          {" "}
-                          {moonlitHallCount}/1.
-                        </cf-text>
-                        <cf-button
-                          aria-label="Attempt open sealed door"
-                          disabled={quest.progress[1].status !== "active" ||
-                            moonlitHallCount < 1}
-                          onClick={attemptScene({
-                            scene: "open-sealed-door",
-                            participants: questParticipants,
-                            evidence: questEvidence,
-                          })}
-                        >
-                          Open the sealed door
-                        </cf-button>
-                      </cf-vstack>
-                    </cf-card>
-
-                    <cf-card>
-                      <cf-vstack gap="3">
-                        <cf-hstack gap="2" justify="between" align="center">
-                          <cf-text variant="heading-sm">3 · Sentinel</cf-text>
-                          <cf-badge>{quest.progress[2].status}</cf-badge>
-                        </cf-hstack>
-                        <cf-text tone="muted">
-                          Move two enlisted characters to the Gatehouse.
-                          Present: {gatehouseCount}/2.
-                        </cf-text>
-                        <cf-button
-                          aria-label="Attempt defeat sentinel"
-                          disabled={quest.progress[2].status !== "active" ||
-                            gatehouseCount < 2}
-                          onClick={attemptScene({
-                            scene: "defeat-sentinel",
-                            participants: questParticipants,
-                            evidence: questEvidence,
-                          })}
-                        >
-                          Challenge the sentinel
-                        </cf-button>
-                      </cf-vstack>
-                    </cf-card>
-
-                    <cf-card>
-                      <cf-vstack gap="3">
-                        <cf-hstack gap="2" justify="between" align="center">
-                          <cf-text variant="heading-sm">4 · The gate</cf-text>
-                          <cf-badge>{quest.progress[3].status}</cf-badge>
-                        </cf-hstack>
-                        <cf-text tone="muted">
-                          Move two enlisted characters to the Sunken Gate.
-                          Present: {sunkenGateCount}/2.
-                        </cf-text>
-                        <cf-button
-                          aria-label="Attempt open Sunken Gate"
-                          disabled={quest.progress[3].status !== "active" ||
-                            sunkenGateCount < 2}
-                          onClick={attemptScene({
-                            scene: "open-sunken-gate",
-                            participants: questParticipants,
-                            evidence: questEvidence,
-                          })}
-                        >
-                          Open the Sunken Gate
-                        </cf-button>
-                      </cf-vstack>
-                    </cf-card>
+                    {locations.map((location) => (
+                      <cf-card>
+                        <cf-vstack gap="3">
+                          <cf-render $cell={location} variant="tile" />
+                          <cf-cell-link $cell={location}>
+                            Visit {location.name}
+                          </cf-cell-link>
+                        </cf-vstack>
+                      </cf-card>
+                    ))}
                   </div>
 
-                  <cf-hstack gap="2" justify="between" align="center" wrap>
-                    <cf-text tone="muted">
-                      Quest state is shared by every browser and CLI agent in
-                      this space.
-                    </cf-text>
-                    <cf-cell-link $cell={quest}>Open quest ledger</cf-cell-link>
-                  </cf-hstack>
-                  <cf-render $cell={quest} variant="full" />
+                  <cf-text tone="muted">
+                    Move a character from its sheet, then revisit a room to see
+                    the shared presence update for every player.
+                  </cf-text>
                 </cf-vstack>
               </cf-tab-panel>
 
@@ -456,11 +273,7 @@ export default pattern<AdventureInput, AdventureOutput>((
                         <cf-hstack gap="2">
                           <cf-button
                             aria-label="Create named adventurer"
-                            onClick={createFromDraft({
-                              name: newCharacterName,
-                              archetype: newCharacterArchetype,
-                              characters,
-                            })}
+                            onClick={createFromDraft}
                           >
                             Create character
                           </cf-button>
@@ -517,6 +330,33 @@ export default pattern<AdventureInput, AdventureOutput>((
                 </cf-vstack>
               </cf-tab-panel>
 
+              <cf-tab-panel value="quest">
+                <cf-vstack gap="4" py="3">
+                  <cf-card>
+                    <cf-hstack gap="3" justify="between" align="center" wrap>
+                      <cf-vstack gap="1">
+                        <cf-heading level={2}>Expedition ledger</cf-heading>
+                        <cf-text tone="muted">
+                          Progress is derived from evidence recorded by actions
+                          in the dungeon's rooms.
+                        </cf-text>
+                      </cf-vstack>
+                      <cf-button
+                        aria-label="Restart expedition"
+                        variant="outline"
+                        onClick={quest.reset}
+                      >
+                        {quest.status === "completed"
+                          ? "Begin a new expedition"
+                          : "Restart expedition"}
+                      </cf-button>
+                    </cf-hstack>
+                  </cf-card>
+                  <cf-cell-link $cell={quest}>Open quest piece</cf-cell-link>
+                  <cf-render $cell={quest} variant="full" />
+                </cf-vstack>
+              </cf-tab-panel>
+
               <cf-tab-panel value="log">
                 <cf-vstack gap="3" py="3">
                   <cf-heading level={2}>Shared expedition log</cf-heading>
@@ -548,6 +388,7 @@ export default pattern<AdventureInput, AdventureOutput>((
       </cf-theme>
     ),
     characters,
+    locations,
     quest,
     createCharacter,
     enlistCharacter: quest.join,
@@ -564,6 +405,8 @@ export type {
   AttemptAdventureActionEvent,
   AttemptAdventureActionResult,
   CharacterPiece,
+  DungeonLocationKey,
+  LocationPiece,
   QuestCharacter,
   QuestEvidence,
   QuestObjectiveDefinition,

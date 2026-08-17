@@ -19,23 +19,8 @@ export default pattern(() => {
     adventure.attemptAdventureAction.send({ action: "assemble-party" });
   });
 
-  const action_enlist_party = action(() => {
-    const alara = adventure.characters?.[0];
-    const bram = adventure.characters?.[1];
-    if (alara) adventure.enlistCharacter.send({ character: alara });
-    if (bram) adventure.enlistCharacter.send({ character: bram });
-  });
-
-  const action_assemble_from_ui = action(() => {
-    const button = findNodeByProp(
-      adventure[UI],
-      "aria-label",
-      "Attempt assemble party",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
-    }
+  const action_assemble_in_antechamber = action(() => {
+    adventure.locations?.[0]?.performAction.send();
   });
 
   const action_repeat_assembly = action(() => {
@@ -50,16 +35,8 @@ export default pattern(() => {
     adventure.characters?.[0]?.moveTo.send({ location: "Moonlit Hall" });
   });
 
-  const action_open_door_from_ui = action(() => {
-    const button = findNodeByProp(
-      adventure[UI],
-      "aria-label",
-      "Attempt open sealed door",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
-    }
+  const action_open_door_in_room = action(() => {
+    adventure.locations?.[1]?.performAction.send();
   });
 
   const action_move_party_to_gatehouse = action(() => {
@@ -67,16 +44,8 @@ export default pattern(() => {
     adventure.characters?.[1]?.moveTo.send({ location: "Gatehouse" });
   });
 
-  const action_defeat_sentinel_from_ui = action(() => {
-    const button = findNodeByProp(
-      adventure[UI],
-      "aria-label",
-      "Attempt defeat sentinel",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
-    }
+  const action_defeat_sentinel_in_room = action(() => {
+    adventure.locations?.[2]?.performAction.send();
   });
 
   const action_move_party_to_sunken_gate = action(() => {
@@ -84,16 +53,8 @@ export default pattern(() => {
     adventure.characters?.[1]?.moveTo.send({ location: "Sunken Gate" });
   });
 
-  const action_open_gate_from_ui = action(() => {
-    const button = findNodeByProp(
-      adventure[UI],
-      "aria-label",
-      "Attempt open Sunken Gate",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
-    }
+  const action_open_gate_in_room = action(() => {
+    adventure.locations?.[3]?.performAction.send();
   });
 
   const action_restart_from_ui = action(() => {
@@ -155,15 +116,19 @@ export default pattern(() => {
     adventure.quest.status === "available" &&
     adventure.quest.progress?.[0]?.status === "active" &&
     adventure.quest.progress?.[1]?.status === "locked" &&
-    adventure.quest.completedObjectiveCount === 0
+    adventure.quest.completedObjectiveCount === 0 &&
+    adventure.locations?.length === 4 &&
+    adventure.locations?.[0]?.name === "Antechamber" &&
+    adventure.locations?.[0]?.occupantCount === 0
   );
 
   const assert_initial_ui = assert(() =>
     hasText(adventure[UI], "The Sunken Gate") &&
-    hasText(adventure[UI], "Adventure") &&
+    hasText(adventure[UI], "Dungeon") &&
     hasText(adventure[UI], "Party & characters") &&
     hasText(adventure[UI], "Recruit an adventurer") &&
-    hasText(adventure[UI], "Expedition controls")
+    hasText(adventure[UI], "Enter the dungeon") &&
+    hasText(adventure[UI], "Visit Antechamber")
   );
 
   const assert_early_actions_rejected = assert(() =>
@@ -175,12 +140,9 @@ export default pattern(() => {
     (adventure.characters ?? []).length === 2 &&
     adventure.characters?.[0]?.name === "Alara" &&
     adventure.characters?.[1]?.name === "Bram" &&
-    adventure.characters?.[1]?.archetype === "Guardian"
-  );
-
-  const assert_party_enlisted = assert(() =>
-    adventure.quest.status === "active" &&
-    (adventure.quest.participants ?? []).length === 2
+    adventure.characters?.[1]?.archetype === "Guardian" &&
+    adventure.locations?.[0]?.occupantCount === 2 &&
+    adventure.locations?.[0]?.occupants?.length === 2
   );
 
   const assert_party_objective_completed = assert(() =>
@@ -188,7 +150,9 @@ export default pattern(() => {
     adventure.quest.progress?.[1]?.status === "active" &&
     adventure.quest.completedObjectiveCount === 1 &&
     adventure.quest.evidence?.length === 1 &&
-    adventure.quest.evidence?.[0]?.actors?.length === 2
+    adventure.quest.evidence?.[0]?.actors?.length === 2 &&
+    adventure.quest.participants?.length === 2 &&
+    adventure.locations?.[0]?.objectiveStatus === "completed"
   );
 
   const assert_duplicate_and_wrong_room_rejected = assert(() =>
@@ -200,7 +164,8 @@ export default pattern(() => {
     adventure.quest.progress?.[1]?.status === "completed" &&
     adventure.quest.progress?.[2]?.status === "active" &&
     adventure.quest.completedObjectiveCount === 2 &&
-    adventure.quest.evidence?.[1]?.actors?.length === 1
+    adventure.quest.evidence?.[1]?.actors?.length === 1 &&
+    adventure.locations?.[1]?.occupantCount === 1
   );
 
   const assert_sentinel_defeated = assert(() =>
@@ -244,21 +209,19 @@ export default pattern(() => {
       { assertion: assert_party_created },
       { action: action_try_assembly_without_enlisting },
       { assertion: assert_early_actions_rejected },
-      { action: action_enlist_party },
-      { assertion: assert_party_enlisted },
-      { action: action_assemble_from_ui },
+      { action: action_assemble_in_antechamber },
       { assertion: assert_party_objective_completed },
       { action: action_repeat_assembly },
       { action: action_try_door_from_wrong_room },
       { assertion: assert_duplicate_and_wrong_room_rejected },
       { action: action_move_alara_to_hall },
-      { action: action_open_door_from_ui },
+      { action: action_open_door_in_room },
       { assertion: assert_door_opened },
       { action: action_move_party_to_gatehouse },
-      { action: action_defeat_sentinel_from_ui },
+      { action: action_defeat_sentinel_in_room },
       { assertion: assert_sentinel_defeated },
       { action: action_move_party_to_sunken_gate },
-      { action: action_open_gate_from_ui },
+      { action: action_open_gate_in_room },
       { assertion: assert_quest_completed },
       { action: action_restart_from_ui },
       { assertion: assert_quest_restarted },

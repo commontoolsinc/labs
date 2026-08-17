@@ -174,6 +174,12 @@ export type AdventureActionKind =
   | "defeat-sentinel"
   | "open-sunken-gate";
 
+export type DungeonLocationKey =
+  | "antechamber"
+  | "moonlit-hall"
+  | "gatehouse"
+  | "sunken-gate";
+
 export type AdventureActionReason =
   | "accepted"
   | "already-completed"
@@ -191,6 +197,32 @@ export interface AttemptAdventureActionResult {
   actorCount: number;
 }
 
+export interface LocationInput {
+  locationKey: DungeonLocationKey;
+  characters?: PerSpace<QuestCharacter[] | Default<[]>>;
+  questParticipants?: PerSpace<
+    Writable<QuestCharacter[] | Default<[]>>
+  >;
+  questEvidence?: PerSpace<Writable<QuestEvidence[] | Default<[]>>>;
+}
+
+/** The navigable role retained by the adventure's world map. */
+export interface LocationPiece {
+  [NAME]: string;
+  [UI]: VNode;
+  [CHIP_UI]: VNode;
+  [TILE_UI]: VNode;
+  locationKey: DungeonLocationKey;
+  name: string;
+  description: string;
+  occupants: QuestCharacter[];
+  occupantCount: number;
+  objectiveStatus: QuestObjectiveStatus;
+  performAction: Stream<void, AttemptAdventureActionResult>;
+}
+
+export interface LocationOutput extends LocationPiece {}
+
 export interface AdventureInput {
   characters?: PerSpace<Writable<CharacterPiece[] | Default<[]>>>;
   questParticipants?: PerSpace<
@@ -203,6 +235,7 @@ export interface AdventureOutput {
   [NAME]: string;
   [UI]: VNode;
   characters: CharacterPiece[];
+  locations: LocationPiece[];
   quest: QuestPiece;
   createCharacter: Stream<CreateCharacterEvent, CreateCharacterResult>;
   enlistCharacter: Stream<JoinQuestEvent>;
