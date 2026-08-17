@@ -57,13 +57,44 @@ const DISCLOSABLE_FORMATS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * A local `$ref` pointer: the whole document, or one entry of the root's
- * `$defs` or `definitions`. Any other reference — a URI, a pointer into
- * something this schema does not carry — is dropped rather than reported.
- * Capture 1 is the keyword the pointer goes through, capture 2 the entry it
- * names; both are absent for a pointer at the root itself.
+ * A local `$ref` pointer, matched against the fragment once it has been
+ * percent-decoded: the whole document, or one entry of the root's `$defs` or
+ * `definitions`. Any other reference — a URI, a pointer into something this
+ * schema does not carry — is dropped rather than reported. Capture 1 is the
+ * keyword the pointer goes through, capture 2 the entry it names; both are
+ * absent for a pointer at the root itself.
  */
-const LOCAL_REF_PATTERN = /^#(?:\/(\$defs|definitions)\/([^/~]+))?$/;
+const LOCAL_REF_PATTERN = /^(?:\/(\$defs|definitions)\/([^/]+))?$/;
+
+/**
+ * The JSON Pointer that `ref`'s fragment denotes, or `undefined` when `ref` is
+ * not a fragment-only reference or does not percent-decode. A `$ref` is a URI,
+ * so its fragment is percent-encoded, and decoding it is what turns the URI
+ * into the pointer — which is why it happens before the pointer is split on
+ * `/`, and why a `%2F` is a separator rather than part of a name.
+ */
+const refPointer = (ref: string): string | undefined => {
+  if (!ref.startsWith("#")) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(ref.slice(1));
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The name a JSON Pointer reference token denotes, or `undefined` when the
+ * token is not a well-formed one. `~1` becomes `/` before `~0` becomes `~`,
+ * per RFC 6901: taking them in the other order would decode the token `a~01b`
+ * to `a/b` rather than to the name `a~1b` it actually denotes. A `~` that
+ * begins neither escape is not a token at all, and fails closed.
+ */
+const referenceTokenName = (token: string): string | undefined =>
+  /~(?![01])/.test(token)
+    ? undefined
+    : token.replaceAll("~1", "/").replaceAll("~0", "~");
 
 const isSchemaRecord = (
   schema: JSONSchema,
@@ -139,6 +170,13 @@ const rootDefinitionNames = (schema: JSONSchema): DefinitionNames => {
  * An unresolved reference fails closed, because disclosing it would put the
  * pointer's authored text into the output through the one keyword whose value
  * is a name.
+ *
+ * The reference is decoded down to the definition name it denotes before that
+ * name is looked up, so a definition legitimately named with a `/`, a `~`, or a
+ * character its author percent-encoded resolves like any other and keeps its
+ * `$ref`. What comes back out needs no encoding of either kind: the canonical
+ * names are `d0`, `d1`, … and the keyword is `$defs` or `definitions`, so the
+ * emitted reference is the same text under either decoding.
  */
 const reduceRef = (
   ref: unknown,
@@ -147,13 +185,21 @@ const reduceRef = (
   if (typeof ref !== "string") {
     return undefined;
   }
-  const match = LOCAL_REF_PATTERN.exec(ref);
+  const pointer = refPointer(ref);
+  if (pointer === undefined) {
+    return undefined;
+  }
+  const match = LOCAL_REF_PATTERN.exec(pointer);
   if (match === null) {
     return undefined;
   }
-  const [, keyword, name] = match;
-  if (keyword === undefined || name === undefined) {
+  const [, keyword, token] = match;
+  if (keyword === undefined || token === undefined) {
     return "#";
+  }
+  const name = referenceTokenName(token);
+  if (name === undefined) {
+    return undefined;
   }
   const canonical = names[keyword as DefinitionMapKey].get(name);
   return canonical === undefined ? undefined : `#/${keyword}/${canonical}`;

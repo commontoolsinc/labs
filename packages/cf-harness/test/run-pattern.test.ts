@@ -547,6 +547,56 @@ describe("run-pattern", () => {
       expect(output.value).toEqual({ doubled: 42 });
     });
 
+    it("returns an error for an undeclared input whose value the `additionalProperties` schema rejects, creating no piece", async () => {
+      // The test above is this one's control: the same pattern accepts the
+      // same undeclared key when its value is what `additionalProperties`
+      // describes. Admitting an undeclared key is a statement about what it
+      // may hold, so the value is still measured — against that schema rather
+      // than against a declared property's.
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: OPEN_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21, offset: "five" },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('input "offset"');
+      expect(output.message).toContain("argument schema");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error for an undeclared live-cell input whose value the `additionalProperties` schema rejects, creating no piece", async () => {
+      const space = pieces.getSpace();
+      const seed = runtime.getCell(
+        space,
+        "run-pattern-open-seed",
+        {
+          type: "string",
+        } as const,
+      );
+      const { error } = await runtime.editWithRetry((tx) => {
+        seed.withTx(tx).set("five");
+      });
+      expect(error).toBeUndefined();
+      await runtime.idle();
+      const seedRef = createLLMFriendlyLink(
+        seed.getAsNormalizedFullLink(),
+        space,
+      );
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: OPEN_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21, offset: seedRef },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('input "offset"');
+      expect(output.message).toContain("argument schema");
+      expect(spy.calls).toBe(0);
+    });
+
     it("returns an error for a plain-JSON input whose value does not match the argument schema, creating no piece", async () => {
       const spy = spyOnRunPersistent();
       const engine = createEngine();
@@ -645,6 +695,57 @@ describe("run-pattern", () => {
       expect(
         (result.output as RunPatternToolSuccessOutput).registrationError,
       ).toBeUndefined();
+    });
+
+    it("removes the piece from the space's piece list when the signal aborts after the registry join and before the slug", async () => {
+      // The window the two publishing steps open: the piece has joined the
+      // list and has no slug yet. Stopping it does not remove it, so without
+      // the cancellation path removing it the space keeps a listed, slugless
+      // piece the caller was handed no reference to.
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+
+      const controller = new AbortController();
+      // Let the join land for real, record that it landed, then abort and
+      // make the slug assignment fail at its first use of the controller — a
+      // call the removal path does not make — so the run is cancelled with
+      // the piece listed and unslugged, deterministically.
+      let listedAfterJoin = -1;
+      const originalGetSpace = pieces.getSpace.bind(pieces);
+      const originalAdd = pieces.add.bind(pieces);
+      pieces.add = async (cells) => {
+        await originalAdd(cells);
+        listedAfterJoin = (await pieces.getRegisteredPieces()).length;
+        pieces.getSpace = () => {
+          pieces.getSpace = originalGetSpace;
+          throw new Error("slug assignment refused");
+        };
+        controller.abort();
+      };
+
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      }, { signal: controller.signal });
+      pieces.getSpace = originalGetSpace;
+      pieces.add = originalAdd;
+
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("cancelled");
+      // The join really happened, so the empty list below is a removal rather
+      // than a join that never landed.
+      expect(listedAfterJoin).toBe(1);
+      expect(await pieces.getRegisteredPieces()).toEqual([]);
+      // And no slug points at it either, so nothing addresses the piece the
+      // cancelled run left behind.
+      await expect(resolvePieceAddress(pieces, "doubling-report")).rejects
+        .toThrow();
     });
 
     it("surfaces a rejected session construction as a structured error and invokes the factory again on the next call", async () => {

@@ -791,7 +791,12 @@ the pattern then runs with that argument undefined and renders a complete page
 holding no values. Only a pattern whose argument schema names its properties,
 and does not admit further ones, is measured that way — an
 `additionalProperties` that is `true`, or that is a schema describing what an
-undeclared key may hold, admits them, and its inputs pass.
+undeclared key may hold, admits undeclared inputs by name. What such an input's
+value is measured against is whatever that `additionalProperties` states:
+against the schema when it is one, since admitting a key says what the key may
+hold rather than exempting it from being checked, and against nothing when it is
+`true`, which declares the argument open and states no shape any value could
+miss.
 
 An input value carrying a sealed opaque link is refused before anything is
 created too, at the top level or nested anywhere inside a plain-JSON value, and
@@ -813,7 +818,13 @@ persisted artifacts instead — run-state and the tool-output artifact record th
 `pieceId`. When the run's abort signal fires after the piece exists — while the
 tool is waiting for the pattern to settle, or while it is registering the piece
 — the tool stops the created piece and returns a structured `cancelled` error;
-the signal is the only cancellation source — there is no timeout.
+the signal is the only cancellation source — there is no timeout. Stopping a
+piece does not remove it from the space's piece list, so an abort that lands
+between the registry join and the slug assignment removes it too: a cancelled
+run hands back no `resultRef`, so a piece left listed under no slug would be one
+nothing addresses. The one join that is not undone is one still in flight when
+the abort won, which is not known to have happened and cannot be waited on
+without putting the cancellation back behind the operation it escaped.
 
 `register` is how a run publishes its result to a person. It takes one required
 field, `slug` — the named address the piece is reachable at, in the same

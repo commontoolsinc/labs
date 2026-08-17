@@ -135,6 +135,105 @@ describe("schema-shape", () => {
       expect(JSON.stringify(shape)).not.toContain("AUTHOR_CHOSEN_SECRET");
     });
 
+    it("rewrites a `$ref` naming a definition whose name contains a `/`", () => {
+      const shape = schemaShapeOnly({
+        type: "object",
+        properties: { row: { $ref: "#/$defs/AUTHOR~1SECRET" } },
+        $defs: { "AUTHOR/SECRET": { type: "string" } },
+      });
+
+      expect(shape).toEqual({
+        type: "object",
+        properties: { row: { $ref: "#/$defs/d0" } },
+        $defs: { d0: { type: "string" } },
+      });
+      expect(JSON.stringify(shape)).not.toContain("AUTHOR");
+    });
+
+    it("rewrites a `$ref` naming a definition whose name contains a `~`", () => {
+      const shape = schemaShapeOnly({
+        type: "object",
+        properties: { row: { $ref: "#/$defs/AUTHOR~0SECRET" } },
+        $defs: { "AUTHOR~SECRET": { type: "string" } },
+      });
+
+      expect(shape).toEqual({
+        type: "object",
+        properties: { row: { $ref: "#/$defs/d0" } },
+        $defs: { d0: { type: "string" } },
+      });
+      expect(JSON.stringify(shape)).not.toContain("AUTHOR");
+    });
+
+    it("rewrites a `$ref` whose fragment percent-encodes a character of the name", () => {
+      const shape = schemaShapeOnly({
+        type: "object",
+        properties: {
+          spaced: { $ref: "#/$defs/AUTHOR%20SECRET" },
+          slashed: { $ref: "#/definitions/AUTHOR%7E1SECRET" },
+        },
+        $defs: { "AUTHOR SECRET": { type: "string" } },
+        definitions: { "AUTHOR/SECRET": { type: "number" } },
+      });
+
+      expect(shape).toEqual({
+        type: "object",
+        properties: {
+          spaced: { $ref: "#/$defs/d0" },
+          slashed: { $ref: "#/definitions/d0" },
+        },
+        $defs: { d0: { type: "string" } },
+        definitions: { d0: { type: "number" } },
+      });
+      expect(JSON.stringify(shape)).not.toContain("AUTHOR");
+    });
+
+    it("rewrites a `$ref` naming a definition whose name contains a literal `~1`", () => {
+      // `~0` unescapes to `~` only after `~1` has unescaped to `/`. Taking the
+      // two in the other order reads this reference as naming `AUTHOR/SECRET`,
+      // which is a different definition and, here, no definition at all.
+      const shape = schemaShapeOnly({
+        type: "object",
+        properties: { row: { $ref: "#/$defs/AUTHOR~01SECRET" } },
+        $defs: { "AUTHOR~1SECRET": { type: "string" } },
+      });
+
+      expect(shape).toEqual({
+        type: "object",
+        properties: { row: { $ref: "#/$defs/d0" } },
+        $defs: { d0: { type: "string" } },
+      });
+      expect(JSON.stringify(shape)).not.toContain("AUTHOR");
+    });
+
+    it("drops a `$ref` whose escaped name resolves to no definition", () => {
+      expect(schemaShapeOnly({
+        type: "object",
+        properties: { row: { $ref: "#/$defs/AUTHOR~1SECRET" } },
+        $defs: { "AUTHOR~SECRET": { type: "string" } },
+      })).toEqual({
+        type: "object",
+        properties: { row: {} },
+        $defs: { d0: { type: "string" } },
+      });
+    });
+
+    it("drops a `$ref` whose fragment is not a well-formed pointer", () => {
+      expect(schemaShapeOnly({
+        type: "object",
+        properties: {
+          escape: { $ref: "#/$defs/AUTHOR~2SECRET" },
+          percent: { $ref: "#/$defs/AUTHOR%2SECRET" },
+          deeper: { $ref: "#/$defs/Row/properties/category" },
+        },
+        $defs: { "AUTHOR~2SECRET": { type: "string" } },
+      })).toEqual({
+        type: "object",
+        properties: { escape: {}, percent: {}, deeper: {} },
+        $defs: { d0: { type: "string" } },
+      });
+    });
+
     it("replaces a definition name nested below the root as well", () => {
       expect(schemaShapeOnly({
         type: "object",

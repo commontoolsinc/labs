@@ -300,7 +300,7 @@ const sealedOpaqueLinkPath = (
   }
   if (
     isSealedOpaqueLinkObject(value) ||
-    (isRecord(value) && isSealedOpaqueTarget(value["@link"]))
+    (isObjectNotArray(value) && isSealedOpaqueTarget(value["@link"]))
   ) {
     return path;
   }
@@ -552,9 +552,10 @@ export const runPatternTool: HarnessToolDefinition<
     // error rather than a persisted broken piece. What supplies the value
     // does not change the question: a live cell is measured by what it
     // currently holds, and a plain JSON value by itself.
-    const argumentProperties = isObjectNotArray(pattern.argumentSchema) &&
-        isObjectNotArray(pattern.argumentSchema.properties)
-      ? pattern.argumentSchema.properties
+    const argumentSchema = pattern.argumentSchema;
+    const argumentProperties = isObjectNotArray(argumentSchema) &&
+        isObjectNotArray(argumentSchema.properties)
+      ? argumentSchema.properties
       : undefined;
     // An input the compiled pattern declares no argument for is refused for
     // the same reason: the pattern would run with that argument undefined and
@@ -567,10 +568,10 @@ export const runPatternTool: HarnessToolDefinition<
     // index signature, which names what an undeclared key is allowed to hold
     // rather than forbidding one.
     const additionalArguments =
-      (pattern.argumentSchema as { additionalProperties?: unknown })
+      (argumentSchema as { additionalProperties?: unknown })
         .additionalProperties;
     const admitsUndeclaredArguments = additionalArguments === true ||
-      isRecord(additionalArguments);
+      isObjectNotArray(additionalArguments);
     if (
       argumentProperties !== undefined && input.inputs !== undefined &&
       !admitsUndeclaredArguments
@@ -592,41 +593,53 @@ export const runPatternTool: HarnessToolDefinition<
         );
       }
     }
-    if (argumentProperties !== undefined) {
-      for (const { key, cell } of liveCellInputs) {
-        const propertySchema = argumentProperties[key];
-        if (propertySchema === undefined) {
-          continue;
-        }
-        await cell.sync();
-        const failure = validateAgainstSchema(
-          propertySchema as JSONSchema,
-          cell.get(),
-          pattern.argumentSchema,
-        );
-        if (failure !== undefined) {
-          return errorOutput(
-            "error",
-            `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
-          );
-        }
+    // An `additionalProperties` schema is what the argument schema says an
+    // undeclared key may hold, so an input admitted by it is measured against
+    // it: admitting a key is a statement about its value, not an exemption
+    // from having one checked. An `additionalProperties` of `true` states
+    // nothing to measure against — the pattern declared its argument open, so
+    // an undeclared key there is unconstrained by declaration rather than
+    // unchecked by omission — and neither does a key the argument schema
+    // declares no shape for at all.
+    const undeclaredArgumentSchema = isObjectNotArray(additionalArguments)
+      ? additionalArguments as JSONSchema
+      : undefined;
+    const argumentSchemaForKey = (key: string): JSONSchema | undefined =>
+      argumentProperties !== undefined && Object.hasOwn(argumentProperties, key)
+        ? argumentProperties[key] as JSONSchema
+        : undeclaredArgumentSchema;
+    const argumentMismatch = (
+      key: string,
+      value: unknown,
+    ): RunPatternToolErrorOutput | undefined => {
+      const propertySchema = argumentSchemaForKey(key);
+      if (propertySchema === undefined) {
+        return undefined;
       }
-      for (const { key, value } of plainInputs) {
-        const propertySchema = argumentProperties[key];
-        if (propertySchema === undefined) {
-          continue;
-        }
-        const failure = validateAgainstSchema(
-          propertySchema as JSONSchema,
-          value,
-          pattern.argumentSchema,
-        );
-        if (failure !== undefined) {
-          return errorOutput(
-            "error",
-            `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
-          );
-        }
+      const failure = validateAgainstSchema(
+        propertySchema,
+        value,
+        argumentSchema,
+      );
+      return failure === undefined ? undefined : errorOutput(
+        "error",
+        `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
+      );
+    };
+    for (const { key, cell } of liveCellInputs) {
+      if (argumentSchemaForKey(key) === undefined) {
+        continue;
+      }
+      await cell.sync();
+      const mismatch = argumentMismatch(key, cell.get());
+      if (mismatch !== undefined) {
+        return mismatch;
+      }
+    }
+    for (const { key, value } of plainInputs) {
+      const mismatch = argumentMismatch(key, value);
+      if (mismatch !== undefined) {
+        return mismatch;
       }
     }
     let piece: PieceController<unknown>;
@@ -673,18 +686,22 @@ export const runPatternTool: HarnessToolDefinition<
     // comment below gives. A failure here leaves a live piece and a usable
     // `resultRef`, so it is reported alongside the result rather than as the
     // run's outcome. An abort during it is not: the caller asked to stop, so
-    // the piece is stopped and the run reports `cancelled`, exactly as an abort
-    // during the settle barrier does.
+    // the piece is stopped, whatever it had joined is undone, and the run
+    // reports `cancelled`, exactly as an abort during the settle barrier does.
     let registration: RunPatternRegistration | undefined;
     let registrationError: string | undefined;
     if (registrationSlug !== undefined) {
       let failure: { error: unknown } | undefined;
+      // Set once the piece is in the space's piece list, so the cancellation
+      // path below knows whether there is a join to undo.
+      let joinedPieceList = false;
       const publishing = (async () => {
         try {
           // The registry join goes first, so a space with no piece list to
           // join leaves no orphan slug behind; the slug was validated before
           // anything was created, so this order costs nothing.
           await pieces.add([piece.getCell()]);
+          joinedPieceList = true;
           await assignSlug(pieces, piece.getCell(), registrationSlug);
         } catch (error) {
           failure = { error };
@@ -692,6 +709,21 @@ export const runPatternTool: HarnessToolDefinition<
       })();
       if (await raceWithAbort(publishing, signal) === "aborted") {
         stopPieceForAbort();
+        if (joinedPieceList) {
+          try {
+            // Stopping a piece leaves it in the list it joined — removal is a
+            // separate operation — so the cancellation path performs it. A
+            // cancelled run hands back no `resultRef`, so a piece left listed
+            // under no slug is one the caller was given no way to reach. A
+            // join still in flight when the abort won is the one case this
+            // cannot reach: it is not known to have happened, and waiting to
+            // find out would put the cancellation path back behind the
+            // operation the abort escaped.
+            await pieces.remove(piece.getCell());
+          } catch {
+            // Best-effort: the cancelled output stands either way.
+          }
+        }
         return cancelledOutput();
       }
       if (failure !== undefined) {
