@@ -888,3 +888,117 @@ describe("stage A: instance keying — unit pins", () => {
     expect(storageManager.shouldPullDoc(space, address.id, "user")).toBe(true);
   });
 });
+
+// The OFF-arm serialized-form witness the stage-A build report claimed
+// and the independent review found unpinned (finding 9): with the flag OFF
+// and no serving posture — every client today — no storage notification
+// change address, reactivity-log address, replica state, or replica
+// document carries a `scopeKey` own-property. Adopted from the review's
+// probe (`zz-review-off-notification-probe`).
+describe("stage A: OFF-arm serialized forms carry no scopeKey", () => {
+  let offManager: ReturnType<typeof StorageManager.emulate>;
+  let offRuntime: Runtime;
+
+  beforeEach(() => {
+    offManager = StorageManager.emulate({ as: signer });
+    offRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: offManager,
+      // OFF: no experimental flag, no serving posture.
+    });
+  });
+
+  afterEach(async () => {
+    await offRuntime.dispose();
+    await offManager.close();
+  });
+
+  const walk = (
+    value: unknown,
+    path: string,
+    hits: string[],
+    seen = new Set<unknown>(),
+    depth = 0,
+  ): void => {
+    if (
+      value === null || typeof value !== "object" || seen.has(value) ||
+      depth > 12
+    ) {
+      return;
+    }
+    seen.add(value);
+    if (Object.hasOwn(value as object, "scopeKey")) hits.push(path);
+    for (
+      const [key, child] of Object.entries(value as Record<string, unknown>)
+    ) {
+      if (key === "scopeKey") continue;
+      walk(child, `${path}.${key}`, hits, seen, depth + 1);
+    }
+  };
+
+  it("a scoped commit at OFF: zero scopeKey own-properties anywhere in the notifications, the reactivity log, the replica states, or the replica documents", async () => {
+    const hits: string[] = [];
+    let notifications = 0;
+    offManager.subscribe({
+      next: (notification: unknown) => {
+        notifications += 1;
+        const changes = (notification as { changes?: Iterable<unknown> })
+          .changes;
+        if (changes !== undefined) {
+          for (const change of changes) walk(change, "change", hits);
+        }
+        walk(
+          { ...(notification as object), changes: undefined },
+          "notification",
+          hits,
+        );
+        return { done: false };
+      },
+    } as never);
+    const userCell = offRuntime.getCell<{ value: string }>(
+      space,
+      "stagea-off-user",
+      undefined,
+      undefined,
+      "user",
+    );
+    const sessionCell = offRuntime.getCell<{ value: string }>(
+      space,
+      "stagea-off-session",
+      undefined,
+      undefined,
+      "session",
+    );
+    const spaceCell = offRuntime.getCell<{ value: string }>(
+      space,
+      "stagea-off-space",
+      undefined,
+    );
+    const tx = offRuntime.edit();
+    userCell.withTx(tx).set({ value: "u" });
+    sessionCell.withTx(tx).set({ value: "s" });
+    spaceCell.withTx(tx).set({ value: "sp" });
+    userCell.withTx(tx).get();
+    walk(txToReactivityLog(tx), "log", hits);
+    expect((await tx.commit()).error).toBeUndefined();
+    await offRuntime.idle();
+    await offManager.synced();
+    const replica = offManager.open(space).replica;
+    for (const cell of [userCell, sessionCell, spaceCell]) {
+      const link = cell.getAsNormalizedFullLink();
+      walk(
+        replica.get({
+          id: link.id,
+          type: "application/json",
+          path: [],
+          scope: link.scope,
+        } as never),
+        "state",
+        hits,
+      );
+      walk(replica.getDocument(link.id as never, link.scope), "doc", hits);
+    }
+    expect(notifications).toBeGreaterThan(0);
+    expect(hits).toEqual([]);
+  });
+});

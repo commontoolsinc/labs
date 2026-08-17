@@ -182,7 +182,20 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     {
       file: "integration/cfc-group-chat-demo-two-browsers.test.ts",
       phase: "phase-7",
-      reason: TWO_BROWSER_NON_SETTLING_REASON,
+      reason: TWO_BROWSER_NON_SETTLING_REASON +
+        " Fan-out stage A (2026-08-16/17): the client arrival gate treated " +
+        "OW32's symptom (both browsers boot < 3 s, zero non-settling, " +
+        "'Alice save + own status' PASSES — the R7 wall is closed), and " +
+        "this gate's NEXT wall is verification-coverage.md OW34: a " +
+        "CFC-serving POLICY item, UNMASKED by stage A and not caused by " +
+        "it — the served save handler's write to the shared owner-" +
+        "protected `profiles` cell is refused at prepare (`missing " +
+        "trusted-event policy input`), because a per-user served handler " +
+        "run carries no renderer-trusted event mark for its UI-contract " +
+        "write; owning layer: stage B's attribution work or a CFC " +
+        "policy-input rule for actor-stamped served entries (its own spec " +
+        "sentence first). Lifts when OW32's triage AND OW34 land and the " +
+        "gate greens 5/5 fresh-store under the full ON posture.",
     },
     {
       file: "integration/lunch-poll-vote.test.ts",

@@ -188,12 +188,19 @@ resolving `scope` against its identity. The vocabulary:
   with it (the event preflight's park cross-matches per instance).
 - **Wire** — `SessionSyncUpsert.scopeKey` / `SessionSyncRemove.scopeKey`
   / `EntitySnapshot.scopeKey` (`packages/memory/v2.ts`), populated
-  ONLY on frames/results to a session whose lease-holder read
-  exemption is live (`toWireUpsert(entry, keyed)`, `buildFullSync` /
-  `buildDiffSync(…, keyed)`, `queryGraph({keyedSnapshots})`); the
-  collapse guard (`#denyExplicitInstanceReads`) refuses two instances
-  of one (branch, id, scope) for NON-holders only; `WatchView.applySync`
-  keys by `scopeKey ?? scope`.
+  ONLY on frames/results to a session that has been admitted an
+  explicit-instance read — its STICKY wire vocabulary (`SessionState.
+  leaseHolderReads`, kept for the session's life; amended 2026-08-17,
+  the stage-A review's finding 1: keying never hangs from the live
+  lease, so a keyed delivery is always keyed-retracted; the DELIVERY of
+  foreign instances is the per-pass live-lease question, with the
+  lapse recorded and re-armed — `leaseHolderReadsLapsed`,
+  `noteLeaseReacquired`) (`toWireUpsert(entry, keyed)`, `toWireRemove`,
+  `buildFullSync` / `buildDiffSync(…, keyed)`,
+  `queryGraph({keyedSnapshots})`); the collapse guard
+  (`#denyExplicitInstanceReads`) refuses two instances of one (branch,
+  id, scope) for NON-holders only; `WatchView.applySync` keys by
+  `scopeKey ?? scope`.
 - **Scheduler** — `entityKey(address, identity)` prefers
   `address.scopeKey` (dependency/trigger keys per instance);
   `sortAndCompactPaths` compacts per instance; the WRITER index and the
@@ -273,8 +280,8 @@ identity, partition-unchanged at cardinality 1 per §2's argument):
   `${branch}\0${scope_key}\0${id}` (`server-sync.ts`), with the
   wire upserts STRIPPED back to scope names (`toWireUpsert`) so
   frames stay byte-identical — EXCEPT (fan-out stage A, §3b) frames to
-  a session whose lease-holder read exemption is live, which keep the
-  key. This was scopes.md §7 M4 itself: dirtiness AND delivery now key
+  a session admitted explicit-instance reads, which keep the key for
+  the session's life. This was scopes.md §7 M4 itself: dirtiness AND delivery now key
   by instance, and one principal's commit touches only sessions
   tracking THAT instance.
 

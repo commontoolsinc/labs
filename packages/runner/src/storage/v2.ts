@@ -3232,7 +3232,10 @@ class SpaceReplica implements ISpaceReplica {
         selector?.schema === undefined ? null : hashStringOf(selector.schema),
         // The explicit instance (stage A) is part of the sync identity:
         // two instances of one doc are two syncs. `null` for the
-        // universal keyless case keeps the OFF-arm key text identical.
+        // universal keyless case — the OFF-arm key TEXT gains a trailing
+        // `,null` per entry (this map is private, single-producer, never
+        // serialized; the PARTITION is unchanged: every keyless entry
+        // still dedupes exactly as before).
         address.scopeKey ?? null,
       ]),
     );

@@ -564,15 +564,29 @@ the target's `eventWatermark` makes processing exactly-once.
   This pairs with scopes.md §7 M4's re-keying: the push path must
   key dirtiness by `scope_key`, and the same key decides delivery.
   *(Fan-out stage A, 2026-08-16 — the ONE wire addition on the push
-  side: frames to a session whose lease-holder read exemption is LIVE
-  (§2's read row armed it) carry `scope_key` on every upsert and
-  remove (`SessionSyncUpsert.scopeKey`, `SessionSyncRemove.scopeKey`;
+  side: frames to a session that has been ADMITTED an explicit-instance
+  read (§2's read row) carry `scope_key` on every upsert and remove
+  (`SessionSyncUpsert.scopeKey`, `SessionSyncRemove.scopeKey`;
   graph.query snapshots to such a session carry `EntitySnapshot.scopeKey`),
   because that session legitimately receives EVERY instance it serves
   and may hold two instances of one (branch, id, scope) — the serving
   replica keys them apart by it. Every other session's frames carry
   scope NAMES only and resolve instances from the session, exactly as
-  before — the OFF-arm wire is byte-identical.)*
+  before — the OFF-arm wire is byte-identical. Amended 2026-08-17 (the
+  stage-A independent review's finding 1): the keying is the session's
+  STICKY wire vocabulary — armed by the admission, kept for the
+  session's life, never hung from the live lease — so an instance
+  delivered keyed is always retracted keyed (an unkeyed remove would
+  name the client's OWN instance: a former holder's catch-up wiped the
+  service's doc and kept the stale foreign one). Whether FOREIGN
+  instances are DELIVERED stays the per-pass live-lease question of
+  §2's read row: a lapse withholds them (incremental) or retracts them
+  keyed (full evaluation), and the first live pass afterwards RE-ARMS
+  with a full evaluation that re-delivers what the lapse withheld — a
+  renewal blip the SpaceServer survives in-process reports the reacquire
+  so that pass runs promptly (`Server.noteLeaseReacquired`), rather
+  than leaving the serving replica silently stale until an unrelated
+  write.)*
 - **Basis-index rows are NOT part of the pushed commit** (T2). They
   ride the loopback store TRANSACTION only (serving-loop.md §1 plane
   (a), §3b); nothing about them crosses the wire to a subscriber,

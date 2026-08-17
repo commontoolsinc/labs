@@ -1108,6 +1108,79 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   wave-level fallback still runs a demanded piece before any
   identity-bearing demand exists and leaves the `user:<serviceDID>`
   garbage instance (stage B's B5 residual).
+  **Independent review + fix round (2026-08-17; review verdict
+  LANDABLE-WITH-FIXES, 24 mutations / 17 caught / 7 untested; fixer:
+  every finding dispositioned, 24/24 archived mutations + M1 caught).**
+  CLOSED by the fix round: (1) the review's MAJOR correctness finding —
+  the keyed wire hung from a bit any lapsed push pass cleared and only
+  a fresh admission re-armed, so a former/blipped holder's
+  full-evaluation catch-up sent UNKEYED removes for keyed-delivered
+  foreign instances (the runner replica wiped its OWN instance and kept
+  the stale foreign one — reproduced end to end) and a survived
+  renew-blip left the loopback session's foreign instances withheld for
+  the session's life (silent-stale). Invariant as landed: the session's
+  keying is STICKY wire vocabulary (a keyed delivery is always keyed-
+  retracted); foreign-instance DELIVERY stays the per-pass live-lease
+  question; a lapse is recorded and the first live pass RE-ARMS with a
+  full evaluation; the SpaceServer's renew arm reports a survived blip
+  (`noteLeaseReacquired`) so that pass runs promptly (protocol.md §3 as
+  amended). Pinned red-first: memory `v2-explicit-read.test.ts` (keyed
+  retraction with the own instance untouched; the re-arm via the notice
+  and via the first evaluating pass; the notice inert when nothing
+  lapsed), `storage-instance-keying.test.ts` (the replica half),
+  `executor-space-server.test.ts` (the renew arm's notice — once per
+  blip, never on a plain tick, never on a park),
+  `executor-instance-keyed-replica.test.ts` (the lapse withholds Alice's
+  write, the notice re-delivers it keyed to the serving replica, her
+  instance re-derives, Bob's untouched); each half mutation-verified.
+  (2) The TRUE R7 shape (type, then save; no derivation ever loaded the
+  actor's draft instance) is now pinned — the shipped R7 pin was
+  green with the presync AND preflight actor identity removed (a
+  derivation had pre-loaded the instance); the new pin asserts the
+  no-load precondition and goes red with both removed. (3) S4's
+  clearance half is pinned in BOTH directions with pre-existing
+  stranded rows plus the same-wave real-row guard
+  (`executor-wave.test.ts`); the earlier "pinned in both directions"
+  claim was an over-claim (only not-written was asserted). (4) The A3
+  seed-memo re-key is pinned (Bob's default seeded after Alice's run
+  memoized presence). (5) The individually-redundant seams have their
+  own pins (served preflight/presync identity, `Cell.sync` identity,
+  the traversal kick identity, `buildReads` identity, `WatchView` key).
+  Residuals SHARPENED, still flagged: (i) effect completion — the
+  writeback tx is unstamped, so its hash-guard reads resolve the
+  service's instances while the seal is under the carriage identity;
+  `buildReads` then attests the CARRIAGE identity's records (a never-
+  loaded record yields seq-0 confirmed reads); the engine does not
+  reject a mis-attested basis on derived commits today, so the
+  consequence is confined to local cascade/hash-guard tracking — but
+  any per-user node with an effect is served with an unattested basis;
+  fix shape: stamp the completion tx with the carriage identity at
+  `markEffectCompletion` (needs the runtime's outbox carriage — a
+  stamper hook, threaded through the builtins), NOT filled here;
+  trigger: before stage B adds per-user effect nodes. (v) The served
+  event stamp sets a NON-RESOLVING identity for a userless `firedAt`
+  (`{session:"server"}`) while preflight/presync read the own instance
+  — deliberately NOT aligned: the non-resolving identity is what makes
+  a userless run's scoped WRITE fail closed (`resolveScopeKey` throws;
+  the events.md §2 sessionless-actor class), dropping it would key the
+  write under the service silently, and aligning the guards the other
+  way buys nothing (loads land only in resolvable instances); the shape
+  itself — a declared sessionless space-scope chain touching user
+  scope — is illegal and its reads are empty either way. (vi) The
+  arrival gate's sweep has no arrival trigger of its own (speculation.md
+  §4 now states the frame-coupling assumption); an arrival re-sweep is
+  owed if that coupling loosens. (vii) Two PRE-EXISTING SpaceServer
+  blip-window shapes surfaced by the fix round's E2E, not stage A's and
+  not filled: (a) with the lease row expired but the in-process tenure
+  live, the loop re-attempts its watermark advance every cycle and each
+  is refused by the engine's derived-class rule (a hot spin — 471
+  `wave-commit-rejected` in 2.7 s observed) until the row is live again
+  or the tick parks; (b) an EMPTY seal (a read probe, a no-op
+  derivation) opens a `#currentWave` that outlives zero-delta cycles
+  with the pre-blip tenure, so the first real seal after a same-process
+  reacquire aborts `lease-lost` and PARKS the space — the "survived
+  blip keeps serving" path is reachable only on a space quiet across the
+  tick; owner: the P7 renew-blip / wedge arms.
 - OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
   (2026-08-13; the RULED 2026-08-07 direction, built whole). A
   demanded root CONFIRMED synced with no pattern meta parks TERMINAL
@@ -2274,7 +2347,14 @@ delta):
   red-first ("lease-holder push exemption dies with the lease" +
   the resume revalidation test, `v2-explicit-read.test.ts`). The
   half (ii) wire-upsert scope-name mitigation (forced full resync)
-  stands unchanged and keeps its comment.
+  stands unchanged and keeps its comment. *(Superseded in part by
+  fan-out stage A's fix round, 2026-08-17: "lease loss clears the
+  persisted bit" is no longer the mechanism — the bit is the session's
+  sticky WIRE VOCABULARY (keyed frames for its life; a keyed delivery is
+  keyed-retracted), the exemption still re-verifies on CURRENT
+  holdership at every push-path use, a lapse is recorded and re-armed on
+  the first live pass; the post-handover tests still hold — a former
+  holder receives no foreign instance — see OW17.)*
 - OW17 — RE-TAGGED with the Phase-5 posture (flag-don't-fill upheld):
   the trigger anticipated foreign scoped instances making the
   replica's scope-name collapse load-bearing; Phase 5 instead
@@ -2517,10 +2597,19 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   stage A's read seam, and the per-user derived state of real users
   needs stage B's supply — record the two-browser gates' status
   honestly at each stage (stage A's build report carries the runs).
-- OW34 — served handler runs carry NO renderer-trusted event mark, so
-  their writes to UI-contract-gated (owner-protected) cells are refused
-  by CFC — the two-browsers gate's NEXT wall, UNMASKED by fan-out stage A
-  (2026-08-16/17): with the R7 read seam closed, Alice's served save
+- OW34 — a CFC-serving POLICY item: served handler runs carry NO
+  renderer-trusted event mark, so a per-user served handler's write to a
+  UI-contract-gated (owner-protected) cell is refused by CFC at prepare
+  ("missing trusted-event policy input") — the two-browsers gate's NEXT
+  wall, UNMASKED by fan-out stage A and NOT caused by it (the stage-A
+  independent review's characterization, 2026-08-17: stage A changed
+  nothing the CFC ladder sees; it made the handler read Alice's draft
+  and reach the write; pre-stage-A the same handler wrote nothing).
+  Owning layer: stage B's attribution work or a CFC policy-input rule
+  for actor-stamped served entries — with its own spec sentence (cfc +
+  events.md) before it is wired; the two-browsers gate's ON-skip reason
+  names it alongside OW32. Evidence (2026-08-16/17): with the R7 read
+  seam closed, Alice's served save
   handler reads her draft and WRITES the shared `profiles` cell, and the
   wave refuses the commit three times and drops it — `CFC enforcement
   rejected commit: relevant transaction was not prepared: missing
@@ -2706,18 +2795,28 @@ serving replica + wire; the client arrival gate):
 - protocol.md §3: +1 binding clause (lease-holder frames/snapshots carry
   `scope_key`; every other session's wire byte-identical) — pinned in
   the same memory test (keyed frames on watch.set/add/query/push; no
-  key on a non-holder's frames).
+  key on a non-holder's frames). AMENDED 2026-08-17 (the fix round on
+  the review's finding 1): the keying is the admitted session's STICKY
+  wire vocabulary — a keyed delivery is always keyed-retracted — and the
+  foreign-instance delivery re-arms after a lapse — pinned in
+  `v2-explicit-read.test.ts` ("finding 1" ×3), `storage-instance-keying.
+  test.ts` (the replica half), `executor-space-server.test.ts` (the
+  renew arm's notice), `executor-instance-keyed-replica.test.ts` (the
+  lapse E2E); mutation-verified per half.
 - scopes.md §2 Monotonicity AMENDED (RULED 2026-08-16): structural at
   the space→user hop only; ragged per principal below it; instance
   addresses carry the full (scope-kind, principal) address; "k only
   narrows" is stage B's policy — a ruling, no impl-gate of its own; its
   consequence for the basis index is the S4 amendment below.
 - serving-loop.md §3b's S4 AMENDED (+1 binding sentence set): rows keyed
-  by the run's FULL instance address, stranded stamp and broader-chain
-  keys cleared in both directions — pinned in
+  by the run's FULL instance address — pinned in
   `executor-instance-keyed-replica.test.ts` (S4 step) with the two P2-F
   pins moved to the same truth (`executor-serving-loop.test.ts`,
-  `executor-space-server.test.ts`).
+  `executor-space-server.test.ts`); the stranded stamp and broader-chain
+  keys cleared in BOTH directions — pinned 2026-08-17 in
+  `executor-wave.test.ts` ("S4 clearance in BOTH directions", with
+  pre-existing stranded rows and the same-wave real-row guard; the
+  earlier "pinned" claim covered not-written only — corrected).
 - key-vocabulary.md §3b (new inventory section) + §5's list: the
   instance-keyed replica/wire vocabulary and `IMemoryAddress.scopeKey`;
   §4's first tripwire covers the list — pinned in
@@ -2737,6 +2836,15 @@ serving replica + wire; the client arrival gate):
   `markAuthoritativeWrites`), park/backoff, the B-1 barrier, the
   renew-blip, and C10/T_flush suites ran green under the re-key (the
   stage-A build report carries the counts).
+- Fix round (2026-08-17, on the independent review): the seams the
+  review found untested each carry a discriminating pin — the true-R7
+  no-load shape (`executor-instance-keyed-replica.test.ts`), the A3
+  seed memo, the served preflight/presync identity, `Cell.sync`, the
+  traversal kick, `buildReads`, and the OFF-arm serialized-form witness
+  (`storage-instance-keying.test.ts`), `WatchView` keying
+  (`v2-client-watch.test.ts`); speculation.md §4 states the arrival
+  gate's frame-coupling assumption; the two-browsers gate's ON-skip
+  reason names OW34 alongside OW32; residuals sharpened in OW17.
 
 ## 4. Standing rule
 
