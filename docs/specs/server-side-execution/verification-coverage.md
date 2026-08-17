@@ -2517,6 +2517,30 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   stage A's read seam, and the per-user derived state of real users
   needs stage B's supply — record the two-browser gates' status
   honestly at each stage (stage A's build report carries the runs).
+- OW34 — served handler runs carry NO renderer-trusted event mark, so
+  their writes to UI-contract-gated (owner-protected) cells are refused
+  by CFC — the two-browsers gate's NEXT wall, UNMASKED by fan-out stage A
+  (2026-08-16/17): with the R7 read seam closed, Alice's served save
+  handler reads her draft and WRITES the shared `profiles` cell, and the
+  wave refuses the commit three times and drops it — `CFC enforcement
+  rejected commit: relevant transaction was not prepared: missing
+  trusted-event policy input for <profiles doc> at /` (both stage-A ON
+  runs, `store-on{2,3}/toolshed.log`). Mechanism: the client's fire marks
+  the UI event renderer-trusted in an in-process WeakSet
+  (`cfc/ui-contract.ts` `markRendererTrustedEvent`), and
+  `recordTrustedEventPolicyInputs` at dispatch matches only such events;
+  a drained stream entry's payload is a fresh object, so the served
+  dispatch records no trusted-event policy input and
+  `verifyTrustedEventRequirements` refuses at prepare. Pre-stage-A the
+  same handler read the service instance's EMPTY draft and wrote nothing,
+  so the refusal never fired. Not stage A's scope (flag-don't-fill): the
+  fix shape is a CFC-serving design question — carry the fired event's
+  trust provenance on the durable stream entry (the append is admitted
+  under the actor's authority; events.md §1) and re-mark it at the served
+  dispatch, or a serving-side trust rule for actor-stamped entries — with
+  its own spec sentence (cfc + events.md) before it is wired. Trigger:
+  before the two-browsers gate can green under ON (with stage B for the
+  per-user derived state of the second user); the gates stay skip-listed.
 - OW33 — the ON-posture DENO-CLIENT family, surfaced by making the ON
   lanes UNIFORM (P7 independent review finding 7; fixer 2026-08-16):
   once the runner integration tests that talk to the lane's toolshed
