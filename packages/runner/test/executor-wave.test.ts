@@ -2706,6 +2706,136 @@ describe("stage D seal-into-wave", () => {
     expect(misKeyed).toEqual([]);
   });
 
+  it("stage A: S4 clearance in BOTH directions — an action whose TRUE key changes across waves has its stranded rows cleared (user→space clears the stamped user key; space→user clears the broader `space` key), and a real row set in the same wave under a stranded key is never overwritten by a clearance (mutations: no clearance / no guard → red)", async () => {
+    // The independent review's finding 3: the shipped S4 pins asserted
+    // only that rows are not WRITTEN under a stranded key; none had a
+    // previously-stranded row to CLEAR. Here the same action (one
+    // actionId, one demand stamp `user:bob`) discovers a different scope
+    // in successive waves, and each wave must clear the rows the previous
+    // one left under the key that is now stranded.
+    const lease = liveLease();
+    // One sink for the whole test: the engine's replay guard keys on the
+    // sink's (session, localSeq), so per-wave sinks would collide.
+    const sink = newSink();
+    const bobIdentity = { principal: "did:key:s4-bob", sessionId: "bob-s1" };
+    const bobKey = resolveScopeKey("user", bobIdentity);
+    const spaceDoc = runtime.getCell<{ value: number }>(
+      space,
+      "wave-s4-clear-space-input",
+      undefined,
+    );
+    const userDoc = runtime.getCell<{ value: number }>(
+      space,
+      "wave-s4-clear-user-input",
+      undefined,
+      undefined,
+      "user",
+    );
+    const output = runtime.getCell<{ value: number }>(
+      space,
+      "wave-s4-clear-output",
+      undefined,
+    );
+    {
+      const seedTx = runtime.edit();
+      spaceDoc.withTx(seedTx).set({ value: 1 });
+      expect((await seedTx.commit()).error).toBeUndefined();
+    }
+    const runOnce = async (
+      actionId: string,
+      reads: "space" | "user",
+      valueOut: number,
+    ) => {
+      const wave = newWave({ lease });
+      runtime.installSealDestination(wave);
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, {
+        actionId,
+        kind: "derivation",
+        scopeKeyIdentity: bobIdentity,
+        // Bob's demand stamps his USER instance in every wave.
+        actionScopeKey: bobKey,
+      });
+      if (reads === "space") {
+        spaceDoc.withTx(tx).get();
+      } else {
+        userDoc.withTx(tx).get(); // discovers `user` (Bob's instance)
+      }
+      // The write stays space-scoped so only the READS decide the
+      // discovered scope (the tx ratchet is read-driven).
+      output.withTx(tx).set({ value: valueOut });
+      expect((await tx.commit()).error).toBeUndefined();
+      runtime.clearSealDestination();
+      const outcome = await wave.commitWave(sink);
+      await wave.settled();
+      expect(outcome.aborted).toBeUndefined();
+    };
+    const rowsUnder = (actionId: string, key: string) =>
+      selectSchedulerBasisRows(engine, {
+        branch: "",
+        action: actionId,
+        actionScopeKey: key,
+      });
+
+    // Direction 1 (user → space): wave 1 discovers Bob's user instance →
+    // rows under `user:bob`; wave 2 reads only space → true key `space`,
+    // and the stamped `user:bob` is now stranded → its rows are CLEARED.
+    await runOnce("s4-clear-broaden", "user", 1);
+    expect(rowsUnder("s4-clear-broaden", bobKey).length).toBeGreaterThan(0);
+    await runOnce("s4-clear-broaden", "space", 2);
+    expect(rowsUnder("s4-clear-broaden", "space").length).toBeGreaterThan(0);
+    expect(rowsUnder("s4-clear-broaden", bobKey)).toEqual([]);
+
+    // Direction 2 (space → user): wave 1 reads only space → rows under
+    // `space`; wave 2 discovers Bob's user instance → true key `user:bob`,
+    // and the broader `space` key on his chain is stranded → CLEARED.
+    await runOnce("s4-clear-narrow", "space", 1);
+    expect(rowsUnder("s4-clear-narrow", "space").length).toBeGreaterThan(0);
+    await runOnce("s4-clear-narrow", "user", 2);
+    expect(rowsUnder("s4-clear-narrow", bobKey).length).toBeGreaterThan(0);
+    expect(rowsUnder("s4-clear-narrow", "space")).toEqual([]);
+
+    // The guard: two contributions of ONE action in ONE wave — a
+    // space-discovering run (real rows under `space`) sealed FIRST, then
+    // Bob's user-discovering run whose stranded set names `space`. The
+    // clearance must not overwrite the real row set already recorded in
+    // this wave under that key.
+    {
+      const wave = newWave({ lease });
+      runtime.installSealDestination(wave);
+      const spaceRun = runtime.edit();
+      stampWaveRunContext(spaceRun, {
+        actionId: "s4-clear-guard",
+        kind: "derivation",
+        // The wave-level identity, no per-run stamp: true key `space`.
+      });
+      spaceDoc.withTx(spaceRun).get();
+      output.withTx(spaceRun).set({ value: 10 });
+      expect((await spaceRun.commit()).error).toBeUndefined();
+      const bobRun = runtime.edit();
+      stampWaveRunContext(bobRun, {
+        actionId: "s4-clear-guard",
+        kind: "derivation",
+        scopeKeyIdentity: bobIdentity,
+        actionScopeKey: bobKey,
+      });
+      userDoc.withTx(bobRun).get();
+      const bobOut = runtime.getCell<{ value: number }>(
+        space,
+        "wave-s4-clear-guard-bob-output",
+        undefined,
+      );
+      bobOut.withTx(bobRun).set({ value: 11 });
+      expect((await bobRun.commit()).error).toBeUndefined();
+      runtime.clearSealDestination();
+      const outcome = await wave.commitWave(sink);
+      await wave.settled();
+      expect(outcome.aborted).toBeUndefined();
+      expect(rowsUnder("s4-clear-guard", "space").length).toBeGreaterThan(0);
+      expect(rowsUnder("s4-clear-guard", bobKey).length).toBeGreaterThan(0);
+    }
+  });
+
   it("stage F: M1 — the run context survives sample()/sink() transaction wrappers (r3739139477: the stamp is on the ORIGINAL tx; a wrapped scoped read must not fall back to the service identity)", async () => {
     const tx = runtime.edit();
     const context = {

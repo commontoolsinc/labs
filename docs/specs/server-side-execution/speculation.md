@@ -144,7 +144,19 @@ own value (correct rendering; no durability of per-user derived values,
 of which there was none before either); an unchanged authoritative
 value (equality cutoff — no rewrite, so the doc's seq stays below the
 floor) leaves the echo standing rather than retiring it, which is
-value-identical. Two riders ride with the gate: SUPERSEDE-BY-NEWER — a
+value-identical. Stated as an ASSUMPTION, not a guarantee (fan-out stage
+A's independent review, finding 7): the sweep has no arrival trigger of
+its own — it runs on the watermark sink, the origin-ack observer, and
+chained settlements — so "retires the moment its derived value arrives"
+holds because a wave's derived doc and its watermark advance ride ONE
+frame per session and the replica applies every record of a frame before
+it notifies; a written doc that arrived in a LATER frame than the
+covering watermark, or one the client never watched, keeps its echo
+until the next watermark event (value-identical when the values agree;
+otherwise the echo hides the authoritative value that long). An arrival
+re-sweep is the owed follow-up if that coupling ever loosens (recorded
+in verification-coverage.md's stage-A delta). Two riders ride with the
+gate: SUPERSEDE-BY-NEWER — a
 newer entry of the same writer whose WHOLE-DOC ops cover every doc an
 older entry wrote retires the older one at seal (the drop of a lower
 layer under an upper whole-doc layer is invisible; a patch is

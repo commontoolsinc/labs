@@ -15,7 +15,16 @@
 //   (mutation: per-run resubscribe → only the last instance's read
 //   survives);
 // - two instance-named loads of one doc are two watches (distinct watch
-//   ids), and the pull-kick reservation is per instance.
+//   ids), and the pull-kick reservation is per instance;
+// - the seam pins the independent review found UNTESTED (fan-out stage
+//   A's fix round, 2026-08-17 — each goes red under the review's
+//   mutation): the served event's presync AND preflight carry the
+//   event's actor; `Cell.sync` names the cell's transaction identity;
+//   the traversal's absent-target kick names the run identity; a seal's
+//   read basis is built from the SEALING identity's records; the A3
+//   seed memo keys under the RUN's identity (Alice's presence never
+//   suppresses Bob's seed); a keyed retraction drops exactly the named
+//   instance.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -37,6 +46,7 @@ import type {
   TransactionSealDestination,
 } from "../src/storage/interface.ts";
 import { txToReactivityLog } from "../src/scheduler/reactivity.ts";
+import type { EventHandler } from "../src/scheduler/types.ts";
 
 const signer = await Identity.fromPassphrase("stage A instance keying");
 const space = signer.did() as MemorySpace;
@@ -523,6 +533,320 @@ describe("stage A: instance keying — unit pins", () => {
         edge.from === writerId && edge.to === readerId
       ),
     ).toBe(true);
+  });
+
+  it("seam pin (M16+M17): a SERVED event's dependency preflight runs under the event's actor and its presync receives the actor — a client-side event passes neither (mutations: either identity dropped → red)", async () => {
+    // Every mechanism the served handler's actor-instance read rides on
+    // (the true-R7 E2E pins the composite; each half here): the
+    // preflight's dependency probe tx carries the actor as its
+    // `scopeKeyIdentity` (so its absent reads kick instance-named loads
+    // and the pending-load park cross-matches them), and `presyncInputs`
+    // is handed the same actor (so the handler's inputs load AS the
+    // actor). Absent on client-side events, byte-identical there.
+    runtime.installSealDestination(
+      { seal: (tx: IExtendedStorageTransaction) => tx.tx.commit() },
+      {
+        runStamper: (tx: IExtendedStorageTransaction, info: ServerRunInfo) => {
+          stampWaveRunContext(tx, {
+            actionId: info.actionId,
+            kind: info.kind,
+            ...(info.scopeKeyIdentity !== undefined
+              ? { scopeKeyIdentity: info.scopeKeyIdentity }
+              : {}),
+            ...(info.actionScopeKey !== undefined
+              ? { actionScopeKey: info.actionScopeKey }
+              : {}),
+          });
+        },
+      },
+    );
+    const stream = runtime.getCell<unknown>(space, "stagea-served-stream");
+    const seen: {
+      preflight: Array<ScopeKeyIdentity | undefined>;
+      presync: Array<ScopeKeyIdentity | undefined>;
+      handled: number;
+    } = { preflight: [], presync: [], handled: 0 };
+    const handler: EventHandler = Object.assign(
+      (_tx: IExtendedStorageTransaction, _event: unknown) => {
+        seen.handled += 1;
+      },
+      {
+        populateDependencies: (depTx: IExtendedStorageTransaction) => {
+          seen.preflight.push(depTx.tx.scopeKeyIdentity);
+        },
+        presyncInputs: (_event: unknown, identity?: ScopeKeyIdentity) => {
+          seen.presync.push(identity);
+          return Promise.resolve();
+        },
+      },
+    );
+    runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    // A served event, fired at Alice (the SpaceServer drain's carriage).
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      { n: 1 },
+      true,
+      undefined,
+      false,
+      {
+        served: {
+          firedAt: { user: alice.principal, session: alice.sessionId },
+        },
+      },
+    );
+    await runtime.idle();
+    expect(seen.handled).toBe(1);
+    expect(seen.preflight).toEqual([alice]);
+    expect(seen.presync).toEqual([alice]);
+    // A client-side event of the same stream: no identity anywhere.
+    runtime.scheduler.queueEvent(stream.getAsNormalizedFullLink(), {
+      n: 2,
+    });
+    await runtime.idle();
+    expect(seen.handled).toBe(2);
+    expect(seen.preflight[1]).toBeUndefined();
+    expect(seen.presync[1]).toBeUndefined();
+    runtime.clearSealDestination();
+  });
+
+  it("seam pin (M15): Cell.sync names the cell's TRANSACTION identity — a cell bound to a run stamped as Alice loads through syncCell with her identity, and the load registers under her instance; an unbound cell passes no options (mutation: identity dropped → red)", async () => {
+    const calls: Array<{ scopeKeyIdentity?: ScopeKeyIdentity } | undefined> =
+      [];
+    const original = storageManager.syncCell.bind(storageManager);
+    (storageManager as { syncCell: typeof storageManager.syncCell })
+      .syncCell = (cell, options) => {
+        calls.push(options);
+        return original(cell, options);
+      };
+    const scoped = runtime.getCell<{ value: number }>(
+      space,
+      "stagea-cell-sync-identity",
+      undefined,
+      undefined,
+      "user",
+    );
+    // Bound to a transaction stamped as Alice: the sync names her.
+    const aliceTx = runtime.edit();
+    stampWaveRunContext(aliceTx, {
+      actionId: "stagea-cell-sync",
+      kind: "derivation",
+      scopeKeyIdentity: alice,
+      actionScopeKey: resolveScopeKey("user", alice),
+    });
+    const bound = scoped.withTx(aliceTx);
+    const load = bound.sync();
+    // The pending-load ledger keys the in-flight load under HER instance
+    // (the address the event preflight's park cross-matches).
+    const inFlight = storageManager.pendingLoadAddresses?.() ?? [];
+    expect(
+      inFlight.some((address) =>
+        address.id === scoped.getAsNormalizedFullLink().id &&
+        (address as { scopeKey?: string }).scopeKey ===
+          resolveScopeKey("user", alice)
+      ),
+    ).toBe(true);
+    await load.catch(() => undefined);
+    expect(calls).toEqual([{ scopeKeyIdentity: alice }]);
+    aliceTx.abort();
+    // The same cell with no transaction: the pre-stage-A call, no options.
+    await scoped.sync().catch(() => undefined);
+    expect(calls[1]).toBeUndefined();
+  });
+
+  it("seam pin (M23): the traversal's absent-target kick names the RUN identity — a read inside a run stamped as Alice that meets a link to a never-loaded scoped doc kicks the load AS Alice (mutation: identity dropped → the runtime's own)", async () => {
+    // A doc holding a link to a user-scoped target the replica has never
+    // seen; a schema-driven read follows the link, finds the target
+    // absent, and kicks `ensureLinkedDocLoaded` — the stage-A site
+    // threads the traversal's run identity into that kick.
+    const target = runtime.getCell<{ label: string }>(
+      space,
+      "stagea-kick-target",
+      undefined,
+      undefined,
+      "user",
+    );
+    const holder = runtime.getCell<{ ref: { label: string } }>(
+      space,
+      "stagea-kick-holder",
+      undefined,
+    );
+    const seedTx = runtime.edit();
+    holder.withTx(seedTx).setRawUntyped({ ref: target.getAsLink() });
+    expect((await seedTx.commit()).error).toBeUndefined();
+
+    const kicks: Array<ScopeKeyIdentity | undefined> = [];
+    const originalKick = runtime.ensureLinkedDocLoaded;
+    runtime.ensureLinkedDocLoaded = (link, sourceSpace, identity) => {
+      if (link.id === target.getAsNormalizedFullLink().id) {
+        kicks.push(identity);
+      }
+      return originalKick.call(runtime, link, sourceSpace, identity);
+    };
+    try {
+      const aliceTx = runtime.edit();
+      stampWaveRunContext(aliceTx, {
+        actionId: "stagea-kick",
+        kind: "derivation",
+        scopeKeyIdentity: alice,
+        actionScopeKey: resolveScopeKey("user", alice),
+      });
+      const typed = runtime.getCell<{ ref: { label: string } }>(
+        space,
+        "stagea-kick-holder",
+        {
+          type: "object",
+          properties: {
+            ref: {
+              type: "object",
+              properties: { label: { type: "string" } },
+            },
+          },
+        } as const,
+        aliceTx,
+      );
+      typed.get();
+      aliceTx.abort();
+      expect(kicks).toEqual([alice]);
+      // The kick reserved ALICE's instance, not the runtime's own: a
+      // later own-identity read of the same target still gets its kick.
+      expect(
+        storageManager.shouldPullDoc(
+          space,
+          target.getAsNormalizedFullLink().id,
+          "user",
+          alice,
+        ),
+      ).toBe(false);
+      expect(
+        storageManager.shouldPullDoc(
+          space,
+          target.getAsNormalizedFullLink().id,
+          "user",
+        ),
+      ).toBe(true);
+    } finally {
+      runtime.ensureLinkedDocLoaded = originalKick;
+    }
+  });
+
+  it("seam pin (M19): a seal's read basis is built from the SEALING identity's records — a run as Alice that read HER instance at seq 5 seals a confirmed read at seq 5, not the own instance's absent seq 0 (mutation: identity dropped → red)", async () => {
+    const replica = storageManager.open(space).replica;
+    const scoped = runtime.getCell<{ value: string }>(
+      space,
+      "stagea-buildreads-cell",
+      undefined,
+      undefined,
+      "user",
+    );
+    const docId = scoped.getAsNormalizedFullLink().id;
+    // Alice's instance arrives KEYED at seq 5; the replica's own instance
+    // of the doc is never loaded (seq 0).
+    (replica as unknown as {
+      applySessionSync: (sync: unknown, type: "pull" | "integrate") => void;
+    }).applySessionSync({
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 5,
+      upserts: [{
+        branch: "",
+        id: docId,
+        scope: "user",
+        scopeKey: resolveScopeKey("user", alice),
+        seq: 5,
+        doc: { value: { value: "alice" } },
+      }],
+      removes: [],
+    }, "integrate");
+    const aliceTx = runtime.edit();
+    stampWaveRunContext(aliceTx, {
+      actionId: "stagea-buildreads",
+      kind: "derivation",
+      scopeKeyIdentity: alice,
+      actionScopeKey: resolveScopeKey("user", alice),
+    });
+    // The run reads HER instance (the tx→replica seam) ...
+    expect(scoped.withTx(aliceTx).get()).toEqual({ value: "alice" });
+    // ... and seals under her identity: the commit's confirmed read of
+    // the doc names the seq HER record holds.
+    const { promise, resolve } = Promise.withResolvers<
+      { committed: { seq: number } }
+    >();
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: docId,
+          type: "application/json",
+          scope: "user",
+          value: { value: { value: "alice-2" } } as never,
+        }],
+        preconditions: [],
+      } as never,
+      aliceTx.tx,
+      promise,
+      { identity: alice },
+    );
+    const read = sealed.commit.reads.confirmed.find((entry) =>
+      entry.id === docId
+    );
+    expect(read?.seq).toBe(5);
+    resolve({ committed: { seq: 6 } } as never);
+    await sealed.settled;
+    aliceTx.abort();
+  });
+
+  it("seam pin (M9, the A3 seed-memo site): a `Writable(initial)`-shaped cell serialized inside Alice's run seeds HER instance and memoizes under HER key — a later run as Bob still seeds HIS default (mutation: memo keyed by the runtime's identity → Alice's presence suppresses Bob's seed)", () => {
+    // The runtime-constructed `Writable(value)` shape: a ROOT-linked
+    // scoped cell whose schema carries the default. Serializing it as a
+    // value into another doc is the seed site (data-updating.ts): the
+    // seed writes the default into the target when absent, memoized per
+    // (space, INSTANCE, id) under the writing run's identity.
+    const seedCell = runtime.getCell<string>(
+      space,
+      "stagea-seed-target",
+      { type: "string", default: "hello" } as const,
+      undefined,
+      "user",
+    );
+    const seedLink = seedCell.getAsNormalizedFullLink();
+    const holder = runtime.getCell<{ slot: unknown }>(
+      space,
+      "stagea-seed-holder",
+      undefined,
+    );
+    const readSeed = (tx: IExtendedStorageTransaction) =>
+      tx.readValueOrThrow({ ...seedLink, path: [] });
+
+    // Alice's run serializes the cell: her instance is seeded.
+    const aliceTx = runtime.edit();
+    stampWaveRunContext(aliceTx, {
+      actionId: "stagea-seed-alice",
+      kind: "derivation",
+      scopeKeyIdentity: alice,
+      actionScopeKey: resolveScopeKey("user", alice),
+    });
+    holder.withTx(aliceTx).set({ slot: seedCell });
+    expect(readSeed(aliceTx)).toBe("hello");
+
+    // Bob's run serializes the same cell: HIS instance is absent, so it
+    // must be seeded too. Pre-fix the memo keyed under the runtime's own
+    // identity for every run — Alice's presence check had already
+    // memoized the doc, Bob's check was skipped, and his default never
+    // landed (the panel's Lens 2d hazard).
+    const bobTx = runtime.edit();
+    stampWaveRunContext(bobTx, {
+      actionId: "stagea-seed-bob",
+      kind: "derivation",
+      scopeKeyIdentity: bob,
+      actionScopeKey: resolveScopeKey("user", bob),
+    });
+    holder.withTx(bobTx).set({ slot: seedCell });
+    expect(readSeed(bobTx)).toBe("hello");
+    aliceTx.abort();
+    bobTx.abort();
   });
 
   it("two instance-named loads of one doc are two watches, and the pull-kick reservation is per instance", () => {

@@ -120,6 +120,18 @@ const PER_USER_PATTERN = [
   "});",
 ].join("\n");
 
+/** The same surface with derivations that read NOTHING per-user: no
+ * demanded run ever loads a principal's draft instance into the serving
+ * replica, so the served save handler's read of Alice's draft is the
+ * FIRST touch of her instance — the true R7 shape (group chat: type,
+ * then save; the server may never have loaded the draft). */
+const PER_USER_PATTERN_HANDLER_ONLY = PER_USER_PATTERN
+  .replace("'echo:' + draftText(draftCell)", "'echo:const'")
+  .replace("'saved-echo:' + draftText(savedCell)", "'saved-echo:const'");
+if (PER_USER_PATTERN_HANDLER_ONLY === PER_USER_PATTERN) {
+  throw new Error("handler-only pattern did not derive from the base");
+}
+
 const sidecarIdsIn = (engine: Engine.Engine): string[] =>
   (engine.database.prepare(
     `SELECT id FROM head WHERE id LIKE 'of:stream-events:%' AND op != 'delete'`,
@@ -238,6 +250,7 @@ describe("stage A: the instance-keyed serving replica (OW17)", () => {
     bobScope: "user" | "session";
     names: { arg: string; result: string };
     hostPolicy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"];
+    pattern?: string;
   }) => {
     // The host first: activation is triggered by session open / admission
     // (serving-loop.md §1), so the clients open against a live host.
@@ -248,7 +261,10 @@ describe("stage A: the instance-keyed serving replica (OW17)", () => {
 
     const compiled = await alice.patternManager.compilePattern({
       main: "/main.tsx",
-      files: [{ name: "/main.tsx", contents: PER_USER_PATTERN }],
+      files: [{
+        name: "/main.tsx",
+        contents: options.pattern ?? PER_USER_PATTERN,
+      }],
     }, { space });
     const aliceArg = alice.getCell<Record<string, unknown>>(
       space,
@@ -501,6 +517,76 @@ describe("stage A: the instance-keyed serving replica (OW17)", () => {
       () => instanceHolds(engine, aliceKey, '"saved-echo:saved:A"'),
       "alice's saved-echo derived from her consequence",
     );
+    setup.cancel();
+  });
+
+  it("R7, the true shape: NO derivation ever loaded Alice's draft instance on the serving replica — type, then save — and the served handler still reads HER draft (the presync/preflight AS THE ACTOR is what loads it) and writes her per-user consequence with the typed value", async () => {
+    // The pin the shipped R7 test above cannot be: there, Alice's echo
+    // derivation had already loaded her instance into the serving
+    // replica before the save, so the handler's actor-identity presync
+    // and preflight were redundant backstops (the independent review's
+    // M15/M16/M17 — each removable, all three together removable, and
+    // that test stayed green). Here no demanded run reads the draft, so
+    // the served handler's read of Alice's instance is the FIRST — and
+    // the presync/preflight as the actor is load-bearing: with both
+    // removed the handler reads the service instance's empty draft and
+    // writes nothing (this test goes red).
+    const setup = await standUpTwoUsers({
+      bobScope: "user",
+      names: { arg: "ika-r7-noload-arg", result: "ika-r7-noload-result" },
+      pattern: PER_USER_PATTERN_HANDLER_ONLY,
+    });
+    const { engine, aliceKey, bobKey, alice, aliceResult } = setup;
+    // (The constant derivations discover `space` and key their rows
+    // there — S4 as amended — and load NO draft instance.)
+    const replica = servingRuntime!.storageManager.open(space).replica;
+    // THE PRECONDITION that makes this the true R7 shape: the serving
+    // replica has NOT loaded Alice's instance of the argument doc.
+    expect(
+      replica.getDocument(setup.argId as never, "user", {
+        principal: aliceSigner.did(),
+      }),
+    ).toBeUndefined();
+
+    (aliceResult.key("save") as unknown as { send(value: unknown): unknown })
+      .send({});
+    await alice.idle();
+    await alice.storageManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the save event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        return (value?.entries?.length ?? 0) >= 1 &&
+          value!.entries!.every((entry) => entry.consequenced === true);
+      },
+      "the save event to consequence",
+    );
+    const entries =
+      (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
+        .entries!;
+    expect(entries[0].firedAt?.user).toBe(aliceSigner.did());
+    expect(entries[0].error).toBeUndefined();
+    // THE R7 ARBITRATION under the true shape: the handler read HER
+    // draft — loaded by its own actor-identity presync/preflight — and
+    // wrote the typed consequence under her instance.
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"saved:A"'),
+      () =>
+        "alice's saved consequence under her instance; rows now: " +
+        JSON.stringify([...rowsUnder(engine, aliceKey).entries()]),
+      10_000,
+    );
+    expect(rowsUnder(engine, aliceKey).get(setup.argId)).toEqual({
+      draft: "A",
+      saved: "saved:A",
+    });
+    expect(instanceHolds(engine, bobKey, '"saved:')).toBe(false);
     setup.cancel();
   });
 
