@@ -38,10 +38,19 @@ const MAX_RECURSION_DEPTH = 100;
 // stays recursive.
 const SHAPE_READ: IReadOptions = { nonRecursive: true };
 
-// Cache of target objects to their proxies, scoped by ReactivityLog
+// Cache of target objects to their proxies, scoped by ReactivityLog.
+//
+// `byValue` is split by writability rather than holding one proxy per value.
+// A writable proxy carries write traps a read-only one refuses, so the two are
+// different objects and a lookup that cannot tell them apart hands whichever
+// was built first to both — a read-only view that permits writes, or a
+// writable one that refuses them, decided by nothing but creation order.
+// Within one writability the sharing is unchanged: the reason this index sits
+// behind `byLink` at all is that two values reached by different routes are
+// one object to a consumer comparing by identity.
 type ProxyCache = {
   byLink: Map<string, any>;
-  byValue: WeakMap<object, any>;
+  byValue: WeakMap<object, { readOnly?: any; writable?: any }>;
 };
 
 const proxyCacheByTx = new WeakMap<
@@ -77,7 +86,7 @@ const getProxyCache = (
   if (!txCache) {
     txCache = {
       byLink: new Map<string, any>(),
-      byValue: new WeakMap<object, any>(),
+      byValue: new WeakMap<object, { readOnly?: any; writable?: any }>(),
     };
     proxyCacheByTx.set(cacheIndex, txCache);
   }
@@ -169,6 +178,18 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
  * normalized (and frozen) level by level inside the write's diff; the caller's
  * input objects are never mutated, and already-deep-frozen valid `FabricValue`
  * inputs are accepted identity-preservingly.
+ *
+ * **Writability is a capability, not authoring guidance.** The refusal a
+ * read-only view gives — "declare type as `Writable<..>`" — names the way to
+ * ask for write access, but the refusal itself is enforcement that the builder
+ * depends on: `collectWritablyBoundRoots` in `builder/pattern.ts` takes a plain
+ * (non-`asCell`) binding in a schema-carrying handler to be unwritable, and a
+ * cell written only through such a binding would be classified `computed` —
+ * replayable from its inputs — if that held and the refusal did not. So a view
+ * built for one writability must never answer a request for the other. Write
+ * capability reaches a pattern two ways: an `asCell` handle minted from a
+ * `Writable<..>` field, or the whole argument of a handler declaring
+ * `{ proxy: true }`, which is the one construction site passing `writable` true.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
@@ -391,9 +412,14 @@ function createViewProxy<T>(
 
   // Check if we already have a proxy for this target in the cache.
   // The cache key is the original `value` (not the stub), ensuring that
-  // the same frozen object always maps to the same proxy instance.
-  const existingProxy = txCache.byLink.get(cacheKey) ??
-    (cfcLabelView === undefined ? txCache.byValue.get(value) : undefined);
+  // the same frozen object always maps to the same proxy instance -- and the
+  // value index is consulted for the writability actually asked for, so a view
+  // built for one never answers a request for the other.
+  let existingProxy = txCache.byLink.get(cacheKey);
+  if (existingProxy === undefined && cfcLabelView === undefined) {
+    const entry = txCache.byValue.get(value);
+    existingProxy = writable ? entry?.writable : entry?.readOnly;
+  }
   if (existingProxy) return remember(existingProxy);
 
   const proxy = new Proxy(proxyTarget as object, {
@@ -881,7 +907,10 @@ function createViewProxy<T>(
   // Cache the proxy in the appropriate cache before returning
   txCache.byLink.set(cacheKey, proxy);
   if (cfcLabelView === undefined) {
-    txCache.byValue.set(value, proxy);
+    const entry = txCache.byValue.get(value) ?? {};
+    if (writable) entry.writable = proxy;
+    else entry.readOnly = proxy;
+    txCache.byValue.set(value, entry);
   }
   return remember(proxy);
 }
