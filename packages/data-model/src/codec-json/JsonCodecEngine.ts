@@ -56,9 +56,9 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   /**
    * @inheritDoc
    *
-   * No cycle guard, for the reason {@link #decode} gives: every tree this
-   * format walks is the product of a parse, and a parse of text yields a
-   * tree. There is no path by which one arrives with a cycle in it.
+   * A plain one: this walk never enters a node, for the reason
+   * {@link #decode} gives, so the context's in-progress set is never
+   * allocated.
    */
   protected override newDecodeContext(env: LiveEnvironment): DecodeContext {
     return new DecodeContext(env);

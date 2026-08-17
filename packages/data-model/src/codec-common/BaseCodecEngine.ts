@@ -180,12 +180,14 @@ export abstract class BaseCodecEngine<
    * `ctx` carries the live environment and the nodes whose decoding is in
    * progress, so that a cycle arriving on a channel is caught rather than
    * followed. Whether cycles are guarded at all is the format's decision,
-   * taken when it builds the context: a format whose input it parses for
-   * itself cannot be handed a cycle and pays nothing.
+   * made by whether this method enters a node: a format whose input it
+   * parses for itself cannot be handed a cycle, so it enters none and its
+   * context allocates no set.
    *
-   * An implementation owes the context one thing: every object it is about to
-   * descend through goes through {@link #enterOrReport} first, and comes back
-   * out through `ctx.leave()` however the descent ends. That means the tagged
+   * An implementation that does guard owes the context one thing: every
+   * object it is about to descend through goes through
+   * {@link #enterOrReport} first, and comes back out through `ctx.leave()`
+   * however the descent ends. That means the tagged
    * form as much as a container -- a format whose transport can carry a graph
    * can close a cycle through tagged nodes alone. Here rather than in
    * {@link #decodeTagged}, because this method is the one that visits every

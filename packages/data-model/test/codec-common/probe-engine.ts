@@ -320,7 +320,7 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
    * it, and the base's guard is what refuses one.
    */
   protected override newDecodeContext(env: LiveEnvironment): DecodeContext {
-    return new DecodeContext(env, true);
+    return new DecodeContext(env);
   }
 
   protected override wrapTag(

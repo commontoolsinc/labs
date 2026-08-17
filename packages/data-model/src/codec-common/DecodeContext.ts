@@ -17,24 +17,14 @@ export class DecodeContext {
   readonly #env: LiveEnvironment;
 
   /**
-   * The nodes whose decoding is in progress, or `null` for a format that
-   * cannot be handed a cycle.
+   * The nodes whose decoding is in progress, or `undefined` before the first
+   * node is entered.
    */
-  readonly #seen: Set<object> | null;
+  #seen: Set<object> | undefined;
 
-  /**
-   * Constructs an instance.
-   *
-   * `guardCycles` is the format's decision, not a caller's, and turns on
-   * whether the format's transport can carry a graph. A format whose input it
-   * parses for itself is handed a tree by construction and pays nothing here;
-   * one handed a tree it did not build starts a set. Getting this wrong in the
-   * permissive direction costs a set per decode and nothing else; in the other
-   * direction it is an unbounded walk on hostile input.
-   */
-  constructor(env: LiveEnvironment, guardCycles = false) {
+  /** Constructs an instance. */
+  constructor(env: LiveEnvironment) {
     this.#env = env;
-    this.#seen = guardCycles ? new Set() : null;
   }
 
   /** The live environment this decode was given. */
@@ -43,7 +33,12 @@ export class DecodeContext {
   }
 
   /**
-   * Enters a node, if this context guards cycles at all.
+   * Enters a node, refusing a repeat visit.
+   *
+   * Whether a format guards cycles at all is decided by whether its walk
+   * calls this: a format whose input it parses for itself is handed a tree by
+   * construction, so it never does, and its set is never allocated. One
+   * handed a tree it did not build enters every node it descends through.
    *
    * @returns `true` if the node was entered, `false` if it was already in
    *   progress -- which is a cycle, and the caller's to report. Reported
@@ -52,13 +47,13 @@ export class DecodeContext {
    *   against the engine's leniency.
    */
   enter(value: object): boolean {
-    if (this.#seen === null) {
-      return true;
-    } else if (this.#seen.has(value)) {
+    const seen = this.#seen ??= new Set();
+
+    if (seen.has(value)) {
       return false;
     }
 
-    this.#seen.add(value);
+    seen.add(value);
     return true;
   }
 
