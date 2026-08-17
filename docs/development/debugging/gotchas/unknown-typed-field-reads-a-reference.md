@@ -140,7 +140,8 @@ deno task cf check <pattern>.tsx --show-transformed --no-run
 ```
 
 A field you expect to read shows as `{ type: "unknown" }` when the read will
-come back undefined, and as the shape you named when it will materialize.
+stop at a reference — the field itself is there and truthy, its properties are
+not — and as the shape you named when it will materialize.
 
 ## Where this has bitten
 

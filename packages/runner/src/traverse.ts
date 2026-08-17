@@ -5072,20 +5072,6 @@ function appendPartsToPath(path: ValuePath, parts: string[]): ValuePath {
  * type name, with the same $ref resolution and allOf/anyOf/oneOf handling the
  * read-side validation uses.
  */
-/**
- * Whether `schema` answers a value of `valueType` opaquely — the position
- * declares a reference, and nothing in the declaration asks for the value.
- *
- * Exported so the lazy view decides it the same way traversal does; a reader
- * must not be able to tell which path answered.
- */
-export function isOpaquePosition(
-  schema: JSONSchema,
-  valueType: JSONSchemaTypes,
-): boolean {
-  return schemaTypeValidity(schema, valueType) === TypeValidity.Unknown;
-}
-
 function schemaTypeValidity(
   schema: JSONSchema,
   valueType: JSONSchemaTypes,
@@ -5236,6 +5222,20 @@ function schemaTypeValidity(
     return TypeValidity.True;
   }
   return TypeValidity.Unknown;
+}
+
+/**
+ * Whether `schema` answers a value of `valueType` opaquely — the position
+ * declares a reference, and nothing in the declaration asks for the value.
+ *
+ * Exported so the lazy view decides it the same way traversal does; a reader
+ * must not be able to tell which path answered.
+ */
+export function isOpaquePosition(
+  schema: JSONSchema,
+  valueType: JSONSchemaTypes,
+): boolean {
+  return schemaTypeValidity(schema, valueType) === TypeValidity.Unknown;
 }
 
 /**
