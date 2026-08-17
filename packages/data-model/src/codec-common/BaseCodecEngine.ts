@@ -7,9 +7,9 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
   CodecForFormat,
+  DecodeContext,
+  EncodeContext,
   NonterminalCodec,
-  ReconstructionContext,
-  SerializationContext,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
@@ -57,7 +57,7 @@ import { UnknownValue } from "./UnknownValue.ts";
  * varying an implementation detail; it is being a different format.
  */
 export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
-  implements SerializationContext<SerializedForm> {
+  implements EncodeContext<SerializedForm> {
   readonly #lenient: boolean;
   readonly #registry: CodecRegistry<Encoded>;
 
@@ -66,7 +66,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * instance encodes and decodes with, and so decides which classes it can
    * carry; there is no default, because which classes participate is a
    * question this class has no standing to answer. `options.lenient` makes a
-   * failed reconstruction produce a `ProblematicValue` instead of throwing.
+   * failed `decode()` produce a `ProblematicValue` instead of throwing.
    */
   constructor(
     options: { registry: CodecRegistry<Encoded>; lenient?: boolean },
@@ -100,7 +100,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   /**
    * Decodes this format's serialized form back into a fabric value.
    *
-   * `context` supplies what reconstruction needs beyond the data itself,
+   * `context` supplies what decoding needs beyond the data itself,
    * chiefly the ability to resolve a cell reference.
    *
    * A codec rejects a state it will not accept in one of two ways, by
@@ -121,7 +121,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    */
   abstract decode(
     data: SerializedForm,
-    context: ReconstructionContext,
+    context: DecodeContext,
   ): FabricValue;
 
   /** Encodes an array, which is this format's business entirely. */
@@ -160,7 +160,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    */
   protected abstract decodeValue(
     data: Encoded,
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen?: Set<object>,
   ): FabricValue;
 
@@ -169,7 +169,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   //
 
   /**
-   * Whether a failed reconstruction produces a `ProblematicValue` instead of
+   * Whether a failed `decode()` produces a `ProblematicValue` instead of
    * throwing.
    */
   get lenient(): boolean {
@@ -315,7 +315,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   protected decodeTagged(
     tag: any,
     rawState: Encoded,
-    context: ReconstructionContext,
+    context: DecodeContext,
     seen?: Set<object>,
   ): FabricValue {
     if (!isCodecTypeTag(tag)) {
@@ -505,7 +505,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    */
   protected static enterOrThrow(seen: Set<object>, value: object): void {
     if (seen.has(value)) {
-      throw new Error("Circular reference detected during serialization");
+      throw new Error("Circular reference detected during encoding");
     }
     seen.add(value);
   }

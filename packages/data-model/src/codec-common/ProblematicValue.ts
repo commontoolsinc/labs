@@ -10,8 +10,8 @@ import {
 } from "./BaseFabricInstance.ts";
 import {
   CODEC,
+  type DecodeContext,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
@@ -20,7 +20,7 @@ import { toReportableState } from "./toReportableState.ts";
 import { toReportableTag } from "./toReportableTag.ts";
 
 /**
- * Container for a value whose deconstruction or reconstruction failed.
+ * Container for a value whose encoding or decoding failed.
  * Preserves the tag and raw state at fault, for round-tripping and debugging.
  * Used in lenient mode to allow graceful degradation rather than hard
  * failures. See Section 3.5 of the formal spec.
@@ -174,7 +174,7 @@ export class ProblematicValue extends BaseFabricInstance {
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        context: DecodeContext,
       ): FabricValue {
         let result: ProblematicValue;
 

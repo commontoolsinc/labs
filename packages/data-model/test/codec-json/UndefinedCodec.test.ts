@@ -13,12 +13,12 @@ import { expect } from "@std/expect";
 
 import { UndefinedCodec } from "@/codec-json/UndefinedCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
 
 describe("UndefinedCodec", () => {
   const codec = new UndefinedCodec();
   const expectedTag = CODEC_TYPE_TAGS.Undefined;
-  const context = EMPTY_RECONSTRUCTION_CONTEXT;
+  const context = EMPTY_DECODE_CONTEXT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {
@@ -29,7 +29,7 @@ describe("UndefinedCodec", () => {
 
     describe("canEncode()", () => {
       it("claims `undefined`, rejects `null` (and other values)", () => {
-        // `undefined` serializes to the `Undefined@1` tag with `null` state,
+        // `undefined` encodes to the `Undefined@1` tag with `null` state,
         // whereas `null` is a JSON-native value that is not codec-handled.
         expect(codec.canEncode(undefined)).toBe(true);
         expect(codec.canEncode(null)).toBe(false);

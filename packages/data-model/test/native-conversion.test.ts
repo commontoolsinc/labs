@@ -27,7 +27,7 @@ import { describe, it } from "@std/testing/bdd";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 
-import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
+import { DummyDecodeContext } from "./fabric-instances/fixtures.ts";
 import {
   BaseFabricInstance,
   DEEP_CLONE_CORE,
@@ -432,8 +432,8 @@ describe("native-conversion", () => {
   });
 
   describe("codec `decode()` honors `shouldDeepFreeze`", () => {
-    const frozenCtx = new DummyReconstructionContext(true);
-    const mutableCtx = new DummyReconstructionContext(false);
+    const frozenCtx = new DummyDecodeContext(true);
+    const mutableCtx = new DummyDecodeContext(false);
 
     it("`FabricError`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = {

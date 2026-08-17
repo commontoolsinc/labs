@@ -119,7 +119,7 @@ describe("type-check", () => {
     describe("given a plain object with unrepresentable keys", () => {
       // A symbol is a valid fabric *value* but not a property *name*:
       // `FabricPlainObject` is keyed by `string`. A non-enumerable string key
-      // has no representation either, being dropped by every serialization.
+      // has no representation either, being dropped by every encoding.
 
       it("returns `false` for a symbol-keyed property", () => {
         const obj = { a: 1 } as Record<string | symbol, unknown>;

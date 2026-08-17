@@ -2,7 +2,7 @@
 
 This document specifies the JSON-compatible wire format used to represent
 fabric values, including the `fvj1:` encoding prefix, the tagged-object
-convention, escaping mechanisms, serialization context responsibilities, and
+convention, escaping mechanisms, codec engine responsibilities, and
 the reservation rules for `/`-prefixed keys.
 
 ## Status
@@ -59,7 +59,7 @@ key follows the pattern `/<Type>@<Version>`.
 
 This convention does **not** prohibit storing plain objects that happen to have
 `/`-prefixed keys. The escaping mechanism in Section 6 (`/object` and
-`/quote`) handles this case: during serialization, plain objects whose shape
+`/quote`) handles this case: during encoding, plain objects whose shape
 would be ambiguous with a tagged type are automatically wrapped so they
 round-trip correctly.
 
@@ -81,7 +81,7 @@ round-trip correctly.
 /**
  * Standard JSON encodings for all built-in special types.
  *
- * In each case, the tag string (e.g. `"Link@1"`) is passed to the context's
+ * In each case, the tag string (e.g. `"Link@1"`) is passed to the engine's
  * internal `wrapTag()` method, which prepends `/` to produce the JSON key
  * (e.g. `"/Link@1"`).
  */
@@ -125,7 +125,7 @@ round-trip correctly.
 //
 // `tag` is the algorithm tag (e.g. "fid1"); `hash` is the hash bytes as an
 // unpadded base64url string (per the convention above). On
-// deserialization, a non-object state or non-string fields produce a
+// decoding, a non-object state or non-string fields produce a
 // `ProblematicValue` (see `1-fabric-values.md` Section 3.5) per the
 // general codec-validation rule below.
 
@@ -135,7 +135,7 @@ round-trip correctly.
 //
 // `source` is the pattern string; `flags` is the flag string (e.g. "gi");
 // `flavor` identifies the regex dialect (e.g. "es2025", the default). On
-// deserialization, a non-object state produces a `ProblematicValue`, as
+// decoding, a non-object state produces a `ProblematicValue`, as
 // does an `es2025` pattern that fails native `RegExp` construction;
 // non-`es2025` flavors are stored faithfully without syntax validation
 // (their dialects cannot be validated here).
@@ -176,14 +176,14 @@ round-trip correctly.
 //
 // The state is one of exactly four literal strings:
 //   - "-0"          → the negative-zero value
-//   - "NaN"         → Number.NaN (any input NaN bit pattern serializes as
+//   - "NaN"         → Number.NaN (any input NaN bit pattern encodes as
 //                     this single literal and round-trips back to NaN)
 //   - "+Infinity"   → positive infinity
 //   - "-Infinity"   → negative infinity
 //
 // String state (rather than a JSON number) is used because JSON.stringify
 // emits `null` for NaN/±Infinity and drops the sign on -0; a numeric-state
-// form would be lossy through the JSON layer. On deserialization, any state
+// form would be lossy through the JSON layer. On decoding, any state
 // other than these four literals — including a non-string state — produces
 // a `ProblematicValue` (see `1-fabric-values.md` Section 3.5) per the
 // general codec-validation rule below.
@@ -197,7 +197,7 @@ round-trip correctly.
 // { "/Symbol@1": string }
 //
 // The state is the registry key — the JavaScript string returned by
-// `Symbol.keyFor(s)`. On deserialization, `Symbol.for(state)` retrieves
+// `Symbol.keyFor(s)`. On decoding, `Symbol.for(state)` retrieves
 // (or creates) the registry symbol with the matching key, so the result
 // is `===` to any other `Symbol.for(state)` in the same realm.
 //
@@ -205,7 +205,7 @@ round-trip correctly.
 // `undefined`) have no portable representation. The codec's
 // `canEncode()` returns `false` for them, which routes them to the
 // registry's "unhandled value" path rather than coercing them silently
-// to a registry key. On deserialization, any state other than a string
+// to a registry key. On decoding, any state other than a string
 // yields a `ProblematicValue` (see `1-fabric-values.md` Section 3.5)
 // per the general codec-validation rule below.
 //
@@ -230,14 +230,14 @@ round-trip correctly.
 // preserved tag (Section 8), which it can because that tag is checked to be
 // a real one.
 //
-// On deserialization, a non-object state, a non-string `tag` or `error`, or
+// On decoding, a non-object state, a non-string `tag` or `error`, or
 // an absent `state` property produces a `ProblematicValue` describing this
 // decode. `state` is checked for presence rather than type because every
 // `FabricValue` is a valid state, `undefined` among them, so filling in an
 // absent one would put a reshaped record back on the wire.
 ```
 
-> **Deserialization validation.** Deserialization cannot assume type safety from
+> **Decoding validation.** Decoding cannot assume type safety from
 > the wire. Each codec must validate the format of its state in `decode()`
 > before processing. For example, a codec whose state is a base64url string
 > (such as
@@ -253,18 +253,18 @@ round-trip correctly.
 > caller. This principle applies to
 > all codecs. Wire data is untrusted input. See `1-fabric-values.md`
 > Section 7.4 for the broader principle that applies to all code consuming
-> deserialized values.
+> decoded values.
 
 > **Sparse array encoding in JSON.** Even when an array contains holes, it is
-> serialized as a JSON array. Runs of consecutive holes are represented by
+> encoded as a JSON array. Runs of consecutive holes are represented by
 > `hole` entries, each carrying the run length as a positive integer. This
 > preserves the array-as-array structure while efficiently encoding sparse
 > arrays:
 >
-> - `[1, , undefined, 3]` serializes as
+> - `[1, , undefined, 3]` encodes as
 >   `[1, { "/hole": 1 }, { "/Undefined@1": null }, 3]`.
-> - `[1, , , , 5]` serializes as `[1, { "/hole": 3 }, 5]`.
-> - A very sparse array like `a = []; a[1000000] = 'x'` serializes as
+> - `[1, , , , 5]` encodes as `[1, { "/hole": 3 }, 5]`.
+> - A very sparse array like `a = []; a[1000000] = 'x'` encodes as
 >   `[{ "/hole": 1000000 }, "x"]`.
 
 ## 4. Detection
@@ -296,7 +296,7 @@ ambiguity about what is an encoding signal and what is user data.
 
 ## 5. Stateless Types
 
-Types that require no reconstruction state use `null` as the value:
+Types that require no decoding state use `null` as the value:
 
 ```json
 { "/Stream@1": null }
@@ -315,49 +315,49 @@ special types.
 ### `/object` — Single-Layer Escape
 
 Wraps a plain object whose key(s) might look like special types. The values
-are still processed normally during deserialization:
+are still processed normally during decoding:
 
 ```json
 { "/object": { "/myKey": { "/Link@1": { "id": "..." } } } }
 ```
 
-Deserializes to: `{ "/myKey": <reconstructed Link> }`. The `/object` wrapper
+Decodes to: `{ "/myKey": <decoded Link> }`. The `/object` wrapper
 is stripped; inner keys are taken literally; inner values go through normal
-deserialization.
+decoding.
 
-**When the serializer emits `/object`:** During serialization, if a plain object
+**When the encoder emits `/object`:** During encoding, if a plain object
 has any string key that starts with `/` — regardless of how many other keys the
-object has — the serializer wraps it in one of these escapes (either `/object`
-or `/quote`; see "Encoder dispatch" below). This prevents the deserializer from
+object has — the encoder wraps it in one of these escapes (either `/object`
+or `/quote`; see "Encoder dispatch" below). This prevents the decoder from
 treating the object as a reserved form. `/object` is always a valid choice; the
 distinction between `/object` and `/quote` is a recommendation about which form
 makes the wire output most readable, not a correctness requirement.
 
 ### `/quote` — Fully Literal
 
-Wraps a value that should be returned exactly as-is, with no deserialization
+Wraps a value that should be returned exactly as-is, with no decoding
 of any nested special forms:
 
 ```json
 { "/quote": { "/Link@1": { "id": "..." } } }
 ```
 
-Deserializes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is
-*not* reconstructed. It remains a plain object.
+Decodes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is
+*not* decoded. It remains a plain object.
 
 **Freeze guarantee.** Although `/quote` skips type-tag interpretation, the
 result is still deep-frozen (arrays and plain objects within the quoted value
 are frozen via `Object.freeze()`). The immutability guarantee (see
-`1-fabric-values.md` Section 2.9) is a property of deserialization output, not
-of whether reconstruction occurred. A caller receiving a value from the
-context's `decode()` can always assume it is immutable, regardless of whether
-it came from a `/quote` path, a reconstructed type, or a plain literal.
+`1-fabric-values.md` Section 2.9) is a property of decoding output, not
+of whether decoding occurred. A caller receiving a value from the
+engine's `decode()` can always assume it is immutable, regardless of whether
+it came from a `/quote` path, a decoded type, or a plain literal.
 
 Use cases:
 - Storing schemas or examples that describe special types without instantiating
   them
 - Metaprogramming and introspection
-- Optimization: skip deserialization when the subtree is known to be plain data
+- Optimization: skip decoding when the subtree is known to be plain data
 - Round-tripping JSON structures that happen to look like special types
 
 ### When to Use Which
@@ -375,7 +375,7 @@ are valid choices. The recommended best practice is:
 - If the entire subtree to be wrapped is fully literal — i.e., it contains no
   values that would themselves need encoding as special types — emit `/quote`.
 - Otherwise (some descendant value still needs to be processed as a special
-  type during deserialization), emit `/object`.
+  type during decoding), emit `/object`.
 
 The motivation for the recommendation is wire-format readability and round-trip
 fidelity: a `/quote`-wrapped literal subtree appears in the wire format as
@@ -390,10 +390,10 @@ conforming decoder must accept both forms.** See `1-fabric-values.md` Section
 2.9 (immutability) and the freeze guarantee under `/quote` above for the
 properties a decoder preserves regardless of which form it sees.
 
-## 7. Serialization Context Responsibilities
+## 7. Codec Engine Responsibilities
 
-The JSON encoding context's internal `wrapTag()` / `#unwrapTag()` methods
-generate and parse `/<Type>@<Version>` keys. The context is also responsible
+The JSON engine's internal `wrapTag()` / `#unwrapTag()` methods
+generate and parse `/<Type>@<Version>` keys. The engine is also responsible
 for:
 
 - Owning recursion and tag-wrapping around the shallow per-type codecs
@@ -408,15 +408,15 @@ for:
   codec's throw becomes a `ProblematicValue`, and in strict mode a
   `ProblematicValue` a codec returns becomes a throw.
 
-Note: `/object` escaping (Section 6) is applied directly by the context's
-private encode walker in its plain-objects path, since it is structural
+Note: `/object` escaping (Section 6) is applied directly by the engine's
+internal encode walker in its plain-objects path, since it is structural
 escaping rather than type encoding.
 
 ## 8. Unknown Type Handling
 
 When a JSON context encounters a `/<Type>@<Version>` key it doesn't recognize,
 it wraps the data in `UnknownValue` (see `1-fabric-values.md` Section 3) to
-preserve it for round-tripping. Re-serializing reproduces the original key,
+preserve it for round-tripping. Re-encoding reproduces the original key,
 the codec's `tagForValue()` reading back the preserved tag and `encode()`
 returning the preserved bare state, so the value passes through byte for byte.
 

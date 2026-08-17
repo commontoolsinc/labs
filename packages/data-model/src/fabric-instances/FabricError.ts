@@ -28,11 +28,11 @@ import {
 } from "@/codec-common/BaseFabricInstance.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { EmptyDecodeContext } from "@/codec-interface/EmptyDecodeContext.ts";
 import {
   CODEC,
+  type DecodeContext,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
@@ -99,7 +99,7 @@ export type FabricErrorState = {
  * Like all `FabricInstance`s, a `FabricError` is wholeheartedly mutable
  * until frozen and immutable thereafter. Every mutator -- the slot setters
  * along with `setExtra` / `deleteExtra` -- throws once the instance is
- * `Object.freeze`'d. The serialization layer handles `FabricError` via its
+ * `Object.freeze`'d. The codec layer handles `FabricError` via its
  * static `[CODEC]`, which is the source of truth for the encoded form.
  * See Section 1.4.1 of the formal spec.
  */
@@ -383,14 +383,14 @@ export class FabricError extends FabricNativeWrapper<Error>
    */
   protected override [DEEP_CLONE_CORE](frozen: boolean): FabricError {
     const codec = FabricError[CODEC];
-    const reconstructContext = new EmptyReconstructionContext(
+    const decodeContext = new EmptyDecodeContext(
       frozen,
       "no runtime context (FabricError deep-clone path).",
     );
     return codec.decode(
       CODEC_TYPE_TAGS.Error,
       codec.encode(this),
-      reconstructContext,
+      decodeContext,
     ) as FabricError;
   }
 
@@ -456,7 +456,7 @@ export class FabricError extends FabricNativeWrapper<Error>
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        context: DecodeContext,
       ): FabricValue {
         const s = state as Record<string, FabricValue>;
         const type = (s.type as string) ?? (s.name as string) ?? "Error";

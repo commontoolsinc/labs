@@ -29,7 +29,7 @@ import {
 } from "@/codec-common/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import {
@@ -547,7 +547,7 @@ describe("FabricError", () => {
     describe("[CODEC]", () => {
       const codec = FabricError[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Error;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const context = EMPTY_DECODE_CONTEXT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Error` wire type tag", () => {

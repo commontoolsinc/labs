@@ -8,7 +8,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/index.ts";
+import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/index.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
@@ -24,7 +24,7 @@ import {
   TERMINAL_HOST,
 } from "./probe-engine.ts";
 
-const CONTEXT = EMPTY_RECONSTRUCTION_CONTEXT;
+const CONTEXT = EMPTY_DECODE_CONTEXT;
 
 describe("BaseCodecEngine", () => {
   describe("terminal vs. nonterminal codecs", () => {
