@@ -1,9 +1,9 @@
 # Verbs over the CLI
 
 A **verb** is a pattern's callable surface: a `Stream` property a caller invokes
-with `cf call` — or `cf piece call`, the same command mounted under `piece`, so
-every `cf call` in this document works as `cf piece call` too. This document is
-about what a caller gets *back*.
+with `cf call` — or `cf piece call`, the same command mounted under `piece`,
+which still works and warns as a deprecated spelling. This document is about
+what a caller gets *back*.
 
 A verb can declare a result, and the caller reads it off the call. That turns a
 sequence of "mutate, then go looking for what happened" into a single
