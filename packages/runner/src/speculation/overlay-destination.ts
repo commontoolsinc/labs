@@ -150,6 +150,33 @@ type OverlayEntry = {
    * lower speculation, a rejected input) contributes no floor — the
    * store won upstream and the confirmed basis governs. */
   originLocalSeqs: number[];
+  /** The doc instances this run WROTE (speculation.md §4's arrival-gated
+   * retirement, RULED 2026-08-16): the entry retires only once every one
+   * of them holds a CONFIRMED value at seq ≥ the entry's floor — the
+   * authoritative derivation for the instance this client reads has
+   * ARRIVED — not on watermark coverage of the basis alone. Coverage
+   * without arrival is exactly the retire-to-nothing loop (OW32): the
+   * echo dropped to nothing, the writer (subscribed to its own output
+   * through the scope-narrowing write path) re-derived, re-speculated,
+   * retired, forever, whenever the server never served THIS instance
+   * (a per-user node the demand walk did not reach; a served node's
+   * first wave not yet landed at boot). Empty for a run that sealed no
+   * document ops — such an entry retires on coverage as before. */
+  writtenDocs: Array<{
+    id: URI;
+    scope?: CellScope;
+    /** Whether the run's op on the doc is a whole-doc set/delete (the
+     * supersede-by-newer rider may drop an OLDER entry's layer under it
+     * invisibly) or a patch (path-relative — never dropped under). */
+    wholeDoc: boolean;
+  }>;
+  /** The scheduler action whose run sealed this entry (the writer), for
+   * the supersede-by-newer rider: a NEWER entry of the same writer whose
+   * whole-doc ops cover every doc of an older entry retires the older one
+   * (the drop of a lower layer under an upper whole-doc layer is
+   * invisible — no flip), bounding entry growth for a never-served
+   * instance that keeps changing. */
+  sourceAction?: object;
   /** Resolves when the entry's verdict has been APPLIED (pending
    * dropped). Retirement chains a re-sweep on it: a chained entry
    * blocked on this one unblocks only after the drop, which is async
@@ -347,6 +374,31 @@ export class SpeculationOverlayDestination
             for (const layer of layers) originLocalSeqs.add(layer);
           }
         }
+        // The written doc instances (arrival-gated retirement): every
+        // document op of the sealed commit, whole-doc or patch.
+        const writtenDocs = new Map<
+          string,
+          { id: URI; scope?: CellScope; wholeDoc: boolean }
+        >();
+        for (
+          const op of sealed.commit.operations as Array<
+            { id?: string; scope?: CellScope; op?: string }
+          >
+        ) {
+          if (typeof op.id !== "string") continue;
+          const key = `${op.scope ?? ""}\0${op.id}`;
+          const wholeDoc = op.op === "set" || op.op === "delete";
+          const existing = writtenDocs.get(key);
+          if (existing === undefined) {
+            writtenDocs.set(key, {
+              id: op.id as URI,
+              scope: op.scope,
+              wholeDoc,
+            });
+          } else if (!wholeDoc) {
+            existing.wholeDoc = false;
+          }
+        }
         const entry: OverlayEntry = {
           space,
           localSeq: sealed.localSeq,
@@ -354,6 +406,10 @@ export class SpeculationOverlayDestination
           confirmedFloor,
           pendingReadDocs: [...pendingDocs.values()],
           originLocalSeqs: [...originLocalSeqs],
+          writtenDocs: [...writtenDocs.values()],
+          ...(source?.sourceAction !== undefined
+            ? { sourceAction: source.sourceAction }
+            : {}),
           settled: sealed.settled.catch(() => undefined),
           ...(context?.kind === "event-handler" &&
               context.eventId !== undefined
@@ -427,6 +483,7 @@ export class SpeculationOverlayDestination
         entries = new Map();
         this.#entries.set(space, entries);
       }
+      this.#supersedeOlderEntries(entries, entry);
       entries.set(entry.localSeq, entry);
       this.#ensureWatermarkSink(space);
     }
@@ -778,6 +835,56 @@ export class SpeculationOverlayDestination
     if (entries.size === 0) this.#entries.delete(space);
   }
 
+  /**
+   * The supersede-by-newer rider (speculation.md §4, RULED 2026-08-16):
+   * a NEWER entry of the same writer whose WHOLE-DOC ops cover every doc
+   * an older entry wrote retires the older one at seal — dropping a
+   * lower layer under an upper whole-doc layer is invisible (the view
+   * reads the upper `set`/`delete` either way; no flip, no
+   * re-derivation), and it bounds entry growth for a never-served
+   * instance that keeps changing (the arrival gate above keeps such
+   * entries alive on purpose). An older entry any of whose docs the
+   * newer one PATCHES is kept: a patch is path-relative to the layer
+   * beneath it, so dropping that layer would change what the patch
+   * applies over.
+   */
+  #supersedeOlderEntries(
+    entries: Map<number, OverlayEntry>,
+    entry: OverlayEntry,
+  ): void {
+    if (entry.sourceAction === undefined || entry.writtenDocs.length === 0) {
+      return;
+    }
+    const covered = new Set(
+      entry.writtenDocs
+        .filter((doc) => doc.wholeDoc)
+        .map((doc) => `${doc.scope ?? ""}\0${doc.id}`),
+    );
+    if (covered.size === 0) return;
+    for (const older of [...entries.values()]) {
+      if (
+        older === entry || older.localSeq >= entry.localSeq ||
+        older.sourceAction !== entry.sourceAction ||
+        older.eventId !== undefined || older.writtenDocs.length === 0
+      ) {
+        continue;
+      }
+      const allCovered = older.writtenDocs.every((doc) =>
+        covered.has(`${doc.scope ?? ""}\0${doc.id}`)
+      );
+      if (!allCovered) continue;
+      entries.delete(older.localSeq);
+      older.resolveVerdict({
+        withdrawn: {
+          message: "speculation superseded by a newer speculation of the " +
+            "same writer over the same instances (speculation.md §4's " +
+            "supersede-by-newer rider)",
+          superseded: true,
+        },
+      });
+    }
+  }
+
   #ensureWatermarkSink(space: MemorySpace): void {
     this.#ensureAckObserver(space);
     if (this.#watermarkSinks.has(space)) return;
@@ -900,6 +1007,28 @@ export class SpeculationOverlayDestination
           }
         }
         if (blocked || watermark < floor) continue;
+        // The ARRIVAL gate (speculation.md §4, RULED 2026-08-16): coverage
+        // of the basis is necessary, not sufficient — every doc instance
+        // this run wrote must hold a CONFIRMED value at seq ≥ floor, i.e.
+        // the store has actually spoken for the instance this client
+        // reads. Otherwise dropping the layer flips the doc to nothing
+        // (or to a stale value) and the writer — a reader of its own
+        // output through the scope-narrowing write path — re-derives
+        // forever (the OW32 client loop). The echo stays until the
+        // authoritative value lands; a served node still retires the
+        // moment its derived value arrives (the watermark write rides the
+        // same wave commit, so the watermark sink re-sweeps at arrival).
+        // Backstop for the demand walk's coverage gaps (fan-out design
+        // §E residual 4) and the first-demand transient (§E residual 1).
+        let arrived = true;
+        for (const doc of entry.writtenDocs) {
+          const state = view(doc.id, doc.scope);
+          if (state.confirmedSeq === 0 || state.confirmedSeq < floor) {
+            arrived = false;
+            break;
+          }
+        }
+        if (!arrived) continue;
         entries.delete(entry.localSeq);
         entry.resolveVerdict({
           withdrawn: {

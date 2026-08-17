@@ -4579,7 +4579,7 @@ class SpaceReplica implements ISpaceReplica {
   private finalizeSupersededSpeculation(
     localSeq: number,
     operations: NativeCommitOperation[],
-    _source: IStorageTransaction | undefined,
+    source: IStorageTransaction | undefined,
     identity?: ScopeKeyIdentity,
   ): Result<Unit, StorageTransactionRejected> {
     const touched = this.#touchedOf(operations, identity);
@@ -4601,10 +4601,14 @@ class SpaceReplica implements ISpaceReplica {
     if (before !== undefined) {
       const changes = before.compare(this);
       if ([...changes].length > 0) {
+        // The flip carries the retiring echo's own transaction as its
+        // source (speculation.md §4's "own retirement is not a trigger"
+        // rider): the writer's scheduler node skips its own flip.
         this.#subscription.next({
           type: "integrate",
           space: this.#space,
           changes,
+          ...(source !== undefined ? { source } : {}),
         } as StorageNotification);
         if (shouldNotifySinks) {
           this.notifySinks(changes);

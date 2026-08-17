@@ -85,10 +85,15 @@ On each pushed `derived` commit with `derivedThrough = W` and
    the authoritative consequences (or, for a dropped event, its
    notice — events.md §5) now exist; the echo's job is done.
 3. Retire overlay entries whose `origin` is `input` once their authored
-   commit is acked AND `W ≥` that commit's seq — regardless of value
-   agreement (the store wins); keep live-input echoes whose authored
-   commit is still unacked or not yet covered by `W` (the user is
-   mid-typing).
+   commit is acked AND `W ≥` that commit's seq AND — the ARRIVAL GATE
+   (RULED 2026-08-16, landed with fan-out stage A) — every doc INSTANCE
+   the entry wrote holds a CONFIRMED value at seq `≥` that floor (the
+   authoritative derivation for the instance this client reads has
+   ARRIVED) — regardless of value agreement (the store wins); keep
+   live-input echoes whose authored commit is still unacked or not yet
+   covered by `W` (the user is mid-typing), and keep echoes whose
+   written instance the store has not yet spoken for (nothing to win
+   with — see the arrival-gate paragraph below).
 4. If any local intents remain un-consequenced (offline queue, in-flight
    events), re-run their speculation against the fresh store state so
    the echo rebases instead of going stale.
@@ -101,16 +106,65 @@ suppression beyond what rebasing gives.
 Stated honestly (RULED 2026-08-07; owed from the wedge round), and
 scoped to step 3's INPUT-origin entries — step 2's intent-origin
 entries retire on their event appearing in `consequenceOf`, which IS
-the authoritative consequence arriving: an input-origin entry retires
-on watermark coverage of its BASIS, not on value ARRIVAL — "the store
-wins" carries no by-construction guarantee that the store HOLDS what
+the authoritative consequence arriving: coverage of an entry's BASIS
+alone carries no by-construction guarantee that the store HOLDS what
 won at withdrawal time (W covers DEMANDED derivations; nothing about
 an entry's own output riding the covering wave is implied). What makes
-retirement safe is the serving loop's first-round reliability
-machinery — the demanded-structure loads with their counted, retried
-deferrals (serving-loop.md §7's `structureLoadDeferred` /
-`structureLoadFailures` counters over §1/§3's per-cycle load pass) —
-which makes the demanded derivation exist and land.
+coverage-based retirement safe is the serving loop's first-round
+reliability machinery — the demanded-structure loads with their
+counted, retried deferrals (serving-loop.md §7's
+`structureLoadDeferred` / `structureLoadFailures` counters over §1/§3's
+per-cycle load pass) — which makes the demanded derivation exist and
+land. That premise is FALSE for a scoped instance the server never
+serves (before the fan-out run supply, every per-user derivation is
+such an instance — the demand registry keeps no identity for a
+space-scoped root; and after it, any per-user subtree the demand walk
+does not reach), and coverage without arrival is then the
+retire-to-nothing loop the P7 review recorded as OW32: the echo dropped
+to nothing, the writer — a reader of its own output through the
+scope-narrowing write path — re-derived, re-speculated, retired,
+forever, at ~80 ms cycles bounded per pass only by the scheduler's
+budget.
+
+**The arrival gate (RULED 2026-08-16 — owner, on the fan-out design
+panel's recommendation; landed with fan-out stage A):** step 3
+additionally requires ARRIVAL — every doc instance the entry wrote
+holds a confirmed value at seq ≥ the entry's floor. The panel's
+rationale: the gate is the client's BACKSTOP for demand-walk coverage
+gaps (fan-out design §E residual 4) and the first-demand transient (§E
+residual 1 — a node whose basis W already covers at speculation time
+retires before the server's first wave lands), and it is independent
+of the server half: it treats the SYMPTOM (a never-served instance
+flips to nothing) while stage B's fan-out run supply fixes the CAUSE
+(the instance is never served). Consequences, exact: a served node
+still retires the moment its derived value arrives — the watermark
+write rides the same wave commit, so the covering sweep sees the
+value; an echo whose instance nobody serves persists as the client's
+own value (correct rendering; no durability of per-user derived values,
+of which there was none before either); an unchanged authoritative
+value (equality cutoff — no rewrite, so the doc's seq stays below the
+floor) leaves the echo standing rather than retiring it, which is
+value-identical. Two riders ride with the gate: SUPERSEDE-BY-NEWER — a
+newer entry of the same writer whose WHOLE-DOC ops cover every doc an
+older entry wrote retires the older one at seal (the drop of a lower
+layer under an upper whole-doc layer is invisible; a patch is
+path-relative to the layer beneath and never supersedes), bounding
+entry growth for a never-served instance that keeps changing; and
+OWN-RETIREMENT-IS-NOT-A-TRIGGER — the `integrate` a retiring echo
+produces carries the echo's own transaction as its source, so the
+scheduler treats the flip of an action's own output like its own
+commit and does not re-run the writer for it (a divergent
+authoritative value would otherwise re-derive, re-speculate, retire,
+and flip forever); downstream readers are unaffected. Impl:
+`packages/runner/src/speculation/overlay-destination.ts` (`#sweep`'s
+gate, `#supersedeOlderEntries`), the replica's superseded flip
+(`finalizeSupersededSpeculation` — `IIntegrateNotification.source`),
+and the scheduler's own-source skip (`scheduler/invalidation.ts`);
+pinned in `speculation-arrival-gate.test.ts` (each with its mutation).
+The measured effect that motivated the ruling (the OW32 triage's
+prototype, 2026-08-16): 45–56 k → 55–137 client action runs per
+5-minute two-browser gate, zero non-settling episodes, `runtime:idle`
+resolving, both two-browser gates booting in < 3 s.
 
 ## 5. Offline
 

@@ -157,7 +157,14 @@ export function processStorageNotification(
       const actionType = actionIsEffect ? "effect" : "computation";
       const pendingBefore = state.pending.has(action);
       const dirtyBefore = state.isInvalid(action);
-      const isOwnCommitSource = notification.type === "commit" &&
+      // Own-commit-source skip (spec scheduler-v2 P5), and its
+      // speculation twin (server-execution v2, speculation.md §4 — the
+      // "own retirement is not a trigger" rider, RULED 2026-08-16): the
+      // `integrate` a retiring echo produces carries the echo's own
+      // transaction as `source`, so the writer does not re-run for the
+      // flip of its OWN output to the authoritative value.
+      const isOwnCommitSource =
+        (notification.type === "commit" || notification.type === "integrate") &&
         notification.source !== undefined &&
         notification.source.sourceAction === action;
       const plan = planPullTriggeredAction({

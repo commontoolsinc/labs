@@ -674,6 +674,21 @@ export interface IIntegrateNotification {
   type: "integrate";
   space: MemorySpace;
   changes: IMergedChanges;
+  /**
+   * Present ONLY on the flip a SPECULATION retirement produces
+   * (server-execution v2, speculation.md §4's arrival-gated retirement,
+   * RULED 2026-08-16 — the "own retirement is not a trigger" rider): the
+   * retiring entry's own transaction, so the scheduler treats the flip
+   * of an action's OWN echo like its own commit source and does not
+   * re-run the writer for it. A writer subscribed to its own output
+   * (the scope-narrowing write path reads the redirect slot and its
+   * diff base) would otherwise re-derive on every retirement whose
+   * authoritative value differs from its echo — re-speculate, retire,
+   * flip, forever. Downstream readers of the doc are unaffected (they
+   * are not the source). Absent on every other integrate (foreign
+   * novelty, watch refreshes) — byte-identical there.
+   */
+  source?: IStorageTransaction;
 }
 
 /**
