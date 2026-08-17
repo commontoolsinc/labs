@@ -16,11 +16,11 @@
 # line that ran cannot drift apart. What a reader sees is what they can retype,
 # given the two environment variables the header names.
 #
-# Two acts are marked PENDING. They print the command and the result they will
-# produce, without running it, because the capability is sequenced and not yet
-# built (docs/plans/references-as-arguments.md). They are deliberately visible —
-# a demo that quietly omits what does not work teaches a surface that does not
-# exist.
+# No act is marked PENDING today. `pending` stays for the next capability
+# that is sequenced but unbuilt: it prints the command and the result it will
+# produce, without running it, so what does not work yet stays deliberately
+# visible — a demo that quietly omits what does not work teaches a surface
+# that does not exist.
 #
 # No act is marked BROKEN today. `broken` stays for the next one that is: it
 # checks that the defect an act claims still answers to its own signature, so
@@ -186,11 +186,11 @@ run cf piece verbs -s "$SPACE" --piece board
 
 act "3 · Ask what a verb wants"
 say "Flags, types, required-ness and result all come from the author's TypeScript."
-run cf piece call -s "$SPACE" --piece board addItem -- --help
+run cf call -s "$SPACE" --piece board addItem -- --help
 
 act "4 · Create, and act on what you were handed"
 say "The create returns the piece it made. Its address is the next command's target."
-run cf piece call -s "$SPACE" --piece board --select item@ addItem -- --title "Login rewrite"
+run cf call -s "$SPACE" --piece board --select item@ addItem -- --title "Login rewrite"
 # The address the reader can see in the output above, carried whole. Taken
 # from that run, not from a second one: `run` leaves the output it displayed
 # in $OUT. It is one reference string, used exactly as printed: `get` and
@@ -209,63 +209,64 @@ say "from the piece in front of you, so an address is enough to discover a"
 say "surface you were never told about."
 say "On get and call the address needs no flag at all: it begins with '/' and"
 say "a path never does, so it stands bare in the first position."
-run cf piece call -s "$SPACE" "$EPIC" addChild -- --title "Session cookies"
+run cf call -s "$SPACE" "$EPIC" addChild -- --title "Session cookies"
 say "The item it hands back can be reached from inside itself: its parent holds"
 say "it, and it holds its parent. The position where the author's own type"
 say "re-enters answers with an address, so the whole result is still one value."
 # Read options come before the address: the first positional starts the
 # callable's own command line, so a flag after it belongs to the verb.
-run cf piece call -s "$SPACE" --select item.title "$EPIC" addChild -- --title "CSRF tokens"
+run cf call -s "$SPACE" --select item.title "$EPIC" addChild -- --title "CSRF tokens"
 say "And a caller who names one field is given one field, circle or no circle."
 
 act "5 · Read addresses instead of contents"
 say "An unshaped read follows every link. A bare @ stops at the address."
-run cf piece get -s "$SPACE" "$EPIC" children --select @,title
+run cf get -s "$SPACE" "$EPIC" children --select @,title
 
 act "6 · Ask the same question twice"
 say "The first thing anyone watching says is 'show me that again'."
-run cf piece get -s "$SPACE" "$EPIC" children --select @,title
+run cf get -s "$SPACE" "$EPIC" children --select @,title
 say "The same answer. A projection is a question you may ask twice, which is"
 say "what makes any of the reads above safe to put in a script — as here: the"
 say "child the next acts drive is taken from the answer just shown."
 # From the run the reader watched, not from a hidden second read: acts 8 and 9
-# drive this child, and its address sits in $OUT under the title it was filed
-# with.
+# drive the first child, act 12 relates it to the second, and both addresses
+# sit in $OUT under the titles they were filed with.
 KID=$(printf '%s' "$OUT" | jq -r '.[] | select(.title=="Session cookies")."$link"')
+CSRF=$(printf '%s' "$OUT" | jq -r '.[] | select(.title=="CSRF tokens")."$link"')
 
 act "7 · A verb returns what only the pattern could compute"
 say "The note's timestamp is the pattern's; the caller never supplied one."
-run cf piece call -s "$SPACE" "$EPIC" recordNote -- --body "blocked on the cookie spec"
+run cf call -s "$SPACE" "$EPIC" recordNote -- --body "blocked on the cookie spec"
 
 act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
 say "A grandchild is filed first, under the child act 6 handed back, so there"
 say "is a subtree to walk."
-run cf piece call -s "$SPACE" --select item.title "$KID" addChild -- --title "Rotate signing key"
-run cf piece call -s "$SPACE" "$EPIC" finish -- --body "shipping behind a flag"
+run cf call -s "$SPACE" --select item.title "$KID" addChild -- --title "Rotate signing key"
+run cf call -s "$SPACE" "$EPIC" finish -- --body "shipping behind a flag"
 
 act "9 · A verb that declares no result"
 say "archive is Stream<void>: nothing to supply, nothing handed back. The call"
 say "is the verb's name alone, and the invocation settles carrying no result"
 say "at all."
-run cf piece call -s "$SPACE" "$KID" archive
+run cf call -s "$SPACE" "$KID" archive
 say "What it changed is a read away, on the one field the caller never sets —"
 say "and the address may carry the path, so one word names the piece and the"
 say "field in it."
-run cf piece get -s "$SPACE" "$KID/status"
+run cf get -s "$SPACE" "$KID/status"
 
 act "10 · Step back and read the board"
 say "Every change so far was seen one call at a time. One read from the name"
 say "the session started with shows the tree they add up to."
-run cf piece get -s "$SPACE" --piece board items --select title,status,children@
+run cf get -s "$SPACE" --piece board items --select title,status,children@
 say "Act 8 paid one verb call for depth — openBelow walked the subtree. Breadth"
 say "is a read: a filter decides membership before projection, so status picks"
 say "the elements and only title comes back."
-run cf piece get -s "$SPACE" "$EPIC" children --select title --filter '.status == "open"'
+run cf get -s "$SPACE" "$EPIC" children --select title --filter '.status == "open"'
 # The two halves of that question do not combine, and the refusal's own message
 # carries the reason, so nothing restates it here.
 refused "an address suffix under a filter" \
-  cf piece get -s "$SPACE" "$EPIC" children \
+  cf get -s "$SPACE" "$EPIC" children \
   --select @,title --filter '.status == "open"'
 
 act "11 · Ask for something that is not there"
@@ -277,34 +278,33 @@ say "the other half of a surface knowing its own vocabulary."
 # reason, and an act that cannot tell those apart would read the same before and
 # after this capability arrived.
 refused "a field the verb does not declare" \
-  cf piece call -s "$SPACE" --piece board addItem \
+  cf call -s "$SPACE" --piece board addItem \
   '{"title":"Ship it","titel":"typo"}'
 refused "a keyword the projection reader does not recognize" \
-  cf piece get -s "$SPACE" "$EPIC" children \
+  cf get -s "$SPACE" "$EPIC" children \
   --schema '{"type":"array","items":{"type":"object","propertes":{"title":true}}}'
 say "One shape of answer from both ends: what was wrong, the position it sat at,"
 say "what that position accepts, and the nearest thing you probably meant. The"
 say "call was turned down before an invocation was spent."
 
-act "12 · Relate two items — PENDING"
+act "12 · Relate two items"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
-pending "cf piece call -s $SPACE <cookies-address> blockOn -- --on <csrf-address>" \
-  "an address cannot yet be a verb argument (references-as-arguments.md)" \
-  '{
-  "status": "settled",
-  "result": {
-    "blocked":         { "$link": "/of:fid1:…", "title": "Session cookies" },
-    "on":              { "$link": "/of:fid1:…", "title": "CSRF tokens" },
-    "blockedOnCount":  1
-  }
-}'
+say "The spelling this session taught throughout — the address as printed — is"
+say "the one thing still refused here (references-as-arguments.md)."
+refused "the address a read emits, as a verb argument" \
+  cf call -s "$SPACE" "$KID" blockOn -- --on "$CSRF"
+say "The capability itself landed: wrap the same address in the link envelope"
+say "by hand, and the edge that lands is the target rather than a copy. The"
+say "assembly is the workaround; the refusal above is this act's claim that it"
+say "is still needed, and the day it stops being refused, this act says so."
+run cf call -s "$SPACE" --select blocked@,on@,blockedOnCount "$KID" blockOn "{\"on\":{\"/\":{\"link@1\":{\"id\":\"${CSRF#/}\"}}}}"
 
-act "13 · One item, two paths, one address — PENDING"
-say "This is what addresses are for: the same item under a parent AND as a blocker,"
-say "and a caller can tell it is one item rather than two copies."
-pending "cf piece get -s $SPACE --piece board items --select title,children@,blockedOn@" \
-  "needs the edge from act 12" \
-  'the same of:fid1:… appears under one item'"'"'s children and another'"'"'s blockedOn'
+act "13 · One item, two paths, one address"
+say "This is what addresses are for: the same item under a parent AND as a"
+say "blocker, and a caller can tell it is one item rather than two copies."
+run cf get -s "$SPACE" "$EPIC" children --select @,title,blockedOn@
+say "One address, two positions: the same string sits in the row that holds"
+say "the item and in the blockedOn of the item that waits on it."
 
 printf '\n%s━━ %s %s\n' "$B" "What just happened" "$N"
 say "No tool was written for this tracker. Every flag, type, listing and result"
@@ -316,9 +316,11 @@ say "is the composition the verb surface exists for. On those lines the flags"
 say "that remain name the space and shape the answer; the slug keeps --piece,"
 say "and a verb's own flags stay the verb's."
 say ""
-say "Acts 12 and 13 are the graph half, sequenced as references-as-arguments."
-say "verb-session-gaps.sh asserts both, and fails the day either one starts"
-say "working — so this demo cannot quietly go stale."
+say "Acts 12 and 13 are the graph half, live minus one spelling: the printed"
+say "address is still refused as an argument, and the envelope assembly beside"
+say "that refusal retires the day it stops being refused — act 12 and"
+say "verb-session-gaps.sh both report that day, so this demo cannot quietly"
+say "go stale."
 
 if [ "$UNEXPECTED" != "0" ]; then
   printf '\n%s━━ %d act(s) failed that this demo says work%s\n' \

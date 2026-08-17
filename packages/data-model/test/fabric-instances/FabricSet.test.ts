@@ -20,7 +20,7 @@ import {
 } from "@/codec-common/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
@@ -111,7 +111,7 @@ describe("FabricSet", () => {
     describe("[CODEC]", () => {
       const codec = FabricSet[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Set;
-      const context = EMPTY_DECODE_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Set` wire type tag", () => {
@@ -136,7 +136,7 @@ describe("FabricSet", () => {
 
       describe("decode()", () => {
         it("throws (stub)", () => {
-          expect(() => codec.decode(expectedTag, null, context)).toThrow(
+          expect(() => codec.decode(expectedTag, null, env)).toThrow(
             "not yet implemented",
           );
         });

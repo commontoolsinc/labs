@@ -215,6 +215,9 @@ Each of these gates fails CI on its own, and none of them run as part of
   in a file, which `docs/` has no other mechanical gate against
 - `deno task check-skill-facts` — a path or import cited by a skill, an
   `AGENTS.md`, or a rule that stopped resolving
+- `deno task check-verb-session-sync` — a `cf` command or act reference in
+  `docs/common/verb-session-walkthrough.md` that its demo script does not back;
+  the walkthrough quotes commands, never composes them
 - `deno task check-single-copy-deps`, `check-unused-deps`, `check-deno-pins` —
   dependency declarations across the workspace
 - `deno task check-baselines-append-only` — a pattern baseline that was deleted

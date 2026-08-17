@@ -13,8 +13,8 @@ interface WorkflowArgs {
 }
 
 interface TransitionEvent {
-  target?: unknown;
-  note?: unknown;
+  target?: string;
+  note?: string;
 }
 
 type TransitionResult = "accepted" | "rejected";

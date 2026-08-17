@@ -1905,6 +1905,23 @@ export function wish(
     sendResult(tx, scoped);
   }
 
+  /**
+   * Counts a sidecar pattern's deferred launch — the fetch, and the run that
+   * follows it — as outstanding scheduler work.
+   *
+   * A wish emits a sidecar's surface into the view before the pattern behind it
+   * exists: the `[UI]` it sends is a `cf-render` bound to a result cell that
+   * only the launch fills. Between the send and the landing the scheduler has
+   * nothing to run, so without this the runtime reports itself idle while a
+   * surface the page is about to grow is still on its way. Anything read off
+   * the layout in that window is read off a page that has not finished
+   * arriving — a click point most of all, since content appearing above a
+   * control moves it out from under the point the click was aimed at.
+   */
+  function trackSidecarLaunch(launch: Promise<unknown>): void {
+    runtime.scheduler.trackBackgroundTask(launch);
+  }
+
   function launchSuggestionPattern(
     input: {
       situation: string;
@@ -1928,7 +1945,7 @@ export function wish(
     const cachedSuggestionPattern = suggestionPatternCache.cached();
     if (!cachedSuggestionPattern) {
       // Once fetch completes, run the pattern without a tx (it creates its own)
-      void suggestionPatternCache.fetch(runtime).then(
+      const launch = suggestionPatternCache.fetch(runtime).then(
         (pattern) => {
           if (!cancelled && pattern && suggestionPatternResultCell) {
             runtime.run(
@@ -1940,6 +1957,7 @@ export function wish(
           }
         },
       );
+      trackSidecarLaunch(launch);
     } else {
       if (!cancelled && suggestionPatternResultCell) {
         runtime.run(
@@ -1962,38 +1980,44 @@ export function wish(
   // Renders an error message into a pattern result cell in its own committed
   // transaction. Used when a deferred system-pattern run fails after the
   // originating wish transaction has already gone.
-  function commitPatternErrorUI(
+  async function commitPatternErrorUI(
     resultCell: Cell<any>,
     message: string,
-  ): void {
+  ): Promise<void> {
     const errorTx = runtime.edit();
     resultCell.withTx(errorTx).set({ [UI]: errorUI(message) });
     runtime.prepareTxForCommit(errorTx);
-    errorTx.commit();
+    const { error } = await errorTx.commit();
+    // The account of the failure failed to land, so the surface stays blank
+    // and this is the only place the reason exists. Writing it again would
+    // meet whatever refused it the first time.
+    if (error) {
+      console.error(
+        `Can't report "${message}" in the surface it belongs to`,
+        error,
+      );
+    }
   }
 
   // Run a just-fetched sidecar pattern (profile create / picker) into its result
   // cell on its own committed transaction, surfacing any commit failure as an
   // error UI in that cell. Shared by launchProfileCreatePattern and
   // launchProfilePickerPattern so the commit/error lifecycle lives in one place.
-  function runSidecarInOwnTx(
+  async function runSidecarInOwnTx(
     resultCell: Cell<any>,
     pattern: Pattern,
     inputForTx: (tx: IExtendedStorageTransaction) => unknown,
-  ): void {
+  ): Promise<void> {
     try {
       const runTx = runtime.edit();
       runtime.run(runTx, pattern, inputForTx(runTx), resultCell.withTx(runTx));
       runtime.prepareTxForCommit(runTx);
-      runTx.commit().then(({ error }) => {
-        if (error) {
-          commitPatternErrorUI(resultCell, toCompactDebugString(error));
-        }
-      }).catch((error) => {
-        commitPatternErrorUI(resultCell, errorMessage(error));
-      });
+      const { error } = await runTx.commit();
+      if (error) {
+        await commitPatternErrorUI(resultCell, toCompactDebugString(error));
+      }
     } catch (error) {
-      commitPatternErrorUI(resultCell, errorMessage(error));
+      await commitPatternErrorUI(resultCell, errorMessage(error));
     }
   }
 
@@ -2053,22 +2077,38 @@ export function wish(
 
     const cachedProfileCreatePattern = profileCreatePatternCache.cached();
     if (!cachedProfileCreatePattern) {
-      void profileCreatePatternCache.fetch(runtime, () => {
+      const launch = profileCreatePatternCache.fetch(runtime, () => {
         if (profileCreatePatternReadyCell) {
           const readyTx = runtime.edit();
           profileCreatePatternReadyCell.withTx(readyTx).set(true);
           runtime.prepareTxForCommit(readyTx);
-          readyTx.commit();
+          trackSidecarLaunch(readyTx.commit());
         }
       }).then((pattern) => {
-        if (!cancelled && pattern && profileCreatePatternResultCell) {
-          runSidecarInOwnTx(
+        if (cancelled || !profileCreatePatternResultCell) return;
+        if (pattern) {
+          return runSidecarInOwnTx(
             profileCreatePatternResultCell,
             pattern,
             profileCreateInputForTx,
           );
         }
+        // Fetch/compile failed, or a later fetch for a changed apiUrl
+        // superseded this one (createSidecarPatternCache swallows the error and
+        // resolves to undefined in both cases). The create surface is the only
+        // way a user with no profile gets one, and nothing re-triggers this
+        // launch, so a silent undefined leaves that surface blank for the life
+        // of the piece. Say so in the cell the surface renders from — unless a
+        // later fetch has since landed a pattern, whose surface is in that same
+        // cell and is the better answer than this launch's failure.
+        if (!profileCreatePatternCache.cached()) {
+          return commitPatternErrorUI(
+            profileCreatePatternResultCell,
+            `Can't load profile-create.tsx`,
+          );
+        }
       });
+      trackSidecarLaunch(launch);
     } else if (!cancelled && profileCreatePatternResultCell) {
       runtime.run(
         tx,
@@ -2157,11 +2197,11 @@ export function wish(
 
     const cachedProfilePickerPattern = profilePickerPatternCache.cached();
     if (!cachedProfilePickerPattern) {
-      void profilePickerPatternCache.fetch(runtime).then(
+      const launch = profilePickerPatternCache.fetch(runtime).then(
         (pattern) => {
           if (cancelled || !profilePickerPatternResultCell) return;
           if (pattern) {
-            runSidecarInOwnTx(
+            return runSidecarInOwnTx(
               profilePickerPatternResultCell,
               pattern,
               pickerInputForTx,
@@ -2173,7 +2213,7 @@ export function wish(
             // `.result` is unaffected: under CT-1829 it rides the main wish state
             // (ordered[0]), not this sidecar (a superseded fetch also resolves
             // to undefined — a benign extra error UI on a since-replaced cell).
-            commitPatternErrorUI(
+            return commitPatternErrorUI(
               profilePickerPatternResultCell,
               `Can't load profile-picker.tsx`,
             );
@@ -2183,12 +2223,13 @@ export function wish(
         // Defensive: a throw inside the `.then` body (or a truly-rejecting
         // fetch) would otherwise be an unhandled rejection. Surface it too.
         if (!cancelled && profilePickerPatternResultCell) {
-          commitPatternErrorUI(
+          return commitPatternErrorUI(
             profilePickerPatternResultCell,
             errorMessage(error),
           );
         }
       });
+      trackSidecarLaunch(launch);
     } else if (!cancelled && profilePickerPatternResultCell) {
       runtime.run(
         tx,

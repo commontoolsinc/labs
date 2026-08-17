@@ -1,7 +1,7 @@
 /**
  * The far side of the boundary this format exists for. It decodes what
  * arrives and reports what it got, so that a test can assert on the value as
- * reconstructed in a *different realm* rather than in the one that encoded it.
+ * decoded in a *different realm* rather than in the one that encoded it.
  *
  * Not a `*.test.ts` file, so the runner does not pick it up as a suite.
  */
@@ -77,7 +77,7 @@ self.onmessage = (ev: MessageEvent) => {
           // distinct, and this is where that gets checked against the
           // transport actually in use rather than same-realm: had cloning
           // deduplicated it against the real marker, it would arrive here as
-          // a reconstructed value instead of the array it went out as.
+          // a decoded value instead of the array it went out as.
           lookalikeIsArray: Array.isArray(value.lookalike),
           lookalikeTag: Array.isArray(value.lookalike)
             ? value.lookalike[1]

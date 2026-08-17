@@ -2661,7 +2661,8 @@ export type AssertRawPart = {
  *
  * It is one record on both paths rather than `true | AssertPart[]`, because a
  * union return infers as `unknown`, and a field whose schema is
- * `{ type: "unknown" }` reads back as `undefined`.
+ * `{ type: "unknown" }` is not materialized: it reads back as an opaque
+ * reference carrying none of the value's properties.
  */
 export type AssertRecord = {
   ok: boolean;

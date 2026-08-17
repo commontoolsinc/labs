@@ -12,7 +12,10 @@ The subject is a work-item tracker — items in a tree, plus typed cross-links.
 It is a real pattern: `packages/cli/integration/pattern/tracker.tsx`, which
 belongs to this document and the two scripts beside it, so a change to a
 pattern the product ships can never break a demonstration of the verb surface.
-Every measurement below was taken against it on a local toolshed.
+The scripts are `packages/cli/integration/verb-session-demo.sh`, the session as
+it is meant to read, and `packages/cli/integration/verb-session-gaps.sh`, the
+gap harness CI runs to keep the **[today]**/**[blocked]** marks below honest.
+Every measurement below was taken against that pattern on a local toolshed.
 
 **Every step is marked for what is real.** The point of the document is the
 line between them.
@@ -57,7 +60,7 @@ verbs, and they differ in nothing but what the new item is filed under:
 | `recordNote` | returns what only the pattern could compute: the clock is a handler capability, so the stamp cannot come from the caller | act 7 |
 | `finish` | returns a derived fact — `openBelow` takes a walk of the whole subtree, which a caller would pay N reads for | act 8 |
 | `archive` | declares no result: the invocation settles carrying no `result` at all, and what it changed is a separate read | act 9 |
-| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12, **[blocked]** |
+| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12 — the envelope spelling works, the printed-address spelling is refused |
 
 Those act numbers are `packages/cli/integration/verb-session-demo.sh`, which
 drives the session and prints each command before running it — the transcript is
@@ -67,6 +70,13 @@ pass/fail, and several of its steps assert that something does *not* work yet,
 failing loudly the day it does. A verb added to the fixture wants a row above, an
 act in the demo, and a step in the harness; a shape demonstrated in none of the
 three is a claim this document is making alone.
+
+This document quotes commands and never composes them: every `cf` line in a
+bash block below is a line the demo runs — or carries a `# not in the demo`
+comment saying why it cannot be — and every act number names an act the demo
+has. `deno task check-verb-session-sync` enforces both, so a command here
+cannot be wrong in a way the demo would have caught, and an act reference
+cannot go stale under renumbering.
 
 ## What you are driving
 
@@ -167,7 +177,8 @@ measured at 3183 bytes for a single child on this pattern. Naming what you want
 brings it to 51:
 
 ```bash
-cf piece get <item-address> children --select 'title,status'
+# not in the demo — the byte measurement's own illustration
+cf get <item-address> children --select 'title,status'
 ```
 
 That is not a workaround; it is the read model working. A schema is a query,
@@ -187,8 +198,9 @@ of the verb's own help page. Step 2 has the measurement.
 An address a person can type, rather than a fid from a previous command.
 
 ```bash
+# not in the demo — the demo deploys straight against a live toolshed
 cf test tracker.test.tsx
-cf piece new tracker.tsx --test tracker.test.tsx --slug board
+cf piece new packages/cli/integration/pattern/tracker.tsx --slug board
 cf piece verbs --piece board
 ```
 
@@ -218,7 +230,7 @@ same words are the summary line.
 ## 2. Ask what a verb wants **[today]**
 
 ```bash
-cf piece call --piece board addItem -- --help
+cf call --piece board addItem -- --help
 ```
 
 ```text
@@ -356,7 +368,8 @@ author to write it, since it sits beside the type it describes.
 ## 3. Complete against the live piece **[today]**
 
 ```bash
-cf piece call --piece board <TAB>
+# not in the demo — completion needs a terminal
+cf call --piece board <TAB>
 addItem
 ```
 
@@ -375,12 +388,12 @@ needs.
 ## 4. Create, and carry the address forward **[today]**
 
 ```bash
-EPIC=$(cf piece call --piece board --select 'item@' addItem -- \
+EPIC=$(cf call --piece board --select 'item@' addItem -- \
        --title "Login rewrite" | jq -r '.result.item."$link"')
 
-cf piece call "$EPIC" addChild -- --title "Session cookie handling"
-cf piece call "$EPIC" recordNote -- --body "Blocked on the cookie spec"
-cf piece get "$EPIC/status"
+cf call "$EPIC" addChild -- --title "Session cookies"
+cf call "$EPIC" recordNote -- --body "blocked on the cookie spec"
+cf get "$EPIC/status"
 ```
 
 **This is the composition the surface exists for.** A create hands back the
@@ -441,10 +454,9 @@ shows the full exchange.
 ## 5. Read the tree back, bounded **[today]**
 
 ```bash
-cf piece get --piece board items --select 'title,status,children@'
+cf get --piece board items --select 'title,status,children@'
 
-cf piece get --piece board items --select 'title,status' \
-  --filter '.status != "done"'
+cf get "$EPIC" children --select title --filter '.status == "open"'
 ```
 
 Two commands rather than one, because **an `@` suffix and `--filter` are
@@ -471,27 +483,47 @@ their own options go.
 The demo's act 10 is this step run against the session's own tree: the whole
 board first, then only what is open, then the refusal.
 
-## 6. Relate two items **[blocked]**
+## 6. Relate two items **[today]**, minus one spelling
 
 ```bash
-cf piece call "$EPIC" blockOn -- --on "$OTHER"
+cf call "$KID" blockOn -- --on "$CSRF"
 ```
 
-This is where the session stops.
+That spelling — the address exactly as a read printed it — is the one still
+refused (#5880 landed the capability, not the round trip). Wrap the same
+address in the link envelope by hand and the call dispatches, the edge that
+lands is the target rather than a copy, and the graph read below shows one
+item under two paths:
+
+```bash
+cf call --select blocked@,on@,blockedOnCount "$KID" blockOn '{"on":{"/":{"link@1":{"id":"of:fid1:…"}}}}'
+
+cf get "$EPIC" children --select @,title,blockedOn@
+```
+
+The demo's acts 12 and 13 run all three: the refusal as a claim that
+self-reports the day the printed address is accepted, the envelope as the
+workaround it is, and the two-paths read as the payoff addresses exist for.
 
 ## The composition axis
 
 Steps 4 and 6 are the same move — take an address out of one command and put it
-into the next — and only one of them works.
+into the next — and the receiver half works in full while the argument half
+works only under a spelling no read emits.
 
 | Direction | State |
 | --- | --- |
 | address → the receiver (first positional, or `--piece`) | works |
-| address → an argument field | refused |
+| a link envelope → an argument field | works (#5880) — the edge that lands is the target, not a copy |
+| the address a read emits → an argument field | refused |
 
-A call payload is plain JSON. `normalizeCallableInputForExecution`
-(`packages/cli/lib/exec-schema.ts`) does nothing with links, so `--on "$OTHER"`
-arrives as a string the pattern cannot resolve into a reference.
+The pre-dispatch gate now passes a link envelope opaquely where a verb
+declares a reference (#5880), matching the ruling the runtime's own dispatch
+gate had already made. What it still refuses is the canonical string a read
+prints — the one spelling a caller is actually holding, since every `$link`
+and `receipt` in this session emits exactly that form. A caller who wants the
+edge today must assemble the envelope from the string by hand, which is the
+round-trip property failing one level in.
 
 A tree mostly hides this, because the natural shape is to call the verb *on* the
 parent — the receiver carries the relationship, so no address needs to be an
@@ -517,7 +549,7 @@ Declared results make an **output** self-describing; this is about what an
 | An event interface's own comment absent everywhere | The one prose level that does not compile ([#5559](https://github.com/commontoolsinc/labs/issues/5559)). Nothing downstream can serve what was never emitted |
 | A declared event field the handler body never reads is absent from the served input schema | A decision, not a patch: the served schema is the handler's read and the declared type is the contract, and which one a caller is owed is open |
 | `--select` completion, and refusal before the call | A provider reading the declared result the help page already resolves |
-| An address accepted as an argument | The round-trip property above |
+| The address a read emits accepted as an argument | The string form beside the envelope #5880 accepts — the round-trip property above. And beside it the protective refusal: a shape-matching payload still stores a detached copy and reports success |
 
 Five rows and five distinct gaps, and the first three are worth reading
 together because they look like one. They are not: the first is a renderer that

@@ -113,9 +113,9 @@ Everything a pattern exports (Chapter 3) is drivable without a browser:
 deno task cf piece ls -s myspace                       # list registered pieces
 deno task cf piece search -s myspace "invoice"         # search registered pieces
 deno task cf piece inspect --piece <ID>                # dump structure/state
-deno task cf piece get --piece <ID> items              # read one exported field
-deno task cf piece call addItem '{"title": "Test"}' --piece <ID>   # send to a stream
-echo '"hello"' | deno task cf piece set --piece <ID> title          # write a field
+deno task cf get --piece <ID> items                    # read one exported field
+deno task cf call --piece <ID> addItem '{"title": "Test"}'   # send to a stream
+echo '"hello"' | deno task cf set --piece <ID> title   # write a field
 deno task cf piece step --piece <ID>                   # force recompute
 deno task cf piece view --piece <ID>                   # render the UI in the terminal
 deno task cf piece link <srcID>/items <dstID>/items    # wire two pieces
@@ -131,13 +131,15 @@ drives the next command unchanged, even from a shell configured for a
 different space.
 
 On `get`, `set`, and `call`, the canonical reference can also sit in the
-first positional instead of the flag — `cf piece get /of:fid1:.../items`. On
+first positional instead of the flag — `cf get /of:fid1:.../items`. On
 the commands that take `--input` (`get` and `set` here), a trailing
 `#argument` selects the piece's arguments cell the way that flag does;
-`call` takes no `--input` and refuses the suffix. These three are also
-mounted at top level, so `cf get /of:fid1:.../items` is the same command
-with a shorter name: reading and writing cells is not really a
-piece-management concern, and the spelling says so.
+`call` takes no `--input` and refuses the suffix. The three are the piece
+data commands mounted at top level — reading and writing cells is not
+really a piece-management concern, and the spelling says so. `cf piece
+get`, `cf piece set`, and `cf piece call` are the same commands, deprecated
+as spellings: each still works and warns on stderr with the date it stops
+working.
 
 One subtlety: neither `piece set` nor `piece call` refreshes *computed*
 outputs. `set` writes the cell without running anything; `call` runs the

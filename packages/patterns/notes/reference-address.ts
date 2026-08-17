@@ -72,9 +72,10 @@ export const referenceAddresses = (
     ?.getAsNormalizedFullLink?.()?.space;
 
   for (const key of Object.keys(map)) {
-    // `destination` is typed unknown and so reads back undefined, but the
-    // ENTRY still materializes — `modifiedTitle` is a boolean — and the
-    // address comes from the path to the destination, not from its value.
+    // `destination` is typed unknown and so reads back as a reference
+    // carrying nothing, but the ENTRY still materializes — `modifiedTitle` is
+    // a boolean — and the address comes from the path to the destination, not
+    // from its value.
     const destination = (references as any).key(key).key("destination");
     const link: NormalizedLink | undefined = destination?.resolveAsCell?.()
       ?.getAsNormalizedFullLink?.();

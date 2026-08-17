@@ -12,8 +12,8 @@ import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
-  DecodeContext,
   JSON_CODEC,
+  LiveEnvironment,
   REALM_CODEC,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
@@ -132,7 +132,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       decode(
         typeTag: string,
         state: JsonCodecValue,
-        _context: DecodeContext,
+        _env: LiveEnvironment,
       ): FabricBytes | ProblematicValue {
         if (typeof state !== "string") {
           return new ProblematicValue(
@@ -199,7 +199,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       decode(
         typeTag: string,
         state: RealmCodecValue,
-        _context: DecodeContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         if (!(state instanceof ArrayBuffer)) {
           return new ProblematicValue(

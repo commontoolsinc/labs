@@ -16,8 +16,8 @@ import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts"
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
-  type DecodeContext,
   JSON_CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
   REALM_CODEC,
   type TerminalCodec,
@@ -139,7 +139,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
       decode(
         typeTag: string,
         state: FabricValue,
-        _context: DecodeContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         if (!isPlainObject(state)) {
           return new ProblematicValue(
@@ -206,7 +206,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
       decode(
         typeTag: string,
         state: RealmCodecValue,
-        _context: DecodeContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         if (!isPlainObject(state)) {
           return new ProblematicValue(

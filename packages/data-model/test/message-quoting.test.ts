@@ -14,7 +14,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
 
-import { EmptyDecodeContext } from "@/codec-common/index.ts";
+import { NullLiveEnvironment } from "@/codec-common/index.ts";
 import { newDefaultJsonCodecEngine } from "@/codecs.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
@@ -85,11 +85,11 @@ describe("message quoting", () => {
 
   describe("`JsonCodecEngine.decode()`", () => {
     it("hands back the excerpt it refused", () => {
-      const context = new EmptyDecodeContext(false);
+      const env = new NullLiveEnvironment(false);
       for (const data of HOSTILE) {
         let message = "";
         try {
-          newDefaultJsonCodecEngine().decode(data, context);
+          newDefaultJsonCodecEngine().decode(data, env);
         } catch (e) {
           message = (e as Error).message;
         }

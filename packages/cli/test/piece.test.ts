@@ -24,6 +24,7 @@ import { toCell } from "../../runner/src/back-to-cell.ts";
 import { setResultCell } from "../../runner/src/result-utils.ts";
 import {
   checkPieceSourceFromCommand,
+  dataCommandAction,
   formatPatternIdentity,
   formatPatternRef,
   getCellValueFromCommand,
@@ -34,10 +35,13 @@ import {
   parsePieceOptions,
   parseSpaceOptions,
   piece,
+  PIECE_DATA_SPELLING_END_DATE,
   readCallTarget,
   readTargetPositionals,
   setCellValueFromCommand,
   setPieceSourceFromCommand,
+  warnDeprecatedPieceSpelling,
+  withDeprecatedSpellingWarning,
 } from "../commands/piece.ts";
 import {
   CellSelectionError,
@@ -478,6 +482,54 @@ describe("cli piece parsing", () => {
   it('parseLink() rejects the "#argument" suffix on a link endpoint', () => {
     expect(() => parseLink(`/${LLM_HANDLE}#argument`))
       .toThrow(/does not apply to a link endpoint/);
+  });
+
+  it("warnDeprecatedPieceSpelling() names the short spelling and the end date", () => {
+    const lines: string[] = [];
+    warnDeprecatedPieceSpelling("piece get", {
+      writeError: (text) => lines.push(text),
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("'cf piece get' is deprecated");
+    expect(lines[0]).toContain("spell it 'cf get'");
+    expect(lines[0]).toContain(
+      `stops working on ${PIECE_DATA_SPELLING_END_DATE}`,
+    );
+  });
+
+  it("withDeprecatedSpellingWarning() warns once, then delegates with `this` intact", () => {
+    const calls: Array<{ self: unknown; args: unknown[] }> = [];
+    const warned: string[] = [];
+    const original = console.error;
+    console.error = (...parts: unknown[]) => {
+      warned.push(parts.join(" "));
+    };
+    try {
+      const wrapped = withDeprecatedSpellingWarning(
+        "piece call",
+        function (this: unknown, ...args: unknown[]) {
+          calls.push({ self: this, args });
+          return "delegated";
+        },
+      );
+      const self = { marker: true };
+      expect(wrapped.call(self, "a", 1)).toBe("delegated");
+    } finally {
+      console.error = original;
+    }
+    // `this` passes through untouched: `call`'s action reads
+    // `this.getLiteralArgs()` off the Cliffy command it runs under.
+    expect(calls).toEqual([{ self: { marker: true }, args: ["a", 1] }]);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain("'cf piece call' is deprecated");
+  });
+
+  it("dataCommandAction() wraps only the piece-mounted spellings", () => {
+    const action = () => "ran";
+    // The top-level spelling mounts the action untouched — identity, not a
+    // silent wrapper — so the two mounts differ in nothing but the notice.
+    expect(dataCommandAction("get", action)).toBe(action);
+    expect(dataCommandAction("piece get", action)).not.toBe(action);
   });
 
   it("parseSpaceOptions() refuses a piece reference beside a URL that names a piece", () => {

@@ -1893,7 +1893,8 @@ export function validateShrinkCoverage(
   // Case 2: concrete type but some accessed properties are typed `unknown`.
   // This catches interfaces like `{ amounts?: unknown }` where the property
   // exists but its type is `unknown`, meaning the runtime schema will contain
-  // `{ type: "unknown" }` and the runtime will return opaque undefined.
+  // `{ type: "unknown" }` and the runtime will hand back an opaque reference
+  // carrying none of the value's properties.
   if (nonNullableBaseType) {
     const unknownProps: string[] = [];
     for (const head of requestedHeads) {

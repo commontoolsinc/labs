@@ -3,7 +3,7 @@
  * it, and the kind each participating class declares.
  *
  * The round trips go through a real `Worker`, not `structuredClone()` in this
- * realm. Cloning runs the same serialization algorithm, so it would prove the
+ * realm. Cloning runs the same encoding algorithm, so it would prove the
  * walk is invertible -- but this format exists to carry values to another
  * realm, and only the far side can show that what arrives there is a live
  * instance of the right class rather than a shape that happens to match.
@@ -19,7 +19,7 @@ import { BaseTerminalCodec } from "@/codec-interface/index.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import {
   type RealmCodecValue,
   type RealmEncodedValue,
@@ -388,7 +388,7 @@ describe("RealmCodecEngine", () => {
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
         wire(tagged("RegExp@1", { source: undefined })),
-        EMPTY_DECODE_CONTEXT,
+        NULL_LIVE_ENVIRONMENT,
       );
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
@@ -455,7 +455,7 @@ describe("RealmCodecEngine", () => {
         decodeOutsideDecode(data: unknown): FabricValue {
           return (this as unknown as {
             decodeValue(d: unknown, c: unknown): FabricValue;
-          }).decodeValue(data, EMPTY_DECODE_CONTEXT);
+          }).decodeValue(data, NULL_LIVE_ENVIRONMENT);
         }
       }
 
@@ -485,7 +485,7 @@ describe("RealmCodecEngine", () => {
       const bad = (tag: string, state: unknown) => {
         const result = engine.decode(
           wire(tagged(tag, state)),
-          EMPTY_DECODE_CONTEXT,
+          NULL_LIVE_ENVIRONMENT,
         );
 
         // Asserted here rather than at each call: the name of this case
@@ -631,7 +631,7 @@ describe("RealmCodecEngine", () => {
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
         wire(tagged(42, "x")),
-        EMPTY_DECODE_CONTEXT,
+        NULL_LIVE_ENVIRONMENT,
       ) as ProblematicValue;
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
@@ -665,7 +665,7 @@ describe("RealmCodecEngine", () => {
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
         wire(tagged("Bytes@1", "nope")),
-        EMPTY_DECODE_CONTEXT,
+        NULL_LIVE_ENVIRONMENT,
       );
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
@@ -779,7 +779,7 @@ describe("RealmCodecEngine", () => {
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
         wire({ first: offender, second: offender }),
-        EMPTY_DECODE_CONTEXT,
+        NULL_LIVE_ENVIRONMENT,
       ) as Record<string, ProblematicValue>;
 
       expect(decoded.first).toBeInstanceOf(ProblematicValue);
@@ -794,7 +794,7 @@ describe("RealmCodecEngine", () => {
       object.self = object;
       const decoded = engine.decode(
         wire(object),
-        EMPTY_DECODE_CONTEXT,
+        NULL_LIVE_ENVIRONMENT,
       ) as Record<string, FabricValue>;
 
       // The report replaces the back-edge rather than the whole value, so
@@ -829,7 +829,7 @@ describe("RealmCodecEngine", () => {
       });
       const decoded = engine.decode(
         wire(data),
-        EMPTY_DECODE_CONTEXT,
+        NULL_LIVE_ENVIRONMENT,
       ) as ProblematicValue;
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
@@ -957,7 +957,7 @@ describe("RealmCodecEngine", () => {
         realmFromFabricValue(value),
       ) as Record<string, FabricValue>;
 
-      // Data, three slots and all, rather than a reconstructed value.
+      // Data, three slots and all, rather than a decoded value.
       expect(Array.isArray(decoded.smuggled)).toBe(true);
       expect((decoded.smuggled as FabricValue[])[1]).toBe("EpochDays@1");
       expect(decoded.smuggled).not.toBeInstanceOf(FabricEpochDays);
@@ -1023,12 +1023,12 @@ describe("RealmCodecEngine", () => {
       });
       const engine = newDefaultRealmCodecEngine({ lenient: true });
 
-      expect(engine.decode(encoded, EMPTY_DECODE_CONTEXT))
+      expect(engine.decode(encoded, NULL_LIVE_ENVIRONMENT))
         .toBeDefined();
 
       const second = engine.decode(
         encoded,
-        EMPTY_DECODE_CONTEXT,
+        NULL_LIVE_ENVIRONMENT,
       ) as Record<string, unknown>;
 
       expect(second.blob).toBeInstanceOf(ProblematicValue);
@@ -1037,7 +1037,7 @@ describe("RealmCodecEngine", () => {
   });
 
   describe("across a real realm boundary", () => {
-    it("reconstructs each class on the far side", async () => {
+    it("decodes each class on the far side", async () => {
       const report = await crossRealm({
         bytes: new FabricBytes(new Uint8Array([1, 2, 250])),
         nsec: new FabricEpochNsec(1234567890123456789n),

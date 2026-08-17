@@ -66,7 +66,7 @@ wrapper classes (Section 1.4).
 > `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
 > `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
 > carries them (Section 8.6). The codec vocabulary (the `CODEC`
-> symbol, `FabricCodec`, `DecodeContext`, `EncodeContext`)
+> symbol, `FabricCodec`, `LiveEnvironment`, `EncodeContext`)
 > lives in `codec-interface/` (Section 2), the machinery that acts on it in
 > `codec-common/`, and the conversion functions in `native-conversion.ts`
 > (Section 8).
@@ -80,7 +80,7 @@ wrapper classes (Section 1.4).
 > re-exports it. `codec-common/` and `fabric-instances/` are exported subpaths
 > in their own right and are imported directly under those names;
 > `fabric-value` does *not* re-export the codec vocabulary, so
-> `DecodeContext` and its siblings come from
+> `LiveEnvironment` and its siblings come from
 > `@commonfabric/data-model/codec-common`. Cite a module to say where
 > something is defined; consult the package's `exports` map to know where to
 > import it from.
@@ -572,7 +572,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   // slots + bag; `wrappedValue` / `toNativeFrozen()` / `toNativeThawed()`
   // build the native `Error` projection on demand. `deepClone(frozen)`
   // round-trips through the codec: `codec.decode(tag,
-  // codec.encode(this), context)`. Bodies omitted for brevity.)
+  // codec.encode(this), env)`. Bodies omitted for brevity.)
 
   static #codec = Object.freeze(
     new (class FabricErrorCodec extends BaseNonterminalCodec {
@@ -609,12 +609,12 @@ export class FabricError extends FabricNativeWrapper<Error> {
        * identity, falling back to `name` for backward compatibility with
        * data encoded before `type` was added; missing `message`
        * becomes `''`. Reserved and unsafe keys are excluded from the
-       * extras. Honors `context.shouldDeepFreeze` (Section 2.5).
+       * extras. Honors `env.shouldDeepFreeze` (Section 2.5).
        */
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: DecodeContext,
+        env: LiveEnvironment,
       ): FabricValue {
         const s = state as Record<string, FabricValue>;
         const type = (s.type as string) ?? (s.name as string) ?? 'Error';
@@ -637,7 +637,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
           cause: s.cause,
           extras,
         });
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );
@@ -703,11 +703,11 @@ export class FabricMap
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: DecodeContext,
+        env: LiveEnvironment,
       ): FabricValue {
         const entries = state as [FabricValue, FabricValue][];
         const result = new FabricMap(new Map(entries));
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );
@@ -757,11 +757,11 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: DecodeContext,
+        env: LiveEnvironment,
       ): FabricValue {
         const elements = state as FabricValue[];
         const result = new FabricSet(new Set(elements));
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );
@@ -1794,7 +1794,7 @@ export interface FabricCodec<Encoded> {
   decode(
     typeTag: string,
     state: Encoded,
-    context: DecodeContext,
+    env: LiveEnvironment,
   ): FabricValue;
 
   /**
@@ -1916,7 +1916,7 @@ Key contracts:
   recursion and tag-wrapping (Section 4.5), which keeps the format
   mechanics in one place rather than spread across every codec.
 - **`decode()` is codec-side, not constructor-side**, for two reasons: it
-  receives a `DecodeContext` (Section 2.5) which shouldn't be
+  receives a `LiveEnvironment` (Section 2.5) which shouldn't be
   mandated in a constructor signature, and it may return an existing
   instance (interning) rather than creating a new one — essential for
   types like `Cell` where identity matters.
@@ -1935,7 +1935,7 @@ Key contracts:
   each in `fabric-primitives/` and `fabric-instances/`), not by ad-hoc
   registration scattered across the codebase. See Section 4.5.
 
-### 2.5 Decode Context
+### 2.5 Live Environment
 
 ```typescript
 // Shown at module scope.
@@ -1950,7 +1950,7 @@ Key contracts:
  * Implementors of `decode()` should depend on this interface, not on
  * the concrete `Runtime` class.
  */
-export interface DecodeContext {
+export interface LiveEnvironment {
   /**
    * Resolves a cell reference. Used by types that need to intern or look
    * up existing instances during decoding.
@@ -1959,18 +1959,18 @@ export interface DecodeContext {
 
   /**
    * Output-contract directive: when `true`, every codec `decode()`
-   * implementation that consults this context must produce a deep-frozen
+   * implementation that consults this live environment must produce a deep-frozen
    * result; when `false`, a mutable result is acceptable. Same contract as
    * the `frozen` argument to `cloneIfNecessary()` (see
    * `packages/data-model/value-clone.ts`): `shouldDeepFreeze === true`
    * corresponds to `cloneIfNecessary(value, { frozen: true })`.
    *
-   * Required (not optional): every context declares it. A shared
-   * `BaseDecodeContext`
-   * (`packages/data-model/src/codec-interface/BaseDecodeContext.ts`)
+   * Required (not optional): every live environment declares it. A shared
+   * `BaseLiveEnvironment`
+   * (`packages/data-model/src/codec-interface/BaseLiveEnvironment.ts`)
    * centralizes the getter with a `true` default, mirroring
-   * `cloneIfNecessary()`'s default; contexts opt out by overriding. An
-   * `EmptyDecodeContext` (same directory) covers context-less
+   * `cloneIfNecessary()`'s default; environments opt out by overriding. An
+   * `NullLiveEnvironment` (same directory) covers environment-less
    * decodes: its `getCell()` throws with a configurable message.
    */
   readonly shouldDeepFreeze: boolean;
@@ -1981,9 +1981,9 @@ export interface DecodeContext {
 > intended to live in a foundational package (`packages/data-model/`).
 > If codec `decode()` implementations depended on the full `Runtime` type
 > from `packages/runner/`, it would create a circular dependency. The
-> `DecodeContext` interface captures the minimal surface needed for
+> `LiveEnvironment` interface captures the minimal surface needed for
 > decoding. The `Runtime` class satisfies this interface. Future
-> fabric types may extend `DecodeContext` if they need additional
+> fabric types may extend `LiveEnvironment` if they need additional
 > capabilities beyond `getCell` and `shouldDeepFreeze`.
 
 ### 2.6 Brand Detection
@@ -2027,7 +2027,7 @@ import {
   CODEC,
   BaseNonterminalCodec,
   type NonterminalCodec,
-  type DecodeContext,
+  type LiveEnvironment,
 } from '@commonfabric/data-model/codec-common';
 import { BaseFabricInstance } from '@commonfabric/data-model/codec-common';
 
@@ -2074,7 +2074,7 @@ class Temperature extends BaseFabricInstance {
       decode(
         _typeTag: string,
         state: FabricValue,
-        _context: DecodeContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         const s = state as { value: number; unit: TemperatureUnit };
         return new Temperature(s.value, s.unit);
@@ -2108,13 +2108,13 @@ codec system:
 2. Encodes that state (recursively handling any nested `FabricValue`s)
    and wraps it with the tag from `codec.tagForValue(value)`.
 3. On decoding, routes the tag back to the codec and calls
-   `codec.decode(tag, state, context)` to produce a real `Temperature`
+   `codec.decode(tag, state, env)` to produce a real `Temperature`
    instance with its methods intact.
 
-**Reference types and `DecodeContext`.** The `Temperature` example
+**Reference types and `LiveEnvironment`.** The `Temperature` example
 above is a simple value type -- its codec's `decode()` creates a fresh
 instance each time. Reference types (such as the runtime's internal `Cell`
-type) use the `DecodeContext` parameter to look up or intern
+type) use the `LiveEnvironment` parameter to look up or intern
 existing instances, ensuring that two references to the same logical entity
 decode to the same object.
 
@@ -2171,7 +2171,7 @@ aligns with the reactive system's assumption that values don't mutate in place.
 
 ### 3.1 Overview
 
-When decoding, a context may encounter a type tag it doesn't recognize —
+When decoding, an engine may encounter a type tag it doesn't recognize —
 for example, data written by a newer version of the system. Unknown types are
 **passed through** rather than rejected, preserving forward compatibility.
 
@@ -2220,7 +2220,7 @@ tag-routed on decode like any other, and its `encode()` returns a record of the
 three preserved facts (`tag`, `state`, `error`). One consequence is worth
 stating, because it is the only place a returned `ProblematicValue` does not
 mean a refusal: this codec's *successful* product is a `ProblematicValue`, so
-the rule in Section 4.5 that turns one into a raise under a strict context does
+the rule in Section 4.5 that turns one into a raise under a strict engine does
 not apply to it. Reading back a record of a past failure is not a failure of
 that read, and without the carve-out a strict reader could never read one at
 all.
@@ -2235,7 +2235,7 @@ import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from '../interface';
 import {
   CODEC,
   type NonterminalCodec,
-  type DecodeContext,
+  type LiveEnvironment,
 } from '../codec-interface/interface';
 import { BaseNonterminalCodec } from '../codec-interface/BaseNonterminalCodec';
 import { BaseFabricInstance } from './BaseFabricInstance';
@@ -2298,10 +2298,10 @@ export class UnknownValue extends BaseFabricInstance {
       decode(
         typeTag: string,
         state: FabricValue,
-        context: DecodeContext,
+        env: LiveEnvironment,
       ): FabricValue {
         const result = new UnknownValue(typeTag, state);
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );
@@ -2342,7 +2342,7 @@ import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from '../interface';
 import {
   CODEC,
   type NonterminalCodec,
-  type DecodeContext,
+  type LiveEnvironment,
 } from '../codec-interface/interface';
 import { BaseNonterminalCodec } from '../codec-interface/BaseNonterminalCodec';
 import { BaseFabricInstance } from './BaseFabricInstance';
@@ -2425,13 +2425,13 @@ export class ProblematicValue extends BaseFabricInstance {
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: DecodeContext,
+        env: LiveEnvironment,
       ): FabricValue {
         // A state that is not this shape becomes a `ProblematicValue` of
         // this decode; omitted for brevity.
         const { tag, state: inner, error } = state as never;
         const result = new ProblematicValue(tag, inner, error);
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );
@@ -2543,12 +2543,12 @@ decode direction:
 
 - `encode(value)` encodes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
-- `decode(data, context)` parses a JSON string, then decodes tagged
+- `decode(data, env)` parses a JSON string, then decodes tagged
   forms back into runtime types.
 
 > **Why the boundary is this narrow.** Tag wrapping and unwrapping are
 > machinery internal to the engine, leaving only the
-> `encode(value) -> SerializedForm` / `decode(data, runtime) -> FabricValue`
+> `encode(value) -> SerializedForm` / `decode(data, env) -> FabricValue`
 > pair as public API. The engine owns the full pipeline rather than the tag
 > step alone, and its public surface says so by exposing nothing else.
 
@@ -2556,7 +2556,7 @@ decode direction:
 
 ```
 Encode:  value -> codec.encode(value) -> serialized form (e.g., JSON string)
-Decode:  serialized form -> codec.decode(data, context) -> FabricValue
+Decode:  serialized form -> codec.decode(data, env) -> FabricValue
 ```
 
 Internally, `JsonCodecEngine`'s `encode()` method calls its internal encode
@@ -2880,13 +2880,13 @@ recognizer for text in it, live one layer down in
 export function jsonFromFabricValue(value: FabricValue): string;
 
 /**
- * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
- * `context` is omitted, a shared decode-framed empty context is
- * substituted, which throws if any decoding is needed.
+ * Decodes a string in the `FabricValue` JSON-embedded encoding format. If no
+ * live environment is given, {@link NULL_LIVE_ENVIRONMENT} is substituted,
+ * which throws if any decoding is needed.
  */
 export function fabricFromJsonValue(
   json: string,
-  context?: DecodeContext,
+  env?: LiveEnvironment,
 ): FabricValue;
 
 /**
@@ -2895,7 +2895,7 @@ export function fabricFromJsonValue(
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
-  context?: DecodeContext,
+  env?: LiveEnvironment,
 ): T;
 ```
 
@@ -2919,7 +2919,7 @@ The `memory` package wraps these at its encoding boundary
 - **Write path:** `encodeMemoryBoundary(value)` calls
   `jsonFromFabricValue(value)`.
 - **Read path:** `decodeMemoryBoundary(source)` calls
-  `fabricFromJsonValue(source, context)` with a memory `DecodeContext`.
+  `fabricFromJsonValue(source, env)` with a memory `LiveEnvironment`.
 
 ### 4.9 Fabric Value Conversion
 
@@ -3435,7 +3435,7 @@ This applies at every point where decoded data is consumed:
 - **JSON-side codec decoding** (Section 3 of `3-json-encoding.md`) must
   validate the format of its state before processing. Malformed input must
   be rejected rather than silently producing garbage; a codec rejects by
-  throwing or by returning a `ProblematicValue`, and the encoding context
+  throwing or by returning a `ProblematicValue`, and the engine
   settles the two against its `lenient` setting (Section 4.5).
 
 - **Hashing** (Section 6.3) may operate on values that have been
@@ -3961,7 +3961,7 @@ values cross from internal codec machinery to callers:
   further copying because the input tree is already deep-frozen.
 
 - **Codec `decode()` implementations honoring `shouldDeepFreeze`.** When a
-  decode call's `DecodeContext.shouldDeepFreeze` is
+  decode call's `LiveEnvironment.shouldDeepFreeze` is
   `true` (Section 2.5; the safe default), each codec `decode()`
   implementation produces a deep-frozen result (typically via the
   instance's own `[DEEP_FREEZE]`, recursing through `deepFreeze()`).
@@ -3994,9 +3994,9 @@ spec from being implementable.
   (sequencing of flag introductions, criteria for graduating each flag to
   default-on) will be addressed in a separate document.
 
-- **`DecodeContext` extensibility**: The minimal interface defined in
+- **`LiveEnvironment` extensibility**: The minimal interface defined in
   Section 2.5 covers `Cell` decoding. Other future fabric types may
-  need additional context methods. Should the interface be extended, or should
+  need additional environment methods. Should the interface be extended, or should
   types cast to a broader interface? Recommendation: extend the interface as
   needed; the indirection through an interface (rather than depending on
   `Runtime` directly) makes this straightforward.

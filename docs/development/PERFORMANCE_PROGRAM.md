@@ -193,7 +193,7 @@ path) · Medium (benchmarks improve, modest user impact) · Low (micro)
 
 | # | Project | Impact | Cost | Summary |
 |---|---------|--------|------|---------|
-| PERF-3 | Link resolution without JSON.stringify | High | S | `link-resolution.ts:83` allocates via `JSON.stringify` on every cycle-detection step. Replace with null-byte-separated concat (~2x faster on typical inputs). Naive separators like `\|` or `/` cause collisions when path segments contain the separator — use `\0` with a length prefix. [Tests needed.](#perf-3-link-resolution) |
+| PERF-3 | Link resolution without JSON.stringify | High | S | `linkAddressKey` in `link-resolution.ts` allocates via `JSON.stringify` on every hop. Replace with null-byte-separated concat (~2x faster on typical inputs). Naive separators like `\|` or `/` cause collisions when path segments contain the separator — use `\0` with a length prefix. The same key names a resolution's entry in the transaction's snapshot memo, so a collision there serves one link's resolution for another; the memo's own tests cover that. [Tests needed.](#perf-3-link-resolution) |
 
 ### Likely High-Impact (pending profiling confirmation)
 

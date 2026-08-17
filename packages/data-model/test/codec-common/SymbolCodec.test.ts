@@ -19,7 +19,7 @@ import { expect } from "@std/expect";
 
 import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 
@@ -39,7 +39,7 @@ const _refusesAWrapper = new SymbolCodec<JsonCodecValue>((key) => ({ key }));
 describe("SymbolCodec", () => {
   const codec = new SymbolCodec<JsonCodecValue>((key) => key);
   const expectedTag = CODEC_TYPE_TAGS.Symbol;
-  const context = EMPTY_DECODE_CONTEXT;
+  const env = NULL_LIVE_ENVIRONMENT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {
@@ -51,7 +51,7 @@ describe("SymbolCodec", () => {
     describe("canEncode()", () => {
       it("claims interned symbols, rejects unique ones", () => {
         // Unique symbols have no registry key, so the codec declines them; this
-        // is what lets a default-configured context fail loudly rather than
+        // is what lets a default-configured environment fail loudly rather than
         // silently flatten the symbol.
         expect(codec.canEncode(Symbol("nope"))).toBe(false);
         // Registry-interned symbols are claimed.
@@ -74,7 +74,7 @@ describe("SymbolCodec", () => {
         const result = codec.decode(
           expectedTag,
           42,
-          context,
+          env,
         );
         expect(result).toBeInstanceOf(ProblematicValue);
         expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
@@ -88,7 +88,7 @@ describe("SymbolCodec", () => {
         const result = codec.decode(
           expectedTag,
           codec.encode(Symbol.for("hello")),
-          context,
+          env,
         );
         expect(typeof result).toBe("symbol");
         expect(result).toBe(Symbol.for("hello"));
@@ -99,7 +99,7 @@ describe("SymbolCodec", () => {
         const result = codec.decode(
           expectedTag,
           codec.encode(Symbol.for(key)),
-          context,
+          env,
         );
         expect(result).toBe(Symbol.for(key));
       });

@@ -3311,6 +3311,112 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "allows optional access inside an inline comparator on a .get() chain",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        sentAt: number;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        const sorted = rows.get().toSorted((a, b) =>
+          (a?.sentAt ?? 0) - (b?.sentAt ?? 0)
+        );
+        return { sorted };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "the binding site's lift absorbs the comparator, so its '?.' runs " +
+          "on resolved values",
+      );
+    },
+  );
+
+  await t.step(
+    "allows optional access inside a parenthesized inline comparator",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        sentAt: number;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        const sorted = rows.get().toSorted(((a, b) =>
+          (a?.sentAt ?? 0) - (b?.sentAt ?? 0)
+        ));
+        return { sorted };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      // The parenthesized spelling still draws the (pre-existing)
+      // function-creation rejection — parentheses hide the callback from
+      // that validation's inline-argument allowance, a separate gap. This
+      // step pins the carrier decision alone: optionality is carried
+      // through the parentheses, so no optional-chaining error joins it.
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:optional-chaining"
+        ),
+        false,
+        "parentheses around the callback do not change the carrier decision",
+      );
+    },
+  );
+
+  await t.step(
+    "still errors on optional access inside a lowered array-method callback",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        flag?: boolean;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        const flagged = rows.get().filter((r) => r?.flag);
+        return { flagged };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
+    },
+  );
+
+  await t.step(
+    "still errors on optional access inside a plain array-method callback",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ label: Writable<string> }>(({ label }) => {
+        const lens = ["a", "bb"].map((s) => s?.length ?? 0);
+        return { lens, label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
+    },
+  );
+
+  await t.step(
     "errors on a .get() inside a reactive array-method callback",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";

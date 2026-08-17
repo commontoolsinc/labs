@@ -199,9 +199,8 @@ interface casually against a piece you care about.
 
 ## Option B — copy the state into your own piece
 
-> **Note:** the copy loop below writes with `cf piece set --input`, which
-> validates the whole input object on every write. Every field fails on this
-> pattern with
+> **Note:** the copy loop below writes with `cf set --input`, which validates
+> the whole input object on every write. Every field fails on this pattern with
 > `updated input does not match its schema: myName: value does not
 > match type string`,
 > including a write to `myName` itself. The pattern's `myName` is `PerUser`, and
@@ -223,8 +222,8 @@ MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
 # 2. Copy each PerSpace field from the shared piece into yours.
 #    `--input` reads/writes the input cell where these live.
 for field in question users options votes participantProfiles adminName visits; do
-  deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
-    | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
+  deno task cf get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
+    | deno task cf set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done
 
 # 3. Recompute so derived values (counts, ranking) refresh.
@@ -248,7 +247,7 @@ gotcha and no SQLite files to inspect.
 - **Read the `visits` input directly** to confirm a write landed (no browser
   needed):
   ```bash
-  deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
+  deno task cf get --piece "$PIECE" -s "$SPACE" visits --input -q
   ```
   The derived outputs (`recentVisits`, `placeStats`, `historyCount`,
   `mostRecentTitle`, `voteHistoryCount`) recompute on `step` and read back the
@@ -257,14 +256,14 @@ gotcha and no SQLite files to inspect.
 **Smoke test after deploy** (host-gated handlers need a join first):
 
 ```bash
-deno task cf piece call --piece "$PIECE" -s "$SPACE" joinAs '{"name":"Host"}'
+deno task cf call --piece "$PIECE" -s "$SPACE" joinAs '{"name":"Host"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
-deno task cf piece call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
+deno task cf call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
-deno task cf piece call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
+deno task cf call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 # Confirm the entry landed (no browser needed):
-deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
+deno task cf get --piece "$PIECE" -s "$SPACE" visits --input -q
 ```
 
 ## Identity & joining
@@ -305,17 +304,17 @@ everyone sees, and direct `set` races anyone's live browser session.**
 - **History:** use the **`clearHistory` handler** (host-gated) — it empties the
   `visits` log (and its embedded vote snapshots):
   ```bash
-  deno task cf piece call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
+  deno task cf call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
   Or, since `visits` is an ordinary `PerSpace` cell, write it directly (below).
 - **PerSpace cells:** write the input cells directly:
   ```bash
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" users     --input -q
-  echo '""' | deno task cf piece set --piece "$PIECE" -s "$SPACE" adminName --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" options   --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" votes     --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" visits    --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" users     --input -q
+  echo '""' | deno task cf set --piece "$PIECE" -s "$SPACE" adminName --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" options   --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" votes     --input -q
+  echo '[]' | deno task cf set --piece "$PIECE" -s "$SPACE" visits    --input -q
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
   After this, the first person to join in the browser becomes host as their own

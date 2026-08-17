@@ -13,8 +13,8 @@ import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import {
-  type DecodeContext,
   JSON_CODEC,
+  type LiveEnvironment,
   REALM_CODEC,
   type TerminalCodec,
 } from "@/codec-interface/interface.ts";
@@ -69,7 +69,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
       decode(
         typeTag: string,
         state: JsonCodecValue,
-        _context: DecodeContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         if (typeof state !== "string") {
           return new ProblematicValue(
@@ -115,7 +115,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
       decode(
         typeTag: string,
         state: RealmCodecValue,
-        _context: DecodeContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         if (typeof state !== "bigint") {
           return new ProblematicValue(

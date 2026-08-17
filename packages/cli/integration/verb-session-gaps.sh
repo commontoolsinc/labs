@@ -72,7 +72,7 @@ if [ -n "$BOARD" ]; then ok "deployed $BOARD"; else
   exit 1
 fi
 $CF piece set-slug board "$BOARD" $ARGS >/dev/null 2>&1
-SLUG_NAME=$($CF piece get --quiet --piece board $ARGS '$NAME' 2>/dev/null | tr -d '"')
+SLUG_NAME=$($CF get --quiet --piece board $ARGS '$NAME' 2>/dev/null | tr -d '"')
 check "Work tracker" "$SLUG_NAME" "the slug resolves everywhere --piece is taken"
 
 step "2. Ask what it can do"
@@ -87,7 +87,7 @@ check "addItem" "$(echo "$VERBS" | jq -r '[.verbs[]?.name] | sort | join(",")')"
   "the listing names the verb and nothing else"
 
 step "3. Ask what a verb wants — flags and prose, both derived"
-HELP=$($CF piece call --piece board $ARGS addItem -- --help 2>/dev/null)
+HELP=$($CF call --piece board $ARGS addItem -- --help 2>/dev/null)
 echo "$HELP" | grep -q -- "--title" &&
   ok "the flag is derived from the event schema" ||
   bad "no --title flag in the generated help"
@@ -133,7 +133,7 @@ fi
 # wide open. It is recorded in the walkthrough's table instead, against #5559.
 
 step "4. A create hands back the piece, and the address chains"
-R=$($CF piece call --quiet --show-links --piece board $ARGS \
+R=$($CF call --quiet --show-links --piece board $ARGS \
   addItem '{"title":"Login rewrite"}' 2>/dev/null)
 check "Login rewrite" "$(echo "$R" | jq -r '.result.item["$NAME"] // empty')" \
   "the result carries the created item"
@@ -147,13 +147,13 @@ fi
 # the writes landed; each call's exit code is checked too, because the
 # readback runs after the write commits — a readback failure leaves the count
 # intact, and only the exit code shows it.
-$CF piece call --quiet --piece "$EPIC" $ARGS \
+$CF call --quiet --piece "$EPIC" $ARGS \
   addChild '{"title":"Session cookies"}' >/dev/null 2>&1 ||
   bad "addChild (Session cookies) exited nonzero"
-$CF piece call --quiet $ARGS "$EPIC" \
+$CF call --quiet $ARGS "$EPIC" \
   addChild '{"title":"CSRF tokens"}' >/dev/null 2>&1 ||
   bad "addChild (CSRF tokens, positional address) exited nonzero"
-KIDS=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
+KIDS=$($CF get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
 check "2" "$(echo "$KIDS" | jq -r 'length')" \
@@ -168,7 +168,7 @@ check "addChild,archive,blockOn,finish,recordNote" \
   "an item lists its own verbs, and not the board's"
 
 step "5. Read addresses instead of contents"
-ADDR=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
+ADDR=$($CF get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
 check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link") and (.title|length>0)] | all')" \
@@ -181,7 +181,7 @@ KID=$(echo "$ADDR" | jq -r '.[] | select(.title=="Session cookies") | .["$link"]
 # nothing about the answer moved. The check above is what gives it force —
 # were the first read already empty, two empty reads would agree and this
 # would pass saying nothing.
-AGAIN=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
+AGAIN=$($CF get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
 check "$ADDR" "$AGAIN" "the same read, run again, answers the same"
@@ -199,29 +199,29 @@ step "6. Two routes hand back an address, and either one addresses the piece"
 # on which it "closes", and a gap that can never fire is a gap that reports
 # nothing. What a caller does depend on is asserted instead — either address,
 # fed back to --piece, reads the same piece.
-MADE=$($CF piece call --quiet --show-links --piece board $ARGS \
+MADE=$($CF call --quiet --show-links --piece board $ARGS \
   addItem '{"title":"Rate limiting"}' 2>/dev/null |
   jq -r '.links["/item"] // empty')
-VIA_READ=$($CF piece get --quiet --piece board items $ARGS --step \
+VIA_READ=$($CF get --quiet --piece board items $ARGS --step \
   --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
   2>/dev/null | jq -r '.[] | select(.title=="Rate limiting") | .["$link"]')
 if [ -z "$MADE" ] || [ -z "$VIA_READ" ]; then
   bad "one of the two routes produced no address (call=$MADE read=$VIA_READ)"
 else
   # Both must work as --piece. That is the property a caller depends on.
-  M_T=$($CF piece get --quiet --piece "$MADE" title $ARGS 2>/dev/null | tr -d '"')
-  R_T=$($CF piece get --quiet --piece "$VIA_READ" title $ARGS 2>/dev/null | tr -d '"')
+  M_T=$($CF get --quiet --piece "$MADE" title $ARGS 2>/dev/null | tr -d '"')
+  R_T=$($CF get --quiet --piece "$VIA_READ" title $ARGS 2>/dev/null | tr -d '"')
   check "Rate limiting" "$M_T" "the address the call returned addresses the piece"
   check "Rate limiting" "$R_T" "the address the read returned addresses the piece too"
   # The same address, standing bare in the first position with the path
   # embedded — the spelling the demo teaches from act 4 on. An address begins
   # with `/` and a relative path never does, so nothing marks it but itself.
-  P_T=$($CF piece get --quiet "$VIA_READ/title" $ARGS 2>/dev/null | tr -d '"')
+  P_T=$($CF get --quiet "$VIA_READ/title" $ARGS 2>/dev/null | tr -d '"')
   check "Rate limiting" "$P_T" "the address stands positional, carrying its path"
 fi
 
 step "7. A verb returns what only the pattern could compute"
-N=$($CF piece call --quiet --piece "$EPIC" $ARGS \
+N=$($CF call --quiet --piece "$EPIC" $ARGS \
   recordNote '{"body":"blocked on the cookie spec"}' 2>/dev/null)
 check "1" "$(echo "$N" | jq -r '.result.noteCount // empty')" \
   "recordNote returns the count after the append"
@@ -231,14 +231,14 @@ AT=$(echo "$N" | jq -r '.result.note.at // 0')
 
 step "8. Finishing reports what the caller could not know"
 # Exit code checked for the same reason as step 4's creates.
-$CF piece call --quiet --piece "$KID" $ARGS \
+$CF call --quiet --piece "$KID" $ARGS \
   addChild '{"title":"Rotate signing key"}' >/dev/null 2>&1 ||
   bad "addChild (Rotate signing key) exited nonzero"
 # Unshaped: a PROJECTED read of this path fails once `finish` has run, while
 # the same path unshaped resolves fine. Counting is all this step needs.
-DIRECT=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
+DIRECT=$($CF get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
-F=$($CF piece call --quiet --piece "$EPIC" $ARGS \
+F=$($CF call --quiet --piece "$EPIC" $ARGS \
   finish '{"body":"shipping behind a flag"}' 2>/dev/null)
 OPEN=$(echo "$F" | jq -r '.result.openBelow // empty')
 # Captured rather than hard-coded: the property is that it counted deeper than
@@ -250,32 +250,47 @@ else
 fi
 
 step "9. A value-less verb settles with the empty witness"
-V=$($CF piece call --quiet --piece "$KID" $ARGS archive '{}' 2>/dev/null)
+V=$($CF call --quiet --piece "$KID" $ARGS archive '{}' 2>/dev/null)
 check "settled" "$(echo "$V" | jq -r '.status')" "archive settled"
 check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witness"
 
-step "10. GAP: an address cannot be a verb argument"
-# blockOn declares `on: Writable<ItemOutput>` — a reference. `send()` already
-# resolves a native sigil (measured), so the pre-dispatch gate is the only
-# thing refusing this. docs/plans/references-as-arguments.md closes it — that
-# work carries no step number in the verbs plan, which numbers only the read
-# and result layers.
-OTHER=$($CF piece get --quiet --piece board items $ARGS \
+step "10. A reference argument dispatches; the emitted spelling is the GAP"
+# blockOn declares `on: Writable<ItemOutput>` — a reference. The capability
+# landed with #5880: a link ENVELOPE in that position passes the gate and the
+# edge that comes back is the target, not a copy. What has not landed is the
+# round-trip spelling docs/plans/references-as-arguments.md holds out for —
+# the address exactly as a read emits it. The two halves are asserted apart,
+# so neither can hide behind the other.
+OTHER=$($CF get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
   jq -r '.[0]["$link"] // empty')
-# Guarded, and matched against the SPECIFIC refusal: an empty address, a
-# renamed verb, or a server hiccup would also exit nonzero, and a probe that
-# reads any failure as "gap still open" is a probe that cannot fail.
 if [ -z "$OTHER" ] || [ -z "${KID:-}" ]; then
   bad "no address to probe blockOn with (item=$OTHER target=${KID:-})"
 else
-  BLOCK_ERR=$($CF piece call --quiet --piece "$KID" $ARGS \
+  # The capability half: the envelope is assembled from the very address the
+  # read above emitted, so the target is one the session was handed.
+  SIGIL="{\"on\":{\"/\":{\"link@1\":{\"id\":\"${OTHER#/}\"}}}}"
+  BLOCKED=$($CF call --quiet --piece "$KID" $ARGS \
+    blockOn "$SIGIL" 2>/dev/null)
+  check "1" "$(echo "$BLOCKED" | jq -r '.result.blockedOnCount // empty')" \
+    "a link envelope names an existing item, and the edge lands"
+  # And the edge is the target rather than a copy: the address under
+  # blockedOn is the address the envelope named.
+  EDGE=$($CF get --quiet --piece "$KID" blockedOn $ARGS \
+    --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
+    jq -r '.[0]["$link"] // empty')
+  check "$OTHER" "$EDGE" "the edge reads back as the address that was named"
+  # The gap half. Guarded, and matched against the SPECIFIC refusal: an empty
+  # address, a renamed verb, or a server hiccup would also exit nonzero, and a
+  # probe that reads any failure as "gap still open" is a probe that cannot
+  # fail.
+  BLOCK_ERR=$($CF call --quiet --piece "$KID" $ARGS \
     blockOn "{\"on\":\"$OTHER\"}" 2>&1 >/dev/null)
   BLOCK_RC=$?
   if [ "$BLOCK_RC" = "0" ]; then
-    gap 0 "blockOn with a bare address"
+    gap 0 "blockOn with the address a read emits"
   elif printf '%s' "$BLOCK_ERR" | grep -q "does not match type object"; then
-    gap 1 "blockOn with a bare address (the pre-dispatch gate refuses it)"
+    gap 1 "blockOn with the address a read emits (the gate still refuses the string)"
   else
     bad "blockOn failed for a reason that is not the known refusal: $BLOCK_ERR"
   fi
@@ -286,16 +301,16 @@ step "11. a verb returning a child piece renders the circle as an address"
 # readback bounds the result with the verb's own declared result and renders
 # the position where the declared type re-enters itself as an address, so the
 # whole outcome is JSON and the write it reports stays legible.
-BEFORE=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
+BEFORE=$($CF get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
-CALLED=$($CF piece call --quiet --piece "$EPIC" $ARGS \
+CALLED=$($CF call --quiet --piece "$EPIC" $ARGS \
   addChild '{"title":"Cycle probe"}' 2>/dev/null)
 RC=$?
 check "0" "$RC" "addChild readback on a doubly-linked tree"
 BACKREF=$(printf '%s' "$CALLED" | jq -r '.result.item.parent["$link"] // ""')
 check "/of:" "${BACKREF:0:4}" \
   "the position that closes the circle returns an address"
-AFTER=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
+AFTER=$($CF get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
 check "$((BEFORE + 1))" "$AFTER" "the write the result describes landed"
 

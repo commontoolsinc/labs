@@ -4,7 +4,7 @@ import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
-import type { DecodeContext } from "@/codec-interface/interface.ts";
+import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import {
   REALM_FORMAT_VERSION,
   type RealmCodecValue,
@@ -73,7 +73,7 @@ export class RealmCodecEngine
    *
    * **The tree shares structure with `value` and is not frozen**, per Section
    * 5.1 of the realm spec: a subtree needing no encoding is the caller's own
-   * object rather than a reconstruction of it, so mutating `value` afterwards
+   * object rather than a rebuild of it, so mutating `value` afterwards
    * changes what was encoded.
    *
    * The marker is minted here, after `value` exists, which is what Section 2.2
@@ -115,7 +115,7 @@ export class RealmCodecEngine
    */
   override decode(
     data: RealmEncodedValue,
-    context: DecodeContext,
+    env: LiveEnvironment,
   ): FabricValue {
     if (!Array.isArray(data) || (data.length !== 2)) {
       return this.reportMalformed(
@@ -148,7 +148,7 @@ export class RealmCodecEngine
       // A set is started here because this format's transport is the tree
       // itself, so a peer can hand one over with a cycle in it.
       // `JsonCodecEngine` starts none, its input being the product of a parse.
-      return this.decodeValue(data[1] as RealmCodecValue, context, new Set());
+      return this.decodeValue(data[1] as RealmCodecValue, env, new Set());
     } finally {
       this.#marker = outer;
     }
@@ -280,7 +280,7 @@ export class RealmCodecEngine
    */
   protected override decodeValue(
     data: RealmCodecValue,
-    context: DecodeContext,
+    env: LiveEnvironment,
     seen?: Set<object>,
   ): FabricValue {
     // Self-representing primitives pass straight through. A `symbol` and a
@@ -320,13 +320,13 @@ export class RealmCodecEngine
         return this.decodeTagged(
           unwrapped.tag,
           unwrapped.state,
-          context,
+          env,
           seen,
         );
       } else if (Array.isArray(data)) {
-        return this.#decodeArray(data, context, seen);
+        return this.#decodeArray(data, env, seen);
       } else if (isPlainObject(data)) {
-        return this.#decodePlainObject(data, context, seen);
+        return this.#decodePlainObject(data, env, seen);
       }
 
       // Wire data is untrusted, and cloning carries a good deal this format
@@ -354,7 +354,7 @@ export class RealmCodecEngine
    */
   #decodeArray(
     data: readonly RealmCodecValue[],
-    context: DecodeContext,
+    env: LiveEnvironment,
     seen: Set<object> | undefined,
   ): FabricValue {
     const length = data.length;
@@ -366,7 +366,7 @@ export class RealmCodecEngine
       }
 
       const original = data[i]!;
-      const decoded = this.decodeValue(original, context, seen);
+      const decoded = this.decodeValue(original, env, seen);
 
       if (result !== undefined) {
         result[i] = decoded;
@@ -394,7 +394,7 @@ export class RealmCodecEngine
    */
   #decodePlainObject(
     data: Record<string, RealmCodecValue>,
-    context: DecodeContext,
+    env: LiveEnvironment,
     seen: Set<object> | undefined,
   ): FabricValue {
     const keys = Object.keys(data);
@@ -408,7 +408,7 @@ export class RealmCodecEngine
       }
 
       const original = data[key]!;
-      const decoded = this.decodeValue(original, context, seen);
+      const decoded = this.decodeValue(original, env, seen);
 
       if (result !== undefined) {
         result[key] = decoded;
