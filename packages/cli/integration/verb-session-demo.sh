@@ -150,7 +150,11 @@ refused() {
   shift 2
   printf '\n%s   $ %s%s\n' "$C" "$(shown "$@")" "$N"
   printf '%s     REFUSED — %s%s\n' "$D" "$why" "$N"
-  "$@" >/dev/null 2>"$ERR"
+  # The version-skew note prints on failure exits, and this failure is the
+  # act's success condition — "a possible cause" under a refusal the act
+  # ordered is noise, so the check is skipped here and only here. An
+  # unexpected failure in `run` keeps the diagnosis.
+  CF_SKIP_VERSION_CHECK=1 "$@" >/dev/null 2>"$ERR"
   local rc=$?
   grep -v '^invocation:\|^session:\|^TIP:\|^(Use --quiet\|^NEXT STEPS:\|^  *→' \
     "$ERR" | grep -v '^$' | sed 's/^/       /'
