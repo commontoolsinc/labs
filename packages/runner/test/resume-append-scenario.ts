@@ -241,12 +241,14 @@ export async function runResumeAppendScenario(
       // Update the input list while the per-element results are held. The
       // coordinator's reconcile reads the still-stale sibling result cells, so
       // its commit is rejected as stale and its inline writes are reverted.
-      const tx1 = rt2.edit();
-      const cur = (rc2.key("items").get() ?? []) as unknown[];
-      const nextItems = scenario.updateItems?.(cur) ??
-        [...cur, scenario.appended];
-      rc2.withTx(tx1).key("items").set(nextItems);
-      await tx1.commit();
+      const edit = await rt2.editWithRetry((tx1) => {
+        const itemsCell = rc2.withTx(tx1).key("items");
+        const cur = (itemsCell.get() ?? []) as unknown[];
+        const nextItems = scenario.updateItems?.(cur) ??
+          [...cur, scenario.appended];
+        itemsCell.set(nextItems);
+      });
+      expect(edit.error).toBeUndefined();
       // Let the coordinator reconcile the input update against the still-held
       // results. idle() drives the scheduler to quiescence without blocking on
       // the held documents the way pull() would.
