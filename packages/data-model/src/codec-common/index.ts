@@ -35,6 +35,8 @@ export { codecOf } from "./codecOf.ts";
 export { isCodecTypeTag } from "./isCodecTypeTag.ts";
 export { CodecRegistry } from "./CodecRegistry.ts";
 export { BaseCodecEngine } from "./BaseCodecEngine.ts";
+export { DecodeContext } from "./DecodeContext.ts";
+export { EncodeContext } from "./EncodeContext.ts";
 
 export { BaseFabricInstance } from "./BaseFabricInstance.ts";
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
