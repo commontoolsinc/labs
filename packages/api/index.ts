@@ -2539,9 +2539,22 @@ export type PatternToolFunction = <
 // `__cfHelpers.lift(...)` is untyped (`__cfHelpers: any`), so it does not depend
 // on these overloads; only authored `lift(...)` calls resolve against them.
 export interface LiftFunction {
+  // A BARE function type, and it has to be one. A generic implementation —
+  // `<T extends { … what the body reads … }>(input) => T` — declares that its
+  // result is the very value it was handed, so a caller passing the whole
+  // document gets the whole document back rather than the narrow shape the
+  // body read. TypeScript carries that type parameter out to the caller only
+  // when the outer signature's return is a function type with a single call
+  // signature and no members at all (`getSingleSignature(…, allowMembers:
+  // false)`); an intersection like `ModuleFactory` fails that test, and the
+  // parameter collapses to its constraint at the `lift(…)` call instead.
+  //
+  // The cost is that a lift's declared type no longer says it is also a
+  // `Module` — the factory object still is one, and `isModule()` narrows to it
+  // where a module record is what's wanted (the module registry, say).
   <T, R>(
     implementation: (input: T) => R,
-  ): ModuleFactory<StripCell<T>, R>;
+  ): (inputs: FactoryInput<StripCell<T>>) => Reactive<R>;
 
   <T>(
     implementation: (input: T) => any,
