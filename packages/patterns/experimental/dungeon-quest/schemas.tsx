@@ -5,6 +5,7 @@
  */
 
 import {
+  type BuiltInLLMMessage,
   CHIP_UI,
   Default,
   NAME,
@@ -44,8 +45,16 @@ export interface QuestCharacter {
   location: string;
 }
 
+/** The character facts visible to a room and its game master. */
+export interface EncounterCharacter extends QuestCharacter {
+  health?: number;
+  maxHealth?: number;
+  power?: number;
+  inventory?: string[];
+}
+
 /** The callable role retained by the adventure's character registry. */
-export interface CharacterPiece extends QuestCharacter {
+export interface CharacterPiece extends EncounterCharacter {
   moveTo: Stream<MoveCharacterEvent>;
 }
 
@@ -199,11 +208,14 @@ export interface AttemptAdventureActionResult {
 
 export interface LocationInput {
   locationKey: DungeonLocationKey;
-  characters?: PerSpace<QuestCharacter[] | Default<[]>>;
+  characters?: PerSpace<EncounterCharacter[] | Default<[]>>;
   questParticipants?: PerSpace<
     Writable<QuestCharacter[] | Default<[]>>
   >;
   questEvidence?: PerSpace<Writable<QuestEvidence[] | Default<[]>>>;
+  encounterMessages?: PerSpace<
+    Writable<BuiltInLLMMessage[] | Default<[]>>
+  >;
 }
 
 /** The navigable role retained by the adventure's world map. */
@@ -215,9 +227,14 @@ export interface LocationPiece {
   locationKey: DungeonLocationKey;
   name: string;
   description: string;
-  occupants: QuestCharacter[];
+  occupants: EncounterCharacter[];
   occupantCount: number;
   objectiveStatus: QuestObjectiveStatus;
+  encounterMessages: BuiltInLLMMessage[];
+  encounterPending: boolean;
+  encounterContext: string;
+  proposeAction: Stream<{ text: string }>;
+  clearEncounter: Stream<void>;
   performAction: Stream<void, AttemptAdventureActionResult>;
 }
 
