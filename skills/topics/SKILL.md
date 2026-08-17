@@ -53,7 +53,7 @@ the Topics, declared through scalar summaries, so one read surveys the whole
 board without expanding any Topic:
 
 ```bash
-deno task cf piece get --url "$TOPICS_BOARD_URL" index --step
+deno task cf get --url "$TOPICS_BOARD_URL" index --step
 ```
 
 A deployed board can run an older pattern without `index` — the read above
@@ -62,7 +62,7 @@ erroring on an unknown path is the tell. Survey such a board through the durable
 linked Topic and can include its body, comments, and handlers.
 
 ```bash
-deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
+deno task cf get --url "$TOPICS_BOARD_URL" topics --input \
   --filter '.title != null' \
   --select title,createdAt,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 ```
@@ -76,17 +76,17 @@ declared nested arrays without exposing sibling fields.
 
 ```bash
 # Find one Topic by exact title.
-deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
+deno task cf get --url "$TOPICS_BOARD_URL" topics --input \
   --filter '.title == "<exact title>"' \
   --select title,lastActivityAt,commentCount
 
 # Find Topics active at or after an epoch-millisecond threshold.
-deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
+deno task cf get --url "$TOPICS_BOARD_URL" topics --input \
   --filter '.lastActivityAt >= 1785074400000' \
   --select title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 
 # Combine predicates for a narrower field search.
-deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
+deno task cf get --url "$TOPICS_BOARD_URL" topics --input \
   --filter '.createdBy.name == "<name>" and .commentCount > 0' \
   --select title,lastActivityAt,commentCount
 ```
@@ -102,22 +102,21 @@ Address a selected Topic by the address its own `index` row carries result.
 Filter and project that computed index too:
 
 ```bash
-deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
-  --filter '.title == "<exact title>"' \
+deno task cf get --url "$TOPICS_BOARD_URL" index --step \
   --select @,title,lastActivityAt,commentCount
 export TOPIC_URL='https://estuary.saga-castor.ts.net/topics-dev-476ea34f/<topic-fid>'
-deno task cf piece get --url "$TOPIC_URL" title --input
-deno task cf piece get --url "$TOPIC_URL" body --input
-deno task cf piece get --url "$TOPIC_URL" comments --input \
+deno task cf get --url "$TOPIC_URL" title --input
+deno task cf get --url "$TOPIC_URL" body --input
+deno task cf get --url "$TOPIC_URL" comments --input \
   --select sentAt,author.kind,author.name,authorName,body
-deno task cf piece get --url "$TOPIC_URL" links --input \
+deno task cf get --url "$TOPIC_URL" links --input \
   --select kind,url,label,addedAt,addedBy.kind,addedBy.name
 
 # Search within a selected Topic's arrays.
-deno task cf piece get --url "$TOPIC_URL" comments --input \
+deno task cf get --url "$TOPIC_URL" comments --input \
   --filter '.author.name == "<agent>" or .authorName == "<legacy name>"' \
   --select sentAt,author.kind,author.name,authorName,body
-deno task cf piece get --url "$TOPIC_URL" links --input \
+deno task cf get --url "$TOPIC_URL" links --input \
   --filter '.kind == "pr"' --select kind,url,label,addedAt
 ```
 
@@ -127,7 +126,7 @@ not compose with `--filter` — a filtered array's survivors no longer say which
 positions they came from — so ask for an address in its own unfiltered read:
 
 ```bash
-deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
+deno task cf get --url "$TOPICS_BOARD_URL" index --step \
   --select @,title
 ```
 
@@ -147,7 +146,7 @@ publishes `crossrefs` at all. On such a board this is the only address source,
 so reach for it there and nowhere else:
 
 ```bash
-deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
+deno task cf get --url "$TOPICS_BOARD_URL" crossrefs --step \
   --filter '.topic.title == "<exact title>"' --select fid,topic.title
 ```
 
@@ -162,10 +161,9 @@ Create a topic through the board rather than deploying the Topic pattern
 directly:
 
 ```bash
-deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic \
+deno task cf call --url "$TOPICS_BOARD_URL" addTopic \
   '{"title":"<title>","agentName":"<agent name>"}'
-deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
-  --filter '.title == "<exact title>"' --select @,title
+deno task cf get --url "$TOPICS_BOARD_URL" index --step --select @,title
 ```
 
 `addTopic` returns the topic it created, so a board running this source hands
@@ -179,13 +177,13 @@ address. All handler arguments are JSON; encode multiline Markdown rather than
 passing an unescaped string.
 
 ```bash
-deno task cf piece call --url "$TOPIC_URL" setBody \
+deno task cf call --url "$TOPIC_URL" setBody \
   '{"body":"<complete revised body>","agentName":"<agent name>"}'
-deno task cf piece call --url "$TOPIC_URL" addComment \
+deno task cf call --url "$TOPIC_URL" addComment \
   '{"body":"<point-in-time update>","agentName":"<agent name>"}'
-deno task cf piece call --url "$TOPIC_URL" addLink \
+deno task cf call --url "$TOPIC_URL" addLink \
   '{"kind":"pr","url":"<PR URL>","label":"<PR label>","agentName":"<agent name>"}'
-deno task cf piece get --url "$TOPIC_URL" commentCount --step
+deno task cf get --url "$TOPIC_URL" commentCount --step
 ```
 
 Each of these three returns the record it wrote — the appended comment or link,
@@ -201,8 +199,8 @@ session per run
 pass `--invocation <your-key>` on mutating calls. A retry with the same pair
 settles on the original outcome instead of posting twice — the handler body
 re-runs, but nothing commits twice. The settled envelope also carries `receipt`,
-the address of the outcome, which `deno task cf piece get --piece <receipt id>`
-reads back later without re-invoking.
+the address of the outcome, which `deno task cf get --piece <receipt id>` reads
+back later without re-invoking.
 
 The body is the living big-picture document. Replace it in place with the full
 revised body so a reader sees the current state without replaying the thread,
@@ -224,8 +222,8 @@ A connection to another Topic is a **reference**, not a string. Record it with
 nothing, because nothing scans prose for addresses:
 
 ```bash
-deno task cf piece call --url "$TOPIC_URL" mention '{"topic":"<other topic>"}'
-deno task cf piece call --url "$TOPIC_URL" unmention '{"topic":"<other topic>"}'
+deno task cf call --url "$TOPIC_URL" mention '{"topic":"<other topic>"}'
+deno task cf call --url "$TOPIC_URL" unmention '{"topic":"<other topic>"}'
 ```
 
 `mention` appends the reference; `unmention` removes every entry naming that

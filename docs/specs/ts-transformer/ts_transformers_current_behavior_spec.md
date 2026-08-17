@@ -497,13 +497,22 @@ Diagnostics emitted in all modes:
     `computed(() => ...)` or module-scope `lift()`
 - **Error** `pattern-context:optional-chaining`
   - optional property / element access that appears outside a supported
-    lowerable expression site
+    lowerable expression site — including inside a lowered array-method
+    callback (`map`/`filter`/`flatMap`) and inside a callback whose owning
+    call has no lowerable site
+  - an optional access inside an inline callback argument is carried by the
+    callback's owning call when that call is outside the lowered array-method
+    families and itself sits at a lowerable expression site: the site's lift
+    absorbs the callback, so the access runs on resolved values
+    (`rows.get().toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))`)
   - optional calls do not receive this diagnostic merely because they are
     optional: their underlying call root is classified by the same policy as a
     non-optional call
   - at supported expression sites, receiver optionality (`value?.method()`),
     invocation optionality (`value.method?.()`), and combined chains lower as
     whole calls with JavaScript short-circuit and receiver semantics intact
+  - message instructs the author to wrap the computation in
+    `computed(() => ...)` or move it to a site that lowers
 - **Error** `pattern-context:computation`
   - binary/unary/conditional computations using opaque dependencies outside
     wrappers
@@ -1523,7 +1532,7 @@ not yet `.for(...)`-wrapped.
 For each `pattern(cb, argumentSchema, resultSchema)` call it marks
 result-schema stream properties `tier: "wrapper"` — the verb-listing mark
 `cf piece verbs` hides by default (verb contract WS-F; everything stays
-callable, `cf piece call` never consults marks). A property is marked when its
+callable, `cf call` never consults marks). A property is marked when its
 returned value resolves (identifier → nearest const initializer, callback body
 first then module scope) to an applied handler factory that:
 

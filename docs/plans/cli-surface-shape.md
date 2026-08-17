@@ -175,8 +175,9 @@ their own is a step-7-class decision this document leaves open.
 
 ## How to get there
 
-Additive, in dependency order. Nothing before step 6 removes or renames anything
-a caller depends on — steps 1–5 only add.
+Additive, in dependency order. Nothing before 6b removes or renames anything a
+caller depends on — steps 1 through 6a only add, and 6a adds a warning rather
+than taking anything away.
 
 1. **Factor out the shared read step** so a single implementation turns a cell
    and a shape into structured output.
@@ -189,7 +190,12 @@ a caller depends on — steps 1–5 only add.
    flags, keeping both.
 5. **Add `cf get`/`set`/`call`** as aliases of the existing
    implementations. Same code, honest names, both spellings working.
-6. **Deprecate the old spellings** once the new ones carry traffic.
+6a. **Warn on the old spellings**, each warning naming the date its spelling
+   stops working — two weeks after this step reaches main. The date is a
+   literal, fixed when this step merges, not a window recomputed per run: a
+   caller who reads the warning today and acts on it next week must be told
+   the same date both times.
+6b. **Remove the old spellings** on the date the warnings named.
 7. **Merge the duplicated nouns** — the two `inspect`s, the two `view`s, `piece
    map` against `inspect graph`, and `apply` against `set`.
 
@@ -208,13 +214,27 @@ intermediate state wrong. What each step owes:
 | 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
 | 4 | `#argument` beside every `--input` example, in the same places |
 | 5 | The new spellings alongside the old ones everywhere both work |
-| 6 | Removal of the old spellings, once redirects have carried traffic |
+| 6a | The old spellings marked deprecated wherever they are taught, each carrying the removal date |
+| 6b | Removal of the old spellings, and of the deprecation notes 6a added |
 | 7 | Whatever the merges decide |
 
-**Old spellings stay as redirects, not errors, until step 6 has traffic behind
-it.** A deprecated spelling that still works costs a line of aliasing; one that
-fails costs every script and skill file that used it, including ones outside
-this repository.
+**Old spellings stay as redirects, not errors, until the date 6a names.** A
+deprecated spelling that still works costs a line of aliasing; one that fails
+costs every script and skill file that used it, including ones outside this
+repository.
+
+A DATE rather than a traffic threshold, because the traffic is not observable.
+Both spellings mount the same builder and emit identical requests, and the CLI
+sends nothing that would let a server attribute one to either — so measuring
+adoption means adding a marker to the wire, somewhere to collect it, and a
+privacy decision about a tool that runs on other people's machines. The
+condition that wording implied could not be checked, only estimated.
+
+What IS checkable is this repository, and it is a precondition rather than a
+gate: the sweep in step 5's documentation row should land before 6a, so the
+warning does not fire on examples we ourselves still teach. Consumers outside
+this repository are unmeasurable by any means available here, which is an
+argument for a generous interval rather than for instrumenting one.
 
 ## Decisions this document does not make
 

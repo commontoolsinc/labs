@@ -82,9 +82,11 @@ Test each handler via the CLI. **Always run `piece step` after `piece call`** â€
 without it, computed values remain stale.
 
 ```bash
-# Example: test addCard handler
-deno task cf piece call --piece {ID} addCard '{"columnIndex": 0, "title": "Test"}' \
-  --identity claude.key --api-url {api-url} --space {space-name}
+# Example: test addCard handler (every target flag before the callable name â€”
+# after it, flags belong to the callable's own parser)
+deno task cf call --piece {ID} \
+  --identity claude.key --api-url {api-url} --space {space-name} \
+  addCard '{"columnIndex": 0, "title": "Test"}'
 deno task cf piece step --piece {ID} \
   --identity claude.key --api-url {api-url} --space {space-name}
 deno task cf piece inspect --piece {ID} \

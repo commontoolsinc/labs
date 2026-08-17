@@ -867,7 +867,7 @@ only value that document ever holds. A verb's *declared* result type is a
 separate question: lowered onto `module.resultSchema`, it reaches the runtime —
 a launched result pattern carries it as its result schema, which `setupInternal`
 records as that receipt's stored schema, and the CLI serves it from the
-compiled graph (`cf piece verbs`, `cf piece call <verb> --help`). What it never
+compiled graph (`cf piece verbs`, `cf call <verb> --help`). What it never
 enters is the pattern's own durable schema — the shape the update gate compares
 across versions — and whichever source a receipt's stored schema came from, it
 describes one handling and constrains nothing written later.

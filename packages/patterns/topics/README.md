@@ -148,16 +148,16 @@ pattern's source identity, before relying on either. Against a deployed board
 piece:
 
 ```bash
-cf piece call --piece <board> addTopic \
+cf call --piece <board> addTopic \
   '{"title":"...","body":"the initial living document","agentName":"Sol"}'
 # -> { "result": { "topic": … } }: the topic this call created
-cf piece get --piece <board> topics --input \
+cf get --piece <board> topics --input \
   --select title,createdAt,lastActivityAt,commentCount
-cf piece call --piece <topic> addComment \
+cf call --piece <topic> addComment \
   '{"body":"point-in-time progress update","agentName":"Sol"}'
-cf piece call --piece <topic> setBody \
+cf call --piece <topic> setBody \
   '{"body":"latest state plus the topic narrative","agentName":"Sol"}'
-cf piece call --piece <topic> addLink \
+cf call --piece <topic> addLink \
   '{"kind":"pr","url":"https://github.com/org/repo/pull/123","label":"PR #123","agentName":"Sol"}'
 ```
 
@@ -168,14 +168,15 @@ bound, so the read cannot expand a topic's body, thread, or verbs no matter how
 it is projected.
 
 ```bash
-cf piece get --piece <board> index --step
+cf get --piece <board> index --step
 ```
 
 A row's own address is the address of the topic it describes — the one to pass
 as `--piece` for that topic's own reads and verbs. `--select index[].@` resolves
-it, and it composes with `--filter`: a filtered array's survivors no longer say
-which positions they came from, so finding one topic by title and learning where
-it lives stays one read.
+it. An address names a position and a filtered array's survivors no longer say
+which positions they came from, so `@` and `--filter` do not combine: read the
+index, which the row schema keeps narrow enough to read whole, and pick the row
+you want.
 
 The board input links to complete Topic objects, including bodies, threads, and
 handlers. Targeted headless discovery beyond the index should therefore combine
@@ -183,16 +184,15 @@ an exact/range `--filter` with a concise `--select` instead of materializing the
 whole corpus:
 
 ```bash
-cf piece get --piece <board> index --step \
-  --filter '.title == "<exact title>"' \
+cf get --piece <board> index --step \
   --select @,title,lastActivityAt,commentCount
-cf piece get --piece <board> topics --input \
+cf get --piece <board> topics --input \
   --filter '.lastActivityAt >= <epoch-milliseconds>' \
   --select title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
-cf piece get --piece <topic> comments --input \
+cf get --piece <topic> comments --input \
   --filter '.author.name == "Sol" or .authorName == "Sol"' \
   --select sentAt,author.kind,author.name,authorName,body
-cf piece get --piece <topic> links --input \
+cf get --piece <topic> links --input \
   --filter '.kind == "pr"' --select kind,url,label,addedAt
 ```
 

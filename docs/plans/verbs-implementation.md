@@ -684,9 +684,9 @@ this document stops being read.
 [The CLI surface](cli-surface-implementation.md), already sequenced. Its first
 two stages add positional addresses and the top-level names, and they can start
 as soon as the read layer has merged; they touch the same commands, so starting
-earlier means resolving the same files twice. Its deprecation stage carries an
-unanswered question of its own — what "carries traffic" means, given nothing
-measures it — and that wants an answer before the stage rather than during it.
+earlier means resolving the same files twice. Its deprecation stage is now
+dated rather than conditional: each warning names the day its spelling stops
+working, two weeks after the warnings land.
 
 **Retention and CFC execution provenance** —
 [its own plan](retention-and-provenance.md). Gated on a CFC review that has not
