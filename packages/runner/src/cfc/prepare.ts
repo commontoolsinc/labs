@@ -7689,11 +7689,41 @@ export const prepareBoundaryCommit = (
     }
 
     for (const stamped of llmDerivedWritesByTarget.get(key) ?? []) {
-      persistedLabelEntries.push({
-        path: canonicalizeLogicalPath(stamped.path),
-        label: { integrity: [cfcAtom.llmDerived()] },
-        origin: "runtime-integrity",
-      });
+      const stampedPath = canonicalizeLogicalPath(stamped.path);
+      const paths = new Map<string, readonly string[]>([
+        [pathKey(stampedPath), stampedPath],
+      ]);
+      for (const entry of mergedSchemaEntries) {
+        if (!isPrefix(stampedPath, entry.path)) continue;
+        for (
+          const path of concreteWrittenPathsForPattern(
+            tx,
+            target,
+            entry.path,
+            valueWrittenPaths,
+          )
+        ) {
+          if (
+            isPrefix(stampedPath, path) &&
+            cfcSchemaEntryMatchesCurrentValueAtConcretePath(
+              tx,
+              target,
+              entry,
+              path,
+              false,
+            )
+          ) {
+            paths.set(pathKey(path), path);
+          }
+        }
+      }
+      for (const path of paths.values()) {
+        persistedLabelEntries.push({
+          path,
+          label: { integrity: [cfcAtom.llmDerived()] },
+          origin: "runtime-integrity",
+        });
+      }
     }
 
     if (flowPersist && (flowHasLabels || clearedExistence.length > 0)) {
