@@ -23,6 +23,7 @@ import {
   demoCommands,
   findViolations,
   joinContinuations,
+  main,
   tokenize,
   WALKTHROUGH_PATH,
   walkthroughCommands,
@@ -59,6 +60,17 @@ describe("check-verb-session-sync", () => {
   describe("joinContinuations", () => {
     it("folds a backslash-continued line into its successor", () => {
       expect(joinContinuations("a \\\nb\nc")).toEqual(["a  b", "c"]);
+    });
+
+    it("keeps a continuation the text ends on", () => {
+      expect(joinContinuations("a \\")).toEqual(["a  "]);
+    });
+  });
+
+  describe("demoCommands", () => {
+    it("extracts a command out of an assignment's substitution", () => {
+      expect(demoCommands(`X=$(cf piece get --piece a title | jq -r .)`))
+        .toEqual([["cf", "piece", "get", "--piece", "a", "title"]]);
     });
   });
 
@@ -144,6 +156,27 @@ describe("check-verb-session-sync", () => {
         "```",
       ].join("\n");
       expect(findViolations(sh, block)).toEqual([]);
+    });
+
+    it("returns 0 through main() for the repository's own files", async () => {
+      const lines: string[] = [];
+      expect(await main({ log: (l) => lines.push(l) })).toBe(0);
+      expect(lines.length).toBe(1);
+    });
+
+    it("returns 1 through main() when the walkthrough composes", async () => {
+      const mdPath = await Deno.makeTempFile({ suffix: ".md" });
+      try {
+        await Deno.writeTextFile(
+          mdPath,
+          "```bash\ncf frobnicate --nothing-like-this\n```\n",
+        );
+        const errors: string[] = [];
+        expect(await main({ mdPath, error: (l) => errors.push(l) })).toBe(1);
+        expect(errors.length).toBeGreaterThanOrEqual(2);
+      } finally {
+        await Deno.remove(mdPath);
+      }
     });
 
     it("still flags the line after an exemption is spent", () => {

@@ -293,16 +293,31 @@ export function findViolations(shText: string, mdText: string): string[] {
   return violations;
 }
 
-if (import.meta.main) {
-  const shText = await Deno.readTextFile(join(REPO_ROOT, DEMO_PATH));
-  const mdText = await Deno.readTextFile(join(REPO_ROOT, WALKTHROUGH_PATH));
+/** Runs the check and returns the process exit code. The file paths and the
+ * printers are injectable so a test can drive both verdicts; the defaults are
+ * the repository's own files and the console. */
+export async function main(deps: {
+  shPath?: string;
+  mdPath?: string;
+  log?: (line: string) => void;
+  error?: (line: string) => void;
+} = {}): Promise<number> {
+  const log = deps.log ?? console.log;
+  const error = deps.error ?? console.error;
+  const shText = await Deno.readTextFile(
+    deps.shPath ?? join(REPO_ROOT, DEMO_PATH),
+  );
+  const mdText = await Deno.readTextFile(
+    deps.mdPath ?? join(REPO_ROOT, WALKTHROUGH_PATH),
+  );
   const violations = findViolations(shText, mdText);
   if (violations.length > 0) {
-    console.error(`verb-session sync: ${violations.length} violation(s)\n`);
-    for (const violation of violations) console.error(`  ${violation}`);
-    Deno.exit(1);
+    error(`verb-session sync: ${violations.length} violation(s)\n`);
+    for (const violation of violations) error(`  ${violation}`);
+    return 1;
   }
-  console.log(
-    "Walkthrough commands and act references all match the demo.",
-  );
+  log("Walkthrough commands and act references all match the demo.");
+  return 0;
 }
+
+if (import.meta.main) Deno.exit(await main());
