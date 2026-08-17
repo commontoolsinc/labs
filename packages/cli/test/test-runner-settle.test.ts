@@ -40,7 +40,8 @@ describe(
         { root: FIXTURES },
       );
       expect(results[0].error ?? "").toContain(
-        "must have an 'action', 'assertion', 'render', or 'settle'",
+        "must have an 'action', 'assertion', 'render', 'settle', 'label', " +
+          "or 'await'",
       );
     });
   },
