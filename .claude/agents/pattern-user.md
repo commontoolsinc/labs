@@ -46,7 +46,7 @@ API_URL=<url> deno task cf piece setsrc main.tsx --test main.test.tsx --piece <p
 
 # Inspect state / call handler
 API_URL=<url> deno task cf piece inspect --piece <piece_id> --identity <key_path>
-API_URL=<url> deno task cf piece call <handler> --piece <piece_id> --identity <key_path>
+API_URL=<url> deno task cf call --piece <piece_id> --identity <key_path> <handler>
 ```
 
 ## Deploy Flow

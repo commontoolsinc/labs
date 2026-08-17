@@ -83,7 +83,7 @@ without it, computed values remain stale.
 
 ```bash
 # Example: test addCard handler
-deno task cf piece call --piece {ID} addCard '{"columnIndex": 0, "title": "Test"}' \
+deno task cf call --piece {ID} addCard '{"columnIndex": 0, "title": "Test"}' \
   --identity claude.key --api-url {api-url} --space {space-name}
 deno task cf piece step --piece {ID} \
   --identity claude.key --api-url {api-url} --space {space-name}
