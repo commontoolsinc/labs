@@ -1097,30 +1097,503 @@ TIPS:
   • Path format: forward slashes only (items/0/name, not items[0].name)
   • JSON values: strings need quotes: echo '"hello"' | cf piece set ...`);
 
-export const piece = new Command()
-  .name("piece")
-  .description(pieceDescription)
-  .error((error, command) => {
-    const args = command.getMainCommand().getRawArgs();
-    if (reservesStdoutForCommandOutput(args)) {
-      throw error;
-    }
-  })
-  .default("help")
-  .globalOption("-q,--quiet", "Suppress hints and next-step suggestions")
-  .globalOption(
-    "-u,--url <url:string>",
-    "URL representing a host, space, and piece.",
-  )
-  .globalEnv("CF_API_URL=<url:string>", "URL of the fabric instance.", {
-    prefix: "CF_",
-  })
-  .globalOption("-a,--api-url <url:string>", "URL of the fabric instance.")
-  .globalEnv("CF_IDENTITY=<path:string>", "Path to an identity keyfile.", {
-    prefix: "CF_",
-  })
-  .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
-  .globalOption("-s,--space <space:string>", "The space name or DID")
+/**
+ * The target-selection surface every piece data command carries: quiet, the
+ * combined URL, the API URL and identity with their environment fallbacks,
+ * and the space. One function defines them for both surfaces that must
+ * agree — `piece` declares them as globals its subcommands inherit, and the
+ * top-level `cf get`/`cf set`/`cf call` instances carry them as their own,
+ * having no parent globals to inherit — so the two spellings of a command
+ * cannot drift apart in what they accept.
+ */
+export function targetOptions(
+  // deno-lint-ignore no-explicit-any
+  cmd: Command<any>,
+  opts: { global: boolean },
+  // deno-lint-ignore no-explicit-any
+): Command<any> {
+  const option = (flags: string, description: string) =>
+    opts.global
+      ? cmd.globalOption(flags, description)
+      : cmd.option(flags, description);
+  const env = (name: string, description: string) =>
+    opts.global
+      ? cmd.globalEnv(name, description, { prefix: "CF_" })
+      : cmd.env(name, description, { prefix: "CF_" });
+  option("-q,--quiet", "Suppress hints and next-step suggestions");
+  option("-u,--url <url:string>", "URL representing a host, space, and piece.");
+  env("CF_API_URL=<url:string>", "URL of the fabric instance.");
+  option("-a,--api-url <url:string>", "URL of the fabric instance.");
+  env("CF_IDENTITY=<path:string>", "Path to an identity keyfile.");
+  option("-i,--identity <path:string>", "Path to an identity keyfile.");
+  option("-s,--space <space:string>", "The space name or DID");
+  return cmd;
+}
+
+/**
+ * The one definition of `get`, mounted under `cf piece` and, through
+ * {@link pieceDataCommand}, at top level as `cf get`. `spelling` is only
+ * how the command names itself in its own help.
+ */
+// deno-lint-ignore no-explicit-any
+function buildGetCommand(spelling = "piece get"): Command<any> {
+  return new Command()
+    .description(
+      `Get a value from a piece at a specific path. Omit path to return the full result.
+
+PATH FORMAT: Use forward slashes and numeric indices for arrays.
+  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
+
+ADDRESS: The target can sit in the first positional instead of --piece when
+written as a canonical reference (it begins with "/"): cf ${spelling}
+/of:fid1:.../items 0/name. A trailing #argument selects the arguments cell
+the way --input does.`,
+    )
+    .usage(`${pieceUsage} [addressOrPath] [path]`)
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} name`),
+      `Get the "name" field from piece result "${RAW_EX_COMP.piece!}".`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP} /of:fid1:abc.../items 0/name`,
+      ),
+      "Read through a positional canonical address; its embedded path applies.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP} '/of:fid1:abc...#argument' draft`,
+      ),
+      `Read the piece's arguments cell ("#argument" spells --input).`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
+      ),
+      `Get a nested field value from piece input "${RAW_EX_COMP.piece!}".`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP} --piece ${RAW_EX_COMP
+          .piece!}@session draft`,
+      ),
+      `Get a value from a session-scoped piece instance.`,
+    )
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE}`),
+      `Get the full result of piece "${RAW_EX_COMP.piece!}".`,
+    )
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} --step`),
+      `Start, recompute, and get the result in one CLI session.`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} items --filter '.status == "open"'`,
+      ),
+      "Return only matching items from an array.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} items --select id,title`,
+      ),
+      "Project each returned item to selected fields.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} --select 'topic@,topic.title'`,
+      ),
+      "Return a field's address, and the fields asked for beside it.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} items ` +
+          `--schema '{"type":"array","items":{"$link":true}}'`,
+      ),
+      "Return each item's address instead of its contents.",
+    )
+    .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
+    .option(
+      "--input",
+      "Read from the piece's input cell instead of result cell (the " +
+        '"#argument" reference suffix spells the same selection)',
+    )
+    .option(
+      "--step",
+      "Start and recompute the piece in this session before reading",
+    )
+    .option(
+      "--json",
+      "Select JSON output explicitly. This command always outputs JSON.",
+    )
+    .option(
+      "--filter <predicate:string>",
+      "Filter an array with a jq-inspired predicate",
+    )
+    .option(
+      "--select <fields:string>",
+      "Project output to comma-separated field paths; a trailing @ asks for " +
+        "a position's address, and @ alone for the source's own. An address " +
+        "comes back as one reference string, which --piece takes back in",
+    )
+    .option(
+      "--schema <schema:string>",
+      "Project output with an inline JSON Schema, @file, or the --select " +
+        "field list",
+      // Both flags carry the one projection, so a command naming both has not
+      // said which shape it wants. Refuse before the read rather than pick.
+      { conflicts: ["select"] },
+    )
+    .arguments("[addressOrPath:string] [path:string]")
+    .action(getCellValueFromCommand);
+}
+
+/**
+ * The one definition of `set`; see {@link buildGetCommand} for the shape.
+ */
+// deno-lint-ignore no-explicit-any
+function buildSetCommand(spelling = "piece set"): Command<any> {
+  return new Command()
+    .description(
+      cliText(
+        `Set a value in a piece at a specific path. Reads JSON from stdin.
+
+PATH FORMAT: Use forward slashes and numeric indices for arrays.
+  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
+
+JSON VALUES: Strings need quotes: echo '"hello"' | cf ${spelling} ...
+
+ADDRESS: The target can sit in the first positional instead of --piece when
+written as a canonical reference (it begins with "/"): a path embedded in it
+counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
+#argument selects the arguments cell the way --input does.`,
+      ),
+    )
+    .usage(`${pieceUsage} [addressOrPath] [path]`)
+    .example(
+      cliText(
+        `echo '"New Name"' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} name`,
+      ),
+      `Set the "name" field in piece result "${RAW_EX_COMP.piece!}".`,
+    )
+    .example(
+      cliText(
+        `echo '{"foo": "bar"}' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} config --input`,
+      ),
+      `Set a nested object value in piece input "${RAW_EX_COMP.piece!}".`,
+    )
+    .example(
+      cliText(
+        `echo '"Milk"' | cf ${spelling} ${EX_ID} ${EX_COMP} /of:fid1:abc.../title`,
+      ),
+      "Write through a positional canonical address; the embedded path is the path.",
+    )
+    .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
+    .option(
+      "--input",
+      "Write to the piece's input cell instead of result cell (the " +
+        '"#argument" reference suffix spells the same selection)',
+    )
+    .arguments("[addressOrPath:string] [path:string]")
+    .action(setCellValueFromCommand);
+}
+
+/**
+ * The one definition of `call`; see {@link buildGetCommand} for the
+ * shape.
+ */
+// deno-lint-ignore no-explicit-any
+function buildCallCommand(spelling = "piece call"): Command<any> {
+  return new Command()
+    .description(
+      `Invoke a callable within a piece.
+
+The callable name separates piece-call options from the callable's arguments.
+Arguments after the callable use the same parser as cf exec. Use --json with an
+optional inline value for complete JSON input; bare --json reads JSON from
+stdin. A single positional JSON value or "-" stdin sentinel is also accepted.
+Use --help --json for machine-readable schema help. Put schema-derived flags
+after --. Handlers interpret piped input when no input argument is present.
+
+ADDRESS: The target can precede the callable name instead of riding --piece
+when written as a canonical reference (it begins with "/"):
+cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
+    )
+    .usage(`${pieceUsage} [address] <callable> [input]`)
+    .example(
+      cliText(`cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} increment`),
+      `Call the "increment" handler on piece "${RAW_EX_COMP.piece!}".`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} setName '{"value":"My Name"}'`,
+      ),
+      `Call the "setName" handler with JSON arguments on piece "${RAW_EX_COMP
+        .piece!}".`,
+    )
+    .example(
+      cliText(
+        `echo '{"value":"My Name"}' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} setName -`,
+      ),
+      `Read the JSON payload from stdin ("-" is the stdin sentinel).`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} setName --json '{"value":"My Name"}'`,
+      ),
+      "Call a handler with explicit inline JSON input.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`,
+      ),
+      `Run the "search" tool using schema-derived flags after "--".`,
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP} /of:fid1:abc... addItem '{"title":"Milk"}'`,
+      ),
+      "Name the target as a positional canonical address before the callable.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} --select topic.title addTopic ` +
+          `'{"title":"Ship it"}'`,
+      ),
+      "Return only the selected fields of the verb's result.",
+    )
+    .example(
+      cliText(
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} ` +
+          `--schema '{"properties":{"topic":{"$link":true}}}' addTopic ` +
+          `'{"title":"Ship it"}'`,
+      ),
+      "Return the address of what the verb returned instead of its contents.",
+    )
+    .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+    .option(
+      "--invocation <id:string>",
+      "Idempotency key for a handler call (before the callable name), and " +
+        "requires an invocation session. A retry naming the same pair cannot " +
+        "commit twice — it settles on the original outcome — but the " +
+        "handler body does re-run, so effects outside the transaction " +
+        "repeat. Both are minted for the one call when neither is given.",
+    )
+    .env(
+      "CF_INVOCATION_SESSION=<id:string>",
+      "Invocation session that this run's invocation ids belong to. The form " +
+        "to reach for: a session is what makes an outcome's address " +
+        "unguessable, and an environment variable stays out of the process " +
+        "listing an argument shows up in.",
+      { prefix: "CF_" },
+    )
+    .option(
+      "--invocation-session <id:string>",
+      "Override CF_INVOCATION_SESSION for this one call (before the callable " +
+        "name): the session this call's invocation id was chosen within, " +
+        "since an invocation id is the caller's own word and another caller " +
+        "can pick the same one. The pair decides which outcome a replay " +
+        "reads, so the same id under another session is another invocation. " +
+        "Mint a session per agent run with `cf invocation-session new`, and " +
+        "carry that one session on every call of the run.",
+    )
+    .option(
+      "--verbose",
+      "Print per-phase wall-clock timings to stderr (before the callable " +
+        "name). stdout still carries only the command output.",
+    )
+    .option(
+      "--await",
+      "Wait for settlement and receipt readback (before the callable name). " +
+        "This is the default; the flag exists so a script can say so " +
+        "explicitly. Contradicts --no-wait.",
+    )
+    .option(
+      "--wait <seconds:number>",
+      "Bound the settlement wait by a chosen patience, in seconds (before " +
+        "the callable name). On expiry the exit is nonzero with the " +
+        "invocation id and furthest phase on stderr; the invocation may not " +
+        "have executed or committed. Re-invoking under the same id and " +
+        "session cannot commit twice — but it runs the handler body again, " +
+        "so effects outside the transaction repeat. An expiry is exactly the " +
+        "case where you cannot tell whether it committed.",
+    )
+    .option(
+      "--no-wait",
+      "Exit once this handling's commit is acknowledged (before the callable " +
+        "name), skipping only the receipt readback: stdout reports status " +
+        '"committed" plus the receipt address, so `cf piece get --piece <that ' +
+        "address>` collects the outcome later without re-running the handler; " +
+        "a call naming the same session and --invocation recovers it too, but " +
+        "runs the handler body again. The handler still executes here and its " +
+        "commit is durable. Handler invocations only.",
+    )
+    .option(
+      "--show-links",
+      "Annotate the Invocation JSON with a links dictionary mapping result " +
+        "paths to their backing cell addresses, each one reference string " +
+        "--piece takes back in (before the callable name). " +
+        'The root "/" entry is the result\'s own backing document — the ' +
+        "receipt, unless the result is itself a reference, in which case a " +
+        'separate "receipt" entry keeps the receipt address; other entries ' +
+        "appear only where a path is backed by a different document. Handler " +
+        "invocations only — a tool already reports its result cell on stderr.",
+    )
+    .option(
+      "--filter <predicate:string>",
+      "Filter an array with a jq-inspired predicate",
+    )
+    .option(
+      "--select <fields:string>",
+      "Project output to comma-separated field paths",
+    )
+    .option(
+      "--schema <schema:string>",
+      "Project output with an inline JSON Schema, @file, or the --select " +
+        "field list",
+      // Both flags carry the one projection, so a command naming both has not
+      // said which shape it wants. Refuse before the call rather than pick.
+      { conflicts: ["select"] },
+    )
+    .stopEarly()
+    .arguments("<callable:string> [tail...:string]")
+    .action(async function (
+      // Spelled out because this builder stands alone: the target options
+      // arrive as `piece` globals on one mount and as own options on the
+      // other, so neither inference sees the whole surface.
+      options:
+        & PieceCLIOptions
+        & PieceCallReadbackFlags
+        & {
+          quiet?: boolean;
+          verbose?: boolean;
+          await?: boolean;
+          wait?: number | boolean;
+          invocation?: string;
+          invocationSession?: string;
+        },
+      callableArg: string,
+      ...tailArgs: string[]
+    ) {
+      // Positional-address intake first: it is a fact about the argv alone,
+      // so a refusal here names no invocation and no phase.
+      const { piece, callableName, tail } = readCallTarget(
+        options,
+        callableArg,
+        tailArgs,
+      );
+      const identity = resolveInvocationIdentity(
+        options.invocation,
+        options.invocationSession,
+      );
+      const invocationId = identity.id;
+      const waitControl = resolveWaitControl(options);
+      let phase: InvocationPhase = "initial_sync";
+      const observer = pieceCallPhaseObserver(
+        !!options.verbose,
+        (next) => phase = next,
+      );
+      setQuietMode(!!options.quiet);
+      // Read outside the invocation's failure wrapper below. Nothing is
+      // dispatched here — no callable resolved, no id spent — so a malformed
+      // selection is a data error about the flags, the same one `cf piece get`
+      // reports. Inside the wrapper it would name an id and a phase to retry
+      // from for a call that was never made; a selection that fails against a
+      // RESULT does sit inside it, and does name one.
+      let selection: CellSelection | undefined;
+      try {
+        selection = await parsePieceCallSelection(options);
+      } catch (error) {
+        // Both exits below leave without reaching the action's catch, so the
+        // verbose in-flight span is closed here.
+        observer.finish("failed");
+        if (error instanceof CellSelectionError) {
+          exitWithDataError({ message: error.message });
+        }
+        throw error;
+      }
+      try {
+        const invocation = pieceCallInvocation(
+          tail,
+          this.getLiteralArgs(),
+        );
+        const pieceConfig = parsePieceOptions({
+          ...options,
+          ...(piece !== undefined && { piece }),
+          json: invocation.jsonOutput,
+        });
+        const result = await boundedSettlement(
+          executePieceCallable(
+            pieceConfig,
+            callableName,
+            invocation.rawArgs,
+            {
+              invocation: identity,
+              skipReadback: waitControl.mode === "commit",
+              showLinks: !!options.showLinks,
+              ...(selection === undefined ? {} : { selection }),
+              onPhase: invocationPhaseReporter(
+                identity,
+                observer.onPhase,
+                undefined,
+                Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
+              ),
+            },
+          ).catch((error) =>
+            reportVerbInputErrorOrRethrow(
+              error,
+              pieceConfig.piece,
+              undefined,
+              observer,
+            )
+          ),
+          waitControl.boundSeconds,
+        );
+        renderPieceCallOutcome(
+          observer,
+          result,
+          callableName,
+          pieceConfig.piece,
+          {},
+          { detached: waitControl.mode === "commit", invocation: identity },
+        );
+      } catch (error) {
+        exitPieceCallFailure(observer, error, invocationId, phase);
+      }
+    });
+}
+
+/**
+ * A top-level instance of a piece data command: the same builder the
+ * `piece` chain mounts under the same name, carrying the target options
+ * itself. `cf get`, `cf set`, and `cf call` are these — one definition per
+ * command, two spellings that parse and behave identically
+ * (docs/plans/cli-surface-shape.md, step 5). Deprecating the `cf piece`
+ * spellings later means touching the piece-mounted instances only.
+ */
+// deno-lint-ignore no-explicit-any
+export function pieceDataCommand(name: "get" | "set" | "call"): Command<any> {
+  const builders = {
+    get: buildGetCommand,
+    set: buildSetCommand,
+    call: buildCallCommand,
+  };
+  return targetOptions(builders[name](name), { global: false });
+}
+
+export const piece = targetOptions(
+  new Command()
+    .name("piece")
+    .description(pieceDescription)
+    .error((error, command) => {
+      const args = command.getMainCommand().getRawArgs();
+      if (reservesStdoutForCommandOutput(args)) {
+        throw error;
+      }
+    })
+    .default("help"),
+  { global: true },
+)
   /* piece ls */
   .command("ls", "List pieces registered in the space.")
   .usage(spaceUsage)
@@ -1682,113 +2155,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   → Inspect target piece:  cf piece inspect --piece ${target.pieceId} ...`));
   })
   /* piece get */
-  .command(
-    "get",
-    `Get a value from a piece at a specific path. Omit path to return the full result.
-
-PATH FORMAT: Use forward slashes and numeric indices for arrays.
-  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
-
-ADDRESS: The target can sit in the first positional instead of --piece when
-written as a canonical reference (it begins with "/"): cf piece get
-/of:fid1:.../items 0/name. A trailing #argument selects the arguments cell
-the way --input does.`,
-  )
-  .usage(`${pieceUsage} [addressOrPath] [path]`)
-  .example(
-    cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} name`),
-    `Get the "name" field from piece result "${RAW_EX_COMP.piece!}".`,
-  )
-  .example(
-    cliText(`cf piece get ${EX_ID} ${EX_COMP} /of:fid1:abc.../items 0/name`),
-    "Read through a positional canonical address; its embedded path applies.",
-  )
-  .example(
-    cliText(
-      `cf piece get ${EX_ID} ${EX_COMP} '/of:fid1:abc...#argument' draft`,
-    ),
-    `Read the piece's arguments cell ("#argument" spells --input).`,
-  )
-  .example(
-    cliText(
-      `cf piece get ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
-    ),
-    `Get a nested field value from piece input "${RAW_EX_COMP.piece!}".`,
-  )
-  .example(
-    cliText(
-      `cf piece get ${EX_ID} ${EX_COMP} --piece ${RAW_EX_COMP
-        .piece!}@session draft`,
-    ),
-    `Get a value from a session-scoped piece instance.`,
-  )
-  .example(
-    cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE}`),
-    `Get the full result of piece "${RAW_EX_COMP.piece!}".`,
-  )
-  .example(
-    cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} --step`),
-    `Start, recompute, and get the result in one CLI session.`,
-  )
-  .example(
-    cliText(
-      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --filter '.status == "open"'`,
-    ),
-    "Return only matching items from an array.",
-  )
-  .example(
-    cliText(
-      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --select id,title`,
-    ),
-    "Project each returned item to selected fields.",
-  )
-  .example(
-    cliText(
-      `cf piece get ${EX_ID} ${EX_COMP_PIECE} --select 'topic@,topic.title'`,
-    ),
-    "Return a field's address, and the fields asked for beside it.",
-  )
-  .example(
-    cliText(
-      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items ` +
-        `--schema '{"type":"array","items":{"$link":true}}'`,
-    ),
-    "Return each item's address instead of its contents.",
-  )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
-  .option(
-    "--input",
-    "Read from the piece's input cell instead of result cell (the " +
-      '"#argument" reference suffix spells the same selection)',
-  )
-  .option(
-    "--step",
-    "Start and recompute the piece in this session before reading",
-  )
-  .option(
-    "--json",
-    "Select JSON output explicitly. This command always outputs JSON.",
-  )
-  .option(
-    "--filter <predicate:string>",
-    "Filter an array with a jq-inspired predicate",
-  )
-  .option(
-    "--select <fields:string>",
-    "Project output to comma-separated field paths; a trailing @ asks for a " +
-      "position's address, and @ alone for the source's own. An address " +
-      "comes back as one reference string, which --piece takes back in",
-  )
-  .option(
-    "--schema <schema:string>",
-    "Project output with an inline JSON Schema, @file, or the --select " +
-      "field list",
-    // Both flags carry the one projection, so a command naming both has not
-    // said which shape it wants. Refuse before the read rather than pick.
-    { conflicts: ["select"] },
-  )
-  .arguments("[addressOrPath:string] [path:string]")
-  .action(getCellValueFromCommand)
+  .command("get", buildGetCommand())
   /* piece get-label */
   .command(
     "get-label",
@@ -1859,45 +2226,7 @@ updated effective label view.`),
   .arguments("[path:string]")
   .action(setCellCfcLabelFromCommand)
   /* piece set */
-  .command(
-    "set",
-    cliText(`Set a value in a piece at a specific path. Reads JSON from stdin.
-
-PATH FORMAT: Use forward slashes and numeric indices for arrays.
-  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
-
-JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...
-
-ADDRESS: The target can sit in the first positional instead of --piece when
-written as a canonical reference (it begins with "/"): a path embedded in it
-counts, so cf piece set /of:fid1:.../title needs no path argument. A trailing
-#argument selects the arguments cell the way --input does.`),
-  )
-  .usage(`${pieceUsage} [addressOrPath] [path]`)
-  .example(
-    cliText(`echo '"New Name"' | cf piece set ${EX_ID} ${EX_COMP_PIECE} name`),
-    `Set the "name" field in piece result "${RAW_EX_COMP.piece!}".`,
-  )
-  .example(
-    cliText(
-      `echo '{"foo": "bar"}' | cf piece set ${EX_ID} ${EX_COMP_PIECE} config --input`,
-    ),
-    `Set a nested object value in piece input "${RAW_EX_COMP.piece!}".`,
-  )
-  .example(
-    cliText(
-      `echo '"Milk"' | cf piece set ${EX_ID} ${EX_COMP} /of:fid1:abc.../title`,
-    ),
-    "Write through a positional canonical address; the embedded path is the path.",
-  )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
-  .option(
-    "--input",
-    "Write to the piece's input cell instead of result cell (the " +
-      '"#argument" reference suffix spells the same selection)',
-  )
-  .arguments("[addressOrPath:string] [path:string]")
-  .action(setCellValueFromCommand)
+  .command("set", buildSetCommand())
   /* piece map */
   .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)
@@ -1922,244 +2251,7 @@ counts, so cf piece set /of:fid1:.../title needs no path argument. A trailing
     render(map);
   })
   /* piece call */
-  .command(
-    "call",
-    `Invoke a callable within a piece.
-
-The callable name separates piece-call options from the callable's arguments.
-Arguments after the callable use the same parser as cf exec. Use --json with an
-optional inline value for complete JSON input; bare --json reads JSON from
-stdin. A single positional JSON value or "-" stdin sentinel is also accepted.
-Use --help --json for machine-readable schema help. Put schema-derived flags
-after --. Handlers interpret piped input when no input argument is present.
-
-ADDRESS: The target can precede the callable name instead of riding --piece
-when written as a canonical reference (it begins with "/"):
-cf piece call /of:fid1:... addItem '{"title":"Milk"}'.`,
-  )
-  .usage(`${pieceUsage} [address] <callable> [input]`)
-  .example(
-    cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} increment`),
-    `Call the "increment" handler on piece "${RAW_EX_COMP.piece!}".`,
-  )
-  .example(
-    cliText(
-      `cf piece call ${EX_ID} ${EX_COMP_PIECE} setName '{"value":"My Name"}'`,
-    ),
-    `Call the "setName" handler with JSON arguments on piece "${RAW_EX_COMP
-      .piece!}".`,
-  )
-  .example(
-    cliText(
-      `echo '{"value":"My Name"}' | cf piece call ${EX_ID} ${EX_COMP_PIECE} setName -`,
-    ),
-    `Read the JSON payload from stdin ("-" is the stdin sentinel).`,
-  )
-  .example(
-    cliText(
-      `cf piece call ${EX_ID} ${EX_COMP_PIECE} setName --json '{"value":"My Name"}'`,
-    ),
-    "Call a handler with explicit inline JSON input.",
-  )
-  .example(
-    cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`),
-    `Run the "search" tool using schema-derived flags after "--".`,
-  )
-  .example(
-    cliText(
-      `cf piece call ${EX_ID} ${EX_COMP} /of:fid1:abc... addItem '{"title":"Milk"}'`,
-    ),
-    "Name the target as a positional canonical address before the callable.",
-  )
-  .example(
-    cliText(
-      `cf piece call ${EX_ID} ${EX_COMP_PIECE} --select topic.title addTopic ` +
-        `'{"title":"Ship it"}'`,
-    ),
-    "Return only the selected fields of the verb's result.",
-  )
-  .example(
-    cliText(
-      `cf piece call ${EX_ID} ${EX_COMP_PIECE} ` +
-        `--schema '{"properties":{"topic":{"$link":true}}}' addTopic ` +
-        `'{"title":"Ship it"}'`,
-    ),
-    "Return the address of what the verb returned instead of its contents.",
-  )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
-  .option(
-    "--invocation <id:string>",
-    "Idempotency key for a handler call (before the callable name), and " +
-      "requires an invocation session. A retry naming the same pair cannot " +
-      "commit twice — it settles on the original outcome — but the " +
-      "handler body does re-run, so effects outside the transaction " +
-      "repeat. Both are minted for the one call when neither is given.",
-  )
-  .env(
-    "CF_INVOCATION_SESSION=<id:string>",
-    "Invocation session that this run's invocation ids belong to. The form " +
-      "to reach for: a session is what makes an outcome's address " +
-      "unguessable, and an environment variable stays out of the process " +
-      "listing an argument shows up in.",
-    { prefix: "CF_" },
-  )
-  .option(
-    "--invocation-session <id:string>",
-    "Override CF_INVOCATION_SESSION for this one call (before the callable " +
-      "name): the session this call's invocation id was chosen within, " +
-      "since an invocation id is the caller's own word and another caller " +
-      "can pick the same one. The pair decides which outcome a replay " +
-      "reads, so the same id under another session is another invocation. " +
-      "Mint a session per agent run with `cf invocation-session new`, and " +
-      "carry that one session on every call of the run.",
-  )
-  .option(
-    "--verbose",
-    "Print per-phase wall-clock timings to stderr (before the callable " +
-      "name). stdout still carries only the command output.",
-  )
-  .option(
-    "--await",
-    "Wait for settlement and receipt readback (before the callable name). " +
-      "This is the default; the flag exists so a script can say so " +
-      "explicitly. Contradicts --no-wait.",
-  )
-  .option(
-    "--wait <seconds:number>",
-    "Bound the settlement wait by a chosen patience, in seconds (before " +
-      "the callable name). On expiry the exit is nonzero with the " +
-      "invocation id and furthest phase on stderr; the invocation may not " +
-      "have executed or committed. Re-invoking under the same id and " +
-      "session cannot commit twice — but it runs the handler body again, " +
-      "so effects outside the transaction repeat. An expiry is exactly the " +
-      "case where you cannot tell whether it committed.",
-  )
-  .option(
-    "--no-wait",
-    "Exit once this handling's commit is acknowledged (before the callable " +
-      "name), skipping only the receipt readback: stdout reports status " +
-      '"committed" plus the receipt address, so `cf piece get --piece <that ' +
-      "address>` collects the outcome later without re-running the handler; " +
-      "a call naming the same session and --invocation recovers it too, but " +
-      "runs the handler body again. The handler still executes here and its " +
-      "commit is durable. Handler invocations only.",
-  )
-  .option(
-    "--show-links",
-    "Annotate the Invocation JSON with a links dictionary mapping result " +
-      "paths to their backing cell addresses, each one reference string " +
-      "--piece takes back in (before the callable name). " +
-      'The root "/" entry is the result\'s own backing document — the ' +
-      "receipt, unless the result is itself a reference, in which case a " +
-      'separate "receipt" entry keeps the receipt address; other entries ' +
-      "appear only where a path is backed by a different document. Handler " +
-      "invocations only — a tool already reports its result cell on stderr.",
-  )
-  .option(
-    "--filter <predicate:string>",
-    "Filter an array with a jq-inspired predicate",
-  )
-  .option(
-    "--select <fields:string>",
-    "Project output to comma-separated field paths",
-  )
-  .option(
-    "--schema <schema:string>",
-    "Project output with an inline JSON Schema, @file, or the --select " +
-      "field list",
-    // Both flags carry the one projection, so a command naming both has not
-    // said which shape it wants. Refuse before the call rather than pick.
-    { conflicts: ["select"] },
-  )
-  .stopEarly()
-  .arguments("<callable:string> [tail...:string]")
-  .action(async function (options, callableArg, ...tailArgs) {
-    // Positional-address intake first: it is a fact about the argv alone,
-    // so a refusal here names no invocation and no phase.
-    const { piece, callableName, tail } = readCallTarget(
-      options,
-      callableArg,
-      tailArgs,
-    );
-    const identity = resolveInvocationIdentity(
-      options.invocation,
-      options.invocationSession,
-    );
-    const invocationId = identity.id;
-    const waitControl = resolveWaitControl(options);
-    let phase: InvocationPhase = "initial_sync";
-    const observer = pieceCallPhaseObserver(
-      !!options.verbose,
-      (next) => phase = next,
-    );
-    setQuietMode(!!options.quiet);
-    // Read outside the invocation's failure wrapper below. Nothing is
-    // dispatched here — no callable resolved, no id spent — so a malformed
-    // selection is a data error about the flags, the same one `cf piece get`
-    // reports. Inside the wrapper it would name an id and a phase to retry
-    // from for a call that was never made; a selection that fails against a
-    // RESULT does sit inside it, and does name one.
-    let selection: CellSelection | undefined;
-    try {
-      selection = await parsePieceCallSelection(options);
-    } catch (error) {
-      // Both exits below leave without reaching the action's catch, so the
-      // verbose in-flight span is closed here.
-      observer.finish("failed");
-      if (error instanceof CellSelectionError) {
-        exitWithDataError({ message: error.message });
-      }
-      throw error;
-    }
-    try {
-      const invocation = pieceCallInvocation(
-        tail,
-        this.getLiteralArgs(),
-      );
-      const pieceConfig = parsePieceOptions({
-        ...options,
-        ...(piece !== undefined && { piece }),
-        json: invocation.jsonOutput,
-      });
-      const result = await boundedSettlement(
-        executePieceCallable(
-          pieceConfig,
-          callableName,
-          invocation.rawArgs,
-          {
-            invocation: identity,
-            skipReadback: waitControl.mode === "commit",
-            showLinks: !!options.showLinks,
-            ...(selection === undefined ? {} : { selection }),
-            onPhase: invocationPhaseReporter(
-              identity,
-              observer.onPhase,
-              undefined,
-              Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
-            ),
-          },
-        ).catch((error) =>
-          reportVerbInputErrorOrRethrow(
-            error,
-            pieceConfig.piece,
-            undefined,
-            observer,
-          )
-        ),
-        waitControl.boundSeconds,
-      );
-      renderPieceCallOutcome(
-        observer,
-        result,
-        callableName,
-        pieceConfig.piece,
-        {},
-        { detached: waitControl.mode === "commit", invocation: identity },
-      );
-    } catch (error) {
-      exitPieceCallFailure(observer, error, invocationId, phase);
-    }
-  })
+  .command("call", buildCallCommand())
   /* piece verbs */
   .command(
     "verbs",

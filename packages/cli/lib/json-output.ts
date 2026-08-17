@@ -77,6 +77,10 @@ export function reservesStdoutForCommandOutput(
   }
   if (args[0] === "exec") return true;
   if (args[0] === "wish") return true;
+  // The top-level spellings reserve stdout exactly as their `cf piece`
+  // counterparts below do. `set` is absent from both lists for the same
+  // reason: it writes prose, not a machine surface.
+  if (args[0] === "get" || args[0] === "call") return true;
   const subcommand = pieceSubcommand(args);
   return subcommand === "get" || subcommand === "get-label" ||
     subcommand === "set-label" || subcommand === "call";
