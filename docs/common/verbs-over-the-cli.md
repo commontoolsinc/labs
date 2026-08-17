@@ -422,8 +422,9 @@ never spent, and the corrected retry can reuse it.
 ### Reading is not calling
 
 `cf get` reads data. A path that lands on a verb is refused and redirected
-to `cf call`, because reading a verb would return the stream's
-serialization — never what a caller wanted.
+to `cf piece call` — the spelling the diagnostic literally prints — because
+reading a verb would return the stream's serialization — never what a
+caller wanted.
 
 ### Watching where the time goes
 
@@ -521,7 +522,7 @@ Each step demonstrates one use case:
 | 8 | A piece result survives `plainResultReceipts=false`; a plain record does not — and the write lands either way |
 | 9 | A value-less verb settles with the empty witness |
 | 10 | A refused call does not spend its invocation id |
-| 11 | Reading a verb redirects to `cf call` |
+| 11 | Reading a verb redirects to `cf piece call` |
 | 12 | Timings on stderr, Invocation JSON still clean on stdout |
 | 13 | An invocation id without a session is refused, and the refusal says how to mint one |
 | 14 | A detached (`--no-wait`) call's `receipt` address reads back the outcome, and a settled call's receipt reads back exactly its `result` |

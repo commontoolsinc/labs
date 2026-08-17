@@ -113,15 +113,17 @@ deno task cf check \
 # 1. What's the full state?
 deno task cf piece inspect --piece <piece-id> -i "$CF_IDENTITY" -a URL -s space
 
-# 2. What are the inputs?
-deno task cf get --piece <piece-id> /input -i "$CF_IDENTITY" -a URL -s space
+# 2. What are the inputs? (--input selects the arguments cell; a positional
+# /input would read a result field of that name)
+deno task cf get --piece <piece-id> --input -i "$CF_IDENTITY" -a URL -s space
 
 # 3. What's a specific computed value?
 deno task cf get --piece <piece-id> myComputedField -i "$CF_IDENTITY" -a URL -s space
 
-# 4. Set known input, trigger recompute, verify output
+# 4. Set known input, trigger recompute, verify output ("" writes the whole
+# input cell; --input selects it)
 echo '{"items":[{"title":"test","done":false}]}' | \
-  deno task cf set --piece <piece-id> /input -i "$CF_IDENTITY" -a URL -s space
+  deno task cf set --piece <piece-id> "" --input -i "$CF_IDENTITY" -a URL -s space
 deno task cf piece step --piece <piece-id> -i "$CF_IDENTITY" -a URL -s space
 deno task cf get --piece <piece-id> itemCount -i "$CF_IDENTITY" -a URL -s space
 ```
