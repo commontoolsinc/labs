@@ -33,6 +33,8 @@ import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime, type ServerRunInfo } from "../src/runtime.ts";
 import { stampWaveRunContext, waveRunContextOf } from "../src/executor/wave.ts";
+import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
+import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 import type {
   IExtendedStorageTransaction,
   TransactionSealDestination,
@@ -498,6 +500,197 @@ describe("stage P2-F per-(action × instance) run supply", () => {
         "alice-s1",
       );
       expect(handlerStamps[0].actionScopeKey).toBe(aliceKey);
+    } finally {
+      cancel();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Fan-out stage B, independent review F1: `RetryImmediately` inside a
+  // fanned-out instance run must be BOUNDED — the OFF arm's shape (one
+  // queued retry per attempt, a macrotask apart, MAX_RETRIES_FOR_REACTIVE
+  // attempts, then the accepted zombie). Before the fix the loop re-ran
+  // the same instance in the SAME pass (its key never became clean, so
+  // the set kept offering it): 501 invocations of a 500-throw action
+  // inside ONE `run()`, and a never-resolving name spun the process's
+  // microtask queue forever — no timer fired, `idle()` never resolved.
+  // -------------------------------------------------------------------------
+
+  it("F1: a demanded action that keeps throwing RetryImmediately is bounded per pass — the loop DEFERS the instance instead of re-running it, the retry rides the queue (a timer fires between attempts), and the budget is MAX_RETRIES_FOR_REACTIVE", async () => {
+    const rootId = "of:p2f-retry-root";
+    runtime.installSealDestination(passThroughDestination(), {
+      runStamper: recordingStamper,
+      runDemanderResolver: (pieceRootIds) =>
+        pieceRootIds.includes(rootId) ? [alice, bob] : [],
+    });
+    let invocations = 0;
+    // The reviewer's probe shape: throw 500 times, then succeed. Under
+    // the bounded shape the budget (10) is exhausted long before the
+    // 500th throw, so the action never "succeeds" — it becomes the
+    // accepted zombie. Under the hot loop it succeeded on invocation
+    // 501 inside one pass.
+    const action = Object.assign(
+      (_tx: IExtendedStorageTransaction) => {
+        invocations += 1;
+        if (invocations <= 500) throw new RetryImmediately("nope");
+      },
+      {
+        schedulerObservationIdentity: {
+          pieceId: `space:${rootId}`,
+          pieceRootId: rootId,
+        },
+      },
+    );
+    // A macrotask armed BEFORE the run: under the hot loop it could not
+    // fire until the loop had spun through all 501 invocations.
+    let invocationsWhenTimerFired = -1;
+    const timer = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        invocationsWhenTimerFired = invocations;
+        resolve();
+      }, 0)
+    );
+    await runtime.scheduler.run(action);
+    // The pass ran the deferred probe ONCE and returned control.
+    expect(invocations).toBe(1);
+    await timer;
+    expect(invocationsWhenTimerFired).toBeLessThanOrEqual(1);
+    await runtime.idle();
+    // Bounded: at most the retry budget, never the 500-throw tail.
+    expect(invocations).toBeLessThanOrEqual(MAX_RETRIES_FOR_REACTIVE);
+  });
+
+  it("F1: one principal's unresolvable name never starves a sibling instance — Alice's instance defers, Bob's runs in the SAME pass; Alice's retries ride the queue and exhaust at MAX_RETRIES_FOR_REACTIVE while Bob's clean instance is not re-run (B7 keep)", async () => {
+    const rootId = "of:p2f-retry-sibling-root";
+    runtime.installSealDestination(passThroughDestination(), {
+      runStamper: recordingStamper,
+      runDemanderResolver: (pieceRootIds) =>
+        pieceRootIds.includes(rootId) ? [alice, bob] : [],
+    });
+    const userDoc = runtime.getCellFromLink<{ v?: number }>({
+      space,
+      id: "of:p2f-retry-sibling-user-doc" as never,
+      scope: "user",
+      path: [],
+    });
+    const runs = { alice: 0, bob: 0, other: 0 };
+    let aliceThrows = false;
+    const action = Object.assign(
+      (tx: IExtendedStorageTransaction) => {
+        // Narrows by READING user scope (D11: learned by running).
+        userDoc.withTx(tx).get();
+        const principal = waveRunContextOf(tx)?.scopeKeyIdentity?.principal;
+        if (principal === alice.principal) {
+          runs.alice += 1;
+          if (aliceThrows) throw new RetryImmediately("alice's name");
+        } else if (principal === bob.principal) {
+          runs.bob += 1;
+        } else {
+          runs.other += 1;
+        }
+      },
+      {
+        schedulerObservationIdentity: {
+          pieceId: `space:${rootId}`,
+          pieceRootId: rootId,
+        },
+      },
+    );
+    // Registered (not a raw one-shot): the queued retries can find the
+    // node and run it, and the node keeps its fan-out record across
+    // passes.
+    const cancel = runtime.scheduler.register(action, undefined, {
+      isEffect: true,
+    });
+    try {
+      await runtime.idle();
+      // Pass 1: the probe (alice) discovers user scope; bob's instance
+      // runs in the same pass (the discovery re-arm).
+      expect(runs).toEqual({ alice: 1, bob: 1, other: 0 });
+
+      // Now alice's instance cannot resolve its name. An untargeted
+      // invalidation dirties both instances.
+      aliceThrows = true;
+      let aliceRunsWhenTimerFired = -1;
+      const timer = new Promise<void>((resolve) =>
+        setTimeout(() => {
+          aliceRunsWhenTimerFired = runs.alice;
+          resolve();
+        }, 0)
+      );
+      runtime.scheduler.invalidateAction(action);
+      await runtime.idle();
+      await timer;
+      // Bob ran once more — in the FIRST pass, not after alice's budget
+      // was gone — and never again (his key stayed clean while alice's
+      // queued retries re-ran only her dirty key).
+      expect(runs.bob).toBe(2);
+      // Alice: bounded by the retry budget, one attempt per queued pass
+      // (a macrotask apart — the timer saw at most her first attempt or
+      // two), then the accepted zombie. The budget counter is per ACTION
+      // (`state.retries`), so bob's one successful commit in the first
+      // pass resets it once — one extra attempt, never an unbounded
+      // number: in the queued passes only alice's dirty key runs.
+      // (Pre-fix this spun the pass forever: 4 GB OOM.)
+      expect(runs.alice - 1).toBeGreaterThanOrEqual(MAX_RETRIES_FOR_REACTIVE);
+      expect(runs.alice - 1).toBeLessThanOrEqual(MAX_RETRIES_FOR_REACTIVE + 1);
+      expect(aliceRunsWhenTimerFired).toBeLessThanOrEqual(3);
+      expect(runs.other).toBe(0);
+    } finally {
+      cancel();
+    }
+  });
+
+  it("F1: a RetryImmediately that resolves after a few attempts converges — the deferred instance's queued retries run it to success, its sibling untouched", async () => {
+    const rootId = "of:p2f-retry-converge-root";
+    runtime.installSealDestination(passThroughDestination(), {
+      runStamper: recordingStamper,
+      runDemanderResolver: (pieceRootIds) =>
+        pieceRootIds.includes(rootId) ? [alice, bob] : [],
+    });
+    const userDoc = runtime.getCellFromLink<{ v?: number }>({
+      space,
+      id: "of:p2f-retry-converge-user-doc" as never,
+      scope: "user",
+      path: [],
+    });
+    const runs = { alice: 0, bob: 0 };
+    let aliceThrowsLeft = 0;
+    let aliceSucceeded = 0;
+    const action = Object.assign(
+      (tx: IExtendedStorageTransaction) => {
+        userDoc.withTx(tx).get();
+        const principal = waveRunContextOf(tx)?.scopeKeyIdentity?.principal;
+        if (principal === alice.principal) {
+          runs.alice += 1;
+          if (aliceThrowsLeft > 0) {
+            aliceThrowsLeft -= 1;
+            throw new RetryImmediately("alice's name, not yet");
+          }
+          aliceSucceeded += 1;
+        } else if (principal === bob.principal) {
+          runs.bob += 1;
+        }
+      },
+      {
+        schedulerObservationIdentity: {
+          pieceId: `space:${rootId}`,
+          pieceRootId: rootId,
+        },
+      },
+    );
+    const cancel = runtime.scheduler.register(action, undefined, {
+      isEffect: true,
+    });
+    try {
+      await runtime.idle();
+      expect(runs).toEqual({ alice: 1, bob: 1 });
+      aliceThrowsLeft = 3;
+      runtime.scheduler.invalidateAction(action);
+      await runtime.idle();
+      // Three deferred attempts, then the fourth succeeds; bob ran once.
+      expect(runs).toEqual({ alice: 1 + 4, bob: 2 });
+      expect(aliceSucceeded).toBe(2);
     } finally {
       cancel();
     }

@@ -1,5 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { resolveScopeKey } from "@commonfabric/memory/v2";
+import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
@@ -449,7 +449,14 @@ export async function runSchedulerAction(
     instance: FanOutInstance | undefined,
     causes: readonly IMemorySpaceAddress[] | undefined,
     startGen: number,
-  ): Promise<{ result: unknown; log: ReactivityLog | undefined }> => {
+  ): Promise<{
+    result: unknown;
+    log: ReactivityLog | undefined;
+    /** The run ended in `RetryImmediately` (an unresolved inSpace name):
+     * its retry — if any budget is left — is QUEUED, never re-run in the
+     * calling pass (see the fan-out loop's deferred set). */
+    retryImmediately: boolean;
+  }> => {
     const tx = state.runtime.edit({
       changeGroup: state.actionChangeGroups.get(action),
     });
@@ -490,6 +497,7 @@ export async function runSchedulerAction(
     let result: any;
     return new Promise((resolve) => {
       let committedLog: ReactivityLog | undefined;
+      let retryImmediately = false;
       const finalizeAction = (error?: unknown) => {
         finalizeSchedulerAction(state, {
           action,
@@ -499,7 +507,8 @@ export async function runSchedulerAction(
           invalidCauses: causes,
           result,
           error,
-          resolve: (value) => resolve({ result: value, log: committedLog }),
+          resolve: (value) =>
+            resolve({ result: value, log: committedLog, retryImmediately }),
           ...(fanOut !== undefined && instance !== undefined
             ? {
               fanOutRun: {
@@ -508,6 +517,9 @@ export async function runSchedulerAction(
                 startGen,
                 collectLog: (log: ReactivityLog) => {
                   committedLog = log;
+                },
+                deferInstance: () => {
+                  retryImmediately = true;
                 },
               },
             }
@@ -554,16 +566,31 @@ export async function runSchedulerAction(
     // same pass (the discovery re-arm; W waits on them because they run
     // inside this running promise, which idle() awaits). Bounded: every
     // run marks its key clean unless a cause dirtied it meanwhile, the
-    // ratchet moves at most twice per principal, and D is finite.
+    // ratchet moves at most twice per principal, and D is finite —
+    // and a run that ends in `RetryImmediately` (an inSpace name that
+    // did not resolve) leaves its key non-clean WITHOUT being re-run
+    // here: it is DEFERRED for the rest of this pass and its retry rides
+    // the queued execution `rescheduleActionForImmediateRetry` armed (a
+    // macrotask boundary per attempt, the OFF arm's shape, bounded by
+    // MAX_RETRIES_FOR_REACTIVE; exhausted → the accepted zombie, spec
+    // §15 decision 9). Re-running it in-loop — the key never became
+    // clean, so the set kept offering it — was an unbounded microtask
+    // hot loop that starved the whole process's timers (independent
+    // review F1: 2.2 M invocations in 25 s, no timer fired). Deferring
+    // rather than breaking keeps the SIBLINGS running in this pass: one
+    // principal's unresolvable name never starves another's instance.
     let lastResult: unknown;
     let ran = false;
+    const deferred = new Set<ScopeKey>();
     for (;;) {
       const currentDemanders = state.runtime.serverRunDemandersFor(
         demandRootIds!,
       ) ?? [];
       const instances = fanOutInstances(fanOut, currentDemanders);
       pruneFanOutInstances(fanOut, instances);
-      const toRun = fanOutInstancesToRun(fanOut, instances);
+      const toRun = fanOutInstancesToRun(fanOut, instances).filter(
+        (instance) => !deferred.has(instance.key),
+      );
       if (toRun.length === 0) break;
       const instance = toRun[0];
       const startGen = fanOutRunStarted(fanOut, instance);
@@ -573,6 +600,7 @@ export async function runSchedulerAction(
       const outcome = await runOnce(instance, causes, startGen);
       lastResult = outcome.result;
       ran = true;
+      if (outcome.retryImmediately) deferred.add(instance.key);
     }
     if (ran || fanOut.instances.size > 0) {
       // The union of the instance runs' logs: each read carries ITS
@@ -628,6 +656,10 @@ interface FanOutRunArgs {
   readonly instance: FanOutInstance;
   readonly startGen: number;
   readonly collectLog: (log: ReactivityLog) => void;
+  /** The run ended in `RetryImmediately`: tell the loop not to offer this
+   * instance again in the current pass (its retry, if any budget is
+   * left, is queued — never re-run in-loop). */
+  readonly deferInstance: () => void;
 }
 
 function finalizeSchedulerAction(
@@ -694,6 +726,13 @@ function rescheduleActionForImmediateRetry(
   },
 ): void {
   if (args.tx.status().status === "ready") args.tx.abort(args.error);
+  // A fanned-out instance's aborted run is DEFERRED for the rest of the
+  // calling pass — in both branches below (independent review F1): its
+  // key stays non-clean either way, and the loop must not offer it again
+  // until the queued retry (a macrotask away) or, once exhausted, the
+  // next real invalidation. Note it BEFORE `resolve`, which is what
+  // returns control to the loop.
+  args.fanOutRun?.deferInstance();
   const retries = (state.retries.get(args.action) ?? 0) + 1;
   state.retries.set(args.action, retries);
   if (retries < MAX_RETRIES_FOR_REACTIVE) {
@@ -708,7 +747,8 @@ function rescheduleActionForImmediateRetry(
       restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
     }
     // A fanned-out instance's aborted run re-runs THAT instance (B7):
-    // its key is dirtied, its siblings stay current.
+    // its key is dirtied, its siblings stay current — on the QUEUED
+    // pass, never this one (deferred above).
     if (args.fanOutRun !== undefined) {
       dirtyFanOutKey(args.fanOutRun.state, args.fanOutRun.instance.key);
       state.markInvalid(args.action, { fanOutInstances: "keep" });
@@ -720,6 +760,9 @@ function rescheduleActionForImmediateRetry(
   } else {
     // WATCH(scheduler-v2): exhausted retries can leave a piece registered
     // against rolled-back data (accepted zombie — spec §15 decision 9).
+    // A fanned-out instance's exhausted key stays non-clean and unqueued:
+    // it runs again on the node's next real invalidation, with a fresh
+    // budget — the same "until its input data changes" shape as OFF's.
     state.retries.delete(args.action);
     logger.error(
       "schedule-error",

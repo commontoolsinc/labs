@@ -290,6 +290,11 @@ export function fanOutRunStarted(
  * scope; the run's key at the (possibly moved) ratchet is marked clean —
  * unless a cause dirtied the STAMPED key while it ran — and holds the
  * committed log. Returns whether the ratchet moved.
+ *
+ * Reached only from a run whose commit was KICKED (a thrown non-retry
+ * error still commits its transaction through the ordinary path — OFF's
+ * shape); a run that ends in `RetryImmediately` never reaches it, so its
+ * key stays non-clean and the loop defers it (run.ts, review F1).
  */
 export function fanOutRunFinished(
   state: FanOutNodeState,
@@ -298,8 +303,6 @@ export function fanOutRunFinished(
     discovered: CellScope;
     startGen: number;
     log: ReactivityLog | undefined;
-    /** The run threw or its commit was not even kicked: nothing is clean. */
-    failed?: boolean;
   },
 ): boolean {
   const moved = ratchetDiscovered(state, instance.identity, outcome.discovered);
@@ -316,7 +319,7 @@ export function fanOutRunFinished(
   record.identity = instance.identity;
   if (outcome.log !== undefined) record.log = outcome.log;
   state.instances.set(key, record);
-  if (!outcome.failed && !dirtiedMeanwhile) {
+  if (!dirtiedMeanwhile) {
     state.clean.add(key);
   } else {
     state.clean.delete(key);
