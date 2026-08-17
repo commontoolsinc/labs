@@ -1029,6 +1029,24 @@ type, apply it to the pattern-test fixture, and create the composed demo's
 shared spot cell with it. Lot Watch continues to consume the same cell through
 its structurally compatible, less restrictive spot contract.
 
+## 45. Give parking admin writes a stable trusted surface
+
+The parking admin registry used an empty-object default union and selected
+between a caller cell and an internal cell through a lifted nullish expression.
+Strict preparation could not attach a single write policy to that selected
+cell. The ordinary row action also wrote an unendorsed role list through a
+manager-integrity floor.
+
+Use a stable internal per-space registry for the demo's mutable admin state.
+Keep the legacy input and output schemas unchanged for piece-update
+compatibility. Define one exported admin-toggle handler and bind the visible
+row buttons to a named trusted UI surface. The internal admin-list schema
+authorizes that handler, adds manager integrity to each role it constructs,
+and retains the existing manager-integrity requirement on the list. Preserve
+the legacy public action as a rollback-compatible API; strict enforcement
+accepts the reviewed UI binding, while observe mode continues to report rather
+than reject other paths.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an

@@ -9,6 +9,7 @@ import {
   type PerSpace,
   type RequiresIntegrity,
   Stream,
+  type TrustedActionWrite,
   UI,
   type VNode,
   wish,
@@ -18,7 +19,6 @@ import {
   type AdminManagerCredential,
   adminManagerCredentialIsActive,
   adminRegistryEntries,
-  type EmptyAdminRegistryValue,
 } from "../../cfc/admin/mod.ts";
 import {
   formatVehicle,
@@ -69,6 +69,8 @@ export interface SpotRequest {
 
 export const PARKING_ADMIN_INTEGRITY = "parking-admin" as const;
 export const PARKING_ADMIN_MANAGER_INTEGRITY = "parking-admin-manager" as const;
+export const TRUSTED_PARKING_ADMIN_SURFACE = "TrustedParkingAdminSurface";
+export const TRUSTED_PARKING_ADMIN_ACTION = "TrustedParkingAdminToggle";
 
 export interface ParkingAdminSubject {
   personName: string;
@@ -93,14 +95,37 @@ export type ParkingAdminList = RequiresIntegrity<
   readonly [typeof PARKING_ADMIN_MANAGER_INTEGRITY]
 >;
 
+type TrustedParkingAdminRole = AddIntegrity<
+  ParkingAdminRole,
+  readonly [typeof PARKING_ADMIN_MANAGER_INTEGRITY]
+>;
+type TrustedParkingAdminList = RequiresIntegrity<
+  TrustedActionWrite<
+    TrustedParkingAdminRole[],
+    typeof commitTrustedParkingAdminToggle,
+    typeof TRUSTED_PARKING_ADMIN_ACTION,
+    typeof TRUSTED_PARKING_ADMIN_SURFACE
+  >,
+  readonly [typeof PARKING_ADMIN_MANAGER_INTEGRITY]
+>;
+
 export interface ParkingAdminRegistryStoredValue {
   admins?: ParkingAdminList;
 }
 
-export type ParkingAdminRegistryValue =
-  | ParkingAdminRegistryStoredValue
-  | Default<EmptyAdminRegistryValue>;
+export type ParkingAdminRegistryValue = Default<
+  ParkingAdminRegistryStoredValue
+>;
 export type ParkingAdminRegistryCell = Writable<ParkingAdminRegistryValue>;
+type TrustedParkingAdminRegistryValue = Default<{
+  admins?: TrustedParkingAdminList;
+}>;
+type TrustedParkingAdminRegistryCell = Writable<
+  TrustedParkingAdminRegistryValue
+>;
+type ParkingAdminRegistryReader = {
+  get(): ParkingAdminRegistryValue | undefined;
+};
 export type ParkingAdminManagerCredentialCell = Writable<
   ParkingAdminManagerCredential | null
 >;
@@ -268,11 +293,11 @@ const parkingAdminSubject = (personName: string): ParkingAdminSubject => ({
 });
 
 const parkingAdminRolesValue = (
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryReader,
 ): ParkingAdminRole[] => adminRegistryEntries<ParkingAdminRole>(registry);
 
 const parkingAdminRoleForPerson = (
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryReader,
   personName: string | undefined,
 ): ParkingAdminRole | undefined => {
   const trimmedName = (personName ?? "").trim();
@@ -284,7 +309,7 @@ const parkingAdminRoleForPerson = (
 };
 
 const personIsParkingAdmin = (
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryReader,
   personName: string | undefined,
 ): boolean => parkingAdminRoleForPerson(registry, personName) !== undefined;
 
@@ -296,7 +321,7 @@ const currentActorName = (
 ): string => selectedPersonName.get() || (people.get() ?? [])[0]?.name || "";
 
 const currentParkingAdminRole = (
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryReader,
   selectedPersonName: Writable<string>,
   people: PeopleCell,
 ): ParkingAdminRole | undefined =>
@@ -311,7 +336,7 @@ const currentUserCanManageParkingAdmins = (
 
 const prepareParkingAdminToggle = (
   credential: ParkingAdminManagerCredential | null | undefined,
-  registry: ParkingAdminRegistryCell,
+  registry: ParkingAdminRegistryReader,
   rawName: string,
 ): ParkingAdminRole[] | null => {
   const personName = rawName.trim();
@@ -332,9 +357,38 @@ const prepareParkingAdminToggle = (
     {
       subject: parkingAdminSubject(personName),
       displayName: personName,
-    } as ParkingAdminRole,
+    } as TrustedParkingAdminRole,
   ];
 };
+
+interface ParkingAdminToggleEvent {
+  name?: string;
+  target?: {
+    name?: string;
+    dataset?: { parkingAdminToggle?: string };
+  };
+}
+
+export const commitTrustedParkingAdminToggle = handler<
+  ParkingAdminToggleEvent,
+  {
+    adminManagerCredential: ParkingAdminManagerCredentialCell;
+    adminRegistry: TrustedParkingAdminRegistryCell;
+  }
+>((event, {
+  adminManagerCredential,
+  adminRegistry,
+}) => {
+  const name = event?.name ?? event?.target?.dataset?.parkingAdminToggle ??
+    event?.target?.name ?? "";
+  const nextAdmins = prepareParkingAdminToggle(
+    adminManagerCredential.get(),
+    adminRegistry,
+    name,
+  );
+  if (nextAdmins === null) return;
+  adminRegistry.key("admins").set(nextAdmins as TrustedParkingAdminList);
+});
 
 const commuteIcon = (mode: CommuteMode): string => {
   const icons: Record<CommuteMode, string> = {
@@ -412,7 +466,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       spots: inputSpots,
       people: inputPeople,
       requests: inputRequests,
-      adminRegistry: inputAdminRegistry,
     },
   ) => {
     const defaultSpots = Writable.perSpace.of<TrustedParkingSpotList>(
@@ -421,13 +474,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const spots: TrustedSpotsCell = (inputSpots as never) ?? defaultSpots;
     const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
     const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
-    const defaultAdminRegistry = new Writable.perSpace<
-      ParkingAdminRegistryValue
-    >(
-      {} as ParkingAdminRegistryValue,
-    );
-    const adminRegistry: ParkingAdminRegistryCell = inputAdminRegistry ??
-      defaultAdminRegistry;
+    const adminRegistry = new Writable.perSpace<
+      TrustedParkingAdminRegistryValue
+    >({} as TrustedParkingAdminRegistryValue);
     const adminManagerCredential = new Writable.perUser<
       ParkingAdminManagerCredential | null
     >(null);
@@ -539,7 +588,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       if (nextAdmins === null) {
         return;
       }
-      adminRegistry.set({ admins: nextAdmins as ParkingAdminList });
+      adminRegistry.set({ admins: nextAdmins as TrustedParkingAdminList });
+    });
+    const trustedTogglePersonAdmin = commitTrustedParkingAdminToggle({
+      adminManagerCredential,
+      adminRegistry,
     });
 
     const toggleAdminMode = action(() => {
@@ -771,7 +824,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   displayName: trimName,
                 } as ParkingAdminRole
                 : role
-            ) as ParkingAdminList,
+            ) as TrustedParkingAdminList,
           });
         }
       }
@@ -785,7 +838,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         adminRegistry.set({
           admins: parkingAdminRolesValue(adminRegistry).filter((role) =>
             role.subject.personName !== name
-          ) as ParkingAdminList,
+          ) as TrustedParkingAdminList,
         });
       }
       if (selectedPersonName.get() === name) {
@@ -1470,7 +1523,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     return {
       [NAME]: "Parking Coordinator",
       [UI]: (
-        <cf-screen>
+        <cf-screen
+          data-ui-pattern={TRUSTED_PARKING_ADMIN_SURFACE}
+          data-ui-event-integrity={TRUSTED_PARKING_ADMIN_SURFACE}
+        >
           {/* Header */}
           <div
             slot="header"
@@ -1732,12 +1788,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         </cf-vstack>
                         <cf-button
                           data-parking-admin-toggle={rowName}
+                          data-ui-action={TRUSTED_PARKING_ADMIN_ACTION}
                           size="sm"
                           disabled={!rowCanManageAdmins}
-                          onClick={() =>
-                            togglePersonAdmin.send({
-                              name: rowName,
-                            })}
+                          onClick={trustedTogglePersonAdmin}
                         >
                           {rowIsAdmin ? "Remove admin" : "Make admin"}
                         </cf-button>
