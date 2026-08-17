@@ -211,6 +211,11 @@ else
   R_T=$($CF piece get --quiet --piece "$VIA_READ" title $ARGS 2>/dev/null | tr -d '"')
   check "Rate limiting" "$M_T" "the address the call returned addresses the piece"
   check "Rate limiting" "$R_T" "the address the read returned addresses the piece too"
+  # The same address, standing bare in the first position with the path
+  # embedded — the spelling the demo teaches from act 4 on. An address begins
+  # with `/` and a relative path never does, so nothing marks it but itself.
+  P_T=$($CF piece get --quiet "$VIA_READ/title" $ARGS 2>/dev/null | tr -d '"')
+  check "Rate limiting" "$P_T" "the address stands positional, carrying its path"
 fi
 
 step "7. A verb returns what only the pattern could compute"
