@@ -86,10 +86,11 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   output would say it without a cast.
 
   What each reader of a row gets from that one link is then its own declared
-  schema's business. The published `index` declares it title-only, so a survey
-  cannot expand a topic at all; `TopicCard`, which the board's ordering and card
-  rendering are declared over, projects two display fields out of it. Neither
-  type is published, which is what leaves both free to be that narrow.
+  schema's business. The published `index` declares the five scalars a survey
+  reads, so a survey cannot expand a topic past them; `TopicCard`, which the
+  board's ordering and card rendering are declared over, projects two display
+  fields out of it. Neither reader widens the row, which is what leaves both
+  free to be that narrow.
 
   The rule for new code stands regardless: prefer a scalar reduction
   (`topics.get().length`) over anything that hands the array to a helper.
@@ -108,15 +109,15 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   read view renders the body as markdown.
 - **The mention map is staged with the prose, not written through it.** The
   editor writes an entry the instant a mention is inserted and drops one the
-  instant its token leaves the document, neither waiting for Save. Both
-  bindings therefore address session drafts: `bodyDraft` and `referencesDraft`,
-  seeded together by Edit and published together by Save. Pointing
-  `$references` at the durable map instead would make Cancel non-transactional
-  in both directions — a discarded insertion would leave an edge no token
-  names, and a discarded deletion would strip the destination out from under a
-  token the durable body still carries. Each `destination` survives the two
-  copies because it is declared `unknown`, which is what carries a reference
-  across a whole-value read and write instead of expanding the piece behind it.
+  instant its token leaves the document, neither waiting for Save. Both bindings
+  therefore address session drafts: `bodyDraft` and `referencesDraft`, seeded
+  together by Edit and published together by Save. Pointing `$references` at the
+  durable map instead would make Cancel non-transactional in both directions — a
+  discarded insertion would leave an edge no token names, and a discarded
+  deletion would strip the destination out from under a token the durable body
+  still carries. Each `destination` survives the two copies because it is
+  declared `unknown`, which is what carries a reference across a whole-value
+  read and write instead of expanding the piece behind it.
 - **A reference is a cell, and identity is the only thing compared.** The board
   derives the whole graph once, in `crossrefTable`, from the same topics array
   read under two minimal declared views: one for identity, one for what each

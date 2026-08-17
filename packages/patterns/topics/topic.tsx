@@ -65,12 +65,14 @@ export interface SetBodyEvent extends AgentAuthoredEvent {
 export interface MentionEvent {
   /** The piece to reference — the piece itself, not an address. Identity here
    * is the cell, so this is what a caller passes and what gets stored.
+   * Required: a mention with nothing to point at is not a mention.
    *
-   * Declared with NO required properties, deliberately. This payload's schema
-   * reaches every topic in `mentionable`, so naming a field here would demand
-   * it of pieces deployed before this verb existed and refuse their update
-   * (`deno task pattern-vintage` catches exactly that). Nothing reads through
-   * this anyway: it is stored and compared. */
+   * What it points at is declared `unknown`, which names NO property of the
+   * referenced piece, deliberately. This field's schema reaches every topic in
+   * `mentionable`, so naming one would demand it of pieces deployed before this
+   * verb existed and refuse their update (`deno task pattern-vintage` catches
+   * exactly that). Nothing reads through it anyway: it is stored and
+   * compared. */
   topic: Writable<unknown>;
 }
 
@@ -205,16 +207,6 @@ export interface TopicMentionRef {
 export type TopicMentionRefMap = Record<string, TopicMentionRef>;
 
 /**
- * One row of the board's mention pivot: a topic, and the topics that mention
- * it.
- *
- * Both sides are declared `unknown`, which is the whole design rather than a
- * shortcut. A row holds cell REFERENCES — `unknown` is the declaration that
- * lets a cell be written into one without a cast, and the one that stops any
- * reader of the table expanding a topic it did not ask for. Each consumer
- * declares what it wants to see through them.
- */
-/**
  * What the board's pivot reads from one topic: what it points at, and nothing
  * else. This is the entire cost of deriving the whole graph.
  *
@@ -235,6 +227,16 @@ export interface TopicMentionSource {
   mentions: ComparableCell<unknown>[] | Default<[]>;
 }
 
+/**
+ * One row of the board's mention pivot: a topic, and the topics that mention
+ * it.
+ *
+ * Both sides are declared `unknown`, which is the whole design rather than a
+ * shortcut. A row holds cell REFERENCES — `unknown` is the declaration that
+ * lets a cell be written into one without a cast, and the one that stops any
+ * reader of the table expanding a topic it did not ask for. Each consumer
+ * declares what it wants to see through them.
+ */
 export interface TopicCrossrefRow {
   /** The topic this row is about. `unknown` because it is written as a
    * reference and only ever compared — `equals` takes the raw link. Anything
