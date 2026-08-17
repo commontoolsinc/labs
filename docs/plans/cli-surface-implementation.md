@@ -184,8 +184,8 @@ outside the accretion this addresses.
 | P2 | P1 | the suffix attaches to the positional |
 | N1 | P1, P2 | a new name should be born with the new address forms, not gain them later |
 | N2 | — | nothing to do |
-| D1 | N1 | cannot deprecate before the replacement exists |
-| D2 | — | and BEFORE D1: a warning that fires on examples this repository still teaches trains agents to generate warnings |
+| D2 | P1, P2, N1 | it teaches what those three add, so it cannot precede them |
+| D1 | N1, D2 | cannot deprecate before the replacement exists, nor before the sweep: a warning that fires on examples this repository still teaches trains agents to generate warnings |
 | M1–M5 | — | each independent of the others and of everything above |
 
 The merges do not depend on the renames. They are ordered last because they are
