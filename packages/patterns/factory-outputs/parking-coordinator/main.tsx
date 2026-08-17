@@ -110,40 +110,19 @@ export type ParkingSpotList = RequiresIntegrity<
   readonly [typeof PARKING_ADMIN_INTEGRITY]
 >;
 
-type TrustedParkingSpotList = RequiresIntegrity<
-  AddIntegrity<
-    ParkingSpot,
+export type TrustedParkingSpotList = AddIntegrity<
+  RequiresIntegrity<
+    AddIntegrity<
+      ParkingSpot,
+      readonly [typeof PARKING_ADMIN_INTEGRITY]
+    >[],
     readonly [typeof PARKING_ADMIN_INTEGRITY]
-  >[],
+  >,
   readonly [typeof PARKING_ADMIN_INTEGRITY]
 >;
 
-type SpotsCell = Writable<
-  | ParkingSpotList
-  | Default<[
-    { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
-    { spotNumber: "5"; label: ""; notes: ""; active: true },
-    {
-      spotNumber: "12";
-      label: "Compact only";
-      notes: "Tight, no large vehicles";
-      active: true;
-    },
-  ]>
->;
-type TrustedSpotsCell = Writable<
-  | TrustedParkingSpotList
-  | Default<[
-    { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
-    { spotNumber: "5"; label: ""; notes: ""; active: true },
-    {
-      spotNumber: "12";
-      label: "Compact only";
-      notes: "Tight, no large vehicles";
-      active: true;
-    },
-  ]>
->;
+type SpotsCell = Writable<ParkingSpotList>;
+type TrustedSpotsCell = Writable<TrustedParkingSpotList>;
 type PeopleCell = Writable<Person[] | Default<[]>>;
 type RequestsCell = Writable<SpotRequest[] | Default<[]>>;
 
@@ -436,8 +415,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       adminRegistry: inputAdminRegistry,
     },
   ) => {
-    const spots: TrustedSpotsCell = inputSpots ??
-      Writable.perSpace.of(DEFAULT_SPOTS);
+    const defaultSpots = Writable.perSpace.of<TrustedParkingSpotList>(
+      DEFAULT_SPOTS as TrustedParkingSpotList,
+    );
+    const spots: TrustedSpotsCell = (inputSpots as never) ?? defaultSpots;
     const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
     const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
     const defaultAdminRegistry = new Writable.perSpace<

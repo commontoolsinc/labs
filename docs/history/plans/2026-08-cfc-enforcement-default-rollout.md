@@ -1001,6 +1001,25 @@ reject added defaults, changed values, and removed result defaults. Focused
 compatibility tests cover the permitted argument removal and both rejected
 directions.
 
+## 43. Move the parking spot default behind its integrity boundary
+
+The parking coordinator's public spot default was written into the argument
+before the pattern started. Its public contract requires `parking-admin`
+integrity, but the unendorsed default could not satisfy that floor. Removing
+the public default lets an absent input reach the pattern before any spot list
+is materialized.
+
+Create one stable per-space fallback cell before the lifted nullish selection.
+Its schema adds `parking-admin` integrity to every default spot and to the list
+root, while retaining the list's required-integrity floor. The root label is
+needed because seed materialization writes the complete list at the root.
+Caller-supplied spot lists remain subject to the unchanged public requirement.
+
+Remove the redundant raw spot list from the browser integration input so the
+test exercises the trusted fallback. Record the resulting public contract as
+a compatible baseline and run the complete manager and admin interaction under
+strict enforcement.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an

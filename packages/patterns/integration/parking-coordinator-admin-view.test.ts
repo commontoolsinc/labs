@@ -49,21 +49,6 @@ describe("parking coordinator admin view integration test", () => {
     const piece = await cc.create(program, {
       start: true,
       input: {
-        spots: [
-          {
-            spotNumber: "1",
-            label: "Near entrance",
-            notes: "",
-            active: true,
-          },
-          { spotNumber: "5", label: "", notes: "", active: true },
-          {
-            spotNumber: "12",
-            label: "Compact only",
-            notes: "Tight, no large vehicles",
-            active: true,
-          },
-        ],
         people: [
           {
             name: "Alice",
