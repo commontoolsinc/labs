@@ -3,6 +3,7 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   detectCallKind,
+  getCallArgumentPosition,
   getEnclosingFunctionLikeDeclaration,
   getTypeAtLocationWithFallback,
   hasReactiveCollectionProvenance,
@@ -150,14 +151,11 @@ function getSiteLiftedCollectionLocalSymbol(
   ) {
     return undefined;
   }
-  const builderCall = enclosing.parent;
-  if (
-    !builderCall || !ts.isCallExpression(builderCall) ||
-    !builderCall.arguments.includes(enclosing)
-  ) {
+  const builderPosition = getCallArgumentPosition(enclosing);
+  if (!builderPosition) {
     return undefined;
   }
-  const builderKind = detectCallKind(builderCall, context.checker);
+  const builderKind = detectCallKind(builderPosition.call, context.checker);
   if (
     builderKind?.kind !== "builder" ||
     (builderKind.builderName !== "pattern" &&
