@@ -85,11 +85,27 @@ avoids the declaration-emit errors TypeScript raises for such a mix:
 import type { AssertRecord } from "commonfabric";
 
 type TestStep =
-  | { assertion: Reactive<AssertRecord> }  // from assert(() => condition)
-  | { action: Stream<void> }           // from action(() => handler.send())
-  | { render: VNode }                  // one headless VDOM demand window
-  | { settle: true };                  // wait for full async settlement
+  | { assertion: Reactive<AssertRecord> } // from assert(() => condition)
+  | {
+    action: Stream<unknown>; // from action(() => handler.send())
+    event?: unknown; // the payload, sent to the stream as authored
+    trustedUi?: { surface: string; action: string };
+  }
+  | { render: VNode } // one headless VDOM demand window
+  | { settle: true } // wait for full async settlement
+  | { label: string } // announce a marker to other participants
+  | { await: string }; // block until a participant announces it
 ```
+
+An action step's `event` is the payload the stream receives, sent as authored:
+an object arrives as an object. `trustedUi` names a trusted UI surface and the
+control inside it, for an action that must originate from rendered UI under
+enforcement.
+
+`{ label }` and `{ await }` synchronize a multi-user test — a participant
+announces reaching `label`, and another blocks on `await` until it is
+announced. A single-user run has no participant to synchronize with, so both
+are inert there: recognized, skipped, and absent from the reported results.
 
 An assertion is an `AssertRecord` — `{ ok, source, parts }` — which `assert()`
 is the only way to write; a bare `Reactive<boolean>` is a compile error. The
@@ -315,6 +331,8 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       assertion?: unknown;
       render?: unknown;
       settle?: boolean;
+      label?: string;
+      await?: string;
     };
 
     // Check discriminated union keys
@@ -322,6 +340,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
     const isAssertion = "assertion" in stepValue;
     const isRender = "render" in stepValue;
     const isSettle = "settle" in stepValue;
+    // Inert in a single-user run, but still a step the runner knows.
+    const isMarker = "label" in stepValue || "await" in stepValue;
+
+    if (isMarker) continue;
 
     if (!isAction && !isAssertion && !isRender && !isSettle) {
       throw new Error(`Test step at index ${i} has no supported discriminant`);
