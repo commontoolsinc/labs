@@ -151,6 +151,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function isDriverCapabilities(value: unknown): value is DriverCapabilities {
+  if (!isRecord(value)) return false;
+  if (
+    ![
+      "inventory",
+      "read",
+      "prompt",
+      "cancel",
+      "rename",
+      "setMode",
+      "setConfigOption",
+    ].every((key) => typeof value[key] === "boolean")
+  ) {
+    return false;
+  }
+  if (
+    value.modes !== undefined &&
+    (!Array.isArray(value.modes) ||
+      !value.modes.every((mode) => typeof mode === "string"))
+  ) {
+    return false;
+  }
+  return value.configOptions === undefined || isRecord(value.configOptions);
+}
+
 function isIsoTimestamp(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const parsed = new Date(value);
@@ -600,9 +625,8 @@ export class AgentFabricTarget implements CommandTarget {
         ? priorSourceRow.driver
         : source.source.driver;
       const capabilities = descriptorSuperseded &&
-          priorSourceRow?.capabilities &&
-          typeof priorSourceRow.capabilities === "object"
-        ? priorSourceRow.capabilities as DriverCapabilities
+          isDriverCapabilities(priorSourceRow?.capabilities)
+        ? priorSourceRow.capabilities
         : source.source.capabilities;
       if (!descriptorSuperseded) {
         observedDescriptorSourceIds.add(source.source.id);

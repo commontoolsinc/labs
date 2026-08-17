@@ -81,6 +81,27 @@ for line in sys.stdin:
         print(frame, flush=True)
 `;
 
+const RETRY_SERVER = String.raw`#!/usr/bin/env python3
+import json, os, sys
+
+attempt_path = sys.argv[1]
+attempt = 1
+if os.path.exists(attempt_path):
+    with open(attempt_path, "r") as source:
+        attempt = int(source.read()) + 1
+with open(attempt_path, "w") as target:
+    target.write(str(attempt))
+
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message:
+        continue
+    if message.get("method") == "initialize" and attempt == 1:
+        print(json.dumps({"id": message["id"], "error": {"message": "first startup failed"}}), flush=True)
+    else:
+        print(json.dumps({"id": message["id"], "result": {"attempt": attempt}}), flush=True)
+`;
+
 function outcome<T>(promise: Promise<T>) {
   return promise.then(
     (value) => ({ ok: true as const, value }),
@@ -151,6 +172,23 @@ Deno.test("Codex restart discards buffered notifications", async () => {
       method: "event/ready",
       params: { ready: true, run: "new" },
     });
+  } finally {
+    await client.stop();
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("Codex waits for failed startup cleanup before retrying", async () => {
+  const dir = await Deno.makeTempDir();
+  const server = `${dir}/retry-codex`;
+  const attempts = `${dir}/attempts`;
+  await Deno.writeTextFile(server, RETRY_SERVER);
+  await Deno.chmod(server, 0o755);
+  const client = new CodexJsonlClient([server, attempts]);
+  try {
+    await assertRejects(() => client.start(), Error, "first startup failed");
+    assertEquals(await client.start(), { attempt: 2 });
+    assertEquals(await client.call("ping"), { attempt: 2 });
   } finally {
     await client.stop();
     await Deno.remove(dir, { recursive: true });

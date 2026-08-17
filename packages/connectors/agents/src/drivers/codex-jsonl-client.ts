@@ -127,7 +127,9 @@ export class CodexJsonlClient {
       await this.notify("initialized");
       return initialized as Record<string, unknown>;
     } catch (error) {
+      const readTask = this.#readTask;
       await this.#terminate(error);
+      await readTask;
       throw error;
     }
   }
