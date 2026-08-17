@@ -4,7 +4,7 @@ import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { resolvePieceAddress } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
+import { entityIdFrom, Runtime, slugIdForSpace } from "@commonfabric/runner";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -896,6 +896,101 @@ describe("run-pattern", () => {
         .toThrow();
     });
 
+    it("leaves nothing registered when the signal aborts while the registry join is still in flight", async () => {
+      // Losing the race does not stop the publishing work: the cancelled
+      // output is handed back while the join is still running, and the join
+      // goes on to land afterwards. Without a mark the continuation reads, a
+      // cancelled run would list the piece and take the slug after saying it
+      // stopped.
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+
+      const controller = new AbortController();
+      const originalAdd = pieces.add.bind(pieces);
+      const originalRemove = pieces.remove.bind(pieces);
+      // Held open until the tool has returned, so the abort provably wins
+      // the race with a join that then lands for real.
+      let releaseJoin!: () => void;
+      const joinReleased = new Promise<void>((resolve) => {
+        releaseJoin = resolve;
+      });
+      let listedAfterJoin = -1;
+      pieces.add = async (cells) => {
+        controller.abort();
+        await joinReleased;
+        await originalAdd(cells);
+        listedAfterJoin = (await pieces.getRegisteredPieces()).length;
+      };
+      // Resolves when the continuation has cleaned up after itself, so the
+      // assertions below read the state it left rather than a state it has
+      // not reached.
+      let removalLanded!: () => void;
+      const removed = new Promise<void>((resolve) => {
+        removalLanded = resolve;
+      });
+      pieces.remove = async (cell) => {
+        const removedPiece = await originalRemove(cell);
+        removalLanded();
+        return removedPiece;
+      };
+      // The other end the continuation can reach: the slug assignment, whose
+      // first act is to fetch the slug document. Waiting on whichever comes
+      // means the assertions run once the continuation has committed to a
+      // course, rather than waiting forever on a removal it never performs.
+      // Armed only once the join is released, so the availability check's own
+      // read of the same document earlier in the run is not mistaken for it.
+      let slugAssignmentReached!: () => void;
+      const slugAssignment = new Promise<void>((resolve) => {
+        slugAssignmentReached = resolve;
+      });
+      let watchingForSlugAssignment = false;
+      const slugEntity = JSON.stringify(
+        entityIdFrom(slugIdForSpace(pieces.getSpace(), "doubling-report")),
+      );
+      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
+      runtime.getCellFromEntityId = ((
+        ...args: Parameters<Runtime["getCellFromEntityId"]>
+      ) => {
+        if (
+          watchingForSlugAssignment && JSON.stringify(args[1]) === slugEntity
+        ) {
+          slugAssignmentReached();
+        }
+        return originalGetCell(...args);
+      }) as Runtime["getCellFromEntityId"];
+
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      }, { signal: controller.signal });
+
+      expect((result.output as RunPatternToolErrorOutput).status).toBe(
+        "cancelled",
+      );
+      watchingForSlugAssignment = true;
+      releaseJoin();
+      await Promise.race([removed, slugAssignment]);
+      runtime.getCellFromEntityId = originalGetCell;
+      pieces.add = originalAdd;
+      pieces.remove = originalRemove;
+
+      // The join really landed after the cancelled output, so the empty list
+      // below is the continuation undoing itself rather than a join that
+      // never happened.
+      expect(listedAfterJoin).toBe(1);
+      expect(await pieces.getRegisteredPieces()).toEqual([]);
+      // And the slug the cancelled run asked for names nothing, so the
+      // continuation stopped before rebinding an address.
+      await expect(resolvePieceAddress(pieces, "doubling-report")).rejects
+        .toThrow();
+    });
+
     it("still returns `cancelled` when removing the piece from the space's piece list fails", async () => {
       // The removal is best effort: the caller asked to stop, and a run that
       // reported the removal's failure instead of the cancellation would be
@@ -1063,6 +1158,62 @@ describe("run-pattern", () => {
       expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
         held.pieceId,
       );
+    });
+
+    it("refuses a `register` request whose slug availability could not be established, creating no piece", async () => {
+      // A resolution that fails operationally — storage error, sync that
+      // never landed — says nothing about what the slug holds. Reading it as
+      // vacancy would send the run on to the blind assignment the
+      // availability check exists to prevent, so an unanswered question is a
+      // refusal. The refusal says the availability is unknown rather than
+      // claiming the slug is taken, which nothing read supports.
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+
+      // The slug document's own cell, so only its sync fails and every other
+      // cell the run reaches behaves normally.
+      const slugEntity = JSON.stringify(
+        entityIdFrom(slugIdForSpace(pieces.getSpace(), "doubling-report")),
+      );
+      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
+      let syncFailures = 0;
+      runtime.getCellFromEntityId = ((
+        ...args: Parameters<Runtime["getCellFromEntityId"]>
+      ) => {
+        const cell = originalGetCell(...args);
+        if (JSON.stringify(args[1]) !== slugEntity) {
+          return cell;
+        }
+        (cell as unknown as { sync: () => Promise<unknown> }).sync = () => {
+          syncFailures += 1;
+          return Promise.reject(new Error("storage unavailable"));
+        };
+        return cell;
+      }) as Runtime["getCellFromEntityId"];
+
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      });
+      runtime.getCellFromEntityId = originalGetCell;
+
+      // The injected failure really was the slug resolution's, so the
+      // refusal below answers it rather than something else going wrong.
+      expect(syncFailures).toBe(1);
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("could not establish");
+      expect(output.message).toContain("doubling-report");
+      expect(output.message).not.toContain("already names a piece");
+      expect(spy.calls).toBe(0);
+      expect(await pieces.getRegisteredPieces()).toEqual([]);
     });
 
     it("registers a second piece under a slug the space does not yet hold", async () => {

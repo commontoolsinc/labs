@@ -54,6 +54,14 @@ const SCRUB_HASH = "C".repeat(43);
 const HOSTILE_HASH_NAME = `fid1:${SCRUB_HASH}`;
 const HOSTILE_DID_NAME = "did:key:z6MkfffDescribeHandleScrubbing";
 
+/**
+ * A property name that is a link rather than a bare identifier. The scrub
+ * deliberately leaves the schemed forms alone, because they are the handle
+ * boundary's business: a link is swapped for a token, wherever it sits.
+ */
+const LINKED_NAME_HASH = "E".repeat(43);
+const LINK_PROPERTY_NAME = `/of:fid1:${LINKED_NAME_HASH}/total`;
+
 /** The sandbox members the prompt loop reaches on a run with no shell work. */
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
@@ -797,6 +805,107 @@ describe("describe_handle", () => {
       // some other field fails this too.
       expect(content).not.toContain("did:key:");
       expect(content).not.toContain(SCRUB_HASH);
+    });
+
+    it("swaps a disclosed property name that is a link for a handle token", async () => {
+      // A property name that is a link is a link, and the outbound boundary
+      // turns a link into a token wherever it occurs. The scrub does not
+      // reach it — schemed forms are left for this swap — so a name left out
+      // of the swap reaches model context as a raw address.
+      const runId = "run-describe-linked-name";
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable(runId),
+        REF_A,
+        {
+          schema: {
+            type: "object",
+            properties: {
+              budget: {
+                type: "object",
+                properties: { [LINK_PROPERTY_NAME]: { type: "number" } },
+              },
+            },
+          },
+        },
+      );
+      let calls = 0;
+      const fetchFn: typeof fetch = () => {
+        calls += 1;
+        const payload = calls === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-1",
+                  type: "function",
+                  function: {
+                    name: "describe_handle",
+                    arguments: JSON.stringify({ token: minted.token }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "Done." },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: createHarnessRunState({
+          runId,
+          cfcEnforcementMode: "disabled",
+          currentDir: "/workspace",
+          model: "gpt-5.4",
+          handleTable: minted.table,
+        }),
+      });
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn,
+      });
+
+      const result = await loop.runTranscript({
+        transcript: [{ role: "user", content: "Describe the handle." }],
+        model: "gpt-5.4",
+      });
+
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).toBeDefined();
+      const content = toolMessage!.content!;
+      const parsed = JSON.parse(content) as {
+        schema: {
+          properties: { budget: { properties: Record<string, unknown> } };
+        };
+      };
+      const disclosedNames = Object.keys(
+        parsed.schema.properties.budget.properties,
+      );
+      // The name the model reads is the token the run's table holds for that
+      // address, so it is a reference the model can ask about rather than
+      // text it can only copy.
+      const entry = engine.getRunState().handleTable?.entries.find(
+        (candidate) => candidate.ref.includes(LINKED_NAME_HASH),
+      );
+      expect(entry?.token).toBeDefined();
+      expect(disclosedNames).toEqual([entry!.token]);
+      // Stated again over the whole reply, so an address that escapes into
+      // some other field fails this too.
+      expect(content).not.toContain(LINKED_NAME_HASH);
     });
   });
 });

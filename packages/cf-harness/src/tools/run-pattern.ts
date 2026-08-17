@@ -11,7 +11,11 @@ import {
   matchLLMFriendlyLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
-import { assignSlug, resolvePieceAddress } from "@commonfabric/piece";
+import {
+  assignSlug,
+  resolvePieceAddress,
+  SlugResolutionError,
+} from "@commonfabric/piece";
 import {
   PieceController,
   type PiecesController,
@@ -369,26 +373,54 @@ const parseRegistrationSlug = (
 };
 
 /**
- * Whether `slug` already names a piece in the session's space.
+ * The `SlugResolutionError` codes that positively say the slug names no
+ * piece: its document is absent, holds no usable redirect, or redirects to
+ * something that is not a piece. Each is a statement about what the space
+ * holds, arrived at by reading it, so each means the slug is free — a
+ * registration only ever competes with a piece.
+ *
+ * Every other outcome is a failure to establish anything: a storage error, a
+ * sync that never landed, a lost connection. `invalid` sits on that side too
+ * — the slug was validated before this is asked, so a resolver calling it
+ * unusable means the two disagree about the rule rather than that the space
+ * is empty.
+ */
+const VACANT_SLUG_CODES: ReadonlySet<
+  NonNullable<SlugResolutionError["code"]>
+> = new Set(["missing", "malformed", "not-piece", "missing-piece-id"]);
+
+/**
+ * Whether `slug` already names a piece in the session's space, or whether
+ * that could not be established at all.
  *
  * Assignment is a blind write: the slug document is pointed at the new piece
  * whatever it held before, and last writer wins. So without asking first, a
  * `register` request naming a slug a person already opens would repoint that
- * name at whatever the model just wrote.
+ * name at whatever the model just wrote. That makes an unanswered question a
+ * refusal rather than a "free": a resolution that failed operationally says
+ * nothing about what the slug holds, and treating it as vacancy would reopen
+ * exactly the overwrite this asks to prevent.
  *
- * A slug that resolves to nothing is free, and so is one whose document
- * resolves to something that is not a piece — `resolvePieceAddress` refuses
- * both the same way, and a registration only ever competes with a piece.
+ * The two are told apart by the typed `code` `resolvePieceAddress` carries on
+ * its `SlugResolutionError`, never by the message text.
  */
-const slugNamesAPiece = async (
+const slugAvailability = async (
   pieces: PiecesController,
   slug: string,
-): Promise<boolean> => {
+): Promise<
+  { state: "free" } | { state: "taken" } | { state: "unknown"; reason: string }
+> => {
   try {
     await resolvePieceAddress(pieces, slug);
-    return true;
-  } catch {
-    return false;
+    return { state: "taken" };
+  } catch (error) {
+    if (
+      error instanceof SlugResolutionError && error.code !== undefined &&
+      VACANT_SLUG_CODES.has(error.code)
+    ) {
+      return { state: "free" };
+    }
+    return { state: "unknown", reason: errorMessage(error) };
   }
 };
 
@@ -399,6 +431,14 @@ const slugNamesAPiece = async (
  */
 const takenSlugRefusal = (slug: string): string =>
   `run_pattern register slug "${slug}" already names a piece in this space, and registering would repoint that address at the new piece. Choose another slug, or omit \`register\` to leave the piece unlisted.`;
+
+/**
+ * What the model is told when the space could not say whether the slug is
+ * free. It does not claim the slug is taken — nothing read says that — and
+ * the run persists nothing, so retrying the same call is the correction.
+ */
+const unknownSlugRefusal = (slug: string, reason: string): string =>
+  `run_pattern could not establish whether register slug "${slug}" is available: ${reason}. Nothing was created. Try the same call again, or omit \`register\` to leave the piece unlisted.`;
 
 /**
  * The URL a person opens for a registered piece, or `undefined` when none can
@@ -522,8 +562,8 @@ export const runPatternTool: HarnessToolDefinition<
       return cancelledOutput();
     }
     // Availability is asked as soon as there is a session to ask, and before
-    // anything is compiled or created, so a taken slug costs a refusal and
-    // nothing else.
+    // anything is compiled or created, so a taken slug — or a question the
+    // space could not answer — costs a refusal and nothing else.
     //
     // Resolution and assignment are not atomic, and nothing here makes them
     // so: a slug that becomes taken between this check and the assignment
@@ -532,8 +572,15 @@ export const runPatternTool: HarnessToolDefinition<
     // — and it does not close a race against a writer working concurrently in
     // the same space.
     if (registrationSlug !== undefined) {
-      if (await slugNamesAPiece(pieces, registrationSlug)) {
+      const availability = await slugAvailability(pieces, registrationSlug);
+      if (availability.state === "taken") {
         return errorOutput("error", takenSlugRefusal(registrationSlug));
+      }
+      if (availability.state === "unknown") {
+        return errorOutput(
+          "error",
+          unknownSlugRefusal(registrationSlug, availability.reason),
+        );
       }
       if (signal?.aborted) {
         return cancelledOutput();
@@ -745,6 +792,12 @@ export const runPatternTool: HarnessToolDefinition<
       // Set once the piece is in the space's piece list, so the cancellation
       // path below knows whether there is a join to undo.
       let joinedPieceList = false;
+      // Set by the cancellation path before it returns. Losing the race does
+      // not stop the publishing continuation — it keeps running after the
+      // cancelled output is handed back — so the continuation reads this mark
+      // at each point it is between operations, and a cancelled run neither
+      // takes the slug nor leaves the piece listed.
+      let cancelled = false;
       const publishing = (async () => {
         try {
           // The registry join goes first, so a space with no piece list to
@@ -752,23 +805,34 @@ export const runPatternTool: HarnessToolDefinition<
           // anything was created, so this order costs nothing.
           await pieces.add([piece.getCell()]);
           joinedPieceList = true;
+          if (cancelled) {
+            // The abort won while the join was in flight, so the cancellation
+            // path saw nothing to undo and the join undoes itself. Setting
+            // `joinedPieceList` and reading the mark happen together, with no
+            // await between them, so exactly one of the two paths removes.
+            await pieces.remove(piece.getCell());
+            return;
+          }
           await assignSlug(pieces, piece.getCell(), registrationSlug);
         } catch (error) {
           failure = { error };
         }
       })();
       if (await raceWithAbort(publishing, signal) === "aborted") {
+        // Marked before anything else on this path, so the continuation reads
+        // it at whichever point it next looks.
+        cancelled = true;
         stopPieceForAbort();
         if (joinedPieceList) {
           try {
             // Stopping a piece leaves it in the list it joined — removal is a
             // separate operation — so the cancellation path performs it. A
             // cancelled run hands back no `resultRef`, so a piece left listed
-            // under no slug is one the caller was given no way to reach. A
-            // join still in flight when the abort won is the one case this
-            // cannot reach: it is not known to have happened, and waiting to
-            // find out would put the cancellation path back behind the
-            // operation the abort escaped.
+            // under no slug is one the caller was given no way to reach. An
+            // abort landing inside the slug assignment itself is the one case
+            // neither path covers: the assignment is already under way, and
+            // waiting to find out how it ended would put the cancellation path
+            // back behind the operation the abort escaped.
             await pieces.remove(piece.getCell());
           } catch {
             // Best-effort: the cancelled output stands either way.
