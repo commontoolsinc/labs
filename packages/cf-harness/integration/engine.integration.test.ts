@@ -221,7 +221,7 @@ const commandStatusWithTimeout = async (
 ): Promise<BoundedCommandStatus> => {
   const child = command.spawn();
   const statusPromise = child.status;
-  let timeoutId: number | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<"timed-out">((resolve) => {
     timeoutId = setTimeout(() => resolve("timed-out"), timeoutMs);
   });
@@ -247,7 +247,7 @@ const commandStatusWithTimeout = async (
     killError = appendError(killError, "SIGKILL failed", error);
   }
 
-  let cleanupTimeoutId: number | undefined;
+  let cleanupTimeoutId: ReturnType<typeof setTimeout> | undefined;
   const cleanupTimeoutPromise = new Promise<"cleanup-timed-out">((resolve) => {
     cleanupTimeoutId = setTimeout(() => resolve("cleanup-timed-out"), 1_000);
   });
