@@ -24,6 +24,8 @@ import {
   trackGraph,
 } from "../v2/query.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { encodeMemoryBoundary } from "../v2.ts";
 
 const createEngine = async (): Promise<{
   engine: Engine;
@@ -1234,6 +1236,100 @@ Deno.test("memory v2 queryGraph supports branch-scoped atSeq reads", async () =>
         },
       },
     }]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 schema-closure assembly fails loudly on a corrupted dependency", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-schema-corruption";
+  try {
+    const leafSchema = { type: "string", title: "corruption-leaf" } as const;
+    const leafHash = internSchemaAsTaggedHashString(leafSchema);
+    const rootSchema = {
+      type: "object",
+      properties: { x: { $ref: `cid:${leafHash}` } },
+    } as const;
+    const rootHash = internSchemaAsTaggedHashString(rootSchema);
+    applyCommit(engine, {
+      sessionId: "session:corruption-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: `cid:${leafHash}`, value: { value: leafSchema } },
+          { op: "set", id: `cid:${rootHash}`, value: { value: rootSchema } },
+          {
+            op: "set",
+            id: "of:corruption-carrier",
+            value: {
+              value: {
+                linked: {
+                  "/": {
+                    "link@1": {
+                      id: "of:corruption-target",
+                      path: [],
+                      schema: { $ref: `cid:${rootHash}` },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const query = {
+      roots: [{
+        id: "of:corruption-carrier",
+        selector: { path: [], schema: false },
+      }],
+    };
+    const tracked = trackGraph(space, engine, query);
+    assert(tracked.state.entities.has(`${space}/space/cid:${leafHash}`));
+
+    // Out-of-band tampering: the leaf's stored content is swapped and its
+    // version advanced. The commit API rejects every cid: mutation, so
+    // direct database manipulation is the only door left — this models
+    // genuine corruption.
+    const forged = encodeMemoryBoundary({
+      value: { type: "number", title: "forged" },
+    });
+    engine.database.prepare(
+      `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
+    ).run({ data: forged, id: `cid:${leafHash}` });
+    engine.database.prepare(
+      `UPDATE head SET seq = seq + 1 WHERE id = :id`,
+    ).run({ id: `cid:${leafHash}` });
+
+    // An established watch's refresh revalidates the whole delivered state
+    // and fails loudly even though the referrer did not change.
+    assertThrows(
+      () =>
+        refreshTrackedGraph(
+          space,
+          engine,
+          tracked.state,
+          new Set([toDirtyKey(`cid:${leafHash}`)]),
+        ),
+      Error,
+      "did not verify in this space",
+    );
+
+    // An initial query over the corrupted closure fails the same way.
+    assertThrows(
+      () =>
+        trackGraph(space, engine, query, undefined, {
+          sessionId: "session:corruption-fresh",
+        }),
+      Error,
+      "did not verify in this space",
+    );
   } finally {
     close(engine);
     await Deno.remove(path);

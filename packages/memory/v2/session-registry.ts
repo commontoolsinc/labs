@@ -20,13 +20,6 @@ export type SessionState = {
    * removes, so the next sync must run a FULL watch evaluation to re-diff
    * them out (CT-1927 review, round 7). Self-clearing. */
   forceFullResync: boolean;
-  /** Dirty ids whose refresh failed THIS session's schema-closure
-   * validation: delivery for this session alone is held (its consistent
-   * pre-violation view keeps serving), the ids merge into its next
-   * evaluation — any later flush of the space, the repairing write's
-   * included — and the set clears on the first success. Other sessions'
-   * fan-out proceeds untouched. */
-  heldDirtyIds: Set<string> | null;
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
@@ -120,7 +113,6 @@ export class SessionRegistry {
       caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
       pendingCaughtUpLocalSeq: existing?.pendingCaughtUpLocalSeq ?? 0,
       forceFullResync: existing?.forceFullResync ?? false,
-      heldDirtyIds: existing?.heldDirtyIds ?? null,
       expiresAt: null,
       ownerConnectionId,
       principal: existing?.principal ?? principal,

@@ -748,13 +748,6 @@ export class MapSet<K, V> {
   private setMap?: Map<K, Set<V>>;
   private hashFunction?: (value: V) => string;
 
-  // Staged-mutation journal: each touched key's pre-state, captured on its
-  // first mutation after `beginStaging()`. Rollback restores exactly the
-  // touched keys — O(touched) — for callers that must stage mutations they
-  // cannot enumerate up front (a refresh's traversal adds), where cloning
-  // the whole map costs O(entries) per pass.
-  #stagedPreStates: Map<K, Map<string, V> | Set<V> | undefined> | null = null;
-
   // Instrumentation counters (kept for diagnostics)
   deepEqualCalls = 0;
   deepEqualMs = 0;
@@ -807,64 +800,7 @@ export class MapSet<K, V> {
     }
   }
 
-  protected get stagingActive(): boolean {
-    return this.#stagedPreStates !== null;
-  }
-
-  protected captureStagedPreState(key: K): void {
-    if (this.#stagedPreStates === null || this.#stagedPreStates.has(key)) {
-      return;
-    }
-    if (this.hashMap) {
-      const values = this.hashMap.get(key);
-      this.#stagedPreStates.set(
-        key,
-        values === undefined ? undefined : new Map(values),
-      );
-    } else {
-      const values = this.setMap!.get(key);
-      this.#stagedPreStates.set(
-        key,
-        values === undefined ? undefined : new Set(values),
-      );
-    }
-  }
-
-  /** Starts journaling mutations for a later commit or rollback. */
-  beginStaging(): void {
-    if (this.#stagedPreStates !== null) {
-      throw new Error("MapSet staging is already active");
-    }
-    this.#stagedPreStates = new Map();
-  }
-
-  /** Keeps every mutation made since `beginStaging()`. */
-  commitStaging(): void {
-    if (this.#stagedPreStates === null) {
-      throw new Error("MapSet staging is not active");
-    }
-    this.#stagedPreStates = null;
-  }
-
-  /** Restores every key touched since `beginStaging()` to its pre-state. */
-  rollbackStaging(): void {
-    if (this.#stagedPreStates === null) {
-      throw new Error("MapSet staging is not active");
-    }
-    for (const [key, pre] of this.#stagedPreStates) {
-      if (this.hashMap) {
-        if (pre === undefined) this.hashMap.delete(key);
-        else this.hashMap.set(key, pre as Map<string, V>);
-      } else {
-        if (pre === undefined) this.setMap!.delete(key);
-        else this.setMap!.set(key, pre as Set<V>);
-      }
-    }
-    this.#stagedPreStates = null;
-  }
-
   public add(key: K, value: V) {
-    this.captureStagedPreState(key);
     if (this.hashMap) {
       let m = this.hashMap.get(key);
       if (m === undefined) {
@@ -902,7 +838,6 @@ export class MapSet<K, V> {
   }
 
   public deleteValue(key: K, value: V): boolean {
-    this.captureStagedPreState(key);
     if (this.hashMap) {
       const m = this.hashMap.get(key);
       if (!m) return false;
@@ -919,7 +854,6 @@ export class MapSet<K, V> {
   }
 
   public delete(key: K) {
-    this.captureStagedPreState(key);
     if (this.hashMap) {
       this.hashMap.delete(key);
     } else {
@@ -1043,46 +977,6 @@ export class MapSetStringToPathSelectors extends MapSet<
   public override delete(key: string) {
     super.delete(key);
     this.trueSchemaIndex.delete(key);
-  }
-
-  // The permissive index's side of the staging journal, keyed and
-  // captured exactly like the base map's.
-  #stagedIndexPreStates:
-    | Map<string, Set<SchemaPathSelector> | undefined>
-    | null = null;
-
-  protected override captureStagedPreState(key: string): void {
-    super.captureStagedPreState(key);
-    if (
-      this.#stagedIndexPreStates === null ||
-      this.#stagedIndexPreStates.has(key)
-    ) {
-      return;
-    }
-    const indexed = this.trueSchemaIndex.get(key);
-    this.#stagedIndexPreStates.set(
-      key,
-      indexed === undefined ? undefined : new Set(indexed),
-    );
-  }
-
-  override beginStaging(): void {
-    super.beginStaging();
-    this.#stagedIndexPreStates = new Map();
-  }
-
-  override commitStaging(): void {
-    super.commitStaging();
-    this.#stagedIndexPreStates = null;
-  }
-
-  override rollbackStaging(): void {
-    super.rollbackStaging();
-    for (const [key, pre] of this.#stagedIndexPreStates!) {
-      if (pre === undefined) this.trueSchemaIndex.delete(key);
-      else this.trueSchemaIndex.set(key, pre);
-    }
-    this.#stagedIndexPreStates = null;
   }
 
   /**

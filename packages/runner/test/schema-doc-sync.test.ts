@@ -494,14 +494,14 @@ describe("schema-doc-sync", () => {
     expect(getDoc(`cid:${rootHash}` as URI)).toBeDefined();
   });
 
-  it("holds a failed refresh without corrupting the watch, and delivers the closure once the store is repaired", async () => {
+  it("terminates the session whose closure breaks, and a fresh session succeeds once the store heals", async () => {
     const decomposed = decomposeSchema({
       type: "object",
-      properties: { heldRefresh: { $ref: "#/$defs/HeldRefreshLeaf" } },
+      properties: { brokenClosure: { $ref: "#/$defs/BrokenClosureLeaf" } },
       $defs: {
-        HeldRefreshLeaf: {
+        BrokenClosureLeaf: {
           type: "object",
-          properties: { heldRefreshLeaf: { type: "string" } },
+          properties: { brokenClosureLeaf: { type: "string" } },
         },
       },
     });
@@ -509,10 +509,10 @@ describe("schema-doc-sync", () => {
     const leafHash = [...decomposed.documents.keys()]
       .find((hash) => hash !== rootHash)!;
     await writeDocs({
-      "of:held-refresh-carrier": { plain: "v1" } as FabricValue,
+      "of:broken-closure-carrier": { plain: "v1" } as FabricValue,
     });
     const provider = readerStorage.open(space);
-    const first = await provider.sync("of:held-refresh-carrier" as URI, {
+    const first = await provider.sync("of:broken-closure-carrier" as URI, {
       path: [],
       schema: false,
     });
@@ -520,14 +520,15 @@ describe("schema-doc-sync", () => {
 
     // The carrier gains a ref but only PART of the closure is written —
     // the write-side guarantee deliberately violated. The push refresh
-    // fails server-side and delivers nothing.
+    // detects the hole and terminates this session loudly; there is no
+    // hold and no automatic repair.
     await writeDocs({
       [`cid:${rootHash}`]: decomposed.documents.get(rootHash)! as FabricValue,
-      "of:held-refresh-carrier": {
+      "of:broken-closure-carrier": {
         linked: {
           "/": {
             [LINK_V1_TAG]: {
-              id: "of:held-refresh-target",
+              id: "of:broken-closure-target",
               path: [],
               schema: { $ref: decomposed.rootRef },
             },
@@ -535,16 +536,24 @@ describe("schema-doc-sync", () => {
         },
       } as FabricValue,
     });
+    await server.idle();
 
-    // The established session's delivery is held (it keeps serving its
-    // consistent pre-break view), while a FRESH session reading the latest
-    // store fails loudly against the hole.
+    // The terminated session's next use fails loudly — whether as the
+    // terminal revocation or as a reopen whose initial query hits the
+    // same hole.
+    const after = await provider.sync("of:broken-closure-carrier" as URI, {
+      path: [],
+      schema: true,
+    });
+    expect(after.error).toBeDefined();
+
+    // A fresh session's initial query fails against the hole too.
     const probeStorage = EmulatedStorageManager.connectTo(server, {
       as: await Identity.fromPassphrase("schema-doc-sync"),
     });
     try {
       const probe = await probeStorage.open(space).sync(
-        "of:held-refresh-carrier" as URI,
+        "of:broken-closure-carrier" as URI,
         { path: [], schema: false },
       );
       expect(String(probe.error?.message)).toContain(
@@ -554,126 +563,32 @@ describe("schema-doc-sync", () => {
       await probeStorage.close();
     }
 
-    // The repair lands the leaf; the held dirty state re-delivers with the
-    // full closure, through the same watch.
-    const repaired = defer<void>();
-    const cancel = (provider as unknown as {
-      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
-    }).sink("of:held-refresh-carrier" as URI, (doc: unknown) => {
-      if (
-        doc !== null && typeof doc === "object" && doc !== undefined &&
-        "value" in doc &&
-        (doc as { value: { linked?: unknown } }).value?.linked !== undefined
-      ) {
-        repaired.resolve();
-      }
-    });
+    // Installing the missing document is an ordinary first write; a fresh
+    // session then succeeds. Nothing resumes the terminated watch.
     await writeDocs({
       [`cid:${leafHash}`]: decomposed.documents.get(leafHash)! as FabricValue,
     });
-    await repaired.promise;
-    cancel();
-    const getDoc = (provider as unknown as {
-      get: (uri: URI) => unknown;
-    }).get.bind(provider);
-    expect(getDoc(`cid:${rootHash}` as URI)).toBeDefined();
-    expect(getDoc(`cid:${leafHash}` as URI)).toBeDefined();
-    expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
-  });
-
-  it("holds an established watch over a forged dependency and resumes it once the content is restored", async () => {
-    const forgedSwapLink = (extra: Record<string, FabricValue>) => ({
-      linked: {
-        "/": {
-          [LINK_V1_TAG]: {
-            id: "of:forged-swap-target",
-            path: [],
-            schema: { $ref: decomposed.rootRef },
-          },
-        },
-      },
-      ...extra,
-    });
-    const decomposed = decomposeSchema({
-      type: "object",
-      properties: { forgedSwap: { $ref: "#/$defs/ForgedSwapLeaf" } },
-      $defs: {
-        ForgedSwapLeaf: {
-          type: "object",
-          properties: { forgedSwapLeaf: { type: "string" } },
-        },
-      },
-    });
-    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
-    const leafHash = [...decomposed.documents.keys()]
-      .find((hash) => hash !== rootHash)!;
-    await writeSchemaDocs(decomposed);
-    await writeDocs({
-      "of:forged-swap-carrier": forgedSwapLink({}) as FabricValue,
-    });
-    const provider = readerStorage.open(space);
-    const first = await provider.sync("of:forged-swap-carrier" as URI, {
-      path: [],
-      schema: false,
-    });
-    expect(first.error).toBeUndefined();
-
-    // The leaf's stored content is swapped for a forgery through the
-    // direct out-of-band write path (still schema-shaped, so only the
-    // identity check can catch it; the commit boundary refuses the patch
-    // a runner transaction would produce). Assembly re-verifies the
-    // changed version, so a fresh session reading the latest store fails
-    // loudly — a valid realm-registry copy notwithstanding.
-    await server.writeDocument(space, `cid:${leafHash}`, {
-      type: "boolean",
-      title: "forged replacement",
-    });
-    const probeStorage = EmulatedStorageManager.connectTo(server, {
+    await server.idle();
+    const healedStorage = EmulatedStorageManager.connectTo(server, {
       as: await Identity.fromPassphrase("schema-doc-sync"),
     });
     try {
-      const probe = await probeStorage.open(space).sync(
-        "of:forged-swap-carrier" as URI,
+      const healedProvider = healedStorage.open(space);
+      const healed = await healedProvider.sync(
+        "of:broken-closure-carrier" as URI,
         { path: [], schema: false },
       );
-      expect(String(probe.error?.message)).toContain(
-        "did not verify in this space",
-      );
+      expect(healed.error).toBeUndefined();
+      const stored = (healedProvider as unknown as {
+        get: (uri: URI) => unknown;
+      }).get(`cid:${leafHash}` as URI);
+      expect(stored).toBeDefined();
     } finally {
-      await probeStorage.close();
+      await healedStorage.close();
     }
-
-    // The established session's delivery was held over the forgery. Once
-    // the true content is restored, its held dirty ids retry with the
-    // next flush — a carrier marker's arrival through the SAME watch
-    // proves the hold released.
-    const repaired = defer<void>();
-    const cancel = (provider as unknown as {
-      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
-    }).sink("of:forged-swap-carrier" as URI, (doc: unknown) => {
-      if (
-        doc !== null && typeof doc === "object" && doc !== undefined &&
-        (doc as { value?: { repaired?: unknown } }).value?.repaired === true
-      ) {
-        repaired.resolve();
-      }
-    });
-    await server.writeDocument(
-      space,
-      `cid:${leafHash}`,
-      decomposed.documents.get(leafHash)! as FabricValue,
-    );
-    await writeDocs({
-      "of:forged-swap-carrier": forgedSwapLink({
-        repaired: true,
-      }) as FabricValue,
-    });
-    await repaired.promise;
-    cancel();
-    expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
   });
 
-  it("holds only the affected session: an unrelated watch keeps receiving updates", async () => {
+  it("terminates only the affected session: an unrelated watch keeps receiving updates", async () => {
     await writeDocs({
       "of:isolated-broken-carrier": { plain: "v1" } as FabricValue,
       "of:isolated-bystander": { counter: 1 } as FabricValue,

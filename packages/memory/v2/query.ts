@@ -376,10 +376,11 @@ const scanSnapshotSchemaRefs = (
 /**
  * Thrown when a query result's schema-document closure cannot be
  * assembled from the delivering space's own store: a referenced document
- * is missing, or its stored content does not hash to its id. The failure
- * is deterministic over the store — a retry against the same state fails
- * the same way — so the server's requeue path holds the dirty state
- * without rescheduling, and the repairing write re-triggers delivery.
+ * is missing, or its stored content does not hash to its id. The commit
+ * boundary makes `cid:` documents immutable, so this is database
+ * corruption, not a transient condition: an initial query fails with it,
+ * and the server terminates an established session's watch loudly rather
+ * than holding or retrying.
  */
 export class SchemaClosureError extends Error {
   constructor(message: string) {
@@ -401,12 +402,14 @@ export class SchemaClosureError extends Error {
  *
  * Two-phase: the walk verifies everything into staging and returns the
  * tracker keys and snapshots to add — the caller commits them only after
- * the whole closure verified, so a throw leaves tracker and session state
- * untouched. `established` extends validation over previously delivered
- * snapshots (a refresh): a dependency that was deleted or replaced with
- * forged content fails the refresh even when its referrer did not change,
- * and the per-version scan and verification caches make an unchanged
- * established set cost map lookups.
+ * the whole closure verified, so the walk itself mutates nothing. A
+ * refresh caller whose traversal already advanced its tracker relies on
+ * session termination instead: the failed session's graph state is
+ * discarded whole. `established` extends validation over previously
+ * delivered snapshots (a refresh): a corrupted dependency fails the
+ * refresh even when its referrer did not change, and the per-version scan
+ * and verification caches make an unchanged established set cost map
+ * lookups.
  *
  * Verification is against THIS space's stored content — a verified copy in
  * the realm registry never stands in for the space's own (the
@@ -765,84 +768,73 @@ export const refreshTrackedGraph = (
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
 
-  // Every pre-validation tracker mutation is journaled (O(touched keys),
-  // where a full clone costs O(entries) per refresh), and `state.entities`
-  // is written only after assembly validates: a failed refresh rolls the
-  // journal back and leaves the session state exactly as it was, so a
-  // repaired store retries from an uncorrupted baseline.
-  state.tracker.beginStaging();
-  let updates: Map<QueryDocKey, EntitySnapshot>;
-  try {
-    for (const key of affectedDocs.keys()) {
-      state.tracker.delete(key);
-    }
+  for (const key of affectedDocs.keys()) {
+    state.tracker.delete(key);
+  }
 
-    for (const [key, selectors] of affectedDocs) {
-      const { id, scope } = fromDocKey(key);
-      for (const selector of selectors) {
-        evaluateTrackedDocument(
-          space,
-          manager,
-          { id, scope },
-          selector,
-          state.tracker,
-          sharedMemo,
-          stats,
-        );
-      }
-    }
-
-    const touched = new Set<QueryDocKey>(affectedDocs.keys());
-    for (const address of manager.loadedAddresses()) {
-      const key = toDocKey(space, address.id, address.scope);
-      const previous = state.entities.get(key);
-      const detail = manager.detail({ id: address.id, scope: address.scope });
-      if (previous !== undefined && detail?.seq === previous.seq) {
-        continue;
-      }
-      touched.add(key);
-    }
-
-    updates = new Map<QueryDocKey, EntitySnapshot>();
-    for (const key of touched) {
-      if (!state.tracker.has(key)) {
-        continue;
-      }
-      const snapshot = snapshotForDocKey(
+  for (const [key, selectors] of affectedDocs) {
+    const { id, scope } = fromDocKey(key);
+    for (const selector of selectors) {
+      evaluateTrackedDocument(
         space,
         manager,
-        state.branch,
-        key,
+        { id, scope },
+        selector,
+        state.tracker,
+        sharedMemo,
+        stats,
       );
-      if (snapshot === null) {
-        continue;
-      }
-      updates.set(key, snapshot);
     }
+  }
 
-    // `established` extends validation over the whole previously delivered
-    // state: a deleted or forged dependency fails the refresh even when its
-    // referrer did not change.
-    const staged = assembleSchemaDocClosures(
+  const touched = new Set<QueryDocKey>(affectedDocs.keys());
+  for (const address of manager.loadedAddresses()) {
+    const key = toDocKey(space, address.id, address.scope);
+    const previous = state.entities.get(key);
+    const detail = manager.detail({ id: address.id, scope: address.scope });
+    if (previous !== undefined && detail?.seq === previous.seq) {
+      continue;
+    }
+    touched.add(key);
+  }
+
+  const updates = new Map<QueryDocKey, EntitySnapshot>();
+  for (const key of touched) {
+    if (!state.tracker.has(key)) {
+      continue;
+    }
+    const snapshot = snapshotForDocKey(
       space,
-      engine,
       manager,
       state.branch,
-      state.tracker,
-      updates,
-      state.entities,
+      key,
     );
-    for (const key of staged.trackerAdds) {
-      state.tracker.add(key, REJECTING_SELECTOR);
+    if (snapshot === null) {
+      continue;
     }
-    for (const [key, snapshot] of staged.additions) {
-      updates.set(key, snapshot);
-    }
-  } catch (error) {
-    state.tracker.rollbackStaging();
-    throw error;
+    updates.set(key, snapshot);
   }
-  state.tracker.commitStaging();
+
+  // `established` extends validation over the whole previously delivered
+  // state, so a corrupted dependency fails the refresh even when its
+  // referrer did not change. A throw here corrupts nothing durable: the
+  // caller terminates the session and discards its graph state whole,
+  // partial tracker advances included.
+  const staged = assembleSchemaDocClosures(
+    space,
+    engine,
+    manager,
+    state.branch,
+    state.tracker,
+    updates,
+    state.entities,
+  );
+  for (const key of staged.trackerAdds) {
+    state.tracker.add(key, REJECTING_SELECTOR);
+  }
+  for (const [key, snapshot] of staged.additions) {
+    updates.set(key, snapshot);
+  }
 
   for (const [key, snapshot] of updates) {
     state.entities.set(key, snapshot);

@@ -296,10 +296,14 @@ to warn about.
 
 Content-addressed documents are immutable at the commit boundary: the
 server rejects a `delete` or `patch` of any `cid:` document, whatever
-its class, because a deleted or altered dependency would invalidate
-every document referencing it. An idempotent re-`set` of the same
-content is how writers install closures and stays legal, and a sync
-frame's removes are watch-result removals, not deletions.
+its class, and rejects a `set` that is neither the first installation
+nor byte-identical to the stored content — conflicting sets of one id
+within a single commit included — because a deleted or altered
+dependency would invalidate every document referencing it. An
+idempotent re-`set` of the same content is how writers install closures
+and stays legal, and a sync frame's removes are watch-result removals,
+not deletions. The commit API therefore cannot create a broken closure
+at all; one that exists anyway is database corruption.
 
 Resolution demands the whole closure: a registered document whose
 transitive closure is not fully registered resolves as a miss, exactly
@@ -394,15 +398,16 @@ delivery and traversal split the work in two layers:
 - **Result assembly** owns delivery: it scans every complete document the
   query delivers, verifies each referenced closure against the space's
   own store, and joins it to the delivered set and watch set — failing
-  the query on a hole. Assembly is two-phase (verify everything, then
-  commit), so a failed query or refresh leaves session state untouched,
-  and a refresh revalidates the established delivery state, so a
-  dependency deleted or replaced with forged content fails even under an
-  unchanged referrer. A deterministic assembly failure holds delivery
-  for the affected session alone — its consistent pre-violation view
-  keeps serving, its dirty ids retry on every later flush of the space,
-  the repairing write's included — while every other session's fan-out
-  proceeds untouched.
+  the query on a hole. A refresh revalidates the established delivery
+  state too, so a corrupted dependency fails even under an unchanged
+  referrer. Because the commit boundary makes `cid:` documents
+  immutable, an assembly failure can only mean corruption outside the
+  commit API — a tampered store, a pre-immutability hole — never a
+  transient condition: an initial query fails with the error, an
+  established session's watch is terminated loudly (a terminal
+  `session/revoked`, its graph state discarded whole), every other
+  session's fan-out proceeds untouched, and nothing holds, retries, or
+  repairs automatically.
 
 A client that syncs a document therefore receives the schema documents for
 every link it contains in the same round trip, keeping the "resolved means

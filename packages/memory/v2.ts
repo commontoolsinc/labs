@@ -819,7 +819,7 @@ export type SessionRevokedMessage = {
   type: "session/revoked";
   space: string;
   sessionId: SessionId;
-  reason: "taken-over" | "unauthorized";
+  reason: "taken-over" | "unauthorized" | "schema-closure-violation";
 };
 
 export type V2Error = {

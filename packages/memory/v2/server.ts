@@ -3246,19 +3246,11 @@ export class Server {
           }
           if (dirtyIds !== undefined) {
             const startedAt = performance.now();
-            // A session holding dirty ids from a schema-closure failure
-            // retries them on every flush of the space; any other session's
-            // fan-out is untouched by that hold.
-            const effectiveDirtyIds = session.heldDirtyIds === null
-              ? dirtyIds
-              : new Set([...session.heldDirtyIds, ...dirtyIds]);
-            let touched = session.heldDirtyIds !== null;
-            if (!touched) {
-              for (const dirtyId of effectiveDirtyIds) {
-                if (session.trackedIds.has(dirtyId)) {
-                  touched = true;
-                  break;
-                }
+            let touched = false;
+            for (const dirtyId of dirtyIds) {
+              if (session.trackedIds.has(dirtyId)) {
+                touched = true;
+                break;
               }
             }
             span.setAttribute("ct.touched", touched);
@@ -3281,7 +3273,7 @@ export class Server {
                         space,
                         engine,
                         graph,
-                        effectiveDirtyIds,
+                        dirtyIds,
                       );
                     } finally {
                       watchSpan.end();
@@ -3304,25 +3296,36 @@ export class Server {
                 }
               }
             } catch (error) {
-              // A schema-closure failure is deterministic over the store
-              // and specific to THIS session's watches: hold the session's
-              // dirty ids (a failed refresh mutated nothing — assembly is
-              // two-phase) and deliver nothing to it, while every other
-              // session's fan-out proceeds. The repairing write flushes
-              // the space again, which retries the held ids above.
+              // A schema-closure violation is database corruption: the
+              // commit boundary makes cid: documents immutable, so a
+              // missing or forged closure is a state normal operation can
+              // never create, not a transient condition to hold and
+              // retry. Terminate THIS session loudly — its graph state is
+              // discarded whole, which also discards any earlier graph's
+              // partial advance from this pass — and let every other
+              // session's fan-out proceed. The client sees a terminal
+              // session/revoked; a reopen's initial query fails against
+              // the same corruption.
               if (
                 error instanceof Error && error.name === "SchemaClosureError"
               ) {
-                session.heldDirtyIds = new Set(effectiveDirtyIds);
-                console.warn(
-                  `memory v2: schema-closure violation; delivery held for session ${sessionId} until the space is repaired`,
+                console.error(
+                  `memory v2: schema-closure violation; terminating session ${sessionId} in space ${space}`,
                   error,
                 );
+                this.#sessions.remove(space, sessionId);
+                if (session.ownerConnectionId !== null) {
+                  this.#connections.get(session.ownerConnectionId)
+                    ?.revokeSession(
+                      space,
+                      sessionId,
+                      "schema-closure-violation",
+                    );
+                }
                 return null;
               }
               throw error;
             }
-            session.heldDirtyIds = null;
 
             if (updates.size === 0) {
               return await emptyCatchUp();

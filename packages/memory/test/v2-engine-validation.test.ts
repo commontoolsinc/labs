@@ -207,3 +207,49 @@ Deno.test("rejects deleting or patching a content-addressed document", async () 
     });
   });
 });
+
+Deno.test("rejects a set that changes a content-addressed document", async () => {
+  await withEngine((engine) => {
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [setOp("cid:fid1:settled", { type: "string" })],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(2, {
+            operations: [setOp("cid:fid1:settled", { type: "number" })],
+          }),
+        }),
+      ProtocolError,
+      "cannot change content-addressed document",
+    );
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(3, {
+            operations: [
+              setOp("cid:fid1:conflicted", { type: "string" }),
+              setOp("cid:fid1:conflicted", { type: "number" }),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "conflicting sets of content-addressed document",
+    );
+    // Identical duplicate sets within one commit are the idempotent case.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(4, {
+        operations: [
+          setOp("cid:fid1:duplicated", { type: "boolean" }),
+          setOp("cid:fid1:duplicated", { type: "boolean" }),
+        ],
+      }),
+    });
+  });
+});
