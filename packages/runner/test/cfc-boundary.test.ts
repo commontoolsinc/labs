@@ -1151,6 +1151,60 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("invalidates prepared state on a dereference under a payload field named `value`", async () => {
+    // `["value","value","slot"]` is the payload path `value.slot`, a
+    // different dereference from `["value","slot"]`'s payload `slot`. Reading
+    // the second must still invalidate, or the guard would mistake it for a
+    // repeat of the first and hold a decision the digest no longer covers.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.markCfcRelevant("test");
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: "of:cfc-payload-value-field",
+        path: [],
+      }, { count: 1 });
+
+      const target = {
+        space: signer.did(),
+        id: "of:cfc-payload-value-target",
+        scope: "space" as const,
+        path: [],
+      };
+      tx.recordCfcDereferenceTrace({
+        source: {
+          space: signer.did(),
+          id: "of:cfc-payload-value-field",
+          scope: "space",
+          path: ["value", "slot"],
+        },
+        target,
+        kind: "value",
+      });
+      tx.prepareCfc();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+
+      tx.recordCfcDereferenceTrace({
+        source: {
+          space: signer.did(),
+          id: "of:cfc-payload-value-field",
+          scope: "space",
+          path: ["value", "value", "slot"],
+        },
+        target,
+        kind: "value",
+      });
+
+      expect(tx.getCfcState().prepare.status).toBe("invalidated");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("invalidates prepared state when the trust snapshot changes", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

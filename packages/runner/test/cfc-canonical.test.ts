@@ -75,6 +75,51 @@ describe("canonical", () => {
       expect(digestOf([raw, canonical])).toBe(digestOf([canonical]));
     });
 
+    it("distinguishes a payload field named `value` from the field it sits over", () => {
+      // Envelope `["value","value","x"]` is the payload path `value.x`; a
+      // payload field may legitimately be named `value`. It canonicalizes to
+      // `["value","x"]`, which a comparator that strips again would flatten
+      // onto payload `x` — two distinct dereferences merging into one, and
+      // the digest binding only the survivor.
+      const overValue = trace(
+        address("board", "value", "value", "x"),
+        address("row"),
+      );
+      const overRoot = trace(address("board", "value", "x"), address("row"));
+      expect(digestOf([overValue, overRoot])).not.toBe(digestOf([overRoot]));
+      expect(
+        canonicalizePreparedDigestInput(
+          baseInput({ dereferenceTraces: [overValue, overRoot] }),
+        ).dereferenceTraces,
+      ).toHaveLength(2);
+    });
+
+    it("distinguishes a payload field named `value` on the target side", () => {
+      const overValue = trace(
+        address("board"),
+        address("row", "value", "value", "x"),
+      );
+      const overRoot = trace(address("board"), address("row", "value", "x"));
+      // Asserted on the canonical length, not on the digest: a merge leaves
+      // whichever trace sorted first, whose content differs from `overRoot`
+      // anyway, so comparing digests would pass without the two surviving.
+      expect(
+        canonicalizePreparedDigestInput(
+          baseInput({ dereferenceTraces: [overValue, overRoot] }),
+        ).dereferenceTraces,
+      ).toHaveLength(2);
+    });
+
+    it("collapses a repeat under a payload field named `value`", () => {
+      // The other side of the same distinction: re-reading `value.x` is one
+      // dereference, exactly as re-reading any other path is.
+      const overValue = trace(
+        address("board", "value", "value", "x"),
+        address("row"),
+      );
+      expect(digestOf([overValue, overValue])).toBe(digestOf([overValue]));
+    });
+
     it("distinguishes two different dereferences from one repeated twice", () => {
       // The guard against a dedupe that collapses too much: two distinct
       // hops must not digest as one hop read twice.

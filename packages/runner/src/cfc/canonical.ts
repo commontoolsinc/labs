@@ -76,6 +76,49 @@ const compareAddress = (left: CfcAddress, right: CfcAddress): number => {
 };
 
 /**
+ * Pointer cache for paths that are ALREADY canonical, kept separate from
+ * `pathPointerCache` because the two disagree on exactly the paths this
+ * distinction exists for: they key on the same array identity but encode it
+ * with and without a `"value"` strip.
+ */
+const canonicalPathPointerCache = new WeakMap<readonly string[], string>();
+
+const canonicalPathToPointer = (path: readonly string[]): string => {
+  const cached = canonicalPathPointerCache.get(path);
+  if (cached !== undefined) return cached;
+  const pointer = encodePointer(path);
+  if (Object.isFrozen(path)) canonicalPathPointerCache.set(path, pointer);
+  return pointer;
+};
+
+/**
+ * Orders addresses whose paths are already in canonical form, encoding them
+ * as they stand.
+ *
+ * `compareAddress` cannot serve here. It reaches paths through
+ * `logicalPathToPointer`, which canonicalizes on the way — harmless for a
+ * raw path, but a second strip for one already canonicalized. A payload field
+ * named `value` is what that loses: envelope `["value","value","x"]` is the
+ * payload path `value.x`, canonicalizes to `["value","x"]`, and a second
+ * strip flattens it onto payload `x`. Two distinct addresses then compare
+ * equal, which merely ties their order in a plain sort but silently merges
+ * them under a comparator that also decides identity.
+ */
+const compareCanonicalAddress = (
+  left: CfcAddress,
+  right: CfcAddress,
+): number => {
+  if (left.space !== right.space) {
+    return left.space < right.space ? -1 : 1;
+  }
+  if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+  if (left.scope !== right.scope) return left.scope < right.scope ? -1 : 1;
+  const leftPointer = canonicalPathToPointer(left.path);
+  const rightPointer = canonicalPathToPointer(right.path);
+  return leftPointer < rightPointer ? -1 : leftPointer > rightPointer ? 1 : 0;
+};
+
+/**
  * Drops runs of equal entries from an already-sorted array, where `compare`
  * is the total order it was sorted by and returning 0 means the two entries
  * are equal rather than merely tied.
@@ -89,33 +132,35 @@ const dedupeSorted = <T>(
   );
 
 /**
- * Total order over dereference traces, comparing every field a trace has.
- * Comparing equal therefore means the two records ARE equal, which is what
- * lets `canonicalizePreparedDigestInput` drop duplicates in one adjacent pass
- * after the sort.
+ * Total order over dereference traces whose addresses are already canonical,
+ * comparing every field a trace has. Comparing equal therefore means the two
+ * records ARE equal, which is what lets `canonicalizePreparedDigestInput`
+ * drop duplicates in one adjacent pass after the sort.
  */
 const compareDereferenceTrace = (
   left: CfcDereferenceTrace,
   right: CfcDereferenceTrace,
 ): number => {
-  const sourceCompare = compareAddress(left.source, right.source);
+  const sourceCompare = compareCanonicalAddress(left.source, right.source);
   if (sourceCompare !== 0) return sourceCompare;
-  const targetCompare = compareAddress(left.target, right.target);
+  const targetCompare = compareCanonicalAddress(left.target, right.target);
   if (targetCompare !== 0) return targetCompare;
   return left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0;
 };
 
 /**
- * Whether two dereference traces are the same record, comparing paths in
- * canonical form — `compareAddress` reaches each path through
- * `logicalPathToPointer`, which strips a leading `"value"` on the way. So a
- * raw trace and its canonicalized twin compare equal without either being
- * canonicalized first.
+ * Whether two dereference traces name the same dereference. Canonicalizes
+ * both sides, so a caller may pass raw traces — a hop recorded off a raw link
+ * path and the same hop already canonicalized are one dereference, not two.
  */
 export const cfcDereferenceTracesEqual = (
   left: CfcDereferenceTrace,
   right: CfcDereferenceTrace,
-): boolean => compareDereferenceTrace(left, right) === 0;
+): boolean =>
+  compareDereferenceTrace(
+    canonicalizeDereferenceTrace(left),
+    canonicalizeDereferenceTrace(right),
+  ) === 0;
 
 const compareConsultedGrant = (
   left: ConsultedGrant,
