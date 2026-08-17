@@ -215,11 +215,11 @@ describe("describe_handle", () => {
             choice: {
               anyOf: [{ type: "string", default: "SECRET-IN-ANYOF" }],
             },
-            row: { $ref: "#/$defs/Row" },
+            row: { $ref: "#/$defs/SECRET-DEFINITION" },
           },
           required: ["status"],
           $defs: {
-            Row: {
+            "SECRET-DEFINITION": {
               type: "object",
               properties: {
                 category: { type: "string", examples: ["SECRET-IN-DEFS"] },
@@ -242,11 +242,11 @@ describe("describe_handle", () => {
         status: { type: "string" },
         rows: { type: "array", items: { type: "string" } },
         choice: { anyOf: [{ type: "string" }] },
-        row: { $ref: "#/$defs/Row" },
+        row: { $ref: "#/$defs/d0" },
       },
       required: ["status"],
       $defs: {
-        Row: { type: "object", properties: { category: { type: "string" } } },
+        d0: { type: "object", properties: { category: { type: "string" } } },
       },
     });
     // Stated again over the whole reply, so a keyword that escapes into some
@@ -260,6 +260,7 @@ describe("describe_handle", () => {
         "SECRET-IN-ITEMS",
         "SECRET-IN-ANYOF",
         "SECRET-IN-DEFS",
+        "SECRET-DEFINITION",
       ]
     ) {
       expect(reply).not.toContain(secret);
@@ -332,6 +333,26 @@ describe("describe_handle", () => {
       expect(properties.topCategory).toEqual({ type: "string" });
     });
 
+    it("reports the shape of a field within a piece by narrowing the declared schema", async () => {
+      // A reference into a document is answered by walking the schema the
+      // document declares down the reference's path. Nothing is read from the
+      // referent itself, so the answer stands even where its value would not.
+      const resultRef = await createPiece();
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-describe"),
+        `${resultRef}/totalSpent`,
+      );
+
+      const output = await describeHandleTool.invoke(
+        contextWith(minted.table, session),
+        { token: minted.token },
+      );
+
+      expect(output.path).toEqual(["totalSpent"]);
+      expect(output.hasSchema).toBe(true);
+      expect(output.schema).toEqual({ type: "number" });
+    });
+
     it("reports no value from the piece it describes", async () => {
       // The piece computes `42` under `totalSpent` and names itself in
       // `$NAME`. Neither may appear: the shape is the whole answer.
@@ -346,8 +367,16 @@ describe("describe_handle", () => {
         { token: minted.token },
       );
 
+      // A computed value can only reach the reply through the schema, and the
+      // schema is where it is looked for. The whole reply is the wrong subject
+      // for `42`: the token's five-character suffix is drawn from an alphabet
+      // that includes the digits 2 through 9, so it can hold `42` on its own,
+      // and a check over the reply would fail on a run that leaked nothing.
+      expect(output.hasSchema).toBe(true);
+      expect(JSON.stringify(output.schema)).not.toContain("42");
+      // The other two are longer than a token suffix and hold characters the
+      // alphabet does not, so the whole reply is a sound subject for them.
       const reply = JSON.stringify(output);
-      expect(reply).not.toContain("42");
       expect(reply).not.toContain("Spending Overview");
       expect(reply).not.toContain("groceries");
     });

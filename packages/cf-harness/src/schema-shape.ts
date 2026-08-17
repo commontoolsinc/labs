@@ -13,6 +13,14 @@
  * `title`, `description`, `$comment`, and `pattern` carry free text that
  * whoever authored the schema chose. A shape tells a model what code to
  * write; none of the rest is needed to write it.
+ *
+ * Identifiers get the same treatment wherever they are not needed. A property
+ * name crosses, because nothing can be written over data without it. A
+ * definition name does not: it names a place in the schema rather than a place
+ * in the data, so every `$defs` and `definitions` key is replaced by an opaque
+ * `d0`, `d1`, … and every `$ref` that resolves to one is rewritten to match. A
+ * `$ref` that resolves to nothing is dropped rather than disclosed, since a
+ * dangling pointer is a string its author chose and nothing else.
  */
 
 import type { JSONSchema, JSONSchemaTypes } from "@commonfabric/api";
@@ -49,11 +57,13 @@ const DISCLOSABLE_FORMATS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * A local `$ref` pointer, which is structure: it names a `$defs` entry whose
- * key is disclosed anyway. Any other reference — a URI, a pointer into
+ * A local `$ref` pointer: the whole document, or one entry of the root's
+ * `$defs` or `definitions`. Any other reference — a URI, a pointer into
  * something this schema does not carry — is dropped rather than reported.
+ * Capture 1 is the keyword the pointer goes through, capture 2 the entry it
+ * names; both are absent for a pointer at the root itself.
  */
-const LOCAL_REF_PATTERN = /^#(?:\/(?:\$defs|definitions)\/[^/~]+)?$/;
+const LOCAL_REF_PATTERN = /^#(?:\/(\$defs|definitions)\/([^/~]+))?$/;
 
 const isSchemaRecord = (
   schema: JSONSchema,
@@ -71,8 +81,83 @@ const SUBSCHEMA_KEYS = [
 /** Structural keywords whose value is an array of subschemas. */
 const SUBSCHEMA_LIST_KEYS = ["allOf", "anyOf", "oneOf", "prefixItems"] as const;
 
-/** Structural keywords whose value is a name-to-subschema map. */
-const SUBSCHEMA_MAP_KEYS = ["properties", "$defs", "definitions"] as const;
+/**
+ * Structural keywords whose value maps a DATA name to a subschema. The names
+ * are the point of the disclosure, so they are copied as they stand.
+ */
+const PROPERTY_MAP_KEYS = ["properties"] as const;
+
+/**
+ * Structural keywords whose value maps a SCHEMA name to a subschema. The names
+ * are the schema author's own, and nothing needs them, so each is replaced by
+ * its ordinal within the map.
+ */
+const DEFINITION_MAP_KEYS = ["$defs", "definitions"] as const;
+
+type DefinitionMapKey = (typeof DEFINITION_MAP_KEYS)[number];
+
+/**
+ * The opaque name disclosed for the `index`-th entry of a definition map.
+ * Ordinal rather than derived from the authored name, so no part of that name
+ * survives the substitution.
+ */
+const canonicalDefinitionName = (index: number): string => `d${index}`;
+
+/**
+ * The name substitutions for the root's definition maps, keyed by the keyword
+ * each map hangs off. Only the root's maps are here because only they can be
+ * the target of a `$ref`; a definition nested deeper is renamed too, but no
+ * pointer can reach it.
+ */
+type DefinitionNames = Readonly<
+  Record<DefinitionMapKey, ReadonlyMap<string, string>>
+>;
+
+const rootDefinitionNames = (schema: JSONSchema): DefinitionNames => {
+  const names = {
+    $defs: new Map<string, string>(),
+    definitions: new Map<string, string>(),
+  };
+  if (isSchemaRecord(schema)) {
+    const source = schema as Record<string, unknown>;
+    for (const key of DEFINITION_MAP_KEYS) {
+      const map = source[key];
+      if (!isSchemaRecord(map as JSONSchema)) {
+        continue;
+      }
+      Object.keys(map as Record<string, unknown>).forEach((name, index) => {
+        names[key].set(name, canonicalDefinitionName(index));
+      });
+    }
+  }
+  return names;
+};
+
+/**
+ * The disclosable form of `ref`, or `undefined` when there is none: the
+ * reference is not local, or it names a definition the root does not declare.
+ * An unresolved reference fails closed, because disclosing it would put the
+ * pointer's authored text into the output through the one keyword whose value
+ * is a name.
+ */
+const reduceRef = (
+  ref: unknown,
+  names: DefinitionNames,
+): string | undefined => {
+  if (typeof ref !== "string") {
+    return undefined;
+  }
+  const match = LOCAL_REF_PATTERN.exec(ref);
+  if (match === null) {
+    return undefined;
+  }
+  const [, keyword, name] = match;
+  if (keyword === undefined || name === undefined) {
+    return "#";
+  }
+  const canonical = names[keyword as DefinitionMapKey].get(name);
+  return canonical === undefined ? undefined : `#/${keyword}/${canonical}`;
+};
 
 const reduceType = (
   type: unknown,
@@ -91,23 +176,39 @@ const reduceType = (
 };
 
 /**
+ * How deep the walk goes before it stops describing. Past this, a subschema
+ * reduces to `{}` — the same answer a cycle gets — so a schema nested beyond
+ * any depth a person writes still yields a valid reduced shape instead of
+ * exhausting the stack. The bound is far above the nesting a generated schema
+ * reaches and far below what the walk's own recursion costs.
+ */
+const MAX_SHAPE_DEPTH = 100;
+
+/**
  * Reduces `schema` to structure, dropping every keyword outside the
  * allowlist at every depth. A boolean schema is structure already and passes
  * through; anything that is not a schema at all reduces to `{}`, the shape
  * that says nothing.
  *
- * Recursion is guarded by the set of schema objects on the CURRENT path, so a
- * schema that contains itself reduces to `{}` at the point it closes the
- * loop, while a subschema shared between two siblings is reduced once for
- * each.
+ * The walk terminates on every input. Recursion is guarded by the set of
+ * schema objects on the CURRENT path, so a schema that contains itself reduces
+ * to `{}` at the point it closes the loop, while a subschema shared between two
+ * siblings is reduced once for each; and by {@link MAX_SHAPE_DEPTH}, so a
+ * schema nested past that reduces to `{}` there rather than throwing. Neither
+ * guard can fail the call: whatever comes in, a valid reduced shape comes out.
  */
 export const schemaShapeOnly = (schema: JSONSchema): JSONSchema =>
-  reduceSchema(schema, new Set<object>());
+  reduceSchema(schema, new Set<object>(), rootDefinitionNames(schema), 0);
 
 const reduceSchema = (
   schema: JSONSchema,
   active: Set<object>,
+  names: DefinitionNames,
+  depth: number,
 ): JSONSchema => {
+  if (depth > MAX_SHAPE_DEPTH) {
+    return {};
+  }
   if (typeof schema === "boolean") {
     return schema;
   }
@@ -127,8 +228,8 @@ const reduceSchema = (
       shape.type = type;
     }
 
-    const ref = source.$ref;
-    if (typeof ref === "string" && LOCAL_REF_PATTERN.test(ref)) {
+    const ref = reduceRef(source.$ref, names);
+    if (ref !== undefined) {
       shape.$ref = ref;
     }
 
@@ -140,7 +241,12 @@ const reduceSchema = (
     for (const key of SUBSCHEMA_KEYS) {
       const child = source[key];
       if (child !== undefined) {
-        shape[key] = reduceSchema(child as JSONSchema, active);
+        shape[key] = reduceSchema(
+          child as JSONSchema,
+          active,
+          names,
+          depth + 1,
+        );
       }
     }
 
@@ -148,12 +254,12 @@ const reduceSchema = (
       const children = source[key];
       if (Array.isArray(children)) {
         shape[key] = children.map((child) =>
-          reduceSchema(child as JSONSchema, active)
+          reduceSchema(child as JSONSchema, active, names, depth + 1)
         );
       }
     }
 
-    for (const key of SUBSCHEMA_MAP_KEYS) {
+    for (const key of PROPERTY_MAP_KEYS) {
       const children = source[key];
       if (isSchemaRecord(children as JSONSchema)) {
         const reduced: Record<string, JSONSchema> = {};
@@ -163,12 +269,30 @@ const reduceSchema = (
           )
         ) {
           Object.defineProperty(reduced, name, {
-            value: reduceSchema(child, active),
+            value: reduceSchema(child, active, names, depth + 1),
             writable: true,
             enumerable: true,
             configurable: true,
           });
         }
+        shape[key] = reduced;
+      }
+    }
+
+    for (const key of DEFINITION_MAP_KEYS) {
+      const children = source[key];
+      if (isSchemaRecord(children as JSONSchema)) {
+        const reduced: Record<string, JSONSchema> = {};
+        Object.values(children as Record<string, JSONSchema>).forEach(
+          (child, index) => {
+            reduced[canonicalDefinitionName(index)] = reduceSchema(
+              child,
+              active,
+              names,
+              depth + 1,
+            );
+          },
+        );
         shape[key] = reduced;
       }
     }

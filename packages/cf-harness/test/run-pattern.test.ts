@@ -73,6 +73,28 @@ const SEALED_OPAQUE_LINK = {
   "@link": "opaque:run-pattern-test%3Arun_pattern%3A1#/overview",
 } as const;
 
+/**
+ * The same seal without its `@link` wrapper. A model reading a sanitized
+ * result can lift the target string out and pass it on its own, which reaches
+ * an input at any position the argument schema admits a string.
+ */
+const SEALED_OPAQUE_TARGET = SEALED_OPAQUE_LINK["@link"];
+
+/**
+ * A pattern whose argument schema carries an index signature, so
+ * `additionalProperties` is a schema: undeclared keys are permitted, and their
+ * values are what that schema describes.
+ */
+const OPEN_DOUBLING_PATTERN_SOURCE = [
+  "import { computed, pattern } from 'commonfabric';",
+  "interface Input { n: number; [key: string]: number; }",
+  "interface Output { doubled: number; }",
+  "export default pattern<Input, Output>(({ n }) => ({",
+  "  doubled: computed(() => n * 2),",
+  "}));",
+  "",
+].join("\n");
+
 const DOUBLED_RESULT_SCHEMA = {
   type: "object",
   properties: { doubled: { type: "number" } },
@@ -468,6 +490,63 @@ describe("run-pattern", () => {
       expect(spy.calls).toBe(0);
     });
 
+    it("returns an error naming the path of a bare seal target string nested inside an object input, creating no piece", async () => {
+      // The seal is the `opaque:` target, not the object it arrived in. Lifted
+      // out of that object it reaches any position the argument schema admits
+      // a string — here `overview.title`, which the pattern declares as one —
+      // and it is the same redaction there.
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: OVERVIEW_PATTERN_SOURCE,
+        inputs: { overview: { title: SEALED_OPAQUE_TARGET } },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('input "overview"');
+      expect(output.message).toContain('at "overview.title"');
+      expect(output.message).toContain("redaction, not an address");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns an error for an `@link` object carrying a seal target alongside another key, creating no piece", async () => {
+      // A model that copied the seal out along with a sibling key it wrote
+      // itself still passed back the redaction; the wrapper's shape is not
+      // what makes it one.
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: OVERVIEW_PATTERN_SOURCE,
+        inputs: {
+          overview: { "@link": SEALED_OPAQUE_TARGET, note: "the overview" },
+        },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      // The object itself is the seal, so the refusal names the input rather
+      // than a path to the `@link` key inside it.
+      expect(output.message).toContain(
+        'input "overview" is a sealed opaque link',
+      );
+      expect(output.message).toContain("redaction, not an address");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("runs an input the argument schema admits through an `additionalProperties` schema rather than by name", async () => {
+      // An `additionalProperties` schema is an index signature: it permits the
+      // undeclared key and says what it may hold. Refusing such a key would
+      // reject an input the pattern's own schema accepts.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: OPEN_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21, offset: 5 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ doubled: 42 });
+    });
+
     it("returns an error for a plain-JSON input whose value does not match the argument schema, creating no piece", async () => {
       const spy = spyOnRunPersistent();
       const engine = createEngine();
@@ -524,6 +603,48 @@ describe("run-pattern", () => {
       expect(output.message).toContain("cancelled");
       expect(stopped.length).toBe(1);
       expect(result.runState.status).toBe("completed");
+    });
+
+    it("returns a `cancelled` output and stops the piece when the signal aborts during registration", async () => {
+      // Registration runs after the settle barrier, so it is its own window in
+      // which the caller can ask to stop. An abort there is the caller's
+      // instruction, not a failed publish: reporting `ok` with a
+      // `registrationError` would leave the piece running.
+      const controller = new AbortController();
+      // Abort exactly when the tool reaches the registry join, and hold the
+      // join open so only the signal can win the race.
+      const piecesWithAdd = pieces as unknown as {
+        add: (cells: unknown[]) => Promise<void>;
+      };
+      piecesWithAdd.add = () => {
+        controller.abort();
+        return new Promise<void>(() => {});
+      };
+      const stopped: unknown[] = [];
+      const runner = runtime.runner as unknown as {
+        stop: (cell: unknown) => unknown;
+      };
+      const originalStop = runner.stop.bind(runtime.runner);
+      runner.stop = (cell) => {
+        stopped.push(cell);
+        return originalStop(cell);
+      };
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      }, { signal: controller.signal });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("cancelled");
+      expect(output.message).toContain("cancelled");
+      expect(stopped.length).toBe(1);
+      expect(
+        (result.output as RunPatternToolSuccessOutput).registration,
+      ).toBeUndefined();
+      expect(
+        (result.output as RunPatternToolSuccessOutput).registrationError,
+      ).toBeUndefined();
     });
 
     it("surfaces a rejected session construction as a structured error and invokes the factory again on the next call", async () => {

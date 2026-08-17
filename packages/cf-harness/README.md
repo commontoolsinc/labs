@@ -649,7 +649,13 @@ since a token from another run simply names nothing here.
 **What is disclosed is structure and only structure**: property names, types,
 nesting, required-ness, array and object composition, a `type` from the schema
 vocabulary, a `format` from the small known set, and a local `$ref` with the
-`$defs` it points into.
+`$defs` it points into. Definition names are not part of that: every `$defs` and
+`definitions` key is replaced by an opaque `d0`, `d1`, … and every `$ref` that
+resolves to one is rewritten to match, so the reported schema stays
+referentially valid while no name its author chose for a definition crosses. A
+`$ref` that resolves to nothing — a pointer into a `$defs` the schema does not
+declare — is dropped rather than reported, since there is nothing left of it but
+its author's text.
 
 **What is not disclosed is anything a value or a word can hide in.** A JSON
 Schema is a place to put data: `const`, `enum`, `default` and `examples` carry
@@ -662,20 +668,31 @@ than disclosed. A `required` name that no property declares is dropped too: that
 is a string, not structure. Numeric bounds, string patterns, and the Common
 Fabric schema extensions do not cross either.
 
+The schema is also reduced to a bounded depth. Past a nesting depth no authored
+schema reaches, a subschema reports as the empty shape `{}`, the same answer a
+schema that refers to itself gets. A deep or cyclic schema therefore yields a
+smaller shape, never a failed call: reduction has no failure mode for
+`describe_handle` to propagate.
+
 That reduction is what makes the fabric-side read safe to allow. The schema a
 piece declares was authored by someone other than this run — quite possibly a
-person — and property names cross the line because nothing can be written over
-data without them. Prose and values do not cross it at all, so the channel a
-schema could otherwise carry is narrowed to the names an agent needs and nothing
-more.
+person — and prose, values, and definition names do not cross the line at all.
 
-Disclosing shape is a policy-governed read, and the current default is
-permissive: any run holding the token gets an answer, for any address in the
-session's own space. A reference outside that space is not followed — the
-session's authority ends at its space — and an address the session can state no
-shape for is reported as shapeless rather than as a failed call. The dial
-belongs beside the other observation boundaries, and moving it is a policy
-change rather than a redesign.
+**Property names are the residual channel, accepted deliberately.** They are
+author-chosen text, and after the reduction above they are the only such text in
+the output. They cross because they have to: an agent handed a reference cannot
+write a line of code over the data without the names of its fields, which is the
+entire purpose of this tool. So the honest statement is not that no authored
+text crosses, but that exactly one kind does — the kind that carries structure —
+and that a reader of a reported schema should treat property names as coming
+from whoever wrote the schema.
+
+Disclosing shape is permissive and fixed rather than configurable: a run that
+holds a token gets an answer for any address in the session's own space, and
+there is no setting that says otherwise. A reference outside that space is not
+followed — the session's authority ends at its space — and an address the
+session can state no shape for is reported as shapeless rather than as a failed
+call.
 
 Shape is also what makes a chain of steps checkable. An orchestrator that passes
 a reference from one step to the next can confirm the reference is the kind of
@@ -772,13 +789,18 @@ pattern's argument schema does not declare at all, listing the names the pattern
 does declare: a misnamed input is the mismatch a shape check cannot see, since
 the pattern then runs with that argument undefined and renders a complete page
 holding no values. Only a pattern whose argument schema names its properties,
-and does not admit further ones, is measured that way.
+and does not admit further ones, is measured that way — an
+`additionalProperties` that is `true`, or that is a schema describing what an
+undeclared key may hold, admits them, and its inputs pass.
 
-An input value carrying a sealed opaque link — the single-key
-`{"@link":"opaque:..."}` object a `resultSchema` sanitization leaves at a
-position it seals — is refused before anything is created too, at the top level
-or nested anywhere inside a plain-JSON value, and the refusal names the path it
-was found at. A seal is a redaction rather than an address: it marks a position
+An input value carrying a sealed opaque link is refused before anything is
+created too, at the top level or nested anywhere inside a plain-JSON value, and
+the refusal names the path it was found at. The seal is the reserved
+`opaque:<handle-id>` target string a `resultSchema` sanitization leaves at a
+position it seals — optionally followed by `#` and a JSON pointer — and it is
+refused wherever it appears: as the `@link` of an object, whatever else that
+object carries alongside it, and as a bare string value a model lifted out of
+that wrapper. A seal is a redaction rather than an address: it marks a position
 an earlier result withheld, and it names nothing any reader resolves, so storing
 one would leave a dead literal where the pattern declared a live reference. The
 reference for that same data is the `cfh:a:` handle token, or the LLM-friendly
@@ -788,10 +810,10 @@ default — it never appears in the space's piece list — and always detached: 
 origin is recorded, because model-authored source starts detached under the
 piece source-lifecycle spec. Run→piece provenance is carried by the run's
 persisted artifacts instead — run-state and the tool-output artifact record the
-`pieceId`. When the run's abort signal fires while the tool is waiting for the
-pattern to settle, the tool stops the created piece and returns a structured
-`cancelled` error; the signal is the only cancellation source — there is no
-timeout.
+`pieceId`. When the run's abort signal fires after the piece exists — while the
+tool is waiting for the pattern to settle, or while it is registering the piece
+— the tool stops the created piece and returns a structured `cancelled` error;
+the signal is the only cancellation source — there is no timeout.
 
 `register` is how a run publishes its result to a person. It takes one required
 field, `slug` — the named address the piece is reachable at, in the same

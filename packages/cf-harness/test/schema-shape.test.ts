@@ -95,14 +95,78 @@ describe("schema-shape", () => {
       });
 
       expect(shape).toEqual({
-        $ref: "#/$defs/Row",
+        $ref: "#/$defs/d0",
         $defs: {
-          Row: {
+          d0: {
             type: "object",
             properties: { category: { type: "string" } },
           },
         },
       });
+    });
+
+    it("replaces a definition name with an opaque one and rewrites the `$ref` that names it", () => {
+      const shape = schemaShapeOnly({
+        type: "object",
+        properties: {
+          first: { $ref: "#/$defs/AUTHOR_CHOSEN_SECRET" },
+          second: { $ref: "#/definitions/AUTHOR_CHOSEN_SECRET" },
+        },
+        $defs: {
+          AUTHOR_CHOSEN_SECRET: { type: "string" },
+          Other: { type: "number" },
+        },
+        definitions: {
+          AUTHOR_CHOSEN_SECRET: { type: "boolean" },
+        },
+      });
+
+      expect(shape).toEqual({
+        type: "object",
+        properties: {
+          first: { $ref: "#/$defs/d0" },
+          second: { $ref: "#/definitions/d0" },
+        },
+        $defs: { d0: { type: "string" }, d1: { type: "number" } },
+        definitions: { d0: { type: "boolean" } },
+      });
+      // The name itself is gone from every position it occupied, while each
+      // reference still lands on the definition it named.
+      expect(JSON.stringify(shape)).not.toContain("AUTHOR_CHOSEN_SECRET");
+    });
+
+    it("replaces a definition name nested below the root as well", () => {
+      expect(schemaShapeOnly({
+        type: "object",
+        properties: {
+          row: {
+            type: "object",
+            $defs: { AUTHOR_CHOSEN_SECRET: { type: "string" } },
+          },
+        },
+      })).toEqual({
+        type: "object",
+        properties: {
+          row: { type: "object", $defs: { d0: { type: "string" } } },
+        },
+      });
+    });
+
+    it("drops a `$ref` naming a definition the root does not declare", () => {
+      expect(schemaShapeOnly({
+        type: "object",
+        properties: { row: { $ref: "#/$defs/AUTHOR_CHOSEN_SECRET" } },
+        $defs: { Row: { type: "string" } },
+      })).toEqual({
+        type: "object",
+        properties: { row: {} },
+        $defs: { d0: { type: "string" } },
+      });
+    });
+
+    it("drops a `$ref` naming a definition where the schema declares none at all", () => {
+      expect(schemaShapeOnly({ $ref: "#/definitions/AUTHOR_CHOSEN_SECRET" }))
+        .toEqual({});
     });
 
     it("drops value-bearing keywords nested inside every combinator", () => {
@@ -189,6 +253,29 @@ describe("schema-shape", () => {
         type: "object",
         properties: { next: {} },
       });
+    });
+
+    it("returns the empty shape at the depth limit for a combinator nested past it", () => {
+      // A person does not write this, but a schema arriving from the fabric is
+      // only as shallow as whoever wrote it, and running out of stack would
+      // fail the whole call rather than reduce.
+      let deep: Record<string, unknown> = { type: "string" };
+      for (let level = 0; level < 20_000; level++) {
+        deep = { allOf: [deep] };
+      }
+
+      const shape = schemaShapeOnly(deep);
+
+      let node = shape as Record<string, unknown>;
+      let described = 0;
+      while (Object.hasOwn(node, "allOf")) {
+        node = (node.allOf as Record<string, unknown>[])[0];
+        described++;
+      }
+      // The root and the hundred levels below it are described; the level
+      // past the limit is the empty shape, as a cycle's closing point is.
+      expect(described).toBe(101);
+      expect(node).toEqual({});
     });
 
     it("returns the empty shape for a value that is not a schema", () => {

@@ -38,11 +38,11 @@ export interface DescribeHandleToolOutput {
  * an orchestrator verify a chain of transformations without reading the data
  * flowing through it.
  *
- * Posture, stated plainly. Disclosing shape is a POLICY-GOVERNED read, and
- * the current default is permissive: any run that holds the token gets an
- * answer. That is defensible on the same ground declassification stands on
- * elsewhere, and it is the contract patterns already work under internally:
- * you cannot see the data, you can only describe the data flow.
+ * Posture, stated plainly. The policy on disclosing shape is permissive and
+ * fixed: any run that holds the token gets an answer, and there is no setting
+ * that says otherwise. That is defensible on the same ground declassification
+ * stands on elsewhere, and it is the contract patterns already work under
+ * internally: you cannot see the data, you can only describe the data flow.
  *
  * Two shapes can answer, in this order:
  *
@@ -62,9 +62,11 @@ export interface DescribeHandleToolOutput {
  * authored the schema chose — and a fabric-declared schema was authored by
  * someone other than this run, quite possibly a person. So every disclosed
  * schema is rebuilt by {@link schemaShapeOnly} from an allowlist of structural
- * keywords, at every depth, before it is reported. Property names cross that
- * line because nothing can be written over data without them; prose and values
- * do not cross it at all.
+ * keywords, at every depth, before it is reported. Prose and values do not
+ * cross that line, and neither do definition names, which are replaced by
+ * opaque ones. Property names do cross it, because nothing can be written over
+ * data without them — so they are the one channel of author-chosen text this
+ * tool knowingly accepts.
  *
  * A run with no fabric session still answers from its own table, so shape
  * stays inspectable in every run that has handles at all.
@@ -158,10 +160,15 @@ const declaredSchemaOf = async (
     if (link.path.length === 0) {
       return documentSchema ?? root.schema;
     }
-    const described = documentSchema === undefined
-      ? root
-      : (root.asSchema(documentSchema) as Cell<unknown>);
-    const referent = described.key(...link.path) as Cell<unknown>;
+    if (documentSchema !== undefined) {
+      // Narrowing a declared schema by a path is a walk over the schema, so
+      // the referent's shape is in hand without going near its value.
+      const described = root.asSchema(documentSchema) as Cell<unknown>;
+      return (described.key(...link.path) as Cell<unknown>).schema;
+    }
+    // With no declared schema there is nothing to walk, and only the referent
+    // itself can state a shape.
+    const referent = root.key(...link.path) as Cell<unknown>;
     await referent.sync();
     return referent.schema;
   } catch {

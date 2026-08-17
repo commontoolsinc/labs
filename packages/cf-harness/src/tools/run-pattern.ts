@@ -262,19 +262,46 @@ const asSerializableValue = (value: unknown): unknown => {
 };
 
 /**
- * The path at which `value` carries a sealed opaque-link object, or
- * `undefined` when it carries none. `path` names the position `value` itself
- * sits at, so a caller starting from an input key gets back a path that
- * points at the offending position within that input. The search is
- * exhaustive because a sealed value reaches an input however the model
- * composed it — nested inside an object or an array it built around what a
- * tool result handed back.
+ * The reserved seal target, as `cfcOpaqueLinkForPath` mints it: the literal
+ * `opaque:` scheme, then a percent-encoded handle id, then optionally `#` and
+ * a JSON pointer that always opens with `/`. The handle-id charset is exactly
+ * what `encodeURIComponent` can emit, which is what keeps this narrower than
+ * "any string starting with `opaque:`" — a sentence, a path, or a quoted
+ * phrase carrying that prefix has a space or a delimiter in it and does not
+ * match.
+ */
+const RESERVED_OPAQUE_TARGET =
+  /^opaque:[A-Za-z0-9\-_.!~*'()%]+(?:#\/[\s\S]*)?$/;
+
+/**
+ * Whether `value` is the reserved seal target string. The target is the seal:
+ * the `@link` object is only the wrapper a sanitized result happens to put it
+ * in, and a model that lifts the string out of that wrapper — or reads it out
+ * of one whose other keys it also copied — is passing back the same redaction.
+ */
+const isSealedOpaqueTarget = (value: unknown): boolean =>
+  typeof value === "string" && RESERVED_OPAQUE_TARGET.test(value);
+
+/**
+ * The path at which `value` carries a sealed opaque link, or `undefined` when
+ * it carries none. `path` names the position `value` itself sits at, so a
+ * caller starting from an input key gets back a path that points at the
+ * offending position within that input. The search is exhaustive because a
+ * sealed value reaches an input however the model composed it — nested inside
+ * an object or an array it built around what a tool result handed back, and in
+ * whatever form it lifted it out in.
  */
 const sealedOpaqueLinkPath = (
   value: unknown,
   path: string,
 ): string | undefined => {
-  if (isSealedOpaqueLinkObject(value)) {
+  if (isSealedOpaqueTarget(value)) {
+    return path;
+  }
+  if (
+    isSealedOpaqueLinkObject(value) ||
+    (isRecord(value) && isSealedOpaqueTarget(value["@link"]))
+  ) {
     return path;
   }
   if (Array.isArray(value)) {
@@ -308,7 +335,7 @@ const sealedInputRefusal = (key: string, path: string): string =>
     path === key
       ? "is a sealed opaque link"
       : `carries a sealed opaque link at "${path}"`
-  } — a single-key {"@link":"opaque:..."} object. A sealed value is a redaction, not an address: it marks a position an earlier result withheld, so it names nothing that can be read, and storing it would leave a dead literal where the pattern declared a live reference, with everything computed from it empty. Pass the reference you were given for that data instead — the whole cfh:a: handle token, or the LLM-friendly link it stands for — as the input's own string value.`;
+  } — the reserved "opaque:..." target, whether as a bare string or as the "@link" of an object. A sealed value is a redaction, not an address: it marks a position an earlier result withheld, so it names nothing that can be read, and storing it would leave a dead literal where the pattern declared a live reference, with everything computed from it empty. Pass the reference you were given for that data instead — the whole cfh:a: handle token, or the LLM-friendly link it stands for — as the input's own string value.`;
 
 /**
  * The slug a `register` request asks for, validated by the same rule every
@@ -535,11 +562,18 @@ export const runPatternTool: HarnessToolDefinition<
     // holding nothing. Only a pattern whose argument schema names its
     // properties is measured this way — one that admits further properties, or
     // that declares its argument through a `$ref` or a combinator, states no
-    // closed set of names to measure against.
+    // closed set of names to measure against. `additionalProperties` admits
+    // them both when it is `true` and when it is a schema: a schema there is an
+    // index signature, which names what an undeclared key is allowed to hold
+    // rather than forbidding one.
+    const additionalArguments =
+      (pattern.argumentSchema as { additionalProperties?: unknown })
+        .additionalProperties;
+    const admitsUndeclaredArguments = additionalArguments === true ||
+      isRecord(additionalArguments);
     if (
       argumentProperties !== undefined && input.inputs !== undefined &&
-      (pattern.argumentSchema as { additionalProperties?: unknown })
-          .additionalProperties !== true
+      !admitsUndeclaredArguments
     ) {
       const declared = Object.keys(argumentProperties);
       const undeclared = Object.keys(input.inputs).filter(
@@ -613,43 +647,61 @@ export const runPatternTool: HarnessToolDefinition<
     } catch (error) {
       return errorOutput("error", errorMessage(error));
     }
-    const barrier = (async () => {
-      await pieces.runtime.settled();
-      await pieces.synced();
-    })();
-    if (await raceWithAbort(barrier, signal) === "aborted") {
-      // Stop without the usual `stopPiece` idle wait: the abort path must
-      // not wait on the very scheduler the signal is escaping.
+    // Stops the created piece without the usual `stopPiece` idle wait: an
+    // abort path must not wait on the very scheduler the signal is escaping.
+    const stopPieceForAbort = () => {
       try {
         pieces.runtime.runner.stop(piece.getCell());
       } catch {
         // Best-effort: the cancelled output stands either way.
       }
+    };
+    const barrier = (async () => {
+      await pieces.runtime.settled();
+      await pieces.synced();
+    })();
+    if (await raceWithAbort(barrier, signal) === "aborted") {
+      stopPieceForAbort();
       return cancelledOutput();
     }
     // Registration is the publishing step, and it runs only when asked for.
     // Without it the piece stays absent from the space's piece list, which is
     // what pure computation wants; with it the piece gains a named address and
-    // joins the list through the space's default pattern — the same
-    // `assignSlug` then `pieces.add` the CLI's registered create performs. A
-    // failure here leaves a live piece and a usable `resultRef`, so it is
-    // reported alongside the result rather than as the run's outcome.
+    // joins the list through the space's default pattern, then has the slug
+    // pointed at it. That is `pieces.add` then `assignSlug`, the reverse of the
+    // order `cf piece new` uses, and deliberately so for the reason the inline
+    // comment below gives. A failure here leaves a live piece and a usable
+    // `resultRef`, so it is reported alongside the result rather than as the
+    // run's outcome. An abort during it is not: the caller asked to stop, so
+    // the piece is stopped and the run reports `cancelled`, exactly as an abort
+    // during the settle barrier does.
     let registration: RunPatternRegistration | undefined;
     let registrationError: string | undefined;
     if (registrationSlug !== undefined) {
-      try {
-        // The registry join goes first, so a space with no piece list to join
-        // leaves no orphan slug behind; the slug was validated before
-        // anything was created, so this order costs nothing.
-        await pieces.add([piece.getCell()]);
-        await assignSlug(pieces, piece.getCell(), registrationSlug);
+      let failure: { error: unknown } | undefined;
+      const publishing = (async () => {
+        try {
+          // The registry join goes first, so a space with no piece list to
+          // join leaves no orphan slug behind; the slug was validated before
+          // anything was created, so this order costs nothing.
+          await pieces.add([piece.getCell()]);
+          await assignSlug(pieces, piece.getCell(), registrationSlug);
+        } catch (error) {
+          failure = { error };
+        }
+      })();
+      if (await raceWithAbort(publishing, signal) === "aborted") {
+        stopPieceForAbort();
+        return cancelledOutput();
+      }
+      if (failure !== undefined) {
+        registrationError = errorMessage(failure.error);
+      } else {
         const url = registeredPieceUrl(pieces, registrationSlug);
         registration = {
           slug: registrationSlug,
           ...(url !== undefined ? { url } : {}),
         };
-      } catch (error) {
-        registrationError = errorMessage(error);
       }
     }
     const resultCell = await piece.result.getCell();
