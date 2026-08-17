@@ -33,12 +33,17 @@
  *     const { open } = await import("./sqlite-store.ts");
  *
  * A file whose whole subject is module loading takes one directive at the top
- * instead of one per site. A file gets only one of those — Deno reads the
- * first and ignores any that follow — so a file that already has one names
- * both rules on that line:
+ * instead of one per site:
  *
  *     // deno-lint-ignore-file cf-imports/no-inline-module-import -- each test
  *     // installs its browser globals before the view module loads.
+ *
+ * A file gets one of those and no more: Deno reads the first and ignores any
+ * that follow, so a second directive suppresses nothing and reads as though it
+ * did. A file that already carries one names every rule it needs on that one
+ * line.
+ *
+ *     // deno-lint-ignore-file no-explicit-any cf-imports/no-inline-module-import
  *
  * See docs/development/imports.md.
  */
