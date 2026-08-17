@@ -258,10 +258,13 @@ const crossrefTable = lift(
     },
   ): TopicCrossrefRow[] => {
     const rows: unknown[] = [];
-    // Each topic's mention list, read once. The scan below is quadratic, so a
-    // read inside it materializes the same list once per topic per topic.
-    const mentions = sources.map((topic) => topic?.get().mentions);
-    sources.forEach((topic, index) => {
+    // Both passes below are over a plain array. The scan is quadratic, and an
+    // element read through the reactive array resolves a link every time, so
+    // reading it there costs a link resolution per topic per topic.
+    const list = Array.from(sources);
+    // Each topic's mention list, read once, for the same reason.
+    const mentions = list.map((topic) => topic?.get().mentions);
+    list.forEach((topic, index) => {
       // An entry with nothing behind it yet (mid-sync) has no identity to
       // address a row by, and `Writable.for(undefined)` is not a cause. It gets
       // no row rather than a junk one — the lookup is by identity, not by
@@ -271,7 +274,7 @@ const crossrefTable = lift(
       // is no id to key a map by — and nothing to mint, keep in step, or
       // migrate when a piece moves. At board scale this is a few hundred
       // comparisons of already-resolved links.
-      const mentionedBy = sources.filter((_other, from) =>
+      const mentionedBy = list.filter((_other, from) =>
         // A topic mentioning itself is not an edge, the rule a self-link has
         // always had here.
         from !== index &&
