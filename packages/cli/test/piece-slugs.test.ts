@@ -1,3 +1,10 @@
+/**
+ * `cf piece slugs` at its three seams: the lib listing over an index-cell
+ * double (name filtering and per-row error isolation — the happy resolution
+ * path runs against a real runtime in `packages/piece/test/slug.test.ts`),
+ * the renderer's JSON and table shapes, and the command wiring.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { decode } from "@commonfabric/utils/encoding";

@@ -104,6 +104,9 @@ describe("piece slugs", () => {
     expect(link?.id).toBe(piece.getAsNormalizedFullLink().id);
     expect(link?.path).toEqual(["value"]);
     expect(readRootMeta(slugId, "slug")).toBe("value-link");
+    // The index write is unconditional: a slug to a cell path is as much a
+    // name the space has as one to a piece root.
+    expect(await listSlugs(pieces)).toEqual(["value-link"]);
   });
 
   it("resolves slug redirects to arbitrary cells without treating them as pieces", async () => {

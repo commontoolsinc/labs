@@ -1,5 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import {
   entityIdFrom,
   getPatternIdentityRef,
@@ -33,8 +34,8 @@ function slugIndexCell(pieces: PiecesController) {
 }
 
 /**
- * Every slug name the space's index records, in sorted order — the slug
- * alphabet is lowercase ASCII, so lexicographic and byte order agree.
+ * Every slug name the space's index records, in byte order (utf8Compare is
+ * the repo comparator).
  *
  * A lower bound with one boundary it cannot detect: the index lists slugs
  * assigned since it existed, so a slug written by an older client still
@@ -45,7 +46,8 @@ function slugIndexCell(pieces: PiecesController) {
 export async function listSlugs(pieces: PiecesController): Promise<string[]> {
   const index = await slugIndexCell(pieces).pull();
   if (index === undefined) return [];
-  return Object.keys(index).filter((slug) => index[slug] === true).sort();
+  return Object.keys(index).filter((slug) => index[slug] === true)
+    .sort(utf8Compare);
 }
 
 export async function assignSlug(
