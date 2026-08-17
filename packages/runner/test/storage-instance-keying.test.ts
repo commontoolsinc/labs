@@ -386,19 +386,12 @@ describe("stage A: instance keying — unit pins", () => {
               : {}),
           });
         },
-        runInstanceResolver: (pieceRootIds) =>
-          pieceRootIds.includes(rootId)
-            ? [
-              {
-                scopeKeyIdentity: alice,
-                actionScopeKey: resolveScopeKey("user", alice),
-              },
-              {
-                scopeKeyIdentity: bob,
-                actionScopeKey: resolveScopeKey("user", bob),
-              },
-            ]
-            : [],
+        // Stage B's seam: the registry returns DEMANDERS; the node's
+        // read of the user-scoped input is what narrows it, so the
+        // probe run (alice) discovers `user` and bob's instance runs
+        // in the same pass — two instance runs, one union.
+        runDemanderResolver: (pieceRootIds) =>
+          pieceRootIds.includes(rootId) ? [alice, bob] : [],
       },
     );
     const scoped = runtime.getCell<{ value: number }>(
@@ -465,13 +458,8 @@ describe("stage A: instance keying — unit pins", () => {
               : {}),
           });
         },
-        runInstanceResolver: (pieceRootIds) =>
-          pieceRootIds.includes(rootId)
-            ? [{
-              scopeKeyIdentity: alice,
-              actionScopeKey: resolveScopeKey("user", alice),
-            }]
-            : [],
+        runDemanderResolver: (pieceRootIds) =>
+          pieceRootIds.includes(rootId) ? [alice] : [],
       },
     );
     const shared = runtime.getCell<{ value: number }>(

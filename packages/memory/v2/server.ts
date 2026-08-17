@@ -406,6 +406,14 @@ export type AdmittedCommitNotice = {
 export type ServerExecutionObserver = {
   commitAdmitted?: (notice: AdmittedCommitNotice) => void;
   sessionOpened?: (space: string) => void;
+  /** A session's WATCH SET changed (`session.watch.set` / `.add`) —
+   * demand may have changed (server-execution v2 fan-out stage B, design
+   * §A's arrival re-arm: a demander's FIRST watch of a root whose nodes
+   * already narrowed must reach the SpaceServer's demand pass without
+   * waiting for the next input; the session-open trigger fires before
+   * any watch exists). Edge-triggered and cheap; the host wakes an
+   * active loop's demand pass, nothing else. */
+  demandChanged?: (space: string) => void;
 };
 
 class Connection {
@@ -3151,6 +3159,7 @@ export class Server {
       session.entities = entities;
       session.trackedIds = trackedIdsFromEntries(entities.values());
       session.lastSyncedSeq = serverSeq;
+      this.#notifyDemandChanged(message.space);
       return {
         type: "response",
         requestId: message.requestId,
@@ -3348,6 +3357,7 @@ export class Server {
       session.graphs = graphs;
       session.watches = nextWatches;
       session.lastSyncedSeq = serverSeq;
+      this.#notifyDemandChanged(message.space);
       recordSlowQueryDuration(
         "session.watch.add",
         message.space,
@@ -4143,13 +4153,15 @@ export class Server {
               }
               continue;
             }
-            const key = `space\0${root.id}\0${session.principal}\0${
-              session.id
-            }`;
+            const key =
+              `space\0${root.id}\0${session.principal}\0${session.id}`;
             if (!roots.has(key)) {
               roots.set(key, {
                 id: root.id,
-                identity: { principal: session.principal, sessionId: session.id },
+                identity: {
+                  principal: session.principal,
+                  sessionId: session.id,
+                },
               });
             }
             continue;
@@ -4220,6 +4232,19 @@ export class Server {
     } catch (error) {
       console.warn(
         "memory v2: server-execution observer threw on sessionOpened",
+        error,
+      );
+    }
+  }
+
+  #notifyDemandChanged(space: string): void {
+    const observer = this.#serverExecutionObserver;
+    if (observer?.demandChanged === undefined) return;
+    try {
+      observer.demandChanged(space);
+    } catch (error) {
+      console.warn(
+        "memory v2: server-execution observer threw on demandChanged",
         error,
       );
     }

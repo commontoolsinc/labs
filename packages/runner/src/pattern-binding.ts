@@ -325,6 +325,28 @@ function sendValueToBindingInner<T>(
         );
         return;
       }
+      if (
+        getServerExecutionConfig() && scopeRank(ref.scope) > scopeRank("space")
+      ) {
+        // The chain's DEEPEST existing hop is a SCOPED slot (the shared
+        // space slot already redirects to user — a sibling narrowed
+        // first, or this run's own earlier discovery): a further
+        // narrowing points THAT slot — this run's own instance of it —
+        // at the narrower instance, and leaves the shared broad redirect
+        // alone (server-execution v2 fan-out stage B, the RAGGED case —
+        // scopes.md §2 as amended 2026-08-16: narrowing below the
+        // space→user hop is per principal, so Bob's session hop lives in
+        // `user:bob`, never on the space slot everyone follows). Writing
+        // the redirect at the ORIGINAL binding link here (the OFF arm's
+        // one-hop shape below) would repoint the SHARED space slot at
+        // `session` and every other principal's next read would resolve
+        // a session instance of a node that is user-scoped for them.
+        tx.writeValueOrThrow(
+          ref,
+          createSigilLinkFromParsedLink(scopedRef, { base: ref }),
+        );
+        return;
+      }
       tx.writeValueOrThrow(
         bindingLink,
         createSigilLinkFromParsedLink(scopedRef, {

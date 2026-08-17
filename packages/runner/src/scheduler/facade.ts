@@ -115,8 +115,8 @@ import type { ExecuteContinuationState } from "./continuation.ts";
 import { applyPullExecuteContinuation } from "./continuation.ts";
 import { SchedulerGates } from "./gates.ts";
 import {
-  type MarkInvalidOptions,
   markInvalid as markInvalidRecord,
+  type MarkInvalidOptions,
   type StorageNotificationState,
 } from "./invalidation.ts";
 import { processStorageNotification } from "./invalidation.ts";

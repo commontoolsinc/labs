@@ -38,9 +38,9 @@ import {
 import {
   dirtyFanOutKey,
   type FanOutInstance,
-  type FanOutNodeState,
   fanOutInstances,
   fanOutInstancesToRun,
+  type FanOutNodeState,
   fanOutRunFinished,
   fanOutRunStarted,
   fanOutUnionLog,
@@ -297,6 +297,7 @@ export function appendActionRunTrace(state: {
   readonly log: ReactivityLog;
   readonly recordedAt?: number;
   readonly maxHistory?: number;
+  readonly instanceKey?: string;
 }): void {
   const parentAction = state.nodes.parentActionOf(args.action);
   const declaredWrites = (state.getSchedulingWrites(args.action) ?? []).map(
@@ -316,6 +317,9 @@ export function appendActionRunTrace(state: {
     durationMs: args.durationMs,
     declaredWrites,
     actualWrites,
+    ...(args.instanceKey !== undefined
+      ? { instanceKey: args.instanceKey }
+      : {}),
   });
   if (
     state.actionRunTrace.length >
@@ -819,16 +823,14 @@ function finalizeReactiveActionCommit(
     resubscribe: fanOutRun === undefined
       ? state.resubscribe
       : (target) => state.resubscribe(target, fanOutUnionLog(fanOutRun.state)),
-    markInvalid: fanOutRun === undefined
-      ? state.markInvalid
-      : (target) => {
-        dirtyFanOutKey(
-          fanOutRun.state,
-          keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
-            fanOutRun.instance.key,
-        );
-        state.markInvalid(target, { fanOutInstances: "keep" });
-      },
+    markInvalid: fanOutRun === undefined ? state.markInvalid : (target) => {
+      dirtyFanOutKey(
+        fanOutRun.state,
+        keyAtRatchet(fanOutRun.state, fanOutRun.instance.identity) ??
+          fanOutRun.instance.key,
+      );
+      state.markInvalid(target, { fanOutInstances: "keep" });
+    },
     queueExecution: state.queueExecution,
     getActionId: state.getActionId,
     restoreInvalidCauses: () => {
@@ -960,6 +962,7 @@ function recordOptionalActionRunDiagnostics(
     readonly action: Action;
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
+    readonly fanOutRun?: FanOutRunArgs;
   },
   log: ReactivityLog,
   elapsed: number,
@@ -975,6 +978,11 @@ function recordOptionalActionRunDiagnostics(
       actionId: args.actionId,
       durationMs: elapsed,
       log,
+      // Stage B: the instance a fanned-out run served (its stamped key),
+      // so a trace reader can attribute runs per instance.
+      ...(args.fanOutRun !== undefined
+        ? { instanceKey: args.fanOutRun.instance.key }
+        : {}),
     });
   }
 

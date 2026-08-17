@@ -30,6 +30,7 @@ import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   resolveScopeKey,
   type ScopeKeyIdentity,
+  streamEntriesDocId,
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import {
@@ -212,7 +213,12 @@ describe("stage A: the instance-keyed serving replica (OW17)", () => {
     });
 
   beforeEach(() => {
-    server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
+    // A short detached-session TTL: the true-R7 test needs an ephemeral
+    // typer's session (and its watches — demand) to prune promptly.
+    server = newSharedServer({
+      subscriptionRefreshDelayMs: 0,
+      sessionTtlMs: 250,
+    });
     managers = [];
     runtimes = [];
     servingRuntime = undefined;
@@ -531,27 +537,156 @@ describe("stage A: the instance-keyed serving replica (OW17)", () => {
     // the presync/preflight as the actor is load-bearing: with both
     // removed the handler reads the service instance's empty draft and
     // writes nothing (this test goes red).
-    const setup = await standUpTwoUsers({
-      bobScope: "user",
-      names: { arg: "ika-r7-noload-arg", result: "ika-r7-noload-result" },
-      pattern: PER_USER_PATTERN_HANDLER_ONLY,
-    });
-    const { engine, aliceKey, bobKey, alice, aliceResult } = setup;
-    // (The constant derivations discover `space` and key their rows
-    // there — S4 as amended — and load NO draft instance.)
+    //
+    // Fan-out stage B: the per-demander demand WALK follows a demander's
+    // redirects wherever her watches reach — a RENDERING client (whose
+    // runtime syncs the argument doc it renders) has its draft instance
+    // pre-loaded by the walk, a legitimate demand read. The true-R7
+    // shape is therefore the NON-RENDERING actor (RULED 2026-08-16, the
+    // event actor as a transient demander): Alice types through an
+    // ephemeral runtime BEFORE the host exists (nothing walks), holds NO
+    // watch on the space afterwards, and fires the save as a raw event
+    // append from a session that syncs nothing. Bob's client watches the
+    // root (the piece is demanded and served); Alice's instance is
+    // untouched by any walk.
+    const engine = await server.engineForSpace(space);
+    const names = { arg: "ika-r7-noload-arg", result: "ika-r7-noload-result" };
+    let compiled: Awaited<
+      ReturnType<Runtime["patternManager"]["compilePattern"]>
+    >;
+    let argId: string;
+    let resultId: string;
+    {
+      // Ephemeral creator + typer, as Alice, with no host serving.
+      const manager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      const creator = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: manager,
+        experimental: { serverExecution: true },
+      });
+      compiled = await creator.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: PER_USER_PATTERN_HANDLER_ONLY,
+        }],
+      }, { space });
+      const arg = creator.getCell<Record<string, unknown>>(
+        space,
+        names.arg,
+        undefined,
+      );
+      const result = creator.getCell<Record<string, unknown>>(
+        space,
+        names.result,
+        compiled.resultSchema,
+      );
+      await arg.sync();
+      await result.sync();
+      {
+        const seed = creator.edit();
+        arg.withTx(seed).set({ n: 1 });
+        expect((await seed.commit()).error).toBeUndefined();
+      }
+      {
+        const tx = creator.edit();
+        creator.run(tx, compiled, arg, result);
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      await creator.idle();
+      argId = arg.getAsNormalizedFullLink().id;
+      resultId = result.getAsNormalizedFullLink().id;
+      // Type: the draft (and the pre-narrowed `saved` slot) through the
+      // argument schema, into HER instance.
+      const typed = creator.getCell<{ draft: string; saved: string }>(
+        space,
+        names.arg,
+        compiled.argumentSchema,
+      );
+      const tx = creator.edit();
+      typed.key("draft").withTx(tx).set("A");
+      typed.key("saved").withTx(tx).set("");
+      expect((await tx.commit()).error).toBeUndefined();
+      await creator.storageManager.synced();
+      await creator.dispose();
+      await manager.close();
+    }
+    const aliceKey = resolveScopeKey("user", { principal: aliceSigner.did() });
+    const bobKey = resolveScopeKey("user", { principal: bobSigner.did() });
+    expect(instanceHolds(engine, aliceKey, '"A"')).toBe(true);
+    // A closed connection's sessions DETACH and linger for the registry
+    // TTL (the resume window) — and a lingering session's watches are
+    // still DEMAND. This suite's server uses a short TTL; wait it out so
+    // no watch of Alice's exists when the host activates.
+    await waitUntil(
+      () =>
+        !server.watchedRootsForSpace(space, {
+          excludePrincipal: serviceSigner.did(),
+        }).some((root) => root.identity?.principal === aliceSigner.did()),
+      "alice's ephemeral session to prune from the registry",
+    );
+
+    // NOW the host; Bob's client demands the piece (the root watch).
+    host = newHost();
+    const bob = openClient(bobSigner);
+    const bobResult = bob.getCell<Record<string, unknown>>(
+      space,
+      names.result,
+      compiled.resultSchema,
+    );
+    await bobResult.sync();
+    const cancel = bobResult.sink(() => {});
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space activation",
+    );
+    // The served constant derivations land (the piece is served)…
+    await waitUntil(
+      () => instanceHolds(engine, "space", '"echo:const"'),
+      "the served constant derivation",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // …and the serving replica has NOT loaded Alice's instance of the
+    // argument doc — THE PRECONDITION that makes this the true R7 shape
+    // (no watch of Alice's exists for any walk to follow).
     const replica = servingRuntime!.storageManager.open(space).replica;
-    // THE PRECONDITION that makes this the true R7 shape: the serving
-    // replica has NOT loaded Alice's instance of the argument doc.
     expect(
-      replica.getDocument(setup.argId as never, "user", {
+      replica.getDocument(argId as never, "user", {
         principal: aliceSigner.did(),
       }),
     ).toBeUndefined();
 
-    (aliceResult.key("save") as unknown as { send(value: unknown): unknown })
-      .send({});
-    await alice.idle();
-    await alice.storageManager.synced();
+    // Alice fires the save as a RAW event append from a session that
+    // syncs nothing (the non-rendering actor): the entry is admitted
+    // under her append authority and server-stamped with her `firedAt`.
+    {
+      const manager = EmulatedStorageManager.connectTo(server, {
+        as: aliceSigner,
+      });
+      try {
+        // The stream the `save` slot links to (as Cell.send resolves it):
+        // read off the stored result doc.
+        const saveLink = (Engine.read(engine, { id: resultId })?.value as {
+          save?: { "/": { "link@1": { id?: string; path?: string[] } } };
+        })?.save?.["/"]?.["link@1"];
+        const stream = {
+          id: saveLink?.id ?? resultId,
+          path: saveLink?.path ?? ["save"],
+        };
+        const delivery = await manager.open(space).replica
+          .enqueueEventAppend!({
+            sidecarId: streamEntriesDocId(stream as never),
+            stream,
+            eventId: `evt:${crypto.randomUUID()}:${resultId}`,
+            payload: {} as never,
+          });
+        expect(delivery.delivered).toBe(true);
+      } finally {
+        await manager.close();
+      }
+    }
     await waitUntil(
       () => sidecarIdsIn(engine).length === 1,
       "the save event append to land",
@@ -579,15 +714,16 @@ describe("stage A: the instance-keyed serving replica (OW17)", () => {
       () => instanceHolds(engine, aliceKey, '"saved:A"'),
       () =>
         "alice's saved consequence under her instance; rows now: " +
-        JSON.stringify([...rowsUnder(engine, aliceKey).entries()]),
+        JSON.stringify([...rowsUnder(engine, aliceKey).entries()]) +
+        "; entry: " + JSON.stringify(entries[0]),
       10_000,
     );
-    expect(rowsUnder(engine, aliceKey).get(setup.argId)).toEqual({
+    expect(rowsUnder(engine, aliceKey).get(argId)).toEqual({
       draft: "A",
       saved: "saved:A",
     });
     expect(instanceHolds(engine, bobKey, '"saved:')).toBe(false);
-    setup.cancel();
+    cancel();
   });
 
   it("the resubscribe path is instance-aware: after both instances ran, BOB's input change wakes the node and his instance re-derives (the union of instance logs; pre-stage-A the last instance's subscription won)", async () => {

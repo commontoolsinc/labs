@@ -108,7 +108,6 @@ import { effectCompletionKeyOf } from "./effect-completion.ts";
 import {
   identityOfScopeKey,
   resolveScopeKey,
-  type ScopeKey,
   type ScopeKeyIdentity,
   SERVER_EXECUTION_EFFECTS_DOC_ID,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
@@ -342,6 +341,10 @@ export class SpaceServer implements TransactionSealDestination {
    * shape as the shadow-flip wake): set when re-armed roots became
    * retryable mid-cycle, consumed by the next #waitForInput. */
   #pendingStructureRetryWake = false;
+  /** Level-converted demand wake (stage B): a session's watch set
+   * changed (or a session opened) since the last demand pass began;
+   * consumed by the next #waitForInput. */
+  #pendingDemandWake = false;
   /** Wave-bound seals CHAINED but not yet applied (the F4 fix, as a
    * LEVEL): seal() returns after arming the seal chain, so a seal
    * landing in a cycle's last microtasks — after the closing wave
@@ -737,8 +740,7 @@ export class SpaceServer implements TransactionSealDestination {
     // registry through the seam above.
     runtime.installSealDestination(this, {
       runStamper: (tx, info) => this.#stampRun(tx, info),
-      runDemanderResolver: (pieceRootIds) =>
-        this.#demandersFor(pieceRootIds),
+      runDemanderResolver: (pieceRootIds) => this.#demandersFor(pieceRootIds),
     });
 
     // Stage B's renew cadence, finally driven (serving-loop.md §2).
@@ -821,8 +823,15 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /** A session opened or its demand may have changed: reconsider the
-   * demanded roots on the next cycle. */
+   * demanded roots on the next cycle. LEVEL-converted (fan-out stage B,
+   * the arrival re-arm's trigger): a note landing MID-CYCLE — while no
+   * input waiter is installed, or while a demand pass that already read
+   * the roots is in flight — latches, so the next `#waitForInput` runs a
+   * cycle whose demand pass sees the change instead of sleeping out the
+   * idle window (the same latch shape as the shadow-flip and
+   * structure-retry wakes). */
   noteDemandChanged(): void {
+    this.#pendingDemandWake = true;
     this.#feedArrived?.resolve();
   }
 
@@ -1588,6 +1597,13 @@ export class SpaceServer implements TransactionSealDestination {
 
   async #waitForInput(maxMs: number): Promise<void> {
     if (this.#feed.length > 0) return;
+    if (this.#pendingDemandWake) {
+      // Consume the demand latch (stage B): a watch set changed since
+      // the last demand pass began; run a cycle now so the pass sees the
+      // arrival (or departure) instead of sleeping out the idle window.
+      this.#pendingDemandWake = false;
+      return;
+    }
     if (this.#pendingStructureRetryWake) {
       // Consume the settle-gated retry latch (stage P2-F): re-armed
       // roots became retryable mid-cycle; run a cycle now so the
@@ -1802,6 +1818,34 @@ export class SpaceServer implements TransactionSealDestination {
           index,
           seq: entry.seq ?? 0,
         };
+        // The mark every arm below writes (the handler tx's, the
+        // skip/error/drop notices') is INDEX-ADDRESSED against the
+        // REPLICA view: verify the view holds this entry at this index
+        // before any of them (a lagging view defers — never a ghost
+        // write). Checked ahead of the SKIP arm too (fan-out stage B):
+        // the skip notice used to seal on the STORED index alone, and
+        // when its wave's basis was fresh — no rebase re-CAS against
+        // the head — a view still missing the entry materialized a
+        // ghost `{consequenced: true}` at that index and left the real
+        // entry unconsequenced (re-drained, re-skipped, ghost twice).
+        {
+          const viewEntry = runtime.getCellFromLink<
+            { eventId?: string } | undefined
+          >({
+            space,
+            id: doc.id as never,
+            scope: "space",
+            path: ["entries", String(index)],
+          }).get();
+          if (viewEntry?.eventId !== entry.eventId) {
+            logger.warn("event-view-lag", () => [
+              `drain deferring ${entry.eventId}: replica view holds ` +
+              `${JSON.stringify(viewEntry)} at index ${index}`,
+            ]);
+            this.#armDeferredRescan();
+            continue;
+          }
+        }
         // Only a NUMERIC-seq consequenced twin skips this entry
         // (round-2 thread T12): a seq-less consequenced entry (the
         // stage-G interim shape, legacy stores only — admission stamps
@@ -1839,26 +1883,6 @@ export class SpaceServer implements TransactionSealDestination {
           // A cold stream doc defers like a cold piece load below.
         }
         try {
-          // The mark the stamper will write is index-addressed against
-          // the REPLICA view: verify the view holds this entry at this
-          // index before dispatch (a lagging view defers — never a ghost
-          // write).
-          const viewEntry = runtime.getCellFromLink<
-            { eventId?: string } | undefined
-          >({
-            space,
-            id: doc.id as never,
-            scope: "space",
-            path: ["entries", String(index)],
-          }).get();
-          if (viewEntry?.eventId !== entry.eventId) {
-            logger.warn("event-view-lag", () => [
-              `drain deferring ${entry.eventId}: replica view holds ` +
-              `${JSON.stringify(viewEntry)} at index ${index}`,
-            ]);
-            this.#armDeferredRescan();
-            continue;
-          }
           runtime.scheduler.queueEvent(
             link,
             entry.payload,
@@ -2144,6 +2168,10 @@ export class SpaceServer implements TransactionSealDestination {
   async #loadDemandedStructure(): Promise<void> {
     const runtime = this.#runtime;
     if (runtime === undefined) return;
+    // A demand note that landed BEFORE this pass reads the roots is
+    // satisfied by this pass; one landing after the read below latches
+    // for the next cycle (noteDemandChanged).
+    this.#pendingDemandWake = false;
     const roots = this.#options.server.watchedRootsForSpace(
       this.#options.space,
       // The serving session's own watches are its graph's reads, not
@@ -2742,6 +2770,31 @@ export class SpaceServer implements TransactionSealDestination {
       // zero-delta case — light cycles cost nothing). An EXHAUSTED
       // empty cycle is still counted: a wedged never-quiescing settle
       // is exactly what §7's wavesBudgetExhausted exists to surface.
+      //
+      // An EMPTY wave does not outlive its cycle (fan-out stage B; the
+      // stage-A fix round's flagged residual vii(b), fixed here at the
+      // root): an empty seal — a read probe, a no-op derivation, an
+      // all-no-op claim re-issue — opens `#currentWave` at THAT
+      // moment's serverSeq and lease tenure. Left open across
+      // zero-delta cycles, the wave's basis went stale: the first
+      // contributions to seal into it later — the boot wave's demanded
+      // derivations, after the piece's own instantiation commits landed
+      // — were dropped as SUPERSEDED at the per-doc CAS (their docs'
+      // heads had advanced past the stale basis; a derivation drop
+      // re-arms nothing, so nothing served until the next input), and
+      // a stale tenure across a same-process lease reacquire aborted
+      // the first real seal `lease-lost`. Discarded only when NOTHING
+      // rides it: no contribution, no pending effect batch, and no seal
+      // chained-but-not-yet-applied (a chained seal has already
+      // captured this wave and must not be orphaned — the F4 counter is
+      // exactly that window). The next seal opens a fresh wave at the
+      // current serverSeq and tenure.
+      if (
+        wave !== undefined && this.#pendingWaveSeals === 0 &&
+        this.#currentWave === wave
+      ) {
+        this.#currentWave = undefined;
+      }
       if (exhausted) {
         this.#options.stats.wavesBudgetExhausted += 1;
         logger.debug?.("wave-budget-exhausted", () => [

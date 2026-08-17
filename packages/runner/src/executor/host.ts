@@ -111,6 +111,14 @@ export class ExecutorHost {
     options.server.setServerExecutionObserver({
       commitAdmitted: (notice) => this.#onCommitAdmitted(notice),
       sessionOpened: (space) => this.#onSessionOpened(space),
+      // Fan-out stage B: a watch-set change on an ACTIVE space wakes its
+      // demand pass (the arrival re-arm's trigger); an inactive space
+      // waits for the session-open / admission activation triggers.
+      demandChanged: (space) => {
+        if (this.#closed) return;
+        const existing = this.#spaces.get(space);
+        if (existing?.active) existing.noteDemandChanged();
+      },
     });
     registerServingLoopStatsProvider(() => this.stats());
   }

@@ -3025,7 +3025,9 @@ describe("stage F serving loop", () => {
     );
     expect(basisKeys.has(expectedInstanceKey)).toBe(true);
     expect(
-      basisKeys.has(resolveScopeKey("user", { principal: serviceSigner.did() })),
+      basisKeys.has(
+        resolveScopeKey("user", { principal: serviceSigner.did() }),
+      ),
     ).toBe(false);
   });
 });

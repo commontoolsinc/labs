@@ -62,6 +62,10 @@ installFakeClock({
     // wall-clock policies; it waits on store/replica edges with bounded
     // timeouts.
     "executor-instance-keyed-replica",
+    // The fan-out stage-B suite (the per-demander run supply) drives the
+    // same live ExecutorHost + N flag-ON clients under the same
+    // wall-clock policies, waiting on store/replica edges.
+    "executor-fan-out",
     // The speculation arrival-gate suite drives a live memory server and
     // waits on push/watermark edges with bounded timeouts, and its
     // "would-be loop" window is a real-time observation.

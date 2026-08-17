@@ -275,7 +275,10 @@ describe("Phase 3 events-down (serving side)", () => {
     // outcome — captured here, asserted after the consequence lands.
     let ackStatus: string | undefined;
     (result.key("bump") as unknown as {
-      send(value: unknown, onCommit?: (tx: { status(): { status: string } }) => void): unknown;
+      send(
+        value: unknown,
+        onCommit?: (tx: { status(): { status: string } }) => void,
+      ): unknown;
     }).send({}, (ackTx) => {
       ackStatus = ackTx.status().status;
     });

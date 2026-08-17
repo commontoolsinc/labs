@@ -146,9 +146,7 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     // for demanded work → the stamp carries no identity).
     await runtime.scheduler.run(action);
     await runtime.idle();
-    let derivationStamps = stamped.filter((info) =>
-      info.kind === "derivation"
-    );
+    let derivationStamps = stamped.filter((info) => info.kind === "derivation");
     expect(derivationStamps.length).toBe(1);
     expect(derivationStamps[0].scopeKeyIdentity?.principal).toBe(
       alice.principal,

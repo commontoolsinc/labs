@@ -144,6 +144,10 @@ export interface ActionRunTraceEntry {
   durationMs: number;
   declaredWrites: ActionRunTraceAddress[];
   actualWrites: ActionRunTraceAddress[];
+  /** Server-execution v2 fan-out stage B: the instance key a fanned-out
+   * run was stamped with (`space` for the probe, `user:…`/`session:…`
+   * otherwise); absent on every other run. */
+  instanceKey?: string;
 }
 
 export interface ActionRunTraceAddress {
