@@ -2515,11 +2515,12 @@ export type JsonCodecValue =
 
 ### 4.3 Public Boundary
 
-An engine's public surface is `encode()` and `decode()`, parameterized by the
-boundary type — `string` for JSON, `Uint8Array` for a binary format. The
-machinery beneath (tag wrapping, tree walking, codec dispatch) is not public.
-Much of it is `protected` rather than private, that being the surface a
-second engine extends — including the two factories below.
+Every engine exposes `encode()` and `decode()`, parameterized by the boundary
+type — `string` for JSON, `Uint8Array` for a binary format — and an engine may
+add a pair for a second boundary type, as `JsonCodecEngine` does for bytes.
+The machinery beneath (tag wrapping, tree walking, codec dispatch) is not
+public. Much of it is `protected` rather than private, that being the surface
+a second engine extends — including the two factories below.
 
 Each act of encoding or decoding carries a context, minted per call by a
 factory the engine's subclass supplies:
@@ -2546,18 +2547,22 @@ running — the inner act gets its own bookkeeping instead of corrupting the
 outer one's. A format needing more than the base class knows about, such as a
 wire marker minted per call, subclasses the context and carries it there.
 
-`JsonCodecEngine` supplies both directions:
+`JsonCodecEngine` supplies both directions at both of its boundary types:
 
 - `encode(value, env?)` encodes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
 - `decode(data, env)` parses a JSON string, then decodes tagged
   forms back into runtime types.
+- `encodeToBytes(value, env?)` and `decodeFromBytes(bytes, env)` are the same
+  two walks against UTF-8 bytes rather than a string.
 
 > **Why the boundary is this narrow.** Tag wrapping and unwrapping are
-> machinery internal to the engine, leaving only the
-> `encode(value) -> SerializedForm` / `decode(data, env) -> FabricValue`
-> pair as public API. The engine owns the full pipeline rather than the tag
-> step alone, and its public surface says so by exposing nothing else.
+> machinery internal to the engine, leaving only
+> `encode(value, env?) -> SerializedForm` and
+> `decode(data, env) -> FabricValue` — one such pair per boundary type the
+> engine offers — as public API. The engine owns the full pipeline rather than
+> the tag step alone, and its public surface says so by exposing no step of
+> it.
 
 ### 4.4 Encode and Decode Flow
 
