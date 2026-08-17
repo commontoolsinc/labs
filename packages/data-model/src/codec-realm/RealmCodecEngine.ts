@@ -4,6 +4,9 @@ import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
+import { RealmDecodeContext } from "./RealmDecodeContext.ts";
+import { RealmEncodeContext } from "./RealmEncodeContext.ts";
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import {
   REALM_FORMAT_VERSION,
@@ -42,29 +45,40 @@ import {
  * TODO(danfuzz): A memo from each visited object to its encoded counterpart
  * closes cycles and sharing at once: a repeat visit yields the node already
  * built for it, which preserves sharing through a rebuild and lets a back-edge
- * resolve instead of recursing. It has to reach `BaseCodecEngine`'s walk state
- * rather than living here, since a cycle can run through a codec-matched
- * object as readily as through a container.
+ * resolve instead of recursing. It belongs on `EncodeContext` and
+ * `DecodeContext`, beside the in-progress set, since a cycle can run through
+ * a codec-matched object as readily as through a container and both walks
+ * need it.
  */
-export class RealmCodecEngine
-  extends BaseCodecEngine<RealmCodecValue, RealmEncodedValue> {
-  /**
-   * The marker for the encode or decode in progress, or `undefined` outside
-   * one.
-   *
-   * A field, unlike the walk's `seen` set, and for a reason that does not
-   * apply to that one. `seen` is per-node state, and holding it in a field is
-   * how an arm comes to forget to enter or leave a node; the marker is a
-   * per-call constant, set at one place and read at one place, with no arm
-   * that can silently skip it. What both share is the save-and-restore, so
-   * that a codec reaching back through a public entry point cannot leave the
-   * outer call without its own.
-   */
-  #marker: RealmFormatMarker | undefined;
-
+export class RealmCodecEngine extends BaseCodecEngine<
+  RealmCodecValue,
+  RealmEncodedValue,
+  RealmEncodeContext,
+  RealmDecodeContext
+> {
   //
   // Instance members
   //
+
+  /** @inheritDoc */
+  protected override newEncodeContext(
+    env: LiveEnvironment,
+  ): RealmEncodeContext {
+    return new RealmEncodeContext(env);
+  }
+
+  /**
+   * @inheritDoc
+   *
+   * Cycles are guarded: this format's transport is the tree itself, so a peer
+   * can hand one over with a cycle in it. The marker is adopted separately,
+   * by {@link #decode}, once the envelope it comes from has been checked.
+   */
+  protected override newDecodeContext(
+    env: LiveEnvironment,
+  ): RealmDecodeContext {
+    return new RealmDecodeContext(env);
+  }
 
   /**
    * @inheritDoc
@@ -79,18 +93,13 @@ export class RealmCodecEngine
    * The marker is minted here, after `value` exists, which is what Section 2.2
    * requires of it and why it cannot be forged from within a payload.
    */
-  override encode(value: FabricValue): RealmEncodedValue {
-    // Saved and restored rather than set and cleared, so that an encode
-    // reached from inside another one cannot leave the outer call marker-less.
-    const outer = this.#marker;
+  override encode(
+    value: FabricValue,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): RealmEncodedValue {
+    const ctx = this.newEncodeContext(env);
 
-    this.#marker = Object.freeze([REALM_FORMAT_VERSION] as const);
-
-    try {
-      return [this.#marker, this.encodeValue(value)];
-    } finally {
-      this.#marker = outer;
-    }
+    return [ctx.marker, this.encodeValue(value, ctx)];
   }
 
   /**
@@ -140,42 +149,27 @@ export class RealmCodecEngine
       );
     }
 
-    const outer = this.#marker;
+    const ctx = this.newDecodeContext(env);
 
-    this.#marker = marker as RealmFormatMarker;
+    ctx.adoptMarker(marker as RealmFormatMarker);
 
-    try {
-      // A set is started here because this format's transport is the tree
-      // itself, so a peer can hand one over with a cycle in it.
-      // `JsonCodecEngine` starts none, its input being the product of a parse.
-      return this.decodeValue(data[1] as RealmCodecValue, env, new Set());
-    } finally {
-      this.#marker = outer;
-    }
+    return this.decodeValue(data[1] as RealmCodecValue, ctx);
   }
 
   /**
    * @inheritDoc
    *
-   * @throws If there is no marker to build a tagged form around, which is the
-   *   case outside an encode and a decode both. Note what it therefore does
-   *   *not* catch: during a decode the field holds the sender's marker, so a
-   *   tag wrapped there would be wrapped under that one rather than refused.
-   *   Nothing reaches it that way -- `decodeTagged()` never encodes -- and the
-   *   guard is here for the case it does cover, a tagged form built with no
-   *   marker at all being one nothing could recognize.
+   * The marker comes from the act this form belongs to, so a form built
+   * without one is not a state this can reach: an encode context has a
+   * marker from the moment it exists, and only an encode context arrives
+   * here.
    */
   protected override wrapTag(
     tag: string,
     state: RealmCodecValue,
+    ctx: RealmEncodeContext,
   ): RealmTaggedValue {
-    const marker = this.#marker;
-
-    if (marker === undefined) {
-      throw new Error("Cannot wrap a tag outside an encode.");
-    }
-
-    return [marker, tag, state];
+    return [ctx.marker, tag, state];
   }
 
   /**
@@ -187,9 +181,9 @@ export class RealmCodecEngine
    */
   protected override encodeArray(
     value: readonly FabricValue[],
-    seen: Set<object>,
+    ctx: RealmEncodeContext,
   ): RealmCodecValue {
-    RealmCodecEngine.enterOrThrow(seen, value);
+    ctx.enter(value);
 
     const length = value.length;
     let result: RealmCodecValue[] | undefined;
@@ -200,7 +194,7 @@ export class RealmCodecEngine
       }
 
       const original = value[i]!;
-      const encoded = this.encodeValue(original, seen);
+      const encoded = this.encodeValue(original, ctx);
 
       if (result !== undefined) {
         result[i] = encoded;
@@ -217,7 +211,7 @@ export class RealmCodecEngine
       }
     }
 
-    seen.delete(value);
+    ctx.leave(value);
     return result ?? (value as RealmCodecValue);
   }
 
@@ -236,9 +230,9 @@ export class RealmCodecEngine
    */
   protected override encodePlainObject(
     value: Record<string, FabricValue>,
-    seen: Set<object>,
+    ctx: RealmEncodeContext,
   ): RealmCodecValue {
-    RealmCodecEngine.enterOrThrow(seen, value);
+    ctx.enter(value);
 
     const keys = Object.keys(value);
     let result: Record<string, RealmCodecValue> | undefined;
@@ -251,7 +245,7 @@ export class RealmCodecEngine
       RealmCodecEngine.assertEncodableKey(key);
 
       const original = value[key]!;
-      const encoded = this.encodeValue(original, seen);
+      const encoded = this.encodeValue(original, ctx);
 
       if (result !== undefined) {
         result[key] = encoded;
@@ -264,7 +258,7 @@ export class RealmCodecEngine
       }
     }
 
-    seen.delete(value);
+    ctx.leave(value);
     return result ?? (value as RealmCodecValue);
   }
 
@@ -280,8 +274,7 @@ export class RealmCodecEngine
    */
   protected override decodeValue(
     data: RealmCodecValue,
-    env: LiveEnvironment,
-    seen?: Set<object>,
+    ctx: RealmDecodeContext,
   ): FabricValue {
     // Self-representing primitives pass straight through. A `symbol` and a
     // function are not among them and are refused here rather than returned:
@@ -306,27 +299,22 @@ export class RealmCodecEngine
       return data as FabricValue;
     }
 
-    if (seen !== undefined) {
-      const cycle = this.enterOrReport(seen, data);
+    {
+      const cycle = this.enterOrReport(ctx, data);
       if (cycle !== null) {
         return cycle;
       }
     }
 
     try {
-      const unwrapped = this.#unwrapTag(data);
+      const unwrapped = this.#unwrapTag(data, ctx);
 
       if (unwrapped !== null) {
-        return this.decodeTagged(
-          unwrapped.tag,
-          unwrapped.state,
-          env,
-          seen,
-        );
+        return this.decodeTagged(unwrapped.tag, unwrapped.state, ctx);
       } else if (Array.isArray(data)) {
-        return this.#decodeArray(data, env, seen);
+        return this.#decodeArray(data, ctx);
       } else if (isPlainObject(data)) {
-        return this.#decodePlainObject(data, env, seen);
+        return this.#decodePlainObject(data, ctx);
       }
 
       // Wire data is untrusted, and cloning carries a good deal this format
@@ -340,7 +328,7 @@ export class RealmCodecEngine
         }: not a form this format emits.`,
       );
     } finally {
-      seen?.delete(data);
+      ctx.leave(data);
     }
   }
 
@@ -354,8 +342,7 @@ export class RealmCodecEngine
    */
   #decodeArray(
     data: readonly RealmCodecValue[],
-    env: LiveEnvironment,
-    seen: Set<object> | undefined,
+    ctx: RealmDecodeContext,
   ): FabricValue {
     const length = data.length;
     let result: FabricValue[] | undefined;
@@ -366,7 +353,7 @@ export class RealmCodecEngine
       }
 
       const original = data[i]!;
-      const decoded = this.decodeValue(original, env, seen);
+      const decoded = this.decodeValue(original, ctx);
 
       if (result !== undefined) {
         result[i] = decoded;
@@ -394,8 +381,7 @@ export class RealmCodecEngine
    */
   #decodePlainObject(
     data: Record<string, RealmCodecValue>,
-    env: LiveEnvironment,
-    seen: Set<object> | undefined,
+    ctx: RealmDecodeContext,
   ): FabricValue {
     const keys = Object.keys(data);
     let result: Record<string, FabricValue> | undefined;
@@ -408,7 +394,7 @@ export class RealmCodecEngine
       }
 
       const original = data[key]!;
-      const decoded = this.decodeValue(original, env, seen);
+      const decoded = this.decodeValue(original, ctx);
 
       if (result !== undefined) {
         result[key] = decoded;
@@ -450,10 +436,11 @@ export class RealmCodecEngine
    */
   #unwrapTag(
     data: RealmCodecValue,
+    ctx: RealmDecodeContext,
   ): { tag: any; state: RealmCodecValue } | null {
     if (
-      (this.#marker === undefined) || !Array.isArray(data) ||
-      (data.length !== 3) || (data[0] !== this.#marker)
+      (ctx.marker === undefined) || !Array.isArray(data) ||
+      (data.length !== 3) || (data[0] !== ctx.marker)
     ) {
       return null;
     }

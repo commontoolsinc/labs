@@ -26,6 +26,7 @@ import {
   type RealmTaggedValue,
 } from "@/codec-realm/interface.ts";
 import { RealmCodecEngine } from "@/codec-realm/RealmCodecEngine.ts";
+import { RealmDecodeContext } from "@/codec-realm/RealmDecodeContext.ts";
 import {
   createDefaultRealmRegistry,
   fabricFromRealmValue,
@@ -425,37 +426,19 @@ describe("RealmCodecEngine", () => {
       }
     });
 
-    it("throws when wrapping a tag with no marker to wrap it under", () => {
-      // `wrapTag()` is unreachable outside a walk through this class, so a
-      // subclass is what reaches it. The guard is worth having anyway: the
-      // alternative to throwing is emitting a tagged form with no marker, which
-      // nothing could ever recognize, and which would fail far from here.
-      class Exposed extends RealmCodecEngine {
-        wrapOutsideEncode(): unknown {
-          return (this as unknown as {
-            wrapTag(t: string, s: unknown): unknown;
-          }).wrapTag("Bytes@1", 1);
-        }
-      }
-
-      const engine = new Exposed({ registry: createDefaultRealmRegistry() });
-
-      expect(() => engine.wrapOutsideEncode())
-        .toThrow(/Cannot wrap a tag outside an encode/);
-    });
-
-    it("returns three slots headed by `undefined` as data, with no marker in hand", () => {
-      // The counterpart to the case above, on the decode side, and reachable
-      // the same way: `decodeValue()` is walked into from `decode()`, which
-      // always holds a marker, so a subclass is what gets here without one.
+    it("returns three slots headed by `undefined` as data, with no marker adopted", () => {
+      // A decode context holds no marker until `decode()` adopts one off the
+      // envelope, and a walk driven with such a context recognizes no tagged
+      // form at all. That is the safe answer rather than a degenerate one:
       // `undefined` is a value this format carries directly, so a payload can
-      // put one in slot zero for free; identity against an absent marker would
-      // match it and read the array as a tagged form.
+      // put one in slot zero for free, and identity against an absent marker
+      // would match it and read the array as a tagged form.
       class Exposed extends RealmCodecEngine {
-        decodeOutsideDecode(data: unknown): FabricValue {
+        decodeWithoutMarker(data: unknown): FabricValue {
+          const ctx = new RealmDecodeContext(NULL_LIVE_ENVIRONMENT);
           return (this as unknown as {
             decodeValue(d: unknown, c: unknown): FabricValue;
-          }).decodeValue(data, NULL_LIVE_ENVIRONMENT);
+          }).decodeValue(data, ctx);
         }
       }
 
@@ -463,7 +446,7 @@ describe("RealmCodecEngine", () => {
       // A state this format carries as data, so that what the walk does with
       // slot zero is the only thing under test: a bare `ArrayBuffer` would be
       // refused on its own account once the array is walked as data.
-      const decoded = engine.decodeOutsideDecode([
+      const decoded = engine.decodeWithoutMarker([
         undefined,
         "EpochDays@1",
         7n,
@@ -890,17 +873,17 @@ describe("RealmCodecEngine", () => {
     });
 
     it("leaves an outer encode its own marker when a codec re-enters it", () => {
-      // `#marker` is a field, so a call that starts DURING another walk has to
-      // hand the outer one back rather than clear it. The way to reach that
-      // with input the model admits is a codec calling back through a public
-      // entry point, which is the case the engine's own contract names -- a
-      // getter would do it in fewer lines and would not be a fabric value,
-      // accessors being rejected by Section 1.5 of `1-fabric-values.md`.
+      // Each act mints its own marker, on its own context, so an encode
+      // reached from inside another cannot disturb the outer one's. The way
+      // to reach that with input the model admits is a codec calling back
+      // through a public entry point -- a getter would do it in fewer lines
+      // and would not be a fabric value, accessors being rejected by Section
+      // 1.5 of `1-fabric-values.md`.
       //
-      // Sequential calls would test nothing here -- the outer has returned
-      // before the second starts, so restoring and clearing look identical.
-      // What discriminates them is a tagged form built AFTER the nested call
-      // returns: with the marker cleared, `wrapTag()` has none and throws.
+      // Sequential calls would test nothing here: the outer has returned
+      // before a second starts, so per-act and per-engine markers look
+      // identical. What discriminates them is a tagged form built AFTER the
+      // nested call returns, which must still carry the outer marker.
       class Reentrant {}
 
       let nestedMarker: unknown;
