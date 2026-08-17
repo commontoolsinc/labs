@@ -62,6 +62,44 @@ interface SchemaRoot {
       .toThrow("A scope wrapper cannot be a member of a union.");
   });
 
+  it("throws for a scope inside a cell that is a union member", async () => {
+    // `Cell<PerSession<T>>` puts the scope on the sibling key next to a string
+    // `asCell` entry, so the branch carries `{asCell: ["cell"], scope: ...}`.
+    const { type, checker, typeNode } = await getTypeFromCode(
+      `
+interface SchemaRoot {
+  draft: Cell<PerSession<string>> | undefined;
+}
+`,
+      "SchemaRoot",
+    );
+
+    expect(() => new SchemaGenerator().generateSchema(type, checker, typeNode))
+      .toThrow("A scope wrapper cannot be a member of a union.");
+  });
+
+  it("emits a scope beside a string asCell entry outside a union", async () => {
+    const { type, checker, typeNode } = await getTypeFromCode(
+      `
+interface SchemaRoot {
+  draft: Cell<PerSession<string>>;
+}
+`,
+      "SchemaRoot",
+    );
+
+    const schema = new SchemaGenerator().generateSchema(
+      type,
+      checker,
+      typeNode,
+    );
+    expect((schema as JSONSchemaObj).properties?.draft).toEqual({
+      type: "string",
+      scope: "session",
+      asCell: ["cell"],
+    });
+  });
+
   it("emits a top-level scope for an optional scoped property", async () => {
     const { type, checker, typeNode } = await getTypeFromCode(
       `

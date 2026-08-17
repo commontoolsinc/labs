@@ -39,7 +39,9 @@ const SAME_SLOT_COMPOUND_KEYWORDS = ["anyOf", "oneOf", "allOf"] as const;
 const topLevelScope = (schema: MutableJSONSchema): string | undefined => {
   if (!isObjectOrArray(schema)) return undefined;
   const entry = Array.isArray(schema.asCell) ? schema.asCell[0] : undefined;
-  if (typeof entry === "string") return undefined;
+  // A string entry (`asCell: ["cell"]`) carries no scope of its own and does
+  // not stand in for one: `Cell<PerSession<T>>` puts the scope on the sibling
+  // key, so the fallback below is the only thing that finds it.
   if (isObjectOrArray(entry) && typeof entry.scope === "string") {
     return entry.scope;
   }
