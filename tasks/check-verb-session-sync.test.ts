@@ -133,10 +133,9 @@ describe("check-verb-session-sync", () => {
     });
 
     it("catches an act reference the demo does not have", () => {
-      const stale = md.replace(
-        "act 12, **[blocked]**",
-        "act 99, **[blocked]**",
-      );
+      // The first "act 12" in the walkthrough, wherever it sits, renumbered
+      // past the demo's range.
+      const stale = md.replace("act 12", "act 99");
       expect(stale).not.toEqual(md);
       const found = findViolations(sh, stale);
       expect(found.some((v) => v.includes("act 99"))).toBe(true);
@@ -177,6 +176,16 @@ describe("check-verb-session-sync", () => {
       } finally {
         await Deno.remove(mdPath);
       }
+    });
+
+    it("does not let a reasonless marker exempt anything", () => {
+      const block = [
+        "```bash",
+        "# not in the demo",
+        "cf frobnicate --nothing-like-this",
+        "```",
+      ].join("\n");
+      expect(findViolations(sh, block).length).toBe(1);
     });
 
     it("still flags the line after an exemption is spent", () => {

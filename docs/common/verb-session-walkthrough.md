@@ -60,7 +60,7 @@ verbs, and they differ in nothing but what the new item is filed under:
 | `recordNote` | returns what only the pattern could compute: the clock is a handler capability, so the stamp cannot come from the caller | act 7 |
 | `finish` | returns a derived fact — `openBelow` takes a walk of the whole subtree, which a caller would pay N reads for | act 8 |
 | `archive` | declares no result: the invocation settles carrying no `result` at all, and what it changed is a separate read | act 9 |
-| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12, **[blocked]** |
+| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12 — the envelope spelling works, the printed-address spelling is refused |
 
 Those act numbers are `packages/cli/integration/verb-session-demo.sh`, which
 drives the session and prints each command before running it — the transcript is
@@ -483,14 +483,27 @@ their own options go.
 The demo's act 10 is this step run against the session's own tree: the whole
 board first, then only what is open, then the refusal.
 
-## 6. Relate two items **[blocked]**
+## 6. Relate two items **[today]**, minus one spelling
 
 ```bash
-cf call "$EPIC" blockOn -- --on "$OTHER"
+cf call "$KID" blockOn -- --on "$CSRF"
 ```
 
-This is where the session stops — on the spelling, no longer on the
-capability.
+That spelling — the address exactly as a read printed it — is the one still
+refused (#5880 landed the capability, not the round trip). Wrap the same
+address in the link envelope by hand and the call dispatches, the edge that
+lands is the target rather than a copy, and the graph read below shows one
+item under two paths:
+
+```bash
+cf call --select blocked@,on@,blockedOnCount "$KID" blockOn '{"on":{"/":{"link@1":{"id":"of:fid1:…"}}}}'
+
+cf get "$EPIC" children --select @,title,blockedOn@
+```
+
+The demo's acts 12 and 13 run all three: the refusal as a claim that
+self-reports the day the printed address is accepted, the envelope as the
+workaround it is, and the two-paths read as the payoff addresses exist for.
 
 ## The composition axis
 
