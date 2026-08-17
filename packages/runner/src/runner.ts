@@ -145,7 +145,7 @@ import {
   isTrustedBuilderArtifact,
   resolveOriginal,
 } from "./builder/pattern-metadata.ts";
-import { diffAndUpdate } from "./data-updating.ts";
+import { diffAndUpdate, preNarrowDeclaredScopeSlots } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
 import {
@@ -1533,6 +1533,17 @@ export class Runner {
       storable,
       argumentLink,
     );
+    // Instantiation-time PRE-NARROWING (RULED 2026-08-17): a slot the
+    // argument schema declares user- (or session-) scoped must never be
+    // written at the space address. The write above narrows such slots
+    // eagerly only when the argument is a VALUE written through the schema;
+    // an argument handed in as a document LINK is a redirect, so the
+    // caller's document kept its declared-scope slots unnarrowed and the
+    // first handler write through one landed on the SPACE row (a per-user
+    // draft every other principal could read — the leak this closes).
+    // Applied to the document the argument resolves to, absent slots only,
+    // idempotent — a no-op after the value path's own eager pass.
+    preNarrowDeclaredScopeSlots(this.runtime, tx, argumentLink);
   }
 
   /** Stage an argument write, materialize aliases in the same transaction, and

@@ -3052,22 +3052,59 @@ supply; OW29/OW32/OW34 closed):
   piece's roots — deterministically, while queued, never after, never
   for another piece). Two FLAGS surfaced while building (j)'s E2E
   shape (owner rulings owed; NOT filled):
-  (1) **A served handler's write to a NEVER-narrowed PerUser slot
-  lands on the SPACE slot** — a `type` handler running as Alice
-  (`firedAt.user` = Alice) wrote her draft into the shared argument
-  row (`{n:1, draft:"A", saved:"saved:echo:A"}` observed on the
-  space-scoped row; no `user:alice` row) — every served-handler test
-  in `executor-instance-keyed-replica.test.ts` pre-narrows the slots
-  it writes (`typed.key("saved").set("")` through the argument
-  schema), which is why the R7 pins never met it. Pre-stage-B (the
-  served write path is P2/stage-A machinery; stage B touched no write
-  path but the ragged hop, which fires only above `space`). A
-  per-user write visible to everyone is a correctness AND a
-  confidentiality residual: it wants the narrow-on-write hop for a
-  scoped slot's first write under the flag (`data-updating.ts`'s
-  one-hop path), or a ruling that scoped slots are pre-narrowed at
-  instantiation. Owner: the served-events line (events.md §5) — a
-  new OW row when ruled.
+  (1) **A handler's write to a NEVER-narrowed PerUser slot lands on
+  the SPACE slot — RULED 2026-08-17 (option a: instantiation-time
+  pre-narrowing) and FIXED in the stage-B fix round; the FOURTH
+  RECORDED OFF-arm acceptance.** As found: a `type` handler running
+  as Alice (`firedAt.user` = Alice) wrote her draft into the shared
+  argument row (`{n:1, draft:"A", saved:"saved:echo:A"}` observed on
+  the space-scoped row; no `user:alice` row) — every served-handler
+  test in `executor-instance-keyed-replica.test.ts` pre-narrows the
+  slots it writes (`typed.key("saved").set("")` through the argument
+  schema), which is why the R7 pins never met it. The independent
+  review characterized it POSTURE-INDEPENDENT: reproduced
+  byte-identically OFF, client-only, no server — the handler's handle
+  carries no scope cap (its own input schema is a plain
+  `Writable<string>`; the `PerUser` declaration lives on the pattern's
+  argument schema) and the eager scoped-key redirect fires only when
+  the parent object is written THROUGH that schema, which a piece
+  instantiated over an EXISTING document handed in as a cell never
+  is. Owner: "a Writable scoped to user at declaration (either schema
+  or the passed in link) should not write to space? that would be a
+  clear yes, but also a serious problem on main right now." Fix
+  (own commit, cherry-pickable to main): `data-updating.ts`
+  `preNarrowDeclaredScopeSlots`, called from the runner's argument
+  staging (`updateArgument`) — writes the broad-slot `space→user`
+  redirect for every declared-scope slot the argument document does
+  not hold yet, so the first write through it lands off the shared
+  space row at the acting principal's USER instance; absent slots
+  only, idempotent. Only the STRUCTURAL top hop: `space→user` is
+  for-everyone (scopes.md §2 monotonicity) and safe to establish
+  eagerly, while the `user→session` hop stays per-principal and
+  discovered by running — pre-narrowing to session would be static
+  scope analysis (D11) and would over-narrow the instantiator to
+  session for empty data (it also broke the ragged pin (c) and the
+  no-session-attribution pin (a) when first tried at full session
+  depth; capping at the user hop keeps both green). The
+  confidentiality boundary is CROSS-USER; user confinement is the
+  whole of it. scopes.md §2 carries the binding sentence (handler
+  writes obey the derivation narrowing-redirect rule, at the
+  structural hop) and §8 item 3 the open corner (legacy plain values
+  already on the broad row are NOT moved — migrate vs shadow vs
+  one-time repair is an owner call). Pinned red-first in
+  `scoped-slot-pre-narrowing.test.ts` (four OFF-arm arms, a second
+  client reading): the SCHEMA-declared slot over an existing doc cell
+  (RED before the fix at "Alice's row holds her draft" — it was on the
+  space row, and Bob read it), the value path (control), and the
+  LINK-declared slot passed in / stored (already confined; regression
+  pins). Mutation (the pre-narrowing call removed) → the doc-cell arm
+  red. RECORDED ACCEPTANCE (OFF-arm behavior change, deliberate): a
+  piece instantiated over a document handed in as a link now writes
+  the declared-scope slots' `space→user` redirect into that document
+  at instantiation, and a handler's write through a declared-scope
+  slot lands at the acting principal's user instance instead of the
+  space row — the former write was a confidentiality leak; no
+  legitimate producer depended on it.
   (2) **The transient demander's REACH**: the ruled sentence covers a
   DIRTY scoped input at the dispatch's preflight. A non-watching
   actor whose earlier event dirtied the input (type, then save, as

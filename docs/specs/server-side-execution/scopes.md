@@ -229,6 +229,45 @@ broader again, but the slot redirect stays. No un-narrowing code
 exists anywhere on main, and v2 keeps it that way: the widen-back
 question (formerly open) is closed NO.
 
+**Handler writes obey the same narrowing-redirect rule as derivations
+(RULED 2026-08-17).** A `Writable` slot declared user- (or session-)
+scoped at instantiation — by the pattern's argument SCHEMA
+(`PerUser<…>` / `PerSession<…>`) or by the LINK the caller passes for
+that slot — is never written at the SPACE address: a handler's write
+through it lands off the shared space row, at the acting principal's own
+instance, behind the same redirect a derivation's discovered narrowing
+writes. Owner: "a Writable scoped to user at declaration (either schema
+or the passed in link) should not write to space? that would be a clear
+yes, but also a serious problem on main right now." The mechanism is
+INSTANTIATION-TIME PRE-NARROWING at the STRUCTURAL `space→user` hop:
+the runner's argument staging writes the broad-slot `space→user`
+redirect for every declared-scope slot (user- OR session-declared) the
+argument document does not hold yet — whether the caller handed in a
+value or a document link — so the first write through the slot already
+lands at the acting principal's USER instance
+(`data-updating.ts` `preNarrowDeclaredScopeSlots`, called from the
+runner's argument staging). Only the top hop: it is STRUCTURAL
+(for-everyone, per the monotonicity rule above), so it is safe to
+establish eagerly; the `user→session` hop stays per-principal and
+discovered by running (writing a session redirect at instantiation
+would be static scope analysis — D11's tripwire — and would over-narrow
+the instantiator's own slot to session for data that does not exist).
+A session-declared slot therefore reaches session later, per principal,
+exactly as a discovered narrowing would; the confidentiality boundary
+the pre-narrowing closes is CROSS-USER (the leak: a per-user draft on
+the shared space row, readable by every other principal), and user
+confinement is the whole of it. Before the fix, a piece instantiated
+over an existing document handed in as a cell had unnarrowed slots —
+the eager redirect fired only for a value written THROUGH the schema —
+and the first per-user handler write landed on the shared row: a
+confidentiality leak, posture-independent (client-only, OFF). Fixing it
+is a deliberate OFF-arm behavior change (verification-coverage.md's
+recorded-acceptance row). Slots that already hold a value — a link, or
+a plain value written before the redirect existed — are left as they
+are (absent slots only): whether a legacy plain value in a
+declared-scope slot migrates into the instantiator's instance or is
+shadowed by the redirect is NOT ruled and stays open (§8).
+
 ## 3. Lifecycle: durable, with retirement (S2)
 
 Session-scoped DERIVED state is durable-with-retirement. It is
@@ -480,6 +519,19 @@ citations use it):
    deletion rule in serving-loop.md §3b keeps the stranding from
    growing without bound in the narrowing case; a retirement design
    still owes the general one.
+3. **Legacy plain values in declared-scope slots (2026-08-17).** The
+   instantiation-time pre-narrowing (§2, RULED 2026-08-17) writes the
+   redirect for ABSENT declared-scope slots only. A slot that already
+   holds a plain value at the broad address — data written before the
+   redirect existed, i.e. the leak's own residue — is left untouched:
+   a later handler write through such a slot still lands at the broad
+   address until the slot is narrowed. Whether that value migrates into
+   the instantiating principal's instance (what the value-argument
+   path does when it stages `{draft: "old"}` through the schema), is
+   shadowed by a redirect over an empty instance, or is repaired by a
+   one-time migration, is an owner call — the ruling spoke to the
+   FIRST write, and none of the three is obviously right for data
+   whose author is unknown.
 
 ## 9. Tripwires
 
