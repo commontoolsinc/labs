@@ -303,8 +303,16 @@ within a single commit included — because a deleted or altered
 dependency would invalidate every document referencing it. An
 idempotent re-`set` of the same content is how writers install closures
 and stays legal, and a sync frame's removes are watch-result removals,
-not deletions. The commit API therefore cannot create a broken closure
-at all; one that exists anyway is database corruption.
+not deletions.
+
+The division of enforcement is deliberate: the WRITER's obligation is to
+install a reference's closure atomically with the referrer (the
+write-side guarantee — the only path through the API does this), while
+the commit boundary mechanically preserves what is installed. The
+boundary does not validate a first installation's hash or require a
+referrer's closure to accompany it, so a contract-violating writer can
+still create a missing or forged closure; readers treat that as a
+violated writer/storage invariant and fail loudly on it.
 
 Resolution demands the whole closure: a registered document whose
 transitive closure is not fully registered resolves as a miss, exactly
@@ -401,10 +409,11 @@ delivery and traversal split the work in two layers:
   own store, and joins it to the delivered set and watch set — failing
   the query on a hole. A refresh revalidates the established delivery
   state too, so a corrupted dependency fails even under an unchanged
-  referrer. Because the commit boundary makes `cid:` documents
-  immutable, an assembly failure can only mean corruption outside the
-  commit API — a tampered store, a pre-immutability hole — never a
-  transient condition. Every query/watch evaluation exception shares one
+  referrer. An assembly failure means a violated writer or storage
+  invariant — a writer that broke the closure obligation, a tampered
+  store, a pre-immutability hole — never a transient condition, since
+  the commit boundary preserves every installed document. Every
+  query/watch evaluation exception shares one
   failure boundary: the server records the diagnostics and closes the
   affected CONNECTION, discarding its session and graph state whole
   (one session per connection leaves nothing worth preserving), while

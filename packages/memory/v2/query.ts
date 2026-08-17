@@ -377,11 +377,11 @@ const scanSnapshotSchemaRefs = (
  * Thrown when a query result's schema-document closure cannot be
  * assembled from the delivering space's own store: a referenced document
  * is missing, or its stored content does not hash to its id. The commit
- * boundary makes `cid:` documents immutable, so this is database
- * corruption, not a transient condition. Like every query/watch
- * evaluation exception, it closes the affected connection at the
- * server's evaluation boundary; reconnection reinstalls fresh state, and
- * a still-corrupt store fails loudly again.
+ * boundary preserves installed documents, so this is a violated writer
+ * or storage invariant, never a transient condition. Like every
+ * query/watch evaluation exception, it closes the affected connection at
+ * the server's evaluation boundary; reconnection reinstalls fresh state,
+ * and a still-broken store fails loudly again.
  */
 export class SchemaClosureError extends Error {
   constructor(message: string) {
