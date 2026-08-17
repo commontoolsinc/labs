@@ -170,11 +170,18 @@ const readDisplayFields = lift<
   nickname: piece?.nickname,
 }));
 
-// Helper to check if a module has settings UI
+/** The one field the settings lifts read off a sub-piece. */
+interface SettingsBearing {
+  settingsUI?: unknown;
+}
+
+// Whether the module exports a settings UI. Naming `settingsUI` on the operand
+// is what makes the read follow the link: an operand that only says the piece
+// is permissive defers to the schema the entry carries, which has
+// `piece: unknown` in it. The node itself stays `unknown` — this asks whether
+// there is one, not what it renders.
 const moduleHasSettings = lift(
-  // deno-lint-ignore no-explicit-any
-  ({ piece }: { piece?: any }) => {
-    // Check if the piece exports a settingsUI
+  ({ piece }: { piece?: SettingsBearing }) => {
     return !!piece?.settingsUI;
   },
 );
@@ -188,8 +195,7 @@ const moduleHasSettings = lift(
 // a copy, so the controls in it stay bound to the sub-piece.
 const readSettingsUI = lift(
   ({ entries, index }: {
-    // deno-lint-ignore no-explicit-any
-    entries?: { piece: any }[];
+    entries?: { piece: SettingsBearing }[];
     index?: number;
   }) => {
     if (index === undefined || index === null) return null;
@@ -1098,7 +1104,7 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Get the settings UI for the currently selected module (if any)
     const currentSettingsUI = readSettingsUI({
-      entries: subPieces,
+      entries: subPieces as { piece: SettingsBearing }[],
       index: settingsModuleIndex,
     });
 
@@ -1331,7 +1337,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 {/* Settings gear - only show if module has settingsUI */}
                                 {!isExpanded &&
                                   ifElse(
-                                    moduleHasSettings({ piece: entry.piece }),
+                                    moduleHasSettings({
+                                      piece: entry.piece as SettingsBearing,
+                                    }),
                                     <button
                                       type="button"
                                       onClick={openSettings({
@@ -1623,7 +1631,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   {/* Settings gear - only show if module has settingsUI */}
                                   {!isExpanded &&
                                     ifElse(
-                                      moduleHasSettings({ piece: entry.piece }),
+                                      moduleHasSettings({
+                                        piece: entry.piece as SettingsBearing,
+                                      }),
                                       <button
                                         type="button"
                                         onClick={openSettings({
@@ -1908,7 +1918,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                               {/* Settings gear - only show if module has settingsUI */}
                               {!isExpanded &&
                                 ifElse(
-                                  moduleHasSettings({ piece: entry.piece }),
+                                  moduleHasSettings({
+                                    piece: entry.piece as SettingsBearing,
+                                  }),
                                   <button
                                     type="button"
                                     onClick={openSettings({
@@ -2247,7 +2259,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               {settingsModuleDisplay.icon} {settingsModuleDisplay.label}{" "}
               Settings
             </span>
-            {currentSettingsUI}
+            {currentSettingsUI as VNode}
             <cf-hstack
               slot="footer"
               gap="3"
