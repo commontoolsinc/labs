@@ -304,30 +304,6 @@ const parkingAdminSubject = (personName: string): ParkingAdminSubject => ({
   personName,
 });
 
-const parkingAdminRolesValue = (
-  registry: ParkingAdminRegistryReader,
-  changeRegistry: TrustedParkingAdminChangeRegistryReader,
-): EffectiveParkingAdminRole[] => {
-  const stored = registry.get() as ParkingAdminRegistryStoredValue | undefined;
-  const changeStored = changeRegistry.get() as
-    | { changes?: TrustedParkingAdminChangeList }
-    | undefined;
-  return Array.from(changeStored?.changes ?? []).reduce(
-    (roles: EffectiveParkingAdminRole[], change) =>
-      change.admin
-        ? [
-          ...roles.filter((role) =>
-            role.subject.personName !== change.subject.personName
-          ),
-          change,
-        ]
-        : roles.filter((role) =>
-          role.subject.personName !== change.subject.personName
-        ),
-    Array.from(stored?.admins ?? []),
-  );
-};
-
 const latestParkingAdminChange = (
   changeRegistry: TrustedParkingAdminChangeRegistryReader,
   personName: string,
@@ -853,6 +829,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const trimName = editPersonNameArg.trim();
       const trimEmail = editPersonEmailArg.trim();
       if (!trimName || !trimEmail) return;
+      if (personIsParkingAdmin(adminRegistry, adminChanges, originalName)) {
+        return;
+      }
 
       const current = people.get();
       if (
@@ -889,34 +868,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             r.personName === originalName ? { ...r, personName: trimName } : r
           ),
         );
-        if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
-          adminRegistry.set({
-            admins: parkingAdminRolesValue(adminRegistry, adminChanges).map((
-              role,
-            ) =>
-              role.subject.personName === originalName
-                ? {
-                  subject: parkingAdminSubject(trimName),
-                  displayName: trimName,
-                } as ParkingAdminRole
-                : role
-            ) as ParkingAdminList,
-          });
-        }
       }
 
       editingPersonName.set(null);
     });
 
     const removePerson = action<{ name: string }>(({ name }) => {
+      if (personIsParkingAdmin(adminRegistry, adminChanges, name)) return;
       people.set(people.get().filter((p) => p.name !== name));
-      if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
-        adminRegistry.set({
-          admins: parkingAdminRolesValue(adminRegistry, adminChanges).filter((
-            role,
-          ) => role.subject.personName !== name) as ParkingAdminList,
-        });
-      }
       if (selectedPersonName.get() === name) {
         const remaining = people.get();
         selectedPersonName.set(remaining[0]?.name ?? "");
@@ -1157,6 +1116,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     // Internal UI actions
     const startEditPerson = action<{ name: string }>(({ name }) => {
+      if (personIsParkingAdmin(adminRegistry, adminChanges, name)) return;
       const p = people.get().find((x) => x.name === name);
       if (!p) return;
       editingPersonName.set(name);
@@ -1202,6 +1162,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     );
 
     const initiateRemovePerson = action<{ name: string }>(({ name }) => {
+      if (personIsParkingAdmin(adminRegistry, adminChanges, name)) return;
       removePersonConfirmTarget.set(name);
     });
 
@@ -1548,6 +1509,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         isLast: idx === sorted.length - 1,
         isEditing: editingName === p.name,
         isRemoveConfirm: removeConfirmName === p.name,
+        isAdmin: personIsParkingAdmin(adminRegistry, adminChanges, p.name),
       }));
     });
 
@@ -2158,6 +2120,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           vehicles: personVehicles,
                           isFirst,
                           isLast,
+                          isAdmin,
                         } = person;
                         // Derived in `adminPeopleData` (see note there) — a
                         // `computed()` nested here that reads the perSession
@@ -2460,6 +2423,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <cf-button
                                         variant="ghost"
                                         size="sm"
+                                        disabled={isAdmin}
                                         onClick={() =>
                                           startEditPerson.send({
                                             name: personName,
@@ -2470,6 +2434,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <cf-button
                                         variant="ghost"
                                         size="sm"
+                                        disabled={isAdmin}
                                         onClick={() =>
                                           initiateRemovePerson.send({
                                             name: personName,
