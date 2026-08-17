@@ -866,7 +866,12 @@ Tasks:
       posture) — *triaged 2026-08-16 (a client speculation
       retire-to-nothing loop on per-user derivations, cause = the
       identity-less space-root demand); the client ARRIVAL GATE landed
-      with fan-out stage A (the symptom); the cause is stage B's*;
+      with fan-out stage A (the symptom); the CAUSE FIXED by fan-out
+      stage B (2026-08-17): the loop is gone at both gates — the
+      two-browsers gate GREEN 3/3 fresh-store and UN-SKIPPED; the lunch
+      gate boots, joins, and votes but is BIMODAL 1/2 on a served-vote
+      no-op residual (its skip entry names it) — the "5/5" bar is met
+      by the first gate and owed by the second*;
       (2) OW17 — the SpaceReplica per-instance re-keying (with
       OW29's space-root demanders + arrival re-runs; P2-F-sized) — *SPLIT
       by the fan-out design (owner-ruled 2026-08-16): STAGE A = the
@@ -875,8 +880,10 @@ Tasks:
       (`claude/server-exec-v2-fanout-a`); STAGE B = the fan-out run
       supply (identity on space-root demands, demanders resolver,
       known-scope ratchet + discovery/arrival re-arms, per-demander demand
-      walk + wish-sidecar chain, output-scope attribution, B7) — NEXT;
-      STAGE C = closeout (un-skip the gates, the honest benchmark)*; (3)
+      walk + wish-sidecar chain, output-scope attribution, B7, OW34's
+      trust carriage) — LANDED (`claude/server-exec-v2-fanout-b`; OW17
+      and OW29 CLOSED, OW32 CLOSED as a cause, OW34 CLOSED); STAGE C =
+      closeout (the lunch gate's residual, the honest benchmark)*; (3)
       OW28 — compile-and-run as an outbox effect kind + completion-class
       writeback; (4) the HONEST propagation benchmark (criterion below)
       once the two-user family works; (5) the ON skip list EMPTY and the
@@ -939,7 +946,7 @@ fresh store per run, private port offset, loaded box):**
 | runtime-client package integration | explicit ON, UNIFORM (the worker declares ON) | 43 steps GREEN + 2 STEP entries ignored loudly (CT-1606 PerUser header render 3/3 red; single-navigateTo dispatch 1/3 red — OW33) |
 | `counter` | full ON | 1 red / 3 green in the build's runs (OW30's controller write-destination race — intermittent); green in the review's run; server exhausts 2/5 waves with no client loop |
 | `topics-navigation` | full ON | RED fast (`missing required property myName`, OW30 class) — ON-skip-listed (and, since the fixer, actually skipped) |
-| `cfc-group-chat-demo-two-browsers` (the Phase-2 gate + the benchmark harness) | full ON — HEAD 2/2 and the unmodified Phase-6 BASE 1/1 (review) | RED: 300 s stall; serving loop QUIET (waves 20–26, derivedCommits 19–25, events 2/2, watermarkLag 1–2, wavesBudgetExhausted 12–16), BOTH browsers in a client-side `scheduler-non-settling` loop (40–56 k action runs / 5 min) — OW32, UNATTRIBUTED, NOT evidenced as OW17; NOT a Phase-7 regression; ON-skip-listed |
-| lunch (`lunch-poll-vote`) | full ON — HEAD 2/2 (review) | RED: 300 s stall — the served `#profile` wish throws identity-less at STEP 1 (the OW29 space-root-demander gap at first demand) while the reference-only client waits forever (`wish/phase/send-error` ~13.6/s), plus the OW32 client loop; the build's "(1)+(2)+(3) → join UI renders" did NOT reproduce (0/2). ON-skip-listed; #5612 not edited |
+| `cfc-group-chat-demo-two-browsers` (the Phase-2 gate + the benchmark harness) | full ON — HEAD 2/2 and the unmodified Phase-6 BASE 1/1 (review); **fan-out stage B: 3/3 fresh-store, ON-built binary (2026-08-17)** | Phase 7: RED (300 s stall; the OW32 client loop, 40–56 k action runs / 5 min). **Fan-out stage B: GREEN 3/3 (1m08s / 1m21s / 1m23s), every step in seconds; client action runs 401–586 per browser; zero non-settling; serving loop waves 48–58, derivedCommits = waves, watermarkLag ≤ 12; UN-SKIPPED** |
+| lunch (`lunch-poll-vote`) | full ON — HEAD 2/2 (review); **fan-out stage B: 2 fresh-store runs on the final binary (2026-08-17)** | Phase 7: RED (the identity-less served `#profile` wish + the OW32 loop). **Fan-out stage B: BIMODAL 1/2 — run 4 GREEN 2m28s (login 1.6 s, runtimes idle 1.0 s, joins 12–640 ms, votes and merges in seconds); run 5 RED at "both browsers see 2 love it (merge)" — both vote events consequenced with no error, one vote's served `castVote` no-op'd (`nowTick` null in the actor's run); stays ON-skip-listed with that residual named** |
 | the deployed-topology binaries the presets flip (`background-piece-service`, CLI, cf-harness, `PiecesController` hosts) | ON | NO gate exercises them ON (review finding 8) — recorded as the flip PR's own obligation; with the constant `false` none flips today |
 | OFF-arm neutrality | full runner suite (OFF ambient) + memory + toolshed unit suites + explicit-OFF sx2 | see the PR's bar |

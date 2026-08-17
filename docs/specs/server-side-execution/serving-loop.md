@@ -51,7 +51,15 @@ policy in v2. The space is ONE lazy reactive graph, and activation
 loads graph structure sufficient to resolve the demanded values and
 the queued events — never "instantiate the pieces" as a step of its
 own. Demand is value-granular client pull: a subscription to a value
-recomputes that value and its upstream, nothing else. Events run
+recomputes that value and its upstream FOR THE SUBSCRIBER'S INSTANCES,
+nothing else — a principal's subscription at a broad address is demand
+for that principal's instance of every node that narrows beneath it
+(scopes.md §2, RULED 2026-08-16; fan-out stage B), so the demand
+registry keeps the demanding (user, session) pair on every root a
+client watches, space-scoped roots included, and the demand WALK
+(the live reader per demanded root that pulls the value's subtree)
+runs once per demanding pair, each run following THAT demander's
+redirects. Events run
 their handlers eagerly — after preflight makes any dirty state
 inputs current (D-v2-2). Undemanded derivations stay
 dirty-unmaterialized indefinitely — `idle()` already excludes them
@@ -360,7 +368,34 @@ executing:
   (scopes.md §2, ruled 2026-08-02 batch 4, corrected by the S3
   review). The redirect write dirties the broad slot's readers in
   the same wave, and demanded siblings are ordinary demanded work
-  under §3's budget rule.
+  under §3's budget rule. **The instance set is derived by the
+  scheduler from what the node has LEARNED (fan-out stage B, RULED
+  2026-08-16):** per node, a KNOWN-SCOPE RATCHET — the top hop a
+  node-level bit, the session depth PER PRINCIPAL (ragged, scopes.md
+  §2), only ever narrowing, forgotten with the node — written only by
+  run outcomes (the transaction's read-scope ratchet — logged reads,
+  the write path's diff-base read at the narrower instance, and
+  identity consumption: resolving whose home space a run targets is
+  a user-scoped read); the demand registry supplies the DEMANDERS,
+  and `instances(ratchet, demanders)` is one probe run (the smallest
+  pair) while unnarrowed, one run per demanding principal at user
+  depth, one per demanding session for a session-deep principal. The
+  ratchet has three sources and no fourth: no schema or code
+  inspection decides instance sets (D11). Discovery RE-ARM: a run
+  that moves the ratchet has its new siblings run in the same pass,
+  before the wave settles. Arrival RE-ARM: a new demanding pair on a
+  root re-arms every NARROWED node beneath it for that pair only.
+  Precise per-instance dirtiness (B7): the node is singular (C11b) but
+  its record keeps, per instance, the last committed reactivity log
+  and a clean bit — a change dirties exactly the instances whose reads
+  covered it (a keyed notification address names the instance; a
+  space doc dirties all), the node's ONE subscription is the union of
+  the instance logs (a pass that skips clean instances keeps their
+  reads registered), and an N-user space costs O(affected instances)
+  per change, not O(N) per node — the load-bearing property that keeps
+  waves draining under sustained multi-user input (an exhausted wave
+  holds W; a pinned W stalls the client's coverage-of-basis
+  retirement).
 - Read sets are authoritative IN MEMORY. Two persisted forms are
   distinguished, and confusing them is how v1 died:
   1. **The basis index (CORRECTNESS-BEARING for recovery)**: compact

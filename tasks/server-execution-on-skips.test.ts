@@ -136,12 +136,11 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list holds exactly THREE phase-7 entries — topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) plus the two two-browser gates the P7 independent review found red under the full ON posture (client-side scheduler-non-settling loop, UNATTRIBUTED — OW32) — printed loudly, never silent", async () => {
+Deno.test("main: the patterns list holds exactly TWO phase-7 entries — topics-navigation (Phase 4's mixed-posture entry, re-justified by Phase 7) plus lunch-poll-vote (the two-browser gate the P7 independent review found red on the client-side scheduler-non-settling loop — OW32 — whose mechanism fan-out stage B fixed; the entry now carries the gate's residual); cfc-group-chat-demo-two-browsers was UN-SKIPPED by fan-out stage B (3/3 green fresh-store under the full ON posture, 2026-08-17) — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   assertEquals(out, [
     "--ignore=integration/topics-navigation.test.ts," +
-    "integration/cfc-group-chat-demo-two-browsers.test.ts," +
     "integration/lunch-poll-vote.test.ts",
   ]);
   const report = err[0];
@@ -151,28 +150,28 @@ Deno.test("main: the patterns list holds exactly THREE phase-7 entries — topic
   );
   assertMatch(
     report,
-    /patterns: SKIP integration\/cfc-group-chat-demo-two-browsers\.test\.ts \(until phase-7\)/,
-  );
-  assertMatch(
-    report,
     /patterns: SKIP integration\/lunch-poll-vote\.test\.ts \(until phase-7\)/,
   );
-  // The reason is LOUD and states the mechanism as characterized, not
-  // as attributed: the client-side non-settling loop, the quiet serving
-  // loop, and the owed triage row.
-  for (const gate of ["cfc-group-chat-demo-two-browsers", "lunch-poll-vote"]) {
-    const entry = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
-      skip.file === `integration/${gate}.test.ts`
-    );
-    if (entry === undefined) throw new Error(`missing ${gate} entry`);
-    assertEquals(entry.phase, "phase-7");
-    assertMatch(entry.reason, /scheduler-non-settling/);
-    assertMatch(entry.reason, /UNATTRIBUTED/);
-    assertMatch(entry.reason, /NOT evidenced as OW17/);
-    assertMatch(entry.reason, /OW32/);
-    assertMatch(entry.reason, /flip PR needs this list EMPTY/);
-  }
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 3);
+  // The two-browsers gate RUNS in the ON arm now (fan-out stage B).
+  assertEquals(
+    SERVER_EXECUTION_ON_SKIPS.patterns.some((skip) =>
+      skip.file === "integration/cfc-group-chat-demo-two-browsers.test.ts"
+    ),
+    false,
+  );
+  // The lunch entry's reason is LOUD and states the residual mechanism as
+  // observed (the served vote no-op), names the closed walls and the
+  // owning register row, and keeps the flip's condition.
+  const lunch = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
+    skip.file === "integration/lunch-poll-vote.test.ts"
+  );
+  if (lunch === undefined) throw new Error("missing lunch-poll-vote entry");
+  assertEquals(lunch.phase, "phase-7");
+  assertMatch(lunch.reason, /OW32/);
+  assertMatch(lunch.reason, /castVote/);
+  assertMatch(lunch.reason, /nowTick/);
+  assertMatch(lunch.reason, /flip PR needs this list EMPTY/);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 

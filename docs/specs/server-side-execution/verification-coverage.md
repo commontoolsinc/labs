@@ -1181,6 +1181,76 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   reacquire aborts `lease-lost` and PARKS the space — the "survived
   blip keeps serving" path is reachable only on a space quiet across the
   tick; owner: the P7 renew-blip / wedge arms.
+  **CLOSED — leg 2 of 2 LANDED (fan-out stage B, 2026-08-17; owner
+  ruling 2026-08-16 "if a space scoped calculation gets narrowed to
+  user, it'll have to run for all users that demand it").** The
+  per-demander run SUPPLY: the demand registry keeps every demanding
+  (user, session) pair on every root a client watches — space-scoped
+  roots included (`watchedRootsForSpace` returns one row per demanding
+  session; the SpaceServer's `#demandersByKey`); the resolver seam
+  returns DEMANDERS (`runDemanderResolver` / `serverRunDemandersFor`,
+  replacing the instance-returning P2-F seam that decided instances
+  from the demand's own scope — F10's over-keying); the scheduler owns
+  the KNOWN-SCOPE RATCHET (`scheduler/fan-out.ts`: the top hop a
+  node-level bit, session depth per principal — ragged, scopes.md §2
+  as amended; only narrows; forgotten with the node) and derives
+  `instances(ratchet, demanders)` — one probe (min pair, key `space`)
+  while unnarrowed, one per demanding principal at user depth, one per
+  demanding session for a session-deep principal; the discovery
+  RE-ARM runs the siblings a moved ratchet exposes in the SAME pass;
+  the ARRIVAL RE-ARM (`invalidateActionsForDemandRoots`, keeping the
+  per-instance record) runs a late demander's instances only, woken
+  by the memory server's new `demandChanged` observer with a 300 ms
+  coalescing grace; the demand WALK runs per demander (an effect node
+  registered per demand key with the root as its demand root, so the
+  ordinary supply fans it out); B7 precise per-instance dirtiness (per
+  instance: the last committed log + a clean bit; a keyed notification
+  address dirties exactly the instances whose identity covers it; the
+  node's one subscription is the union; retries dirty only their own
+  instance); scope-derived ATTRIBUTION with the early-emit guard
+  (protocol.md §1 as amended); the wish sidecars chained to their
+  wish's piece (`parentPieceRootId`); the ragged redirect fix
+  (pattern-binding.ts: a session hop below an existing user redirect
+  lands in the run's own user slot, never on the shared space slot);
+  the service identity runs NO demanded work (fallback only when no
+  principal demands the roots; a narrowing fallback counted as
+  `undemandedNarrowingRuns`). Pinned red-first at the stage-A tip:
+  `executor-fan-out.test.ts` — (a) two users watching ONLY the space
+  root → two instances with their own values, user-only attribution,
+  no service row; (b) the arrival re-arm (Bob's instance on demand,
+  Alice's untouched); (c) RAGGED (Bob per session, Alice per user, no
+  session-keyed run for Alice); (d)+(e) a space node runs ONCE for
+  three demanders, stamped as a demander; (f-walk) a subtree
+  reachable only through a demander's value materializes under her
+  instance; (h) the B7 probe — N=4 × M=3: ONE user's change re-ran
+  exactly that user's 3 instances (naive 12), derivation node count
+  35 → 35; (i) the OW29 storm pin — 20 divergent edits per user,
+  waves bounded, quiescent, values never crossed; `scheduler-fan-out.
+  test.ts` (the pure core: instance function, ratchet, run outcomes,
+  mid-run causes, B7 dirtiness, union/prune); `executor-run-supply.
+  test.ts` (probe once, then per principal in the same pass; the
+  nested/list/grandchild chains per principal); `executor-space-server.
+  test.ts` (LT6 as a user-instance run: `firedAt.session = "server"`;
+  the EARLY-EMIT GUARD — send-then-read refused fail-closed, retry
+  attributed at the learned scope, one durable entry); the P2-F pins
+  moved to the ruled attribution (a user-scoped instance carries the
+  user only). Stage-B residuals, FLAGGED: (viii) the wish sidecar's
+  instance SET is the chain's demanders, not only the demander the
+  sidecar was minted for (a sibling's runs of a per-user sidecar's
+  narrowed nodes are inert but not free) — a per-demander pin
+  (`demandedBy` on the run options → a resolver filter) is the
+  refinement, an unstated semantic left for the owner; (ix) the walk
+  re-fires per changed doc it read (an effect; N × walk per changed
+  root — the design's stated cost), not covered by B7's derivation
+  claim; (x) the demand wake's 300 ms grace is a coalescing choice,
+  not a ruling — without it the lunch gate's browsers hung at login
+  (the loop's eager first structure load + derivations of a piece its
+  creator was still setting up made the creator's deferred-start
+  reads stale; the client's `piece-instantiate` then failed
+  `piece-start-commit-failed` and the shells never idled) — the
+  client-instantiate-vs-server-derive race at piece creation is
+  pre-existing and only softened, not closed (owner: the runner's
+  piece-start path).
 - OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
   (2026-08-13; the RULED 2026-08-07 direction, built whole). A
   demanded root CONFIRMED synced with no pattern meta parks TERMINAL
@@ -2496,6 +2566,21 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   key), and whether a per-demander sidecar wants the chain's instances
   or exactly its own demander is an UNSTATED semantic — owner ruling
   needed before it is wired.
+  **CLOSED (fan-out stage B, 2026-08-17): direction VINDICATED, storm
+  cut PINNED.** Both extensions landed on stage A's instance-keyed
+  replica: space-root demanders (every demanding pair recorded on
+  every root; the walk and the supply per demander) and the demand-
+  arrival re-run (the arrival re-arm). The 4,427-wave storm's cycle —
+  N instance runs writing one collapsed local doc + patches diffed
+  against a sibling's value — is UNCONSTRUCTIBLE now: per-instance
+  local docs (stage A) + precise dirtiness (B7) cut every edge; pinned
+  in `executor-fan-out.test.ts` (i): two users, 20 divergent authored
+  edits each, waves ≤ 2·edits + 8, quiescent after the last edit (no
+  wave in a 3 s window), zero `wave-commit-rejected … missing path`,
+  neither instance ever holding the sibling's value. The wish-sidecar
+  chain is filled per the panel's Lens 5 (the sidecar's actions run as
+  demanders; the lunch gate's `#profile` family joins in 35–640 ms);
+  the per-demander pin stays FLAGGED (OW17 residual viii).
 - OW30 — the controller-side write-destination validation RACE under
   the flag (`piece-controller.ts` `validateWriteDestination`, the
   #4717 guard as narrowed 2026-08-07): under the full ON posture
@@ -2597,6 +2682,28 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   stage A's read seam, and the per-user derived state of real users
   needs stage B's supply — record the two-browser gates' status
   honestly at each stage (stage A's build report carries the runs).
+  **CLOSED as a CAUSE (fan-out stage B, 2026-08-17): the loop's
+  premise — the store holds per-user instances under the SERVICE
+  identity and no user principal — is gone; every demanded per-user
+  node runs per demanding principal (OW17 leg 2). The arrival gate
+  STAYS as the backstop for the first-demand transient and any
+  walk-coverage gap (design §E residuals 1 and 4). Gate observations
+  on stage B's ON-built binary, fresh store per run: the two-browsers
+  gate GREEN 3/3 (1m08s–1m23s; client action runs 401–586 per browser
+  vs 45–56 k; zero `scheduler-non-settling`; every step in seconds) —
+  UN-SKIPPED (`tasks/server-execution-on-skips.ts`); the lunch gate
+  boots and joins in seconds (login 1.6 s, runtimes idle 0.6–1.0 s,
+  'both join lands' 35–640 ms — the identity-less `#profile` wish is
+  gone) and is BIMODAL 1/2 on a NEW residual, named in its skip
+  entry: run 5 stalled at "both browsers see 2 love it (merge)" with
+  BOTH vote events consequenced and no error but ONE vote landed —
+  the served `castVote` run for the second voter read `nowTick` (the
+  `#now/300` interval wish's value) null and returned without writing;
+  the transient-demander preflight recomputes DIRTY inputs, and a
+  wish whose interval timer has not fired for the serving runtime is
+  not dirty. Owed: the served interval `#now` wish's value for a
+  demanding actor at dispatch (or the pattern's `if (!now) return`
+  guard reading a wall clock the serving runtime supplies) — Stage C.**
 - OW34 — a CFC-serving POLICY item: served handler runs carry NO
   renderer-trusted event mark, so a per-user served handler's write to a
   UI-contract-gated (owner-protected) cell is refused by CFC at prepare
@@ -2630,6 +2737,34 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   its own spec sentence (cfc + events.md) before it is wired. Trigger:
   before the two-browsers gate can green under ON (with stage B for the
   per-user derived state of the second user); the gates stay skip-listed.
+  **CLOSED (fan-out stage B, 2026-08-17) — the sister-mark carriage,
+  wired red-first (item 10's condition: the actor carriage did NOT
+  supply the policy input — the ladder wants the process-local
+  renderer-trust MARK, which no `firedAt` carries — so the fix is the
+  register's own stated shape, the twin of the already-landed
+  `runtimeInjectedEventKeys` re-mint, not a new CFC rule): the firing
+  RUNTIME writes `rendererTrusted: true` on the durable entry IFF the
+  sent event carried the renderer-trust mark (never the pattern; the
+  append queue carries only the runtime's `true`; admission refuses any
+  other value); the served dispatch RE-MARKS the payload, so the
+  handler's UI-contract-gated write records the trusted-event policy
+  input `verifyTrustedEventRequirements` requires, under the same
+  in-process trust the client-side gate ran under (the entry was
+  admitted under the firing client's authority). events.md §2 carries
+  the sentence. Pinned: `executor-events-down.test.ts` (a marked fire
+  appends the flag, an unmarked one — even one CLAIMING renderer
+  provenance in its payload — does not; a served probe handler sees
+  the re-mark for the attested entry only; a caller-supplied non-true
+  value never reaches the entry) and memory `v2-event-append.test.ts`
+  (malformed values refused, `true` admits). Evidence: the
+  two-browsers gate's "Bob sees Alice before save" — 300 s / 14
+  `missing trusted-event policy input` refusals on stage B's first
+  build (`store-on1`) — passes in 3–3.4 s with the carriage
+  (`store-on2..4`), zero refusals. FLAGGED for the owner: the
+  server re-mints a client runtime's process-local trust attestation
+  — sound at the injected-keys precedent's trust level (a compromised
+  client can already write what its session authority admits), stated
+  here so the ruling can veto.**
 - OW33 — the ON-posture DENO-CLIENT family, surfaced by making the ON
   lanes UNIFORM (P7 independent review finding 7; fixer 2026-08-16):
   once the runner integration tests that talk to the lane's toolshed
@@ -2845,6 +2980,65 @@ serving replica + wire; the client arrival gate):
   (`v2-client-watch.test.ts`); speculation.md §4 states the arrival
   gate's frame-coupling assumption; the two-browsers gate's ON-skip
   reason names OW34 alongside OW32; residuals sharpened in OW17.
+
+Delta 2026-08-17 — fan-out stage B (OW17 leg 2: the per-demander run
+supply; OW29/OW32/OW34 closed):
+
+- scopes.md §2: +1 binding bullet — the mechanism sentence ("a
+  principal's demand at a broad address is demand for that
+  principal's instance of every node that narrows beneath it"; RULED
+  2026-08-16) with the probe / discovery re-arm / arrival re-arm /
+  accept-and-count / transient-demander sentences — pinned in
+  `executor-fan-out.test.ts` (a)–(i) and `executor-run-supply.test.ts`.
+- serving-loop.md §1 ("for the subscriber's instances"; the walk per
+  demanding pair) and §3b (the known-scope ratchet's three sources and
+  no fourth; `instances(ratchet, demanders)`; discovery/arrival
+  re-arms; B7) — pinned in `scheduler-fan-out.test.ts` (the pure core,
+  each mutation red on its own), `executor-fan-out.test.ts` (b)/(h),
+  `executor-run-supply.test.ts` (probe once, then per principal).
+- protocol.md §1: the SpaceServer's-own-writes sentence AMENDED for the
+  discovering run's redirect (RULED 2026-08-16, §I.3) with the
+  durability-coupling note; +1 binding sentence set for scope-derived
+  attribution and the early-emit guard (RULED 2026-08-16, §I.2) —
+  pinned in `executor-space-server.test.ts` (LT6 as a user-instance
+  run; the guard arm) and `executor-fan-out.test.ts` (a) (user-only
+  annotations, never the service). §4: W waits on demanded INSTANCES;
+  arrival is later demand — pinned by (i)'s bounded waves and (b).
+- events.md §2: the renderer-trust attestation carriage (OW34) —
+  pinned in `executor-events-down.test.ts` and memory
+  `v2-event-append.test.ts`.
+- Counters (stats.ts): `undemandedNarrowingRuns`, `earlyEmitRefusals`,
+  `demandArrivals` — the first two 0 at both browser gates, the third
+  17–36 per gate run.
+- Danger-zone note: `space-server.ts` gained (i) the demand latch +
+  300 ms coalescing grace on `noteDemandChanged`, (ii) the empty-wave
+  discard at zero-delta cycles (a wave with no contribution, no
+  pending effect batch and no chained-not-yet-applied seal is dropped
+  so the next seal opens a fresh basis/tenure — closes the stage-A fix
+  round's residual vii(b): a stale-basis wave superseded the boot
+  wave's first derivations; verified against the wave/outbox/watermark/
+  cross-space/effect-channel/events-down/serving-loop suites), (iii)
+  the drain's view-lag guard moved AHEAD of the SKIP arm (the skip
+  notice was index-addressed on the stored index alone; with a fresh
+  basis its stale-view write materialized a ghost entry — pinned by
+  the events-down SKIP-arm test staying green under the discard).
+  `pattern-binding.ts` gained the ragged redirect fix (flag-gated; a
+  session hop below an existing user redirect writes the run's own
+  user slot). Not touched: the wedge machinery in `storage/v2.ts`,
+  park/backoff, B-1, the renew-blip arm, C10/T_flush.
+- OFF byte-identity: every new seam is reached only past a serving-
+  posture or flag gate — `serverRunDemandersFor` undefined off the
+  serving runtime (the scheduler's single-run path is byte-identical;
+  a node acquires a fan-out record only from demanders); the wave's
+  attribution settle/guard run only for stamped derivations with a
+  demanded identity; `homeSpacePrincipalFor`'s ratchet is inside the
+  serving branch; the pattern-binding hop is behind
+  `getServerExecutionConfig()`; the wish sidecar chain is inert
+  (`demandRootIds` is consulted only by the resolver); `rendererTrusted`
+  rides only events-down appends (the OFF client fires no appends);
+  the memory server's `demandChanged` observer and per-session demand
+  rows are read only by the ExecutorHost. Whole-suite witness in the
+  build report.
 
 ## 4. Standing rule
 

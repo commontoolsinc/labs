@@ -158,6 +158,36 @@ faced them:
   lands on the serving loop with no prior art in the client
   scheduler. Do NOT port client-era cardinality assumptions into
   the fan-out path.
+- **Whose demand a broad subscription is (RULED 2026-08-16, the
+  fan-out run-supply design §A/§I.1; landed by fan-out stage B): a
+  principal's demand expressed at a BROAD (space-scoped) address is
+  demand for THAT principal's instance of every node that narrows
+  beneath it.** The demand registry therefore records the demanding
+  (user, session) pair on space-scoped roots too — every watch a
+  client holds is identity-bearing demand — and a node's instance
+  set is derived from its DISCOVERED scope × its demand roots'
+  demanders: while a node has read nothing scoped it runs ONCE, as a
+  PROBE (the smallest demanding pair, resolution scaffolding only —
+  no annotation depends on it; a space node runs once regardless of
+  demander count, never as the service identity); once a run
+  discovers `user` it runs once per demanding principal, and once a
+  run discovers `session` for a principal it runs once per demanding
+  session of THAT principal (ragged, per the amendment below). The
+  discovering run writes the redirect and its own instance and, in the
+  SAME wave, its demanded siblings run too (the discovery re-arm) — W
+  waits on them like on any demanded work. A demander who ARRIVES
+  after a node narrowed finds no instance of their own; the registry's
+  new pair re-arms the narrowed nodes beneath the root for THAT
+  demander only (the arrival re-arm — later demand, protocol.md §4).
+  Demand-paced still: instances come only from demanders (never "all
+  known principals"), and an eager/idle-scheduled node NOBODY demands
+  with an identity keeps the wave-level fallback and, if it narrows,
+  writes the service identity's inert instance — accepted and counted
+  (`undemandedNarrowingRuns`; RULED 2026-08-16, design §I.4). The
+  event actor is a TRANSIENT demander of the event's target piece for
+  the dispatch's preflight (RULED 2026-08-16, design §I.5): the actor's
+  own instance of a dirty scoped input recomputes even if the actor
+  watches nothing — never another principal's.
 
 **Monotonicity (owner-ruled; AMENDED — RULED 2026-08-16, the fan-out
 design panel's Lens 1): narrowing is for everyone or no one AT THE

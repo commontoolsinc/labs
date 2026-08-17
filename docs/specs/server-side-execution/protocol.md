@@ -106,13 +106,25 @@ nothing outside the flag may claim it; the OFF arm therefore has no
 unclassed commit and no third answer.
 
 **The SpaceServer's own writes.** Not every write inside a derived
-commit belongs to a user. The watermark advance (§4), the
-narrowing redirect written at a broad slot (scopes.md §2), and the
+commit belongs to a user. The watermark advance (§4) and the
 retirement of acked effect entries (§5) are the SpaceServer's OWN
 writes under its SERVICE identity — the same identity before any
 per-user delegation exists and after it does. They carry addressing
 (a `scope_key` where the target is scoped) and NO acting principal;
-nothing is being attributed to a user, so nothing is missing.
+nothing is being attributed to a user, so nothing is missing. **The
+narrowing redirect written at a broad slot (scopes.md §2) is NOT one
+of them (AMENDED — RULED 2026-08-16, the fan-out design §B6/§I.3;
+fan-out stage B):** under the per-demander run supply the redirect
+is written inside the DISCOVERING run's own transaction, so its
+annotation carries that run's scope-derived attribution (below) —
+the discovering principal — recorded, not read, like every
+attribution; the redirect's value is a constant shape (no user data)
+and annotations are not pushed, so no client observes who narrowed
+first. One coupling to state plainly: the shared broad-slot redirect
+rides a per-user run's transaction, so its durability is hostage to
+that run's commit — a withdrawn discovering contribution withdraws
+the shared redirect its siblings' narrowing needs, delaying them by
+one wave.
 
 Threat model, stated honestly (RULED, owner 2026-08-02): the
 single-deriver invariant is by construction against HONEST clients —
@@ -244,7 +256,29 @@ prevent:
   (serving-loop.md §3c). CFC labels evaluate per instance run for
   the same reason. A run with no acting identity — a space-scope
   derivation before any narrowing — carries none, like the
-  SpaceServer's own writes above.
+  SpaceServer's own writes above. **A run's RESOLUTION identity and
+  its ATTRIBUTION are two things (RULED 2026-08-16, the fan-out
+  design §F/§I.2; fan-out stage B).** The demand supplies a FULL
+  (user, session) pair as the run's resolution identity (a narrower
+  read the run discovers must still resolve to a real demanded
+  instance — for a user-scoped instance the session is the
+  REPRESENTATIVE one, scaffolding only); what the run ACTS AS derives
+  from the scope it DISCOVERS by running: space → no actor; user →
+  the user (a user-scoped instance value belongs to all of the user's
+  sessions — its events carry `firedAt.session = "server"`, events.md
+  §2); session → the pair. Settled at the seal from the transaction's
+  read-scope ratchet — the write annotations, the foreign-write
+  accept gate, the delegated carriage (`demanded-run:<user>`) and
+  the outbox carriage a completion inherits all read the settled
+  pair. A MID-RUN emission (a derivation's `.send()`) derives its
+  actor from the ratchet so far, never broader than the node's known
+  scope for that principal, and the seal REFUSES the contribution
+  fail-closed if the run then discovers a NARROWER scope than the
+  emission was attributed at (the early-emit guard, design risk 4:
+  an under-attributed event never commits; the retry — at the moved
+  known scope — attributes it right; counted as
+  `earlyEmitRefusals`). Handler runs are unchanged (the event's
+  server-stamped `firedAt` is their explicit actor, LD1).
 
 Attributed, not signed, today — and RECORDED, not read, today
 (stated after the 2026-08-03 provenance audit asked): no
@@ -636,7 +670,13 @@ the target's `eventWatermark` makes processing exactly-once.
 - W covers DEMANDED derivations (pull-based laziness, serving-loop.md
   §3b). Client subscriptions are demand, so a fresh subscription
   arriving after W may still trigger a recompute, whose results land in
-  a later derived commit.
+  a later derived commit. Under fan-out (fan-out stage B, RULED
+  2026-08-16) "demanded derivations" means every DEMANDED INSTANCE of
+  every demanded node — `instances(known scope, demanders)`, serving-
+  loop.md §3b — including the siblings a discovery re-armed in the
+  same wave; an instance that was NOT demanded when W advanced (a
+  later arrival) is ordinary later demand. One integer, no
+  per-instance watermark.
 - The watermark is ONE integer per space. Not per-doc, not per-piece, not
   vectorized. If a consumer seems to need a finer watermark, escalate
   before building it.

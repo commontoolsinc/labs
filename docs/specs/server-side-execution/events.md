@@ -111,6 +111,25 @@ handler fires
   originated events carry NO `clientSeq` (LT7, RULED 2026-08-03):
   `clientSeq` orders one CLIENT session's own appends and nothing
   else; server-emitted entries are ordered by stream seq alone.
+  **The renderer-trust attestation rides the durable entry (fan-out
+  stage B, 2026-08-17 — verification-coverage.md OW34; the sister of
+  the entry's `runtimeInjectedEventKeys` carriage — the runtime-
+  injection provenance the served dispatch re-mints so the closed-
+  world gate judges the payload as the firing client's runtime did —
+  and re-minted with the same in-process trust argument).** A client-fired event's entry
+  carries `rendererTrusted: true` IFF the firing RUNTIME saw the
+  process-local renderer-trust mark on the sent event (the mark the
+  renderer's dispatch sets and pattern code cannot reach) — the
+  runtime writes it, never the pattern, and admission refuses any
+  value but `true`; absent means not attested. The served dispatch
+  RE-MARKS the entry's payload before the handler runs, so a per-user
+  served handler's UI-contract-gated (owner-protected) write records
+  the trusted-event policy input the CFC ladder requires — under the
+  same in-process trust the client-side gate ran under (the entry was
+  committed under the firing client's own admission). A payload that
+  merely CLAIMS renderer provenance in its fields is not attested. A
+  served cascade forwarding a renderer-trusted event object keeps the
+  attestation (the in-process propagation's durable twin).
   **Same-space carriage (LT1, RULED 2026-08-03).** A server-emitted
   append whose target stream lives in the SAME space gets its
   durable stream entry as a WRITE WITHIN the wave's own derived

@@ -88,14 +88,16 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * the load pass runs under the flush deadline), so the surface runs —
  * carrying the in-CI amplification-ratio gate and the pattern-updater
  * CHECK-half witness (verification-coverage.md's closed OW19 row).
- * Every list is EMPTY but for FOUR `phase-7` entries: three `patterns`
+ * Every list is EMPTY but for THREE `phase-7` entries: two `patterns`
  * — topics-navigation (Phase 4's mixed-posture entry, re-justified by
  * Phase 7 — the ON shell build now runs in the ON lanes, the inherited
- * red did not lift) and, added by the Phase 7 fixer on the independent
- * review (2026-08-16), the two two-browser gates
- * `cfc-group-chat-demo-two-browsers` and `lunch-poll-vote`, red under
- * the FULL ON posture on an UNATTRIBUTED client-side
- * `scheduler-non-settling` loop (verification-coverage.md OW32) — and
+ * red did not lift) and `lunch-poll-vote` (added by the Phase 7 fixer
+ * on the independent review, 2026-08-16, for the client-side
+ * `scheduler-non-settling` loop — verification-coverage.md OW32 — whose
+ * mechanism fan-out stage B fixed; the entry now carries the gate's
+ * residual, a bimodal served-vote no-op; its sibling
+ * `cfc-group-chat-demo-two-browsers` was UN-SKIPPED by fan-out stage B,
+ * 2026-08-17: 3/3 green fresh-store under the full ON posture) — and
  * one `runner` entry, `pattern-and-data-persistence`, red once the
  * runner integration clients DECLARE the ON posture (the lane was mixed
  * before; verification-coverage.md OW33) — plus two STEP-level
@@ -105,37 +107,16 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * suites; the flip PR lands only once this list is empty again.
  */
 /**
- * The LOUD reason the two two-browser gates carry (Phase 7 fixer,
- * 2026-08-16, on the independent review's findings 1 and 2). Named once
- * so the two entries cannot drift apart; the mechanism is stated AS
- * CHARACTERIZED by the review's evidence, and NOTHING here attributes it.
+ * The two-browser gates' Phase-7 reason (the client-side
+ * `scheduler-non-settling` loop, verification-coverage.md OW32) RETIRED
+ * with fan-out stage B (2026-08-17): the loop's cause — the demand
+ * registry dropping identity for space-scoped roots, so every per-user
+ * node ran once as the service and the client's speculated per-user
+ * instances retired to nothing — is fixed by the per-demander run supply
+ * (stage A's arrival gate stays as the backstop). Its text lives in the
+ * OW32 row's history; the one remaining two-browser entry below carries
+ * that gate's own residual.
  */
-const TWO_BROWSER_NON_SETTLING_REASON =
-  "Phase 7 (2026-08-16): under the FULL ON posture (toolshed server ON, " +
-  "test process ON, browser shell ON-built) this two-browser gate STALLS " +
-  "its 300 s budget — reproduced 2/2 at the Phase-7 head AND at the " +
-  "unmodified Phase-6 base by the P7 independent review " +
-  "(review-p7-logs/tb-*/lunch-* stats + toolshed logs): the SERVING LOOP " +
-  "IS QUIET (waves 20–26, derivedCommits 19–25, events 2/2 " +
-  "appended/processed, watermarkLag 1–2 — no storm; wavesBudgetExhausted " +
-  "12–16 of those waves, but the single-browser counter gate exhausts " +
-  "2/5 with no client loop, so exhaustion alone is not the discriminator) " +
-  "while BOTH browsers run a CLIENT-SIDE `scheduler-non-settling` loop " +
-  "(every ~6.6 s; 40–56 k client action runs / 5 min at head and base; " +
-  "runner/start/resumeCellSync n=458–644 piece re-starts). The mechanism " +
-  "is UNATTRIBUTED — it is NOT evidenced as OW17 (the SpaceReplica " +
-  "scope-name collapse; the 4,427-wave storm signature exists ONLY on the " +
-  "builder's tree with the reverted OW29 extensions applied) — and its " +
-  "TRIAGE IS OWED FIRST in the flip's ordered gates " +
-  "(verification-coverage.md OW32; discriminating experiment: a " +
-  "`commonfabric.detectNonIdempotent()` capture in one browser plus a " +
-  "debug-level `wave-budget-exhausted` trace naming the non-quiescing " +
-  "server actions). Skipped rather than red-by-design so the explicit-ON " +
-  "lane stays green-with-visible-skips and keeps exercising everything " +
-  "else ON; NOT green-by-vacuity — this file is RED under the full ON " +
-  "posture. Lifts when OW32's triage lands and the gate greens 5/5 " +
-  "fresh-store under the full ON posture; the flip PR needs this list " +
-  "EMPTY.";
 
 export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
@@ -180,38 +161,35 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "inherited red is fixed.",
     },
     {
-      file: "integration/cfc-group-chat-demo-two-browsers.test.ts",
-      phase: "phase-7",
-      reason: TWO_BROWSER_NON_SETTLING_REASON +
-        " Fan-out stage A (2026-08-16/17): the client arrival gate treated " +
-        "OW32's symptom (both browsers boot < 3 s, zero non-settling, " +
-        "'Alice save + own status' PASSES — the R7 wall is closed), and " +
-        "this gate's NEXT wall is verification-coverage.md OW34: a " +
-        "CFC-serving POLICY item, UNMASKED by stage A and not caused by " +
-        "it — the served save handler's write to the shared owner-" +
-        "protected `profiles` cell is refused at prepare (`missing " +
-        "trusted-event policy input`), because a per-user served handler " +
-        "run carries no renderer-trusted event mark for its UI-contract " +
-        "write; owning layer: stage B's attribution work or a CFC " +
-        "policy-input rule for actor-stamped served entries (its own spec " +
-        "sentence first). Lifts when OW32's triage AND OW34 land and the " +
-        "gate greens 5/5 fresh-store under the full ON posture.",
-    },
-    {
       file: "integration/lunch-poll-vote.test.ts",
       phase: "phase-7",
-      reason: TWO_BROWSER_NON_SETTLING_REASON +
-        " This gate ADDITIONALLY hits, at step 1, the served `#profile` " +
-        "wish running once identity-less and throwing (`home-space " +
-        "resolution on a serving runtime requires the run's demanding " +
-        "identity`; the OW29 space-root-demander gap is live at FIRST " +
-        "demand, not at the join click) while the flag-ON client — " +
-        "reference-only for the served sidecar since P7's fix (2) — waits " +
-        "forever for a sidecar the server cannot produce (`wish/phase/" +
-        "send-error` ~13.6/s; the review's `lunch-head-default-run{1,2}` " +
-        "logs). Fix (2) without OW29 turned a racy-but-rendering client " +
-        "into a wait-forever client; the P7 build's '(1)+(2)+(3) → join " +
-        "UI renders' narrative did NOT reproduce (0/2 at head).",
+      reason: "Fan-out stage B (2026-08-17): the walls this entry carried " +
+        "are CLOSED — the OW32 client loop (stage A's arrival gate + stage " +
+        "B's per-demander run supply: both browsers boot < 2 s, 'both " +
+        "runtimes idle' 0.6–1.0 s, zero non-settling, client action runs " +
+        "~450–830 / run vs 45–56 k), the identity-less served `#profile` " +
+        "wish (space-root demand now carries the demanding principal; " +
+        "the wish runs per demander and provisions with its " +
+        "`demanded-run:<user>` carriage — 'both join lands' 35–640 ms), " +
+        "and OW34 (the renderer-trust attestation on the durable entry). " +
+        "Under the full ON posture on a fresh store this gate is now " +
+        "BIMODAL, 1/2 (stage B's build runs `store-lunch4` GREEN in 2m28s " +
+        "with every step in seconds; `store-lunch5` RED at 'both browsers " +
+        "see 2 love it (merge)' after 'both cast green concurrently' took " +
+        "13.9 s): the store shows BOTH vote events consequenced with no " +
+        "error, yet ONE vote landed — the served `castVote` handler run " +
+        "as the second voter read `nowTick` (the `#now/300` interval " +
+        "wish's value, null until that wish resolves for the run) and " +
+        "returned without writing (`if (!now) return`); the client's " +
+        "speculative vote rendered, its echo retired to the server's " +
+        "no-op. The residual mechanism is the served handler reading a " +
+        "not-yet-derived wish value for its actor at dispatch (the " +
+        "transient-demander preflight, RULED 2026-08-16, recomputes dirty " +
+        "INPUTS — a wish whose interval timer has not fired for the " +
+        "serving runtime is not dirty). Recorded in " +
+        "verification-coverage.md (OW32's row); lifts when this gate " +
+        "greens ≥2/2 fresh-store under the full ON posture; the flip PR " +
+        "needs this list EMPTY.",
     },
   ],
   runner: [
