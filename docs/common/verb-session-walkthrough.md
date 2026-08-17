@@ -167,7 +167,7 @@ measured at 3183 bytes for a single child on this pattern. Naming what you want
 brings it to 51:
 
 ```bash
-cf piece get --piece <item> children --select 'title,status'
+cf piece get <item-address> children --select 'title,status'
 ```
 
 That is not a workaround; it is the read model working. A schema is a query,
@@ -375,17 +375,24 @@ needs.
 ## 4. Create, and carry the address forward **[today]**
 
 ```bash
-EPIC=$(cf piece call --piece board addItem -- --title "Login rewrite" \
-       --select 'item@' | jq -r '.result.item."$link"')
+EPIC=$(cf piece call --piece board --select 'item@' addItem -- \
+       --title "Login rewrite" | jq -r '.result.item."$link"')
 
-cf piece call --piece "$EPIC" addChild -- --title "Session cookie handling"
-cf piece call --piece "$EPIC" recordNote -- --body "Blocked on the cookie spec"
+cf piece call "$EPIC" addChild -- --title "Session cookie handling"
+cf piece call "$EPIC" recordNote -- --body "Blocked on the cookie spec"
+cf piece get "$EPIC/status"
 ```
 
 **This is the composition the surface exists for.** A create hands back the
 piece it made, the address renders in place as one canonical reference, and the
-next call takes that same string as its target. Identity survives the round trip instead of being flattened into a copy
-of the item's contents.
+next command takes that same string — bare, in its first position. An address
+begins with `/` and a relative path never does, so the two cannot collide, and
+the address may carry the path, as the `get` above shows. The slug stays on
+`--piece`, where no path competes for the position; naming the target both
+ways at once is refused. Identity survives the round trip instead of being
+flattened into a copy of the item's contents. Read options (`--select`,
+`--schema`, `--filter`) come before the address on a `call`, because the first
+positional starts the callable's own command line.
 
 `--show-links` is the **[today]** spelling of the same move: it returns a
 dictionary of RFC 6901 pointers naming the document behind each result path, so
@@ -467,7 +474,7 @@ board first, then only what is open, then the refusal.
 ## 6. Relate two items **[blocked]**
 
 ```bash
-cf piece call --piece "$EPIC" blockOn -- --on "$OTHER"
+cf piece call "$EPIC" blockOn -- --on "$OTHER"
 ```
 
 This is where the session stops.
@@ -479,7 +486,7 @@ into the next — and only one of them works.
 
 | Direction | State |
 | --- | --- |
-| address → `--piece` (the receiver) | works |
+| address → the receiver (first positional, or `--piece`) | works |
 | address → an argument field | refused |
 
 A call payload is plain JSON. `normalizeCallableInputForExecution`

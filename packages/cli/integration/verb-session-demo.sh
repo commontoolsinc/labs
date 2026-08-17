@@ -193,56 +193,66 @@ say "The create returns the piece it made. Its address is the next command's tar
 run cf piece call -s "$SPACE" --piece board --select item@ addItem -- --title "Login rewrite"
 # The address the reader can see in the output above, carried whole. Taken
 # from that run, not from a second one: `run` leaves the output it displayed
-# in $OUT. It is one reference string, handed to --piece exactly as it was
-# printed, on `get`, `call` and `verbs` alike, so nothing here strips the
-# scheme: the string passed below is the string act 4 displayed, which is the
-# round-trip property this session exists to show. The bare hash is a
+# in $OUT. It is one reference string, used exactly as printed: `get` and
+# `call` take it as their first positional — an address begins with `/` and a
+# relative path never does, so nothing marks it but itself — and `verbs`
+# takes it on --piece. Nothing here strips the scheme: the bare hash is a
 # different spelling that resolves by defaulting to `of:`, not the same
 # address — the scheme is part of the identity.
 EPIC=$(printf '%s' "$OUT" | jq -r '.result.item."$link"')
-say "That address is what --piece takes from here on, exactly as printed. Ask"
-say "it the same question act 2 asked the board, before assuming anything"
+say "That address is the whole of what later commands need, exactly as printed."
+say "Ask it the same question act 2 asked the board, before assuming anything"
 say "about what it can do."
 run cf piece verbs -s "$SPACE" --piece "$EPIC"
 say "Every verb an item has, and not the board's one: the listing is derived"
 say "from the piece in front of you, so an address is enough to discover a"
 say "surface you were never told about."
-run cf piece call -s "$SPACE" --piece "$EPIC" addChild -- --title "Session cookies"
+say "On get and call the address needs no flag at all: it begins with '/' and"
+say "a path never does, so it stands bare in the first position."
+run cf piece call -s "$SPACE" "$EPIC" addChild -- --title "Session cookies"
 say "The item it hands back can be reached from inside itself: its parent holds"
 say "it, and it holds its parent. The position where the author's own type"
 say "re-enters answers with an address, so the whole result is still one value."
-run cf piece call -s "$SPACE" --piece "$EPIC" --select item.title addChild -- --title "CSRF tokens"
+# Read options come before the address: the first positional starts the
+# callable's own command line, so a flag after it belongs to the verb.
+run cf piece call -s "$SPACE" --select item.title "$EPIC" addChild -- --title "CSRF tokens"
 say "And a caller who names one field is given one field, circle or no circle."
 
 act "5 · Read addresses instead of contents"
 say "An unshaped read follows every link. A bare @ stops at the address."
-run cf piece get -s "$SPACE" --piece "$EPIC" children --select @,title
+run cf piece get -s "$SPACE" "$EPIC" children --select @,title
 
 act "6 · Ask the same question twice"
 say "The first thing anyone watching says is 'show me that again'."
-run cf piece get -s "$SPACE" --piece "$EPIC" children --select @,title
+run cf piece get -s "$SPACE" "$EPIC" children --select @,title
 say "The same answer. A projection is a question you may ask twice, which is"
-say "what makes any of the reads above safe to put in a script."
+say "what makes any of the reads above safe to put in a script — as here: the"
+say "child the next acts drive is taken from the answer just shown."
+# From the run the reader watched, not from a hidden second read: acts 8 and 9
+# drive this child, and its address sits in $OUT under the title it was filed
+# with.
+KID=$(printf '%s' "$OUT" | jq -r '.[] | select(.title=="Session cookies")."$link"')
 
 act "7 · A verb returns what only the pattern could compute"
 say "The note's timestamp is the pattern's; the caller never supplied one."
-run cf piece call -s "$SPACE" --piece "$EPIC" recordNote -- --body "blocked on the cookie spec"
+run cf piece call -s "$SPACE" "$EPIC" recordNote -- --body "blocked on the cookie spec"
 
 act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
-say "A grandchild is filed first, so there is a subtree to walk."
-KID=$(cf piece get -s "$SPACE" --piece "$EPIC" children --select @ 2>/dev/null |
-  jq -r '.[0]."$link"')
-run cf piece call -s "$SPACE" --piece "$KID" --select item.title addChild -- --title "Rotate signing key"
-run cf piece call -s "$SPACE" --piece "$EPIC" finish -- --body "shipping behind a flag"
+say "A grandchild is filed first, under the child act 6 handed back, so there"
+say "is a subtree to walk."
+run cf piece call -s "$SPACE" --select item.title "$KID" addChild -- --title "Rotate signing key"
+run cf piece call -s "$SPACE" "$EPIC" finish -- --body "shipping behind a flag"
 
 act "9 · A verb that declares no result"
 say "archive is Stream<void>: nothing to supply, nothing handed back. The call"
 say "is the verb's name alone, and the invocation settles carrying no result"
 say "at all."
-run cf piece call -s "$SPACE" --piece "$KID" archive
-say "What it changed is a read away, on the one field the caller never sets."
-run cf piece get -s "$SPACE" --piece "$KID" status
+run cf piece call -s "$SPACE" "$KID" archive
+say "What it changed is a read away, on the one field the caller never sets —"
+say "and the address may carry the path, so one word names the piece and the"
+say "field in it."
+run cf piece get -s "$SPACE" "$KID/status"
 
 act "10 · Step back and read the board"
 say "Every change so far was seen one call at a time. One read from the name"
@@ -251,11 +261,11 @@ run cf piece get -s "$SPACE" --piece board items --select title,status,children@
 say "Act 8 paid one verb call for depth — openBelow walked the subtree. Breadth"
 say "is a read: a filter decides membership before projection, so status picks"
 say "the elements and only title comes back."
-run cf piece get -s "$SPACE" --piece "$EPIC" children --select title --filter '.status == "open"'
+run cf piece get -s "$SPACE" "$EPIC" children --select title --filter '.status == "open"'
 # The two halves of that question do not combine, and the refusal's own message
 # carries the reason, so nothing restates it here.
 refused "an address suffix under a filter" \
-  cf piece get -s "$SPACE" --piece "$EPIC" children \
+  cf piece get -s "$SPACE" "$EPIC" children \
   --select @,title --filter '.status == "open"'
 
 act "11 · Ask for something that is not there"
@@ -270,7 +280,7 @@ refused "a field the verb does not declare" \
   cf piece call -s "$SPACE" --piece board addItem \
   '{"title":"Ship it","titel":"typo"}'
 refused "a keyword the projection reader does not recognize" \
-  cf piece get -s "$SPACE" --piece "$EPIC" children \
+  cf piece get -s "$SPACE" "$EPIC" children \
   --schema '{"type":"array","items":{"type":"object","propertes":{"title":true}}}'
 say "One shape of answer from both ends: what was wrong, the position it sat at,"
 say "what that position accepts, and the nearest thing you probably meant. The"
@@ -278,7 +288,7 @@ say "call was turned down before an invocation was spent."
 
 act "12 · Relate two items — PENDING"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
-pending "cf piece call -s $SPACE --piece <cookies> blockOn -- --on <csrf-address>" \
+pending "cf piece call -s $SPACE <cookies-address> blockOn -- --on <csrf-address>" \
   "an address cannot yet be a verb argument (references-as-arguments.md)" \
   '{
   "status": "settled",
@@ -300,9 +310,11 @@ printf '\n%s━━ %s %s\n' "$B" "What just happened" "$N"
 say "No tool was written for this tracker. Every flag, type, listing and result"
 say "field above was derived from the pattern's own TypeScript by cf."
 say ""
-say "One name was typed: 'board'. Everything under it was addressed by the id a"
-say "call handed back — which is the composition the verb surface exists for,"
-say "and the reason those lines are as long as they are."
+say "One name was typed: 'board'. Everything under it was addressed by the"
+say "address a call handed back, standing bare where a flag used to be — which"
+say "is the composition the verb surface exists for. On those lines the flags"
+say "that remain name the space and shape the answer; the slug keeps --piece,"
+say "and a verb's own flags stay the verb's."
 say ""
 say "Acts 12 and 13 are the graph half, sequenced as references-as-arguments."
 say "verb-session-gaps.sh asserts both, and fails the day either one starts"
