@@ -89,13 +89,21 @@ check "addItem" "$(echo "$VERBS" | jq -r '[.verbs[]?.name] | sort | join(",")')"
 # the reason step 3 states: rewording a doc comment moves the probe with it.
 # The purpose needle is the FIRST line of the interface's own comment — the
 # one prose level that compiles only at a schema root, which is exactly what
-# this page exists to serve.
+# this page exists to serve. The awk walks back from the declaration to the
+# nearest `/**` opener, clearing on any line that is not part of a JSDoc
+# block, so the probe survives the comment growing or shrinking — a fixed
+# window would fail the harness the day the comment gained a line — and an
+# interface that LOST its comment still reads as having none rather than
+# inheriting an earlier block's.
 DESCRIBE=$($CF piece describe --piece board $ARGS 2>/dev/null)
 echo "$DESCRIBE" | grep -q '^NAME    Work tracker$' &&
   ok "the page opens with the piece's display name" ||
   bad "no NAME header on the describe page"
-BOARD_DOC=$(grep -B 4 '^interface BoardOutput {' "$FIXTURE" |
-  sed -n 's/^\/\*\* *\(.*[^ ]\) *$/\1/p' | head -1)
+BOARD_DOC=$(awk '
+  /^\/\*\*/ { doc = $0; next }
+  /^interface BoardOutput \{/ { print doc; exit }
+  !/^ \*/ { doc = "" }
+' "$FIXTURE" | sed -e 's/^\/\*\* *//' -e 's/ *\*\/ *$//')
 if [ -z "$BOARD_DOC" ]; then
   bad "no JSDoc on BoardOutput itself in the fixture — the purpose probe has no needle"
 else

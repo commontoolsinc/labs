@@ -92,9 +92,12 @@ interface BoardInput {
   items?: ItemOutput[];
 }
 
-/** The board holds ROOT items only. Everything deeper is reached through an
- *  item's `children`. */
+/** A work-item tracker: root items on a board, everything deeper under an
+ *  item's `children`. State changes only through verbs — a caller files,
+ *  notes, finishes, archives, and relates items; nothing here is written
+ *  directly. */
 interface BoardOutput {
+  /** Root items only. The tree hangs off each one's `children`. */
   items: ItemOutput[];
   /** File a new root item on the board. */
   addItem: Stream<AddItemEvent, AddItemResult>;

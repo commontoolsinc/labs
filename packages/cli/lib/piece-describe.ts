@@ -31,7 +31,7 @@ import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefs,
 } from "@commonfabric/runner/cfc";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 
 import type { PieceCallableListing, PieceCallablesListing } from "./piece.ts";
 
@@ -170,7 +170,9 @@ function fieldDescriptions(
   markRequired: boolean,
   skip: (name: string, property: Record<string, unknown>) => boolean,
 ): PieceFieldDescription[] {
-  if (!isObjectOrArray(declared.properties)) return [];
+  // A plain object only: `properties` as an array is not a schema shape, and
+  // entries over one would document its indices as fields.
+  if (!isPlainObject(declared.properties)) return [];
   const required = new Set(
     markRequired && Array.isArray(declared.required) ? declared.required : [],
   );

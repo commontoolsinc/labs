@@ -243,6 +243,30 @@ describe("piece-describe", () => {
       expect(description.inputs).toEqual([]);
     });
 
+    it("documents no fields off a properties map that is not a plain object", () => {
+      // A malformed or hand-assembled schema can carry `properties` as an
+      // array; entries over one would list its indices as fields.
+      const description = buildPieceDescription({
+        listing: listingOf([]),
+        compiled: {
+          argumentSchema: {
+            type: "object",
+            properties: [{ type: "string" }],
+          } as never,
+          resultSchema: {
+            type: "object",
+            description: "Still the purpose.",
+            properties: [{ type: "string" }],
+          } as never,
+        },
+      });
+
+      expect(description.state).toEqual([]);
+      expect(description.inputs).toEqual([]);
+      // The root prose is undamaged by the malformed property map.
+      expect(description.purpose).toBe("Still the purpose.");
+    });
+
     it("omits the documentation half when the pattern was unreadable", () => {
       const description = buildPieceDescription({
         listing: listingOf([ADD_ITEM_ROW], {
