@@ -6,7 +6,7 @@ import {
 } from "@/codec-common/BaseFabricInstance.ts";
 import {
   CODEC,
-  type DecodeContext,
+  type LiveEnvironment,
   type NonterminalCodec,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
@@ -98,7 +98,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
       decode(
         _typeTag: string,
         _state: FabricValue,
-        _context: DecodeContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         throw new Error("`FabricSet`: not yet implemented");
       }

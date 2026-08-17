@@ -7,8 +7,8 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
   CodecForFormat,
-  DecodeContext,
   EncodeContext,
+  LiveEnvironment,
   NonterminalCodec,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
@@ -100,7 +100,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   /**
    * Decodes this format's serialized form back into a fabric value.
    *
-   * `context` supplies what decoding needs beyond the data itself,
+   * `env` supplies what decoding needs beyond the data itself,
    * chiefly the ability to resolve a cell reference.
    *
    * A codec rejects a state it will not accept in one of two ways, by
@@ -121,7 +121,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    */
   abstract decode(
     data: SerializedForm,
-    context: DecodeContext,
+    env: LiveEnvironment,
   ): FabricValue;
 
   /** Encodes an array, which is this format's business entirely. */
@@ -160,7 +160,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    */
   protected abstract decodeValue(
     data: Encoded,
-    context: DecodeContext,
+    env: LiveEnvironment,
     seen?: Set<object>,
   ): FabricValue;
 
@@ -315,7 +315,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   protected decodeTagged(
     tag: any,
     rawState: Encoded,
-    context: DecodeContext,
+    env: LiveEnvironment,
     seen?: Set<object>,
   ): FabricValue {
     if (!isCodecTypeTag(tag)) {
@@ -326,7 +326,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // decoded state, so that a lenient result carries what arrived.
       return this.reportMalformed(
         tag,
-        this.decodeValue(rawState, context, seen),
+        this.decodeValue(rawState, env, seen),
         `tagged value has a malformed tag: ${
           backtickQuote(toCompactDebugString(tag, 30))
         }`,
@@ -339,26 +339,24 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // A tag this registry does not carry, kept in the unknown form so that
       // it round-trips. Not covered by the deep-frozen contract the codec arm
       // below states.
-      return new UnknownValue(tag, this.decodeValue(rawState, context, seen));
+      return new UnknownValue(tag, this.decodeValue(rawState, env, seen));
     }
 
     // A terminal codec takes the state exactly as it arrived; a nonterminal
     // one takes it expanded. The casts restate what `instanceof` just
     // established, which TypeScript drops on a generic class.
     const terminal = matched instanceof BaseTerminalCodec;
-    const state = terminal
-      ? rawState
-      : this.decodeValue(rawState, context, seen);
+    const state = terminal ? rawState : this.decodeValue(rawState, env, seen);
 
     let decoded: FabricValue;
 
     try {
       decoded = terminal
-        ? (matched as TerminalCodec<Encoded>).decode(tag, rawState, context)
+        ? (matched as TerminalCodec<Encoded>).decode(tag, rawState, env)
         : (matched as NonterminalCodec).decode(
           tag,
           state as FabricValue,
-          context,
+          env,
         );
     } catch (e: any) {
       if (!this.lenient) {

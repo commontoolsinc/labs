@@ -10,7 +10,7 @@ import {
 } from "./BaseFabricInstance.ts";
 import {
   CODEC,
-  type DecodeContext,
+  type LiveEnvironment,
   type NonterminalCodec,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
@@ -174,7 +174,7 @@ export class ProblematicValue extends BaseFabricInstance {
       decode(
         _typeTag: string,
         state: FabricValue,
-        context: DecodeContext,
+        env: LiveEnvironment,
       ): FabricValue {
         let result: ProblematicValue;
 
@@ -209,7 +209,7 @@ export class ProblematicValue extends BaseFabricInstance {
 
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+        return env.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
   );

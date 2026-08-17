@@ -1,5 +1,5 @@
 /**
- * Empty `DecodeContext`: a singleton whose `getCell()` always throws.
+ * Null `LiveEnvironment`: a singleton whose `getCell()` always throws.
  * Useful as a default for decode paths that aren't expected to encounter
  * `Cell` references (e.g. storage-boundary reads of values known to be
  * structurally flat).
@@ -7,14 +7,14 @@
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import type { FabricInstance } from "@/interface.ts";
-import type { DecodeContext } from "./interface.ts";
-import { BaseDecodeContext } from "./BaseDecodeContext.ts";
+import type { LiveEnvironment } from "./interface.ts";
+import { BaseLiveEnvironment } from "./BaseLiveEnvironment.ts";
 
 /**
- * `DecodeContext` whose `getCell()` always throws. `shouldDeepFreeze`
- * is inherited from `BaseDecodeContext` (defaults to `true`).
+ * `LiveEnvironment` whose `getCell()` always throws. `shouldDeepFreeze`
+ * is inherited from `BaseLiveEnvironment` (defaults to `true`).
  */
-export class EmptyDecodeContext extends BaseDecodeContext {
+export class NullLiveEnvironment extends BaseLiveEnvironment {
   readonly #getCellMessage: string;
 
   /**
@@ -26,7 +26,7 @@ export class EmptyDecodeContext extends BaseDecodeContext {
    */
   constructor(shouldDeepFreeze: boolean, getCellMessage?: string) {
     super(shouldDeepFreeze);
-    this.#getCellMessage = getCellMessage ?? "no runtime context provided.";
+    this.#getCellMessage = getCellMessage ?? "no live environment provided.";
   }
 
   override getCell(
@@ -41,11 +41,11 @@ export class EmptyDecodeContext extends BaseDecodeContext {
 }
 
 /**
- * Shared `EmptyDecodeContext` instance with `.shouldDeepFreeze ===
+ * Shared `NullLiveEnvironment` instance with `.shouldDeepFreeze ===
  * true` and whose `getCell()` always throws. Pass this when a decoder wants a
- * context object but isn't expected to need cell decoding; if a cell ref
+ * live environment but isn't expected to need cell decoding; if a cell ref
  * does turn up, the throw makes the unexpected decode obvious instead
  * of silent.
  */
-export const EMPTY_DECODE_CONTEXT: DecodeContext = Object
-  .freeze(new EmptyDecodeContext(true));
+export const NULL_LIVE_ENVIRONMENT: LiveEnvironment = Object
+  .freeze(new NullLiveEnvironment(true));

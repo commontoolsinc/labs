@@ -4,6 +4,7 @@
     "./packages/background-piece-service",
     "./packages/piece",
     "./packages/cli",
+    "./packages/connectors/agents",
     "./packages/content-hash",
     "./packages/dashboard",
     "./packages/data-model",

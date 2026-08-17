@@ -27,7 +27,7 @@ import {
   fabricFromJsonValue,
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import { EmptyDecodeContext } from "@commonfabric/data-model/codec-common";
+import { NullLiveEnvironment } from "@commonfabric/data-model/codec-common";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";
 import type { URI } from "@commonfabric/memory/interface";
@@ -52,7 +52,7 @@ const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
 const DOC = "of:capability-skew-doc" as URI;
 
-const decodeContext = new EmptyDecodeContext(
+const liveEnvironment = new NullLiveEnvironment(
   true,
   "no cell reconstruction in capability-skew transport",
 );
@@ -85,7 +85,7 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
     // Decoded wire payload, asserted to the shape this fake expects.
     const message = fabricFromJsonValue(
       payload,
-      decodeContext,
+      liveEnvironment,
     ) as unknown as {
       type: string;
       requestId?: string;

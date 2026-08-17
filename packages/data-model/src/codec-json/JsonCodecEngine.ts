@@ -5,9 +5,9 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 import type { FabricValue } from "@/interface.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
-import { CODEC, type DecodeContext } from "@/codec-interface/interface.ts";
+import { CODEC, type LiveEnvironment } from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { EmptyDecodeContext } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NullLiveEnvironment } from "@/codec-interface/NullLiveEnvironment.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
@@ -21,7 +21,7 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  *
  * Public surface: `EncodeContext<string>`, plus the matching decode direction.
  * - `encode(value)` -- full pipeline: tree-encode + stringify
- * - `decode(data, context)` -- full pipeline: parse + tree-decode
+ * - `decode(data, env)` -- full pipeline: parse + tree-decode
  *
  * All internal machinery (tag wrapping, tree walking, byte conversion) is
  * private. Per-type encoding/decoding is delegated to the `FabricCodec`s in
@@ -61,7 +61,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * never receives a tree it did not build itself, which is the condition
    * under which a decode can be handed a cycle at all.
    */
-  override decode(data: string, context: DecodeContext): FabricValue {
+  override decode(data: string, env: LiveEnvironment): FabricValue {
     if (!JsonCodecEngine.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
@@ -71,7 +71,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
     const parsed = JsonCodecEngine.#parseWireText(json);
-    return this.decodeValue(parsed, context);
+    return this.decodeValue(parsed, env);
   }
 
   /** Encodes a fabric value to UTF-8 JSON bytes. */
@@ -86,10 +86,10 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   decodeFromBytes(
     bytes: Uint8Array,
-    context: DecodeContext,
+    env: LiveEnvironment,
   ): FabricValue {
     const tree = JsonCodecEngine.#fromBytes(bytes);
-    return this.decodeValue(tree, context);
+    return this.decodeValue(tree, env);
   }
 
   /**
@@ -204,7 +204,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override decodeValue(
     data: JsonCodecValue,
-    context: DecodeContext,
+    env: LiveEnvironment,
     seen?: Set<object>,
   ): FabricValue {
     const decoded = JsonCodecEngine.#unwrapTag(data);
@@ -226,14 +226,14 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
           if (isUnsafeObjectKey(key)) {
             return this.reportReservedKey(key, inner);
           }
-          result[key] = this.decodeValue(val, context, seen);
+          result[key] = this.decodeValue(val, env, seen);
         }
         return Object.freeze(result);
       }
 
       // `/quote` and `/object` returned above, so no codec ever sees their
       // state, and `/quote` contents alone go undecoded.
-      return this.decodeTagged(tag, rawState, context, seen);
+      return this.decodeTagged(tag, rawState, env, seen);
     }
 
     // Primitives pass through.
@@ -245,14 +245,14 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     }
 
     if (Array.isArray(data)) {
-      return this.#decodeArray(data, context, seen);
+      return this.#decodeArray(data, env, seen);
     }
 
     // `Array.isArray()` above removed the array arm, but TypeScript keeps it
     // in the union; the remaining member is the record.
     return this.#decodePlainObject(
       data as Record<string, JsonCodecValue>,
-      context,
+      env,
       seen,
     );
   }
@@ -279,7 +279,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   #decodeArray(
     data: readonly JsonCodecValue[],
-    context: DecodeContext,
+    env: LiveEnvironment,
     seen: Set<object> | undefined,
   ): FabricValue {
     const result: FabricValue[] = new Array(data.length);
@@ -301,7 +301,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
         }
         targetIndex += count;
       } else {
-        result[targetIndex] = this.decodeValue(entry, context, seen);
+        result[targetIndex] = this.decodeValue(entry, env, seen);
         targetIndex++;
       }
     }
@@ -332,7 +332,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   #decodePlainObject(
     data: Record<string, JsonCodecValue>,
-    context: DecodeContext,
+    env: LiveEnvironment,
     seen: Set<object> | undefined,
   ): FabricValue {
     const result: Record<string, FabricValue> = {};
@@ -352,7 +352,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       if (isUnsafeObjectKey(key)) {
         return this.reportReservedKey(key, data);
       }
-      result[key] = this.decodeValue(val, context, seen);
+      result[key] = this.decodeValue(val, env, seen);
     }
     return Object.freeze(result);
   }
@@ -392,15 +392,15 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       .extend(UnknownValue[CODEC], ProblematicValue[CODEC]);
 
   /**
-   * Decode context for the throwaway checks in the testing helpers
+   * Live environment for the throwaway checks in the testing helpers
    * below. Deep-freezes, as the ordinary decode path does. Paired with a
-   * lenient codec context, a cell reference degrades to a `ProblematicValue`
+   * lenient engine, a cell reference degrades to a `ProblematicValue`
    * rather than throwing.
    */
-  static readonly #testingDecodeContext = Object.freeze(
-    new EmptyDecodeContext(
+  static readonly #testingLiveEnvironment = Object.freeze(
+    new NullLiveEnvironment(
       true,
-      "no runtime context (validity check in a test-only helper).",
+      "no live environment (validity check in a test-only helper).",
     ),
   );
 
@@ -466,7 +466,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       // the tag first, so the malformed branch above loses nothing.)
       new JsonCodecEngine({ registry }).decode(
         encoded,
-        JsonCodecEngine.#testingDecodeContext,
+        JsonCodecEngine.#testingLiveEnvironment,
       );
     }
 
@@ -515,7 +515,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       jsonCodecEngine.encode(
         jsonCodecEngine.decode(
           encoded,
-          JsonCodecEngine.#testingDecodeContext,
+          JsonCodecEngine.#testingLiveEnvironment,
         ),
       );
     }

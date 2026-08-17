@@ -16,7 +16,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
@@ -71,7 +71,7 @@ describe("FabricEpochNsec", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricEpochNsec[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochNsec;
-      const context = EMPTY_DECODE_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `EpochNsec` wire type tag", () => {
@@ -99,14 +99,14 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             "AA",
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(0n);
         });
 
         it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 42, context);
+          const decoded = codec.decode(expectedTag, 42, env);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
@@ -114,7 +114,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             "not valid base64!!",
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -126,7 +126,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sn),
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(0n);
@@ -140,7 +140,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sn),
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(nsec);
@@ -152,7 +152,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sn),
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded).toBeInstanceOf(FabricEpochNsec);
           expect(decoded.value).toBe(nsec);
@@ -165,7 +165,7 @@ describe("FabricEpochNsec", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sn),
-            context,
+            env,
           ) as unknown as FabricEpochNsec;
           expect(decoded.value).toBe(nsec);
         });

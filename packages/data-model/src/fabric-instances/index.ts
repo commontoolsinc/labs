@@ -30,7 +30,7 @@ type InstanceCodecClass = Constructor & FabricClassWithNonterminalCodec;
  * differ from each other. `UnknownValue`'s has no preferred wire tag -- the
  * encode path uses `tagForValue()` to read each instance's preserved
  * per-instance tag -- and it is not tag-routed on decode, an unrecognized tag
- * being wrapped by the encoding context rather than decoded via a codec.
+ * being wrapped by the engine rather than decoded via a codec.
  * `ProblematicValue`'s is ordinary in both respects: it declares
  * `Problematic@1` and is tag-routed like any other, the preserved tag riding
  * inside its state because it need not be a tag at all.

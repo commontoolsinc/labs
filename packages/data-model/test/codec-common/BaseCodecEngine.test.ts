@@ -8,7 +8,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/index.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/index.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
@@ -24,7 +24,7 @@ import {
   TERMINAL_HOST,
 } from "./probe-engine.ts";
 
-const CONTEXT = EMPTY_DECODE_CONTEXT;
+const ENV = NULL_LIVE_ENVIRONMENT;
 
 describe("BaseCodecEngine", () => {
   describe("terminal vs. nonterminal codecs", () => {
@@ -61,7 +61,7 @@ describe("BaseCodecEngine", () => {
       // Hand-built so that both hosts are given the identical wire state.
       const wire = new Tagged("T@1", { inner: new Tagged("X@1", "encoded-X") });
 
-      engine.decode(wire, CONTEXT);
+      engine.decode(wire, ENV);
 
       const seen = record.decoded[0] as { inner: unknown };
       // Undecoded: the inner tag is still a tag, not the value it stands for.
@@ -72,7 +72,7 @@ describe("BaseCodecEngine", () => {
       const { engine, record } = newProbeEngine();
       const wire = new Tagged("N@1", { inner: new Tagged("X@1", "encoded-X") });
 
-      engine.decode(wire, CONTEXT);
+      engine.decode(wire, ENV);
 
       const seen = record.decoded[0] as { inner: unknown };
       // Decoded: the walk reached the inner tag before this codec was called.
@@ -153,7 +153,7 @@ describe("BaseCodecEngine", () => {
       const data: Record<string, ProbeValue> = { a: 1 };
       data.self = data;
 
-      const result = engine.decode(data, CONTEXT) as Record<
+      const result = engine.decode(data, ENV) as Record<
         string,
         FabricValue
       >;
@@ -173,7 +173,7 @@ describe("BaseCodecEngine", () => {
       const tagged = new Tagged("Zz@1", state);
       state.back = tagged;
 
-      const result = engine.decode(tagged, CONTEXT);
+      const result = engine.decode(tagged, ENV);
 
       expect(result).toBeInstanceOf(UnknownValue);
       const inner = (result as UnknownValue).state as Record<
@@ -190,7 +190,7 @@ describe("BaseCodecEngine", () => {
       const data: Record<string, ProbeValue> = { a: 1 };
       data.self = data;
 
-      expect(() => engine.decode(data, CONTEXT))
+      expect(() => engine.decode(data, ENV))
         .toThrow(ProblematicStateError);
     });
 
@@ -205,7 +205,7 @@ describe("BaseCodecEngine", () => {
       expect(() =>
         engine.decode(
           { a: shared, b: shared, c: tagged, d: tagged },
-          CONTEXT,
+          ENV,
         )
       ).not.toThrow();
     });
@@ -216,7 +216,7 @@ describe("BaseCodecEngine", () => {
       const { engine } = newProbeEngine();
       const result = engine.decode(
         new Tagged("Nope@1", new Tagged("X@1", "encoded-X")),
-        CONTEXT,
+        ENV,
       );
 
       expect(result).toBeInstanceOf(UnknownValue);
@@ -228,7 +228,7 @@ describe("BaseCodecEngine", () => {
     it("rejects an empty tag rather than naming an `UnknownValue` with one", () => {
       const { engine } = newProbeEngine();
 
-      expect(() => engine.decode(new Tagged("", "x"), CONTEXT))
+      expect(() => engine.decode(new Tagged("", "x"), ENV))
         .toThrow(/malformed tag/);
     });
 
@@ -238,7 +238,7 @@ describe("BaseCodecEngine", () => {
       // it, and nowhere else a type this or any registry could carry.
       const { engine } = newProbeEngine();
 
-      expect(() => engine.decode(new Tagged("hole", 5), CONTEXT))
+      expect(() => engine.decode(new Tagged("hole", 5), ENV))
         .toThrow(/malformed tag/);
     });
 
@@ -247,7 +247,7 @@ describe("BaseCodecEngine", () => {
       // finds off the wire need not be a string.
       const { engine } = newProbeEngine();
 
-      expect(() => engine.decode(new Tagged(42 as never, "x"), CONTEXT))
+      expect(() => engine.decode(new Tagged(42 as never, "x"), ENV))
         .toThrow(/malformed tag/);
     });
 
@@ -256,7 +256,7 @@ describe("BaseCodecEngine", () => {
       // codec here returns a primitive, which is deep-frozen however the
       // engine behaves, and so could not witness this.
       const { engine } = newProbeEngine();
-      const result = engine.decode(new Tagged("M@1", "m"), CONTEXT);
+      const result = engine.decode(new Tagged("M@1", "m"), ENV);
 
       expect(result).toEqual({ deep: { n: 1 } });
       expect(isDeepFrozen(result)).toBe(true);
@@ -290,7 +290,7 @@ describe("BaseCodecEngine", () => {
       it("raises a codec's throw", () => {
         const { engine } = newProbeEngine();
 
-        expect(() => engine.decode(THROWN, CONTEXT))
+        expect(() => engine.decode(THROWN, ENV))
           .toThrow(/rejected by throwing/);
       });
 
@@ -299,14 +299,14 @@ describe("BaseCodecEngine", () => {
         // before, so the setting governed only the codecs that threw.
         const { engine } = newProbeEngine();
 
-        expect(() => engine.decode(RETURNED, CONTEXT))
+        expect(() => engine.decode(RETURNED, ENV))
           .toThrow(/rejected by returning/);
       });
 
       it("raises a malformation the walk itself found", () => {
         const { engine } = newProbeEngine();
 
-        expect(() => engine.decode(MALFORMED, CONTEXT)).toThrow(
+        expect(() => engine.decode(MALFORMED, ENV)).toThrow(
           /malformed tag/,
         );
       });
@@ -315,7 +315,7 @@ describe("BaseCodecEngine", () => {
         // Not a rejection, so the setting has no say in it.
         const { engine } = newProbeEngine();
 
-        expect(engine.decode(UNCLAIMED, CONTEXT)).toBeInstanceOf(UnknownValue);
+        expect(engine.decode(UNCLAIMED, ENV)).toBeInstanceOf(UnknownValue);
       });
 
       it("carries tag and state however the codec reported it", () => {
@@ -332,7 +332,7 @@ describe("BaseCodecEngine", () => {
           ]] as const
         ) {
           try {
-            engine.decode(wire, CONTEXT);
+            engine.decode(wire, ENV);
             throw new Error(`Should have thrown (${label}).`);
           } catch (e) {
             expect(e).toBeInstanceOf(ProblematicStateError);
@@ -347,7 +347,7 @@ describe("BaseCodecEngine", () => {
         const { engine } = newProbeEngine();
 
         try {
-          engine.decode(MALFORMED, CONTEXT);
+          engine.decode(MALFORMED, ENV);
           throw new Error("Should have thrown.");
         } catch (e) {
           expect(e).toBeInstanceOf(ProblematicStateError);
@@ -362,7 +362,7 @@ describe("BaseCodecEngine", () => {
         const { engine } = newProbeEngine();
 
         try {
-          engine.decode(THROWN, CONTEXT);
+          engine.decode(THROWN, ENV);
           throw new Error("Should have thrown.");
         } catch (e) {
           expect(e).toBeInstanceOf(ProblematicStateError);
@@ -376,7 +376,7 @@ describe("BaseCodecEngine", () => {
     describe("when `lenient === true`", () => {
       it("turns a codec's throw into a `ProblematicValue`", () => {
         const { engine } = newProbeEngine({ lenient: true });
-        const result = engine.decode(THROWN, CONTEXT);
+        const result = engine.decode(THROWN, ENV);
 
         expect(result).toBeInstanceOf(ProblematicValue);
         // Carrying the codec's own message, so what went wrong survives the
@@ -388,7 +388,7 @@ describe("BaseCodecEngine", () => {
 
       it("lets a `ProblematicValue` a codec returned stand", () => {
         const { engine } = newProbeEngine({ lenient: true });
-        const result = engine.decode(RETURNED, CONTEXT);
+        const result = engine.decode(RETURNED, ENV);
 
         expect(result).toBeInstanceOf(ProblematicValue);
         expect((result as ProblematicValue).error)
@@ -397,7 +397,7 @@ describe("BaseCodecEngine", () => {
 
       it("keeps a malformation the walk itself found", () => {
         const { engine } = newProbeEngine({ lenient: true });
-        const result = engine.decode(MALFORMED, CONTEXT);
+        const result = engine.decode(MALFORMED, ENV);
 
         expect(result).toBeInstanceOf(ProblematicValue);
         expect((result as ProblematicValue).error).toMatch(/malformed tag/);
@@ -407,7 +407,7 @@ describe("BaseCodecEngine", () => {
         // The codec arm's freeze: this report is the codec's own product.
         const { engine } = newProbeEngine({ lenient: true });
 
-        expect(isDeepFrozen(engine.decode(RETURNED, CONTEXT))).toBe(true);
+        expect(isDeepFrozen(engine.decode(RETURNED, ENV))).toBe(true);
       });
 
       it("deep-freezes a `ProblematicValue` it built itself", () => {
@@ -416,14 +416,14 @@ describe("BaseCodecEngine", () => {
         // Neither stands in for the other.
         const { engine } = newProbeEngine({ lenient: true });
 
-        expect(isDeepFrozen(engine.decode(THROWN, CONTEXT))).toBe(true);
-        expect(isDeepFrozen(engine.decode(MALFORMED, CONTEXT))).toBe(true);
+        expect(isDeepFrozen(engine.decode(THROWN, ENV))).toBe(true);
+        expect(isDeepFrozen(engine.decode(MALFORMED, ENV))).toBe(true);
       });
 
       it("wraps an unclaimed tag in an `UnknownValue` regardless", () => {
         const { engine } = newProbeEngine({ lenient: true });
 
-        expect(engine.decode(UNCLAIMED, CONTEXT)).toBeInstanceOf(UnknownValue);
+        expect(engine.decode(UNCLAIMED, ENV)).toBeInstanceOf(UnknownValue);
       });
     });
   });
