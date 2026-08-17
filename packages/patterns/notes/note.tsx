@@ -59,7 +59,14 @@ export const bareMentionId = (uri: string): string => {
 export interface NoteOutput extends NotePiece {
   [NAME]: string;
   [UI]: VNode;
-  [FS]: FsProjection;
+  /** A note is always markdown, so it declares that arm rather than the whole
+   * `FsProjection` union: the open arm types every field loosely, and a reader
+   * of this projection wants `content` as the string it is. */
+  [FS]: {
+    type: "text/markdown";
+    frontmatter?: Record<string, unknown>;
+    content: string;
+  };
   title: string;
   content: string;
   summary: string;

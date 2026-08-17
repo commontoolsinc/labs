@@ -507,7 +507,7 @@ export function materializeSchemaView(
   // PROBE: an opaque (`type: "unknown"`) position answers presence and stops,
   // the way eager traversal does, instead of viewing what is behind it.
   if (
-    isObjectOrArray(value) && !(value instanceof FabricPrimitive) &&
+    value !== undefined &&
     isObjectOrArray(schema) && schema.type !== undefined &&
     (Array.isArray(schema.type)
       ? schema.type.includes("unknown")

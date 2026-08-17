@@ -3611,7 +3611,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
     const jsonType = getJsonType(doc.value);
     if (
       jsonType !== null && !isSigilLink(doc.value) &&
-      isObjectOrArray(doc.value) &&
       this.isValidType(schemaObj, jsonType) === TypeValidity.Unknown
     ) {
       const opaqueLink = link ?? getNormalizedLink(doc.address, schemaObj);

@@ -61,7 +61,7 @@ export interface RecordOutput {
   /** Adds a module of the named type to this record's sub-pieces. */
   addModule?: Stream<{
     type: string;
-    initialData?: Record<string, unknown>;
+    initialData?: { label?: string; [key: string]: unknown };
     result?: Writable<unknown>;
   }>;
   /** Writes a structured summary of every module into the result cell. */
@@ -570,7 +570,7 @@ const handleGetSummary = handler<
 const handleAddModule = handler<
   {
     type: string;
-    initialData?: Record<string, unknown>;
+    initialData?: { label?: string; [key: string]: unknown };
     result?: Writable<unknown>;
   },
   {
