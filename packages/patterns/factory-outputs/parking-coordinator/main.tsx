@@ -328,17 +328,36 @@ const parkingAdminRolesValue = (
   );
 };
 
+const latestParkingAdminChange = (
+  changeRegistry: TrustedParkingAdminChangeRegistryReader,
+  personName: string,
+): TrustedParkingAdminChange | null | undefined => {
+  const changeStored = changeRegistry.get() as
+    | { changes?: TrustedParkingAdminChangeList }
+    | undefined;
+  const changes = Array.from(changeStored?.changes ?? []);
+  for (let index = changes.length - 1; index >= 0; index -= 1) {
+    const change = changes[index];
+    if (change.subject.personName === personName) {
+      return change.admin ? change : null;
+    }
+  }
+  return undefined;
+};
+
 const parkingAdminRoleForPerson = (
   registry: ParkingAdminRegistryReader,
   changeRegistry: TrustedParkingAdminChangeRegistryReader,
   personName: string | undefined,
 ): EffectiveParkingAdminRole | undefined => {
   const trimmedName = (personName ?? "").trim();
-  return trimmedName === ""
-    ? undefined
-    : parkingAdminRolesValue(registry, changeRegistry).find((role) =>
-      role.subject.personName === trimmedName
-    );
+  if (trimmedName === "") return undefined;
+  const latestChange = latestParkingAdminChange(changeRegistry, trimmedName);
+  if (latestChange !== undefined) return latestChange ?? undefined;
+  const stored = registry.get() as ParkingAdminRegistryStoredValue | undefined;
+  return Array.from(stored?.admins ?? []).find((role) =>
+    role.subject.personName === trimmedName
+  );
 };
 
 const personIsParkingAdmin = (
