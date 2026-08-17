@@ -34,6 +34,11 @@ import {
   type SessionFactory,
   StorageManager,
 } from "../src/storage/v2.ts";
+import {
+  getModernCellRepConfig,
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import { Runtime } from "../src/runtime.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
@@ -70,9 +75,10 @@ class LoopbackSessionFactory implements SessionFactory {
  */
 class CountingStorageManager extends StorageManager {
   closeCount = 0;
-  /** Subscribers currently registered. The relay inside exposes only
-   * `hasSubscribers()`, and what a leak needs is the COUNT: two per runtime,
-   * so "some are registered" cannot tell a clean teardown from a leaking one. */
+  /** Subscriptions handed to `subscribe` and not yet handed back. Mirrors the
+   * calls reaching the manager, which is what the assertions below are about;
+   * the relay's own membership is private, and its `hasSubscribers()` would
+   * read the same whether teardown was clean or leaked two per runtime. */
   readonly live = new Set<IStorageSubscription>();
   static over(server: MemoryV2Server.Server): CountingStorageManager {
     return new CountingStorageManager(
@@ -91,6 +97,25 @@ class CountingStorageManager extends StorageManager {
   override unsubscribe(subscription: IStorageSubscription): void {
     this.live.delete(subscription);
     super.unsubscribe(subscription);
+  }
+}
+
+/**
+ * Rejects on `close()`, standing in for a provider whose `replica.close()`
+ * fails. That is the ONE await in `Runtime.dispose()` able to reject — every
+ * other one resolves through `Promise.allSettled` or a resolve-only promise —
+ * so this is the only way the error path is reachable at all.
+ */
+class FailingCloseStorageManager extends CountingStorageManager {
+  static failing(server: MemoryV2Server.Server): FailingCloseStorageManager {
+    return new FailingCloseStorageManager(
+      { as: signer, memoryHost: new URL("memory://") } as Options,
+      new LoopbackSessionFactory(server),
+    );
+  }
+  override close(): Promise<void> {
+    this.closeCount++;
+    return Promise.reject(new Error("provider destroy failed"));
   }
 }
 
@@ -315,5 +340,33 @@ describe("runtime.dispose({ closeStorage })", () => {
 
     // Neither disposal closed the store, which is the option's whole point.
     expect(held.closeCount).toBe(0);
+  });
+
+  it("releases what it holds when closing the store rejects", async () => {
+    const failing = FailingCloseStorageManager.failing(server);
+    const runtime = new Runtime({
+      apiUrl: new URL("memory://"),
+      storageManager: failing,
+    });
+    const registered = [...failing.live];
+    expect(registered).toHaveLength(2);
+
+    setModernCellRepConfig(true);
+    try {
+      // The closing path, so `close()` runs and rejects. The rejection still
+      // reaches the caller: releasing on the way out changes what has been
+      // given back by then, not whether disposal fails.
+      await expect(runtime.dispose()).rejects.toThrow(
+        "provider destroy failed",
+      );
+
+      // PROCESS-GLOBAL, which is why this one matters beyond the runtime that
+      // set it: skipped once, a non-default flag reaches every runtime built
+      // afterwards in the same process and nothing puts it back.
+      expect(getModernCellRepConfig()).toBe(false);
+      expect(registered.filter((s) => failing.live.has(s))).toEqual([]);
+    } finally {
+      resetModernCellRepConfig();
+    }
   });
 });
