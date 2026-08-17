@@ -107,15 +107,6 @@ describe(
       expect(results[0].results[0].name).toBe("bob/assertion_1");
     });
 
-    it("delivers an action step's object event payload as authored", async () => {
-      const { passed, failed } = await runTests(
-        fixture("event-payload.test.tsx"),
-        { root: FIXTURES },
-      );
-      expect(failed).toBe(0);
-      expect(passed).toBe(1);
-    });
-
     it("runs an explicit settle step for a participant", async () => {
       // `verbose` exercises the per-step logging the orchestrator emits,
       // settle included, so those lines are covered rather than merely run.

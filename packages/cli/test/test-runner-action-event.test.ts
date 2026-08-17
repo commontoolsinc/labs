@@ -25,6 +25,18 @@ describe(
         expect(failed).toBe(0);
         expect(passed).toBe(2);
       });
+
+      it("keeps the gesture's own `type` when the step adds a payload", async () => {
+        // A record payload extends the click rather than replacing it, which
+        // is what the browser-parity harness in
+        // `packages/patterns/integration/multi-runtime-worker.ts` does.
+        const { passed, failed } = await runTests(
+          resolve(FIXTURES, "trusted-gesture.test.tsx"),
+          { root: FIXTURES },
+        );
+        expect(failed).toBe(0);
+        expect(passed).toBe(1);
+      });
     });
   },
 );

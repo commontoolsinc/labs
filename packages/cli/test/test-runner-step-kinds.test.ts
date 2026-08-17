@@ -23,8 +23,13 @@ describe(
         );
         expect(failed).toBe(0);
         expect(passed).toBe(1);
-        // Only the assertion is reported; neither marker adds a result.
-        expect(results.flatMap((r) => r.results).length).toBe(1);
+        // Neither marker adds a result, and neither perturbs the one that
+        // remains: the `{ await }` sits between the action and the assertion,
+        // so the assertion still reports as following that action.
+        const steps = results.flatMap((r) => r.results);
+        expect(steps.length).toBe(1);
+        expect(steps[0].name).toBe("assertion_1");
+        expect(steps[0].afterAction).toBe("action_1");
       });
     });
   },
