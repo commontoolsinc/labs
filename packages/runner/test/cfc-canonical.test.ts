@@ -1,3 +1,16 @@
+/**
+ * The prepared digest binds the SET of dereferences a transaction performed,
+ * never the number of times it read each link. Both halves of that rule are
+ * pinned here: a repeat collapses, and dereferences differing in any field
+ * stay apart — including the pair that a payload field named `value` produces,
+ * whose canonical path still opens with the element canonicalization strips.
+ *
+ * Only `canonicalizePreparedDigestInput`'s handling of `dereferenceTraces` is
+ * in scope. Each other field of the digest input is covered alongside the gate
+ * that depends on it, the write-attempt log's ordering in
+ * `cfc-write-prefix-provenance.test.ts` among them.
+ */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
