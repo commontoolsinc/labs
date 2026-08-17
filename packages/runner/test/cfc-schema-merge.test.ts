@@ -2656,11 +2656,75 @@ describe("mergeCfcSchemaEnvelopes", () => {
         },
       },
     });
-    const encoded = JSON.stringify(merged);
+    const mergedAgain = mergeCfcSchemaEnvelopes(merged, merged);
+    const emptyBranch = (merged as JSONSchemaObj).anyOf?.[1];
 
-    expect(encoded).toContain('"requiredIntegrity":["admin"]');
-    expect(encoded).toContain('"addIntegrity":["admin"]');
-    expect(() => mergeCfcSchemaEnvelopes(merged, merged)).not.toThrow();
+    expect(emptyBranch).toEqual({
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    });
+    expect(
+      cfcSchemaEntries(merged).map(({ path, schema }) => ({
+        path,
+        requiredIntegrity: typeof schema === "object" && schema !== null
+          ? schema.ifc?.requiredIntegrity
+          : undefined,
+        addIntegrity: typeof schema === "object" && schema !== null
+          ? schema.ifc?.addIntegrity
+          : undefined,
+      })),
+    ).toEqual([
+      {
+        path: ["list"],
+        requiredIntegrity: ["admin"],
+        addIntegrity: undefined,
+      },
+      {
+        path: ["list", "*"],
+        requiredIntegrity: undefined,
+        addIntegrity: ["admin"],
+      },
+    ]);
+    expect(mergedAgain).toEqual(merged);
+  });
+
+  it("does not treat a constrained object as the empty-union branch", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      anyOf: [
+        { $ref: "#/$defs/StoredValue" },
+        { type: "object", properties: {}, additionalProperties: false },
+      ],
+      $defs: {
+        StoredValue: {
+          type: "object",
+          properties: { list: { type: "array" } },
+        },
+      },
+    }, {
+      anyOf: [
+        {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+          minProperties: 1,
+        },
+        { $ref: "#/$defs/TrustedValue" },
+      ],
+      $defs: {
+        TrustedValue: {
+          type: "object",
+          properties: { list: { type: "array" } },
+        },
+      },
+    }) as JSONSchemaObj;
+
+    expect(merged.anyOf?.[0]).toEqual({
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+      minProperties: 1,
+    });
   });
 
   it("rejects changed policy in a defaulted empty-or-value union", () => {

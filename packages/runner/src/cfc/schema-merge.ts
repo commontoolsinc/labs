@@ -641,10 +641,14 @@ const isPolicyFreeClosedEmptyObject = (
   root: JSONSchema,
 ): boolean => {
   const resolved = resolvedBranchCheckPosition(branch, root).schema;
-  return isObjectOrArray(resolved) && resolved.type === "object" &&
-    isObjectOrArray(resolved.properties) &&
+  return isObjectNotArray(resolved) && resolved.type === "object" &&
+    isObjectNotArray(resolved.properties) &&
     Object.keys(resolved.properties).length === 0 &&
     resolved.additionalProperties === false &&
+    Object.keys(resolved).every((key) =>
+      key === "type" || key === "properties" ||
+      key === "additionalProperties"
+    ) &&
     !resolvedSchemaTreeContainsIfc(branch, root);
 };
 

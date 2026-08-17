@@ -955,6 +955,23 @@ multi-runtime group-chat integration test proves that a room added by an admin
 reaches another user and that an admin can grant the role to that user while
 strict CFC enforcement is active.
 
+## 40. Restrict empty-union matching to the literal empty object
+
+The closed-empty-union merge relies on the empty branch accepting exactly the
+empty object. An object schema can have no declared properties and disallow
+additional properties while also carrying another constraint such as
+`minProperties`, `required`, `not`, or a conditional. Treating that schema as
+the literal empty-object branch could discard the extra constraint when the
+stored branch is retained.
+
+Recognize only the three-key schema consisting of `type: "object"`, an empty
+`properties` map, and `additionalProperties: false`. Any other validation
+keyword leaves the union on the ordinary merge path, which retains the
+candidate restriction. Strengthen the matching-union regression to inspect
+the two policy declarations at their exact paths and compare the second merge
+structurally with the first. A second regression proves that a constrained
+object is not handled by the special matcher.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an
