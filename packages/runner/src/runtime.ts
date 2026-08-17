@@ -1428,8 +1428,13 @@ export class Runtime {
     // Wait for any pending operations
     await this.scheduler.idle();
 
-    // Clean up scheduler timers
+    // Clean up scheduler timers, and unregister both storage subscribers.
+    // Last, and after the final `idle()` above, because a subscriber removed
+    // earlier would miss notifications the settling work above still depends
+    // on. It matters most when `closeStorage` is false: the manager outlives
+    // this runtime, and anything it still holds holds a disposed runtime.
     this.scheduler.dispose();
+    this.runner.dispose();
 
     // Pop the default frame
     if (this.defaultFrame) {

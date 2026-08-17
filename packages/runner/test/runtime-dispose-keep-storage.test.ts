@@ -28,6 +28,7 @@ import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type { IStorageSubscription } from "../src/storage/interface.ts";
 import {
   type Options,
   type SessionFactory,
@@ -69,6 +70,10 @@ class LoopbackSessionFactory implements SessionFactory {
  */
 class CountingStorageManager extends StorageManager {
   closeCount = 0;
+  /** Subscribers currently registered. The relay inside exposes only
+   * `hasSubscribers()`, and what a leak needs is the COUNT: two per runtime,
+   * so "some are registered" cannot tell a clean teardown from a leaking one. */
+  readonly live = new Set<IStorageSubscription>();
   static over(server: MemoryV2Server.Server): CountingStorageManager {
     return new CountingStorageManager(
       { as: signer, memoryHost: new URL("memory://") } as Options,
@@ -78,6 +83,14 @@ class CountingStorageManager extends StorageManager {
   override close(): Promise<void> {
     this.closeCount++;
     return super.close();
+  }
+  override subscribe(subscription: IStorageSubscription): void {
+    this.live.add(subscription);
+    super.subscribe(subscription);
+  }
+  override unsubscribe(subscription: IStorageSubscription): void {
+    this.live.delete(subscription);
+    super.unsubscribe(subscription);
   }
 }
 
@@ -254,5 +267,38 @@ describe("runtime.dispose({ closeStorage })", () => {
     // Verified by mutation: with `settled()` left at its default cap this reads
     // 50, and the chain is still running after dispose returned.
     expect(reached).toBe(GENERATIONS);
+  });
+
+  it("leaves no storage subscriber behind on a store it does not close", async () => {
+    // `Scheduler` and `Runner` each register one at construction. `subscribe`
+    // returns nothing, so the argument is the only handle there will ever be —
+    // a subscription built inline is unreachable and can never be handed back.
+    // Nor can it retire itself: both return `{ done: false }` unconditionally,
+    // and `{ done: true }` is the contract's only self-cancelling answer.
+    //
+    // The count matters, not the presence. A manager outliving its runtimes
+    // accumulates two per runtime, each holding a disposed scheduler or runner
+    // reachable, and `hasSubscribers()` reads the same either way.
+    const baseline = held.live.size;
+
+    const first = new Runtime({
+      apiUrl: new URL("memory://"),
+      storageManager: held,
+    });
+    expect(held.live.size).toBe(baseline + 2);
+    await first.dispose({ closeStorage: false });
+    expect(held.live.size).toBe(baseline);
+
+    // And across several, because one runtime returning to baseline would also
+    // hold if disposal removed a subscriber some OTHER runtime had registered.
+    for (let i = 0; i < 3; i++) {
+      const runtime = new Runtime({
+        apiUrl: new URL("memory://"),
+        storageManager: held,
+      });
+      await runtime.dispose({ closeStorage: false });
+    }
+    expect(held.live.size).toBe(baseline);
+    expect(held.closeCount).toBe(0);
   });
 });
