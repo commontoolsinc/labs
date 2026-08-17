@@ -4772,8 +4772,10 @@ describe("renderPieceCallOutcome", () => {
     assertEquals(hinted.length, 1);
     assertStringIncludes(hinted[0], "of:x");
     // The address argument the next command takes, not the three-part prose
-    // that named the same cell in a spelling nothing parses. `cf exec` prints
-    // the same shape for the same cell.
+    // that named the same cell in a spelling nothing parses. The token stays
+    // bare because the readback runs under the same configured space as the
+    // call; `cf exec`, whose space comes from the mount instead, prints the
+    // space-carrying canonical form for the same cell.
     assertStringIncludes(hinted[0], "cf piece get --piece of:x");
     expect(hinted[0]).not.toContain("(space did:key:s");
   });

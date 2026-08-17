@@ -740,9 +740,11 @@ export function renderPieceCallOutcome(
       // asked for the bare result.
       //
       // Written as an address argument, which is the same spelling the
-      // receipt hint below uses and the same one `cf exec` prints: a caller
-      // reads the address off one command and passes it to the next without
-      // taking it apart first.
+      // receipt hint below uses: a caller reads the address off one command
+      // and passes it to the next without taking it apart first. It stays
+      // bare because the readback runs under the same configured space as
+      // the call; `cf exec`, whose space comes from the mount instead,
+      // prints the space-carrying canonical form.
       const ref = addressArgument(result.resultRef);
       hintOut(
         `Tool result cell: ${ref} (read it back with ` +
@@ -1047,7 +1049,9 @@ const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
 const PIECE_OPTION_HELP =
   "The target piece: an id, slug, or canonical LLM-friendly reference " +
-  "(/of:fid1:.../).";
+  "(/of:fid1:.../). A space embedded in the reference (/@did:.../of:.../) " +
+  "supplies --space when the flag is absent, and must agree with it when " +
+  "both are given.";
 const PIECE_OPTION_PATH_HELP = `${PIECE_OPTION_HELP} A path embedded in ` +
   `the reference prefixes the positional path.`;
 const PIECE_REGISTRY_LINK_EXAMPLE = [
@@ -2537,6 +2541,12 @@ export function parsePieceOptions(
 // ways of defining service components, we cannot make the options
 // "required" with cliffy. Ensure that all required values are
 // available after parsing both args and env vars.
+//
+// The space can arrive three ways: `--url` embeds it, `--space` names it, and
+// a canonical `--piece` reference may carry it as a `/@did:.../` prefix. A
+// reference's space fills an absent `--space`; a present one must agree —
+// checked at parse time when `--space` is a DID, and at session open through
+// `validateEmbeddedSpaces` when it is a name still to be resolved.
 export function parseSpaceOptions(
   input: PieceCLIOptions,
 ): SpaceConfig {
@@ -2574,12 +2584,6 @@ export function parseSpaceOptions(
       { exitCode: 1 },
     );
   }
-  if (!input.space) {
-    throw new ValidationError(
-      `Missing required option: "--space".`,
-      { exitCode: 1 },
-    );
-  }
 
   if (input.piece) {
     // Do not validate here -- piece is only
@@ -2591,7 +2595,10 @@ export function parseSpaceOptions(
       output.piece = llmRef.pieceId;
       if (llmRef.scope) output.pieceScope = llmRef.scope;
       if (llmRef.path.length > 0) output.piecePath = llmRef.path;
-      if (llmRef.embeddedSpace) output.embeddedSpaces = [llmRef.embeddedSpace];
+      if (llmRef.embeddedSpace) {
+        output.embeddedSpaces = [llmRef.embeddedSpace];
+        if (!input.space) output.space = llmRef.embeddedSpace;
+      }
     } else {
       const parsedPiece = parseScopedId(input.piece);
       output.piece = parsedPiece.id;
@@ -2599,15 +2606,15 @@ export function parseSpaceOptions(
     }
   }
 
-  output.apiUrl = normalizeApiUrl(input.apiUrl);
-  output.space = input.space;
-
-  if (!input.identity) {
+  if (input.space) output.space = input.space;
+  if (!output.space) {
     throw new ValidationError(
-      `Missing required option: "--identity", or "CF_IDENTITY".`,
+      `Missing required option: "--space".`,
       { exitCode: 1 },
     );
   }
+
+  output.apiUrl = normalizeApiUrl(input.apiUrl);
   return output as PieceConfig;
 }
 
