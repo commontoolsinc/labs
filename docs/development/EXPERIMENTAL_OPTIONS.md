@@ -129,6 +129,12 @@ value is ignored with a warning rather than coerced. See
   only — readers accept both link forms unconditionally, which is what makes
   the flag safe to flip in either direction; a schema decomposition refuses
   stays inline exactly as with the flag off.
+- **Interaction with `syncSchemaTableV2`.** Both mechanisms dedupe the same
+  link-schema positions, so a flag-on process disables the sync schema
+  table outright (`setSyncSchemaTableConfig(false)` at Runtime
+  construction) rather than running both — a reference-bearing link never
+  needs frame compression, and the table's negotiation simply stops being
+  offered by that process.
 - **Current default and planned end state.** Off by default. Graduate to on
   once the writer path has soaked (old inline links keep reading forever and
   age out through pattern re-instantiation), then proceed to the spec's
@@ -741,6 +747,10 @@ the per-epic implementation notes).
   It changes only the size of the payload, not its meaning. Peers that do not
   advertise the capability keep receiving the historical fully-expanded
   `SessionSync` shape.
+- **Interaction with `contentAddressedSchemas`.** A process with that
+  flag on disables this table outright — content-addressed references
+  dedupe the same link-schema positions at rest, so the two mechanisms
+  never run together (see that flag's entry).
 - **Current default and planned end state.** On by default. It is negotiated, so
   it degrades safely against older peers. The end state is to retire the
   negotiation and the expanded form once every peer in the fleet speaks the

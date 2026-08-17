@@ -21,6 +21,7 @@ import {
   getContentAddressedSchemasConfig,
   setContentAddressedSchemasConfig,
 } from "./schema-doc-config.ts";
+import { setSyncSchemaTableConfig } from "@commonfabric/memory/v2";
 import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
@@ -1021,6 +1022,15 @@ export class Runtime {
     );
     this.experimental.contentAddressedSchemas =
       getContentAddressedSchemasConfig();
+    if (this.experimental.contentAddressedSchemas) {
+      // Content-addressed schema references and the sync schema table dedupe
+      // the same link-schema positions; a reference-bearing link never needs
+      // frame compression, so a flag-on process stops negotiating the table
+      // entirely rather than running both mechanisms. Ambient and one-way
+      // like the flag itself: once any runtime in the realm enables the
+      // flag, the table stays off for the process.
+      setSyncSchemaTableConfig(false);
+    }
     setPersistentSchedulerStateConfig(
       this.experimental.persistentSchedulerState,
     );

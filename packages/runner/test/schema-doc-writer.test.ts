@@ -18,6 +18,10 @@ import {
 } from "../src/schema-decompose.ts";
 import { setContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { lookupSchemaDocument } from "../src/schema-registry.ts";
+import {
+  getSyncSchemaTableConfig,
+  resetSyncSchemaTableConfig,
+} from "@commonfabric/memory/v2";
 import type { CellLinkRefPayload, URI } from "../src/sigil-types.ts";
 
 // The Phase 1 writer: with the flag on, a schema-bearing link is stamped
@@ -44,8 +48,10 @@ describe("schema-doc-writer", () => {
   });
 
   afterEach(async () => {
-    // The ambient flag is realm-sticky; later test files must see it off.
+    // The ambient flag is realm-sticky; later test files must see it off,
+    // and the sync schema table (disabled by the flag) must come back.
     setContentAddressedSchemasConfig(false);
+    resetSyncSchemaTableConfig();
     await writer.dispose();
     await writerStorage.close();
     await readerStorage.close();
@@ -123,6 +129,13 @@ describe("schema-doc-writer", () => {
       }).get(`cid:${hash}` as URI);
       expect(stored).toBeDefined();
     }
+  });
+
+  it("disables the sync schema table for the process", () => {
+    // Both mechanisms dedupe the same link-schema positions; a flag-on
+    // process must not negotiate the frame table (the Runtime in
+    // beforeEach carries the flag).
+    expect(getSyncSchemaTableConfig()).toBe(false);
   });
 
   it("keeps a schema decomposition refuses inline", () => {
