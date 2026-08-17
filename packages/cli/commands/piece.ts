@@ -1132,10 +1132,11 @@ export function targetOptions(
 
 /**
  * The day the `cf piece get`, `cf piece set`, and `cf piece call` spellings
- * stop working: two weeks after step 6a reaches main
+ * stop working: two weeks after step 6a reached main
  * (docs/plans/cli-surface-shape.md). A literal rather than a window computed
  * at runtime, because a caller who reads the warning today and acts on it
- * next week must be told the same date both times. Set when 6a merges.
+ * next week must be told the same date both times. Step 6b removes the
+ * spellings and their notices on this day.
  */
 export const PIECE_DATA_SPELLING_END_DATE = "2026-08-31";
 
