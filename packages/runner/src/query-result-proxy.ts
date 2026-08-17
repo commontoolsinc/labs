@@ -247,6 +247,43 @@ function createViewProxy<T>(
   // the dereference traces it recorded, so the label view below costs no read
   // of the transaction's CFC state.
   const resolved = resolveLinkTracingDereferences(runtime, viewTx, link);
+
+  // Everything from here down — the label view, the value read, the stream and
+  // primitive dispatch, the proxy — is a function of this transaction's
+  // snapshot and the link the caller ASKED for. The cache below is keyed on
+  // that link rather than the resolved one, which is the difference between
+  // consulting it and having to resolve and read a value first just to name
+  // the entry. A scan that touches each element more than once pays the walk
+  // and the read once.
+  //
+  // The resolution above still runs on every access: it is what records this
+  // read's dereference traces and fires the sync kicks that belong to it, and
+  // being memoized itself, that is all it does on a repeat.
+  //
+  // The key names no more than the caches below it already distinguish, so
+  // this index can never be the reason two things that differ share a view.
+  // `writable` is there because a writable proxy carries write traps a
+  // read-only one refuses; `depth` and `pinned` are not, because `byLink`
+  // conflates the first and the second changes nothing about what a view of
+  // this link against this transaction is.
+  const viewMemo = viewTx.getSnapshotMemo?.();
+  const viewKey = viewMemo !== undefined && resolved.memoKey !== undefined &&
+      cfcLabelView === undefined
+    // A caller-supplied label view would have to be part of the key, and
+    // serializing one costs more than the read it saves. Those reads take the
+    // long way; a label view arrives only where a document carries stored CFC
+    // labels.
+    ? `view:${writable ? 1 : 0}|${resolved.memoKey}`
+    : undefined;
+  if (viewKey !== undefined) {
+    const cached = viewMemo!.get(viewKey) as { view: unknown } | undefined;
+    if (cached !== undefined) return cached.view as T;
+  }
+  const remember = <V>(view: V): V => {
+    if (viewKey !== undefined) viewMemo!.set(viewKey, { view });
+    return view;
+  };
+
   link = resolved.link;
   cfcLabelView = mergeCfcLabelViews([
     cloneCfcLabelView(cfcLabelView),
@@ -267,7 +304,9 @@ function createViewProxy<T>(
   // pattern's Output type wasn't explicitly specified, causing the capture
   // schema to lose the asCell stream information.
   if (isStreamValue(value)) {
-    return createCell(runtime, link, tx, false, "stream", cfcLabelView) as T;
+    return remember(
+      createCell(runtime, link, tx, false, "stream", cfcLabelView) as T,
+    );
   }
 
   // `FabricPrimitive`s (byte sequences, temporal values, hashes, ...) are
@@ -286,7 +325,7 @@ function createViewProxy<T>(
     if (value instanceof FabricPrimitive) {
       viewTx.readValueOrThrow(link);
     }
-    return value;
+    return remember(value);
   }
 
   // A `FabricInstance` is _not_ exempted here the way a `FabricPrimitive` is
@@ -355,7 +394,7 @@ function createViewProxy<T>(
   // the same frozen object always maps to the same proxy instance.
   const existingProxy = txCache.byLink.get(cacheKey) ??
     (cfcLabelView === undefined ? txCache.byValue.get(value) : undefined);
-  if (existingProxy) return existingProxy;
+  if (existingProxy) return remember(existingProxy);
 
   const proxy = new Proxy(proxyTarget as object, {
     get: (target, prop, receiver) => {
@@ -844,7 +883,7 @@ function createViewProxy<T>(
   if (cfcLabelView === undefined) {
     txCache.byValue.set(value, proxy);
   }
-  return proxy;
+  return remember(proxy);
 }
 
 // Wraps a value on an array so that it can be read as literal or object,

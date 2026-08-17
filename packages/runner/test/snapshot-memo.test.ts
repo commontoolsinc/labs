@@ -13,6 +13,7 @@ import {
   resolveLink,
   resolveLinkTracingDereferences,
 } from "../src/link-resolution.ts";
+import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createNonReactiveTransaction } from "../src/storage/extended-storage-transaction.ts";
@@ -490,5 +491,102 @@ describe("snapshot memo", () => {
     expect(afterCommit.path).toEqual(["target"]);
 
     tx = runtime.edit();
+  });
+
+  describe("proxy views", () => {
+    /** A list of links to one-field documents -- the shape a lift scans. */
+    const linkedList = (cause: string, length: number) => {
+      const entries = [];
+      for (let index = 0; index < length; index++) {
+        const entry = runtime.getCell<{ title: string }>(
+          space,
+          `${cause}-entry-${index}`,
+          undefined,
+          tx,
+        );
+        entry.set({ title: `Entry ${index}` });
+        entries.push(entry);
+      }
+      const list = runtime.getCell<unknown[]>(space, cause, undefined, tx);
+      list.set(entries as never);
+      return list;
+    };
+
+    it("issues no further reads for an element already read in the transaction", () => {
+      const list = linkedList("read-once", 3);
+      const view = list.get() as unknown[];
+
+      void view[0];
+      const afterFirst = readCount();
+      void view[0];
+
+      expect(afterFirst).toBeGreaterThan(0);
+      expect(readCount()).toBe(afterFirst);
+    });
+
+    it("returns the same element view on a repeated read", () => {
+      const list = linkedList("same-view", 3);
+      const view = list.get() as unknown[];
+
+      expect(view[1]).toBe(view[1]);
+    });
+
+    it("reads a leaf value once per element in the transaction", () => {
+      const list = linkedList("leaf-once", 3);
+      const view = list.get() as { title: string }[];
+
+      expect(view[2].title).toBe("Entry 2");
+      const afterFirst = readCount();
+
+      expect(view[2].title).toBe("Entry 2");
+      expect(readCount()).toBe(afterFirst);
+    });
+
+    it("reads the new value after a write in the same transaction", () => {
+      const list = linkedList("rewrite", 2);
+      const view = list.get() as { title: string }[];
+      expect(view[0].title).toBe("Entry 0");
+
+      runtime.getCell<{ title: string }>(
+        space,
+        "rewrite-entry-0",
+        undefined,
+        tx,
+      )
+        .key("title").set("Edited");
+
+      expect(view[0].title).toBe("Edited");
+    });
+
+    it("hands two readers of one element the same view", () => {
+      const list = linkedList("shared", 2);
+      const link = list.getAsNormalizedFullLink();
+      const first = createQueryResultProxy<unknown[]>(runtime, tx, link);
+      const second = createQueryResultProxy<unknown[]>(runtime, tx, link);
+
+      // Consumers compare element views by identity -- FUSE matching a
+      // callable against its own entry, a value whose element points back at
+      // the array holding it. The index must hand back what the proxy cache
+      // under it would, not a second object for the same element.
+      expect(second[0]).toBe(first[0]);
+    });
+
+    it("reads the new value through a later transaction", async () => {
+      linkedList("later", 2);
+      const read = (of: IExtendedStorageTransaction) =>
+        (runtime.getCell<{ title: string }[]>(space, "later", undefined, of)
+          .get())[0].title;
+
+      expect(read(tx)).toBe("Entry 0");
+      await tx.commit();
+
+      // Each transaction memoizes for itself. A view taken in one is not an
+      // answer any later one may give.
+      tx = runtime.edit();
+      runtime.getCell<{ title: string }>(space, "later-entry-0", undefined, tx)
+        .key("title").set("Edited");
+
+      expect(read(tx)).toBe("Edited");
+    });
   });
 });

@@ -351,6 +351,12 @@ export function resolveLink(
  *
  * The traces are recorded on the transaction either way; this is the same list,
  * not an alternative to recording it.
+ *
+ * `memoKey` is the key this resolution was memoized under, or `undefined` where
+ * the transaction memoized nothing. A caller memoizing something of its own
+ * derived from the same link against the same transaction can extend it rather
+ * than build a second key over the same fields — and gets the transaction's
+ * "may I memoize at all" answer with it.
  */
 export function resolveLinkTracingDereferences(
   runtime: Runtime,
@@ -358,7 +364,11 @@ export function resolveLinkTracingDereferences(
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
   options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
-): { link: ResolvedFullLink; traces: readonly CfcDereferenceTrace[] } {
+): {
+  link: ResolvedFullLink;
+  traces: readonly CfcDereferenceTrace[];
+  memoKey: string | undefined;
+} {
   // The walk needs this to detect cycles; the memo needs it to name the entry.
   let addressKey = linkAddressKey(link);
   const memo = tx.getSnapshotMemo?.();
@@ -377,6 +387,7 @@ export function resolveLinkTracingDereferences(
         // the entry the next resolution will serve.
         link: { ...cached.result } as unknown as ResolvedFullLink,
         traces: cached.traces,
+        memoKey,
       };
     }
   }
@@ -628,7 +639,11 @@ export function resolveLinkTracingDereferences(
 
   // The casting is a workaround for the branding, we don't actually want to add
   // the symbol to the result.
-  return { link: result as unknown as ResolvedFullLink, traces };
+  return {
+    link: result as unknown as ResolvedFullLink,
+    traces,
+    memoKey: memoizable ? memoKey : undefined,
+  };
 }
 
 /**
