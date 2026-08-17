@@ -255,7 +255,13 @@ export interface TopicCrossrefRow {
  * surface is what leaves it free to shrink.
  */
 export interface TopicSummary {
-  title: string;
+  /** Defaulted rather than required, like every other field a board card
+   * renders. The card list is a mapped sub-pattern, so this type reaches a
+   * piece holding topics written before the field existed as the argument
+   * schema its update is checked against, and a required property those topics
+   * lack refuses that update outright. `deno task pattern-vintage` is what
+   * catches it, by replaying a real deployed board. */
+  title: string | Default<"">;
   createdAt: number;
   createdBy?:
     | TopicAuthor
@@ -285,8 +291,8 @@ export interface TopicPiece extends TopicSummary {
   [NAME]: string | Default<""> | undefined;
   /** @deprecated Compatibility shadow for consumers of the previous result
    * schema. New callers must use `createdBy`; the pattern mirrors this field. */
-  createdByName: string;
-  body: string;
+  createdByName: string | Default<"">;
+  body: string | Default<"">;
   comments: TopicComment[];
   links: TopicLink[];
   /** Every piece this topic's prose and links point at, as references.

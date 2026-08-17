@@ -67,11 +67,20 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260810T212206Z-cIIz70jbLbbPc-F3",
       "20260812T003521Z-Jy37T5qk4KSHkgQe",
       "20260814T233350Z-jHoJZsDa5eUdWU-B",
+      "20260817T051200Z-NIE10ssgY89CXloq",
+      "20260817T212730Z-3FUPLp4oeb7gwpch",
     ],
     // `argument.topics[]` is every change to `TopicPiece` seen from the board's
     // list: each stored topic's defaults moved, which the proof cannot show is
     // stable under insertion. The `crossrefs[]` fields are the old graph row's,
     // which the pivot row replaces wholesale.
+    //
+    // The last defaults to move are `title`, `body` and `createdByName`, which
+    // gained one so the board's card list can be declared over the topic itself
+    // rather than over a card-shaped copy of it. A card's argument schema is
+    // what a piece holding older topics is updated against, so every field a
+    // card renders has to carry a default for that update to be accepted —
+    // `deno task pattern-vintage` refuses it otherwise, naming the field.
     paths: [
       "argument.topics[]",
       "result.crossrefs",
@@ -100,6 +109,8 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260808T001558Z-H7ntBZnGU80t30LL",
       "20260810T212206Z-FQasUmU3p-SDapLo",
       "20260812T003521Z-XWPlA9Dl3OHXlHEH",
+      "20260814T233350Z-ignmxWvAy2vygaDl",
+      "20260817T212731Z-S2Y3ePoq7Zj_7fLa",
     ],
     paths: [
       "argument.boardCrossrefs",

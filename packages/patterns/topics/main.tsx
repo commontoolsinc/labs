@@ -180,24 +180,6 @@ const crossrefTable = lift(
   },
 );
 
-/** Exactly what one board card renders: the topic itself, declared through the
- * handful of fields the card shows. The declared schema is the bound, so a card
- * can never expand a topic past them. Private to the board; nothing published
- * is shaped by it, which is what leaves it free to be this narrow. */
-interface TopicCardView {
-  // Every field carries a default. The board's card list is lowered to a
-  // mapped sub-pattern, so this is the argument schema a piece holding topics
-  // written by an older version of this pattern gets updated against — and a
-  // required property that its stored topics lack refuses the update outright
-  // (`deno task pattern-vintage` catches exactly that).
-  title: string | Default<"">;
-  body: string | Default<"">;
-  createdByName: string | Default<"">;
-  createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
-  commentCount: number | Default<0>;
-  lastActivityAt: number | Default<0>;
-}
-
 /**
  * The board's cards, most recently active first.
  *
@@ -208,17 +190,22 @@ interface TopicCardView {
  * registered and the old ones torn down — for topics whose content never
  * changed. Passing a topic through keeps the identity it already has.
  *
- * HACK: the parameter declares the one field the sort reads, so ordering the
- * board expands no topic. The elements are links, and the cast hands the card
- * list the wider view each card resolves its own link through. Generic lifts
- * that carried an input reference type through to the output would say this
- * without a cast.
+ * The CONSTRAINT declares the one field the sort reads, so ordering the board
+ * expands no topic; the type parameter hands back what it was given, which is
+ * the topics themselves. Those are two separate statements, and a cast could
+ * only conflate them — the one here used to claim a card-shaped view the sort
+ * never produced, which also hid `lastActivityAt`'s absence from the caller.
+ *
+ * Each card still bounds its own read: the elements are links, and the mapped
+ * sub-pattern's argument schema is shrunk to the fields its body renders. That
+ * schema is why every field a card touches carries a default — it is what a
+ * piece holding older topics is updated against.
  */
 const cardsByActivity = lift(
-  (rows: { lastActivityAt: number | Default<0> | undefined }[] | Default<[]>) =>
-    rows.toSorted((a, b) =>
-      (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)
-    ) as TopicCardView[],
+  <T extends { lastActivityAt: number | Default<0> | undefined }>(
+    { rows }: { rows: T[] | Default<[]> },
+  ): T[] =>
+    rows.toSorted((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)),
 );
 
 /**
@@ -302,7 +289,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   // `.length` — or through a helper this analysis cannot see into — is what
   // puts the whole board back in the read.
   const topicCount = topics.get().length;
-  const cards = cardsByActivity(topics);
+  const cards = cardsByActivity({ rows: topics });
   // Derived once for the whole board; every topic reads its own row out of it.
   const crossrefs = crossrefTable({ sources: topics });
   const hasNoTopics = topicCount === 0;
@@ -424,7 +411,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                         card.createdByName,
                       )}
                       {" · "}
-                      {whenLabel(card.lastActivityAt)}
+                      {whenLabel(card.lastActivityAt ?? 0)}
                     </cf-text>
                   </cf-vstack>
                   <cf-cell-link $cell={card} label="Open" static />
