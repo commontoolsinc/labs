@@ -1164,6 +1164,7 @@ describe("stage G SpaceServer recovery seams", () => {
         const name of [
           "lt6-stream-userless",
           "lt6-stream-demanded",
+          "lt6-stream-early",
         ]
       ) {
         const stream = creator.getCell<unknown>(space, name, undefined);
@@ -1172,7 +1173,13 @@ describe("stage G SpaceServer recovery seams", () => {
         stream.withTx(tx).setRaw({ $stream: true });
         expect((await tx.commit()).error).toBeUndefined();
       }
-      for (const name of ["lt6-probe-userless", "lt6-probe-demanded"]) {
+      for (
+        const name of [
+          "lt6-probe-userless",
+          "lt6-probe-demanded",
+          "lt6-probe-early",
+        ]
+      ) {
         const probe = creator.getCell<{ handled?: number }>(
           space,
           name,
@@ -1212,6 +1219,9 @@ describe("stage G SpaceServer recovery seams", () => {
         probe: string;
         pieceRootId: string;
         actionId: string;
+        /** The EARLY-EMIT shape (fan-out stage B): send FIRST, read user
+         * scope AFTER. */
+        emitBeforeRead?: boolean;
       }): Promise<{
         entry: NonNullable<StreamEventsDocValue["entries"]>[number];
       }> => {
@@ -1251,6 +1261,11 @@ describe("stage G SpaceServer recovery seams", () => {
         });
         const action = Object.assign(
           (tx: IExtendedStorageTransaction) => {
+            if (arm.emitBeforeRead) {
+              streamCell.withTx(tx).send({ ping: 1 } as never);
+              userProbe.withTx(tx).get();
+              return;
+            }
             userProbe.withTx(tx).get();
             streamCell.withTx(tx).send({ ping: 1 } as never);
           },
@@ -1337,6 +1352,37 @@ describe("stage G SpaceServer recovery seams", () => {
       expect(
         actingAnnotations().every((a) => a.actingUser === demander.principal),
       ).toBe(true);
+
+      // ARM 3 — the EARLY-EMIT GUARD (fan-out stage B, RULED 2026-08-16
+      // fail-closed; design §F risk 4): the demanded run SENDS before it
+      // reads user scope. Its first run's emission is attributed at the
+      // ratchet SO FAR — `space`, no actor — and the run then discovers
+      // `user`; the seal REFUSES that contribution (an under-attributed
+      // event never commits), the node's known-scope ratchet has moved
+      // to `user`, and the retry emits at the learned scope: the durable
+      // entry carries the demanding USER. Mutation (the guard removed):
+      // the first, userless emission commits — the entry has no `user`.
+      const refusalsBefore = stats.earlyEmitRefusals;
+      const early = await runArm({
+        stream: "lt6-stream-early",
+        probe: "lt6-probe-early",
+        pieceRootId: demandedRoot,
+        actionId: "test/lt6-early-emitter",
+        emitBeforeRead: true,
+      });
+      expect(early.entry.firedAt?.user).toBe(demander.principal);
+      expect(early.entry.firedAt?.session).toBe("server");
+      expect(stats.earlyEmitRefusals).toBeGreaterThan(refusalsBefore);
+      // Exactly one durable entry: the refused emission never landed.
+      const earlySidecarId = streamEntriesDocId({
+        id: serving.getCell<unknown>(space, "lt6-stream-early", undefined)
+          .getAsNormalizedFullLink().id,
+        path: [],
+      } as never);
+      const earlyEntries =
+        ((Engine.read(engine, { id: earlySidecarId })?.value ??
+          {}) as StreamEventsDocValue).entries ?? [];
+      expect(earlyEntries.length).toBe(1);
     } finally {
       for (const cancel of cancels) cancel();
     }

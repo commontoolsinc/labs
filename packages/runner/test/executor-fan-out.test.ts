@@ -86,6 +86,28 @@ const FAN_OUT_PATTERN = [
   "});",
 ].join("\n");
 
+/** A per-user subtree reachable ONLY through a per-user VALUE (design
+ * §B4/§G B-f): `view` links to the `guarded` computed only for a user
+ * whose per-user flag is set — the result exposes `view`, never
+ * `guarded` directly, so the guarded node is reached only by a walk that
+ * follows THAT user's redirects. */
+const GUARDED_PATTERN = [
+  "import { computed, Default, ifElse, pattern, PerUser, Writable } from 'commonfabric';",
+  "type Draft = Writable<string | Default<''>>;",
+  "type Flag = Writable<boolean | Default<false>>;",
+  "const text = (cell: Draft): string => (cell.get() as string | undefined) ?? '';",
+  "export default pattern<",
+  "  { draft?: PerUser<Draft>; flag?: PerUser<Flag>; n?: number },",
+  "  { view: unknown }",
+  ">(({ draft, flag }) => {",
+  "  const draftCell: Draft = draft!;",
+  "  const flagCell: Flag = flag!;",
+  "  const guarded = computed(() => 'guarded:' + text(draftCell));",
+  "  const on = computed(() => flagCell.get() === true);",
+  "  return { view: ifElse(on, guarded, 'off') };",
+  "});",
+].join("\n");
+
 /** M per-user derivations over one PerUser draft (the B7 probe). */
 const MULTI_NODE_PATTERN = (m: number) =>
   [
@@ -426,6 +448,11 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       () => instanceHolds(engine, aliceKey, '"echo:A"'),
       "alice's instance (the node narrowed for her)",
     );
+    // Quiesce (Alice's own walk re-fires on her echo landing) before the
+    // trace baseline.
+    await servingRuntime!.idle();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await servingRuntime!.idle();
     const arrivalsBefore = host!.stats().demandArrivals;
     const traceBefore = servingRuntime!.scheduler.getActionRunTrace().length;
 
@@ -440,13 +467,17 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       "bob's instance to materialize on arrival (empty draft → 'echo:')",
     );
     expect(host!.stats().demandArrivals).toBeGreaterThan(arrivalsBefore);
-    // Alice's instance did not re-run for Bob's arrival (B7: the arrival
-    // re-arm keeps her instance clean).
+    // Alice's DERIVATION instances did not re-run for Bob's arrival (B7:
+    // the arrival re-arm keeps her instances clean; the demand walks
+    // are effects that re-fire on their own reads and are not the claim).
     const sinceArrival = servingRuntime!.scheduler.getActionRunTrace()
       .slice(traceBefore);
     expect(
-      sinceArrival.filter((entry) => entry.instanceKey === aliceKey).length,
-    ).toBe(0);
+      sinceArrival.filter((entry) =>
+        entry.instanceKey === aliceKey &&
+        !entry.actionId.startsWith("demand-walk:")
+      ).map((entry) => entry.actionId),
+    ).toEqual([]);
     // And once Bob types, his instance follows his input.
     await setup.writeDraft(bob, "B");
     await waitUntil(
@@ -605,6 +636,58 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     expect(labelRuns[0].instanceKey).toBe("space");
     // And the label's basis rows key `space` only.
     expect(basisKeys(engine).has(setup.serviceUserKey)).toBe(false);
+    setup.cancel();
+  });
+
+  it("(f-walk) the per-demander demand WALK reaches a per-user subtree: a computed guarded by Alice's per-user flag — reachable only through HER value — materializes server-side under her instance (design §B4; residual 2's coverage)", async () => {
+    const setup = await standUp({
+      names: { arg: "fo-f-arg", result: "fo-f-result" },
+      pattern: GUARDED_PATTERN,
+      clients: [aliceSigner, bobSigner],
+    });
+    const { engine, clients } = setup;
+    const alice = clients.get(aliceSigner.did())!;
+    const bob = clients.get(bobSigner.did())!;
+    const aliceKey = setup.userKey(aliceSigner);
+    const bobKey = setup.userKey(bobSigner);
+    // Both type a draft; only ALICE sets her flag.
+    await setup.writeDraft(alice, "A");
+    await setup.writeDraft(bob, "B");
+    {
+      const arg = alice.getCell<{ flag: boolean }>(
+        space,
+        "fo-f-arg",
+        setup.compiled.argumentSchema,
+      );
+      await arg.sync();
+      const tx = alice.edit();
+      arg.key("flag").withTx(tx).set(true);
+      expect((await tx.commit()).error).toBeUndefined();
+      await alice.idle();
+      await alice.storageManager.synced();
+    }
+    // THE COVERAGE: Alice's guarded value exists server-side under HER
+    // instance — the walk, running as Alice, followed her `view` into
+    // the guarded computed and pulled it. A single service walk (the
+    // pre-stage-B sink) stopped at the first redirect: `view` for the
+    // service is 'off', and the guarded subtree was live for nobody.
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"guarded:A"'),
+      () =>
+        "alice's guarded value under her instance (rows: " +
+        JSON.stringify([...rowsUnder(engine, aliceKey).values()]) + ")",
+    );
+    // Never Bob's value in Alice's instance.
+    expect(instanceHolds(engine, aliceKey, '"guarded:B"')).toBe(false);
+    // Bob's `view` is 'off'; his instance of the guarded node — if it
+    // ran (the node is one, its demanders are both, design §B2) — holds
+    // HIS value, never Alice's; reported for the record.
+    console.log(
+      `[walk coverage] bob's instance holds guarded:B? ${
+        instanceHolds(engine, bobKey, '"guarded:B"')
+      } (inert if so — nothing of Bob's reads it)`,
+    );
+    expect(instanceHolds(engine, bobKey, '"guarded:A"')).toBe(false);
     setup.cancel();
   });
 
