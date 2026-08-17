@@ -65,25 +65,24 @@ results back. Patterns choose the words; the runtime carries them.
 
 ## The problem
 
-Filing one topic headlessly takes six CLI invocations:
+Filing one topic headlessly takes four CLI invocations:
 
 | invocations | what | cause |
 | --- | --- | --- |
-| 1 | `addTopic {title, agentName}` | the create itself |
-| 1 | `get index --step` to learn the new fid | create returns no handle |
+| 1 | `addTopic {title, agentName}` | the create itself, which hands back the topic it made |
 | 3 | `setBody` / `addComment` / `addLink` | the body cannot ride the create; the comment and link are the real work |
-| 1 | a verification read (`get … --step`) | no result to inspect |
 
-Half of this is protocol tax: the fid lookup and the verification read exist
-only because nothing is returned, and `setBody` rides every create only
-because the create cannot carry a body.
+One of these is protocol tax: `setBody` rides every create only because the
+create cannot carry a body. A declared result is what removed the other two —
+the caller neither looks the new topic up nor reads it back to see whether the
+call did anything.
 
 Three consequences:
 
-- **Create returns no handle.** `addTopic` returns nothing, so the caller reads
-  the board's index to learn which topic it made — and `TopicIndexRow.fid` reads
-  `""` until known. (Sub-piece addressability by fid itself works — #4758; only
-  the return value is missing.)
+- **A create with no declared result returns no handle**, leaving the caller to
+  search a list for the thing it just made. `addTopic` declares one
+  (`AddTopicResult.topic`) and hands back the piece itself, which is the shape
+  this contract asks of every create.
 - **Semantic rejection is invisible.** Runtime failures surface; a verb
   declining on its own terms does not. `addTopic` early-returns on an empty
   title and on a blank `agentName`, both indistinguishable from success.
@@ -355,17 +354,13 @@ produce over 300k tokens of output. Acceptance for an index: its serialization
 contains no expanded piece, action, or runtime values, and a full-board read
 stays bounded.
 
-`topics.index` also carries an explicit `fid` per row, and that part is *not*
-the general model: it is derived indirectly from runtime-only cell surface,
-reads `""` while unresolved, and a pattern cannot reliably see its own runtime
-address. It is there because a row's reference alone cannot be turned into an
-address by any `piece get` flag today, so a survey could be read but not
-followed. The general answer is for generic clients to render identity on top: a
-coarse exploration mode such as `--include-ids` can annotate every point where
-the backing identity changes, with a narrower path-selected form to follow if
-the broad form proves too noisy. Both are projections of existing references,
-not fields every pattern must maintain — and landing one is what lets a
-pattern's index drop its authored `fid`.
+A row carries no authored identifier, and that is the general model: the row IS
+the child, read through the narrow schema, so its address is the child's and a
+survey can be followed without the pattern maintaining an address field it
+cannot reliably see. A client asks for that address where it wants one —
+`--select index[].@` names it, the `@` suffix being the concise address form.
+Identity is a projection of a reference the result already holds, so no pattern
+has to publish one.
 
 Discovery is the parent's job; the child's own verbs are the child's. A comment
 is addressed to the topic, not routed through the board — **but that depends on

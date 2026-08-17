@@ -189,16 +189,17 @@ addPiece.send({ piece: ann });
 **Topics — a multi-user tracker over #topic pieces** (durable units of shared
 attention; CT-1878): title, living body document, flat chronological comment
 thread, typed links out. Deliberately minimal — no statuses, labels, or
-assignees. The board publishes a bounded discovery index — one row per topic
-carrying its canonical fid, a title-only reference, and summary scalars — and
-renders its cards from the same rows. Topics reference each other by CELL: the
-board derives the whole graph once by scanning what each topic points at with
-`equals`, and each topic reads its own inbound edges out of that pivot.
-Demonstrates: reading-list-style piece-in-list composition, `PerUser`
-display-name on a shared piece, mergeable comment appends, session-scoped
-drafts, bounding a whole-list derivation with a narrow declared `lift`
-parameter, per-row cell identity so an activity-sorted list keeps its element
-runs across a prepend (`resolveAsCell().entityId` for piece identity),
+assignees. The board publishes a bounded discovery index — the topics
+themselves, declared through a narrow row schema of summary scalars, so a row's
+address IS its topic's and a survey and the follow-up read name one document.
+`addTopic` returns the piece it created, so a caller addresses a new topic
+straight from the create. Topics reference each other by CELL: the board derives
+the whole graph once by scanning what each topic points at with `equals`, and
+each topic reads its own inbound edges out of that pivot. Demonstrates:
+reading-list-style piece-in-list composition, `PerUser` display-name on a shared
+piece, mergeable comment appends, session-scoped drafts, bounding a whole-list
+derivation with a narrow declared `lift` parameter, passing topics through a
+sort so an activity-ordered list keeps the identity its elements already have,
 `multiUserTest` coverage.
 
 **Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
@@ -224,13 +225,14 @@ interface TopicsOutput {
   topics: TopicPiece[];
   mentionable: TopicPiece[];
   topicCount: number;
-  // { fid, topic: { title }, title, createdAt, createdBy, commentCount,
-  //   lastActivityAt }
+  // The topics, read through { title, createdAt, createdBy, commentCount,
+  //   lastActivityAt } — a row addresses the topic it describes
   index: TopicIndexRow[];
   // { topic, mentionedBy } per topic — the reference graph, derived once here
   crossrefs: TopicCrossrefRow[];
   myName: string;
-  addTopic: Stream<{ title: string }>;
+  // Returns { topic } — the piece it created
+  addTopic: Stream<AddTopicEvent, AddTopicResult>;
   setMyName: Stream<{ name: string }>;
 }
 ```

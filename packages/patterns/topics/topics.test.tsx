@@ -116,6 +116,7 @@ interface LegacyUnsignedTopicOutput {
   createdByName: string;
   mentions: unknown[] | undefined;
   references: TopicMentionRefMap | undefined;
+  mentioned: unknown[] | undefined;
   referencedBy: TopicSummary[] | undefined;
   commentCount: number | undefined;
   lastActivityAt: number | undefined;
