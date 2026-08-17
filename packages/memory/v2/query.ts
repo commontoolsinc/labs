@@ -6,6 +6,7 @@ import {
   type IAttestation,
   type IMemorySpaceValueAttestation,
   loadMetaLinkedDocs,
+  loadSchemaDocsForDeliveredValue,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
   type ObjectStorageManager,
@@ -620,6 +621,16 @@ const loadFactsForDoc = (
     }),
   );
   const document = fact.value as { value: FabricValue };
+  // Delivery-keyed collection (the read-side delivery guarantee): the
+  // delivered document's embedded external schema refs travel with it, a
+  // rejecting pull included — this path is the only traversal entry a
+  // schema-less pull takes, so the scan happens here, not in traverse().
+  loadSchemaDocsForDeliveredValue(
+    tx,
+    { ...fact.address, space: space as MemorySpace, path: [] },
+    fact.value as FabricValue,
+    traversalContext,
+  );
   const factValue: IMemorySpaceValueAttestation = {
     address: { ...fact.address, space: space as MemorySpace, path: ["value"] },
     value: document.value,

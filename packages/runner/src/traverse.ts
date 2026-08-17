@@ -89,7 +89,11 @@ import {
 } from "./link-types.ts";
 import type { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
-import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import {
+  isLinkRef,
+  linkRefFrom,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
 import {
   recordTraverseInvocation,
@@ -1149,6 +1153,12 @@ export type TraversalContext = {
    * selection depended on.
    */
   schemaDocsAvailable: Set<string>;
+  /**
+   * Tracker keys of delivered documents whose VALUES this traversal has
+   * already scanned for embedded external schema refs, so each document is
+   * walked at most once per traversal (see `loadSchemaDocsForDeliveredValue`).
+   */
+  valueScannedDocs: Set<string>;
 };
 
 export function createTraversalContext(
@@ -1162,6 +1172,7 @@ export function createTraversalContext(
   ) => void,
   schemaDocsLoaded: Set<string> = new Set<string>(),
   schemaDocsAvailable: Set<string> = new Set<string>(),
+  valueScannedDocs: Set<string> = new Set<string>(),
 ): TraversalContext {
   return {
     tracker,
@@ -1171,6 +1182,7 @@ export function createTraversalContext(
     onMissingLinkTarget,
     schemaDocsLoaded,
     schemaDocsAvailable,
+    valueScannedDocs,
   };
 }
 
@@ -2276,6 +2288,8 @@ function followPointer(
     address: target,
     value: valueEntry.value,
   };
+  // Delivery-keyed collection for the followed document's own embedded refs.
+  loadSchemaDocsForDeliveredValue(tx, target, valueEntry.value, context);
 
   // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
   // then the provided path from the arguments.
@@ -2409,6 +2423,10 @@ function loadMetaLinkedDocFromLink(
   return { address, value: result.ok.value, selector: REJECTING_SELECTOR };
 }
 
+// Meta-linked docs are delivered too; their embedded refs collect in
+// traverseMetaLinkedDoc's caller via loadSchemaDocsForDeliveredValue at the
+// loadMetaLinkedDocs loop below.
+
 /**
  * Loads the schema-document closure behind every external ref in `schema`
  * into the traversal: each document is read (a scheduling-visible read, so
@@ -2437,7 +2455,114 @@ function loadExternalSchemaDocs(
   context: TraversalContext,
 ): boolean {
   if (!containsExternalSchemaRef(schema)) return true;
-  const pending = [...collectExternalSchemaRefHashes(schema)];
+  loadSchemaDocClosure(
+    tx,
+    referrer,
+    collectExternalSchemaRefHashes(schema),
+    context,
+  );
+
+  // The verdict: every hash transitively reachable from the schema's own
+  // refs was collected in this traversal (this call or an earlier one — the
+  // per-context set accumulates).
+  const pendingCheck = [...collectExternalSchemaRefHashes(schema)];
+  const checked = new Set<string>();
+  while (pendingCheck.length > 0) {
+    const hash = pendingCheck.pop()!;
+    if (checked.has(hash)) continue;
+    checked.add(hash);
+    if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
+      return false;
+    }
+    const document = lookupSchemaDocument(hash);
+    if (document === undefined) return false;
+    pendingCheck.push(...collectExternalSchemaRefHashes(document));
+  }
+  return true;
+}
+
+/**
+ * Collects the external schema-ref hashes carried by link-payload schema
+ * positions anywhere in a delivered value. A traversal value can be CYCLIC
+ * (the cycle-fallback machinery feeds self-referential objects through
+ * delivery), so this walk carries its own on-path guard — the transport
+ * walker (`mapLinkSchemas`) is deliberately guard-free for tree-shaped wire
+ * values and stays that way. Non-link `FabricInstance` contents live in
+ * private slots and are not walked, the same blindness the transport
+ * walkers share.
+ */
+function collectDeliveredValueSchemaRefs(
+  value: FabricValue,
+  into: Set<string>,
+  seen: WeakSet<object>,
+): void {
+  if (value === null || typeof value !== "object") return;
+  if (seen.has(value)) return;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectDeliveredValueSchemaRefs(item, into, seen);
+    }
+    return;
+  }
+  if (isLinkRef(value)) {
+    const payload = linkRefPayload(value);
+    if (isObjectOrArray(payload)) {
+      const schema = (payload as { schema?: unknown }).schema;
+      if (schema !== undefined) {
+        for (
+          const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+        ) {
+          into.add(hash);
+        }
+      }
+      for (const [key, child] of Object.entries(payload)) {
+        if (key !== "schema") {
+          collectDeliveredValueSchemaRefs(child as FabricValue, into, seen);
+        }
+      }
+      return;
+    }
+  }
+  if (value instanceof FabricPrimitive || value instanceof FabricInstance) {
+    return;
+  }
+  for (const child of Object.values(value)) {
+    collectDeliveredValueSchemaRefs(child as FabricValue, into, seen);
+  }
+}
+
+/**
+ * The read-side delivery guarantee's collection step, keyed on DELIVERY:
+ * every document a traversal adds to its result is scanned for link schemas
+ * carrying external refs, and their closures are collected into the same
+ * result — a rejecting pull included, since its delivered document's
+ * embedded refs must resolve for whoever reads it next.
+ */
+export function loadSchemaDocsForDeliveredValue(
+  tx: IExtendedStorageTransaction,
+  address: IMemorySpaceAddress,
+  value: FabricValue | undefined,
+  context: TraversalContext,
+): void {
+  if (value === undefined || !isObjectOrArray(value)) return;
+  const key = getTrackerKey(address);
+  if (context.valueScannedDocs.has(key)) return;
+  context.valueScannedDocs.add(key);
+  const hashes = new Set<string>();
+  collectDeliveredValueSchemaRefs(value, hashes, new WeakSet());
+  if (hashes.size > 0) {
+    loadSchemaDocClosure(tx, address, hashes, context);
+  }
+}
+
+function loadSchemaDocClosure(
+  tx: IExtendedStorageTransaction,
+  referrer: IMemorySpaceAddress,
+  initialHashes: ReadonlySet<string>,
+  context: TraversalContext,
+): void {
+  const pending = [...initialHashes];
   while (pending.length > 0) {
     const hash = pending.pop()!;
     const address = {
@@ -2493,24 +2618,6 @@ function loadExternalSchemaDocs(
       ]);
     }
   }
-
-  // The verdict: every hash transitively reachable from the schema's own
-  // refs was collected in this traversal (this call or an earlier one — the
-  // per-context set accumulates).
-  const pendingCheck = [...collectExternalSchemaRefHashes(schema)];
-  const checked = new Set<string>();
-  while (pendingCheck.length > 0) {
-    const hash = pendingCheck.pop()!;
-    if (checked.has(hash)) continue;
-    checked.add(hash);
-    if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
-      return false;
-    }
-    const document = lookupSchemaDocument(hash);
-    if (document === undefined) return false;
-    pendingCheck.push(...collectExternalSchemaRefHashes(document));
-  }
-  return true;
 }
 
 function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
@@ -2553,6 +2660,7 @@ function traverseMetaLinkedDoc(
     context.onMissingLinkTarget,
     context.schemaDocsLoaded,
     context.schemaDocsAvailable,
+    context.valueScannedDocs,
   );
   const traverser = new SchemaObjectTraverser(
     tx,
@@ -2604,6 +2712,12 @@ export function loadMetaLinkedDocs(
         if (linkedDoc.address.id.startsWith("cid:")) {
           continue;
         }
+        loadSchemaDocsForDeliveredValue(
+          tx,
+          linkedDoc.address,
+          linkedDoc.value as FabricValue,
+          context,
+        );
         const linkedDocKey = getTrackerKey(linkedDoc.address);
         if (context.metaDocsVisited.has(linkedDocKey)) continue;
         context.metaDocsVisited.add(linkedDocKey);
@@ -3229,6 +3343,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
       this.tx,
       doc.address,
       this.selector.schema,
+      this.context,
+    );
+    // Delivery-keyed collection: the delivered root's own embedded refs
+    // travel with it, a rejecting pull included.
+    loadSchemaDocsForDeliveredValue(
+      this.tx,
+      doc.address,
+      doc.value,
       this.context,
     );
     // Reset MapSet deepEqual counters

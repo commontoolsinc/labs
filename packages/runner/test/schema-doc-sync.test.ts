@@ -280,6 +280,54 @@ describe("schema-doc-sync", () => {
     expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
   });
 
+  it("delivers the closure behind a document's embedded refs on a schema-less pull", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { rejectingPull: { $ref: "#/$defs/RejectingPullLeaf" } },
+      $defs: {
+        RejectingPullLeaf: {
+          type: "object",
+          properties: { rejectingLeaf: { type: "string" } },
+        },
+      },
+    };
+    const decomposed = decomposeSchema(schema);
+    await writeSchemaDocs(decomposed);
+    await writeDocs({
+      "of:rejecting-carrier": {
+        carried: {
+          "/": {
+            "link@1": {
+              id: "of:rejecting-carrier-target",
+              path: [],
+              schema: { $ref: decomposed.rootRef },
+            },
+          },
+        },
+      } as FabricValue,
+    });
+
+    // The bug this pins: a schema:false pull delivered the carrier alone,
+    // leaving its embedded refs permanently unresolvable in the receiving
+    // realm — the delivery guarantee violated for non-traversing pulls.
+    const provider = readerStorage.open(space);
+    const result = await provider.sync("of:rejecting-carrier" as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(result.error).toBeUndefined();
+    await readerStorage.synced();
+
+    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
+    for (const hash of decomposed.documents.keys()) {
+      const stored = (provider as unknown as {
+        get: (uri: URI) => unknown;
+      }).get(`cid:${hash}` as URI);
+      expect(stored).toBeDefined();
+    }
+  });
+
   it("keeps registrations alive past one manager's close while another session holds its lease", async () => {
     const schema: JSONSchemaObj = {
       type: "object",

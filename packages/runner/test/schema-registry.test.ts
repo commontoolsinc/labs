@@ -273,6 +273,28 @@ describe("schema-registry", () => {
       expect(resolved).toEqual(inner);
     });
 
+    it("throws from the OrThrow resolver for an unregistered document — a delivery-guarantee violation is loud", () => {
+      // The read-side delivery guarantee says a document arrives WITH the
+      // schema documents its embedded refs need. An unresolvable external
+      // ref on an OrThrow path therefore signals a consistency bug in
+      // delivery, not a state to tolerate quietly.
+      const orphanRef = `cid:${
+        internSchemaAsTaggedHashString({
+          type: "object",
+          properties: { orThrowOrphan: { type: "string" } },
+        })
+      }`;
+      expect(() =>
+        ContextualFlowControl.resolveSchemaRefsOrThrow({ $ref: orphanRef })
+      ).toThrow("Failed to resolve");
+      expect(() =>
+        ContextualFlowControl.resolveSchemaRefsOrThrow(
+          { $ref: "#/$defs/NoSuchDef" },
+          { type: "object" },
+        )
+      ).toThrow("Failed to resolve");
+    });
+
     it("returns `false` from resolveSchema() for an unregistered document", () => {
       const orphanRef = `cid:${
         internSchemaAsTaggedHashString({
