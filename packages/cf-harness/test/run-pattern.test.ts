@@ -1156,6 +1156,52 @@ describe("run-pattern", () => {
       expect((await pieces.getRegisteredPieces()).length).toBe(1);
     });
 
+    it("reports the piece as still listed when the removal answers that the list did not hold it", async () => {
+      // `remove` resolving false is not the same as it throwing: the call
+      // succeeded and reported that nothing left the list. The message follows
+      // the answer rather than the absence of an exception.
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
+
+      const controller = new AbortController();
+      const originalGetSpace = pieces.getSpace.bind(pieces);
+      const originalAdd = pieces.add.bind(pieces);
+      const originalRemove = pieces.remove.bind(pieces);
+      pieces.add = async (cells) => {
+        await originalAdd(cells);
+        pieces.getSpace = () => {
+          pieces.getSpace = originalGetSpace;
+          throw new Error("slug assignment refused");
+        };
+        controller.abort();
+      };
+      let removeCalls = 0;
+      pieces.remove = () => {
+        removeCalls += 1;
+        return Promise.resolve(false);
+      };
+
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        register: { slug: "doubling-report" },
+      }, { signal: controller.signal });
+      pieces.getSpace = originalGetSpace;
+      pieces.add = originalAdd;
+      pieces.remove = originalRemove;
+
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("cancelled");
+      expect(removeCalls).toBe(1);
+      expect(output.message).toContain("was left listed");
+      expect(output.message).not.toContain("no longer listed");
+    });
+
     it("surfaces a rejected session construction as a structured error and invokes the factory again on the next call", async () => {
       let factoryCalls = 0;
       const engine = new CfHarnessEngine({

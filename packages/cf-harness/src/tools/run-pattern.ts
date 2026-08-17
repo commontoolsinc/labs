@@ -857,8 +857,10 @@ export const runPatternTool: HarnessToolDefinition<
             // under no slug is one the caller was given no way to reach —
             // except where the abort landed inside the slug assignment, whose
             // name may go on reaching it, which is why the output below says so.
-            await pieces.remove(piece.getCell());
-            delistedPiece = true;
+            // `remove` answers whether the piece left the list — it returns
+            // false when the list did not hold it — so the report follows that
+            // answer rather than the fact that the call was made.
+            delistedPiece = await pieces.remove(piece.getCell());
           } catch {
             // Best-effort. The cancelled output stands either way, and reports
             // the piece as left listed rather than claiming a removal that did

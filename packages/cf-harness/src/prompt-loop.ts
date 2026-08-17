@@ -1397,7 +1397,7 @@ const scrubBareFabricIdentifiersDeep = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map((entry) => scrubBareFabricIdentifiersDeep(entry));
   }
-  if (isObjectRecord(value)) {
+  if (isObjectNotArray(value)) {
     const scrubbed: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
       // `defineProperty` rather than assignment, so a scrubbed key of
