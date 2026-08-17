@@ -193,22 +193,36 @@ export function verbListingLines(
       ...notes.filter((note) => note !== hiddenNote).map((note) => `(${note})`),
     ];
   }
+  // One table line per row by construction — no cell holds a newline and no
+  // width is set — which is what lets each row's prose be slotted directly
+  // beneath it: the verb's own doc comment, the same sentence its help page
+  // opens with and `--json` carries as the row's `description`. The grid
+  // stays scannable; the words ride under it rather than in a column they
+  // would overflow.
+  const table = Table.from([
+    ["NAME", "KIND", "ON", "MARKS"],
+    ...shown.map((v) => [
+      v.name,
+      v.kind,
+      v.on,
+      [
+        ...(v.tier === "wrapper" ? ["wrapper"] : []),
+        ...(v.deprecated ? ["deprecated"] : []),
+      ].join(","),
+    ]),
+  ]).toString().split("\n");
+  const rows: string[] = [table[0]];
+  shown.forEach((verb, at) => {
+    rows.push(table[at + 1]);
+    for (const line of verb.description?.split("\n") ?? []) {
+      rows.push(`    ${line}`);
+    }
+  });
   return [
     ...(listing.pattern
       ? [`PATTERN ${formatPatternIdentity(listing.pattern)}`]
       : []),
-    Table.from([
-      ["NAME", "KIND", "ON", "MARKS"],
-      ...shown.map((v) => [
-        v.name,
-        v.kind,
-        v.on,
-        [
-          ...(v.tier === "wrapper" ? ["wrapper"] : []),
-          ...(v.deprecated ? ["deprecated"] : []),
-        ].join(","),
-      ]),
-    ]).toString(),
+    ...rows,
     ...notes.map((note) => `(${note})`),
   ];
 }

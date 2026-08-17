@@ -147,6 +147,19 @@ else
     ok "an event field's JSDoc reaches its flag description" ||
     bad "the flag carries no description: [$FIELD_DOC]"
 fi
+# The third parameter level: a RESULT field's comment, beside its line in the
+# Output section. Its needle travels the other route again — the description
+# is a ref-site sibling on the declared result's property — and reaches the
+# text page with no resolution at all.
+RESULT_DOC=$(sed -n '/interface AddItemResult {/,/^}/p' "$FIXTURE" |
+  sed -n 's/.*\/\*\* *\(.*[^ ]\) *\*\/.*/\1/p' | head -1)
+if [ -z "$RESULT_DOC" ]; then
+  bad "no JSDoc on AddItemResult's field in the fixture — the probe has no needle"
+else
+  echo "$HELP" | grep -qiF "$RESULT_DOC" &&
+    ok "a result field's JSDoc reaches its Output line" ||
+    bad "the Output line carries no description: [$RESULT_DOC]"
+fi
 # The verb's own comment, on the line above its `Stream` property. Its needle
 # comes from BoardOutput rather than from the event interface, because the two
 # travel by different routes — this one is a sibling of the property's `$ref`,
@@ -166,6 +179,11 @@ else
     >/dev/null 2>&1 &&
     ok "the verb's own JSDoc reaches its listing row" ||
     bad "the listing row carries no description: [$VERB_DOC]"
+  # And beneath the row a person scans: the text table prints the same
+  # sentence under the verb's grid line.
+  $CF piece verbs --piece board $ARGS 2>/dev/null | grep -qF "$VERB_DOC" &&
+    ok "the same words ride beneath the text table's row" ||
+    bad "the text listing shows names only: [$VERB_DOC]"
 fi
 # The third prose level — an event INTERFACE's own comment — is not probed
 # here, and deliberately. It never compiles, so the honest assertion is that it
