@@ -26,6 +26,7 @@ export {
   FileSystemProgramResolver,
   HttpProgramResolver,
   InMemoryProgram,
+  readDataFileSource,
 } from "./program.ts";
 export {
   composeBundleSourceMap,

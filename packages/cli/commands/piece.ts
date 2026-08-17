@@ -272,6 +272,7 @@ export function localPatternEntry(
     repository?: string;
     root?: string;
     test?: string[];
+    datafile?: string[];
   },
 ): EntryConfig {
   return {
@@ -280,6 +281,7 @@ export function localPatternEntry(
     repository: options.repository,
     rootPath: options.root ? absPath(options.root) : undefined,
     testPaths: options.test?.map((path) => absPath(path)),
+    dataFilePaths: options.datafile?.map((path) => absPath(path)),
   };
 }
 
@@ -1722,6 +1724,11 @@ export const piece = targetOptions(
     "Attach a test pattern source file to the deployed source package. Repeatable.",
     { collect: true },
   )
+  .option(
+    "--datafile <path:string>",
+    "Attach a data file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .option(
     "--dangerously-allow-incompatible-schema",
@@ -1857,6 +1864,11 @@ export const piece = targetOptions(
   .option(
     "--test <path:string>",
     "Attach a test pattern source file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
+  .option(
+    "--datafile <path:string>",
+    "Attach a data file to the deployed source package. Repeatable.",
     { collect: true },
   )
   .option(
@@ -2439,6 +2451,11 @@ updated effective label view.`),
     "Attach a test pattern source file to the deployed source package. Repeatable.",
     { collect: true },
   )
+  .option(
+    "--datafile <path:string>",
+    "Attach a data file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
   .arguments("[main:string]")
   .action(async (options, main?: string) => {
     setQuietMode(!!options.quiet);
@@ -2464,6 +2481,12 @@ updated effective label view.`),
     if (options.reset && options.test !== undefined) {
       throw new ValidationError(
         "Cannot use --test with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.datafile !== undefined) {
+      throw new ValidationError(
+        "Cannot use --datafile with --reset.",
         { exitCode: 1 },
       );
     }
@@ -2494,6 +2517,7 @@ export interface PieceCLIOptions {
   repository?: string;
   root?: string;
   test?: string[];
+  datafile?: string[];
   dangerouslyAllowIncompatibleSchema?: boolean;
   json?: boolean;
 }

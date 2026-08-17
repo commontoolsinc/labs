@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import type { CfcPolicyCompilerManifestV1 } from "../core/runtime-contract.ts";
 
@@ -38,9 +39,6 @@ class StaticAuthoringError extends Error {
     super(message);
   }
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const assertKeys = (
   value: Record<string, unknown>,
@@ -207,7 +205,7 @@ const expressionFromStatic = (
       value.map((entry) => expressionFromStatic(entry, factory)),
     );
   }
-  if (isRecord(value)) {
+  if (isObjectNotArray(value)) {
     return factory.createObjectLiteralExpression(
       Object.entries(value).map(([key, field]) =>
         factory.createPropertyAssignment(
@@ -223,7 +221,7 @@ const expressionFromStatic = (
 const collectVariables = (value: unknown, into: Set<string>): void => {
   if (Array.isArray(value)) {
     value.forEach((entry) => collectVariables(entry, into));
-  } else if (isRecord(value)) {
+  } else if (isObjectNotArray(value)) {
     if (
       Object.keys(value).length === 1 && typeof value.var === "string"
     ) {
@@ -236,7 +234,7 @@ const collectVariables = (value: unknown, into: Set<string>): void => {
 
 const containsThisPolicy = (value: unknown): boolean => {
   if (Array.isArray(value)) return value.some(containsThisPolicy);
-  if (!isRecord(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   if (value.thisPolicy === true) return true;
   return Object.values(value).some(containsThisPolicy);
 };
@@ -246,7 +244,7 @@ const lowerRule = (
   value: unknown,
   node: ts.Node,
 ): AuthoredRule => {
-  if (!isRecord(value)) {
+  if (!isObjectNotArray(value)) {
     throw new StaticAuthoringError(node, "exchangeRule() requires an object");
   }
   assertKeys(
@@ -256,7 +254,7 @@ const lowerRule = (
     "rule",
   );
   if (
-    !isRecord(value.appliesTo) || value.appliesTo.thisPolicy !== true ||
+    !isObjectNotArray(value.appliesTo) || value.appliesTo.thisPolicy !== true ||
     Object.keys(value.appliesTo).length !== 1
   ) {
     throw new StaticAuthoringError(
@@ -266,7 +264,7 @@ const lowerRule = (
   }
 
   const pre = value.pre === undefined ? {} : value.pre;
-  if (!isRecord(pre)) {
+  if (!isObjectNotArray(pre)) {
     throw new StaticAuthoringError(node, "rule pre must be a static object");
   }
   assertKeys(pre, new Set(["confidentiality", "integrity"]), node, "pre");
@@ -287,7 +285,7 @@ const lowerRule = (
 
   let guard: AuthoredRule["guard"];
   if (value.guard !== undefined) {
-    if (!isRecord(value.guard)) {
+    if (!isObjectNotArray(value.guard)) {
       throw new StaticAuthoringError(
         node,
         "rule guard must be a static object",
@@ -305,7 +303,8 @@ const lowerRule = (
     }
     for (const entry of value.guard.policyState) {
       if (
-        !isRecord(entry) || typeof entry.kind !== "string" || entry.kind === ""
+        !isObjectNotArray(entry) || typeof entry.kind !== "string" ||
+        entry.kind === ""
       ) {
         throw new StaticAuthoringError(
           node,
@@ -329,7 +328,7 @@ const lowerRule = (
   ) {
     throw new StaticAuthoringError(node, "invalid preConfScope");
   }
-  if (!isRecord(value.post)) {
+  if (!isObjectNotArray(value.post)) {
     throw new StaticAuthoringError(node, "rule post must be a static object");
   }
   assertKeys(

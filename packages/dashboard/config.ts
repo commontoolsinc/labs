@@ -38,6 +38,10 @@ export const DUR_MAX_AGE_HOURS = 6;
 // several distinct days, so the recent slice is measured in days, not hours.
 export const BENCH_TREND_MIN_RUNS = 20;
 export const BENCH_TREND_MAX_AGE_DAYS = 14;
+// A processor contributes to the benchmark headline only while the collection
+// has measured it recently. This keeps an old processor-specific regression
+// from setting the tile after the runner group has moved to other processors.
+export const BENCH_HEADLINE_MAX_AGE_HOURS = 12;
 // The trend reads one run per bucket of this length, matching the
 // benchmarks.yml cron. The collection keeps every run, for the drill-down's
 // shortest view; the trend does not want that resolution, because runs closer

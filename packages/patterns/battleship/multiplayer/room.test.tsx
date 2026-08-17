@@ -11,14 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/battleship/multiplayer/room.test.tsx --root packages/patterns/battleship --verbose
  */
-import {
-  action,
-  assert,
-  computed,
-  pattern,
-  TESTS,
-  Writable,
-} from "commonfabric";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 import BattleshipRoom from "./room.tsx";
 import {
   createInitialShots,
@@ -181,13 +174,13 @@ export default pattern(() => {
   // Assertions - After Hit
   // ==========================================================================
 
-  const _assert_hit_recorded = computed(() => {
+  const _assert_hit_recorded = assert(() => {
     const shots = shotsCell.get();
     // Player 1 fired at player 2's board at 0,0 where destroyer is
     return shots[2][0][0] === "hit";
   });
 
-  const _assert_message_contains_hit = computed(() =>
+  const _assert_message_contains_hit = assert(() =>
     gameStateCell.get().lastMessage.includes("Hit")
   );
 

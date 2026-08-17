@@ -4,6 +4,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { isDID } from "@commonfabric/identity";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { Context } from "@hono/hono";
 
 // Blob routes are intentionally unauthenticated for the MVP. Anyone can POST a
@@ -49,9 +50,6 @@ class BlobPayloadTooLarge extends Error {
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
 /**
  * Interprets a decoded request body as bytes, or returns `undefined` when it
  * is not byte-shaped. The result is always freshly allocated and unshared, so
@@ -73,7 +71,7 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
   ) {
     return Uint8Array.from(value);
   }
-  if (!isRecord(value)) {
+  if (!isObjectNotArray(value)) {
     return undefined;
   }
 
@@ -95,7 +93,7 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
 };
 
 const asBlobContents = (value: unknown): BlobContents | undefined => {
-  if (!isRecord(value) || typeof value.type !== "string") {
+  if (!isObjectNotArray(value) || typeof value.type !== "string") {
     return undefined;
   }
   if (value.body instanceof FabricBytes) {

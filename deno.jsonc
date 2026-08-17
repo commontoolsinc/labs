@@ -4,6 +4,7 @@
     "./packages/background-piece-service",
     "./packages/piece",
     "./packages/cli",
+    "./packages/connectors/agents",
     "./packages/content-hash",
     "./packages/dashboard",
     "./packages/data-model",
@@ -139,6 +140,9 @@
       "packages/static/assets/",
       "packages/ts-transformers/test/fixtures",
       "packages/schema-generator/test/fixtures",
+      // Attached data files travel byte-for-byte and their bytes are asserted
+      // on; formatting them would rewrite the thing under test.
+      "packages/cli/integration/pattern/data/",
       "packages/ui/src/v2/components/cf-chart/cf-chart.ts",
       "packages/ui/src/v2/components/cf-chart/lib/axes.ts",
       "packages/ui/src/v2/components/cf-chart/lib/render.ts",

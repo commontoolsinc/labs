@@ -1,3 +1,4 @@
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -229,9 +230,6 @@ const ROOT_PATH = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const LUNCH_POLL_DIR = new URL("../lunch-poll/", import.meta.url).pathname
   .replace(/\/$/, "");
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
 const asString = (value: unknown): string =>
   typeof value === "string" ? value : "";
 
@@ -241,7 +239,7 @@ const asNumber = (value: unknown): number =>
 const asBoolean = (value: unknown): boolean => value === true;
 
 const asRecordArray = (value: unknown): readonly Record<string, unknown>[] =>
-  Array.isArray(value) ? value.filter(isRecord) : [];
+  Array.isArray(value) ? value.filter(isObjectNotArray) : [];
 
 const asStringArray = (value: unknown): readonly string[] =>
   Array.isArray(value)
@@ -249,7 +247,7 @@ const asStringArray = (value: unknown): readonly string[] =>
     : [];
 
 function pollSummary(value: unknown): PollOutputSummary {
-  if (!isRecord(value)) {
+  if (!isObjectNotArray(value)) {
     throw new Error(
       `poll output is not an object: ${JSON.stringify(value)}`,
     );
@@ -277,7 +275,7 @@ function pathKey(address: TraceAddressSummary): string {
 }
 
 function traceAddressSummary(value: unknown): TraceAddressSummary {
-  if (!isRecord(value)) return {};
+  if (!isObjectNotArray(value)) return {};
   return {
     space: asString(value.space),
     entityId: asString(value.entityId),
@@ -286,7 +284,7 @@ function traceAddressSummary(value: unknown): TraceAddressSummary {
 }
 
 function traceEntrySummary(value: unknown): ActionRunTraceSummary {
-  if (!isRecord(value)) {
+  if (!isObjectNotArray(value)) {
     return {
       actionId: "",
       actionType: "",
@@ -309,13 +307,15 @@ function traceEntrySummary(value: unknown): ActionRunTraceSummary {
 }
 
 function summarizeSettleEntry(value: unknown) {
-  const stats = isRecord(value) && isRecord(value.stats) ? value.stats : {};
+  const stats = isObjectNotArray(value) && isObjectNotArray(value.stats)
+    ? value.stats
+    : {};
   const iterations = Array.isArray(stats.iterations) ? stats.iterations : [];
   let maxWorkSetSize = 0;
   let maxOrderSize = 0;
   let actionsRun = 0;
   for (const iteration of iterations) {
-    if (!isRecord(iteration)) continue;
+    if (!isObjectNotArray(iteration)) continue;
     maxWorkSetSize = Math.max(maxWorkSetSize, asNumber(iteration.workSetSize));
     maxOrderSize = Math.max(maxOrderSize, asNumber(iteration.orderSize));
     actionsRun += asNumber(iteration.actionsRun);

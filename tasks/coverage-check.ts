@@ -960,7 +960,7 @@ export const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
   ...[1, 2, 3, 4, 5, 6, 7, 8].map((shard) =>
     `coverage-profile-runner-${shard}`
   ),
-  ...[1, 2, 3].map((shard) => `coverage-profile-generated-patterns-${shard}`),
+  ...[1, 2].map((shard) => `coverage-profile-generated-patterns-${shard}`),
   "coverage-profile-package-runner",
   "coverage-profile-package-runtime-client",
   "coverage-profile-package-shell",
@@ -968,7 +968,7 @@ export const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
     `coverage-profile-pattern-integration-${shard}`
   ),
   "coverage-profile-pattern-reload",
-  ...[1, 2, 3, 4, 5].map((chunk) => `coverage-profile-pattern-unit-${chunk}`),
+  ...[1, 2, 3, 4].map((chunk) => `coverage-profile-pattern-unit-${chunk}`),
 ];
 
 function sampleForRun(

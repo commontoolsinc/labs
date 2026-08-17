@@ -26,11 +26,8 @@ type RewriteState = {
   onSchema?: (schema: JSONSchema) => void;
 };
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  isPlainObject(value);
-
 const isCompressibleSchema = (value: unknown): value is JSONSchema =>
-  value === true || value === false || isPlainRecord(value);
+  value === true || value === false || isPlainObject(value);
 
 const schemaRefFor = (
   schema: JSONSchema,
@@ -184,11 +181,11 @@ const compressResponseSync = (
   if (message.type !== "response" || message.ok === undefined) {
     return message;
   }
-  if (!isPlainRecord(message.ok)) {
+  if (!isPlainObject(message.ok)) {
     return message;
   }
   const sync = message.ok.sync;
-  if (!isPlainRecord(sync) || sync.type !== "sync") {
+  if (!isPlainObject(sync) || sync.type !== "sync") {
     return message;
   }
 
@@ -208,14 +205,14 @@ const expandResponseSync = (
   message: unknown,
   onSchema?: (schema: JSONSchema) => void,
 ): unknown => {
-  if (!isPlainRecord(message) || message.type !== "response") {
+  if (!isPlainObject(message) || message.type !== "response") {
     return message;
   }
-  if (!isPlainRecord(message.ok)) {
+  if (!isPlainObject(message.ok)) {
     return message;
   }
   const sync = message.ok.sync;
-  if (!isPlainRecord(sync) || sync.type !== "sync") {
+  if (!isPlainObject(sync) || sync.type !== "sync") {
     return message;
   }
 
@@ -248,7 +245,7 @@ export const expandServerMessageSchemas = (
   message: unknown,
   onSchema?: (schema: JSONSchema) => void,
 ): unknown => {
-  if (isPlainRecord(message) && message.type === "session/effect") {
+  if (isPlainObject(message) && message.type === "session/effect") {
     return {
       ...message,
       effect: expandSessionSyncSchemas(

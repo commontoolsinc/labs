@@ -300,7 +300,7 @@ surveillance tool.
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond. A source whose feed stopped being written more than four days ago counts as one that cannot be read, rather than charting the days since as $0. A month whose usage report cannot be read breaks that source's line across those days rather than charting them as $0 | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
-| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
+| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise from a CPU measured in the preceding twelve hours. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total; a provider whose cost report stopped being written more than four days ago is one of those | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
@@ -643,8 +643,9 @@ Notes:
   benchmark barely registers, however slow that benchmark is. The drill-down
   covers individual benchmarks. A summed total would instead be dominated by
   the few slowest benchmarks. Each CPU has its own colored line. The headline
-  shows the largest established CPU trend. A second line names how many
-  benchmarks the latest run measured and the highlighted window when applicable.
+  shows the largest established trend among CPUs measured in the preceding
+  twelve hours. A second line names how many benchmarks the latest run measured
+  and the highlighted window when applicable.
   **Red** marks the **most recent run failing outright, or finishing green on CI
   with no readable benchmark data**. A successful run with no usable output is
   treated as failed. Either failure takes over that second line, in place of the
@@ -664,17 +665,20 @@ Notes:
   color may be about to move; the runs that have finished still set it. The red
   state reads the workflow-run list and the latest run's cached result. It
   therefore fires when the artifacts cannot be read. **Orange** means at least
-  one CPU index is **trending up** past 5%. Each CPU trend uses the runs in the
-  last `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`,
-  whichever set is larger. This matches the window rule used for the CI
-  duration median. The corresponding line still spans the full ~45 days. Its
-  trend window is brighter. Green means every established CPU is flat or
-  falling. A benchmark runs either to a fixed time budget or for a fixed number
-  of iterations, and neither is a measurement. The run's wall clock therefore
-  barely moves with performance. The per-operation times do move, so the tile
-  trends those values instead. Because the index
-  comes from artifacts, the tile turns gray when no in-window run has readable
-  data and the latest run is neither failed nor empty. A collection leaves its
+  one CPU measured in the preceding twelve hours has an index **trending up**
+  past 5%. Each CPU trend uses the runs in the last
+  `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`, whichever set
+  is larger. This matches the window rule used for the CI duration median. The
+  corresponding line still spans the full ~45 days. Its trend window is
+  brighter. Green means every eligible established CPU is flat or falling. If
+  no CPU has been measured in the preceding twelve hours, the tile turns gray
+  and reports **no recent benchmark data**. A benchmark runs either to a fixed
+  time budget or for a fixed number of iterations, and neither is a
+  measurement. The run's wall clock therefore barely moves with performance.
+  The per-operation times do move, so the tile trends those values instead.
+  Because the index comes from artifacts, the tile also turns gray when no
+  in-window run has readable data and the latest run is neither failed nor
+  empty. A collection leaves its
   last completed color and values in place until the workflow status and
   artifact refresh have both settled. A collection that takes more than a
   minute says **refresh still pending** without changing that color. A newly

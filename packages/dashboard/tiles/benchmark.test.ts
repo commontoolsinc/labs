@@ -25,6 +25,7 @@ import {
   availableGeneratedCpuColor,
   benchmark,
   type BenchmarkFetchProgress,
+  benchmarkHeadlineCandidates,
   benchmarkHistoryCheckResponse,
   benchmarkFailureLabel,
   benchmarkHistoryProgressResponse,
@@ -62,8 +63,9 @@ if (Deno.env.get("DASHBOARD_CACHE_DIR") === undefined) {
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
-// Midnight UTC yesterday plus two hours keeps test data inside the live window.
-const BASE = Math.floor(Date.now() / DAY) * DAY - DAY + 2 * HOUR;
+// One full hour before the current hour keeps each common newest successful
+// fixture inside the headline window.
+const BASE = Math.floor(Date.now() / HOUR) * HOUR - HOUR;
 const COLLECTION_BUCKET = ciHistoryBucketMs(CI_HISTORY_MIN_DAYS);
 const SAMPLED_BASE = Math.floor(BASE / COLLECTION_BUCKET) *
     COLLECTION_BUCKET +
@@ -1231,6 +1233,39 @@ Deno.test("benchmark: runs inside one trend bucket are one sample, newest kept",
   );
 });
 
+Deno.test("benchmark: the headline considers CPUs measured in the last 12 hours", () => {
+  const now = Date.UTC(2026, 7, 17, 12);
+  const hours = (count: number) => count * HOUR;
+  const stale = { name: "stale", points: [{ at: now - hours(12) - 1 }] };
+  const boundary = { name: "boundary", points: [{ at: now - hours(12) }] };
+  const recent = {
+    name: "recent",
+    points: [{ at: now - hours(20) }, { at: now - hours(1) }],
+  };
+  const future = { name: "future", points: [{ at: now + 1 }] };
+
+  assertEquals(
+    benchmarkHeadlineCandidates([stale, boundary, recent, future], now),
+    [boundary, recent],
+  );
+});
+
+Deno.test("benchmark: the tile reports when every CPU measurement is stale", async () => {
+  await withTotals(
+    Array.from({ length: 8 }, (_, day) => ({
+      id: 95_000 + day,
+      at: BASE - (8 - day) * DAY,
+      total: (5 + day) * 1e6,
+    })),
+    async () => {
+      const tile = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      assertEquals(tile.status, "unknown");
+      assertEquals(tile.value, "—");
+      assertEquals(tile.sub, "no recent benchmark data");
+    },
+  );
+});
+
 Deno.test("benchmark: a red run's measurements still reach the trend", async () => {
   // Eight daily runs whose one benchmark climbs. Three of them are red, because
   // `deno bench` exits non-zero when any single benchmark throws — having
@@ -1477,7 +1512,7 @@ Deno.test("benchmark: returns a failed rising view after the run list settles", 
 });
 
 Deno.test("benchmark: a failed most-recent run turns the tile red over its last good total", async () => {
-  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
+  const at = (d: number) => SAMPLED_BASE - (6 - d) * DAY;
   // The last successful run totals 7ms; the failed head has no artifact to headline.
   await withTotals([
     ...Array.from({ length: 7 }, (_, d) => ({ id: 9_200 + d, at: at(d), total: d === 6 ? 7e6 : 5e6 })),
@@ -1492,7 +1527,7 @@ Deno.test("benchmark: a failed most-recent run turns the tile red over its last 
 });
 
 Deno.test("benchmark: consecutive failures are counted on the tile", async () => {
-  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
+  const at = (d: number) => SAMPLED_BASE - (6 - d) * DAY;
   // Seven good days, then three failures in a row.
   await withTotals([
     ...Array.from({ length: 7 }, (_, d) => ({ id: 9_310 + d, at: at(d), total: 5e6 })),
@@ -1513,7 +1548,7 @@ Deno.test("benchmark: consecutive failures are counted on the tile", async () =>
 Deno.test("benchmark: a failure outranks a rising trend", async () => {
   // Eight days whose one benchmark climbs from 5 to 12 ms, which alone reads orange,
   // and then a failed run.
-  const at = (d: number) => SAMPLED_BASE - (8 - d) * DAY;
+  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
   await withTotals([
     ...Array.from({ length: 8 }, (_, d) => ({ id: 9_330 + d, at: at(d), total: (5 + d) * 1e6 })),
     { id: 9_398, at: SAMPLED_BASE + HOUR, conclusion: "failure" },
@@ -1721,7 +1756,7 @@ Deno.test("benchmark: a run under way is a badge, not a verdict", async () => {
 });
 
 Deno.test("benchmark: a cancelled most-recent run is not a failure", async () => {
-  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
+  const at = (d: number) => SAMPLED_BASE - (6 - d) * DAY;
   await withTotals([
     ...Array.from({ length: 7 }, (_, d) => ({ id: 9_400 + d, at: at(d), total: d === 6 ? 7e6 : 5e6 })),
     { id: 9_499, at: SAMPLED_BASE + HOUR, conclusion: "cancelled" },
@@ -1770,7 +1805,9 @@ Deno.test("benchmark: a run that finished green but produced no valid data reads
   // Seven good days, then a run that passes CI but whose artifact carries no usable
   // measurement. It ran and made nothing, so it is as good as failed: red, over the
   // last run whose total could be read.
-  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
+  const at = (d: number) => d === 7
+    ? SAMPLED_BASE + HOUR
+    : SAMPLED_BASE - (6 - d) * DAY;
   const artifacts: Api["artifacts"] = {};
   const zips: Api["zips"] = {};
   const runs: GhRun[] = [];
@@ -2227,7 +2264,7 @@ Deno.test("benchmark: the tile indexes every benchmark equally; the drill-down k
   });
 });
 
-Deno.test("benchmark: CPU lines split across large gaps and use distinct colors", async () => {
+Deno.test("benchmark: stale CPU trends stay out of the headline while their lines remain", async () => {
   const directory = await Deno.makeTempDir({ prefix: "benchmark-cpus-" });
   const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
   Deno.env.set("DASHBOARD_CACHE_DIR", directory);
@@ -2327,8 +2364,11 @@ Deno.test("benchmark: CPU lines split across large gaps and use distinct colors"
         `./benchmark.ts?cpus=${crypto.randomUUID()}`
       );
       const tile = await isolated.benchmark.collect(ctx({ GH_TOKEN: "t" }));
-      assertEquals(tile.status, "warn");
-      assertStringIncludes(tile.value ?? "", "▲");
+      // The Apple line rises, but its last point is a day old. The recent
+      // one-point CPU lines set the headline and verdict while every line stays
+      // in the chart.
+      assertEquals(tile.status, "good");
+      assertStringIncludes(tile.value ?? "", "new");
       assertStringIncludes(tile.extra ?? "", ">1 benchmark</div>");
       assert(!/\bCPUs?\b/.test(tile.extra ?? ""));
       assert(!(tile.extra ?? "").includes('class="swatch"'));
@@ -3100,10 +3140,9 @@ Deno.test("benchmark: a rejected token grays out as an auth failure", async () =
   });
 });
 
-Deno.test("benchmark: a failed fetch keeps the last-known trend grayed instead of blanking", async () => {
-  // Was online and cached two runs, then the source goes unreachable. The tile keeps
-  // its last-known trend — grayed, with the reason — rather than dropping to a bare
-  // dash, and would recover on the next collection once the source is back.
+Deno.test("benchmark: a failed fetch keeps a stale cached trend grayed", async () => {
+  // Cache two runs older than the headline window, then make the source unreachable.
+  // The tile keeps the cached trend and chart gray with the reason.
   const directory = await Deno.makeTempDir({ prefix: "benchmark-offline-" });
   const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
   const originalFetch = globalThis.fetch;
@@ -3111,7 +3150,7 @@ Deno.test("benchmark: a failed fetch keeps the last-known trend grayed instead o
   Deno.env.set("DASHBOARD_CACHE_DIR", directory);
   const key = "packages/a/x.bench.ts";
   const healthy = serve({
-    pages: { 1: [ghRun(7_701, BASE - DAY), ghRun(7_702, BASE)] },
+    pages: { 1: [ghRun(7_701, BASE - 2 * DAY), ghRun(7_702, BASE - DAY)] },
     artifacts: {
       7_701: [{ id: 77_010, name: "bench-results", expired: false }],
       7_702: [{ id: 77_020, name: "bench-results", expired: false }],
@@ -3129,8 +3168,9 @@ Deno.test("benchmark: a failed fetch keeps the last-known trend grayed instead o
       return Promise.resolve(healthy(url));
     }) as typeof fetch;
     const online = await isolated.benchmark.collect(ctx({ GH_TOKEN: token }));
-    assertEquals(online.status, "good");
-    assertStringIncludes(online.value ?? "", "new"); // two runs, under a week -> "new"
+    assertEquals(online.status, "unknown");
+    assertEquals(online.value, "—");
+    assertEquals(online.sub, "no recent benchmark data");
 
     // The source becomes unreachable on the next collection.
     globalThis.fetch = (() =>
@@ -3138,10 +3178,10 @@ Deno.test("benchmark: a failed fetch keeps the last-known trend grayed instead o
         new TypeError("error sending request for url (https://api.github.com/...)"),
       )) as typeof fetch;
     const offline = await isolated.benchmark.collect(ctx({ GH_TOKEN: token }));
-    assertEquals(offline.status, "unknown"); // grayed — never a stale red or green
+    assertEquals(offline.status, "unknown");
     assertEquals(offline.sub, "source unreachable");
-    assertStringIncludes(offline.value ?? "", "new"); // kept the last-known trend
-    assert((offline.value ?? "") !== "—"); // not blanked to a bare dash
+    assertStringIncludes(offline.value ?? "", "new");
+    assertStringIncludes(offline.extra ?? "", "<svg");
   } finally {
     globalThis.fetch = originalFetch;
     if (previousCacheDirectory === undefined) {

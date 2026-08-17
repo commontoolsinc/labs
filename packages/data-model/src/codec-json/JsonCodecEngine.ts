@@ -4,6 +4,9 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
+import { DecodeContext } from "@/codec-common/DecodeContext.ts";
+import { EncodeContext } from "@/codec-common/EncodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { CODEC, type LiveEnvironment } from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
@@ -19,13 +22,24 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from
  * the formal spec (Section 5).
  *
- * Public surface: `EncodeContext<string>`, plus the matching decode direction.
- * - `encode(value)` -- full pipeline: tree-encode + stringify
+ * Public instance surface, two directions and two boundary types:
+ * - `encode(value, env?)` -- full pipeline: tree-encode + stringify
  * - `decode(data, env)` -- full pipeline: parse + tree-decode
+ * - `encodeToBytes(value, env?)` -- as `encode()`, to UTF-8 bytes
+ * - `decodeFromBytes(bytes, env)` -- as `decode()`, from UTF-8 bytes
  *
- * All internal machinery (tag wrapping, tree walking, byte conversion) is
- * private. Per-type encoding/decoding is delegated to the `FabricCodec`s in
- * the `CodecRegistry`.
+ * The machinery beneath is not public, and divides in two. The tree
+ * walkers, the tag wrapper and the context factories are `protected`:
+ * that is the surface a second engine extends, whether or not this one
+ * overrides any given member of it. This class's own helpers -- byte
+ * conversion, wire-text parsing, tag unwrapping and the container decode
+ * arms -- are `#`-private. Per-type encoding and decoding is delegated to
+ * the `FabricCodec`s in the `CodecRegistry`.
+ *
+ * Three statics are public besides: `seemsLikeEncoded()`, and the
+ * `wrapEncodedValueForTesting()` / `unwrapEncodedValueForTesting()` pair
+ * that lets a test build and take apart this format's tagged form without
+ * reaching into the private wrapper.
  *
  * **Cycles are refused** and **shared references are flattened**, per Section
  * 1.6 of the formal spec, which requires an engine to say which of these it
@@ -39,15 +53,34 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   // Instance members
   //
 
+  /** @inheritDoc */
+  protected override newEncodeContext(env: LiveEnvironment): EncodeContext {
+    return new EncodeContext(env);
+  }
+
+  /**
+   * @inheritDoc
+   *
+   * A plain one: this walk never enters a node, for the reason
+   * {@link #decode} gives, so the context's in-progress set is never
+   * allocated.
+   */
+  protected override newDecodeContext(env: LiveEnvironment): DecodeContext {
+    return new DecodeContext(env);
+  }
+
   /**
    * @inheritDoc
    *
    * Walks the value into the `/<Type>@<Version>` tagged tree, stringifies it,
    * and prefixes the format tag.
    */
-  override encode(value: FabricValue): string {
+  override encode(
+    value: FabricValue,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): string {
     return ENCODING_PREFIX_TAG +
-      JSON.stringify(this.encodeValue(value));
+      JSON.stringify(this.encodeValue(value, this.newEncodeContext(env)));
   }
 
   /**
@@ -71,12 +104,17 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
     const parsed = JsonCodecEngine.#parseWireText(json);
-    return this.decodeValue(parsed, env);
+    return this.decodeValue(parsed, this.newDecodeContext(env));
   }
 
   /** Encodes a fabric value to UTF-8 JSON bytes. */
-  encodeToBytes(value: FabricValue): Uint8Array {
-    return JsonCodecEngine.#toBytes(this.encodeValue(value));
+  encodeToBytes(
+    value: FabricValue,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): Uint8Array {
+    return JsonCodecEngine.#toBytes(
+      this.encodeValue(value, this.newEncodeContext(env)),
+    );
   }
 
   /**
@@ -89,7 +127,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     env: LiveEnvironment,
   ): FabricValue {
     const tree = JsonCodecEngine.#fromBytes(bytes);
-    return this.decodeValue(tree, env);
+    return this.decodeValue(tree, this.newDecodeContext(env));
   }
 
   /**
@@ -108,6 +146,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   protected override wrapTag(
     tag: string,
     state: JsonCodecValue,
+    _ctx: EncodeContext,
   ): JsonCodecValue {
     return { [`/${tag}`]: state } as JsonCodecValue;
   }
@@ -120,27 +159,32 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override encodeArray(
     value: readonly FabricValue[],
-    seen: Set<object>,
+    ctx: EncodeContext,
   ): JsonCodecValue {
-    JsonCodecEngine.enterOrThrow(seen, value);
+    ctx.enter(value);
 
     const result: JsonCodecValue[] = [];
-    let i = 0;
-    while (i < value.length) {
-      if (!(i in value)) {
-        let count = 0;
-        while (i < value.length && !(i in value)) {
-          count++;
+    try {
+      let i = 0;
+      while (i < value.length) {
+        if (!(i in value)) {
+          let count = 0;
+          while (i < value.length && !(i in value)) {
+            count++;
+            i++;
+          }
+          result.push(
+            Object.freeze(this.wrapTag(CODEC_META_TAGS.hole, count, ctx)),
+          );
+        } else {
+          result.push(this.encodeValue(value[i]!, ctx));
           i++;
         }
-        result.push(Object.freeze(this.wrapTag(CODEC_META_TAGS.hole, count)));
-      } else {
-        result.push(this.encodeValue(value[i]!, seen));
-        i++;
       }
+    } finally {
+      ctx.leave(value);
     }
 
-    seen.delete(value);
     return result as JsonCodecValue;
   }
 
@@ -160,21 +204,24 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override encodePlainObject(
     value: Record<string, FabricValue>,
-    seen: Set<object>,
+    ctx: EncodeContext,
   ): JsonCodecValue {
-    JsonCodecEngine.enterOrThrow(seen, value);
+    ctx.enter(value);
 
     const result: Record<string, JsonCodecValue> = {};
     let anySlashKey = false;
-    for (const key of utf8SortedKeysOf(value)) {
-      JsonCodecEngine.assertEncodableKey(key);
+    try {
+      for (const key of utf8SortedKeysOf(value)) {
+        JsonCodecEngine.assertEncodableKey(key);
 
-      if (key.startsWith("/")) {
-        anySlashKey = true;
+        if (key.startsWith("/")) {
+          anySlashKey = true;
+        }
+        result[key] = this.encodeValue(value[key]!, ctx);
       }
-      result[key] = this.encodeValue(value[key]!, seen);
+    } finally {
+      ctx.leave(value);
     }
-    seen.delete(value);
 
     if (anySlashKey) {
       if (Object.values(result).every((v) => JsonCodecEngine.#isQuoteSafe(v))) {
@@ -185,9 +232,11 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
             ) => [k, JsonCodecEngine.#unquote(v)]),
           ),
         );
-        return Object.freeze(this.wrapTag(CODEC_META_TAGS.quote, unquoted));
+        return Object.freeze(
+          this.wrapTag(CODEC_META_TAGS.quote, unquoted, ctx),
+        );
       }
-      return Object.freeze(this.wrapTag(CODEC_META_TAGS.object, result));
+      return Object.freeze(this.wrapTag(CODEC_META_TAGS.object, result, ctx));
     }
 
     return result as JsonCodecValue;
@@ -204,8 +253,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override decodeValue(
     data: JsonCodecValue,
-    env: LiveEnvironment,
-    seen?: Set<object>,
+    ctx: DecodeContext,
   ): FabricValue {
     const decoded = JsonCodecEngine.#unwrapTag(data);
     if (decoded !== null) {
@@ -226,14 +274,14 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
           if (isUnsafeObjectKey(key)) {
             return this.reportReservedKey(key, inner);
           }
-          result[key] = this.decodeValue(val, env, seen);
+          result[key] = this.decodeValue(val, ctx);
         }
         return Object.freeze(result);
       }
 
       // `/quote` and `/object` returned above, so no codec ever sees their
       // state, and `/quote` contents alone go undecoded.
-      return this.decodeTagged(tag, rawState, env, seen);
+      return this.decodeTagged(tag, rawState, ctx);
     }
 
     // Primitives pass through.
@@ -245,15 +293,14 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     }
 
     if (Array.isArray(data)) {
-      return this.#decodeArray(data, env, seen);
+      return this.#decodeArray(data, ctx);
     }
 
     // `Array.isArray()` above removed the array arm, but TypeScript keeps it
     // in the union; the remaining member is the record.
     return this.#decodePlainObject(
       data as Record<string, JsonCodecValue>,
-      env,
-      seen,
+      ctx,
     );
   }
 
@@ -279,8 +326,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   #decodeArray(
     data: readonly JsonCodecValue[],
-    env: LiveEnvironment,
-    seen: Set<object> | undefined,
+    ctx: DecodeContext,
   ): FabricValue {
     const result: FabricValue[] = new Array(data.length);
     let targetIndex = 0;
@@ -301,7 +347,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
         }
         targetIndex += count;
       } else {
-        result[targetIndex] = this.decodeValue(entry, env, seen);
+        result[targetIndex] = this.decodeValue(entry, ctx);
         targetIndex++;
       }
     }
@@ -332,8 +378,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   #decodePlainObject(
     data: Record<string, JsonCodecValue>,
-    env: LiveEnvironment,
-    seen: Set<object> | undefined,
+    ctx: DecodeContext,
   ): FabricValue {
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
@@ -352,7 +397,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       if (isUnsafeObjectKey(key)) {
         return this.reportReservedKey(key, data);
       }
-      result[key] = this.decodeValue(val, env, seen);
+      result[key] = this.decodeValue(val, ctx);
     }
     return Object.freeze(result);
   }

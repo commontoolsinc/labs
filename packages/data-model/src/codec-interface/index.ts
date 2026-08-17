@@ -1,7 +1,6 @@
 export {
   CODEC,
   type CodecForFormat,
-  type EncodeContext,
   type FabricClassWithNonterminalCodec,
   type FabricCodec,
   JSON_CODEC,

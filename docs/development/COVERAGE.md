@@ -271,7 +271,7 @@ condition's own count. See
 
 ### Paths reached only when something happens twice
 
-The other common shape is a line that runs only on the second occurrence of
+A second common shape is a line that runs only on the second occurrence of
 something within one process: a cache that is populated the second time it is
 asked, a guard that turns away a duplicate, a retry that only a second failure
 reaches. Whether a suite produces that second occurrence is often decided by
@@ -292,6 +292,28 @@ An assertion that only counts the outcome would pass either way and would leave
 the line's coverage exactly as environment-dependent as it was.
 [The August 2026 record](../history/development/coverage-flake-idempotency-dedup-2026-08-12.md)
 follows one such line from a group-level `+2` down to the guard and the test.
+
+### Rejection paths reached only when two writes race
+
+The third shape is a branch that runs only when one write lands on a base
+another write already changed: a merge that finds the key it removes already
+gone, a precondition only a loser fails, a replay that has to drop a layer. The
+surrounding code runs constantly. What decides whether the branch runs is the
+order frames arrive in, which nothing in an integration suite asserts, so the
+line is covered on some runs and not on others.
+
+Reaching such a line does not take a race, and that is the way out of it. What
+the branch responds to is the value the operation was handed, so a test that
+constructs that value reaches the branch directly. `applyPatch()` is a pure
+function over a value tree: its `missing object key` rejection, which the
+client's pending-layer replay reaches when a `remove` names a key a winning
+writer already dropped, is one call over a base object without the key.
+`packages/memory/test/v2-patch-errors.test.ts` is the worked example, and it
+states one case per rejection the module raises rather than only the line that
+moved — a sibling branch in the same file is the next one to flap.
+[The investigation record](../history/development/coverage-flake-patch-remove-missing-key-2026-08-17.md)
+follows that line from a group-level `+2` down to the two integration hits that
+covered it in one run and not the next.
 
 ### What the check says when the regression is not the pull request's
 

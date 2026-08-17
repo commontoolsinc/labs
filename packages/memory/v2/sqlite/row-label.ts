@@ -20,6 +20,7 @@
 
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /** A reference to a declared column, handed to the rule as `f.<col>`. */
 export type FieldRef = {
@@ -49,11 +50,9 @@ export type RowLabelRule<C extends Record<string, unknown>> = (
   f: RowFieldHandles<C>,
 ) => { confidentiality?: FabricValue; integrity?: FabricValue };
 
-const isRecord = (x: unknown): x is Record<string, unknown> =>
-  typeof x === "object" && x !== null && !Array.isArray(x);
-
 const isFieldRef = (x: unknown): x is FieldRef =>
-  isRecord(x) && typeof x.field === "string" && Object.keys(x).length === 1;
+  isObjectNotArray(x) && typeof x.field === "string" &&
+  Object.keys(x).length === 1;
 
 // ---------------------------------------------------------------------------
 // Builders — each returns its serialized AST node.
@@ -122,7 +121,7 @@ export function principal(
       `principal(): invalid DID protocol ${JSON.stringify(protocol)}`,
     );
   }
-  if (!isRecord(of) || !isRecord(of.match)) {
+  if (!isObjectNotArray(of) || !isObjectNotArray(of.match)) {
     throw new TypeError("principal() takes a match(...) term");
   }
   return { principal: { protocol, of } };
@@ -189,7 +188,7 @@ function assertRegExp(x: unknown, who: string): asserts x is RegExp {
   if (!(x instanceof RegExp)) throw new TypeError(`${who} takes a RegExp`);
 }
 function assertPrincipal(x: unknown, who: string) {
-  if (!isRecord(x) || !isRecord(x.principal)) {
+  if (!isObjectNotArray(x) || !isObjectNotArray(x.principal)) {
     throw new TypeError(`${who} takes a principal(...) term`);
   }
 }
@@ -281,21 +280,21 @@ function validateAnyOfAlternative(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (isRecord(node) && ("allOf" in node || "anyOf" in node)) {
+  if (isObjectNotArray(node) && ("allOf" in node || "anyOf" in node)) {
     return "an any() alternative must be a single principal-like term, not " +
       "all()/any() — a conjunction or nested disjunction cannot be an " +
       "OR-clause alternative (CFC spec §3.1.8)";
   }
-  if (isRecord(node)) {
+  if (isObjectNotArray(node)) {
     // Before the `when` branch below follows the gate: a dual-op alternative
     // (e.g. {when, then, principal}) would be validated as a when() here but
     // EVALUATED as a principal (evalConf dispatches on `principal` first).
     const amb = ambiguousOpReason(node, "any()-alternative");
     if (amb) return amb;
   }
-  if (isRecord(node) && "when" in node) {
+  if (isObjectNotArray(node) && "when" in node) {
     const test = (node as { when?: unknown }).when;
-    const gate = isRecord(test) && "match" in test
+    const gate = isObjectNotArray(test) && "match" in test
       ? validateMatchNode(test.match, columns, "when")
       : "malformed when gate (use whenMatches())";
     if (gate) return gate;
@@ -309,7 +308,7 @@ function validateMatchNode(
   columns: ReadonlySet<string>,
   who: string,
 ): string | undefined {
-  if (!isRecord(node)) return `${who}: malformed match node`;
+  if (!isObjectNotArray(node)) return `${who}: malformed match node`;
   const { field, source, flags, group, min } = node;
   if (typeof field !== "string") return `${who}: match without a field`;
   if (!columns.has(field)) {
@@ -341,14 +340,14 @@ function validatePrincipalNode(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (!isRecord(node) || typeof node.protocol !== "string") {
+  if (!isObjectNotArray(node) || typeof node.protocol !== "string") {
     return "malformed principal node";
   }
   if (!/^[a-z][a-z0-9.+-]*$/.test(node.protocol)) {
     return `invalid DID protocol ${JSON.stringify(node.protocol)}`;
   }
   const of = node.of;
-  if (!isRecord(of) || !("match" in of)) {
+  if (!isObjectNotArray(of) || !("match" in of)) {
     return "principal() takes a match(...) term";
   }
   return validateMatchNode(of.match, columns, "principal");
@@ -396,7 +395,7 @@ function validateConfTerm(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (!isRecord(node)) return "malformed confidentiality term";
+  if (!isObjectNotArray(node)) return "malformed confidentiality term";
   const amb = ambiguousOpReason(node, "confidentiality");
   if (amb) return amb;
   if ("anyOf" in node) return validateConfAnyOf(node, columns);
@@ -417,7 +416,7 @@ function validateConfTerm(
   if ("constant" in node) return undefined;
   if ("when" in node) {
     const test = (node as { when?: unknown }).when;
-    const r = isRecord(test) && "match" in test
+    const r = isObjectNotArray(test) && "match" in test
       ? validateMatchNode(test.match, columns, "when")
       : "malformed when gate (use whenMatches())";
     if (r) return r;
@@ -430,7 +429,7 @@ function validateConfExpr(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (!isRecord(node)) return "malformed confidentiality expression";
+  if (!isObjectNotArray(node)) return "malformed confidentiality expression";
   const amb = ambiguousOpReason(node, "confidentiality");
   if (amb) return amb;
   if ("anyOf" in node) return validateConfAnyOf(node, columns);
@@ -452,7 +451,7 @@ function validateIntegTerm(
   node: unknown,
   columns: ReadonlySet<string>,
 ): string | undefined {
-  if (!isRecord(node)) return "malformed integrity term";
+  if (!isObjectNotArray(node)) return "malformed integrity term";
   const amb = ambiguousOpReason(node, "integrity");
   if (amb) return amb;
   if ("anyOf" in node) {
@@ -461,7 +460,7 @@ function validateIntegTerm(
   }
   if ("authoredBy" in node || "endorsedBy" in node) {
     const inner = (node.authoredBy ?? node.endorsedBy) as unknown;
-    if (!isRecord(inner) || !("principal" in inner)) {
+    if (!isObjectNotArray(inner) || !("principal" in inner)) {
       return "authoredBy()/endorsedBy() take a principal(...) term";
     }
     return validatePrincipalNode(inner.principal, columns);
@@ -479,7 +478,7 @@ function validateIntegTerm(
   }
   if ("when" in node) {
     const test = node.when;
-    const r = isRecord(test) && "match" in test
+    const r = isObjectNotArray(test) && "match" in test
       ? validateMatchNode(test.match, columns, "when")
       : "malformed when gate (use whenMatches())";
     if (r) return r;
@@ -499,7 +498,7 @@ export function validateRowLabelSpec(
   spec: unknown,
   columns: readonly string[],
 ): string | undefined {
-  if (!isRecord(spec)) return "rowLabel spec must be an object";
+  if (!isObjectNotArray(spec)) return "rowLabel spec must be an object";
   if (spec.version !== 1) {
     return `unsupported rowLabel version ${JSON.stringify(spec.version)}`;
   }
@@ -528,7 +527,7 @@ export function buildRowLabelSpec<C extends Record<string, unknown>>(
     columns.map((name) => [name, { field: name }]),
   ) as RowFieldHandles<C>;
   const out = rule(handles);
-  if (!isRecord(out)) {
+  if (!isObjectNotArray(out)) {
     throw new TypeError(
       "table(): a rowLabel rule must return { confidentiality?, integrity? }",
     );
@@ -563,7 +562,7 @@ export function atomKey(v: unknown): string {
   if (typeof v === "string") return `s:${v}`;
   return `j:${
     JSON.stringify(v, (_k, val) =>
-      isRecord(val)
+      isObjectNotArray(val)
         ? Object.fromEntries(Object.keys(val).sort().map((k) => [k, val[k]]))
         : val)
   }`;
@@ -643,7 +642,7 @@ function evalTest(
   test: unknown,
   row: Record<string, unknown>,
 ): boolean {
-  if (!isRecord(test) || !isRecord(test.match)) {
+  if (!isObjectNotArray(test) || !isObjectNotArray(test.match)) {
     return fail("malformed when gate (use whenMatches())");
   }
   const { field, source, flags } = test.match as Record<string, unknown>;
@@ -677,7 +676,7 @@ function evalPrincipal(
 // fails closed on the same shape the validator rejects, even for a wire spec
 // that bypassed validation.
 function anyOfAlternativeHasConjunction(node: unknown): boolean {
-  if (!isRecord(node)) return false;
+  if (!isObjectNotArray(node)) return false;
   if ("allOf" in node || "anyOf" in node) return true;
   if ("when" in node) {
     return anyOfAlternativeHasConjunction((node as { then?: unknown }).then);
@@ -690,7 +689,7 @@ function evalConf(
   row: Record<string, unknown>,
   ctx: { dbOwner?: string },
 ): unknown[] {
-  if (!isRecord(node)) return fail("malformed confidentiality term");
+  if (!isObjectNotArray(node)) return fail("malformed confidentiality term");
   // Defense in depth against a wire spec that bypassed validation: a dual-op
   // node must refuse, never be resolved by this dispatch's key precedence
   // (the validator and the static analysis each have their own).
@@ -749,7 +748,7 @@ function evalInteg(
   row: Record<string, unknown>,
   ctx: { dbOwner?: string },
 ): unknown[] {
-  if (!isRecord(node)) return fail("malformed integrity term");
+  if (!isObjectNotArray(node)) return fail("malformed integrity term");
   const amb = ambiguousOpReason(node, "integrity");
   if (amb) return fail(amb);
   if ("anyOf" in node) return fail("disjunctive integrity does not exist");
@@ -812,10 +811,10 @@ export function evaluateRowLabel(
 ):
   | { confidentiality: unknown[]; integrity: unknown[] }
   | { error: string } {
-  if (!isRecord(spec) || spec.version !== 1) {
+  if (!isObjectNotArray(spec) || spec.version !== 1) {
     return {
       error: `unsupported rowLabel version ${
-        JSON.stringify(isRecord(spec) ? spec.version : spec)
+        JSON.stringify(isObjectNotArray(spec) ? spec.version : spec)
       }`,
     };
   }
@@ -842,7 +841,7 @@ function staticUnconditionalAlternatives(
   node: unknown,
   ctx: { dbOwner?: string },
 ): unknown[] {
-  if (!isRecord(node)) return [];
+  if (!isObjectNotArray(node)) return [];
   // A dual-op node is ambiguous (the evaluator dispatches by a DIFFERENT key
   // precedence — e.g. {principal, dbOwner} labels rows with only the
   // principal): it contributes no static reader, so the aggregate refuses.
@@ -873,7 +872,7 @@ function staticUnconditionalAlternatives(
 // {allOf: [], constant} keeps counting as a constraint rather than reading as
 // the degenerate empty conjunction (which would make an aggregate public).
 function flattenConfConjuncts(conf: unknown): unknown[] {
-  return isRecord(conf) && Array.isArray(conf.allOf) &&
+  return isObjectNotArray(conf) && Array.isArray(conf.allOf) &&
       presentOps(conf).length === 1
     ? conf.allOf.flatMap(flattenConfConjuncts)
     : [conf];
@@ -893,7 +892,7 @@ export function ruleCommonAlternatives(
   spec: RowLabelSpec,
   ctx: { dbOwner?: string },
 ): unknown[] {
-  const conf = isRecord(spec) ? spec.confidentiality : undefined;
+  const conf = isObjectNotArray(spec) ? spec.confidentiality : undefined;
   if (conf === undefined) return [];
   const conjuncts = flattenConfConjuncts(conf);
   if (conjuncts.length === 0) return [];
@@ -924,7 +923,7 @@ export function ruleCommonAlternatives(
  * across tables must skip unconstrained rules, not treat them as a refusal.
  */
 export function ruleConstrainsConfidentiality(spec: RowLabelSpec): boolean {
-  const conf = isRecord(spec) ? spec.confidentiality : undefined;
+  const conf = isObjectNotArray(spec) ? spec.confidentiality : undefined;
   if (conf === undefined) return false;
   return flattenConfConjuncts(conf).length > 0;
 }
@@ -932,9 +931,9 @@ export function ruleConstrainsConfidentiality(spec: RowLabelSpec): boolean {
 /** The rule attached to a (possibly wire-supplied) table schema, or undefined.
  *  Presence gates all Phase 3 work, so rule-less tables pay nothing. */
 export function rowLabelSpecOf(tableSchema: unknown): RowLabelSpec | undefined {
-  if (!isRecord(tableSchema)) return undefined;
+  if (!isObjectNotArray(tableSchema)) return undefined;
   const spec = tableSchema.rowLabel;
-  return isRecord(spec) ? spec as unknown as RowLabelSpec : undefined;
+  return isObjectNotArray(spec) ? spec as unknown as RowLabelSpec : undefined;
 }
 
 /**
@@ -951,9 +950,11 @@ export function ruleInputFields(spec: RowLabelSpec): string[] {
       for (const x of n) walk(x);
       return;
     }
-    if (!isRecord(n)) return;
+    if (!isObjectNotArray(n)) return;
     const m = n.match;
-    if (isRecord(m) && typeof m.field === "string" && !seen.has(m.field)) {
+    if (
+      isObjectNotArray(m) && typeof m.field === "string" && !seen.has(m.field)
+    ) {
       seen.add(m.field);
       out.push(m.field);
     }
