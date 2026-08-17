@@ -1,7 +1,6 @@
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
 
 import { BaseElement } from "../../core/base-element.ts";
 import { sanitizeSvg } from "./sanitize-svg.ts";
@@ -11,6 +10,9 @@ import { sanitizeSvg } from "./sanitize-svg.ts";
 
 /**
  * CFSvg - Renders SVG content from a string
+ *
+ * The source is sanitized before it is drawn, so untrusted content is safe to
+ * pass in. `sanitize-svg.ts` describes what survives and what does not.
  *
  * @element cf-svg
  *
@@ -107,7 +109,7 @@ export class CFSvg extends BaseElement {
 
     return html`
       <div class="svg-content" part="content">
-        ${unsafeHTML(sanitizeSvg(contentValue))}
+        ${sanitizeSvg(contentValue)}
       </div>
     `;
   }
