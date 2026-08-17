@@ -785,7 +785,7 @@ export async function replayVintage(
         // schema `before` came from: an asymmetric strip would measure the
         // stripping. `applied` is counted from the vintage's side only, since
         // that is where "the vintage held it" is a fact.
-        const drops = acceptedDropsFor(entry.main ?? "");
+        const drops = acceptedDropsFor(entry.main ?? "", vintage.stamp);
         const paths = drops?.paths ?? new Set<string>();
         const keptBefore = withoutAcceptedDrops(before, paths, isReduction);
         const keptAfter = withoutAcceptedDrops(after, paths, isReduction);

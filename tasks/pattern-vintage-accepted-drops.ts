@@ -27,8 +27,15 @@
  * has to see the state it was handed, and a subtree that lost nothing is
  * returned as itself rather than as a copy of itself.
  *
- * The list can only shrink. A path that removes nothing from any vintage the
- * run replays fails it, so an exemption cannot outlive the removal it was
+ * An entry is bounded in TIME as well, by `capturedThrough`. A removal happened
+ * once, and only the vintages captured before it hold state that cannot roll
+ * forward — so a vintage captured later is compared with no exemption at all.
+ * That is what keeps a REPLACED path honest: `crossrefs` is still published,
+ * carrying pivot rows now, and an entry that forgave it forever would hide a
+ * later change that stranded those.
+ *
+ * The list can only shrink. A path that removes nothing from any vintage in its
+ * own window fails the run, so an exemption cannot outlive the removal it was
  * granted for.
  */
 export interface AcceptedStateDrop {
@@ -39,6 +46,20 @@ export interface AcceptedStateDrop {
    * A segment ending in `[]` steps through every element of that list.
    */
   paths: readonly string[];
+  /**
+   * Capture stamp of the newest vintage this entry forgives, as
+   * `VintageRef.stamp` spells one (ISO-8601 with `:` replaced, so it sorts as
+   * a string).
+   *
+   * A removal happened once, at a point in time, and only the vintages
+   * captured before it hold the state that cannot roll forward. Without this
+   * bound an entry would also strip the path out of every vintage captured
+   * LATER, which matters most where a path was replaced rather than retired:
+   * `crossrefs` still exists on the board, carrying pivot rows, and an
+   * unbounded entry would hide a future change that stranded those too. The
+   * exemption covers the removal it was granted for and stops there.
+   */
+  capturedThrough: string;
   /** Why the removal was accepted. */
   reason: string;
 }
@@ -67,6 +88,10 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "topics[].crossrefs",
       "mentionable[].crossrefs",
     ],
+    // The newest topics vintage predating the rebuild. Both replayed fixtures
+    // sit at or under it, and any captured from here on hold the pivot rows,
+    // which owe the comparison the same answer as anything else.
+    capturedThrough: "2026-08-06T23-04-13.189Z",
     reason:
       "Topics' reference graph was rebuilt on cell identity — see the matching " +
       "entry in tasks/pattern-compat-accepted-breaks.ts. A topic publishes " +
@@ -80,6 +105,7 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
     // references are read out of the board's pivot and published as
     // `referencedBy`, so nothing reads this path.
     paths: ["crossrefs"],
+    capturedThrough: "2026-08-06T23-04-13.189Z",
     reason:
       "Topics' reference graph was rebuilt on cell identity — see the matching " +
       "entry in tasks/pattern-compat-accepted-breaks.ts. The board's own " +
@@ -93,19 +119,27 @@ export const acceptedDropKey = (pattern: string, path: string): string =>
   `${pattern} ${path}`;
 
 /**
- * The paths accepted as dropped for one pattern.
+ * The paths accepted as dropped for one pattern, in one vintage.
  *
  * A manifest entry names its pattern by repo-relative path
  * (`/packages/patterns/topics/topic.tsx`), so the key is matched as a path
  * suffix rather than a bare one: `endsWith("topics/main.tsx")` alone would also
  * claim a `subtopics/main.tsx` that no entry mentions.
+ *
+ * `stamp` is the replayed vintage's capture stamp, and an entry answers only
+ * for the vintages it was granted over. Stamps are ISO-8601 with `:` replaced,
+ * which leaves them sortable as plain strings — so the window is a string
+ * comparison and needs no date parsing.
  */
 export function acceptedDropsFor(
   patternPath: string,
+  stamp: string,
   drops: readonly AcceptedStateDrop[] = ACCEPTED_STATE_DROPS,
 ): { paths: ReadonlySet<string>; pattern: string } | undefined {
   const entry = drops.find((drop) =>
-    patternPath === drop.pattern || patternPath.endsWith(`/${drop.pattern}`)
+    (patternPath === drop.pattern ||
+      patternPath.endsWith(`/${drop.pattern}`)) &&
+    stamp <= drop.capturedThrough
   );
   return entry === undefined
     ? undefined

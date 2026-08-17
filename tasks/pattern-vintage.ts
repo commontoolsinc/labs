@@ -14,6 +14,15 @@
  * something rather than nothing, AND every value the vintage held is still
  * readable afterwards.
  *
+ * It asserts two things about the exemption list as well, and a clean replay
+ * does not excuse either. Every path in `ACCEPTED_STATE_DROPS` must still
+ * forgive something in a vintage inside its own `capturedThrough` window — an
+ * entry that has stopped removing anything has outlived the removal it was
+ * granted for, and the run exits 1 naming it. And an entry whose pattern no
+ * fixture records is UNJUDGEABLE rather than stale: nothing replays it, so
+ * nothing can say whether it is still needed, and that fails too rather than
+ * sitting unexamined.
+ *
  * That last clause is the one that makes this a state-continuity gate rather
  * than an applies-cleanly gate. An update can materialize perfectly and still
  * lose data: move where a field is stored — `.for("journal")` becomes

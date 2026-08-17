@@ -50,8 +50,8 @@ recorded in the implementation plan). What remains open is all of Part 1.
 ## Goal
 
 Any pattern drivable by an agent, with no pattern-specific CLI code. Filing one
-topic on the team board takes six CLI invocations, returns no handle, hides
-rejections, and duplicates on retry. The fix is smaller than it looks, because
+topic on the team board takes four CLI invocations, hides rejections, and
+duplicates on retry. The fix is smaller than it looks, because
 the hard parts already exist in the runtime: a durable id per event, a
 per-invocation result cell addressed by it, and an exactly-once receipt.
 
@@ -463,14 +463,15 @@ required field later stops the sugar applying rather than silently misbinding.
 
 ### Applied to `topics`
 
-`topics` already satisfies the interim atomic-attribution rule; filing is six
-invocations. The rest of Part 1 — a body argument on `addTopic` so `setBody`
-becomes an editing verb rather than part of every create, and thrown rejections
-in place of silent early-returns — makes it five. The remaining waste — the
-handle lookup and the verification read — is exactly what a returned child
-reference removes, and that is Part 2's job: with it, filing is `addTopic`,
-`addComment`, `addLink` — one call per thing the author meant to do. The CLI
-renders the returned reference as a usable fid/path.
+`topics` already satisfies the interim atomic-attribution rule; filing is four
+invocations. The handle lookup and the verification read are already gone:
+`addTopic` declares `AddTopicResult.topic` and hands back the piece itself, so
+the caller neither searches a list for what it just made nor reads it back to
+learn whether the call did anything. What remains of Part 1 is a body argument
+on `addTopic`, so `setBody` becomes an editing verb rather than part of every
+create, and thrown rejections in place of silent early-returns. That makes
+filing `addTopic`, `addComment`, `addLink` — one call per thing the author
+meant to do. The CLI renders the returned reference as a usable address.
 
 ## Part 2 — the invocation protocol
 

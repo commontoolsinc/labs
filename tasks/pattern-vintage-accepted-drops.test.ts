@@ -12,32 +12,57 @@ describe("pattern-vintage-accepted-drops", () => {
     {
       pattern: "topics/main.tsx",
       paths: ["crossrefs", "topics[].crossrefs"],
+      capturedThrough: "2026-08-06T23-04-13.189Z",
       reason: "removed",
     },
   ];
+  /** A capture from inside the window the entry was granted over. */
+  const within = "2026-07-30T21-43-16.977Z";
 
   describe("acceptedDropsFor", () => {
     it("returns the paths for a repo-relative path ending in the key", () => {
       expect(
-        acceptedDropsFor("/packages/patterns/topics/main.tsx", drops)?.paths,
+        acceptedDropsFor("/packages/patterns/topics/main.tsx", within, drops)
+          ?.paths,
       ).toEqual(new Set(["crossrefs", "topics[].crossrefs"]));
     });
 
     it("returns the entry for the bare key", () => {
-      expect(acceptedDropsFor("topics/main.tsx", drops)?.pattern).toBe(
+      expect(acceptedDropsFor("topics/main.tsx", within, drops)?.pattern).toBe(
         "topics/main.tsx",
       );
     });
 
+    it("returns the entry for a capture on the boundary itself", () => {
+      expect(
+        acceptedDropsFor("topics/main.tsx", "2026-08-06T23-04-13.189Z", drops)
+          ?.pattern,
+      ).toBe("topics/main.tsx");
+    });
+
+    it("returns undefined for a capture past the boundary", () => {
+      // The path this entry forgives is republished, so a vintage captured
+      // after the removal owes the comparison the same answer as any other.
+      expect(
+        acceptedDropsFor("topics/main.tsx", "2026-08-06T23-04-13.190Z", drops),
+      ).toBeUndefined();
+    });
+
     it("returns undefined for a path that only ends with the same text", () => {
       // A bare `endsWith` would claim this one, which no entry mentions.
-      expect(acceptedDropsFor("/packages/patterns/subtopics/main.tsx", drops))
-        .toBeUndefined();
+      expect(
+        acceptedDropsFor(
+          "/packages/patterns/subtopics/main.tsx",
+          within,
+          drops,
+        ),
+      ).toBeUndefined();
     });
 
     it("returns undefined for a pattern with no entry", () => {
-      expect(acceptedDropsFor("/packages/patterns/notes/main.tsx", drops))
-        .toBeUndefined();
+      expect(
+        acceptedDropsFor("/packages/patterns/notes/main.tsx", within, drops),
+      ).toBeUndefined();
     });
   });
 
