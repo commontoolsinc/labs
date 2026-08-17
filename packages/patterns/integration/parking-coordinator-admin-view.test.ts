@@ -130,5 +130,18 @@ describe("parking coordinator admin view integration test", () => {
     await waitForRuntimeIdle(page);
     await waitForText(page, "#parking-admin-people-section", "People");
     await waitForText(page, "#parking-admin-add-person-open", "+ Add Person");
+
+    await clickCfButtonAndWaitForText(
+      page,
+      '[data-parking-admin-toggle="Alice"]',
+      '[data-parking-admin-row="Alice"]',
+      "Member",
+    );
+    await waitForRuntimeIdle(page);
+    await waitForText(
+      page,
+      '[data-parking-admin-toggle="Alice"]',
+      "Make admin",
+    );
   });
 });
