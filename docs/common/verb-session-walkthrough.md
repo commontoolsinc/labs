@@ -1,8 +1,8 @@
 # A verb session, end to end
 
 What driving a pattern entirely through `cf` looks like when the verb surface is
-complete: discovery, help, completion, and carrying an address from one call
-into the next.
+complete: discovery, documentation, help, completion, and carrying an address
+from one call into the next.
 
 [Verbs over the CLI](verbs-over-the-cli.md) explains what a verb hands back.
 This walks a whole session using it, and marks where the surface is still
@@ -190,7 +190,7 @@ bytes unshaped, 140 with `--select 'item.title'`.
 **The prose above reaches a caller.** Each verb carries a doc comment saying
 what it is for, which is where that documentation belongs, and `cf` serves it:
 as a row's `description` under `cf piece verbs --json`, and as the summary line
-of the verb's own help page. Step 2 has the measurement.
+of the verb's own help page. Step 3 has the measurement.
 
 
 ## 1. Arrive with a slug **[today]**
@@ -225,9 +225,73 @@ scan, so each row stays one line and a verb's prose — which runs to a sentence
 or several — travels on the machine-readable spelling instead, as the row's
 `description`, alongside the input and output schemas the table has no room for
 either. A person asking what one verb is for reads its help page, where the
-same words are the summary line.
+same words are the summary line — or the piece's own page below, which prints
+them for every verb at once.
 
-## 2. Ask what a verb wants **[today]**
+## 2. Ask what it is **[today]**
+
+```bash
+cf piece describe --piece board
+```
+
+```text
+NAME    Work tracker
+PATTERN cf:module/ZPxyGdkkv-YmizdHdNx5DIlqlpc9JRSm5iXTl4Tb2T0#default (/tracker.tsx)
+
+  A work-item tracker: root items on a board, everything deeper under an
+  item's `children`. State changes only through verbs — a caller files,
+  notes, finishes, archives, and relates items; nothing here is written
+  directly.
+
+STATE
+  items  ItemOutput[]
+      Root items only. The tree hangs off each one's `children`.
+
+INPUTS
+  items  ItemOutput[]
+
+VERBS
+  addItem
+      File a new root item on the board.
+```
+
+The piece's man page: what it is, what it holds, what a caller supplies, and
+what it can do — one command, and every sentence on it is the author's own,
+compiled with the pattern and read back from it. The demo's act 2 runs it
+here, and act 4 runs it again against the address a call handed back, where
+the page that answers is the item's: its own purpose, its state fields'
+prose, and a summary line per verb.
+
+| Line | Written on | Compiled to |
+| --- | --- | --- |
+| the purpose paragraph | the result (Output) interface's own doc comment | the result schema's root `description` |
+| a STATE row's prose | the field's doc comment | `resultSchema.properties.<field>.description` |
+| an INPUTS row | a field of the argument (Input) interface | `argumentSchema.properties` — `Required.` marks what that schema requires |
+| a VERBS row's summary | the verb's doc comment | the listing row's `description` — the same sentence its help page opens with |
+
+**The purpose has exactly one compiled home.** A comment at the top of the
+pattern FILE compiles to nothing — emit strips comments, so it survives only
+in the stored source `cf piece getsrc` retrieves. The Output interface's
+comment is where a pattern's purpose reaches a caller, because the schema
+generator attaches a type's own doc comment only where that type is the root
+of a generated schema — which its result root is, and which the nested types
+inside it are not. The same rule is why an event interface's comment reaches
+nothing (step 3's table).
+
+**STATE and INPUTS split on who writes.** An INPUTS row is what a caller
+supplies; a STATE row belongs to the pattern and changes only when a verb is
+called. That split is the piece's usage model, and the page keeps it visible
+— which is also why `Required.` appears only under INPUTS: a result schema's
+`required` array marks fields the pattern owns, and that is not a claim on
+any caller.
+
+**The page degrades honestly.** A field nobody documented still lists with
+its name and declared type (`title` on an item does exactly that). A piece
+whose compiled pattern cannot be read keeps its VERBS — they still dispatch —
+and loses purpose, STATE, and INPUTS, with a note saying so rather than empty
+sections claiming the pattern declares nothing.
+
+## 3. Ask what a verb wants **[today]**
 
 ```bash
 cf call --piece board addItem -- --help
@@ -365,7 +429,7 @@ compile at all ([#5559](https://github.com/commontoolsinc/labs/issues/5559)) —
 so the verb's own comment is both the shorter road and the better place for an
 author to write it, since it sits beside the type it describes.
 
-## 3. Complete against the live piece **[today]**
+## 4. Complete against the live piece **[today]**
 
 ```bash
 # not in the demo — completion needs a terminal
@@ -385,7 +449,7 @@ same declared result a completion provider would read. What is missing is the
 provider consulting it, which is the same wiring a derived default selection
 needs.
 
-## 4. Create, and carry the address forward **[today]**
+## 5. Create, and carry the address forward **[today]**
 
 ```bash
 EPIC=$(cf call --piece board --select 'item@' addItem -- \
@@ -451,7 +515,7 @@ a stack trace.
 [A result that points back at its container](verbs-over-the-cli.md#a-result-that-points-back-at-its-container)
 shows the full exchange.
 
-## 5. Read the tree back, bounded **[today]**
+## 6. Read the tree back, bounded **[today]**
 
 ```bash
 cf get --piece board items --select 'title,status,children@'
@@ -483,7 +547,7 @@ their own options go.
 The demo's act 10 is this step run against the session's own tree: the whole
 board first, then only what is open, then the refusal.
 
-## 6. Relate two items **[today]**, minus one spelling
+## 7. Relate two items **[today]**, minus one spelling
 
 ```bash
 cf call "$KID" blockOn -- --on "$CSRF"
@@ -507,7 +571,7 @@ workaround it is, and the two-paths read as the payoff addresses exist for.
 
 ## The composition axis
 
-Steps 4 and 6 are the same move — take an address out of one command and put it
+Steps 5 and 7 are the same move — take an address out of one command and put it
 into the next — and the receiver half works in full while the argument half
 works only under a spelling no read emits.
 

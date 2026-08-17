@@ -75,7 +75,7 @@ $CF piece set-slug board "$BOARD" $ARGS >/dev/null 2>&1
 SLUG_NAME=$($CF get --quiet --piece board $ARGS '$NAME' 2>/dev/null | tr -d '"')
 check "Work tracker" "$SLUG_NAME" "the slug resolves everywhere --piece is taken"
 
-step "2. Ask what it can do"
+step "2. Ask what it is, and what it can do"
 VERBS=$($CF piece verbs --piece board $ARGS --json 2>/dev/null)
 echo "$VERBS" | jq -r '.verbs[]? | "    " + .name + "  (" + .kind + ")"' 2>/dev/null
 echo "$VERBS" | jq -e '[.verbs[]?.name] | index("addItem")' >/dev/null 2>&1 &&
@@ -85,6 +85,40 @@ echo "$VERBS" | jq -e '[.verbs[]?.name] | index("addItem")' >/dev/null 2>&1 &&
 # a listing that offers them hands a client operations that do not exist.
 check "addItem" "$(echo "$VERBS" | jq -r '[.verbs[]?.name] | sort | join(",")')" \
   "the listing names the verb and nothing else"
+# The man page beside the listing. Its needles are read out of the FIXTURE for
+# the reason step 3 states: rewording a doc comment moves the probe with it.
+# The purpose needle is the FIRST line of the interface's own comment — the
+# one prose level that compiles only at a schema root, which is exactly what
+# this page exists to serve.
+DESCRIBE=$($CF piece describe --piece board $ARGS 2>/dev/null)
+echo "$DESCRIBE" | grep -q '^NAME    Work tracker$' &&
+  ok "the page opens with the piece's display name" ||
+  bad "no NAME header on the describe page"
+BOARD_DOC=$(grep -B 4 '^interface BoardOutput {' "$FIXTURE" |
+  sed -n 's/^\/\*\* *\(.*[^ ]\) *$/\1/p' | head -1)
+if [ -z "$BOARD_DOC" ]; then
+  bad "no JSDoc on BoardOutput itself in the fixture — the purpose probe has no needle"
+else
+  echo "$DESCRIBE" | grep -qF "$BOARD_DOC" &&
+    ok "the Output interface's own JSDoc is the page's purpose" ||
+    bad "the page carries no purpose paragraph: [$BOARD_DOC]"
+fi
+ITEMS_DOC=$(sed -n '/^interface BoardOutput {/,/^}/p' "$FIXTURE" |
+  grep -B 1 'items:' | sed -n 's/.*\/\*\* *\(.*[^ ]\) *\*\/.*/\1/p' | head -1)
+if [ -z "$ITEMS_DOC" ]; then
+  bad "no JSDoc on BoardOutput.items in the fixture — the state probe has no needle"
+else
+  echo "$DESCRIBE" | grep -qF "$ITEMS_DOC" &&
+    ok "a state field's JSDoc reaches its STATE row" ||
+    bad "the STATE row carries no prose: [$ITEMS_DOC]"
+fi
+# The machine spelling of the same page, shaped: a purpose, a state array,
+# and the verb rows the listing itself serves.
+$CF piece describe --piece board $ARGS --json 2>/dev/null |
+  jq -e '(.purpose | type == "string") and (.state | type == "array")
+    and ([.verbs[]?.name] | index("addItem"))' >/dev/null 2>&1 &&
+  ok "the same page is served as JSON" ||
+  bad "describe --json is missing purpose, state, or the verb rows"
 
 step "3. Ask what a verb wants — flags and prose, both derived"
 HELP=$($CF call --piece board $ARGS addItem -- --help 2>/dev/null)
