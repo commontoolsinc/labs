@@ -332,7 +332,10 @@ ACCEPT_COVERAGE_DEBT: packages/runner +12 lines
 
 The marker names the source group — `workspace`, a top-level directory such as
 `tasks`, or a package as `packages/runner` — rather than the metric that group's
-lines are counted in.
+lines are counted in. Only `packages` splits into a second level, because that
+is where the collection stops rolling a file up; `tasks/foo` names no group. A
+name that could be a group but that the run measured nothing for, a package that
+does not exist among them, fails the job and lists the groups it did measure.
 
 The number is how far above the baseline the group may rise, not the total it
 may reach. The gate passes the group when its uncovered-line count is at most
@@ -360,7 +363,9 @@ can name the marker in a sentence, and can indent an example of it into a code
 block, without either being read as accepting anything — or as a malformed
 attempt at it. Indent the line to show the form, and write it flush to use it. A
 pull request description often starts life as a commit message body, so a line
-indented there arrives indented, and stays an example.
+indented there arrives indented, and stays an example. The check names each
+indented marker it passed over in its log, so an author who indented one meaning
+it as an acceptance can see why the gate carried on without it.
 
 Use the broad reset marker only to bootstrap coverage data for the first time,
 or when the `main` baseline is known to be bogus and should be re-seeded for one

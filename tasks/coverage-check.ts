@@ -62,6 +62,7 @@ import {
   readAndParseEvent,
   REPO,
   shouldGateCoverageDebtMetric,
+  unknownAcceptedMetrics,
   WORKFLOW_FILE,
   type WorkflowRun,
   writeCoverageBaselineFile,
@@ -1864,6 +1865,29 @@ export async function main() {
     `Extracted ${currentMetrics.size} coverage metrics from current run.`,
   );
 
+  // An acceptance for a group this run measured nothing for is one nothing will
+  // ever consult, so say which groups there are rather than letting the line
+  // pass for an acceptance that had no effect.
+  const unknown = unknownAcceptedMetrics(prOverrides, currentMetrics);
+  if (unknown.length > 0) {
+    for (const metric of unknown) {
+      console.error(
+        `ACCEPT_COVERAGE_DEBT names "${
+          coverageMetricGroupName(metric) ?? metric
+        }", which this run measured no coverage for.`,
+      );
+    }
+    console.error(
+      `The source groups this run measured are: ${
+        [...currentMetrics.keys()]
+          .map((metric) => coverageMetricGroupName(metric) ?? metric)
+          .sort()
+          .join(", ")
+      }.`,
+    );
+    Deno.exit(1);
+  }
+
   // 3. Fetch recent main-branch push runs for baseline
   const { mainHeadSha, baselineRuns } = await fetchBaselineRunsForCheck(
     perfArtifact,
@@ -2075,7 +2099,7 @@ export async function main() {
     `\nTo ${verb} the coverage ratchet for one cycle, add ${COVERAGE_BASELINE_RESET_MARKER} to your PR description.`,
   );
   console.log(
-    "\nTo accept these coverage regressions one metric at a time, add the following to your PR description:\n",
+    "\nTo accept these coverage regressions one group at a time, add the following to your PR description, each line flush against the left margin:\n",
   );
   console.log("---BEGIN COPY-PASTE---");
   for (const f of failures) {

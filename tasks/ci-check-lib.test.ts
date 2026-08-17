@@ -37,6 +37,7 @@ import {
   REPO,
   serializeCoverageBaseline,
   shouldGateCoverageDebtMetric,
+  unknownAcceptedMetrics,
 } from "./ci-check-lib.ts";
 
 Deno.test("coverage baseline files round-trip stable metric samples", () => {
@@ -310,6 +311,34 @@ Deno.test("baseline override parser rejects a name no source group could have", 
     Error,
     "name a coverage source group",
   );
+
+  // Only `packages` splits into a second level, so a path below any other
+  // top-level directory names nothing the collection rolls a file up to.
+  assertThrows(
+    () => parseBaselineOverrides("ACCEPT_COVERAGE_DEBT: tasks/foo +7 lines"),
+    Error,
+    "name a coverage source group",
+  );
+});
+
+Deno.test("unknownAcceptedMetrics names an accepted group nothing measured", () => {
+  const overrides = parseBaselineOverrides(
+    "ACCEPT_COVERAGE_DEBT: packages/nonexistent +7 lines\n" +
+      "ACCEPT_COVERAGE_DEBT: tasks +2 lines",
+  );
+  const measured = new Set([
+    "coverage-debt: tasks uncovered lines",
+    "coverage-debt: workspace uncovered lines",
+  ]);
+
+  // A shape a group could have is not a group this run has: the acceptance
+  // would otherwise sit in the description having no effect on anything.
+  assertEquals(unknownAcceptedMetrics(overrides, measured), [
+    "coverage-debt: packages/nonexistent uncovered lines",
+  ]);
+
+  measured.add("coverage-debt: packages/nonexistent uncovered lines");
+  assertEquals(unknownAcceptedMetrics(overrides, measured), []);
 });
 
 Deno.test("baseline override parser reads only a marker starting a line", () => {
@@ -321,12 +350,28 @@ Deno.test("baseline override parser reads only a marker starting a line", () => 
   assertEquals(parseBaselineOverrides(prose).metrics.size, 0);
 
   // An indented example of the marker is an example. A description showing the
-  // form — as this change's own does — accepts nothing by showing it.
+  // form — as this change's own does — accepts nothing by showing it, and says
+  // so, so an author who indented one by mistake can see why it did nothing.
+  const warnings: string[] = [];
   const example = parseBaselineOverrides(
     "Accept a rise above the baseline instead:\n\n" +
       "    ACCEPT_COVERAGE_DEBT: packages/runner +12 lines\n",
+    false,
+    (message) => warnings.push(message),
   );
   assertEquals(example.metrics.size, 0);
+  assertEquals(warnings.length, 1);
+  assertStringIncludes(warnings[0], "is indented, so it is read as an example");
+
+  // A merged description is read for its acceptances alone, so the examples it
+  // carries are passed over without comment.
+  const merged: string[] = [];
+  parseBaselineOverrides(
+    "    ACCEPT_COVERAGE_DEBT: packages/runner +12 lines\n",
+    true,
+    (message) => merged.push(message),
+  );
+  assertEquals(merged, []);
 
   // Flush against the left margin, the same line is an acceptance.
   const accepted = parseBaselineOverrides(

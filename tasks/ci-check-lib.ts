@@ -1408,12 +1408,20 @@ export async function fetchCurrentPRBody(
  */
 const COVERAGE_ACCEPTANCE_MARKER = /^ACCEPT_COVERAGE_DEBT:[^\n]*/gm;
 
+/** The same marker, indented, which is what makes it an example. */
+const COVERAGE_ACCEPTANCE_INDENTED = /^[ \t]+ACCEPT_COVERAGE_DEBT:[^\n]*/gm;
+
 /** The source group and the rise a well-formed acceptance names. */
 const COVERAGE_ACCEPTANCE_TERMS =
   /^ACCEPT_COVERAGE_DEBT:[ \t]*(\S+)[ \t]*\+[ \t]*(\d+)[ \t]*lines?\b/;
 
-/** A coverage source group: `workspace`, `tasks`, `packages/runner`. */
-const COVERAGE_GROUP_NAME = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?$/;
+/**
+ * A coverage source group. Metric collection rolls a file up to its top-level
+ * directory, `packages` excepted, where the package directory below it carries
+ * the group. So `workspace` and `tasks` are groups and `packages/runner` is
+ * one, while `tasks/foo` is not — nothing measures a group at that depth.
+ */
+const COVERAGE_GROUP_NAME = /^(?:[A-Za-z0-9._-]+|packages\/[A-Za-z0-9._-]+)$/;
 
 /**
  * Parse a PR body for coverage-debt overrides.
@@ -1430,6 +1438,10 @@ const COVERAGE_GROUP_NAME = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?$/;
  * what lets a pull request be rebased: the baseline moves with the rebase and
  * the accepted rise above it does not, so the same line keeps accepting the
  * same amount of new debt.
+ *
+ * A group name of the right shape still names no group the run measured, so
+ * the caller checks each accepted metric against the metrics it collected;
+ * `unknownAcceptedMetrics()` is that check.
  * `NEW_COVERAGE_BASELINE` is a whole-coverage ratchet reset marker; it has no
  * value and lets the PR's/main run's coverage metrics become the next baseline.
  *
@@ -1449,6 +1461,7 @@ const COVERAGE_GROUP_NAME = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?$/;
 export function parseBaselineOverrides(
   body: string,
   mergedPullRequestBody = false,
+  warn: (message: string) => void = console.warn,
 ): BaselineOverrides {
   const result: BaselineOverrides = {
     metrics: new Map(),
@@ -1457,6 +1470,18 @@ export function parseBaselineOverrides(
       "m",
     ).test(body),
   };
+
+  // An indented marker is read as an example, which is silent by design. Say
+  // which lines that reached, so an author who meant one as an acceptance and
+  // indented it can see why the gate carried on without it.
+  if (!mergedPullRequestBody) {
+    for (const example of body.match(COVERAGE_ACCEPTANCE_INDENTED) ?? []) {
+      warn(
+        `  Warning: "${example.trim()}" is indented, so it is read as an ` +
+          "example. An acceptance starts at the left margin.",
+      );
+    }
+  }
 
   for (const marker of body.match(COVERAGE_ACCEPTANCE_MARKER) ?? []) {
     const terms = COVERAGE_ACCEPTANCE_TERMS.exec(marker);
@@ -1495,6 +1520,25 @@ export function parseBaselineOverrides(
   }
 
   return result;
+}
+
+/**
+ * The accepted metrics this run measured nothing for, in the order they were
+ * written.
+ *
+ * A group name can be well formed and still name no group: a package that does
+ * not exist, a directory that holds no tracked source, a misspelling. Nothing
+ * downstream consults an acceptance whose metric is absent, so left alone it
+ * would read as a line that was written, accepted, and quietly did nothing.
+ * The caller fails the run instead.
+ */
+export function unknownAcceptedMetrics(
+  overrides: BaselineOverrides,
+  measured: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+): string[] {
+  return [...overrides.metrics.keys()].filter((metric) =>
+    !measured.has(metric)
+  );
 }
 
 /**
