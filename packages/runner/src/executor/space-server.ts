@@ -254,6 +254,12 @@ const demanderPairKey = (identity: ScopeKeyIdentity): string =>
     identity.sessionId === undefined ? "" : String(identity.sessionId)
   }`;
 
+/** The demand wake's coalescing grace (stage B): a watch-set change waits
+ * this long before it runs a demand pass, so a burst of watches (a shell's
+ * boot, a creator syncing its new piece) costs one pass and lands after
+ * the creator's own setup commits. Well under the flush deadline. */
+const DEMAND_WAKE_GRACE_MS = 300;
+
 const neverAPieceRootId = (id: string): boolean =>
   id === SERVER_EXECUTION_WATERMARK_DOC_ID ||
   // Phase 4: the effects doc is a session-scoped VALUE doc every
@@ -343,9 +349,11 @@ export class SpaceServer implements TransactionSealDestination {
    * retryable mid-cycle, consumed by the next #waitForInput. */
   #pendingStructureRetryWake = false;
   /** Level-converted demand wake (stage B): a session's watch set
-   * changed (or a session opened) since the last demand pass began;
-   * consumed by the next #waitForInput. */
+   * changed (or a session opened) and the grace elapsed; consumed by the
+   * next #waitForInput. */
   #pendingDemandWake = false;
+  /** The demand wake's grace timer (see noteDemandChanged). */
+  #demandWakeTimer: ReturnType<typeof setTimeout> | undefined;
   /** Wave-bound seals CHAINED but not yet applied (the F4 fix, as a
    * LEVEL): seal() returns after arming the seal chain, so a seal
    * landing in a cycle's last microtasks — after the closing wave
@@ -824,16 +832,26 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /** A session opened or its demand may have changed: reconsider the
-   * demanded roots on the next cycle. LEVEL-converted (fan-out stage B,
-   * the arrival re-arm's trigger): a note landing MID-CYCLE — while no
-   * input waiter is installed, or while a demand pass that already read
-   * the roots is in flight — latches, so the next `#waitForInput` runs a
-   * cycle whose demand pass sees the change instead of sleeping out the
-   * idle window (the same latch shape as the shadow-flip and
-   * structure-retry wakes). */
+   * demanded roots on a cycle SOON. LEVEL-converted with a GRACE
+   * (fan-out stage B, the arrival re-arm's trigger): the note arms a
+   * short timer (DEMAND_WAKE_GRACE_MS) and, when it fires, latches a
+   * cycle — so a note landing MID-CYCLE (no input waiter installed, or a
+   * demand pass that already read the roots in flight) is not lost (the
+   * same latch shape as the shadow-flip and structure-retry wakes), and
+   * a BURST of watch changes (a shell opening dozens of watches at boot;
+   * a piece's creator syncing what it just created) coalesces into ONE
+   * demand pass that runs after the burst — the creator's own setup
+   * commits get a head start over the loop's first structure load and
+   * derivations of that piece (protocol.md §4: a fresh subscription's
+   * recompute lands in a LATER derived commit; arrival is later demand).
+   * Input-driven cycles are unaffected (they run their pass regardless). */
   noteDemandChanged(): void {
-    this.#pendingDemandWake = true;
-    this.#feedArrived?.resolve();
+    if (this.#demandWakeTimer !== undefined) return;
+    this.#demandWakeTimer = setTimeout(() => {
+      this.#demandWakeTimer = undefined;
+      this.#pendingDemandWake = true;
+      this.#feedArrived?.resolve();
+    }, DEMAND_WAKE_GRACE_MS);
   }
 
   // ---- TransactionSealDestination ----
@@ -2184,10 +2202,6 @@ export class SpaceServer implements TransactionSealDestination {
   async #loadDemandedStructure(): Promise<void> {
     const runtime = this.#runtime;
     if (runtime === undefined) return;
-    // A demand note that landed BEFORE this pass reads the roots is
-    // satisfied by this pass; one landing after the read below latches
-    // for the next cycle (noteDemandChanged).
-    this.#pendingDemandWake = false;
     const roots = this.#options.server.watchedRootsForSpace(
       this.#options.space,
       // The serving session's own watches are its graph's reads, not
@@ -3147,6 +3161,11 @@ export class SpaceServer implements TransactionSealDestination {
     this.#demandedRoots.clear();
     this.#demandersByKey.clear();
     this.#pieceRootByDemandKey.clear();
+    if (this.#demandWakeTimer !== undefined) {
+      clearTimeout(this.#demandWakeTimer);
+      this.#demandWakeTimer = undefined;
+    }
+    this.#pendingDemandWake = false;
     this.#pendingStructureLoads.clear();
     this.#terminalStructureLoads.clear();
     this.#rearmedAwaitingSettle.clear();
