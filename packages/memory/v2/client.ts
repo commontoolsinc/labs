@@ -1668,6 +1668,7 @@ export const connect = Client.connect;
 // cascade rather than on a turn of their own.
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
+  let closeReceiver: ((error?: Error) => void) | undefined;
   let closed = false;
   const queue: string[] = [];
   let turn: ArmedTurn | null = null;
@@ -1682,27 +1683,47 @@ export const loopback = (server: Server): Transport => {
   const schedule = () => {
     turn ??= armTurn(drainOne);
   };
-  const connection = server.connect((message) => {
-    if (closed) return;
-    queue.push(encodeMemoryBoundary(message));
-    schedule();
-  });
+  // The server can close a connection (the evaluation boundary does); the
+  // loopback surfaces that like a socket close, and the next send opens a
+  // fresh connection — the same reconnect shape a deployment has.
+  let connection: ReturnType<Server["connect"]> | null = null;
+  const ensureConnection = () => {
+    if (connection !== null) return connection;
+    const opened = server.connect((message) => {
+      if (closed) return;
+      queue.push(encodeMemoryBoundary(message));
+      schedule();
+    }, () => {
+      if (connection !== opened) return;
+      connection = null;
+      if (closed) return;
+      queue.length = 0;
+      closeReceiver?.(new Error("memory loopback connection closed by server"));
+    });
+    connection = opened;
+    return opened;
+  };
+  ensureConnection();
   return {
     async send(payload: string) {
-      await connection.receive(payload);
+      await ensureConnection().receive(payload);
     },
     close() {
       closed = true;
       turn?.cancel();
       turn = null;
       queue.length = 0;
-      connection.close();
+      const current = connection;
+      connection = null;
+      current?.close();
       return Promise.resolve();
     },
     setReceiver(next) {
       receiver = next;
     },
-    setCloseReceiver() {},
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
   };
 };
 

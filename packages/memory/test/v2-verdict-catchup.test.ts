@@ -105,9 +105,12 @@ const setup = async (options: {
     session: {},
     invocation: authInvocation(committerSessionOpen),
   }));
-  const committerSessionId =
-    assertResponse<{ sessionId: string }>(shiftMessage(committerMessages))
-      .ok!.sessionId;
+  const committerOpened = assertResponse<{
+    sessionId: string;
+    sessionToken: string;
+  }>(shiftMessage(committerMessages)).ok!;
+  const committerSessionId = committerOpened.sessionId;
+  const committerSessionToken = committerOpened.sessionToken;
 
   await committer.receive(
     encodeMemoryBoundary(watchBoth(space, committerSessionId)),
@@ -125,7 +128,34 @@ const setup = async (options: {
     committer,
     committerMessages,
     committerSessionId,
+    committerSessionToken,
   };
+};
+
+// Resume the committer's session on a fresh connection — the client-side
+// recovery the connection-level evaluation boundary relies on.
+const resumeCommitter = async (
+  server: Server,
+  space: string,
+  sessionId: string,
+  sessionToken: string,
+) => {
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  await connection.receive(encodeMemoryBoundary(HELLO));
+  const sessionOpen = expectHelloOk(messages);
+  await connection.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "committer-resume",
+    space,
+    session: { sessionId, sessionToken },
+    invocation: authInvocation(sessionOpen),
+  }));
+  const opened = assertResponse<{ sessionId: string; sync?: SessionSync }>(
+    shiftMessage(messages),
+  );
+  assertEquals(opened.ok?.sessionId, sessionId);
+  return { connection, messages, sync: opened.ok?.sync };
 };
 
 Deno.test("memory v2 server: an accept returns inline and its marker rides the batched frame with the parked novelty", async () => {
@@ -341,12 +371,14 @@ Deno.test("memory v2 server: a failed fan-out requeues the batch and the schedul
   assertEquals(verdict.ok?.seq, 2);
 
   // Fail INSIDE the fan-out — after refreshLoop has consumed the dirty
-  // state — unlike a stubbed flushSessions, which never consumes it.
-  const original = server.syncSessionForConnection.bind(server);
+  // state — at the CONNECTION delivery layer, below the evaluation
+  // boundary (an evaluation failure closes the connection instead of
+  // requeueing; this pin is about transport-class failures).
+  const original = committer.refreshDirty.bind(committer);
   let calls = 0;
-  (server as unknown as {
-    syncSessionForConnection: typeof original;
-  }).syncSessionForConnection = (...args) => {
+  (committer as unknown as {
+    refreshDirty: typeof original;
+  }).refreshDirty = (...args) => {
     calls += 1;
     if (calls === 1) {
       return Promise.reject(new Error("synthetic fan-out failure"));
@@ -640,7 +672,7 @@ Deno.test("memory v2 server: a failed send rolls back delivery state; the next f
   assertEquals(committerMessages.length, 0);
 });
 
-Deno.test("memory v2 server: a throwing evaluation restores the consumed marker obligation", async () => {
+Deno.test("memory v2 server: a throwing evaluation closes the connection and the resumed session recovers the marker", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-eval-rollback",
@@ -686,23 +718,27 @@ Deno.test("memory v2 server: a throwing evaluation restores the consumed marker 
     }
     return originalAttach(...args);
   };
-  let threw = false;
-  try {
-    await server.flushSessions([space]);
-  } catch {
-    threw = true;
-  }
-  assertEquals(threw, true);
+  // The evaluation failure closes the committer's connection at the
+  // boundary (no throw surfaces, nothing is delivered to it), with the
+  // marker obligation rolled back into the detached session.
+  await server.flushSessions([space]);
   assertEquals(committerMessages.length, 0);
 
-  // The requeued batch AND the restored obligation deliver together.
-  await server.flushSessions([space]);
-  const effect = assertEffect(shiftMessage(committerMessages));
-  const sync = effect.effect as SessionSync;
+  // Client-side recovery: resume on a fresh connection. Catch-up delivers
+  // the parked novelty AND the restored obligation together.
+  const { sync } = await resumeCommitter(
+    server,
+    space,
+    context.committerSessionId,
+    context.committerSessionToken,
+  );
+  assertExists(sync);
   assertEquals(sync.caughtUpLocalSeq, 1);
+  // A resume catch-up carries no per-batch origin info, so the session's
+  // own doc:a write rides along with the parked foreign doc:b.
   assertEquals(
-    sync.upserts.map((upsert) => upsert.id),
-    ["of:doc:b"],
+    sync.upserts.map((upsert) => upsert.id).toSorted(),
+    ["of:doc:a", "of:doc:b"],
   );
 });
 
@@ -770,7 +806,7 @@ Deno.test("memory v2 server: a failing timer-driven flush warns and leaves recov
   );
 });
 
-Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", async () => {
+Deno.test("memory v2 server: an evaluation failure closes only its connection; later spaces deliver in the same pass", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-multi-space",
@@ -824,30 +860,11 @@ Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", 
     return original(...args);
   };
 
-  let threw = false;
-  try {
-    await server.flushSessions([space, spaceB]);
-  } catch {
-    threw = true;
-  }
-  assertEquals(threw, true);
-  // The failing pass delivered NOTHING: the rejected sync sent no frame,
-  // and the pass aborted before reaching the other space.
+  // The evaluation failure closes ONLY the committer's connection at the
+  // boundary; the same pass still reaches the other space's observer —
+  // nothing is stranded and nothing throws.
+  await server.flushSessions([space, spaceB]);
   assertEquals(committerMessages.length, 0);
-  assertEquals(observerMessages.length, 0);
-
-  // Recovery must reach BOTH spaces: the failed space's consumed batch was
-  // requeued, and the unreached space was never removed from the dirty set
-  // (spaces leave it at their own processing turn). Pre-fix the whole
-  // selection was deleted up front, so whichever space the failure skipped
-  // stayed stranded and its observer never heard the parked novelty.
-  await server.flushSessions();
-  const committerSync = assertEffect(shiftMessage(committerMessages))
-    .effect as SessionSync;
-  assertEquals(
-    committerSync.upserts.map((upsert) => upsert.id),
-    ["of:doc:b"],
-  );
   const observerSync = assertEffect(shiftMessage(observerMessages))
     .effect as SessionSync;
   assertEquals(
@@ -861,17 +878,20 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-requeue-origin",
   });
-  const { server, space, committerMessages, committerSessionId } = context;
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
 
   // First fan-out consumes the batch (doc:b unattributed) and, BEFORE
   // failing, doc:b is re-dirtied WITH an origin — as a concurrent own
-  // write would. The requeue merge must not let the newer origin win:
-  // provenance survives only when both batches agree.
-  const original = server.syncSessionForConnection.bind(server);
+  // write would. The failure is at the CONNECTION delivery layer (below
+  // the evaluation boundary), so the requeue merge runs, and it must not
+  // let the newer origin win: provenance survives only when both batches
+  // agree.
+  const original = committer.refreshDirty.bind(committer);
   let failed = false;
-  (server as unknown as {
-    syncSessionForConnection: typeof original;
-  }).syncSessionForConnection = (...args) => {
+  (committer as unknown as {
+    refreshDirty: typeof original;
+  }).refreshDirty = (...args) => {
     if (!failed) {
       failed = true;
       server.markSpaceDirty(space, ["space of:doc:b"], {

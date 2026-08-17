@@ -264,7 +264,7 @@ describe("schema-doc-sync", () => {
       path: [],
       schema: false,
     });
-    expect(String(first.error?.message)).toContain("not stored in this space");
+    expect(String(first.error?.message)).toContain("connection closed");
     expect(isSchemaDocumentClosureComplete(rootHash)).toBe(false);
 
     // The leaf lands late. A fresh sync (differently selected, so coverage
@@ -403,7 +403,7 @@ describe("schema-doc-sync", () => {
       "of:dangling-carrier" as URI,
       { path: [], schema: false },
     );
-    expect(String(result.error?.message)).toContain("not stored in this space");
+    expect(String(result.error?.message)).toContain("connection closed");
   });
 
   it("fails a pull whose stored dependency is forged even though the realm registry holds a valid copy", async () => {
@@ -433,9 +433,7 @@ describe("schema-doc-sync", () => {
       `cid:${rootHash}` as URI,
       { path: [], schema: false },
     );
-    expect(String(result.error?.message)).toContain(
-      "did not verify in this space",
-    );
+    expect(String(result.error?.message)).toContain("connection closed");
   });
 
   it("delivers the closure behind a ref a document gains after the watch was established", async () => {
@@ -556,9 +554,7 @@ describe("schema-doc-sync", () => {
         "of:broken-closure-carrier" as URI,
         { path: [], schema: false },
       );
-      expect(String(probe.error?.message)).toContain(
-        "not stored in this space",
-      );
+      expect(String(probe.error?.message)).toContain("connection closed");
     } finally {
       await probeStorage.close();
     }

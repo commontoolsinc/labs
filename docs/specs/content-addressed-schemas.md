@@ -404,11 +404,14 @@ delivery and traversal split the work in two layers:
   referrer. Because the commit boundary makes `cid:` documents
   immutable, an assembly failure can only mean corruption outside the
   commit API — a tampered store, a pre-immutability hole — never a
-  transient condition: an initial query fails with the error, an
-  established session's watch is terminated loudly (a terminal
-  `session/revoked`, its graph state discarded whole), every other
-  session's fan-out proceeds untouched, and nothing holds, retries, or
-  repairs automatically.
+  transient condition. Every query/watch evaluation exception shares one
+  failure boundary: the server records the diagnostics and closes the
+  affected CONNECTION, discarding its session and graph state whole
+  (one session per connection leaves nothing worth preserving), while
+  fan-out to other connections proceeds. The client's ordinary
+  disconnect/reconnect recovery reinstalls fresh state; a still-corrupt
+  store fails the reinstalled watch loudly again, and no partial result
+  is ever served.
 
 A client that syncs a document therefore receives the schema documents for
 every link it contains in the same round trip, keeping the "resolved means

@@ -2423,8 +2423,11 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
       session: {},
       invocation: authInvocation(sessionOpen),
     }));
-    const opened = nextResponse<{ sessionId: string }>(messages);
+    const opened = nextResponse<{ sessionId: string; sessionToken: string }>(
+      messages,
+    );
     const sessionId = opened.ok!.sessionId;
+    const sessionToken = opened.ok!.sessionToken;
 
     await connection.receive(encodeMemoryBoundary({
       type: "transact",
@@ -2501,11 +2504,30 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
         },
       }],
     } as any));
-    const failed = nextResponse<any>(messages);
-    assertEquals(failed.requestId, "watch-2");
-    assertEquals(failed.error?.name, "QueryError");
+    // The broken watch fails evaluation, which closes the connection at
+    // the boundary: no response arrives, and the failed add's partial
+    // mutations die with the connection's graph state.
+    assertEquals(messages, []);
 
-    await connection.receive(encodeMemoryBoundary({
+    // Client-side recovery: resume the session on a fresh connection. The
+    // discarded add left nothing behind — doc:2 is not watched, so its
+    // update rides no frame, while the accept's catch-up marker still
+    // arrives (CT-1927).
+    const resumedMessages: ServerMessage[] = [];
+    const resumed = server.connect((message) => resumedMessages.push(message));
+    await resumed.receive(encodeMemoryBoundary(HELLO));
+    const resumedOpen = expectHelloOk(resumedMessages);
+    await resumed.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-resume",
+      space,
+      session: { sessionId, sessionToken },
+      invocation: authInvocation(resumedOpen),
+    }));
+    const reopened = nextResponse<{ sessionId: string }>(resumedMessages);
+    assertEquals(reopened.ok?.sessionId, sessionId);
+
+    await resumed.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "update-doc-2",
       space,
@@ -2521,16 +2543,17 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
       },
     }));
     assertEquals(
-      nextResponse<any>(messages).requestId,
+      nextResponse<any>(resumedMessages).requestId,
       "update-doc-2",
     );
 
     await tick();
     // The accept's catch-up marker rides an otherwise-empty frame
     // (CT-1927); no watched novelty is echoed.
-    const marker2 = assertEffect(shiftMessage(messages));
+    const marker2 = assertEffect(shiftMessage(resumedMessages));
     assertEquals(marker2.effect.upserts, []);
     assertEquals(marker2.effect.caughtUpLocalSeq, 2);
+    assertEquals(resumedMessages, []);
     assertEquals(messages, []);
   } finally {
     await server.close();

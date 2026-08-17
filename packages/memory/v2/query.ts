@@ -378,9 +378,10 @@ const scanSnapshotSchemaRefs = (
  * assembled from the delivering space's own store: a referenced document
  * is missing, or its stored content does not hash to its id. The commit
  * boundary makes `cid:` documents immutable, so this is database
- * corruption, not a transient condition: an initial query fails with it,
- * and the server terminates an established session's watch loudly rather
- * than holding or retrying.
+ * corruption, not a transient condition. Like every query/watch
+ * evaluation exception, it closes the affected connection at the
+ * server's evaluation boundary; reconnection reinstalls fresh state, and
+ * a still-corrupt store fails loudly again.
  */
 export class SchemaClosureError extends Error {
   constructor(message: string) {

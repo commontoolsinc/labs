@@ -396,6 +396,7 @@ class Connection {
     readonly id: string,
     private readonly server: Server,
     private readonly sendRaw: Send,
+    private readonly onClose?: () => void,
   ) {}
 
   private send(message: ServerMessage): void {
@@ -648,7 +649,12 @@ class Connection {
         });
         return;
       case "session.open": {
-        const response = await this.server.openSession(parsed, this);
+        const response = await this.#evaluationBoundary(
+          "session.open",
+          parsed.space,
+          () => this.server.openSession(parsed, this),
+        );
+        if (response === undefined) return;
         if (response.ok?.sessionId) {
           this.addSession(parsed.space, response.ok.sessionId);
         }
@@ -781,7 +787,12 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.watchSet(parsed);
+          const response = await this.#evaluationBoundary(
+            "session.watch.set",
+            parsed.space,
+            () => this.server.watchSet(parsed),
+          );
+          if (response === undefined) return;
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -801,7 +812,12 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.watchAdd(parsed);
+          const response = await this.#evaluationBoundary(
+            "session.watch.add",
+            parsed.space,
+            () => this.server.watchAdd(parsed),
+          );
+          if (response === undefined) return;
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -855,6 +871,33 @@ class Connection {
     }
   }
 
+  /**
+   * Query/watch evaluation shares ONE failure boundary: any exception —
+   * schema-closure corruption included — records its diagnostics and
+   * closes this connection, discarding its session and graph state whole.
+   * The client's ordinary disconnect/reconnect recovery reinstalls fresh
+   * connection, session, and watch state; persistent corruption fails
+   * loudly again rather than ever serving a partial result. One session
+   * per connection means no independent session state is worth
+   * preserving across the failure.
+   */
+  async #evaluationBoundary<T>(
+    label: string,
+    space: string,
+    evaluate: () => Promise<T>,
+  ): Promise<T | undefined> {
+    try {
+      return await evaluate();
+    } catch (error) {
+      console.error(
+        `memory v2: ${label} evaluation failed; closing connection ${this.id} for space ${space}`,
+        error,
+      );
+      this.close();
+      return undefined;
+    }
+  }
+
   async refreshDirty(
     space: string,
     dirtyIds?: ReadonlySet<string>,
@@ -875,13 +918,22 @@ class Connection {
       if (sessionSpace !== space) {
         continue;
       }
-      const effect = await this.server.syncSessionForConnection(
+      const effect = await this.#evaluationBoundary(
+        "watch refresh",
         space,
-        sessionId,
-        dirtyIds,
-        dirtyOrigins,
-        { adoptionObservations: this.#persistentSchedulerState },
+        () =>
+          this.server.syncSessionForConnection(
+            space,
+            sessionId,
+            dirtyIds,
+            dirtyOrigins,
+            { adoptionObservations: this.#persistentSchedulerState },
+          ),
       );
+      // `undefined` means the boundary closed this connection.
+      if (effect === undefined) {
+        return;
+      }
       if (this.#closed) {
         // Evaluation already advanced the session cache past this content;
         // roll the delivery state back so a later pass (or a resumed
@@ -927,6 +979,19 @@ class Connection {
       this.server.detachSession(space, sessionId, this.id);
     }
     this.server.disconnect(this);
+    // After teardown: a transport that surfaces server-initiated closes
+    // (the socket-close signal a real deployment gets for free) hears it
+    // here.
+    this.onClose?.();
+  }
+}
+
+// Carries a resume catch-up evaluation failure past `openSession`'s
+// protocol-error mapping to the connection's evaluation boundary.
+class SessionOpenEvaluationEscape extends Error {
+  constructor(readonly evaluationError: unknown) {
+    super("session.open resume catch-up evaluation failed");
+    this.name = "SessionOpenEvaluationEscape";
   }
 }
 
@@ -1357,8 +1422,8 @@ export class Server {
     }
   }
 
-  connect(send: Send): Connection {
-    const connection = new Connection(crypto.randomUUID(), this, send);
+  connect(send: Send, onClose?: () => void): Connection {
+    const connection = new Connection(crypto.randomUUID(), this, send, onClose);
     this.#connections.set(connection.id, connection);
     return connection;
   }
@@ -2004,7 +2069,12 @@ export class Server {
         ? await this.syncSessionForConnection(
           message.space,
           opened.sessionId,
-        )
+        ).catch((error) => {
+          // Resume catch-up is query/watch evaluation: its failures belong
+          // to the connection's evaluation boundary, not this handler's
+          // protocol-error mapping.
+          throw new SessionOpenEvaluationEscape(error);
+        })
         : null;
       // A resumed session is registered before catch-up, and catch-up awaits
       // graph evaluation. An ACL commit (or takeover) can remove or replace it
@@ -2041,6 +2111,9 @@ export class Server {
         },
       };
     } catch (error) {
+      if (error instanceof SessionOpenEvaluationEscape) {
+        throw error.evaluationError;
+      }
       const name = error instanceof Error && error.name === "AuthorizationError"
         ? "AuthorizationError"
         : error instanceof Error && error.name === "SessionRevokedError"
@@ -2770,7 +2843,7 @@ export class Server {
       }
     }
 
-    try {
+    {
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
         message.space,
         message.watches,
@@ -2799,14 +2872,6 @@ export class Server {
           sync,
         },
       };
-    } catch (error) {
-      return respondTypedError<WatchSetResult>(
-        message.requestId,
-        toError(
-          "QueryError",
-          error instanceof Error ? error.message : String(error),
-        ),
-      );
     }
   }
 
@@ -2842,7 +2907,7 @@ export class Server {
       }
     }
 
-    try {
+    {
       const startedAt = performance.now();
       const engine = aclEngine ?? await this.openEngine(message.space);
       const existingById = new Map(
@@ -2980,14 +3045,6 @@ export class Server {
           },
         },
       };
-    } catch (error) {
-      return respondTypedError<WatchAddResult>(
-        message.requestId,
-        toError(
-          "QueryError",
-          error instanceof Error ? error.message : String(error),
-        ),
-      );
     }
   }
 
@@ -3262,69 +3319,40 @@ export class Server {
             const fromSeq = session.lastSyncedSeq;
             const updates = new Map<string, SessionCacheEntry>();
 
-            try {
-              for (const graph of session.graphs.values()) {
-                const refreshed = tracer.startActiveSpan(
-                  "memory.watch.refresh",
-                  (watchSpan) => {
-                    watchSpan.setAttribute("space.did", space);
-                    try {
-                      return refreshTrackedGraph(
-                        space,
-                        engine,
-                        graph,
-                        dirtyIds,
-                      );
-                    } finally {
-                      watchSpan.end();
-                    }
-                  },
-                );
-                if (refreshed === null) {
-                  continue;
-                }
-                for (const entity of refreshed.updates.values()) {
-                  const entry = toCacheEntry(entity);
-                  updates.set(
-                    cacheKeyForEntity(
-                      entry.branch,
-                      entry.id,
-                      declaredScope(entry.scope),
-                    ),
-                    entry,
-                  );
-                }
-              }
-            } catch (error) {
-              // A schema-closure violation is database corruption: the
-              // commit boundary makes cid: documents immutable, so a
-              // missing or forged closure is a state normal operation can
-              // never create, not a transient condition to hold and
-              // retry. Terminate THIS session loudly — its graph state is
-              // discarded whole, which also discards any earlier graph's
-              // partial advance from this pass — and let every other
-              // session's fan-out proceed. The client sees a terminal
-              // session/revoked; a reopen's initial query fails against
-              // the same corruption.
-              if (
-                error instanceof Error && error.name === "SchemaClosureError"
-              ) {
-                console.error(
-                  `memory v2: schema-closure violation; terminating session ${sessionId} in space ${space}`,
-                  error,
-                );
-                this.#sessions.remove(space, sessionId);
-                if (session.ownerConnectionId !== null) {
-                  this.#connections.get(session.ownerConnectionId)
-                    ?.revokeSession(
+            // Evaluation exceptions — schema-closure corruption included —
+            // propagate to the connection's evaluation boundary, which
+            // closes the affected connection whole.
+            for (const graph of session.graphs.values()) {
+              const refreshed = tracer.startActiveSpan(
+                "memory.watch.refresh",
+                (watchSpan) => {
+                  watchSpan.setAttribute("space.did", space);
+                  try {
+                    return refreshTrackedGraph(
                       space,
-                      sessionId,
-                      "schema-closure-violation",
+                      engine,
+                      graph,
+                      dirtyIds,
                     );
-                }
-                return null;
+                  } finally {
+                    watchSpan.end();
+                  }
+                },
+              );
+              if (refreshed === null) {
+                continue;
               }
-              throw error;
+              for (const entity of refreshed.updates.values()) {
+                const entry = toCacheEntry(entity);
+                updates.set(
+                  cacheKeyForEntity(
+                    entry.branch,
+                    entry.id,
+                    declaredScope(entry.scope),
+                  ),
+                  entry,
+                );
+              }
             }
 
             if (updates.size === 0) {
