@@ -22,6 +22,7 @@ import {
 } from "./pieces-controller.ts";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 export interface WorkerRequest {
   id: number;
@@ -235,7 +236,7 @@ const handlers: Record<
       ),
     );
     const created = await controller().create(program, {
-      input: isRecord(input) ? input : undefined,
+      input: isObjectNotArray(input) ? input : undefined,
       start: true,
     });
     await attachPiece(created);
@@ -258,7 +259,7 @@ const handlers: Record<
       // applies when delivering real DOM events.
       eventValue = {
         type: "click",
-        ...(isRecord(event) ? event : {}),
+        ...(isObjectNotArray(event) ? event : {}),
         provenance: {
           origin: "dom",
           trusted: true,
@@ -469,9 +470,6 @@ const handlers: Record<
     return {};
   },
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const { id, cmd, args } = event.data;

@@ -125,6 +125,7 @@ DIRS=(
   "packages/patterns/scrabble"
   "packages/patterns/system"
   "packages/patterns/test"
+  "packages/patterns/tools"
   "packages/patterns/weekly-calendar"
   "packages/piece"
   "packages/runner"

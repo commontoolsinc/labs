@@ -1,5 +1,8 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { isObjectNotArray } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
 
 export type PromptSlotRole = "direct-command" | "context" | "quote";
 
@@ -47,9 +50,6 @@ const PROMPT_SLOT_ROLES: readonly PromptSlotRole[] = [
   "quote",
 ];
 
-const isJsonObject = (input: unknown): input is Record<string, unknown> =>
-  isObjectNotArray(input);
-
 const isPromptSlotRole = (input: unknown): input is PromptSlotRole =>
   typeof input === "string" &&
   PROMPT_SLOT_ROLES.includes(input as PromptSlotRole);
@@ -61,10 +61,10 @@ const isPromptSlotReference = (
   input: unknown,
 ): input is PromptSlotReference =>
   isNonEmptyString(input) ||
-  (isJsonObject(input) && Object.keys(input).length > 0);
+  (isObjectNotArray(input) && Object.keys(input).length > 0);
 
 const optionalString = (
-  input: Record<string, unknown>,
+  input: ReadonlyRecord,
   field: keyof PromptSlotBinding,
 ): string | undefined => {
   const value = input[field];
@@ -83,7 +83,7 @@ const normalizePromptSlotRenderRef = (
   if (input === undefined) {
     return undefined;
   }
-  if (!isJsonObject(input)) {
+  if (!isObjectNotArray(input)) {
     throw new Error("prompt slot renderRef must be an object");
   }
   if (typeof input.seq !== "number" || !Number.isSafeInteger(input.seq)) {
@@ -101,7 +101,7 @@ const normalizePromptSlotRenderRef = (
 export const normalizePromptSlotBinding = (
   input: unknown,
 ): PromptSlotBinding => {
-  if (!isJsonObject(input)) {
+  if (!isObjectNotArray(input)) {
     throw new Error("prompt slot binding must be a JSON object");
   }
   if (input.type !== CFC_PROMPT_SLOT_BOUND_ATOM_TYPE) {

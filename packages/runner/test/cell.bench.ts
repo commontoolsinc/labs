@@ -1,5 +1,6 @@
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -1422,12 +1423,9 @@ Deno.bench("Notebook read - 100 notes, 1000 reads", async () => {
 // ============================================================================
 
 Deno.bench(
-  "Overhead - isRecord check (10000x)",
+  "Overhead - isObjectNotArray check (10000x)",
   { group: "overhead" },
   () => {
-    const isRecord = (v: unknown): v is Record<string, unknown> =>
-      typeof v === "object" && v !== null && !Array.isArray(v);
-
     const values = [
       42,
       "string",
@@ -1438,7 +1436,7 @@ Deno.bench(
       { key: "value" },
     ];
     for (let i = 0; i < 10000; i++) {
-      isRecord(values[i % values.length]);
+      isObjectNotArray(values[i % values.length]);
     }
   },
 );
