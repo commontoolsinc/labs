@@ -564,6 +564,26 @@ both survive: `PerUser<Cell<PerSession<string>>>` → `{ asCell: [{ kind:
 "cell", scope: "user" }], scope: "session", type: "string" }` (fixture
 `scoped-wrappers`).
 
+A scope wrapper **as a union member throws** (`A scope wrapper cannot be a
+member of a union.`; tested, scope-wrappers.test.ts). The runtime reads a
+slot's scope from the top level of that slot's own schema
+(`ContextualFlowControl.getSchemaScopeCap`), so a declaration that lands in an
+`anyOf` branch is invisible to the write path: no narrowing redirect is
+written, the value lands on the shared space row, and every principal reads
+the same instance. Write the union inside the wrapper
+(`PerUser<string | undefined>` → `{ type: ["string", "undefined"], scope:
+"user" }`) or make the property optional (`draft?: PerUser<string>` →
+`{ type: "string", scope: "user" }`) — both keep the scope at the top level.
+
+Two detection points enforce this, because a wrapper around a cell loses its
+scope before the schema is built. `formatWrapperUnion`
+(`common-fabric-formatter.ts`) catches a scope-wrapped union member while the
+wrapper is still visible; `assertScopeDeclarationsAreReachable`
+(`scope-placement.ts`), run on every finished schema, catches a scope that
+reached an `anyOf`/`oneOf`/`allOf` branch by any route. A scope nested deeper
+— on a property of an object that is itself a union member — is that
+property's own top-level declaration and is accepted.
+
 ## 11. CFC Alias Lowering (`ifc` Metadata)
 
 The canonical authoring surface contains 18 names. The inventory is
@@ -747,6 +767,7 @@ Everything that throws, with source (test-pinned unless noted):
 | `DeepDefault` without object target/default | `DeepDefault must be unioned with an object type …` | `union-formatter.ts` |
 | `DeepDefault` unknown key | `DeepDefault key "…" does not exist on the target object type.` | `union-formatter.ts` |
 | Nested scope wrappers | `Nested scope wrappers require a cell boundary between scopes.` | `common-fabric-formatter.ts` |
+| Scope wrapper as a union member | `A scope wrapper cannot be a member of a union.` | `common-fabric-formatter.ts`, `scope-placement.ts` |
 | Circular type alias (wrapper chain) | `Circular type alias detected: A -> B -> …` | `type-utils.ts` |
 | Circular type alias (union alias) | `Circular type alias detected: <name>` | `union-formatter.ts` |
 | Wrapper/scope/CFC alias without type argument | `<Kind><T> requires type argument` | `common-fabric-formatter.ts` (untested) |
