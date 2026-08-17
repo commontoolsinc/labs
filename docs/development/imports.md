@@ -7,6 +7,11 @@ constructs break that: a type written as `import("./mod.ts").Thing`, and a
 module loaded by an `import("./mod.ts")` expression in the middle of a
 function. Both are called an inline import here.
 
+How the declarations at the top are then grouped, collated and sorted, and how
+many statements one module may take, is the `Imports` section of
+[`DEVELOPMENT.md`](DEVELOPMENT.md). This document is about what may not be
+written outside that list at all.
+
 Two lint rules keep them out. They live in
 [`tasks/lint-inline-imports.ts`](../../tasks/lint-inline-imports.ts) and are
 registered under `lint.plugins` in the root `deno.jsonc`, so `deno lint` runs

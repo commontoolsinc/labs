@@ -38,6 +38,9 @@ describe("piece-data-spellings", () => {
   }
 
   it("mounts each command at top level with the piece mount's exact surface", async () => {
+    // This test drives its own copy of the command tree, which reads the
+    // environment as it is built; the query string is what makes the copy.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const { main } = await import(
       "../commands/main.ts?piece-data-spellings-surface"
     );
