@@ -671,14 +671,14 @@ Notes:
   is larger. This matches the window rule used for the CI duration median. The
   corresponding line still spans the full ~45 days. Its trend window is
   brighter. Green means every eligible established CPU is flat or falling. If
-  no CPU has been measured in the preceding twelve hours, the tile reports
-  **no recent benchmark data**. A benchmark runs either to a fixed time budget
-  or for a fixed number of iterations, and neither is a measurement. The run's
-  wall clock therefore barely moves with performance. The per-operation times
-  do move, so the tile
-  trends those values instead. Because the index
-  comes from artifacts, the tile turns gray when no in-window run has readable
-  data and the latest run is neither failed nor empty. A collection leaves its
+  no CPU has been measured in the preceding twelve hours, the tile turns gray
+  and reports **no recent benchmark data**. A benchmark runs either to a fixed
+  time budget or for a fixed number of iterations, and neither is a
+  measurement. The run's wall clock therefore barely moves with performance.
+  The per-operation times do move, so the tile trends those values instead.
+  Because the index comes from artifacts, the tile also turns gray when no
+  in-window run has readable data and the latest run is neither failed nor
+  empty. A collection leaves its
   last completed color and values in place until the workflow status and
   artifact refresh have both settled. A collection that takes more than a
   minute says **refresh still pending** without changing that color. A newly

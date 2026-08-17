@@ -3140,10 +3140,9 @@ Deno.test("benchmark: a rejected token grays out as an auth failure", async () =
   });
 });
 
-Deno.test("benchmark: a failed fetch keeps the last-known trend grayed instead of blanking", async () => {
-  // Was online and cached two runs, then the source goes unreachable. The tile keeps
-  // its last-known trend — grayed, with the reason — rather than dropping to a bare
-  // dash, and would recover on the next collection once the source is back.
+Deno.test("benchmark: a failed fetch keeps a stale cached trend grayed", async () => {
+  // Cache two runs older than the headline window, then make the source unreachable.
+  // The tile keeps the cached trend and chart gray with the reason.
   const directory = await Deno.makeTempDir({ prefix: "benchmark-offline-" });
   const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
   const originalFetch = globalThis.fetch;
@@ -3151,7 +3150,7 @@ Deno.test("benchmark: a failed fetch keeps the last-known trend grayed instead o
   Deno.env.set("DASHBOARD_CACHE_DIR", directory);
   const key = "packages/a/x.bench.ts";
   const healthy = serve({
-    pages: { 1: [ghRun(7_701, BASE - DAY), ghRun(7_702, BASE)] },
+    pages: { 1: [ghRun(7_701, BASE - 2 * DAY), ghRun(7_702, BASE - DAY)] },
     artifacts: {
       7_701: [{ id: 77_010, name: "bench-results", expired: false }],
       7_702: [{ id: 77_020, name: "bench-results", expired: false }],
@@ -3169,8 +3168,9 @@ Deno.test("benchmark: a failed fetch keeps the last-known trend grayed instead o
       return Promise.resolve(healthy(url));
     }) as typeof fetch;
     const online = await isolated.benchmark.collect(ctx({ GH_TOKEN: token }));
-    assertEquals(online.status, "good");
-    assertStringIncludes(online.value ?? "", "new"); // two runs, under a week -> "new"
+    assertEquals(online.status, "unknown");
+    assertEquals(online.value, "—");
+    assertEquals(online.sub, "no recent benchmark data");
 
     // The source becomes unreachable on the next collection.
     globalThis.fetch = (() =>
@@ -3178,10 +3178,10 @@ Deno.test("benchmark: a failed fetch keeps the last-known trend grayed instead o
         new TypeError("error sending request for url (https://api.github.com/...)"),
       )) as typeof fetch;
     const offline = await isolated.benchmark.collect(ctx({ GH_TOKEN: token }));
-    assertEquals(offline.status, "unknown"); // grayed — never a stale red or green
+    assertEquals(offline.status, "unknown");
     assertEquals(offline.sub, "source unreachable");
-    assertStringIncludes(offline.value ?? "", "new"); // kept the last-known trend
-    assert((offline.value ?? "") !== "—"); // not blanked to a bare dash
+    assertStringIncludes(offline.value ?? "", "new");
+    assertStringIncludes(offline.extra ?? "", "<svg");
   } finally {
     globalThis.fetch = originalFetch;
     if (previousCacheDirectory === undefined) {

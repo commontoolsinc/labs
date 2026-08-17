@@ -1151,8 +1151,7 @@ function benchmarkIndexView(
     );
   }
   const headlineCandidates = benchmarkHeadlineCandidates(indices, now);
-  if (!headlineCandidates.length) {
-    if (offline) return benchmarkUnavailable(offline, aside);
+  if (!headlineCandidates.length && !offline) {
     if (failed) {
       return {
         ...benchmarkDrill,
@@ -1165,10 +1164,13 @@ function benchmarkIndexView(
     }
     return benchmarkUnavailable("no recent benchmark data", aside);
   }
-  const established = headlineCandidates.filter((series) =>
+  const displayCandidates = headlineCandidates.length
+    ? headlineCandidates
+    : indices;
+  const established = displayCandidates.filter((series) =>
     series.trend.label !== "new"
   );
-  const headlinePool = established.length ? established : headlineCandidates;
+  const headlinePool = established.length ? established : displayCandidates;
   const headline = headlinePool.reduce((
     worst,
     series,
