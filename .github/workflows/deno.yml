@@ -116,6 +116,10 @@ jobs:
         timeout-minutes: *work-timeout
         run: deno task check-single-copy-deps
 
+      - name: 🚧 Guard against new import cycles between packages
+        timeout-minutes: *work-timeout
+        run: deno task check-package-cycles
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         timeout-minutes: *work-timeout
         working-directory: packages/static

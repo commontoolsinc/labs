@@ -1,5 +1,5 @@
 /**
- * JSX development runtime for @commonfabric/html
+ * JSX development runtime for @commonfabric/runner
  *
  * This module provides the JSX development runtime implementation compatible with
  * TypeScript's "jsx": "react-jsxdev" configuration.
@@ -12,7 +12,7 @@
 
 import type { JSXElement, RenderNode, VNode } from "@commonfabric/api";
 
-import { h } from "./h.ts";
+import { h } from "./builder/h.ts";
 
 /**
  * Props type for JSX elements in development mode, including children and debug info
