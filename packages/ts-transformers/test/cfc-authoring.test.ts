@@ -706,6 +706,51 @@ Deno.test("PolicyOf retains the defining identity of an imported ruleset", async
   );
 });
 
+Deno.test("PolicyOf retains its identity in narrowed capture schemas", async () => {
+  const outputs = await transformFiles({
+    "/policy.ts": `/// <cts-enable />
+      import { Confidential } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import {
+        cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+      } from "commonfabric/cfc";
+      export const release = exchangeRule({
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+        post: { addAlternatives: [cfcPattern.user(v("user"))] },
+      });
+      export const rules = exchangeRules([release]);
+      export interface ProtectedValue {
+        message: Confidential<string, readonly [PolicyOf<typeof rules>]>;
+      }
+    `,
+    "/main.tsx": `/// <cts-enable />
+      import { assert, pattern, TESTS } from "commonfabric";
+      import type { ProtectedValue } from "./policy.ts";
+      declare function loadProtectedValue(): ProtectedValue;
+      export default pattern(() => {
+        const protectedValue = loadProtectedValue();
+        const assertion = assert(() => protectedValue.message === "ready");
+        return { [TESTS]: [{ assertion }] };
+      });
+    `,
+  }, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([
+      ["/main.tsx", "sha256:importer"],
+      ["/policy.ts", "sha256:defining-policy"],
+    ]),
+  });
+  const output = outputs["/main.tsx"] ?? "";
+
+  assertEquals(output.includes("__ct_cfc_policy_of__"), false);
+  assertEquals(
+    output.includes('moduleIdentity: "sha256:defining-policy"'),
+    true,
+  );
+  assertEquals(output.includes('symbol: "rules"'), true);
+});
+
 Deno.test("PolicyOf validation receives defining module identities", async () => {
   const { diagnostics } = await validateFiles({
     "/policy.ts": `/// <cts-enable />

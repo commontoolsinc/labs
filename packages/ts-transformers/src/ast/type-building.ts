@@ -439,6 +439,38 @@ export function expressionToTypeNode(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.TypeNode {
+  // PolicyOf binds a schema claim to a source-level `typeof rules` reference.
+  // Preserve that reference before TypeScript expands the property type into a
+  // structural type that no longer names the exported rules binding.
+  const propertyDeclaredTypeNode = getPropertyAccessDeclaredTypeNode(
+    expr,
+    context.checker,
+  );
+  if (propertyDeclaredTypeNode) {
+    const loweredTypeNode = lowerPolicyOfMarkersForEmission(
+      propertyDeclaredTypeNode,
+      context,
+    );
+    if (loweredTypeNode !== propertyDeclaredTypeNode) {
+      const type = context.checker.getTypeAtLocation(expr);
+      const qualifiedTypeNode = qualifyCommonFabricTypeRefs(
+        loweredTypeNode,
+        type,
+        {
+          checker: context.checker,
+          factory: context.factory,
+          typeRegistry: context.state.typeRegistry,
+        },
+      );
+      const clonedTypeNode = cloneTypeNodeDeepForEmission(
+        qualifiedTypeNode,
+        context.state.typeRegistry,
+      );
+      context.state.typeRegistry.set(clonedTypeNode, type);
+      return clonedTypeNode;
+    }
+  }
+
   const declaredTypeNode = getDestructuredBindingDeclaredTypeNode(
     expr,
     context,
@@ -469,6 +501,144 @@ export function expressionToTypeNode(
     context,
     context.state.typeRegistry,
   );
+}
+
+function getPropertyAccessDeclaredTypeNode(
+  expr: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  if (!ts.isPropertyAccessExpression(expr)) {
+    return undefined;
+  }
+  const symbol = checker.getSymbolAtLocation(expr.name);
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (
+    declaration &&
+    (ts.isPropertySignature(declaration) ||
+      ts.isPropertyDeclaration(declaration))
+  ) {
+    return declaration.type;
+  }
+  return undefined;
+}
+
+function lowerPolicyOfMarkersForEmission(
+  typeNode: ts.TypeNode,
+  context: TransformationContext,
+): ts.TypeNode {
+  const visit = (node: ts.Node): ts.VisitResult<ts.Node> => {
+    if (
+      ts.isTypeReferenceNode(node) &&
+      isImportedPolicyOfReference(node, context.checker)
+    ) {
+      const binding = node.typeArguments?.[0];
+      if (
+        binding && ts.isTypeQueryNode(binding) &&
+        ts.isIdentifier(binding.exprName)
+      ) {
+        const marker = createPolicyIdentityMarkerType(
+          binding.exprName,
+          context,
+        );
+        if (marker) {
+          return marker;
+        }
+      }
+    }
+    return ts.visitEachChild(node, visit, context.tsContext);
+  };
+  return ts.visitNode(typeNode, visit) as ts.TypeNode;
+}
+
+function isImportedPolicyOfReference(
+  node: ts.TypeReferenceNode,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!ts.isIdentifier(node.typeName)) {
+    return false;
+  }
+  const symbol = checker.getSymbolAtLocation(node.typeName);
+  if (!symbol || !(symbol.flags & ts.SymbolFlags.Alias)) {
+    return false;
+  }
+  return (symbol.declarations ?? []).some((declaration) => {
+    if (!ts.isImportSpecifier(declaration)) {
+      return false;
+    }
+    if (
+      (declaration.propertyName?.text ?? declaration.name.text) !== "PolicyOf"
+    ) {
+      return false;
+    }
+    const importDeclaration = declaration.parent.parent.parent;
+    return ts.isImportDeclaration(importDeclaration) &&
+      ts.isStringLiteral(importDeclaration.moduleSpecifier) &&
+      (importDeclaration.moduleSpecifier.text === "commonfabric/cfc" ||
+        importDeclaration.moduleSpecifier.text ===
+          "@commonfabric/api/cfc-authoring");
+  });
+}
+
+function createPolicyIdentityMarkerType(
+  bindingName: ts.Identifier,
+  context: TransformationContext,
+): ts.TypeLiteralNode | undefined {
+  const symbol = context.checker.getSymbolAtLocation(bindingName);
+  const declarationSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
+    ? context.checker.getAliasedSymbol(symbol)
+    : symbol;
+  const declaration = declarationSymbol?.valueDeclaration ??
+    declarationSymbol?.declarations?.[0];
+  if (
+    !declaration || !ts.isVariableDeclaration(declaration) ||
+    !ts.isIdentifier(declaration.name)
+  ) {
+    return undefined;
+  }
+
+  const { factory } = context;
+  const literal = (value: string): ts.LiteralTypeNode =>
+    factory.createLiteralTypeNode(factory.createStringLiteral(value));
+  const property = (
+    name: string,
+    type: ts.TypeNode,
+  ): ts.PropertySignature =>
+    factory.createPropertySignature(
+      [factory.createModifier(ts.SyntaxKind.ReadonlyKeyword)],
+      factory.createIdentifier(name),
+      undefined,
+      type,
+    );
+
+  return factory.createTypeLiteralNode([
+    property(
+      "type",
+      literal("https://commonfabric.org/cfc/atom/Policy"),
+    ),
+    property("policyRefKind", literal("module")),
+    property(
+      "__ctPolicyIdentityOf",
+      factory.createTypeLiteralNode([
+        property(
+          "file",
+          literal(declaration.getSourceFile().fileName.replace(/\\/g, "/")),
+        ),
+        property(
+          "path",
+          factory.createTupleTypeNode([literal(declaration.name.text)]),
+        ),
+      ]),
+    ),
+    property(
+      "subject",
+      factory.createTypeLiteralNode([
+        property(
+          "__ctOwningSpace",
+          factory.createLiteralTypeNode(factory.createTrue()),
+        ),
+      ]),
+    ),
+  ]);
 }
 
 function getDestructuredBindingDeclaredTypeNode(

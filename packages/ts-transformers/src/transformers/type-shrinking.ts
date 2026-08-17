@@ -202,6 +202,13 @@ function shouldPreferNodeDrivenShrink(
   checker: ts.TypeChecker,
 ): boolean {
   if (
+    containsPolicyIdentityMarker(nodeDriven) &&
+    !containsPolicyIdentityMarker(typeDriven)
+  ) {
+    return true;
+  }
+
+  if (
     containsDefaultTypeNode(nodeDriven) && !containsDefaultTypeNode(typeDriven)
   ) {
     return true;
@@ -236,6 +243,22 @@ function shouldPreferNodeDrivenShrink(
       containsAnyOrUnknownTypeNode(nodeDriven) &&
       !containsAnyOrUnknownTypeNode(typeDriven)
     );
+}
+
+function containsPolicyIdentityMarker(node: ts.TypeNode): boolean {
+  let found = false;
+  const visit = (candidate: ts.Node): void => {
+    if (
+      ts.isPropertySignature(candidate) && candidate.name &&
+      getRequestedPropertyNameText(candidate.name) === "__ctPolicyIdentityOf"
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(candidate, visit);
+  };
+  visit(node);
+  return found;
 }
 
 function shouldPreferTypeDrivenShrink(

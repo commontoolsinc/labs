@@ -886,6 +886,30 @@ the intended stale reconciliation window for append, removal, `flatMap`, and
 `filter`; it no longer assumes that a one-shot raw transaction can ignore CFC
 metadata catch-up.
 
+## 37. Preserve module policy identity in narrowed captures
+
+TypeScript expands the type of a property captured by a generated lift. That
+expansion retains the structural shape of `PolicyOf`, but it drops the
+`typeof exportedRules` reference that identifies the policy's defining module
+and exported symbol. The schema generator then sees an unresolved optional
+marker instead of the concrete module policy. Strict schema merging rejects
+the two structural forms of that unresolved marker as a policy weakening.
+
+Read the property's authored type declaration before TypeScript expands it.
+Replace each verified `PolicyOf<typeof exportedRules>` use with the existing
+compiler-only policy identity marker. Continue to carry the original semantic
+type beside the generated type node. When capability analysis narrows the
+capture to the properties that the callback reads, prefer the generated shape
+that still has that marker over the expanded shape that lost it. The schema
+generator resolves the marker to the policy module identity, exported symbol,
+and policy digest before it emits the runtime schema.
+
+A transformer regression defines the rules and protected property in one
+module, captures that property from another module, and checks that the lift
+input schema contains the defining module policy. The direct-release pattern
+test then proves that both its default and custom protected messages can be
+read by their assertions while enforcement is enabled.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an
