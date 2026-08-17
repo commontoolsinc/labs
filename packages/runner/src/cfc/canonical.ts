@@ -75,6 +75,36 @@ const compareAddress = (left: CfcAddress, right: CfcAddress): number => {
   return leftPointer < rightPointer ? -1 : leftPointer > rightPointer ? 1 : 0;
 };
 
+/**
+ * Drops runs of equal entries from an already-sorted array, where `compare`
+ * is the total order it was sorted by and returning 0 means the two entries
+ * are equal rather than merely tied.
+ */
+const dedupeSorted = <T>(
+  sorted: readonly T[],
+  compare: (left: T, right: T) => number,
+): T[] =>
+  sorted.filter((entry, index) =>
+    index === 0 || compare(sorted[index - 1], entry) !== 0
+  );
+
+/**
+ * Total order over dereference traces, comparing every field a trace has.
+ * Comparing equal therefore means the two records ARE equal, which is what
+ * lets `canonicalizePreparedDigestInput` drop duplicates in one adjacent pass
+ * after the sort.
+ */
+const compareDereferenceTrace = (
+  left: CfcDereferenceTrace,
+  right: CfcDereferenceTrace,
+): number => {
+  const sourceCompare = compareAddress(left.source, right.source);
+  if (sourceCompare !== 0) return sourceCompare;
+  const targetCompare = compareAddress(left.target, right.target);
+  if (targetCompare !== 0) return targetCompare;
+  return left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0;
+};
+
 const compareConsultedGrant = (
   left: ConsultedGrant,
   right: ConsultedGrant,
@@ -315,17 +345,34 @@ export const canonicalizePreparedDigestInput = (
   ),
   triggerReads: [...(input.triggerReads ?? [])].map(canonicalizeAttemptedWrite)
     .sort(compareAddress),
-  dereferenceTraces: [...input.dereferenceTraces].map(
-    canonicalizeDereferenceTrace,
-  ).sort((left, right) => {
-    const sourceCompare = compareAddress(left.source, right.source);
-    if (sourceCompare !== 0) {
-      return sourceCompare;
-    }
-    const targetCompare = compareAddress(left.target, right.target);
-    if (targetCompare !== 0) return targetCompare;
-    return left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0;
-  }),
+  // A SET, not a multiset: the digest binds WHICH dereferences the
+  // transaction performed, never how many times a link was read. Reading one
+  // link twice observes exactly what reading it once observes, so counting
+  // re-reads would let a change in read frequency — a cache, a batch, a loop
+  // rewritten — move the digest without changing what was observed. The two
+  // other consumers already read these as a set: `prepare.ts` indexes trace
+  // sources to classify probes, and `cfcLabelViewForDereferenceTraces` joins
+  // them into a lattice where a repeat merges to the same view.
+  //
+  // Deduplicated HERE rather than at `recordCfcDereferenceTrace`, which must
+  // keep appending: callers bracket a resolution with the trace-array length
+  // and slice off what it appended to derive that hop's label view
+  // (`Cell.resolveAsCell`, `deriveDereferenceLabelView`, the query-result
+  // proxy). Suppressing a repeat's append leaves those slices empty, and the
+  // hop's label view collapses to the resolved document's own labels — the
+  // link slot's contribution, which only the trace's `source` address
+  // reaches, is silently dropped from the second read onward.
+  //
+  // Duplicates land adjacent because `compareDereferenceTrace` orders on
+  // every field, so comparing equal means equal. Dedupe follows the sort, and
+  // the sort follows canonicalization: two traces differing only in a leading
+  // `"value"` path element are the same record, but only once canonicalized.
+  dereferenceTraces: dedupeSorted(
+    [...input.dereferenceTraces].map(canonicalizeDereferenceTrace).sort(
+      compareDereferenceTrace,
+    ),
+    compareDereferenceTrace,
+  ),
   writePolicyInputs: [...input.writePolicyInputs].map(
     canonicalizeWritePolicyInput,
   ).sort(compareWritePolicyInput),
