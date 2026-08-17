@@ -237,10 +237,13 @@ cf exec --select comment.writtenAt \
 
 A tool prints its result on stdout as it always did, with the result cell's
 address on stderr. The line spells out the whole command that reads it back,
-`--space` beside `--piece`: an address has three parts, and `cf piece get`
-takes the space on its own flag. `cf exec` gets its space from the mount it ran
-through, while `cf piece get` falls back to whichever space the caller has
-configured, so the two name the same cell only when the line says which.
+and the address is one token that carries all three parts — space, id, and
+scope — as the canonical `/@did:.../of:...` reference `--piece` takes whole.
+Naming the space inside the token is what makes the command portable: `cf exec`
+gets its space from the mount it ran through, while `cf piece get` falls back
+to whichever space the caller has configured, so an address that named only id
+and scope would read the right cell only for a reader configured for the same
+space.
 
 `packages/cli/README.md` has the grammar and the supported schema subset.
 
