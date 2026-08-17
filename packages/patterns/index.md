@@ -61,11 +61,12 @@ profile roster — every participant's cross-space profile badge), `self.tsx`,
 `self-improving-classifier.tsx`, `shopping-list.tsx`, `store-mapper.tsx`,
 `text-swapper.tsx`.
 
-App and integration directories: `activity-log/`, `agent/`, `airtable/`,
-`auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
-`contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
-explorations), `github-activity/`, `google/` (the `core/` tree; `google/WIP/` is
-legacy), `habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
+App and integration directories: `activity-log/`, `agent/`,
+`agent-sessions-debug/`, `airtable/`, `auth/`, `base/`, `battleship/`,
+`budget-tracker/`, `calendar/`, `card-piles/`, `contacts/`, `cozy-poll/`,
+`examples/`, `experimental/` (explicitly unhardened explorations),
+`github-activity/`, `google/` (the `core/` tree; `google/WIP/` is legacy),
+`habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
 `project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
 `scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
 `weekly-calendar/`.
@@ -309,6 +310,20 @@ self.markIdle.send({
   learned: "## 2026-04-07\nNew observation",
 });
 ```
+
+---
+
+## `agent-sessions-debug/main.tsx`
+
+A read-only operations view for the agent connector host. It receives direct
+links to the recent index, complete index, health, command, and receipt cells.
+It shows source lifecycle, collection state, session metadata, Git context,
+command payloads, receipts, bounded host activity, top-level cell IDs, and raw
+cell values. Tab and filter state are session-scoped. The pattern does not write
+to connector data.
+
+**Keywords:** agents, connector, sessions, debug, health, commands, receipts,
+activity, operations, Fabric cells
 
 ---
 
