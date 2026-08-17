@@ -1,20 +1,26 @@
-// What a reference declared `unknown` projects to on a whole-object read.
-//
-// `unknown` is the declaration a pattern reaches for when a field holds a
-// REFERENCE it tests and compares but never reads through: anything wider
-// retrieves the piece instead of pointing at it. The schema generator emits
-// `{type: "unknown"}` for it, and traversal deliberately does not descend.
-//
-// Not descending is not the same as having nothing. The projection answers
-// three questions and no others: is something there, is it the same thing as
-// that, and where does it point when written back.
-import { describe, it } from "@std/testing/bdd";
+/**
+ * What a position declared `unknown` projects to.
+ *
+ * `unknown` is the declaration a pattern reaches for when a field holds a
+ * REFERENCE it tests and compares but never reads through; anything wider
+ * retrieves the piece instead of pointing at it. The schema generator emits
+ * `{type: "unknown"}` for it, and neither read path descends into one.
+ *
+ * Not descending is not the same as having nothing. The projection answers
+ * three questions and no others: is something there, is it the same thing as
+ * that, and where does it point when written back. Both read paths — eager
+ * traversal and the lazy view a lift's argument goes through — have to answer
+ * them identically, or the same field means two things.
+ */
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { isOpaqueReference } from "../src/back-to-cell.ts";
 import { areLinksSame, parseLink } from "../src/link-utils.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("unknown reference");
 const space = signer.did();
@@ -33,76 +39,180 @@ const holderSchema = {
   },
 } as JSONSchema;
 
-describe("a reference declared `unknown`", () => {
-  /** Store a link to a live document as both an array element and a property. */
-  const read = (label: string, write: boolean) => {
-    const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
+describe("unknown-reference materialization", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+  let seq = 0;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    const tx = runtime.edit();
-    const inner = runtime.getCell(space, `inner-${label}`, innerSchema, tx);
+    tx = runtime.edit();
+    seq++;
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  /** A holder whose `ref` and `refs[0]` both name a live target. */
+  const holding = (write: boolean) => {
+    const inner = runtime.getCell(space, `inner-${seq}`, innerSchema, tx);
     if (write) inner.set({ field: "secret" });
-    const outer = runtime.getCell(space, `outer-${label}`, holderSchema, tx);
+    const outer = runtime.getCell(space, `outer-${seq}`, holderSchema, tx);
     outer.set({ refs: [inner], ref: inner } as never);
     const whole = outer.get() as { refs: unknown[]; ref: unknown };
-    return {
-      runtime,
-      storageManager,
-      tx,
-      inner,
-      element: whole.refs[0],
-      property: whole.ref,
+    return { inner, outer, element: whole.refs[0], property: whole.ref };
+  };
+
+  describe("a reference the declaration does not read through", () => {
+    it("is truthy when the target holds a value", () => {
+      const r = holding(true);
+      expect(Boolean(r.element)).toBe(true);
+      expect(Boolean(r.property)).toBe(true);
+    });
+
+    it("is falsy when the target was never written", () => {
+      const r = holding(false);
+      expect(Boolean(r.element)).toBe(false);
+      expect(Boolean(r.property)).toBe(false);
+    });
+
+    it("compares equal to the cell it names", () => {
+      const r = holding(true);
+      const same = (v: unknown) =>
+        areLinksSame(v, r.inner, undefined, true, tx, runtime);
+      expect(same(r.element)).toBe(true);
+      expect(same(r.property)).toBe(true);
+    });
+
+    it("carries none of the target's properties", () => {
+      const r = holding(true);
+      // Own enumerable keys: the back-to-cell annotation and the opaque
+      // marker are non-enumerable symbols, and neither is content.
+      expect(Object.keys(r.element as object)).toEqual([]);
+      expect((r.element as { field?: string }).field).toBeUndefined();
+      expect((r.property as { field?: string }).field).toBeUndefined();
+    });
+
+    it("writes back as a link, not an inline copy", () => {
+      const r = holding(true);
+      const sink = runtime.getCell(space, `sink-${seq}`, holderSchema, tx);
+      sink.set({ refs: [r.element], ref: r.element } as never);
+      const stored = (sink.getRaw() as { refs: unknown[] }).refs[0];
+      const link = parseLink(stored, sink.getAsNormalizedFullLink());
+      expect(link?.id).toBe(r.inner.getAsNormalizedFullLink().id);
+    });
+  });
+
+  describe("the two read paths", () => {
+    /**
+     * Read `v` eagerly and through the lazy view a lift's argument uses. Its
+     * own runtime: the two reads need transactions of their own, and the
+     * suite's shared one is already open.
+     */
+    const bothPaths = async <T>(
+      schema: JSONSchema,
+      value: unknown,
+      project: (v: unknown) => T,
+    ) => {
+      const sm = StorageManager.emulate({ as: signer });
+      const rt = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+      });
+      const setup = rt.edit();
+      const cell = rt.getCell(
+        space,
+        `paths-${seq}`,
+        { type: "object", properties: { v: schema } } as JSONSchema,
+        setup,
+      );
+      cell.set({ v: value } as never);
+      await setup.commit();
+      const read = async (lazy: boolean) => {
+        const readTx = rt.edit();
+        if (lazy) readTx.markLazyMaterialize(true);
+        // Projected while the transaction is open: a lazy view resolves what
+        // a reader touches when it touches it, and a closed one refuses.
+        const out = project((cell.withTx(readTx).get() as { v: unknown }).v);
+        await readTx.commit();
+        return out;
+      };
+      const eager = await read(false);
+      const lazy = await read(true);
+      await rt.dispose();
+      await sm.close();
+      return { eager, lazy };
     };
-  };
 
-  const done = async (r: ReturnType<typeof read>) => {
-    await r.tx.commit();
-    await r.runtime.dispose();
-    await r.storageManager.close();
-  };
+    it("answer an opaque position identically", async () => {
+      const r = await bothPaths(
+        { type: "unknown" },
+        { field: "secret" },
+        (v) => ({
+          opaque: isOpaqueReference(v),
+          keys: Object.keys(v as object),
+        }),
+      );
+      expect(r.eager).toEqual({ opaque: true, keys: [] });
+      expect(r.lazy).toEqual({ opaque: true, keys: [] });
+    });
 
-  it("is truthy when the target holds a value", async () => {
-    const r = read("present", true);
-    expect(Boolean(r.element)).toBe(true);
-    expect(Boolean(r.property)).toBe(true);
-    await done(r);
+    it("both honor a concrete type declared beside `unknown`", async () => {
+      // `unknown` admits anything, so it decides only when nothing else in
+      // the list does. A reader who declared `object` asked for the value.
+      const schema = {
+        type: ["object", "unknown"],
+        properties: { field: { type: "string" } },
+      } as JSONSchema;
+      const r = await bothPaths(
+        schema,
+        { field: "secret" },
+        (v) => (v as { field?: string }).field,
+      );
+      expect(r.eager).toBe("secret");
+      expect(r.lazy).toBe("secret");
+    });
   });
 
-  it("is falsy when the target was never written", async () => {
-    const r = read("absent", false);
-    expect(Boolean(r.element)).toBe(false);
-    expect(Boolean(r.property)).toBe(false);
-    await done(r);
-  });
+  describe("an anyOf merge", () => {
+    const merged = (branches: JSONSchema[]) => {
+      const schema = {
+        type: "object",
+        properties: { v: { anyOf: branches } },
+      } as JSONSchema;
+      const cell = runtime.getCell(space, `merge-${seq}`, schema, tx);
+      cell.set({ v: { field: "secret", other: "x" } } as never);
+      return (cell.get() as { v: Record<string, unknown> }).v;
+    };
+    const declared = {
+      type: "object",
+      properties: { field: { type: "string" } },
+    } as JSONSchema;
+    const bag = {
+      type: "object",
+      additionalProperties: { type: "unknown" },
+    } as JSONSchema;
 
-  it("compares equal to the cell it points at", async () => {
-    const r = read("compare", true);
-    const same = (v: unknown) =>
-      areLinksSame(v, r.inner, undefined, true, r.tx, r.runtime);
-    expect(same(r.element)).toBe(true);
-    expect(same(r.property)).toBe(true);
-    await done(r);
-  });
+    it("lets a branch that looked beat one that declined, either order", () => {
+      expect((merged([declared, bag]) as { field?: string }).field)
+        .toBe("secret");
+      expect((merged([bag, declared]) as { field?: string }).field)
+        .toBe("secret");
+    });
 
-  it("exposes nothing of the target's content", async () => {
-    const r = read("opaque", true);
-    // Own enumerable keys: the back-to-cell annotation is a non-enumerable
-    // symbol, and is not content.
-    expect(Object.keys(r.element as object)).toEqual([]);
-    expect((r.element as { field?: string }).field).toBeUndefined();
-    expect((r.property as { field?: string }).field).toBeUndefined();
-    await done(r);
-  });
-
-  it("writes back as a link to the target, not an inline copy", async () => {
-    const r = read("writeback", true);
-    const sink = r.runtime.getCell(space, "sink", holderSchema, r.tx);
-    sink.set({ refs: [r.element], ref: r.element } as never);
-    const stored = (sink.getRaw() as { refs: unknown[] }).refs[0];
-    const link = parseLink(stored, sink.getAsNormalizedFullLink());
-    expect(link?.id).toBe(r.inner.getAsNormalizedFullLink().id);
-    await done(r);
+    it("does not mark the merged value as holding nothing", () => {
+      // The opaque marker describes the branch it came from, not the merge:
+      // carried onto a result that holds another branch's properties, the
+      // rule above would let a later opaque branch overwrite it.
+      expect(isOpaqueReference(merged([bag, declared]))).toBe(false);
+    });
   });
 });

@@ -15,19 +15,31 @@ mentions: unknown[] | Default<[]>;
 A read of such a field does not descend into what it points at. What comes back
 answers three questions and no others:
 
-- **Is something there.** The field is truthy when the target holds a value and
-  falsy when it does not, so `if (mention)` and `mention !== undefined` mean
-  what they say.
+- **Is something there.** The field is truthy when the position holds anything
+  and falsy only when it holds nothing, so `if (mention)` and
+  `mention !== undefined` mean what they say. A stored `0`, `""`, `false` or
+  `null` is *something*, so it is truthy here — the bit answered is presence,
+  not the value's own truthiness.
 - **Is it the same thing as that.** `equals(mention, other)` compares the two by
   identity, resolving both sides first, so it holds whether each side arrived as
   a reference or as a cell.
-- **Where does it point.** Writing the value into another field stores a link to
-  the same document rather than an inline copy of it.
+- **Where does it point.** Writing the value into another field stores a link
+  rather than an inline copy. The link addresses the position it was read from,
+  which resolves to the same document — so a value read from a transient event
+  and written into a durable field stores a pointer into that event.
 
-Everything else is absent. The value carries no properties of the target, so
-reading one yields `undefined` rather than the target's data — and the compiler
-rejects the attempt before it runs, naming the property and asking for a type
-that declares it.
+Everything else is absent, whatever sits behind the position: a stored string
+is as opaque as a stored object, and an array reads back as a reference rather
+than an array. Reading a property yields `undefined`.
+
+The compiler catches some of these before they run — `schema:unknown-type-access`
+names a property read directly off a lift or handler parameter — but not all of
+them: reaching the field through an array element inside a callback is outside
+it. `docs/development/debugging/gotchas/unknown-typed-field-reads-a-reference.md`
+is the debugging entry point when a read comes back empty.
+
+`===` and `includes()` do not work on these: two reads of the same reference are
+distinct objects. `equals()` is what compares them.
 
 ```typescript
 // Shown at module scope.

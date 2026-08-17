@@ -49,7 +49,7 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
-import { isOpaqueReference } from "./back-to-cell.ts";
+import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import type { LastNode } from "./link-resolution.ts";
@@ -1393,6 +1393,11 @@ export function mergeAnyOfMatches<T>(
       // keep the symbol off `Object.keys` and out of a spread.
       for (const match of matches) {
         for (const key of Object.getOwnPropertySymbols(match as object)) {
+          // Not the opaque brand: it describes the match it came from, not the
+          // merge. Carrying it would mark a merged value that holds another
+          // branch's properties as one that holds nothing, and the rule below
+          // would then let a later opaque branch overwrite it.
+          if (key === opaqueReference) continue;
           if (Object.hasOwn(unified, key)) continue;
           const descriptor = Object.getOwnPropertyDescriptor(
             match as object,
@@ -5067,6 +5072,20 @@ function appendPartsToPath(path: ValuePath, parts: string[]): ValuePath {
  * type name, with the same $ref resolution and allOf/anyOf/oneOf handling the
  * read-side validation uses.
  */
+/**
+ * Whether `schema` answers a value of `valueType` opaquely — the position
+ * declares a reference, and nothing in the declaration asks for the value.
+ *
+ * Exported so the lazy view decides it the same way traversal does; a reader
+ * must not be able to tell which path answered.
+ */
+export function isOpaquePosition(
+  schema: JSONSchema,
+  valueType: JSONSchemaTypes,
+): boolean {
+  return schemaTypeValidity(schema, valueType) === TypeValidity.Unknown;
+}
+
 function schemaTypeValidity(
   schema: JSONSchema,
   valueType: JSONSchemaTypes,

@@ -58,7 +58,7 @@ import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { isSigilLink, type NormalizedFullLink } from "./link-utils.ts";
 import { type Runtime } from "./runtime.ts";
 import {
-  annotateWithBackToCellSymbols,
+  createOpaqueReference,
   processDefaultValue,
   validateAndTransform,
 } from "./schema.ts";
@@ -66,6 +66,7 @@ import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   canBranchMatch,
   combineSchema,
+  isOpaquePosition,
   mergeAnyOfBranchSchemas,
   opaqueLeafMissesRequired,
   SchemaObjectTraverser,
@@ -504,24 +505,15 @@ export function materializeSchemaView(
     }
   }
 
-  // PROBE: an opaque (`type: "unknown"`) position answers presence and stops,
-  // the way eager traversal does, instead of viewing what is behind it.
+  // An opaque (`type: "unknown"`) position answers presence and stops, the way
+  // traversal does, instead of viewing what is behind it. Same predicate and
+  // same projection, so a reader cannot tell which path answered.
   if (
-    value !== undefined &&
-    isObjectOrArray(schema) && schema.type !== undefined &&
-    (Array.isArray(schema.type)
-      ? schema.type.includes("unknown")
-      : schema.type === "unknown")
+    value !== undefined && schema !== undefined &&
+    isOpaquePosition(schema, actualType as JSONSchemaTypes)
   ) {
     tx.readValueOrThrow(link, { nonRecursive: true });
-    return annotateWithBackToCellSymbols(
-      {},
-      runtime,
-      link,
-      tx,
-      synced,
-      cfcLabelView,
-    );
+    return createOpaqueReference(runtime, link, tx, synced, cfcLabelView);
   }
 
   // A primitive, and a `FabricPrimitive` with it, is a leaf: the type check

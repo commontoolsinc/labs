@@ -1365,6 +1365,36 @@ const combinedCellSchemaCache = new WeakMap<
   Map<string, JSONSchema>
 >();
 
+/**
+ * The value an opaque (`type: "unknown"`) position projects to when something
+ * is there: an empty object carrying the back-to-cell annotation and the
+ * marker that says it holds nothing of what it names. Both read paths mint it
+ * here, so a reader cannot tell which one answered.
+ */
+export function createOpaqueReference(
+  runtime: Runtime,
+  link: NormalizedFullLink,
+  tx: IExtendedStorageTransaction | undefined,
+  synced: boolean,
+  cfcLabelView: CfcLabelView | undefined,
+): FabricValue {
+  const value: Record<symbol, unknown> = {};
+  // Non-enumerable, like the back-to-cell annotation beside it, so the marker
+  // stays off `Object.keys` and out of a spread.
+  Object.defineProperty(value, opaqueReference, {
+    value: true,
+    enumerable: false,
+  });
+  return annotateWithBackToCellSymbols(
+    value,
+    runtime,
+    link,
+    tx,
+    synced,
+    cfcLabelView,
+  );
+}
+
 class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<FabricValue>> {
   constructor(
@@ -1500,21 +1530,13 @@ class TransformObjectCreator
   createOpaquePresence(
     link: NormalizedFullLink,
   ): AnyCellWrapping<FabricValue> {
-    const value: Record<symbol, unknown> = {};
-    // Non-enumerable, like the back-to-cell annotation beside it, so the
-    // marker stays off `Object.keys` and out of a spread.
-    Object.defineProperty(value, opaqueReference, {
-      value: true,
-      enumerable: false,
-    });
-    return annotateWithBackToCellSymbols(
-      value,
+    return createOpaqueReference(
       this.runtime,
       link,
       this.tx,
       this.synced,
       this.labelViewFor(link),
-    );
+    ) as AnyCellWrapping<FabricValue>;
   }
 
   /**
