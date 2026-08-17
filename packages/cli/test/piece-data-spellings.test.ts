@@ -15,19 +15,25 @@ import { cf, stripAnsi } from "./utils.ts";
 describe("piece-data-spellings", () => {
   const SPELLINGS = ["get", "set", "call"] as const;
 
-  /** Option names visible on a command, inherited globals included, minus
-   * the help machinery every command carries. */
+  /** The option surface visible on a command, inherited globals included,
+   * minus the help machinery every command carries. Each option contributes
+   * its full signature — every flag spelling plus the value grammar — so a
+   * mount that renamed a short flag or retyped a value diverges here, not
+   * only one that dropped an option outright. */
   // deno-lint-ignore no-explicit-any
-  function effectiveOptionNames(command: any): string[] {
-    const own = command.getOptions(true).map((option: { name: string }) =>
-      option.name
+  function effectiveOptionSurface(command: any): string[] {
+    const signature = (
+      option: { name: string; flags: string[]; typeDefinition?: string },
+    ) =>
+      `${[...option.flags].sort().join(",")} ${option.typeDefinition ?? ""}`
+        .trim();
+    const visible = [
+      ...command.getOptions(true),
+      ...command.getGlobalOptions(true),
+    ].filter((option: { name: string }) =>
+      option.name !== "help" && option.name !== "version"
     );
-    const inherited = command.getGlobalOptions(true).map((
-      option: { name: string },
-    ) => option.name);
-    return [...new Set([...own, ...inherited])]
-      .filter((name) => name !== "help" && name !== "version")
-      .sort();
+    return [...new Set(visible.map(signature))].sort();
   }
 
   it("mounts each command at top level with the piece mount's exact surface", async () => {
@@ -42,7 +48,9 @@ describe("piece-data-spellings", () => {
       expect(nested).toBeDefined();
       expect(top!.getArgsDefinition()).toBe(nested!.getArgsDefinition());
       expect(top!.getUsage()).toBe(nested!.getUsage());
-      expect(effectiveOptionNames(top)).toEqual(effectiveOptionNames(nested));
+      expect(effectiveOptionSurface(top)).toEqual(
+        effectiveOptionSurface(nested),
+      );
       // The description differs only by how the command names itself.
       expect(top!.getDescription()).toBe(
         nested!.getDescription().replaceAll(`cf piece ${name}`, `cf ${name}`),
