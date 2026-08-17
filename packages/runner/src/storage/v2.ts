@@ -977,7 +977,6 @@ export class StorageManager implements IStorageManager {
             }, routeSignal),
         syncReplayDependencies: (document) =>
           this.syncCfcSchemaDocument(space, document),
-        trackPendingWork: (work) => this.trackUntilSettled(work),
         getTelemetry: () => this.#telemetry,
       });
       this.#providers.set(space, provider);
@@ -1792,14 +1791,6 @@ type ProviderOptions = {
   syncReplayDependencies: (
     document: EntityDocument | undefined,
   ) => Promise<Error | undefined>;
-  /**
-   * Registers background work (the schema-document dependency chase) with
-   * the manager's cross-space ledger, so `synced()` awaits it to
-   * quiescence — the ledger's resolve loop re-checks after every settle,
-   * which is what lets a chased document's arrival enqueue the next chase
-   * and still be covered by one `synced()`.
-   */
-  trackPendingWork?: (work: Promise<unknown>) => void;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
 };
@@ -2203,12 +2194,6 @@ class SpaceReplica implements ISpaceReplica {
   #schedulerObservationFlushPromise:
     | Promise<Result<Unit, StorageTransactionRejected>>
     | undefined;
-  readonly #trackPendingWork?: (work: Promise<unknown>) => void;
-  // cid: schema documents seen IN THIS SPACE — arrived in a frame or already
-  // chased from here. Chase dedup keys on this, never on the realm-global
-  // registry: a document another space registered still needs syncing here,
-  // so this space's replica holds it and its watch set covers it.
-  readonly #schemaDocsSeenHere = new Set<string>();
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
@@ -2290,7 +2275,6 @@ class SpaceReplica implements ISpaceReplica {
     this.#settings = options.settings;
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
-    this.#trackPendingWork = options.trackPendingWork;
   }
 
   did(): MemorySpace {
@@ -4244,19 +4228,24 @@ class SpaceReplica implements ISpaceReplica {
 
   /**
    * Registers the `cid:` schema documents a sync frame delivered
-   * (`docs/specs/content-addressed-schemas.md`), and chases the unregistered
-   * documents behind each one's external refs so the closure completes
-   * without a reader having to trip over every hole in turn. Registration
-   * is hash-verified; a mismatched document is warned about and skipped —
-   * it never enters the registry, so refs to it stay unresolved. A `cid:`
-   * document that is not a schema (a blob) either fails the subschema shape
-   * check or registers harmlessly: the registry asserts content-addressed
-   * identity, nothing more.
+   * (`docs/specs/content-addressed-schemas.md`) and validates the read-side
+   * delivery guarantee over them: every external ref a registered document
+   * carries must reach a document this replica already stores — delivered
+   * by this frame or an earlier one. A broken ref throws, because it is a
+   * delivery consistency bug to surface, never a hole to quietly repair;
+   * the asynchronous closure pull for callers who ask for a closure by
+   * hash lives in `syncSchemaDocumentClosure`. Direct refs suffice: a
+   * stored dependency was itself validated when it arrived.
    *
-   * The chase syncs within this space and is handed to the manager's
-   * cross-space ledger, so `synced()` covers the whole chain.
+   * Which arrived `cid:` documents are schema documents is decided by
+   * content-addressed identity, the classifier the traversal loader also
+   * uses: a document is a schema document exactly when its id is the
+   * schema interning of its value. Any other `cid:` class — a blob, or a
+   * forged document, which resolution fails closed on when reached
+   * through a schema ref — is not this hook's concern.
    */
   #registerArrivedSchemaDocuments(upserts: SessionSync["upserts"]): void {
+    const registered: [string, JSONSchema][] = [];
     for (const upsert of upserts) {
       if (upsert.deleted === true) continue;
       const id = upsert.id;
@@ -4265,42 +4254,25 @@ class SpaceReplica implements ISpaceReplica {
         ? (upsert.doc as { value?: unknown }).value
         : undefined;
       if (!isSubschema(value)) continue;
-      // Arrived means present in this space, verified or not.
-      this.#schemaDocsSeenHere.add(id.slice("cid:".length));
-      let registered: JSONSchema;
-      try {
-        registered = registerSchemaDocument(
-          id.slice("cid:".length),
-          value as JSONSchema,
-        );
-      } catch (error) {
-        logger.warn("schema-doc-reject", () => [
-          "Rejected arrived schema document (content does not match its id):",
-          id,
-          error,
-        ]);
+      const hash = id.slice("cid:".length);
+      if (internSchemaAsTaggedHashString(value as JSONSchema) !== hash) {
         continue;
       }
-      for (const dep of collectExternalSchemaRefHashes(registered)) {
-        // Dedupe on THIS SPACE's history, not on the realm registry: a
-        // dependency verified elsewhere still has to exist and be watched
-        // here (the space-boundary rule in the spec).
-        if (this.#schemaDocsSeenHere.has(dep)) continue;
-        this.#schemaDocsSeenHere.add(dep);
-        const uri = `cid:${dep}` as URI;
-        const chase = this.sync(uri, { path: [], schema: false }).then(
-          (result) => {
-            // A settle without a locally stored document must not suppress
-            // the next chase: the marker means "present here", not "tried".
-            if (
-              result.error !== undefined || this.getDocument(uri) === undefined
-            ) {
-              this.#schemaDocsSeenHere.delete(dep);
-            }
-            return result;
-          },
-        );
-        this.#trackPendingWork?.(chase);
+      registered.push([id, registerSchemaDocument(hash, value as JSONSchema)]);
+    }
+    // Validation runs after the whole frame's registrations: a dependency
+    // may follow its dependent within the frame, and intra-frame order must
+    // not matter.
+    for (const [id, document] of registered) {
+      for (const dep of collectExternalSchemaRefHashes(document)) {
+        if (this.getDocument(`cid:${dep}` as URI) === undefined) {
+          throw new Error(
+            `Schema document ${id} was delivered with a broken external ` +
+              `ref: cid:${dep} is not stored in this replica. Every ` +
+              `delivered document's refs must resolve within the delivered ` +
+              `set (docs/specs/content-addressed-schemas.md).`,
+          );
+        }
       }
     }
   }

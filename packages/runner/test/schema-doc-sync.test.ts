@@ -73,7 +73,7 @@ describe("schema-doc-sync", () => {
       ) => [`cid:${hash}`, document as FabricValue]),
     ));
 
-  it("registers a schema document on sync arrival and chases its dependencies", async () => {
+  it("registers a schema document and its delivered closure on sync arrival", async () => {
     const schema: JSONSchemaObj = {
       type: "object",
       properties: { arrivalChase: { $ref: "#/$defs/ArrivalChaseLeaf" } },
@@ -90,8 +90,9 @@ describe("schema-doc-sync", () => {
     const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
     expect(lookupSchemaDocument(rootHash)).toBeUndefined();
 
-    // Sync ONLY the root document; the arrival hook registers it and chases
-    // the leaf, and `synced()` covers the chase to quiescence.
+    // Sync ONLY the root document; the server delivers the leaf in the same
+    // frame (a schema document's own refs are embedded refs of a delivered
+    // document), and the arrival hook registers both.
     const result = await readerStorage.open(space).sync(
       `cid:${rootHash}` as URI,
       { path: [], schema: false },
@@ -104,7 +105,7 @@ describe("schema-doc-sync", () => {
     expect(resolveSchema({ $ref: decomposed.rootRef })).not.toBe(false);
   });
 
-  it("rejects a forged schema document on arrival and leaves resolution closed", async () => {
+  it("leaves a forged schema document unregistered on arrival, with resolution closed", async () => {
     const claimed = internSchemaAsTaggedHashString({
       type: "object",
       properties: { forgedSyncTarget: { type: "string" } },
@@ -200,7 +201,7 @@ describe("schema-doc-sync", () => {
     expect(String(failure)).toContain("did not verify in this space");
   });
 
-  it("chases a dependency into the space even when the realm registry already holds it", async () => {
+  it("delivers a dependency into the space even when the realm registry already holds it", async () => {
     const schema: JSONSchemaObj = {
       type: "object",
       properties: { chaseDespite: { $ref: "#/$defs/ChaseDespiteLeaf" } },
@@ -218,7 +219,7 @@ describe("schema-doc-sync", () => {
     const leafHash = [...decomposed.documents.keys()]
       .find((hash) => hash !== rootHash)!;
     // The leaf is already realm-registered (as if another space delivered
-    // it); the chase must still pull it into THIS space.
+    // it); the server must still deliver it into THIS space.
     registerSchemaDocument(leafHash, decomposed.documents.get(leafHash)!);
 
     const provider = readerStorage.open(space);
@@ -235,14 +236,14 @@ describe("schema-doc-sync", () => {
     expect(stored).toBeDefined();
   });
 
-  it("re-chases a dependency that was absent on the first arrival", async () => {
+  it("fails a sync whose frame delivers a document with a broken external ref, and completes once the closure lands", async () => {
     const schema: JSONSchemaObj = {
       type: "object",
-      properties: { rechase: { $ref: "#/$defs/RechaseLeaf" } },
+      properties: { brokenRef: { $ref: "#/$defs/BrokenRefLeaf" } },
       $defs: {
-        RechaseLeaf: {
+        BrokenRefLeaf: {
           type: "object",
-          properties: { rechaseLeaf: { type: "string" } },
+          properties: { brokenRefLeaf: { type: "string" } },
         },
       },
     };
@@ -251,8 +252,9 @@ describe("schema-doc-sync", () => {
     const leafHash = [...decomposed.documents.keys()]
       .find((hash) => hash !== rootHash)!;
 
-    // Only the root exists; the first arrival's chase for the leaf settles
-    // empty, which must release the seen-marker rather than pin it.
+    // Only the root exists, so the server cannot deliver the closure — a
+    // delivery-guarantee violation the arrival hook must surface loudly,
+    // never quietly repair.
     await writeDocs({
       [`cid:${rootHash}`]: decomposed.documents.get(rootHash)! as FabricValue,
     });
@@ -261,13 +263,11 @@ describe("schema-doc-sync", () => {
       path: [],
       schema: false,
     });
-    expect(first.error).toBeUndefined();
-    await readerStorage.synced();
+    expect(String(first.error?.message)).toContain("broken external ref");
     expect(isSchemaDocumentClosureComplete(rootHash)).toBe(false);
 
-    // The leaf lands late. A second root arrival (a differently-selected
-    // sync, so coverage does not elide it) re-runs the chase — a pinned
-    // marker would leave the closure incomplete forever.
+    // The leaf lands late. A fresh sync (differently selected, so coverage
+    // does not elide it) delivers the now-complete closure.
     await writeDocs({
       [`cid:${leafHash}`]: decomposed.documents.get(leafHash)! as FabricValue,
     });
@@ -276,7 +276,6 @@ describe("schema-doc-sync", () => {
       schema: true,
     });
     expect(second.error).toBeUndefined();
-    await readerStorage.synced();
     expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
   });
 

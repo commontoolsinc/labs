@@ -37,7 +37,9 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   collectExternalSchemaRefHashes,
   containsExternalSchemaRef,
+  SCHEMA_DOCUMENT_REF_PREFIX,
 } from "./schema-decompose.ts";
+import { isSubschema } from "./schema-walk.ts";
 import {
   isExternalClosureComplete,
   lookupSchemaDocument,
@@ -2538,6 +2540,11 @@ function collectDeliveredValueSchemaRefs(
  * carrying external refs, and their closures are collected into the same
  * result — a rejecting pull included, since its delivered document's
  * embedded refs must resolve for whoever reads it next.
+ *
+ * A `cid:` schema document delivered directly is its own carrier of
+ * embedded refs: its `$ref`s are schema refs, not links, so the value scan
+ * would not see them. Its closure is collected through the document's own
+ * hash instead, which also registers and verifies it.
  */
 export function loadSchemaDocsForDeliveredValue(
   tx: IExtendedStorageTransaction,
@@ -2549,6 +2556,26 @@ export function loadSchemaDocsForDeliveredValue(
   const key = getTrackerKey(address);
   if (context.valueScannedDocs.has(key)) return;
   context.valueScannedDocs.add(key);
+  if (address.id.startsWith(SCHEMA_DOCUMENT_REF_PREFIX)) {
+    // `cid:` holds more classes than schema documents (blobs among them),
+    // and no delivery site knows which class a directly pulled document is.
+    // Content-addressed identity is the classifier: a document is a schema
+    // document exactly when its id is the schema interning of its value —
+    // the same verification registration demands, so anything that passes
+    // is usable as the schema document that id names. Any other class
+    // falls through to the ordinary value scan.
+    const hash = address.id.slice(SCHEMA_DOCUMENT_REF_PREFIX.length);
+    const inner = "value" in value
+      ? (value as { value?: unknown }).value
+      : undefined;
+    if (
+      isSubschema(inner) &&
+      internSchemaAsTaggedHashString(inner as JSONSchema) === hash
+    ) {
+      loadSchemaDocClosure(tx, address, new Set([hash]), context);
+      return;
+    }
+  }
   const hashes = new Set<string>();
   collectDeliveredValueSchemaRefs(value, hashes, new WeakSet());
   if (hashes.size > 0) {

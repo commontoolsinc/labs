@@ -286,6 +286,14 @@ a mismatched document is rejected and never enters the registry. Because
 external refs are hash-covered content, verifying each document
 individually verifies the whole closure against the root reference.
 
+The same identity check is the class test. `cid:` holds more document
+classes than schema documents — blobs among them — and a delivery site
+cannot name the class of a directly pulled document, so a document is a
+schema document exactly when its id is the schema interning of its
+value. Anything that passes is byte-for-byte usable as the schema
+document that id names; anything else is another class, not a rejection
+to warn about.
+
 Resolution demands the whole closure: a registered document whose
 transitive closure is not fully registered resolves as a miss, exactly
 like an unregistered document. Resolving it partially would let derived
@@ -322,12 +330,19 @@ exactly two guarantees, both about delivery rather than about values:
   availability is closure-transitive, so interior resolution needs no
   per-lookup scoping. Selecting by an uncollectable schema would produce a
   result whose shape the receiving client could never reproduce from what
-  arrives.
+  arrives. A `cid:` schema document delivered directly is itself such a
+  carrier: its own refs are embedded refs of a delivered document, and
+  its closure is collected through the document's own hash.
 
-The recovery path repairs per-space presence when the guarantees meet a
-hole: the loader's reads are tracked (arrival re-runs the reader), the
-missing-target kick requests the fetch, and the arrival-time dependency
-chase and `syncSchemaDocumentClosure` complete a closure within their own
+Arrival enforces the read-side guarantee rather than repairing around it:
+as a sync frame's `cid:` documents register, every external ref a
+registered document carries must reach a document the replica already
+stores — delivered by that frame or an earlier one — and a broken ref
+fails the sync loudly, because it is a delivery consistency bug to
+surface, never a hole to quietly fill. The repair paths that do exist
+serve callers, not arrival: the loader's reads are tracked (arrival
+re-runs the reader), the missing-target kick requests the fetch, and
+`syncSchemaDocumentClosure` completes a closure by hash within its own
 space — never satisfied by realm-registry presence alone.
 
 Outside a traversal — direct runtime resolution of an already-read
