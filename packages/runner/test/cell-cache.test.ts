@@ -38,6 +38,7 @@ import {
   dataFileSpecifier,
   sourceRootSpecifier,
 } from "../src/sandbox/module-record-compiler.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-test-options.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
@@ -854,6 +855,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -1291,7 +1293,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     snapshotTx.abort?.("mixed-space compiled snapshot inspected");
   });
 
-  it("skips compiled import links without integrity", async () => {
+  it("rejects compiled closures with import links without integrity", async () => {
     const entryIdentity = "compiled-entry-with-unstamped-import";
     const missingIdentity = "compiled-unstamped-child";
     const modules: CacheableModule[] = [
@@ -1320,8 +1322,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     );
     rtx.abort?.();
 
-    expect(loaded.size).toBe(1);
-    expect(loaded.get(entryIdentity)?.imports).toEqual([]);
+    expect(loaded.size).toBe(0);
   });
 
   it("skips compiled imports that do not carry links", async () => {
@@ -1816,6 +1817,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   it("rejects coverage replication when compiled spans are absent", async () => {
     const coverageStorageManager = StorageManager.emulate({ as: signer });
     const coverageRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager: coverageStorageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -2305,6 +2307,7 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
     smA = EmulatedStorageManager.connectTo(server, { as: e2eSignerA });
     smB = EmulatedStorageManager.connectTo(server, { as: e2eSignerB });
     rtA = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager: smA,
       cfcEnforcementMode: "enforce-explicit",
@@ -2314,6 +2317,7 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
       }),
     });
     rtB = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager: smB,
       cfcEnforcementMode: "enforce-explicit",

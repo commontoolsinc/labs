@@ -1556,17 +1556,12 @@ export const COMPILE_CACHE_WRITEBACK_CHUNK_MODULES = 4;
  * plain cache miss whose already-durable docs make the next session's
  * re-write cheaper (equal-value re-writes diff to nothing).
  *
- * The loaders are deliberately NOT fail-closed on missing DESCENDANTS:
- * `loadCompiledClosure` drops an absent/unstamped child along with the edge
- * to it (pinned by "skips compiled import links without integrity"), and the
- * by-identity hit test is entry presence. Chunk interruption cannot create
- * an entry-present/descendant-missing state, but should one arise out of
- * band, it degrades to a clean RECOMPILE rather than a corrupt load: the
- * source path rejects the partial graph in `loadVerifiedSourceClosure`
- * (verifySourceDocs' missing-import check) and the compiled path fails
- * cached-module evaluation, both funneling into the cold recompile fallback
- * — pinned by the descendant-missing tests in
- * compile-cache-incremental-writeback.test.ts.
+ * The compiled loader drops a missing or unstamped child together with its
+ * import edge. The source loader rejects the partial graph during source
+ * verification. Chunk interruption cannot create an entry-present and
+ * descendant-missing state, but an out-of-band loss still degrades to a clean
+ * recompile rather than a corrupt load. The descendant-missing tests in
+ * compile-cache-incremental-writeback.test.ts cover both cases.
  *
  * `extraRoots` is computed over the FULL module set and must be passed to
  * each chunk's write (the entry doc's synthetic root links enumerate every

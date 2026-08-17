@@ -599,6 +599,15 @@ export class PatternManager {
         ]),
       });
     }
+    for (const dependencyIdentity of fabricDependencies) {
+      await this.replicateClosures(
+        dependencyIdentity,
+        fromSpace,
+        toSpace,
+        visited,
+      );
+    }
+
     if (runtimeVersion === undefined) {
       await this.persistSourceCacheTracked(
         toSpace,
@@ -611,15 +620,6 @@ export class PatternManager {
         modules,
         entryIdentity,
         { runtimeVersion },
-      );
-    }
-
-    for (const dependencyIdentity of fabricDependencies) {
-      await this.replicateClosures(
-        dependencyIdentity,
-        fromSpace,
-        toSpace,
-        visited,
       );
     }
   }

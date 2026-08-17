@@ -10,6 +10,7 @@ import {
 } from "../src/harness/module-identity.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 import {
+  compiledDocKey,
   loadCompiledClosure,
   loadSourceClosure,
   loadVerifiedSourceClosure,
@@ -240,13 +241,11 @@ describe("chunked compile-cache write-back (interruption survivability)", () => 
     tx.abort?.();
   });
 
-  it("entry-present/descendant-missing (not producible by interruption) is a partial compiled read and a source-closure miss", async () => {
+  it("entry-present/descendant-missing is a cache miss", async () => {
     // Chunk interruption cannot create this state (the entry doc lands
     // last), but out-of-band loss can. Pin the ACTUAL loader behavior the
-    // safety argument rests on: the compiled loader is NOT fail-closed on a
-    // missing descendant — it returns the entry plus the valid subset — while
-    // the verified source loader rejects the partial graph, so the system
-    // recovers via recompile-from-source (see the degradation test below).
+    // safety argument rests on: both loaders reject a graph with a missing
+    // descendant, so the system recovers via recompile-from-source.
     const { modules, entryIdentity } = toModules(PROGRAM);
     const { chunks, extraRoots } = planCompileCacheWriteChunks(
       modules,
@@ -263,9 +262,8 @@ describe("chunked compile-cache write-back (interruption survivability)", () => 
     }
 
     const tx = runtime.edit();
-    // Compiled loader: entry present, missing child skipped along with its
-    // edge (same behavior "skips compiled import links without integrity"
-    // pins) — the result is a PARTIAL closure, not a miss.
+    // Compiled loader: the missing child invalidates the entry's integrity-
+    // bearing import link, so the entire closure is a miss.
     const compiled = await loadCompiledClosure(
       runtime,
       space,
@@ -273,9 +271,9 @@ describe("chunked compile-cache write-back (interruption survivability)", () => 
       opts(),
       tx,
     );
-    expect(compiled.has(entryIdentity)).toBe(true);
+    expect(compiled.has(entryIdentity)).toBe(false);
     expect(compiled.has(utilIdentity)).toBe(false);
-    expect(compiled.size).toBe(modules.length - 1);
+    expect(compiled.size).toBe(0);
     // Verified source loader: fail-closed — the missing import target fails
     // graph verification, so the caller degrades to a recompile.
     const source = await loadVerifiedSourceClosure(
@@ -326,15 +324,11 @@ describe("chunked compile-cache write-back (interruption survivability)", () => 
 });
 
 // ---------------------------------------------------------------------------
-// System-level degradation pin: the by-identity load's hit test is ENTRY
-// presence (`closure.has(entryIdentity)`), not closure completeness. Chunked
-// interruption cannot create an entry-present/descendant-missing compiled
-// namespace (the entry doc lands last), but the safety argument in
-// planCompileCacheWriteChunks leans on what happens if that state exists
-// anyway: cached-module evaluation fails on the missing module and the load
-// falls back to a clean recompile from the verified source closure — a
-// working pattern, never a corrupt load — and the recovery write-back heals
-// the compiled namespace.
+// System-level degradation pin: an out-of-band descendant loss leaves the
+// integrity-stamped entry readable as a partial compiled closure. Chunked
+// interruption cannot create this state because the entry doc lands last. The
+// incomplete cached evaluation falls back to a clean recompile from the
+// verified source closure. The recovery write-back heals the namespace.
 // ---------------------------------------------------------------------------
 describe("descendant-missing compiled closure degrades to a clean recompile", () => {
   it("loadPatternByIdentity recompiles from source and heals the compiled set", async () => {
@@ -379,13 +373,12 @@ describe("descendant-missing compiled closure degrades to a clean recompile", ()
         .compileToRecordGraph(program, { fabricImports: { space } });
       const utilModule = modules.find((m) => m.filename === "/util.ts");
       expect(utilModule).toBeDefined();
-      const compiledSubset = modules.filter((m) => m !== utilModule);
       const tx = runtimeA.edit();
       writeSourceDocs(runtimeA, space, modules, entryIdentity, tx);
       writeCompiledDocs(
         runtimeA,
         space,
-        compiledSubset,
+        modules,
         entryIdentity,
         { runtimeVersion: RTVER },
         tx,
@@ -394,10 +387,31 @@ describe("descendant-missing compiled closure degrades to a clean recompile", ()
       expect((await tx.commit()).error).toBeUndefined();
       await smA.synced();
 
+      const idTx = runtimeA.edit();
+      const utilCompiledId = runtimeA.getCell(
+        space,
+        compiledDocKey(RTVER, utilModule!.identity),
+        undefined,
+        idTx,
+      ).getAsNormalizedFullLink().id;
+      idTx.abort?.();
+      const replica = smA.open(space).replica;
+      if (replica?.commitNative === undefined) {
+        throw new Error("emulated storage replica cannot commit native writes");
+      }
+      const deletion = await replica.commitNative({
+        operations: [{
+          op: "delete",
+          id: utilCompiledId,
+          type: "application/json",
+        }],
+      });
+      expect(deletion.error).toBeUndefined();
+      await smA.synced();
+
       // Cold replica: confirm the pre-state actually exercises the intended
-      // path — the compiled ENTRY is present (hit test passes) while the
-      // descendant is absent. Without this guard a mis-stamped write would
-      // silently turn the test into the ordinary absent-entry miss.
+      // path. The integrity-stamped entry remains readable while the missing
+      // descendant and its edge are omitted.
       smB = EmulatedStorageManager.connectTo(server, { as: signer });
       runtimeB = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -414,6 +428,7 @@ describe("descendant-missing compiled closure degrades to a clean recompile", ()
       preTx.abort?.();
       expect(partial.has(entryIdentity)).toBe(true);
       expect(partial.has(utilModule!.identity)).toBe(false);
+      expect(partial.size).toBe(modules.length - 1);
 
       // The by-identity load must degrade to a clean recompile: a WORKING
       // pattern from the verified source closure, not a corrupt cached load.
