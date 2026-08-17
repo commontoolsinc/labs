@@ -1,17 +1,17 @@
-import {
-  fabricFromNativeValue,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { hasEncodableForm } from "../encodable-form.ts";
 import {
   FabricBytes,
   FabricEpochNsec,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
+import {
+  fabricFromNativeValue,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { isNativeError } from "@commonfabric/data-model/native-type-tags";
 
 import { isReactive } from "../builder/types.ts";
+import { hasEncodableForm } from "../encodable-form.ts";
 import { isCellLink } from "../link-utils.ts";
 
 export interface NormalizedSandboxResult {

@@ -113,7 +113,7 @@ is a no-op.
 **The residual same-DID risk is real, and belongs at the endpoint layer.** Two
 stores now claim one identity, so a mis-pointed client is the hazard. The fix is
 not to change the identity — it is to make the clone unreachable at the prod
-address and loudly labelled at its own. See [Safety rails](#safety-rails).
+address and loudly labeled at its own. See [Safety rails](#safety-rails).
 
 **Interview result:** the July rehearsal used same-DID, and Wilk noticed no
 trouble — caveated that he drove it mostly through an agent, so a mis-point

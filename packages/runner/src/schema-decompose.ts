@@ -16,11 +16,17 @@
  * covers the external refs it carries, so the root reference pins the exact
  * content of the whole closure.
  *
+ * An embedded schema ref (a URL in the static table of
+ * `./embedded-schemas.ts`) is an allowed leaf: every realm resolves it from
+ * that table, so it hashes as ordinary document content and contributes
+ * nothing to the closure.
+ *
  * Decomposition refuses input it cannot represent faithfully — a `$ref`
- * outside the `#/$defs/<name>` and external vocabularies, a dangling local
- * ref, a nested `$defs` scope, or the deprecated `definitions` keyword — by
- * throwing {@link SchemaNotDecomposableError}. A writer catches that and
- * falls back to carrying the schema inline.
+ * outside the `#/$defs/<name>`, external-document, and embedded
+ * vocabularies, a dangling local ref, a nested `$defs` scope, or the
+ * deprecated `definitions` keyword — by throwing
+ * {@link SchemaNotDecomposableError}. A writer catches that and falls back
+ * to carrying the schema inline.
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
@@ -37,6 +43,7 @@ import {
   walkSchema,
 } from "./schema-walk.ts";
 import { decodeJsonPointer, encodeJsonPointer } from "./link-types.ts";
+import { isEmbeddedCfcSchemaRef } from "./embedded-schemas.ts";
 
 // Every walk in this module must be COMPLETE over the subschema keywords,
 // including the never-emitted tier: a ref a walk misses is a ref the
@@ -250,7 +257,10 @@ function scanFragment(
         );
       }
       into.add(name);
-    } else if (!isExternalSchemaRef(fragment.$ref)) {
+    } else if (
+      !isExternalSchemaRef(fragment.$ref) &&
+      !isEmbeddedCfcSchemaRef(fragment.$ref)
+    ) {
       throw new SchemaNotDecomposableError(
         `unsupported \`$ref\` form: \`${fragment.$ref}\``,
       );

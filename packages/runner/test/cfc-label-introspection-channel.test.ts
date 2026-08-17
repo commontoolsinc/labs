@@ -1,21 +1,23 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
-import { deriveFlowJoin } from "../src/cfc/prepare.ts";
+import type { URI } from "@commonfabric/memory/interface";
+
 import {
   canonicalizePreparedDigestInput,
   preparedDigestFor,
 } from "../src/cfc/canonical.ts";
-import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { inspectStoredConfLabel } from "../src/cfc/label-introspection.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { deriveFlowJoin } from "../src/cfc/prepare.ts";
 import type { CfcLabelMetadataObservation } from "../src/cfc/types.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import type { URI } from "@commonfabric/memory/interface";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-label-introspection-channel",

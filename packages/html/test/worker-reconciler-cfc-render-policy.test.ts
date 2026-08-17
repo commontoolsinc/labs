@@ -1,22 +1,24 @@
 import { assertEquals } from "@std/assert";
+
 import type { CfcAtom } from "@commonfabric/api/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 import {
   isCell as isRuntimeCell,
   KeepAsCell,
   Runtime,
 } from "@commonfabric/runner";
-import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   createRenderConfidentialityResolver,
   type SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import type { VDomOp } from "../src/vdom-ops.ts";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { WorkerVNode } from "../src/worker/types.ts";
 import { normalizeRenderDeclassificationPolicy } from "../src/worker/types.ts";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { VDomOp } from "../src/vdom-ops.ts";
 
 function createOpsCollector() {
   const allOps: VDomOp[] = [];

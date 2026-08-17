@@ -70,7 +70,7 @@ class TestReconstructionContext extends BaseReconstructionContext {
 
 /**
  * A `FabricInstance` with no registered codec, for exercising the encode-side
- * mandate guard (every wire form must be explicitly represented).
+ * mandate guard (every encoded form must be explicitly represented).
  */
 class UnregisteredInstance extends BaseFabricInstance {
   get wireTypeTag(): string {
@@ -100,7 +100,7 @@ class UnregisteredInstance extends BaseFabricInstance {
 
 /**
  * The encoding prefix tag, named once for the assertions below that pin the
- * wire form or that feed the decoder deliberately broken input. Bridging
+ * encoded form or that feed the decoder deliberately broken input. Bridging
  * between encoded strings and codec-value trees does NOT go through this --
  * that is what `JsonCodecEngine`'s wrap/unwrap helpers are for.
  */
@@ -124,7 +124,7 @@ function roundTrip(value: FabricValue): FabricValue {
  * Helper: encode a value and return the codec-value tree (parsed JSON).
  * Used for assertions about the intermediate codec value.
  */
-function toWireFormat(value: FabricValue): JsonCodecValue {
+function toEncodedFormat(value: FabricValue): JsonCodecValue {
   const { jsonCodecEngine } = makeTestCodec();
   const encoded = jsonCodecEngine.encode(value);
   return JSON.parse(
@@ -136,7 +136,7 @@ function toWireFormat(value: FabricValue): JsonCodecValue {
  * Helper: decode from a codec-value tree. Stringifies to JSON first (tagged as
  * an encoded value), then feeds through the public decode API.
  */
-function fromWireFormat(
+function fromEncodedFormat(
   data: JsonCodecValue,
   malformed = false,
 ): FabricValue {
@@ -175,7 +175,7 @@ describe("JsonCodecEngine", () => {
     });
 
     it("returns an `UnknownValue` on decode for a tag the supplied registry lacks", () => {
-      const wire = newDefaultJsonCodecEngine().encode(
+      const encoded = newDefaultJsonCodecEngine().encode(
         FabricError.fromNativeError(new Error("boom")),
       );
       const jsonCodecEngine = new JsonCodecEngine({
@@ -183,7 +183,7 @@ describe("JsonCodecEngine", () => {
       });
 
       const result = jsonCodecEngine.decode(
-        wire,
+        encoded,
         new TestReconstructionContext(),
       );
 
@@ -205,7 +205,7 @@ describe("JsonCodecEngine", () => {
     // These cases use a state that does not survive one: a plain object
     // carrying a `/`-prefixed key. The walker escapes such an object with
     // `/quote` on the way out, and decodes the tag it names on the way back,
-    // so which kind of codec produced it is legible in the wire form and in
+    // so which kind of codec produced it is legible in the encoded form and in
     // what `decode()` is handed.
 
     const PROBE_TAG = "Probe@1";
@@ -283,8 +283,8 @@ describe("JsonCodecEngine", () => {
       });
     }
 
-    /** The wire tree a probe produces for a `ProbeInstance`. */
-    function wireFormatFrom(
+    /** The encoded tree a probe produces for a `ProbeInstance`. */
+    function encodedFormatFrom(
       probe: ProbeTerminalCodec | ProbeNonterminalCodec,
     ): JsonCodecValue {
       const encoded = codecWith(probe).encode(new ProbeInstance());
@@ -293,21 +293,21 @@ describe("JsonCodecEngine", () => {
       ) as JsonCodecValue;
     }
 
-    it("writes a terminal codec's state to the wire untouched", () => {
-      expect(wireFormatFrom(new ProbeTerminalCodec())).toEqual({
+    it("writes a terminal codec's state to the encoded form untouched", () => {
+      expect(encodedFormatFrom(new ProbeTerminalCodec())).toEqual({
         [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" },
       });
     });
 
-    it("expands a nonterminal codec's state on the way to the wire", () => {
+    it("expands a nonterminal codec's state on the way to the encoded form", () => {
       // The `/quote` wrapper is the walker's mark: it saw a plain object with
       // a reserved key and escaped it.
-      expect(wireFormatFrom(new ProbeNonterminalCodec())).toEqual({
+      expect(encodedFormatFrom(new ProbeNonterminalCodec())).toEqual({
         [`/${PROBE_TAG}`]: { "/quote": { "/Bytes@1": "AQID" } },
       });
     });
 
-    it("hands a terminal codec the wire state exactly as it arrived", () => {
+    it("hands a terminal codec the encoded state exactly as it arrived", () => {
       const probe = new ProbeTerminalCodec();
 
       codecWith(probe).decode(
@@ -746,7 +746,7 @@ describe("JsonCodecEngine", () => {
 
     /** Decodes a hand-built array, which is deliberately not encodable. */
     function decodeArray(entries: JsonCodecValue[]): FabricValue {
-      // Lenient; see `fromWireFormat()` above.
+      // Lenient; see `fromEncodedFormat()` above.
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestReconstructionContext();
       return jsonCodecEngine.decode(
@@ -834,7 +834,7 @@ describe("JsonCodecEngine", () => {
     it("serializes `[1,,3]` with `/hole`", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , 3];
-      const result = toWireFormat(arr) as JsonCodecValue[];
+      const result = toEncodedFormat(arr) as JsonCodecValue[];
       expect(result.length).toBe(3);
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 1 });
@@ -854,7 +854,7 @@ describe("JsonCodecEngine", () => {
     it("serializes consecutive holes as run-length encoded", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , , , 5];
-      const result = toWireFormat(arr) as JsonCodecValue[];
+      const result = toEncodedFormat(arr) as JsonCodecValue[];
       expect(result.length).toBe(3); // [1, {"/hole": 3}, 5]
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 3 });
@@ -916,7 +916,7 @@ describe("JsonCodecEngine", () => {
       arr[0] = 1;
       arr[2] = undefined;
       arr[4] = 3;
-      const result = toWireFormat(arr) as JsonCodecValue[];
+      const result = toEncodedFormat(arr) as JsonCodecValue[];
       expect(result).toEqual([
         1,
         { "/hole": 1 },
@@ -961,8 +961,8 @@ describe("JsonCodecEngine", () => {
     describe("key ordering (Section 10)", () => {
       it("emits keys in UTF-8 byte order for a bare plain object", () => {
         const obj = { c: 3, a: 1, b: 2 };
-        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
-        expect(Object.keys(wire)).toEqual(["a", "b", "c"]);
+        const encoded = toEncodedFormat(obj) as Record<string, JsonCodecValue>;
+        expect(Object.keys(encoded)).toEqual(["a", "b", "c"]);
       });
 
       it("emits keys in UTF-8 byte order regardless of insertion order", () => {
@@ -979,9 +979,9 @@ describe("JsonCodecEngine", () => {
           b: { z: 1, a: 2 },
           a: 0,
         };
-        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
-        expect(Object.keys(wire)).toEqual(["a", "b"]);
-        const inner = wire.b as Record<string, JsonCodecValue>;
+        const encoded = toEncodedFormat(obj) as Record<string, JsonCodecValue>;
+        expect(Object.keys(encoded)).toEqual(["a", "b"]);
+        const inner = encoded.b as Record<string, JsonCodecValue>;
         expect(Object.keys(inner)).toEqual(["a", "z"]);
       });
 
@@ -993,8 +993,8 @@ describe("JsonCodecEngine", () => {
           ["\u{10000}"]: 1,
           [""]: 2,
         };
-        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
-        expect(Object.keys(wire)).toEqual(["", "\u{10000}"]);
+        const encoded = toEncodedFormat(obj) as Record<string, JsonCodecValue>;
+        expect(Object.keys(encoded)).toEqual(["", "\u{10000}"]);
       });
 
       it("matches the key order used by `value-hash.ts`", async () => {
@@ -1009,8 +1009,10 @@ describe("JsonCodecEngine", () => {
           ["﻿"]: 3,
           a: 4,
         };
-        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
-        expect(Object.keys(wire)).toEqual([...utf8SortedKeysOf(obj as object)]);
+        const encoded = toEncodedFormat(obj) as Record<string, JsonCodecValue>;
+        expect(Object.keys(encoded)).toEqual([
+          ...utf8SortedKeysOf(obj as object),
+        ]);
       });
     });
   });
@@ -1019,7 +1021,7 @@ describe("JsonCodecEngine", () => {
     describe("/quote: literal-only /-keyed objects", () => {
       it("emits `/quote` for single-key literal `/`-prefixed object", () => {
         const obj = { "/myKey": "val" };
-        expect(toWireFormat(obj)).toEqual({ "/quote": { "/myKey": "val" } });
+        expect(toEncodedFormat(obj)).toEqual({ "/quote": { "/myKey": "val" } });
       });
 
       it('round-trips `{ "/myKey": "val" }`', () => {
@@ -1030,7 +1032,9 @@ describe("JsonCodecEngine", () => {
 
       it('emits `/quote` for `{ "/Link@1": "fake" }` (looks like tag but is literal user data)', () => {
         const obj = { "/Link@1": "fake" };
-        expect(toWireFormat(obj)).toEqual({ "/quote": { "/Link@1": "fake" } });
+        expect(toEncodedFormat(obj)).toEqual({
+          "/quote": { "/Link@1": "fake" },
+        });
       });
 
       it('round-trips `{ "/Link@1": "fake" }`', () => {
@@ -1041,7 +1045,7 @@ describe("JsonCodecEngine", () => {
 
       it("emits `/quote` for multi-key literal object with one `/`-prefixed key", () => {
         const obj = { a: 1, "/b": 2 };
-        expect(toWireFormat(obj)).toEqual({ "/quote": { a: 1, "/b": 2 } });
+        expect(toEncodedFormat(obj)).toEqual({ "/quote": { a: 1, "/b": 2 } });
       });
 
       it("round-trips multi-key literal object with one `/`-prefixed key", () => {
@@ -1053,7 +1057,7 @@ describe("JsonCodecEngine", () => {
 
       it("emits `/quote` for multi-key literal object with multiple `/`-prefixed keys", () => {
         const obj = { "/a": 1, "/b": 2, c: 3 };
-        expect(toWireFormat(obj)).toEqual({
+        expect(toEncodedFormat(obj)).toEqual({
           "/quote": { "/a": 1, "/b": 2, c: 3 },
         });
       });
@@ -1068,7 +1072,7 @@ describe("JsonCodecEngine", () => {
 
       it("emits `/quote` when value is a plain nested object (no `/`-keys inside)", () => {
         const obj = { "/x": { a: 1 } };
-        expect(toWireFormat(obj)).toEqual({ "/quote": { "/x": { a: 1 } } });
+        expect(toEncodedFormat(obj)).toEqual({ "/quote": { "/x": { a: 1 } } });
       });
 
       it("round-trips `/`-keyed object whose value is a plain nested object", () => {
@@ -1087,7 +1091,7 @@ describe("JsonCodecEngine", () => {
         // output, and decoding -- which strips exactly one `/quote` layer --
         // hands back the wrapper instead of the object the caller wrote.
         const obj = { "/outer": [{ "/inner": "val" }] };
-        expect(toWireFormat(obj)).toEqual({
+        expect(toEncodedFormat(obj)).toEqual({
           "/quote": { "/outer": [{ "/inner": "val" }] },
         });
 
@@ -1099,10 +1103,10 @@ describe("JsonCodecEngine", () => {
     describe("/object: any value requires encoding", () => {
       it("emits `/quote` for doubly-nested `/`-prefixed literal object (whole subtree is literal)", () => {
         const obj = { "/x": { "/y": 123 } };
-        const wire = toWireFormat(obj);
+        const encoded = toEncodedFormat(obj);
         // Whole subtree is deep-literal, so it takes a single `/quote` wrap of
         // the original structure.
-        expect(wire).toEqual({
+        expect(encoded).toEqual({
           "/quote": { "/x": { "/y": 123 } },
         });
         const result = roundTrip(obj) as Record<
@@ -1115,7 +1119,7 @@ describe("JsonCodecEngine", () => {
       it("boundary contrast: literal subtree uses `/quote`, Fabric type uses `/object`", () => {
         // All-literal: single /quote wraps the whole structure.
         const literal = { "/x": { "/y": 123 } };
-        expect(toWireFormat(literal)).toEqual({
+        expect(toEncodedFormat(literal)).toEqual({
           "/quote": { "/x": { "/y": 123 } },
         });
 
@@ -1124,7 +1128,7 @@ describe("JsonCodecEngine", () => {
         const withEpoch = {
           "/x": new FabricEpochDays(42n),
         };
-        expect(toWireFormat(withEpoch)).toEqual({
+        expect(toEncodedFormat(withEpoch)).toEqual({
           "/object": { "/x": { "/EpochDays@1": expect.anything() } },
         });
       });
@@ -1132,8 +1136,8 @@ describe("JsonCodecEngine", () => {
       it("emits `/object` for `/`-keyed object with `FabricError` value", () => {
         const err = FabricError.fromNativeError(new TypeError("eep!"));
         const obj = { "/x": err };
-        const wire = toWireFormat(obj);
-        expect(Object.keys(wire as object)).toEqual(["/object"]);
+        const encoded = toEncodedFormat(obj);
+        expect(Object.keys(encoded as object)).toEqual(["/object"]);
       });
 
       it("round-trips `FabricError` as value inside `/`-prefixed key object", () => {
@@ -1159,8 +1163,8 @@ describe("JsonCodecEngine", () => {
           "/a": "literal",
           "/b": FabricError.fromNativeError(new Error("oops")),
         };
-        const wire = toWireFormat(obj);
-        expect(Object.keys(wire as object)).toEqual(["/object"]);
+        const encoded = toEncodedFormat(obj);
+        expect(Object.keys(encoded as object)).toEqual(["/object"]);
       });
 
       it("round-trips mixed literal+encoded `/`-keyed object", () => {
@@ -1179,7 +1183,7 @@ describe("JsonCodecEngine", () => {
         // Wire data without a `/quote` or `/object` wrapper: the decoder must
         // not silently round-trip it as a plain object.
         const data = { a: 1, "/b": 2 } as JsonCodecValue;
-        const result = fromWireFormat(data, true);
+        const result = fromEncodedFormat(data, true);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
 
@@ -1189,18 +1193,18 @@ describe("JsonCodecEngine", () => {
         // must produce a `ProblematicValue`, not an `UnknownValue` with an
         // empty tag.
         const data = { "/": "x" } as JsonCodecValue;
-        const result = fromWireFormat(data, true);
+        const result = fromEncodedFormat(data, true);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
 
       it("does not wrap plain object with no `/`-prefixed keys", () => {
         const obj = { a: 1, b: 2 };
-        expect(toWireFormat(obj)).toEqual({ a: 1, b: 2 });
+        expect(toEncodedFormat(obj)).toEqual({ a: 1, b: 2 });
       });
 
       it("deserializes an `/object`-wrapped multi-key object with `/`-prefixed key correctly", () => {
         const data = { "/object": { a: 1, "/b": 2 } } as JsonCodecValue;
-        const result = fromWireFormat(data) as Record<string, FabricValue>;
+        const result = fromEncodedFormat(data) as Record<string, FabricValue>;
         expect(result["a"]).toBe(1);
         expect(result["/b"]).toBe(2);
       });
@@ -1220,7 +1224,7 @@ describe("JsonCodecEngine", () => {
         // unrecognized tag and never reach the multi-key guard's
         // `ProblematicValue`.
         const data = { "/Future@7": { id: "x" } } as JsonCodecValue;
-        const result = fromWireFormat(data);
+        const result = fromEncodedFormat(data);
         expect(result).toBeInstanceOf(UnknownValue);
         expect((result as unknown as UnknownValue).wireTypeTag).toBe(
           "Future@7",
@@ -1228,12 +1232,15 @@ describe("JsonCodecEngine", () => {
       });
 
       it("decoder strips exactly one `/quote` layer — inner `/quote` is preserved literally", () => {
-        // The wire form `{"/quote": {"/quote": "x"}}` is a `/quote`-wrapped
+        // The encoded form `{"/quote": {"/quote": "x"}}` is a `/quote`-wrapped
         // literal whose content happens to be `{"/quote": "x"}`. Decoding must
         // return that inner object as a frozen plain object, and must _not_
         // recurse into it and return just `x`.
-        const wire = { "/quote": { "/quote": "x" } } as JsonCodecValue;
-        const result = fromWireFormat(wire) as Record<string, FabricValue>;
+        const encoded = { "/quote": { "/quote": "x" } } as JsonCodecValue;
+        const result = fromEncodedFormat(encoded) as Record<
+          string,
+          FabricValue
+        >;
         expect(result["/quote"]).toBe("x");
       });
 
@@ -1261,17 +1268,44 @@ describe("JsonCodecEngine", () => {
         //
         // The keys are computed on purpose: in an object literal a bare or
         // quoted `__proto__:` sets the prototype instead of creating a
-        // property, so a literal cannot express this wire shape at all.
+        // property, so a literal cannot express this encoded shape at all.
         // `JSON.parse()`, which is how such bytes actually arrive, does create
         // the own property.
-        expect(fromWireFormat({ ["__proto__"]: { hostile: true }, a: 1 }, true))
+        expect(
+          fromEncodedFormat({ ["__proto__"]: { hostile: true }, a: 1 }, true),
+        )
           .toBeInstanceOf(ProblematicValue);
-        expect(fromWireFormat({ ["constructor"]: "c" }, true))
+        expect(fromEncodedFormat({ ["constructor"]: "c" }, true))
           .toBeInstanceOf(ProblematicValue);
       });
 
+      it("throws rather than encoding a reserved key", () => {
+        // The encode side is the caller's own value rather than a channel's,
+        // so it raises where the decode side reports. Leaving it unguarded is
+        // damage either way: on a host with the standard `__proto__` accessor
+        // the key is dropped in the rebuild, and on one without, it reaches
+        // the wire as text this same decoder refuses -- written and never
+        // readable.
+        for (const key of ["__proto__", "constructor"]) {
+          const value = Object.defineProperty({ a: 1 }, key, {
+            value: "payload",
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          });
+
+          // `encode()` directly rather than `toEncodedFormat()`: that helper
+          // round-trips through the testing unwrap, which decodes, so a test
+          // written against it passes on the DECODE guard and says nothing
+          // about this one.
+          const { jsonCodecEngine } = makeTestCodec();
+
+          expect(() => jsonCodecEngine.encode(value)).toThrow(/reserves/);
+        }
+      });
+
       it("produces a `ProblematicValue` for a reserved key nested in the graph", () => {
-        const result = fromWireFormat({
+        const result = fromEncodedFormat({
           nested: { ["__proto__"]: 1 },
         }, true) as Record<string, unknown>;
         expect(result.nested).toBeInstanceOf(ProblematicValue);
@@ -1279,7 +1313,7 @@ describe("JsonCodecEngine", () => {
       });
 
       it("produces a `ProblematicValue` for a reserved key inside `/object`", () => {
-        expect(fromWireFormat({ "/object": { ["__proto__"]: 1 } }, true))
+        expect(fromEncodedFormat({ "/object": { ["__proto__"]: 1 } }, true))
           .toBeInstanceOf(ProblematicValue);
       });
 
@@ -1310,10 +1344,10 @@ describe("JsonCodecEngine", () => {
           });
 
           const hostile = { hostile: true };
-          expect(fromWireFormat({ ["__proto__"]: hostile, a: 1 }, true))
+          expect(fromEncodedFormat({ ["__proto__"]: hostile, a: 1 }, true))
             .toBeInstanceOf(ProblematicValue);
 
-          const nested = fromWireFormat({
+          const nested = fromEncodedFormat({
             deep: { ["__proto__"]: hostile },
           }, true) as Record<string, unknown>;
           expect(nested.deep).toBeInstanceOf(ProblematicValue);
@@ -1341,7 +1375,7 @@ describe("JsonCodecEngine", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
       } as JsonCodecValue;
-      const result = fromWireFormat(data);
+      const result = fromEncodedFormat(data);
       // The inner structure is returned as-is, not reconstructed.
       const obj = result as Record<string, unknown>;
       expect(obj["/Link@1"]).toEqual({ id: "abc" });
@@ -1351,7 +1385,7 @@ describe("JsonCodecEngine", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
       } as JsonCodecValue;
-      const result = fromWireFormat(data) as Record<string, unknown>;
+      const result = fromEncodedFormat(data) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result["/Link@1"])).toBe(true);
     });
@@ -1360,7 +1394,7 @@ describe("JsonCodecEngine", () => {
       const data = {
         "/quote": [1, { nested: "obj" }, [2, 3]],
       } as JsonCodecValue;
-      const result = fromWireFormat(data) as unknown[];
+      const result = fromEncodedFormat(data) as unknown[];
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result[1])).toBe(true);
       expect(Object.isFrozen(result[2])).toBe(true);
@@ -1370,7 +1404,7 @@ describe("JsonCodecEngine", () => {
       const data = {
         "/quote": { key: "val" },
       } as JsonCodecValue;
-      const result = fromWireFormat(data) as Record<string, unknown>;
+      const result = fromEncodedFormat(data) as Record<string, unknown>;
       expect(() => {
         result.key = "changed";
       }).toThrow();
@@ -1382,18 +1416,18 @@ describe("JsonCodecEngine", () => {
       const data = {
         "/FutureType@2": { some: "data" },
       } as JsonCodecValue;
-      const result = fromWireFormat(data);
+      const result = fromEncodedFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
       const unknown = result as unknown as UnknownValue;
       expect(unknown.wireTypeTag).toBe("FutureType@2");
       expect(unknown.state).toEqual({ some: "data" });
     });
 
-    it("preserves the `UnknownValue` tag in wire format via `encode()`", () => {
+    it("preserves the `UnknownValue` tag in the encoded form via `encode()`", () => {
       // Encoding an UnknownValue produces the original tagged form.
       const us = new UnknownValue("FutureType@2", { some: "data" });
-      const wireFormat = toWireFormat(us);
-      expect(wireFormat).toEqual({
+      const encodedFormat = toEncodedFormat(us);
+      expect(encodedFormat).toEqual({
         "/FutureType@2": { some: "data" },
       });
     });
@@ -1413,7 +1447,7 @@ describe("JsonCodecEngine", () => {
       // elements, and is a structural violation anywhere else.
       const data = { "/hole": 5 } as JsonCodecValue;
 
-      expect(() => fromWireFormat(data)).toThrow(/malformed tag/);
+      expect(() => fromEncodedFormat(data)).toThrow(/malformed tag/);
     });
   });
 
@@ -1465,7 +1499,7 @@ describe("JsonCodecEngine", () => {
       const obj = { a: shared, b: shared };
       // Should not throw -- shared references are fine, and only cycles are
       // rejected.
-      const result = toWireFormat(obj);
+      const result = toEncodedFormat(obj);
       expect(result).toEqual({ a: { val: 42 }, b: { val: 42 } });
     });
   });
@@ -1478,9 +1512,9 @@ describe("JsonCodecEngine", () => {
         "something went wrong",
       );
 
-      // The preserved tag is data here rather than wire structure, which is
+      // The preserved tag is data here rather than encoded structure, which is
       // what lets an instance reporting an unusable tag be encoded at all.
-      expect(toWireFormat(prob)).toEqual({
+      expect(toEncodedFormat(prob)).toEqual({
         "/Problematic@1": {
           tag: "BadType@1",
           state: "original data",
@@ -1518,13 +1552,13 @@ describe("JsonCodecEngine", () => {
       expect(prob.wireTypeTag).toBe("BigInt@1");
     });
 
-    it("wraps a throw from a terminal codec, over the wire-form state", () => {
+    it("wraps a throw from a terminal codec, over the encoded-form state", () => {
       // `Undefined@1` is terminal and throws outright, so it reaches the
       // lenient catch from the terminal arm. A codec that reports a bad state
       // by returning a `ProblematicValue` never reaches that catch at all.
       //
       // What the state assertion pins is what the *report* carries, which is
-      // the wire form. That the *codec* is handed the wire form is a separate
+      // the encoded form. That the *codec* is handed the encoded form is a separate
       // fact, pinned separately above.
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const data = { "/Undefined@1": { "/Bytes@1": "AQID" } } as JsonCodecValue;
@@ -1583,21 +1617,21 @@ describe("JsonCodecEngine", () => {
 
   describe("freeze guarantees", () => {
     it("deserialized arrays are frozen", () => {
-      const result = fromWireFormat(
+      const result = fromEncodedFormat(
         [1, 2, 3] as JsonCodecValue,
       );
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("deserialized objects are frozen", () => {
-      const result = fromWireFormat(
+      const result = fromEncodedFormat(
         { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("mutation of deserialized array throws", () => {
-      const result = fromWireFormat(
+      const result = fromEncodedFormat(
         [1, 2, 3] as JsonCodecValue,
       );
       expect(() => {
@@ -1606,7 +1640,7 @@ describe("JsonCodecEngine", () => {
     });
 
     it("mutation of deserialized object throws", () => {
-      const result = fromWireFormat(
+      const result = fromEncodedFormat(
         { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
       expect(() => {
@@ -1615,7 +1649,7 @@ describe("JsonCodecEngine", () => {
     });
 
     it("nested deserialized objects are frozen", () => {
-      const result = fromWireFormat(
+      const result = fromEncodedFormat(
         { inner: { val: 42 } } as JsonCodecValue,
       ) as Record<string, Record<string, FabricValue>>;
       expect(Object.isFrozen(result)).toBe(true);
@@ -1624,7 +1658,7 @@ describe("JsonCodecEngine", () => {
 
     it("deserialized `/object`-unwrapped objects are frozen", () => {
       const data = { "/object": { "/myKey": "val" } } as JsonCodecValue;
-      const result = fromWireFormat(data) as Record<
+      const result = fromEncodedFormat(data) as Record<
         string,
         FabricValue
       >;
@@ -1642,7 +1676,7 @@ describe("JsonCodecEngine", () => {
     it("codec-produced value is deep-frozen at the boundary", () => {
       // `/EpochNsec@1` dispatches through a registered codec; the
       // reconstructed FabricEpochNsec must be deep-frozen on return.
-      const result = fromWireFormat(
+      const result = fromEncodedFormat(
         { "/EpochNsec@1": "AA" } as JsonCodecValue,
       );
       expect(result).toBeInstanceOf(FabricEpochNsec);
@@ -1676,7 +1710,7 @@ describe("JsonCodecEngine", () => {
     });
   });
 
-  describe("deep-frozen wire invariant (`decode()`/`decodeFromBytes()` symmetry)", () => {
+  describe("deep-frozen encoded invariant (`decode()`/`decodeFromBytes()` symmetry)", () => {
     // Every `JsonCodecValue` handed to `deserialize()` must be deep-frozen, so
     // both `deserialize()` entry points must produce equally deep-frozen
     // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
@@ -1729,9 +1763,9 @@ describe("JsonCodecEngine", () => {
       }],
     ];
 
-    for (const [name, wire] of cases) {
+    for (const [name, encoded] of cases) {
       it(`both paths yield a deep-frozen, equal result: ${name}`, () => {
-        const { viaString, viaBytes } = decodeBothPaths(wire);
+        const { viaString, viaBytes } = decodeBothPaths(encoded);
         expect(isDeepFrozen(viaString)).toBe(true);
         expect(isDeepFrozen(viaBytes)).toBe(true);
         expect(viaString).toEqual(viaBytes);
@@ -1739,12 +1773,12 @@ describe("JsonCodecEngine", () => {
     }
 
     it("string path deep-freezes `/quote` content at every depth (regression for `decode()` vs `#fromBytes()`)", () => {
-      const wire = {
+      const encoded = {
         "/quote": { outer: { inner: [1, 2] } },
       } as JsonCodecValue;
       const { jsonCodecEngine, runtime } = makeTestCodec();
       const result = jsonCodecEngine.decode(
-        JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(wire)),
+        JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(encoded)),
         runtime,
       ) as Record<string, Record<string, FabricValue[]>>;
 
@@ -1760,12 +1794,12 @@ describe("JsonCodecEngine", () => {
     });
 
     it("bytes path deep-freezes `/quote` content at every depth", () => {
-      const wire = {
+      const encoded = {
         "/quote": { outer: { inner: [{ deep: 1 }] } },
       } as JsonCodecValue;
       const { jsonCodecEngine, runtime } = makeTestCodec();
       const result = jsonCodecEngine.decodeFromBytes(
-        new TextEncoder().encode(JSON.stringify(wire)),
+        new TextEncoder().encode(JSON.stringify(encoded)),
         runtime,
       ) as Record<string, Record<string, Array<Record<string, FabricValue>>>>;
 
@@ -1849,8 +1883,8 @@ describe("JsonCodecEngine", () => {
     });
   });
 
-  describe("malformed wire the engine itself detects", () => {
-    /** The wire shapes the engine rejects without any codec being consulted. */
+  describe("malformed encoded the engine itself detects", () => {
+    /** The encoded shapes the engine rejects without any codec being consulted. */
     const CASES: readonly (readonly [string, JsonCodecValue, RegExp])[] = [
       ["a bare `/` key", { "/": "x" }, /malformed tag/],
       ["a `/`-prefixed key in a bare object", { a: 1, "/b": 2 }, /reserved/],
@@ -1862,7 +1896,7 @@ describe("JsonCodecEngine", () => {
       ],
     ];
 
-    for (const [what, wire, message] of CASES) {
+    for (const [what, encoded, message] of CASES) {
       it(`throws given ${what}, when not lenient`, () => {
         const jsonCodecEngine = newDefaultJsonCodecEngine();
 
@@ -1870,7 +1904,7 @@ describe("JsonCodecEngine", () => {
         expect(() =>
           jsonCodecEngine.decode(
             JsonCodecEngine.wrapEncodedValueForTesting(
-              JSON.stringify(wire),
+              JSON.stringify(encoded),
               true, // Malformed on purpose; that is what these are about.
             ),
             new TestReconstructionContext(),
@@ -1882,7 +1916,9 @@ describe("JsonCodecEngine", () => {
         // The same detection, kept as a value. Which side of this a caller
         // gets is `lenient` and nothing else -- notably not whether a codec
         // or the walk noticed, which these cases are the walk noticing.
-        expect(fromWireFormat(wire, true)).toBeInstanceOf(ProblematicValue);
+        expect(fromEncodedFormat(encoded, true)).toBeInstanceOf(
+          ProblematicValue,
+        );
       });
     }
   });
@@ -1939,11 +1975,11 @@ describe("JsonCodecEngine", () => {
     });
 
     it("encodes a `FabricError` as `/Error@1` carrying `type` and `message`", () => {
-      // The `@1` in the tag makes this a versioned wire surface, so the exact
+      // The `@1` in the tag makes this a versioned encoded surface, so the exact
       // shape asserted below is the contract rather than an implementation
       // detail.
       const se = FabricError.fromNativeError(new TypeError("compat test"));
-      const serialized = toWireFormat(
+      const serialized = toEncodedFormat(
         se,
       ) as Record<string, unknown>;
       expect(Object.keys(serialized)).toEqual(["/Error@1"]);

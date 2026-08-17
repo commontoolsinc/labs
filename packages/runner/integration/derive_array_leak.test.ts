@@ -9,11 +9,13 @@
  * Expected behavior: Memory should stabilize or grow modestly
  * Actual behavior: Memory grows by gigabytes (1GB+ per 100 increments)
  */
+
 import { Identity, Session } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { compileAndSavePattern, Runtime } from "../src/index.ts";
 import { PiecesController } from "@commonfabric/piece/ops";
+
+import { compileAndSavePattern, Runtime } from "../src/index.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 (Error as any).stackTraceLimit = 100;
 

@@ -1,5 +1,7 @@
-import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
+
+import ts from "typescript";
+
 import {
   analyzeFunctionCapabilities,
   type MergeablePushMisuse,

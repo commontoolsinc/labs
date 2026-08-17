@@ -1,16 +1,18 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
+import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
 import {
   type Options,
   type SessionFactory,
   StorageManager,
 } from "../src/storage/v2.ts";
-import type { Signer } from "@commonfabric/memory/interface";
-import { Runtime } from "../src/runtime.ts";
-import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
   testPrincipalSessionOpenAuthFactory,

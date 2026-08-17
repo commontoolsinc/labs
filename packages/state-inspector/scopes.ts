@@ -22,9 +22,10 @@
 // honest, runtime-true divergence view; prefer it. Scope-key construction reuses
 // the engine's exported `resolveScopeKey` so encoding never drifts.
 
-import type { SpaceDb } from "./db.ts";
-import { resolveScopeKey } from "@commonfabric/memory/v2/engine";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { resolveScopeKey } from "@commonfabric/memory/v2/engine";
+
+import type { SpaceDb } from "./db.ts";
 import { annotate, summarize } from "./decode.ts";
 import {
   type EntityDocument,

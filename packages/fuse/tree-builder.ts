@@ -1,15 +1,16 @@
 // tree-builder.ts — Convert JSON values to FsTree nodes
 
+import { isLinkRef, type SigilLink } from "@commonfabric/runner/shared";
+
+import type { CfcJsonAnnotationContext } from "./annotations.ts";
 import {
   type CallableKind,
   isHandlerCell,
   isStreamValue,
   transformCallableValues,
 } from "./callables.ts";
-import type { CfcJsonAnnotationContext } from "./annotations.ts";
-import { FsTree } from "./tree.ts";
 import { encodeFuseComponent } from "./path-codec.ts";
-import { isLinkRef, type SigilLink } from "@commonfabric/runner/shared";
+import { FsTree } from "./tree.ts";
 
 type JsonPropName = "input" | "result";
 type PendingJsonRootName = ".input.pending" | ".result.pending";

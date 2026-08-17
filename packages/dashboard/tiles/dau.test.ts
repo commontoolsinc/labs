@@ -1,7 +1,10 @@
-// dau tile tests: collect(ctx) -> TileView against a stubbed SigNoz. No network:
-// globalThis.fetch is swapped for the duration of a test and put back afterwards.
-// The pure helpers (foldSeries, parseExcludes) are pinned in
-// ../tiles.test.ts; what is pinned here is the tile's own reading of a response.
+/**
+ * dau tile tests: collect(ctx) -> TileView against a stubbed SigNoz. No network:
+ * globalThis.fetch is swapped for the duration of a test and put back afterwards.
+ * The pure helpers (foldSeries, parseExcludes) are pinned in
+ * ../tiles.test.ts; what is pinned here is the tile's own reading of a response.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx } from "../types.ts";
 import { dau } from "./dau.ts";

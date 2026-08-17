@@ -1,5 +1,8 @@
-// Unit tests for the helpers lib.test.ts does not reach: the GitHub API wrapper
-// and the memo cache. No real network — fetch is stubbed and restored.
+/**
+ * Unit tests for the helpers lib.test.ts does not reach: the GitHub API wrapper
+ * and the memo cache. No real network — fetch is stubbed and restored.
+ */
+
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { friendlyError, github, memo } from "./lib.ts";
 

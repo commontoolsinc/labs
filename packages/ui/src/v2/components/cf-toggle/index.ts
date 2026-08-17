@@ -1,6 +1,4 @@
-import { CFToggle } from "./cf-toggle.ts";
-
-import { ToggleSize, ToggleVariant } from "./cf-toggle.ts";
+import { CFToggle, ToggleSize, ToggleVariant } from "./cf-toggle.ts";
 
 if (!customElements.get("cf-toggle")) {
   customElements.define("cf-toggle", CFToggle);

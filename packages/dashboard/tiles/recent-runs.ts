@@ -150,7 +150,7 @@ export const recentRuns: Tile = {
         escapeHtml(href)
       }" target="_blank" rel="noopener" aria-label="Open landed change on GitHub">↗</a></div>`;
     }).join("") ||
-      `<div class="ev"><span class="dot grey"></span><span>waiting for first poll…</span></div>`;
+      `<div class="ev"><span class="dot gray"></span><span>waiting for first poll…</span></div>`;
 
     return {
       label: `recent main runs · ${runs.length} in window`,

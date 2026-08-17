@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { createSession, Identity } from "@commonfabric/identity";
 import { type Cell, Runtime } from "@commonfabric/runner";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import { pieceId } from "../src/piece-id.ts";

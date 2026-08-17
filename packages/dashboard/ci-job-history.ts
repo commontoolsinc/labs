@@ -3169,7 +3169,7 @@ export function ciJobHistoryPage(
     : "";
   const rangeContent = `<div id="range-content">
     ${progressHtml}${coverageHtml}
-    <p class="legend">Job start-to-finish duration. Overall CI runs from the first job start to the last job completion. A shard group's line is the longest-running shard in each run. Lower is faster; colour follows the selected ${days}-day trend. Duration sort uses the latest sample.</p>
+    <p class="legend">Job start-to-finish duration. Overall CI runs from the first job start to the last job completion. A shard group's line is the longest-running shard in each run. Lower is faster; color follows the selected ${days}-day trend. Duration sort uses the latest sample.</p>
     ${refreshNotice}${body}
     <p class="note">Every successful main run is sampled when the selected window contains at most ${CI_HISTORY_POINT_TARGET}. Larger sets keep exactly ${CI_HISTORY_POINT_TARGET} builds spread evenly through the chronological run sequence from <a href="${
     escapeHtml(workflowUrl)

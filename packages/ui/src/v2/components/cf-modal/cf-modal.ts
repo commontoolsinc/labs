@@ -51,12 +51,14 @@
  * </cf-modal>
  * ```
  */
+
+import { CellHandle } from "@commonfabric/runtime-client";
 import { html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
+
 import { BaseElement } from "../../core/base-element.ts";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
 import { modalStyles } from "./styles.ts";
-import { CellHandle } from "@commonfabric/runtime-client";
 
 /** Z-index for an open modal: the `--cf-z-layer-overlay` token's value. */
 const MODAL_Z_INDEX = 1000;

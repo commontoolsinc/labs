@@ -1,7 +1,10 @@
-// ci-duration's drill-down: the Gantt page and the /bench/gantt.svg image behind it.
-// The image handler shells out to scripts/ci-gantt.ts and writes a temp file.
-// The subprocess and the filesystem calls around it are replaced with
-// stubs that record what the handler asked for and hand back a canned result.
+/**
+ * ci-duration's drill-down: the Gantt page and the /bench/gantt.svg image behind it.
+ * The image handler shells out to scripts/ci-gantt.ts and writes a temp file.
+ * The subprocess and the filesystem calls around it are replaced with
+ * stubs that record what the handler asked for and hand back a canned result.
+ */
+
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, Run } from "../types.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "../config.ts";
@@ -271,7 +274,7 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
   assert(!html.includes('class="spinner"'));
   assert(!html.includes("min runs per job"));
   assert(!html.includes("minRuns"));
-  // The runs slider offers only what the image route will honour, so dragging it
+  // The runs slider offers only what the image route will honor, so dragging it
   // to either end can't ask for a limit that comes back silently clamped.
   assertStringIncludes(html, `id="limit" min="1" max="150"`);
   assertEquals((await gantt("?limit=150")).args.indexOf("150") >= 0, true);

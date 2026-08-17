@@ -1,31 +1,33 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { normalize } from "@std/path/posix";
+
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
-import { normalize } from "@std/path/posix";
-import { computeModuleHashes } from "../harness/module-identity.ts";
-import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
-import {
-  deriveModuleRecordFields,
-  SOURCE_ROOT_SPECIFIER,
-} from "../sandbox/module-record-compiler.ts";
-import type { CacheableModule } from "../harness/types.ts";
-import type { MemorySpace, Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { type Cell, isCell } from "../cell.ts";
-import { snapshotQueryResult } from "../query-result-proxy.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type { JSONSchema } from "../builder/types.ts";
+import { type Cell, isCell } from "../cell.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
+import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
+import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
+import { computeModuleHashes } from "../harness/module-identity.ts";
+import type { CacheableModule } from "../harness/types.ts";
+import { snapshotQueryResult } from "../query-result-proxy.ts";
+import type { MemorySpace, Runtime } from "../runtime.ts";
 import {
   isFabricImportSpecifier,
   parseFabricRef,
   pinnedIdentity,
 } from "../sandbox/fabric-import-specifier.ts";
 import {
+  deriveModuleRecordFields,
+  SOURCE_ROOT_SPECIFIER,
+} from "../sandbox/module-record-compiler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
   COMPILE_CACHE_RUNTIME_VERSION,
   SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
 } from "./compile-cache-version.ts";
-import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("cell-cache");
 

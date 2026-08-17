@@ -1,7 +1,17 @@
-import type { FabricPlainObject } from "@commonfabric/api";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
-import { resolveSpaceStoreUrl } from "./storage-path.ts";
+
+import type { FabricPlainObject } from "@commonfabric/api";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
+
+import {
+  aclDocId,
+  ANYONE_USER,
+  type Capability,
+  hasConcreteOwner,
+  isACL,
+  isCapable,
+} from "../acl.ts";
 import {
   type CellScope,
   type ClientCommit,
@@ -56,29 +66,7 @@ import {
 } from "../v2.ts";
 import { classifyCommitTelemetry } from "./commit-telemetry.ts";
 import * as Engine from "./engine.ts";
-import {
-  aclDocId,
-  ANYONE_USER,
-  type Capability,
-  hasConcreteOwner,
-  isACL,
-  isCapable,
-} from "../acl.ts";
-import {
-  aliasForDbId,
-  attachDatabase,
-  detachDatabase,
-  ensureTables,
-} from "./sqlite/exec.ts";
-import { assertReadOnly } from "./sqlite/guard.ts";
-import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
-import type { TableSchema } from "./sqlite/schema.ts";
-import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
-import { ReadConnectionPool } from "./sqlite/read-pool.ts";
-import {
-  columnOriginUnavailableReason,
-  ensureColumnOriginAvailable,
-} from "./sqlite/column-origin.ts";
+import { respondToHello } from "./handshake.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -90,8 +78,6 @@ import {
   type TrackedGraphState,
   trackGraph,
 } from "./query.ts";
-import { respondToHello } from "./handshake.ts";
-import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
   buildDiffSync,
   buildFullSync,
@@ -105,10 +91,26 @@ import {
   toCacheEntry,
   trackedIdsFromEntries,
 } from "./server-sync.ts";
-import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
+import { SessionRegistry, type SessionState } from "./session-registry.ts";
+import {
+  columnOriginUnavailableReason,
+  ensureColumnOriginAvailable,
+} from "./sqlite/column-origin.ts";
+import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
+import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
+import {
+  aliasForDbId,
+  attachDatabase,
+  detachDatabase,
+  ensureTables,
+} from "./sqlite/exec.ts";
+import { assertReadOnly } from "./sqlite/guard.ts";
+import { ReadConnectionPool } from "./sqlite/read-pool.ts";
+import type { TableSchema } from "./sqlite/schema.ts";
+import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 export { SessionRegistry } from "./session-registry.ts";
 
@@ -3260,37 +3262,69 @@ export class Server {
             const fromSeq = session.lastSyncedSeq;
             const updates = new Map<string, SessionCacheEntry>();
 
-            for (const graph of session.graphs.values()) {
-              const refreshed = tracer.startActiveSpan(
-                "memory.watch.refresh",
-                (watchSpan) => {
-                  watchSpan.setAttribute("space.did", space);
-                  try {
-                    return refreshTrackedGraph(
-                      space,
-                      engine,
-                      graph,
-                      dirtyIds,
-                    );
-                  } finally {
-                    watchSpan.end();
-                  }
-                },
-              );
-              if (refreshed === null) {
-                continue;
-              }
-              for (const entity of refreshed.updates.values()) {
-                const entry = toCacheEntry(entity);
-                updates.set(
-                  cacheKeyForEntity(
-                    entry.branch,
-                    entry.id,
-                    declaredScope(entry.scope),
-                  ),
-                  entry,
+            try {
+              for (const graph of session.graphs.values()) {
+                const refreshed = tracer.startActiveSpan(
+                  "memory.watch.refresh",
+                  (watchSpan) => {
+                    watchSpan.setAttribute("space.did", space);
+                    try {
+                      return refreshTrackedGraph(
+                        space,
+                        engine,
+                        graph,
+                        dirtyIds,
+                      );
+                    } finally {
+                      watchSpan.end();
+                    }
+                  },
                 );
+                if (refreshed === null) {
+                  continue;
+                }
+                for (const entity of refreshed.updates.values()) {
+                  const entry = toCacheEntry(entity);
+                  updates.set(
+                    cacheKeyForEntity(
+                      entry.branch,
+                      entry.id,
+                      declaredScope(entry.scope),
+                    ),
+                    entry,
+                  );
+                }
               }
+            } catch (error) {
+              // A schema-closure violation is database corruption: the
+              // commit boundary makes cid: documents immutable, so a
+              // missing or forged closure is a state normal operation can
+              // never create, not a transient condition to hold and
+              // retry. Terminate THIS session loudly — its graph state is
+              // discarded whole, which also discards any earlier graph's
+              // partial advance from this pass — and let every other
+              // session's fan-out proceed. The client sees a terminal
+              // session/revoked; a reopen's initial query fails against
+              // the same corruption.
+              if (
+                error instanceof Error && error.name === "SchemaClosureError"
+              ) {
+                console.error(
+                  `memory v2: schema-closure violation; terminating session ${sessionId} in space ${space}`,
+                  error,
+                );
+                this.#sessions.remove(space, sessionId);
+                if (session.ownerConnectionId !== null) {
+                  this.#connections.get(session.ownerConnectionId)
+                    ?.revokeSession(
+                      space,
+                      sessionId,
+                      "schema-closure-violation",
+                    );
+                }
+                return null;
+              }
+              throw error;
             }
 
             if (updates.size === 0) {

@@ -1,14 +1,16 @@
-import { describe, it } from "@std/testing/bdd";
-import type { CfcAtom } from "@commonfabric/api/cfc";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { describe, it } from "@std/testing/bdd";
+
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { JSONSchema } from "../src/builder/types.ts";
 import { atomPropagationClass } from "../src/cfc/atom-classes.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-integrity");
 const space = signer.did();

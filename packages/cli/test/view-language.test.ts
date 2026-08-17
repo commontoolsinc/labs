@@ -5,6 +5,7 @@
  * a diff touches, and `diffSemanticsFor` composes the diff view's semantic layer
  * from the languages present, scoped to each one's files.
  */
+
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
 import { join } from "@std/path";

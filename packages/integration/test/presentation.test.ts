@@ -876,7 +876,7 @@ Deno.test("FrameRecorder acknowledges immediately and preserves variable timing"
   }
 });
 
-Deno.test("FrameRecorder waits for late acknowledgement failures", async () => {
+Deno.test("FrameRecorder waits for late acknowledgment failures", async () => {
   const dir = await Deno.makeTempDir();
   try {
     let rejectAcknowledgement!: (reason: Error) => void;

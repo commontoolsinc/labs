@@ -332,7 +332,7 @@ describe("runDeviceLinkLogin", () => {
   });
 
   it("shows BOTH DIDs to the confirm gate when replacing", async () => {
-    // The confirm screen is the ONLY defence against a donated-identity link,
+    // The confirm screen is the ONLY defense against a donated-identity link,
     // so it must be handed the DIDs a user can cross-check against the Pair
     // screen — not a truncation or a placeholder.
     const stale = await Identity.fromRaw(
@@ -411,7 +411,7 @@ describe("runDeviceLinkLogin", () => {
 // Previously uncovered: every test above injects its own `confirm`, so the
 // production path and the whole view were unexercised. Two mutations passed the
 // entire suite as a result — `confirmWithUser` hardcoded to true, and the Cancel
-// button rewired to accept. For the screen the design calls the only defence
+// button rewired to accept. For the screen the design calls the only defense
 // against a donated-identity link, those are the mutations that matter most.
 //
 // Follows the repo's view-test idiom (see login-view.test.ts): install fake
@@ -711,7 +711,7 @@ describe("confirmWithUser (the production confirm path)", () => {
 // ── the modal activation seam ──────────────────────────────────────────────
 //
 // firstUpdated's imperative DOM work runs only against a real DOM, so the
-// browser-behaviour mutations (Escape rewired to accept, showModal never
+// browser-behavior mutations (Escape rewired to accept, showModal never
 // called, cancel listener never attached) previously ALL survived — the unit
 // tests stub document.body.appendChild to a no-op, so the element never
 // connects and firstUpdated never fires. `activateModalDialog` is extracted so
@@ -1237,7 +1237,7 @@ describe("handleDeviceLink", () => {
   });
 
   it("survives the reporter itself failing", async () => {
-    // Last line of defence: if even the failure screen cannot render, boot on
+    // Last line of defense: if even the failure screen cannot render, boot on
     // rather than hanging forever.
     const { handleDeviceLink } = await load();
     await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {

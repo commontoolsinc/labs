@@ -1,5 +1,22 @@
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isCell, setCellUnlinkedSpace } from "../cell.ts";
+import type { ImplementationIdentity } from "../cfc/types.ts";
+import { createRef } from "../create-ref.ts";
+import {
+  getStableInternalPathSegment,
+  KeepAsCell,
+  sanitizeSchemaForLinks,
+} from "../link-utils.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+import { Runtime } from "../runtime.ts";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 import {
   ARRAY_SUBSCHEMA_KEYS,
   RECORD_SUBSCHEMA_KEYS,
@@ -7,8 +24,32 @@ import {
   UNUSED_RECORD_SUBSCHEMA_KEYS,
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
 } from "../schema-walk.ts";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { type AliasBinding } from "../sigil-types.ts";
+import {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../storage/interface.ts";
+import { toURI } from "../uri-utils.ts";
+import {
+  REPLAYABLE_BUILTIN_REFS,
+  SUBPATTERN_ARGUMENT_BUILTIN_REFS,
+} from "./builtin-replayability.ts";
+import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
+import { toJSONMethod } from "./json-member.ts";
+import {
+  applyArgumentIfcToResult,
+  applyInputIfcToOutput,
+  connectInputAndOutputs,
+} from "./node-utils.ts";
+import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
+import { reactive } from "./reactive.ts";
+import {
+  type CellAliasResolver,
+  moduleToEncodableForm,
+  patternToEncodableForm,
+  withAliasBindings,
+} from "./to-encodable-form.ts";
+import { traverseValue } from "./traverse-utils.ts";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
@@ -35,46 +76,6 @@ import {
   type toJSON,
   type UnsafeBinding,
 } from "./types.ts";
-import { reactive } from "./reactive.ts";
-import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
-import {
-  applyArgumentIfcToResult,
-  applyInputIfcToOutput,
-  connectInputAndOutputs,
-} from "./node-utils.ts";
-import {
-  type CellAliasResolver,
-  moduleToEncodableForm,
-  patternToEncodableForm,
-  withAliasBindings,
-} from "./to-encodable-form.ts";
-import { toJSONMethod } from "./json-member.ts";
-import { traverseValue } from "./traverse-utils.ts";
-import {
-  REPLAYABLE_BUILTIN_REFS,
-  SUBPATTERN_ARGUMENT_BUILTIN_REFS,
-} from "./builtin-replayability.ts";
-import {
-  getStableInternalPathSegment,
-  KeepAsCell,
-  sanitizeSchemaForLinks,
-} from "../link-utils.ts";
-import { type AliasBinding } from "../sigil-types.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
-import { isCell, setCellUnlinkedSpace } from "../cell.ts";
-import { createRef } from "../create-ref.ts";
-import { toURI } from "../uri-utils.ts";
-import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
-import { Runtime } from "../runtime.ts";
-import type { ImplementationIdentity } from "../cfc/types.ts";
-import {
-  IExtendedStorageTransaction,
-  MemorySpace,
-} from "../storage/interface.ts";
-import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
 /** Declare a pattern
  *

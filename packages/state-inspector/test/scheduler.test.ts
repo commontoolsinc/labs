@@ -1,5 +1,4 @@
 import { assertEquals } from "@std/assert";
-import { Database } from "@db/sqlite";
 import { toFileUrl } from "@std/path";
 
 import {
@@ -8,6 +7,7 @@ import {
   resolveScopeKey,
   upsertSchedulerObservation,
 } from "@commonfabric/memory/v2/engine";
+import { Database } from "@db/sqlite";
 
 import { openSpace } from "../db.ts";
 import { schedulerDetails } from "../scheduler.ts";

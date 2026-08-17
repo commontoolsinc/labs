@@ -1,51 +1,51 @@
-import { StaticCache } from "@commonfabric/static";
-import { RuntimeTelemetry } from "@commonfabric/runner";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
-import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import type { NonIdempotentReport } from "./telemetry.ts";
-import type {
-  AnyCell,
-  JSONSchema,
-  Module,
-  NodeFactory,
-  Pattern,
-  Schema,
-} from "./builder/types.ts";
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { createSession, Identity } from "@commonfabric/identity";
 import {
-  getContentAddressedSchemasConfig,
-  setContentAddressedSchemasConfig,
-} from "./schema-doc-config.ts";
-import { setSyncSchemaTableConfig } from "@commonfabric/memory/v2";
-import {
+  commitPreconditionValueHash,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
+  setSyncSchemaTableConfig,
 } from "@commonfabric/memory/v2";
+import { RuntimeTelemetry } from "@commonfabric/runner";
+import {
+  getContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "./schema-doc-config.ts";
+import { StaticCache } from "@commonfabric/static";
+import {
+  type AsyncLocalStore,
+  FallbackAsyncLocalStore,
+} from "@commonfabric/utils/async-local-store";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isDeno } from "@commonfabric/utils/env";
+
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import {
   isEagerSourceAnnotationEnabled,
   setEagerSourceAnnotation,
 } from "./builder/module.ts";
-import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
-import type { PatternCoverageCollector } from "./pattern-coverage.ts";
+import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type {
-  ChangeGroup,
-  CommitError,
-  DID,
-  IExtendedStorageTransaction,
-  IStorageManager,
-  MemorySpace,
-  URI,
-} from "./storage/interface.ts";
+  AnyCell,
+  Frame,
+  JSONSchema,
+  Module,
+  NodeFactory,
+  Pattern,
+  Schema,
+} from "./builder/types.ts";
+import { registerBuiltins } from "./builtins/index.ts";
 import {
   type Cell,
   createCell,
@@ -53,25 +53,6 @@ import {
   isCell,
   schemaCellScope,
 } from "./cell.ts";
-import { createRef, EntityId } from "./create-ref.ts";
-import { createSession, Identity } from "@commonfabric/identity";
-import { Action, Scheduler } from "./scheduler.ts";
-import {
-  type CommitBackpressurePolicy,
-  resolveCommitBackpressure,
-} from "./scheduler/backpressure.ts";
-import { Engine } from "./harness/index.ts";
-import {
-  CellLink,
-  isCellLink,
-  isNormalizedFullLink,
-  isSigilLink,
-  type NormalizedFullLink,
-  NormalizedLink,
-  parseLink,
-} from "./link-utils.ts";
-import { addressKey } from "./link-types.ts";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
@@ -101,28 +82,47 @@ import {
   type PolicyArtifactManifestV1,
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
-import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { createRef, EntityId } from "./create-ref.ts";
+import type { ConsoleMethod } from "./harness/console.ts";
+import { Engine } from "./harness/index.ts";
+import type { CompiledModuleArtifact } from "./harness/types.ts";
+import type { ConsoleMessage } from "./interface.ts";
+import { addressKey } from "./link-types.ts";
+import {
+  CellLink,
+  isCellLink,
+  isNormalizedFullLink,
+  isSigilLink,
+  type NormalizedFullLink,
+  NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
+import { ModuleRegistry } from "./module.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { PatternUpdater } from "./pattern-updater.ts";
-import type { CompiledModuleArtifact } from "./harness/types.ts";
-import { ModuleRegistry } from "./module.ts";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
+import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
-import { registerBuiltins } from "./builtins/index.ts";
-import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
-import { isRetryableCommitRejection } from "./storage/rejection.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
-import { toURI } from "./uri-utils.ts";
-import { isDeno } from "@commonfabric/utils/env";
+import { Action, Scheduler } from "./scheduler.ts";
 import {
-  type AsyncLocalStore,
-  FallbackAsyncLocalStore,
-} from "@commonfabric/utils/async-local-store";
-import { popFrame, pushFrame } from "./builder/pattern.ts";
-import type { Frame } from "./builder/types.ts";
-import type { ConsoleMessage } from "./interface.ts";
-import type { ConsoleMethod } from "./harness/console.ts";
+  type CommitBackpressurePolicy,
+  resolveCommitBackpressure,
+} from "./scheduler/backpressure.ts";
+import { isCellScope, normalizeCellScope } from "./scope.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import type {
+  ChangeGroup,
+  CommitError,
+  DID,
+  IExtendedStorageTransaction,
+  IStorageManager,
+  MemorySpace,
+  URI,
+} from "./storage/interface.ts";
+import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
@@ -131,12 +131,13 @@ import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
 } from "./storage/write-stack-trace.ts";
+import type { NonIdempotentReport } from "./telemetry.ts";
 import {
   createUnsafeHostTrustToken,
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
-import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
+import { toURI } from "./uri-utils.ts";
 
 const isFullNormalizedLinkShape = (
   value: unknown,
@@ -1397,78 +1398,94 @@ export class Runtime {
   async dispose(
     { closeStorage = true }: { closeStorage?: boolean } = {},
   ): Promise<void> {
-    // A kept store keeps RECORDING, so this path drains what could still write
-    // into it. In-flight async builtin work is that shape: a fetch / llm call or
-    // a sqlite RPC runs from a post-commit outbox flush and writes its result
-    // back when it lands, and `trackAsyncWork` exists because neither `idle()`
-    // nor `synced()` waits for it. `settled()` is the barrier that does. The
-    // closing path skips it because a caller who let the store close has no
-    // reader left to mislead, and waiting on the network in every teardown is a
-    // real cost; here the caller is about to read what this runtime wrote.
-    //
-    // BEFORE the cancellation below, not after: `stopAll()` and
-    // `scheduler.dispose()` would cut a writeback's reactive cascade midway,
-    // leaving the store holding part of a result — which is worse than either
-    // extreme for a reader trying to learn what state this runtime reached.
-    //
-    // UNCAPPED, deliberately. `settled()`'s default 50 rounds falls out of the
-    // loop and returns — silently, with work still outstanding — which is
-    // exactly the hole this drain exists to close, one layer down. Measured: 60
-    // generations of chained tracked work, and a capped drain returned at
-    // generation 50 while the chain kept running and writing. `settledFor`'s
-    // JSDoc gives the reason a cap is wrong for this question and why removing
-    // it cannot spin: every round awaits real promises, so a runtime that keeps
-    // working keeps the barrier open rather than busy-looping.
-    if (!closeStorage) await this.settled(Infinity);
-    // Abort any pending (not-yet-started) queued jobs so they don't start
-    // after storage is torn down.
-    for (const queue of this.queues.values()) {
-      queue.abortPending();
+    try {
+      // A kept store keeps RECORDING, so this path drains what could still write
+      // into it. In-flight async builtin work is that shape: a fetch / llm call or
+      // a sqlite RPC runs from a post-commit outbox flush and writes its result
+      // back when it lands, and `trackAsyncWork` exists because neither `idle()`
+      // nor `synced()` waits for it. `settled()` is the barrier that does. The
+      // closing path skips it because a caller who let the store close has no
+      // reader left to mislead, and waiting on the network in every teardown is a
+      // real cost; here the caller is about to read what this runtime wrote.
+      //
+      // BEFORE the cancellation below, not after: `stopAll()` and
+      // `scheduler.dispose()` would cut a writeback's reactive cascade midway,
+      // leaving the store holding part of a result — which is worse than either
+      // extreme for a reader trying to learn what state this runtime reached.
+      //
+      // UNCAPPED, deliberately. `settled()`'s default 50 rounds falls out of the
+      // loop and returns — silently, with work still outstanding — which is
+      // exactly the hole this drain exists to close, one layer down. Measured: 60
+      // generations of chained tracked work, and a capped drain returned at
+      // generation 50 while the chain kept running and writing. `settledFor`'s
+      // JSDoc gives the reason a cap is wrong for this question and why removing
+      // it cannot spin: every round awaits real promises, so a runtime that keeps
+      // working keeps the barrier open rather than busy-looping.
+      if (!closeStorage) await this.settled(Infinity);
+      // Abort any pending (not-yet-started) queued jobs so they don't start
+      // after storage is torn down.
+      for (const queue of this.queues.values()) {
+        queue.abortPending();
+      }
+      this.queues.clear();
+      // Stop all running docs
+      this.runner.stopAll();
+
+      // Background source checks are deliberately outside the scheduler. Abort
+      // and settle them before the storage sessions they may write through close.
+      await this.patternUpdater.dispose();
+
+      // Same contract for the runner's unloadable-pointer roll-forward commits
+      // (CT-1923): settle before their storage sessions close. Commits only —
+      // never the watcher pattern LOADS, which can be held/wedged arbitrarily
+      // long and are lifecycle-epoch-guarded instead.
+      await this.runner.settlePointerCommits();
+
+      // Scheduler background work can still be using storage, for example the
+      // lifecycle-guarded boot-time persistent-state listing. Let that finish
+      // before tearing down storage sessions.
+      await this.scheduler.idle();
+
+      // Clear module registry
+      this.moduleRegistry.clear();
+
+      // Cancel all storage operations
+      if (closeStorage) await this.storageManager.close();
+
+      // Wait for any pending operations
+      await this.scheduler.idle();
+    } finally {
+      // Released whatever happened above. `storageManager.close()` can reject
+      // — through a provider's `replica.close()` — and it is the one await here
+      // that can. Every statement below is synchronous field-clearing that
+      // cannot fail in turn, so running them on the error path costs nothing
+      // while skipping them strands the process: the config resets are
+      // PROCESS-GLOBAL, and one skipped leaves a non-default experimental flag
+      // set for every runtime built afterwards, with nothing to put it back.
+      //
+      // The error still propagates. What changes is how much has been released
+      // by the time it does, not whether disposal fails.
+      //
+      // The unsubscribes come last, and after the final `idle()` above, because
+      // a subscriber removed earlier would miss notifications the settling work
+      // still depends on.
+      this.scheduler.dispose();
+      this.runner.dispose();
+
+      // Pop the default frame
+      if (this.defaultFrame) {
+        popFrame(this.defaultFrame);
+        this.defaultFrame = undefined;
+      }
+
+      // Dispose the Engine (clears compiler/runtime state and the console hook)
+      this.harness.dispose();
+
+      // Reset experimental config to defaults.
+      resetModernCellRepConfig();
+      resetPersistentSchedulerStateConfig();
+      resetCommitPreconditionsConfig();
     }
-    this.queues.clear();
-    // Stop all running docs
-    this.runner.stopAll();
-
-    // Background source checks are deliberately outside the scheduler. Abort
-    // and settle them before the storage sessions they may write through close.
-    await this.patternUpdater.dispose();
-
-    // Same contract for the runner's unloadable-pointer roll-forward commits
-    // (CT-1923): settle before their storage sessions close. Commits only —
-    // never the watcher pattern LOADS, which can be held/wedged arbitrarily
-    // long and are lifecycle-epoch-guarded instead.
-    await this.runner.settlePointerCommits();
-
-    // Scheduler background work can still be using storage, for example the
-    // lifecycle-guarded boot-time persistent-state listing. Let that finish
-    // before tearing down storage sessions.
-    await this.scheduler.idle();
-
-    // Clear module registry
-    this.moduleRegistry.clear();
-
-    // Cancel all storage operations
-    if (closeStorage) await this.storageManager.close();
-
-    // Wait for any pending operations
-    await this.scheduler.idle();
-
-    // Clean up scheduler timers
-    this.scheduler.dispose();
-
-    // Pop the default frame
-    if (this.defaultFrame) {
-      popFrame(this.defaultFrame);
-      this.defaultFrame = undefined;
-    }
-
-    // Dispose the Engine (clears compiler/runtime state and the console hook)
-    this.harness.dispose();
-
-    // Reset experimental config to defaults.
-    resetModernCellRepConfig();
-    resetPersistentSchedulerStateConfig();
-    resetCommitPreconditionsConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
@@ -2129,7 +2146,7 @@ export class Runtime {
    * NOTE(#1): The derivation is intentionally name-based for now — `createSession`
    * derives the space key from the name alone (the identity is ignored on the
    * `spaceName` path), so equal names map to the same shared space across users.
-   * This is the deliberate "shared profile space" behaviour today; revisit once
+   * This is the deliberate "shared profile space" behavior today; revisit once
    * we can derive unique space DIDs from a string.
    */
   async resolveSpaceName(name: string): Promise<MemorySpace> {
@@ -2258,7 +2275,7 @@ export class Runtime {
   /**
    * The host that serves a space's space-bound work (LLM, fetch, blob).
    * A mapped space resolves to its host; everything else to the
-   * default `apiUrl`. The single compute-side analogue of the storage
+   * default `apiUrl`. The single compute-side analog of the storage
    * layer's per-space address resolver.
    */
   hostForSpace(space: MemorySpace): URL {

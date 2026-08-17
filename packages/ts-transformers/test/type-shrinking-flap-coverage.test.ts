@@ -184,7 +184,7 @@ Deno.test("applyShrinkAndWrap drops a deep read into an unknown-typed property u
 
   const result = applyShrinkAndWrap(
     createParamSummary({
-      // Deep path into `blob` (unknown): the child cannot be materialised, so
+      // Deep path into `blob` (unknown): the child cannot be materialized, so
       // `blob` is dropped instead of widened to the full unknown shape.
       readPaths: [["blob", "inner"], ["kept"]],
     }),

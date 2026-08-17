@@ -1271,6 +1271,68 @@ Deno.test("interactive startup blockers use the chat protocol", async () => {
   assertEquals(response.error.code, "provider-auth-required");
 });
 
+Deno.test("only an unreachable provider marks a startup blocker retryable", async () => {
+  // `retryable` reads as `Retry-After` does: waiting alone can clear this one.
+  // A blocker that needs a provider connected, configured, or matched does not
+  // become true because an operator could go and do that.
+  const blockers: Array<{
+    error: HarnessControlError;
+    code: string;
+    retryable: boolean | undefined;
+  }> = [
+    {
+      error: new HarnessControlError("provider-unavailable", "codex is down"),
+      code: "provider-unavailable",
+      retryable: true,
+    },
+    {
+      error: new HarnessControlError("provider-auth-required", "connect codex"),
+      code: "provider-auth-required",
+      retryable: undefined,
+    },
+    {
+      error: new HarnessControlError(
+        "provider-configuration-required",
+        "configure a provider",
+      ),
+      code: "provider-configuration-required",
+      retryable: undefined,
+    },
+    {
+      error: new HarnessControlError("provider-mismatch", "resume mismatch"),
+      code: "provider-mismatch",
+      retryable: undefined,
+    },
+    {
+      error: new Error("something broke") as HarnessControlError,
+      code: "internal_error",
+      retryable: undefined,
+    },
+  ];
+
+  for (const blocker of blockers) {
+    const request = JSON.stringify({
+      type: "cf-harness.chat.request",
+      protocolVersion: 1,
+      requestId: "request-1",
+      method: "status",
+      params: {},
+    });
+    let output = "";
+    await runLoomLocalInteractiveFailureStdio(blocker.error, {
+      input: new Response(`${request}\n`).body!,
+      output: new WritableStream({
+        write(chunk: Uint8Array) {
+          output += new TextDecoder().decode(chunk);
+        },
+      }),
+    });
+    const error = JSON.parse(output).error;
+    assertEquals(error.code, blocker.code);
+    assertEquals(error.retryable, blocker.retryable, blocker.code);
+  }
+});
+
 Deno.test("local Loom interactive entrypoint returns missing config on stdout protocol", async () => {
   const home = await Deno.makeTempDir();
   const request = JSON.stringify({

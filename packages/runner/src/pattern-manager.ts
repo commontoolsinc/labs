@@ -1,7 +1,7 @@
-import { getLogger } from "@commonfabric/utils/logger";
 import type { Source } from "@commonfabric/js-compiler";
-import { compilerStack } from "./harness/deferred-compiler-stack.ts";
-import { Module, Pattern } from "./builder/types.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import {
   brandTrustedPattern,
   getArtifactEntryRef,
@@ -13,25 +13,9 @@ import {
   setPatternProgram,
   setPatternSourcePath,
 } from "./builder/pattern-metadata.ts";
-import type { MemorySpace, Runtime } from "./runtime.ts";
-import type { PatternCoverageCollector } from "./pattern-coverage.ts";
-import { createRef } from "./create-ref.ts";
-import type {
-  CacheableModule,
-  CompiledModuleArtifact,
-  EvaluateResult,
-  Exports,
-  TypeScriptHarnessProcessOptions,
-} from "./harness/types.ts";
-import { RuntimeProgram } from "./harness/types.ts";
-import {
-  type CachedCompiledModule,
-  SOURCE_ROOT_SPECIFIER,
-} from "./sandbox/module-record-compiler.ts";
-import type {
-  CommitError,
-  IExtendedStorageTransaction,
-} from "./storage/interface.ts";
+import { Module, Pattern } from "./builder/types.ts";
+import { readStoredCfcMetadata } from "./cfc/metadata.ts";
+import type { CfcMetadata } from "./cfc/types.ts";
 import {
   buildSourceDocs,
   COMPILED_INTEGRITY_ATOM,
@@ -50,16 +34,33 @@ import {
   writeSourceAndCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
-import { readStoredCfcMetadata } from "./cfc/metadata.ts";
-import type { CfcMetadata } from "./cfc/types.ts";
+import { createRef } from "./create-ref.ts";
+import { interleaveCompileYield } from "./harness/compile-interleave.ts";
+import { compilerStack } from "./harness/deferred-compiler-stack.ts";
+import type {
+  CacheableModule,
+  CompiledModuleArtifact,
+  EvaluateResult,
+  Exports,
+  TypeScriptHarnessProcessOptions,
+} from "./harness/types.ts";
+import { RuntimeProgram } from "./harness/types.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
+import type { MemorySpace, Runtime } from "./runtime.ts";
 import {
   isFabricImportSpecifier,
   parseFabricRef,
   pinnedIdentity,
 } from "./sandbox/fabric-import-specifier.ts";
+import {
+  type CachedCompiledModule,
+  SOURCE_ROOT_SPECIFIER,
+} from "./sandbox/module-record-compiler.ts";
+import type {
+  CommitError,
+  IExtendedStorageTransaction,
+} from "./storage/interface.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { interleaveCompileYield } from "./harness/compile-interleave.ts";
 
 const logger = getLogger("pattern-manager");
 

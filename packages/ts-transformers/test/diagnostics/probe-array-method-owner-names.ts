@@ -40,6 +40,7 @@
  *
  * Diagnostic; not a test. Safe to delete once the owner-set question closes.
  */
+
 import { join } from "@std/path";
 import { walk } from "@std/fs";
 

@@ -1,6 +1,18 @@
-import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  isFabricPrimitiveSchemaType,
+  type JSONSchemaObj,
+  type SchemaPathSelector,
+} from "@commonfabric/api";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   hashSchema,
   internSchema,
@@ -8,21 +20,19 @@ import {
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import {
-  FABRIC_SPECIAL_OBJECT_BRAND,
-  isFabricPrimitiveSchemaType,
-  type JSONSchemaObj,
-  type SchemaPathSelector,
-} from "@commonfabric/api";
+  DEFAULT_SELECTOR,
+  internPathSelector,
+  internSchemaPairAsKey,
+  REJECTING_SELECTOR,
+  schemaWithProperties,
+} from "@commonfabric/data-model/schema-utils";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricSpecialObject,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+
+import { getLogger } from "../../utils/src/logger.ts";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
 // but rollup has issues
 import {
@@ -32,25 +42,16 @@ import {
   isObjectOrArray,
   isString,
 } from "../../utils/src/types.ts";
-import { getLogger } from "../../utils/src/logger.ts";
-import { ContextualFlowControl } from "./cfc.ts";
 import {
   collectExternalSchemaRefHashes,
   containsExternalSchemaRef,
 } from "./schema-decompose.ts";
 import {
-  isExternalClosureComplete,
+  externalResolutionMissCount,
   lookupSchemaDocument,
   onSchemaRegistryClear,
   registerSchemaDocument,
 } from "./schema-registry.ts";
-import {
-  DEFAULT_SELECTOR,
-  internPathSelector,
-  internSchemaPairAsKey,
-  REJECTING_SELECTOR,
-  schemaWithProperties,
-} from "@commonfabric/data-model/schema-utils";
 import type {
   CellScope,
   JSONObject,
@@ -58,13 +59,24 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import type { LastNode } from "./link-resolution.ts";
+import {
+  type IMemorySpaceValueAddress,
+  isSigilLink,
+  isWriteRedirectLink,
+  type ValuePath,
+} from "./link-types.ts";
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
+import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
 import type {
   Activity,
   CommitError,
+  IAttestation,
   IExtendedStorageTransaction,
+  IMemoryAddress,
   IMemorySpaceAddress,
   InactiveTransactionError,
   IReadOptions,
@@ -81,16 +93,6 @@ import {
   ignoreReadForScheduling,
 } from "./storage/reactivity-log.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
-import {
-  type IMemorySpaceValueAddress,
-  isSigilLink,
-  isWriteRedirectLink,
-  type ValuePath,
-} from "./link-types.ts";
-import type { LastNode } from "./link-resolution.ts";
-import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
-import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
 import {
   recordTraverseInvocation,
   wrapTxForTraverseCapture,
@@ -347,11 +349,12 @@ function schemaAtPathCanonical(
   // Marker-bearing calls return freshly-spread tops over the (deep-frozen,
   // since `schema` is interned) children. Default calls may already be the
   // core method's canonical result; interning is idempotent in that case.
+  const missesBefore = externalResolutionMissCount();
   const result = internSchema(compute());
-  // Populate only when every external ref's document closure is at hand: a
+  // Populate only when no `cid:` resolution missed while computing: a
   // derivation computed over a hole must not outlive the documents'
   // arrival.
-  if (!isExternalClosureComplete(schema)) return result;
+  if (externalResolutionMissCount() !== missesBefore) return result;
   if (byPath.size >= INTERN_CACHE_MAX) byPath.clear();
   byPath.set(key, result);
   return result;
@@ -688,10 +691,11 @@ export function traverseDiagnosticsEnabled(): boolean {
  * and re-walks. Only memoizes memoizable (interned or deep-frozen, hence
  * identity-stable) inputs; the un-memoized fallback is byte-identical to
  * the direct call.
- * `null` records a failed resolution (`undefined` result) — except when the
- * input contains an external `cid:` ref, whose failure is deliberately not
- * memoized: the referenced schema document can arrive after the first
- * failed lookup, and a pinned `null` would outlive the arrival.
+ * `null` records a failed resolution (`undefined` result) — except when a
+ * `cid:` resolution missed during the walk (the miss counter moved), which
+ * is deliberately not memoized: the referenced schema document can arrive
+ * after the first failed lookup, and a pinned `null` would outlive the
+ * arrival.
  */
 let _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
 // Successful resolutions embed registry content; the registry clear (last
@@ -708,11 +712,12 @@ export function resolveSchemaRefsCanonical(
   }
   let cached = _resolvedRefCache.get(schema);
   if (cached === undefined) {
+    const missesBefore = externalResolutionMissCount();
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
-    if (resolved === undefined && containsExternalSchemaRef(schema)) {
-      // The failure may be an unregistered schema document, which can arrive
-      // later; memoizing it would pin the miss past the arrival.
-      return undefined;
+    if (externalResolutionMissCount() !== missesBefore) {
+      // A `cid:` resolution missed during this walk; the document can
+      // arrive later, so nothing from this run may be pinned.
+      return resolved;
     }
     // `null` (not `undefined`) is the cache's "resolved to nothing" sentinel,
     // so it stays distinct from "absent" on `Map.get()`.
@@ -856,6 +861,31 @@ export class MapSet<K, V> {
     }
   }
 
+  protected isHashing(): boolean {
+    return this.hashMap !== undefined;
+  }
+
+  /**
+   * Structurally copies `other`'s entries into this (empty) map: per-key
+   * container copies, no re-hashing and no dedup checks. Both maps must
+   * use the same hashing mode.
+   */
+  protected copyStateFrom(other: MapSet<K, V>): void {
+    if (this.hashMap !== undefined && other.hashMap !== undefined) {
+      for (const [key, values] of other.hashMap) {
+        this.hashMap.set(key, new Map(values));
+      }
+      return;
+    }
+    if (this.setMap !== undefined && other.setMap !== undefined) {
+      for (const [key, values] of other.setMap) {
+        this.setMap.set(key, new Set(values));
+      }
+      return;
+    }
+    throw new Error("MapSet structural copy requires matching hashing modes");
+  }
+
   /**
    * iterable
    */
@@ -947,6 +977,21 @@ export class MapSetStringToPathSelectors extends MapSet<
   public override delete(key: string) {
     super.delete(key);
     this.trueSchemaIndex.delete(key);
+  }
+
+  /**
+   * A structural copy: per-key container copies of the base map and the
+   * permissive index. Cloning through `add()` would re-hash every selector
+   * and re-derive the index; this keeps a full-state clone (`extend`
+   * staging) at plain container-copy cost.
+   */
+  clone(): MapSetStringToPathSelectors {
+    const cloned = new MapSetStringToPathSelectors(this.isHashing());
+    cloned.copyStateFrom(this);
+    for (const [key, values] of this.trueSchemaIndex) {
+      cloned.trueSchemaIndex.set(key, new Set(values));
+    }
+    return cloned;
   }
 }
 
@@ -2276,7 +2321,6 @@ function followPointer(
     address: target,
     value: valueEntry.value,
   };
-
   // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
   // then the provided path from the arguments.
   return getAtPath(tx, targetDoc, path, context, selector, lastNode);
@@ -2437,7 +2481,39 @@ function loadExternalSchemaDocs(
   context: TraversalContext,
 ): boolean {
   if (!containsExternalSchemaRef(schema)) return true;
-  const pending = [...collectExternalSchemaRefHashes(schema)];
+  loadSchemaDocClosure(
+    tx,
+    referrer,
+    collectExternalSchemaRefHashes(schema),
+    context,
+  );
+
+  // The verdict: every hash transitively reachable from the schema's own
+  // refs was collected in this traversal (this call or an earlier one — the
+  // per-context set accumulates).
+  const pendingCheck = [...collectExternalSchemaRefHashes(schema)];
+  const checked = new Set<string>();
+  while (pendingCheck.length > 0) {
+    const hash = pendingCheck.pop()!;
+    if (checked.has(hash)) continue;
+    checked.add(hash);
+    if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
+      return false;
+    }
+    const document = lookupSchemaDocument(hash);
+    if (document === undefined) return false;
+    pendingCheck.push(...collectExternalSchemaRefHashes(document));
+  }
+  return true;
+}
+
+function loadSchemaDocClosure(
+  tx: IExtendedStorageTransaction,
+  referrer: IMemorySpaceAddress,
+  initialHashes: ReadonlySet<string>,
+  context: TraversalContext,
+): void {
+  const pending = [...initialHashes];
   while (pending.length > 0) {
     const hash = pending.pop()!;
     const address = {
@@ -2493,24 +2569,6 @@ function loadExternalSchemaDocs(
       ]);
     }
   }
-
-  // The verdict: every hash transitively reachable from the schema's own
-  // refs was collected in this traversal (this call or an earlier one — the
-  // per-context set accumulates).
-  const pendingCheck = [...collectExternalSchemaRefHashes(schema)];
-  const checked = new Set<string>();
-  while (pendingCheck.length > 0) {
-    const hash = pendingCheck.pop()!;
-    if (checked.has(hash)) continue;
-    checked.add(hash);
-    if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
-      return false;
-    }
-    const document = lookupSchemaDocument(hash);
-    if (document === undefined) return false;
-    pendingCheck.push(...collectExternalSchemaRefHashes(document));
-  }
-  return true;
 }
 
 function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {

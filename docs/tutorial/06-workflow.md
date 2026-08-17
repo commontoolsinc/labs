@@ -122,6 +122,14 @@ deno task cf piece link <srcID>/items <dstID>/items    # wire two pieces
 deno task cf piece set-slug myslug <ID>                # pretty URL
 ```
 
+`--piece` takes an id (`fid1:abc...`), a slug, or the canonical fabric
+reference other commands print (`/of:fid1:...`). The canonical form can carry
+its space — `/@did:key:.../of:fid1:...` — and a reference that does needs no
+`-s` beside it: the embedded space supplies the target, and a `-s` that
+disagrees with it is refused. So an address copied off one command's output
+drives the next command unchanged, even from a shell configured for a
+different space.
+
 One subtlety: neither `piece set` nor `piece call` refreshes *computed*
 outputs. `set` writes the cell without running anything; `call` runs the
 handler (so the handler's own writes land and sync), but the scheduler is

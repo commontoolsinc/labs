@@ -109,6 +109,12 @@ class DurableTurnExistsError extends Error {
   }
 }
 
+/**
+ * The one chat error that waiting alone clears: the turn in flight ends on its
+ * own, and the identical request then succeeds. That is what `retryable`
+ * claims, in the sense HTTP's `Retry-After` gives it — not that a caller could
+ * do something about the failure, which is true of most of the errors here.
+ */
 const activeTurnError = (
   requestId: string,
   session: HarnessChatSessionStatus,
@@ -260,13 +266,19 @@ const loomLocalHostBindingsEqual = (
     actual.credentialOwner,
   ) && expected.harnessHomeIdentity === actual.harnessHomeIdentity;
 
+/**
+ * A lease reaches a turn on the request that starts it, or on the one that
+ * started the session; no request adds one to a session already running. So
+ * resending this turn unchanged fails the same way however long the caller
+ * waits, and it carries no `retryable` — the next attempt has to carry the
+ * lease, which makes it a different request.
+ */
 const browserAccessRequiredError = (
   requestId: string,
 ): HarnessChatErrorResponse =>
   createHarnessChatErrorResponse(requestId, {
     code: "browser_access_required",
     message: "Browser Access lease is required for browser profile turns.",
-    retryable: true,
   });
 
 const turnNotFoundError = (

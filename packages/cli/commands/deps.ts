@@ -1,16 +1,18 @@
-import { Command } from "@cliffy/command";
 import { dirname, join } from "@std/path";
+
+import { Command } from "@cliffy/command";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { loadPieces } from "../lib/piece.ts";
+
+import { cliText } from "../lib/cli-name.ts";
 import { collectLocalProgram } from "../lib/dev.ts";
-import { parseSpaceOptions } from "./piece.ts";
 import {
   pinProgramFabricImports,
   renderPinRewrite,
 } from "../lib/fabric-deps.ts";
-import { absPath } from "../lib/utils.ts";
+import { loadPieces } from "../lib/piece.ts";
 import { render } from "../lib/render.ts";
-import { cliText } from "../lib/cli-name.ts";
+import { absPath } from "../lib/utils.ts";
+import { parseSpaceOptions } from "./piece.ts";
 
 // Typed as Command<any> because cliffy's accumulated option generics don't
 // survive registration in main.ts (the same idiom as the check command).

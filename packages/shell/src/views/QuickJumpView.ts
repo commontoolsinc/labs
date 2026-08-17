@@ -1,11 +1,12 @@
+import type { DID } from "@commonfabric/identity";
+import { PageHandle } from "@commonfabric/runtime-client";
+import { Task } from "@lit/task";
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
-import { BaseView } from "./BaseView.ts";
-import { RuntimeInternals } from "../lib/runtime.ts";
-import type { DID } from "@commonfabric/identity";
-import { Task } from "@lit/task";
+
 import { navigate } from "../../shared/mod.ts";
-import { PageHandle } from "@commonfabric/runtime-client";
+import { RuntimeInternals } from "../lib/runtime.ts";
+import { BaseView } from "./BaseView.ts";
 
 type PieceItem = { id: string; name: string };
 

@@ -1,11 +1,12 @@
 // Inline scheduler idempotency check tests.
 
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+
 import {
   captureTransactionWrites,
   findDifferingWriteKeys,
   makeAddressKey,
 } from "../src/scheduler/diagnosis.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   afterEach,
   beforeEach,

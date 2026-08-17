@@ -18,7 +18,7 @@ import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./codec-interface/interface.ts";
-import { EmptyReconstructionContext } from "./codec-interface/EmptyReconstructionContext.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "./codec-interface/EmptyReconstructionContext.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodecEngine } from "./codec-json/JsonCodecEngine.ts";
@@ -68,22 +68,6 @@ export function newDefaultJsonCodecEngine(
 const jsonCodecEngine = newDefaultJsonCodecEngine();
 
 /**
- * Shared empty `ReconstructionContext` used when a JSON decode is requested
- * without a runtime context. Behaviorally identical to the bare empty
- * singleton (`shouldDeepFreeze` is `true`); only the `getCell()` throw
- * message is decode-framed, so an unexpected cell reference during a
- * context-less decode produces a message that names the situation. This
- * single instance covers both public entry points (`fabricFromJsonValue()` and
- * `plainObjectFromJson()`, the latter delegating to the former).
- */
-const JSON_DECODE_EMPTY_CONTEXT = Object.freeze(
-  new EmptyReconstructionContext(
-    true,
-    "no runtime context (JSON decode); a cell reference cannot be reconstructed.",
-  ),
-);
-
-/**
  * Encodes a fabric value to a JSON string in the standard `FabricValue`
  * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  */
@@ -123,16 +107,12 @@ export function plainObjectFromJson<T extends object = object>(
 
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
- * `context` is omitted, the shared decode-framed empty context
- * (`JSON_DECODE_EMPTY_CONTEXT`) is substituted, which throws if any
- * reconstruction is needed.
+ * `context` is omitted, {@link EMPTY_RECONSTRUCTION_CONTEXT} is substituted,
+ * which throws if any reconstruction is needed.
  */
 export function fabricFromJsonValue(
   json: string,
   context?: ReconstructionContext | undefined,
 ): FabricValue {
-  return jsonCodecEngine.decode(
-    json,
-    context ?? JSON_DECODE_EMPTY_CONTEXT,
-  );
+  return jsonCodecEngine.decode(json, context ?? EMPTY_RECONSTRUCTION_CONTEXT);
 }

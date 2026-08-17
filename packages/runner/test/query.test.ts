@@ -1,9 +1,25 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type { SchemaPathSelector } from "@commonfabric/api";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
-import { JSONObject, type JSONSchema } from "../src/index.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { Identity } from "@commonfabric/identity";
+import type {
+  MIME,
+  Revision,
+  State,
+  URI,
+} from "@commonfabric/memory/interface";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { JSONObject, type JSONSchema } from "../src/index.ts";
+import { Runtime } from "../src/runtime.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
 import {
   CompoundCycleTracker,
   createTraversalContext,
@@ -12,20 +28,6 @@ import {
   MapSetStringToPathSelectors,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import type { SchemaPathSelector } from "@commonfabric/api";
-import type {
-  MIME,
-  Revision,
-  State,
-  URI,
-} from "@commonfabric/memory/interface";
-import { Runtime } from "../src/runtime.ts";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Identity } from "@commonfabric/identity";
-import { StoreObjectManager } from "../src/storage/query.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

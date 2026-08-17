@@ -6,9 +6,10 @@
  * including in LLM context/prompts.
  */
 
-import type { JSONSchema } from "commonfabric";
-import { ContextualFlowControl } from "./cfc.ts";
 import { AsCellType } from "@commonfabric/api";
+import type { JSONSchema } from "commonfabric";
+
+import { ContextualFlowControl } from "./cfc.ts";
 
 export interface SchemaFormatOptions {
   /** Definitions map for resolving $ref references */

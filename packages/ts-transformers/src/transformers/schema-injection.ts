@@ -1,12 +1,5 @@
-import ts from "typescript";
-import {
-  cloneTypeNode,
-  createRegisteredTypeLiteral,
-  getDeclaredTypeNodeForBindingElement,
-  reportUnknownReactiveType,
-  shouldPreserveBindingDeclaredTypeNode,
-} from "../ast/type-building.ts";
 import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
+import ts from "typescript";
 
 import {
   classifyArrayMethodCall,
@@ -34,7 +27,13 @@ import {
   unwrapCellLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import {
+  cloneTypeNode,
+  createRegisteredTypeLiteral,
+  getDeclaredTypeNodeForBindingElement,
+  reportUnknownReactiveType,
+  shouldPreserveBindingDeclaredTypeNode,
+} from "../ast/type-building.ts";
 import {
   type CapabilityParamSummary,
   type FunctionCapabilitySummary,
@@ -45,6 +44,8 @@ import {
   type TypeRegistry,
 } from "../core/mod.ts";
 import { analyzeFunctionCapabilities } from "../policy/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
+import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
 import {
   applyShrinkAndWrap,
   type CapabilitySummaryApplicationMode,
@@ -53,7 +54,6 @@ import {
   preservedWrapperFor,
   printTypeNode,
 } from "./type-shrinking.ts";
-import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";

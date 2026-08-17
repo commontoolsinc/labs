@@ -184,7 +184,7 @@ issue. A failure before issuance also leaves the route provisional.
 
 Once a stateful operation is handed to the provisional host, the route becomes
 authoritative. This remains true when the client later reports an error because
-the host may have committed the operation before its acknowledgement was lost.
+the host may have committed the operation before its acknowledgment was lost.
 A hint naming another host is then a conflict. A hint matching the default host
 makes the route authoritative without reconnecting. After the first hint is
 accepted, a different hint remains a conflict. A later load hydrates the
@@ -767,7 +767,7 @@ The manager refuses to replace a provisional replica after its session accepts
 any stateful operation for issue. Stateful operations include ordinary and
 scheduler transactions, ACL setup transactions, and injected SQLite source
 registration. The route is fixed at issuance rather than successful
-acknowledgement because a reported error does not prove that the host rejected
+acknowledgment because a reported error does not prove that the host rejected
 the operation. A hint can still replace work that is waiting for a session or
 is rejected before the session accepts it. Route generations prevent
 invalidated work from starting a later mount or issuing a mutation after
@@ -791,10 +791,10 @@ replicated-host failover remain open design work.
 |---|---|---|
 | Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and the first accepted late hint becomes authoritative |
 | Keep an accepted late hint stable before opening | **Implemented** | `StorageManager.registerSpaceHost` accepts the first late hint and rejects a different hint before or after the space opens |
-| Replace a provisional default route after opening | **Implemented** | The first late hint invalidates an unseeded provider that opened through the default host before its session accepts a stateful operation. It cancels unfinished connection, initial or reconnect session signature creation, mount, and ACL work. Registered document reads, existing sync barriers, and overlapping read-only calls continue through the hinted host, including verified CFC schema documents discovered from the hinted data. Transactions based on the old replica are rejected as inconsistent at issue time, including when they write another space. Invalid scheduler observations do not reject or strand valid observations. A matching default-host hint confirms without reconnecting. Ordinary and scheduler transactions, ACL setup, and SQLite source registration fix the route when issued, even if acknowledgement later fails |
+| Replace a provisional default route after opening | **Implemented** | The first late hint invalidates an unseeded provider that opened through the default host before its session accepts a stateful operation. It cancels unfinished connection, initial or reconnect session signature creation, mount, and ACL work. Registered document reads, existing sync barriers, and overlapping read-only calls continue through the hinted host, including verified CFC schema documents discovered from the hinted data. Transactions based on the old replica are rejected as inconsistent at issue time, including when they write another space. Invalid scheduler observations do not reject or strand valid observations. A matching default-host hint confirms without reconnecting. Ordinary and scheduler transactions, ACL setup, and SQLite source registration fix the route when issued, even if acknowledgment later fails |
 | Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last origin-only HTTP or HTTPS route for each space, and registers those hints. It ignores credentials, paths, queries, fragments, malformed URLs, unsupported schemes, and entries whose `did` does not start with `did:`. Hydration can replace a provisional default route. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
 | Apply one origin-only grammar to every route | **Partial** | `normalizeSpaceHost` rejects credentials, a non-root path, a query, and a fragment. Seeds, live hints, and hydration use it. The shared fabric-authority helper defaults to HTTPS and derives HTTP only for loopback when the current runtime route explicitly uses HTTP. Applying the grammar to the default host, future share-link receipt, and future effective-host results remains required |
-| Append an accepted route with commit acknowledgement | **Runtime persistence API required** | Generic `CellHandle` writes either overwrite the table or return before a remote append failure can reach the caller. There is no dedicated operation that synchronizes and applies the table's existing candidate, registers the supplied route, transactionally appends it, inspects the commit result, and reports live conflict separately from persistence failure |
+| Append an accepted route with commit acknowledgment | **Runtime persistence API required** | Generic `CellHandle` writes either overwrite the table or return before a remote append failure can reach the caller. There is no dedicated operation that synchronizes and applies the table's existing candidate, registers the supplied route, transactionally appends it, inspects the commit result, and reports live conflict separately from persistence failure |
 | Accept a host-qualified piece origin | **Origin integration required** | No source lifecycle operation persists and registers a `cf://` hint before resolving and committing the origin |
 | Receive a host-qualified fabric link in the shell | **Link-receipt integration required** | **Copy link** still copies the frontend URL. No shell path emits or receives the `spaceHost` share-link form, asks the runtime for the effective per-space host, or waits for acknowledged route persistence before navigation |
 | Replace an explicit route after host failure or space movement | **Reliability design required** | There is no authenticated route-change or failover protocol after a seed or late hint becomes authoritative |
@@ -1100,7 +1100,7 @@ The implementation evidence for this table is concentrated in:
   Invalidated transactions are rejected and recompute from the hinted replica.
   Once an ordinary or scheduler transaction, ACL setup transaction, or SQLite
   source registration is issued, the route remains fixed even if its
-  acknowledgement fails. The first accepted late hint remains stable,
+  acknowledgment fails. The first accepted late hint remains stable,
   including against a later table update.
   IPC callers must check the registration result and stop before mounting on a
   conflict. Historical fabric origin resolution can register a matching live

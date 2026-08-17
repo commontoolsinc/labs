@@ -20,7 +20,7 @@ subsumes another. Their current homes and defaults:
 | `cfcFlowLabels` | `off` · `observe` · `persist` | `off` | whether the per-tx **flow join is derived and persisted** as `derived` label components (S16) |
 | `cfcWriteFloor` | `off` · `observe` · `enforce` | `off` | whether the **write-side `requiredIntegrity` floor** (SC-18, Epic D3) is checked against the written value's integrity |
 | `cfcTriggerReadGating` | `false` · `true` | `false` | whether the **§8.9.2 trigger reads** — the addresses whose invalidating writes scheduled this run — join the enforcement consumed sets: the sink-request ceiling and the `requiredIntegrity` input gate (SC-3 / H5; [runtime.ts](../../packages/runner/src/runtime.ts) `cfcTriggerReadGating`, [types.ts](../../packages/runner/src/cfc/types.ts) `CfcTriggerReadGating`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `triggerReadSources`) |
-| `cfcPolicyEvaluation` | `off` · `observe` · `enforce` | `off` | whether the **exchange-rule evaluator** (spec §4.4.5, Epic B5) rewrites gated labels to a fuelled fixpoint before the sink-request ceiling and `requiredIntegrity` input gates fit them. `observe` evaluates + diagnoses divergence but decides on the *un-rewritten* label; `enforce` decides on the *rewritten* label and **fails closed on fuel exhaustion or policy-lookup failure**. ([runtime.ts](../../packages/runner/src/runtime.ts) `cfcPolicyEvaluation` + `cfcPolicyRecords`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `evaluateGatedConfidentiality`) |
+| `cfcPolicyEvaluation` | `off` · `observe` · `enforce` | `off` | whether the **exchange-rule evaluator** (spec §4.4.5, Epic B5) rewrites gated labels to a fueled fixpoint before the sink-request ceiling and `requiredIntegrity` input gates fit them. `observe` evaluates + diagnoses divergence but decides on the *un-rewritten* label; `enforce` decides on the *rewritten* label and **fails closed on fuel exhaustion or policy-lookup failure**. ([runtime.ts](../../packages/runner/src/runtime.ts) `cfcPolicyEvaluation` + `cfcPolicyRecords`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `evaluateGatedConfidentiality`) |
 
 They are orthogonal because they gate different things: the **enforcement mode**
 decides what happens to a recorded reason (ignore / diagnose / reject); the
@@ -87,7 +87,7 @@ adds:
    `enforce-strict` (H4) and the render ceiling that consumes derived labels
    (H3a/H3b) must not precede H2.
 
-3. **`cfcWriteFloor`: `observe` before `enforce`** (the D3 analogue of #1). The
+3. **`cfcWriteFloor`: `observe` before `enforce`** (the D3 analog of #1). The
    floor is a new reason-source; observe its miss volume on real schemas before
    it rejects. Independent of the flow dial — the floor credits the flow meet
    only when `cfcFlowLabels: persist` (else it credits nothing, fail-closed), so

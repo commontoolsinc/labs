@@ -5,8 +5,8 @@ import {
   type JSONSchema,
   type JSONValue,
 } from "@commonfabric/api";
-import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import {
   cloneIfNecessary,
   type FabricPlainObject,
@@ -15,17 +15,24 @@ import {
   isFabricPlainObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isSubschema } from "../schema-walk.ts";
 import {
   hasOwnEnumerableDataProperty,
   isCellKind,
   isSchemaScope,
 } from "../scope.ts";
-import { isSubschema } from "../schema-walk.ts";
+import type { CfcConfClause } from "./clause.ts";
+import { clauseAlternatives, isOrClause } from "./clause.ts";
+import {
+  DEFAULT_EXCHANGE_FUEL,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
+import { buildCfcPolicySnapshot } from "./policy.ts";
 import {
   cfcSchemaChildRoot,
   isEmbeddedCfcSchemaRef,
@@ -33,12 +40,6 @@ import {
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
 } from "./schema-refs.ts";
-import {
-  DEFAULT_EXCHANGE_FUEL,
-  evaluateExchangeRules,
-} from "./exchange-eval.ts";
-import { buildCfcPolicySnapshot } from "./policy.ts";
-import { clauseAlternatives, isOrClause } from "./clause.ts";
 import {
   MATERIAL_RISK_DISCHARGE_KINDS,
   MATERIAL_RISK_DISCHARGE_POLICY,
@@ -254,6 +255,122 @@ export const cfcObjectSchemaIsClosed = (
   schemaDeclaresObjectShape(schema) &&
   schema.additionalProperties !== true &&
   typeof schema.additionalProperties !== "object";
+
+/**
+ * The property surface an object schema's `anyOf`/`oneOf`/`allOf` branches
+ * contribute to the node carrying them: the property names those branches
+ * declare, and whether any of them leaves the object open.
+ *
+ * A discriminated union is normally written as a bare node — `{type: "object",
+ * oneOf: [...]}` — whose own `properties` is empty because every property
+ * belongs to a branch. Judging that node's closedness on its own `properties`
+ * alone makes it a closed object with no permitted keys, so every value fails
+ * on its first key. The branches are where the shape lives, so they are what
+ * decides.
+ *
+ * This grants nothing a branch would refuse: a branch is validated against the
+ * same value in its own right, and rejects any key it does not model.
+ *
+ * The walk is an explicit worklist rather than a recursion, so a chain of
+ * combinators costs heap instead of call stack: `A` branches to `B` branches
+ * to `C` for as long as an author (or a generator) cares to nest, and depth is
+ * no longer what decides whether this returns an answer or a stack overflow.
+ *
+ * Two guards keep it finite, and each answers a different question:
+ *
+ * - `activeRefs` is PATH-scoped: a `$ref` goes in when the walk descends
+ *   through it and comes out when the walk leaves, so the set holds exactly
+ *   the chain from the root to wherever the walk stands. That is what makes a
+ *   self-recursive union — `$defs.Node.anyOf = [leaf, {$ref: "#/$defs/Node"}]`
+ *   — terminate. Scoping it to the path rather than to the whole walk is
+ *   load-bearing: two SIBLING branches may name one `$ref` while carrying
+ *   different constraints of their own, and a walk-wide guard would skip the
+ *   second, losing the property names it declares and treating keys it models
+ *   as unmodeled. Refs are tracked by string because a ref site carrying
+ *   siblings resolves to a fresh object every time, so identity alone would
+ *   not close such a loop.
+ * - `visited` is walk-wide, and holds the RESOLVED branch objects already
+ *   descended into. One object's subtree is the same subtree whichever path
+ *   arrives at it, so descending once is enough — which is what keeps a
+ *   diamond of definitions from re-walking its shared tail once per path, and
+ *   what cuts a branch array that holds its own node. Nothing is lost to it:
+ *   a ref site with its own siblings resolves to its own object, so it is
+ *   never confused with another site naming the same definition.
+ *
+ * A branch a guard cuts contributes nothing further: no property names, and no
+ * `open`. Contributing nothing is the fail-closed answer, because `open` is
+ * the permissive result — it is what makes the caller skip its
+ * additional-property check — so a cycle leaves the surface closed and an
+ * unmodeled key is still refused. A cut branch's own property names are
+ * collected before the cut, and every branch merges into the one set the
+ * caller reads.
+ *
+ * A branch that leaves the object open contributes its names too, and is
+ * descended into like any other. Openness and the name set are separate
+ * answers: the validator reads `known` only where nothing is open, while the
+ * opaque-link sanitizer reads it whether or not anything is open — an
+ * unmodeled key seals there even under an open schema. One walk therefore has
+ * to answer both, or the two disagree about what the schema declares, and that
+ * disagreement is what decides whether a value seals or is released.
+ */
+export const cfcCombinatorObjectSurface = (
+  schema: Record<string, unknown>,
+  schemaRoot: JSONSchema,
+): { known: Set<string>; open: boolean } => {
+  const known = new Set<string>();
+  let open = false;
+  const activeRefs = new Set<string>();
+  const visited = new Set<object>([schema]);
+
+  type SurfaceStep =
+    | { kind: "branch"; raw: unknown }
+    | { kind: "leave"; ref: string };
+
+  const stack: SurfaceStep[] = [];
+  const pushBranches = (node: Record<string, unknown>): void => {
+    for (const keyword of ["anyOf", "oneOf", "allOf"] as const) {
+      const branches = node[keyword];
+      if (!Array.isArray(branches)) continue;
+      for (const raw of branches) stack.push({ kind: "branch", raw });
+    }
+  };
+  pushBranches(schema);
+
+  while (stack.length > 0) {
+    const step = stack.pop()!;
+    if (step.kind === "leave") {
+      activeRefs.delete(step.ref);
+      continue;
+    }
+    const raw = step.raw;
+    const branchRef = isObjectOrArray(raw) && typeof raw.$ref === "string"
+      ? raw.$ref
+      : undefined;
+    if (branchRef !== undefined && activeRefs.has(branchRef)) continue;
+    const branch = branchRef !== undefined && isObjectOrArray(raw)
+      ? resolveCfcSchemaRefs(raw, schemaRoot)
+      : raw;
+    if (branch === false) continue;
+    if (!isObjectNotArray(branch)) {
+      open = true;
+      continue;
+    }
+    if (!cfcObjectSchemaIsClosed(branch)) {
+      open = true;
+    }
+    for (const key of Object.keys(branch.properties ?? {})) {
+      known.add(key);
+    }
+    if (visited.has(branch)) continue;
+    visited.add(branch);
+    if (branchRef !== undefined) {
+      activeRefs.add(branchRef);
+      stack.push({ kind: "leave", ref: branchRef });
+    }
+    pushBranches(branch);
+  }
+  return { known, open };
+};
 
 export const resolveSchemaForValidation = (
   schema: JSONSchema,
@@ -1123,7 +1240,44 @@ interface SchemaValidationOptions {
     fullSchema: JSONSchema,
   ) => boolean;
   optionalUndefinedIsAbsent?: boolean;
+  /**
+   * Property names an object may carry without the schema modelling them —
+   * the reserved keys of whatever produced the value, whose NAMES are fixed by
+   * a framework rather than chosen by the value's author.
+   *
+   * They are excused from the additional-property rules ONLY. A name in this
+   * set that the schema DOES model is measured against what the schema says
+   * about it, exactly as it would be otherwise: excusing a key from the
+   * unmodeled-key policy is not a licence to skip its constraints.
+   *
+   * The exemption reaches the ROOT value of one validation and no further —
+   * see {@link nestedValueValidationOptions}.
+   */
+  reservedAdditionalProperties?: ReadonlySet<string>;
 }
+
+/**
+ * `options` as they apply to a value nested INSIDE the value being measured.
+ *
+ * A reserved name is reserved because the framework that produced THIS value
+ * fixed its spelling — a pattern result carries `$NAME` and `$UI` at its top
+ * level whatever the caller's schema says. Nothing fixes the spelling of a key
+ * one level down: that key was chosen by whoever wrote the data there, and its
+ * NAME may itself be data. So the exemption stops at the root, and a nested
+ * object carrying an unmodeled `$NAME` is simply an object with an unmodeled
+ * key, answered by the unmodeled-key rules like any other.
+ *
+ * Only a recursion that changes the VALUE takes this. A combinator branch, a
+ * resolved `$ref`, `not`/`if`/`then`/`else` and `dependentSchemas` all measure
+ * the SAME value against another schema, so they keep the options they were
+ * given — the root is still the root however many schemas describe it.
+ */
+const nestedValueValidationOptions = (
+  options: SchemaValidationOptions,
+): SchemaValidationOptions =>
+  options.reservedAdditionalProperties === undefined
+    ? options
+    : { ...options, reservedAdditionalProperties: undefined };
 
 export interface SchemaValueValidationOptions {
   /**
@@ -1163,6 +1317,8 @@ export interface SchemaValueValidationOptions {
    */
   optionalUndefinedIsAbsent?: boolean;
 }
+
+const EMPTY_RESERVED: ReadonlySet<string> = new Set<string>();
 
 const SANITIZATION_VALIDATION: SchemaValidationOptions = {
   strictConstraints: false,
@@ -1495,6 +1651,33 @@ export const validateAgainstSchema = (
     createSchemaValidationContext(),
   )?.message;
 
+/**
+ * `validateAgainstSchema()` with a set of reserved property names excused from
+ * the unmodeled-key rules, which is the question the structured-result
+ * sanitizer asks of every value it measures.
+ *
+ * A reserved name is one whose SPELLING belongs to the framework that produced
+ * the value rather than to whoever described it — a pattern result always
+ * carries `$NAME` and `$UI`, whatever the caller's schema says. Excusing them
+ * from the unmodeled-key rules is what keeps a schema describing only the
+ * computed fields from failing on the framework's own. It excuses nothing
+ * else: a reserved name the schema DOES model is measured against what the
+ * schema says about it.
+ */
+export const validateAgainstSchemaForSanitization = (
+  schema: JSONSchema,
+  value: unknown,
+  fullSchema: JSONSchema = schema,
+  reservedAdditionalProperties: ReadonlySet<string> = EMPTY_RESERVED,
+): string | undefined =>
+  validateAgainstSchemaInternal(
+    schema,
+    value,
+    fullSchema,
+    { ...SANITIZATION_VALIDATION, reservedAdditionalProperties },
+    createSchemaValidationContext(),
+  )?.message;
+
 const validateAgainstSchemaInternal = (
   schema: JSONSchema,
   value: unknown,
@@ -1538,6 +1721,7 @@ const validateAgainstSchemaInternal = (
     if (options.acceptOpaqueValue?.(value, schema, schemaRoot)) {
       return undefined;
     }
+    const nestedOptions = nestedValueValidationOptions(options);
 
     if (Array.isArray(schema.allOf)) {
       // `optionalUndefinedIsAbsent` is dropped for the branches. It decides
@@ -1701,25 +1885,39 @@ const validateAgainstSchemaInternal = (
             child,
             value[key],
             schemaRoot,
-            options,
+            nestedOptions,
             context,
           );
           if (failure !== undefined) return atValidationPath(key, failure);
         }
       }
+      // Reserved names are excused from the unmodeled-key rules below; a
+      // reserved name the schema models was already measured against it above.
+      const reserved = options.reservedAdditionalProperties ?? EMPTY_RESERVED;
+      const explicitlyClosed = schema.additionalProperties === false;
       const closesAdditionalProperties = options
           .implicitAdditionalPropertiesOpen
-        ? schema.additionalProperties === false
+        ? explicitlyClosed
         : cfcObjectSchemaIsClosed(schema);
-      if (closesAdditionalProperties) {
-        const known = new Set(Object.keys(schema.properties ?? {}));
+      // A node that closes only by the implicit default defers to the shape
+      // its combinator branches declare; one that says `additionalProperties:
+      // false` in so many words is taken at its word.
+      const branchSurface = explicitlyClosed
+        ? { known: new Set<string>(), open: false }
+        : cfcCombinatorObjectSurface(schema, schemaRoot);
+      if (closesAdditionalProperties && !branchSurface.open) {
+        const known = new Set([
+          ...Object.keys(schema.properties ?? {}),
+          ...branchSurface.known,
+        ]);
         const patterns = options.strictConstraints
           ? Object.keys(schema.patternProperties ?? {}).map((pattern) =>
             new RegExp(pattern)
           )
           : [];
         const extra = Object.keys(value).find((key) =>
-          !known.has(key) && !patterns.some((pattern) => pattern.test(key))
+          !known.has(key) && !reserved.has(key) &&
+          !patterns.some((pattern) => pattern.test(key))
         );
         if (extra !== undefined) {
           return mismatch(`additional property ${extra}`);
@@ -1733,13 +1931,14 @@ const validateAgainstSchemaInternal = (
           : [];
         for (const key of Object.keys(value)) {
           if (
-            !known.has(key) && !patterns.some((pattern) => pattern.test(key))
+            !known.has(key) && !reserved.has(key) &&
+            !patterns.some((pattern) => pattern.test(key))
           ) {
             const failure = validateAgainstSchemaInternal(
               schema.additionalProperties,
               value[key],
               schemaRoot,
-              options,
+              nestedOptions,
               context,
             );
             if (failure !== undefined) return atValidationPath(key, failure);
@@ -1758,7 +1957,7 @@ const validateAgainstSchemaInternal = (
           schema.items,
           value[index],
           schemaRoot,
-          options,
+          nestedOptions,
           context,
         );
         if (failure !== undefined) return atValidationPath(index, failure);
@@ -1780,6 +1979,7 @@ function validateStrictSchemaConstraints(
 ): SchemaValidationFailure | undefined {
   const definitionIssue = strictConstraintDefinitionIssue(schema);
   if (definitionIssue !== undefined) return indeterminate(definitionIssue);
+  const nestedOptions = nestedValueValidationOptions(options);
 
   if (schema.not !== undefined) {
     const failure = validateAgainstSchemaInternal(
@@ -1898,7 +2098,7 @@ function validateStrictSchemaConstraints(
         schema.prefixItems![index],
         value[index],
         fullSchema,
-        options,
+        nestedOptions,
         context,
       );
       if (failure !== undefined) return atValidationPath(index, failure);
@@ -1911,7 +2111,7 @@ function validateStrictSchemaConstraints(
           schema.items,
           value[index],
           fullSchema,
-          options,
+          nestedOptions,
           context,
         );
         if (failure !== undefined) return atValidationPath(index, failure);
@@ -1927,7 +2127,7 @@ function validateStrictSchemaConstraints(
           schema.contains,
           value[index],
           fullSchema,
-          options,
+          nestedOptions,
           context,
         );
         if (failure === undefined) matches++;
@@ -2008,7 +2208,7 @@ function validateStrictSchemaConstraints(
           schema.propertyNames,
           key,
           fullSchema,
-          options,
+          nestedOptions,
           context,
         );
         if (failure !== undefined) return atValidationPath(key, failure);
@@ -2027,7 +2227,7 @@ function validateStrictSchemaConstraints(
             childSchema,
             child,
             fullSchema,
-            options,
+            nestedOptions,
             context,
           );
           if (failure !== undefined) return atValidationPath(key, failure);

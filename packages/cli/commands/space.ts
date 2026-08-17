@@ -19,6 +19,7 @@
 import { Command, ValidationError } from "@cliffy/command";
 import {
   clonePaths,
+  contentFingerprint,
   createClone,
   openSpace,
   readManifest,
@@ -27,7 +28,7 @@ import {
   verifyClone,
   type VerifyResult,
 } from "@commonfabric/state-inspector";
-import { contentFingerprint } from "@commonfabric/state-inspector";
+
 import { hasJsonArgument } from "../lib/json-output.ts";
 
 function out(json: boolean, data: unknown, render: () => void): void {
@@ -68,7 +69,7 @@ function fromFileUrl(url: string): string {
  * Reject a snapshot URL that would put a whole space on the wire in the clear.
  *
  * A snapshot is the entire contents of a space — the same confidentiality
- * judgement that keeps the dump endpoint hard-off in production — so plaintext
+ * judgment that keeps the dump endpoint hard-off in production — so plaintext
  * transport is refused rather than merely discouraged in the help text.
  * Loopback is the exception: it never leaves the machine, and the tests serve
  * fixtures over it.

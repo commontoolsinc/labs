@@ -7,6 +7,7 @@
  * When modifying these Zod schemas, run the alignment tests to check for drift:
  *   deno test --allow-all packages/runner/test/llm-schema-alignment.test.ts
  */
+
 import { createRoute } from "@hono/zod-openapi";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { jsonContent } from "stoker/openapi/helpers";
@@ -54,7 +55,7 @@ const failureResponses = {
   ),
   [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
     ErrorSchema,
-    "This service is misconfigured, or failed for a reason it does not recognise.",
+    "This service is misconfigured, or failed for a reason it does not recognize.",
   ),
   [HttpStatusCodes.BAD_GATEWAY]: jsonContent(
     ErrorSchema,

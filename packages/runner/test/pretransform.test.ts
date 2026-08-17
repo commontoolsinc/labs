@@ -4,15 +4,16 @@ import {
   assertNotMatch,
   assertThrows,
 } from "@std/assert";
+
+import { injectCfHelpers } from "@commonfabric/ts-transformers";
+
+import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+import { helperInjectionLineOffset } from "../src/harness/engine.ts";
 import {
   preserveLineCount,
   transformInjectHelperModule,
 } from "../src/harness/pretransform.ts";
-import { helperInjectionLineOffset } from "../src/harness/engine.ts";
-import { injectCfHelpers } from "@commonfabric/ts-transformers";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-
-import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.

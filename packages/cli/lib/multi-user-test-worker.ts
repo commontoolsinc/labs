@@ -28,6 +28,12 @@
  */
 
 import {
+  createSession,
+  Identity,
+  type KeyPairRaw,
+} from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
   type Cell,
   type ConsoleHandler,
   ConsoleMethod,
@@ -41,25 +47,20 @@ import {
   TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { defer } from "@commonfabric/utils/defer";
+
+import { assertionOutcome } from "./assert-record.ts";
 import {
   flushDefaultModuleByteCache,
   getDefaultModuleByteCache,
 } from "./compile-byte-cache.ts";
-import { buildActionEvent } from "./trusted-test-event.ts";
 import {
   appendLoggerDeltaMessages,
   type LoggerErrorWarnSnapshot,
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
-import {
-  createSession,
-  Identity,
-  type KeyPairRaw,
-} from "@commonfabric/identity";
-import { defer } from "@commonfabric/utils/defer";
-import { assertionOutcome } from "./assert-record.ts";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 
 export interface WorkerRequest {
   id: number;
@@ -205,7 +206,13 @@ const stepPeekSchema = {
     settle: { type: "boolean" },
     label: { type: "string" },
     await: { type: "string" },
-    event: { type: "unknown" },
+    // The payload is what the step sends, so it is read as authored: an
+    // object arrives as an object, reaching the handler as a reference into
+    // this step rather than a snapshot of it. `type: "unknown"` marks a value
+    // the traversal must not descend into, which is right for the fields this
+    // schema only tests for presence and wrong here, where it drops an object
+    // payload to `undefined`.
+    event: true,
     trustedUi: {
       type: "object",
       properties: {
@@ -244,7 +251,12 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
   throw new Error(
     `Test step ${index} has none of ` +
       `action/assertion/render/settle/label/await ` +
-      `(keys: ${Object.keys(peek ?? {}).join(",") || "none"})`,
+      // The step's own keys, not the peek's: the peek schema has already
+      // dropped every key it does not declare, which is exactly the set an
+      // author needs named here.
+      `(keys: ${
+        Object.keys(stepCell.get() as object ?? {}).join(",") || "none"
+      })`,
   );
 }
 

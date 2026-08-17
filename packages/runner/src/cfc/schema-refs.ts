@@ -1,9 +1,12 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import { getLogger } from "@commonfabric/utils/logger";
-import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+
+import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 import {
   forEachSubschema,
   isSubschema,
@@ -17,20 +20,24 @@ import {
 // everywhere in this module. (`$defs` bodies stay dormant — reached through the
 // definition-scope logic, not this flag.)
 const ALL_SUBSCHEMAS: SchemaWalkOptions = { includeUnused: true };
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
-import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 import {
-  containsExternalSchemaRef,
+  embeddedSchemas,
+  isEmbeddedCfcSchemaRef,
+} from "../embedded-schemas.ts";
+import {
   type ExternalSchemaRef,
   isExternalSchemaRef,
   parseExternalSchemaRef,
 } from "../schema-decompose.ts";
 import {
+  externalResolutionMissCount,
   isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
+  noteExternalResolutionMiss,
   onSchemaRegistryClear,
 } from "../schema-registry.ts";
+
+export { isEmbeddedCfcSchemaRef };
 
 const logger = getLogger("cfc");
 
@@ -75,17 +82,9 @@ const resolvedRefCache = new WeakMap<
   Map<string, JSONSchema | undefined>
 >();
 
-const embeddedSchemas: Record<string, JSONSchema> = {
-  "https://commonfabric.org/schemas/vdom.json": rendererVDOMSchema,
-  "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
-};
-
 const isRootDefsSchemaPointer = (pathToDef: readonly string[]): boolean =>
   pathToDef.length === 3 && pathToDef[0] === "#" && pathToDef[1] === "$defs" &&
   pathToDef[2].length > 0;
-
-export const isEmbeddedCfcSchemaRef = (schemaRef: string): boolean =>
-  Object.hasOwn(embeddedSchemas, schemaRef);
 
 export const cfcSchemaToObject = (schema?: JSONSchema): JSONSchemaObj =>
   (schema === true || schema === undefined)
@@ -447,15 +446,17 @@ onSchemaRegistryClear(() => {
 
 /**
  * Resolve an external `cid:` ref through the schema-document registry.
- * Returns `undefined` on a miss — an unregistered document may still arrive,
- * which is exactly why callers must never memoize this failure (see
- * `containsExternalSchemaRef`).
+ * Returns `undefined` on a miss — an unregistered document may still
+ * arrive, which is exactly why the arrival-curable misses bump the
+ * external-resolution miss counter: derived caches memoize only across a
+ * derivation the counter did not move in.
  */
 const resolveExternalCfcSchemaRef = (
   parsed: ExternalSchemaRef,
 ): JSONSchema | undefined => {
   const document = lookupSchemaDocument(parsed.taggedHash);
   if (document === undefined) {
+    noteExternalResolutionMiss();
     logger.debug("cfc", () => [
       "Schema document not (yet) registered: ",
       parsed.taggedHash,
@@ -469,6 +470,7 @@ const resolveExternalCfcSchemaRef = (
   // would never invalidate them. Completeness is monotonic, so this gate
   // opens by itself once the closure lands.
   if (!isSchemaDocumentClosureComplete(parsed.taggedHash)) {
+    noteExternalResolutionMiss();
     logger.debug("cfc", () => [
       "Schema document closure not (yet) complete: ",
       parsed.taggedHash,
@@ -673,16 +675,13 @@ export const resolveCfcSchemaRefs = (
     // Intern the result so the cached instance is canonical and frozen —
     // downstream identity-keyed caches then hit, and sharing it across callers
     // is safe. Primitive and `undefined` results intern to themselves.
+    const missesBefore = externalResolutionMissCount();
     const raw = resolveCfcSchemaRefsUncached(schemaObj, fullSchema);
     const result = internSchema(raw);
-    if (
-      result === undefined &&
-      (containsExternalSchemaRef(schemaObj) ||
-        containsExternalSchemaRef(fullSchema))
-    ) {
-      // The failure may be an unregistered schema document; the document can
-      // arrive later, so this miss must not be pinned.
-      return undefined;
+    if (externalResolutionMissCount() !== missesBefore) {
+      // A `cid:` resolution missed during this walk; the document can
+      // arrive later, so nothing from this run may be pinned.
+      return result;
     }
     byFull.set(fullKey, result === undefined ? RESOLVED_UNDEFINED : result);
     return result;
@@ -816,7 +815,7 @@ export const resolveCfcSchemaRefsOrThrow = (
     throw new Error(
       `Failed to resolve $ref: ${ref}. ` +
         (typeof ref === "string" && ref.startsWith("http")
-          ? `External $ref URLs must be registered in embeddedSchemas (packages/runner/src/cfc/schema-refs.ts). ` +
+          ? `External $ref URLs must be registered in embeddedSchemas (packages/runner/src/embedded-schemas.ts). ` +
             `If you added a new native type to NATIVE_TYPE_SCHEMAS in ` +
             `packages/schema-generator/src/formatters/native-type-formatter.ts, ` +
             `add its schema to embeddedSchemas as well.`

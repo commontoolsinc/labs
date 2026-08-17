@@ -1,3 +1,11 @@
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import { Identity } from "@commonfabric/identity";
+
+import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
+import { resolveLink } from "../src/link-resolution.ts";
+import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
+import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   afterEach,
   beforeEach,
@@ -9,7 +17,6 @@ import {
   Runtime,
   space,
 } from "./scheduler-test-utils.ts";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import type {
   Cell,
   IExtendedStorageTransaction,
@@ -18,12 +25,6 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
-import { resolveLink } from "../src/link-resolution.ts";
-import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
-import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
 
 // The session a caller-supplied id is chosen within, for the sends whose
 // subject is something else: the pair is what a stream send accepts, and one

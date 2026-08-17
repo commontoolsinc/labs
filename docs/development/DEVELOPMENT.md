@@ -26,12 +26,65 @@ about one aspect of the runtime, are indexed in
 
 ### Imports
 
-- Group imports by source: standard library, external, then internal.
+- Group imports by source: standard library, external, then internal, with a
+  blank line between the groups.
 - Prefer named exports over default exports.
 - Use package names for internal imports.
 - Destructure when importing multiple names from the same module.
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
+- Collate a package's imports. Every specifier naming the same top-level
+  package, or the same namespace-and-package pair, sits in one contiguous run:
+  `@commonfabric/utils/base64url` next to `@commonfabric/utils/types`,
+  `@std/testing/bdd` next to `@std/testing/time`. A package that appears in two
+  places in the list reads as two dependencies, and the second appearance hides
+  from anyone scanning for what the file rests on.
+- Alpha-sorting each run is strongly suggested. Sorting is what makes a list
+  scannable rather than merely grouped, and it answers by rule the question of
+  where a new import goes. Sort on the specifier, comparing without regard to
+  case, so that `codec-type-tags.ts` precedes `EmptyReconstructionContext.ts`
+  the way a reader expects. Where sorting and the grouping above disagree, the
+  grouping wins: sort within the standard-library, external, and internal
+  blocks, not across them.
+- A bare `import "x";` is there for its side effect, so where it sits is part of
+  what it does. A polyfill, or a setup module that installs globals, running
+  after the code relying on it has already run is a different program, and
+  nothing type-checks that. So grouping, collation and sorting all yield to this
+  one: leave a bare import where it is, and move no other import across it. They
+  then apply to each run of imports between bare ones rather than to the file as
+  a whole — a file with a bare import in the middle has two groupings, two
+  collations and two sorts, and a checker that reads it as one will call correct
+  code wrong. A bare import of a module the file also imports by name is a
+  separate matter, and which way it goes turns on the kind of that named import.
+  Against a value import the bare one adds nothing, since the value import
+  evaluates the module, side effects included: drop it, and put what it was
+  there for in a comment on the surviving statement. Against nothing but an
+  `import type`, it stays — a type-only import is erased and evaluates nothing,
+  so the bare import is the only thing producing the effect.
+- Import a given module in exactly one or two statements. Two shapes are
+  allowed:
+  - One unified statement, marking any type-only names inline:
+    `import { type Foo, bar } from "x";`.
+  - One statement of each kind, kept adjacent:
+    `import type { Foo } from "x";` above `import { bar } from "x";`.
+
+  A file uses whichever reads better; neither is preferred. What neither shape
+  allows is a second statement of the same kind — two value imports from one
+  module, or two `import type`s from it. Those represent one dependency as
+  though it were two, and the second is easy to miss when the first is being
+  edited or removed, so merge their specifier lists. A bare `import "x";` counts
+  toward the total.
+- Within a package that defines the `@/` import alias, address the aliased tree
+  as `@/...` rather than by a `../` path that climbs out of the current
+  directory to reach it. The alias exists so that a module's address does not
+  depend on where the importing file sits, and a `../` path spends that. The
+  rule is about `../` and nothing else: a `./` path addresses the importing
+  file's own directory or something under it, and so never states how two
+  directories sit relative to each other. `./` and `@/` are both fine, and a
+  file may use each where it reads better. A `../` path whose target lies
+  outside the aliased tree has no `@/` form at all, and stays as it is — a
+  `bench/` or `test/` file reaching a fixture in its own tree, in a package
+  whose alias covers `src/`.
 
 ### Classes
 
@@ -210,6 +263,21 @@ come up.
   ordinary English for writing something at length. `spell` is additionally an
   identifier here — the retired name for a pattern, still read by the state
   inspector — so prose that borrows the word costs a search as well.
+- **`visits`**, `reads`, `encounters`, `finds` — the list is open — not `meets`,
+  for coming across something during a walk or on a channel. It is the word that
+  is wrong here and not the sense, so pick what the site wants rather than one
+  substitute throughout: a walk visits every node it descends through, a decoder
+  reads what arrives, a format carrying no marker encounters data it never emits.
+  Often the cleanest sentence names where the thing arrived and wants no such
+  verb at all — "a cycle *here* arrived from a channel". What rules `meets` out
+  is that two other senses are already at work in these files, and both stay.
+  `meet` a requirement — `meet the condition`, `must meet the threshold` — is
+  ordinary and exact, with the caveat that the verb takes the requirement itself
+  as its object and not the artifact stating one: a value **satisfies** a schema,
+  or meets the schema's *requirements*, where "meets the schema" reaches past
+  what the verb selects for. And `meet` is the lattice operation the Contextual
+  Flow Control code is built on, a technical term with test files named after it,
+  where a stray prose use costs a search.
 
 ## Code Design & Principles
 

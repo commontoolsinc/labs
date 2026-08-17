@@ -1,6 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-run --allow-write
-import ts from "typescript";
 import { fromFileUrl, join } from "@std/path";
+
+import ts from "typescript";
 
 /**
  * Generates `packages/static/assets/types/cfc.ts` from the public

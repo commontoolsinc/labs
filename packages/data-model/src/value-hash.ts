@@ -7,7 +7,6 @@
  * the full algorithm.
  */
 
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   createHasher,
   type IncrementalHasher,
@@ -16,16 +15,17 @@ import {
 import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "@commonfabric/utils/bigint";
 import { LRUCache } from "@commonfabric/utils/cache";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { BaseFabricInstance } from "@/codec-common/BaseFabricInstance.ts";
-import { codecOf } from "@/codec-common/index.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+import { BaseFabricInstance } from "@/codec-common/BaseFabricInstance.ts";
+import { codecOf } from "@/codec-common/index.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 //
 // Type tag bytes (Section 2 of the byte-level spec)

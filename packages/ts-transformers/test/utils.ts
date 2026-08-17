@@ -1,13 +1,15 @@
-import ts from "typescript";
+import { assert } from "@std/assert";
 import { dirname, join } from "@std/path";
+
 import { StaticCache } from "@commonfabric/static";
+import ts from "typescript";
+
 import {
   CommonFabricTransformerPipeline,
   CrossStageState,
   TransformationDiagnostic,
   transformCfDirective,
 } from "../src/mod.ts";
-import { assert } from "@std/assert";
 
 const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
 

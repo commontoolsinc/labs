@@ -1,10 +1,20 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import {
+  extractDataUriPayloadText,
+  isDataUriMediaType,
+  isFabricDataUri,
+  valueFromDataUriPayloadText,
+} from "@commonfabric/data-model/data-uri-codec";
 import {
   type FabricPlainObject,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { unclaimed } from "@commonfabric/memory/fact";
+import { LRUCache } from "@commonfabric/utils/cache";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -19,16 +29,7 @@ import type {
   Result,
   State,
 } from "../interface.ts";
-import { unclaimed } from "@commonfabric/memory/fact";
-import { getLogger } from "@commonfabric/utils/logger";
-import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
-import {
-  extractDataUriPayloadText,
-  isDataUriMediaType,
-  isFabricDataUri,
-  valueFromDataUriPayloadText,
-} from "@commonfabric/data-model/data-uri-codec";
 
 const logger = getLogger("attestation", {
   enabled: false,

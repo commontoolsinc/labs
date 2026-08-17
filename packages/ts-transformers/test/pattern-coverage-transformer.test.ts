@@ -1,9 +1,7 @@
-import ts from "typescript";
 import { assert, assertEquals, assertMatch } from "@std/assert";
-import {
-  PatternCoverageTransformer,
-} from "../src/transformers/pattern-coverage.ts";
-import { collect, literalToValue, parseModule } from "./transformed-ast.ts";
+
+import ts from "typescript";
+
 import { CommonFabricTransformerPipeline } from "../src/cf-pipeline.ts";
 import {
   type PatternCoverageOptions,
@@ -11,6 +9,10 @@ import {
   TransformationContext,
   type TransformationDiagnostic,
 } from "../src/core/mod.ts";
+import {
+  PatternCoverageTransformer,
+} from "../src/transformers/pattern-coverage.ts";
+import { collect, literalToValue, parseModule } from "./transformed-ast.ts";
 
 interface TransformResult {
   output: string;

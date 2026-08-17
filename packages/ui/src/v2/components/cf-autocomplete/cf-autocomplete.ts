@@ -1,18 +1,19 @@
+import type { Schema } from "@commonfabric/api/schema";
+import { stringArraySchema, stringSchema } from "@commonfabric/runner/schemas";
+import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
+import { consume } from "@lit/context";
 import { css, html, nothing, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
+
 import { BaseElement } from "../../core/base-element.ts";
-import { consume } from "@lit/context";
+import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
   defaultTheme,
 } from "../theme-context.ts";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
-import type { Schema } from "@commonfabric/api/schema";
-import { stringArraySchema, stringSchema } from "@commonfabric/runner/schemas";
-import { createCellController } from "../../core/cell-controller.ts";
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,
 // matching the prior phase-1 token migration pattern.

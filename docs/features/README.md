@@ -5,7 +5,7 @@ narrow: it explains how that piece behaves, what invariants it holds, and what
 you need to know before you change it. Read one when you are working on the
 thing it describes. None of them is general orientation.
 
-The neighbouring trees answer different questions.
+The neighboring trees answer different questions.
 [`../development/`](../development/README.md) is how to work in this
 repository — style, dependencies, testing, debugging, continuous integration.
 [`../specs/`](../specs/README.md) is what the system is required to do.

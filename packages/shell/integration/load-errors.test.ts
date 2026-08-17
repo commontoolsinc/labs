@@ -1,7 +1,9 @@
+import { describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
 import { env, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
-import { Identity } from "@commonfabric/identity";
-import { describe, it } from "@std/testing/bdd";
+
 import "../src/globals.ts";
 
 const { FRONTEND_URL, SPACE_NAME } = env;

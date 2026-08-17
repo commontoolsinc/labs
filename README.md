@@ -190,7 +190,7 @@ norms have not yet been established and techniques change weekly. We may
 "review" your PR by recreating it, or by providing extensive feedback from an
 agent.
 
-Using agents is not a substitute for judgement. Check your agent's output; see
+Using agents is not a substitute for judgment. Check your agent's output; see
 what it is doing. Have it prove its hypotheses and assumptions; perform manual
 testing to check the user experience makes sense with your change. We rely
 heavily on unit tests, integration tests, and lints to guide agents; add your
@@ -199,7 +199,7 @@ own to help future agents do even better.
 When communicating with humans, make it clear what you are writing versus what
 your bot is writing.
 
-If you have commit access, we trust you to use your own judgement for when a PR
+If you have commit access, we trust you to use your own judgment for when a PR
 needs review by another human or not. If you are not sure if the PR should land,
 it definitely needs review.
 

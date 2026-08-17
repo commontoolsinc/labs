@@ -293,11 +293,14 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
     return this.encodeValue(value);
   }
 
+  // A set is started here, unlike `JsonCodecEngine`'s entry points: this
+  // format's transport is the tree itself, so a caller can hand `decode()` a
+  // graph with a cycle in it, and the base's guard is what refuses one.
   override decode(
     data: ProbeValue,
     context: ReconstructionContext,
   ): FabricValue {
-    return this.decodeValue(data, context);
+    return this.decodeValue(data, context, new Set());
   }
 
   protected override wrapTag(tag: string, state: ProbeValue): ProbeValue {
@@ -330,20 +333,37 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
   protected override decodeValue(
     data: ProbeValue,
     context: ReconstructionContext,
+    seen?: Set<object>,
   ): FabricValue {
-    if (data instanceof Tagged) {
-      return this.decodeTagged(data.tag, data.state, context);
-    } else if (Array.isArray(data)) {
-      return data.map((d) => this.decodeValue(d, context));
-    } else if ((data !== null) && (typeof data === "object")) {
-      const result: Record<string, FabricValue> = {};
-      for (const [k, v] of Object.entries(data)) {
-        result[k] = this.decodeValue(v as ProbeValue, context);
-      }
-      return result;
+    if ((data === null) || (typeof data !== "object")) {
+      return data as FabricValue;
     }
 
-    return data as FabricValue;
+    // Every object node goes through the guard, the tagged form included: this
+    // format's transport is the tree itself, so a `Tagged` can hold a
+    // reference back to a node above it with no container in between.
+    if (seen !== undefined) {
+      const cycle = this.enterOrReport(seen, data);
+      if (cycle !== null) {
+        return cycle;
+      }
+    }
+
+    try {
+      if (data instanceof Tagged) {
+        return this.decodeTagged(data.tag, data.state, context, seen);
+      } else if (Array.isArray(data)) {
+        return data.map((d) => this.decodeValue(d, context, seen));
+      }
+
+      const result: Record<string, FabricValue> = {};
+      for (const [k, v] of Object.entries(data)) {
+        result[k] = this.decodeValue(v as ProbeValue, context, seen);
+      }
+      return result;
+    } finally {
+      seen?.delete(data);
+    }
   }
 }
 

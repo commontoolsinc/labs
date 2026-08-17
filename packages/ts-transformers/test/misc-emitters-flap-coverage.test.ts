@@ -1,15 +1,16 @@
-import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
-import { StaticCache } from "@commonfabric/static";
 
+import { StaticCache } from "@commonfabric/static";
+import ts from "typescript";
+
+import { unwrapOpaqueLikeType } from "../src/ast/type-inference.ts";
+import { shouldTransformArrayMethod } from "../src/closures/strategies/array-method-policy.ts";
+import { symbolDeclaresCommonFabricDefault } from "../src/core/common-fabric-symbols.ts";
 import { TransformationContext } from "../src/core/context.ts";
 import { transformCfDirective } from "../src/mod.ts";
-import { shouldTransformArrayMethod } from "../src/closures/strategies/array-method-policy.ts";
-import { findPreferredNestedLowerableExpressionSite } from "../src/transformers/expression-site-policy.ts";
-import { unwrapOpaqueLikeType } from "../src/ast/type-inference.ts";
-import { symbolDeclaresCommonFabricDefault } from "../src/core/common-fabric-symbols.ts";
 import { emitElementAccessExpression } from "../src/transformers/expression-rewrite/emitters/element-access-expression.ts";
 import type { EmitterContext } from "../src/transformers/expression-rewrite/types.ts";
+import { findPreferredNestedLowerableExpressionSite } from "../src/transformers/expression-site-policy.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 // Each branch exercised here otherwise runs only while a pattern compiles cold

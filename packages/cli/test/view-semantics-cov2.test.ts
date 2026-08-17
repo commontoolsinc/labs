@@ -8,10 +8,11 @@
  *
  * The public surface only takes `text`, `cwd`, an `offset` and a `filePath`,
  * so the throwing inputs here are values whose declared type matches the API
- * (a `string`, a `number`) but whose runtime behaviour throws when the code
+ * (a `string`, a `number`) but whose runtime behavior throws when the code
  * touches them. That is exactly the input the module documents itself as being
  * robust against: "every query is wrapped so a failure degrades to `null`".
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument } from "./view-helpers.ts";
@@ -123,7 +124,7 @@ Deno.test("semantics: typeAt swallows a throw raised while locating the section"
 
 Deno.test("semantics: definitionOf swallows a throw and caches the empty result", () => {
   // Same hostile offset, but through definitionOf: the throw lands in its try,
-  // the catch resets `out` to [], and the empty array is memoised.
+  // the catch resets `out` to [], and the empty array is memoized.
   const blob = `// transformed: /m.ts\nconst x: number = 1;\nconst y = x;`;
   const sem = createSemantics(blob, { cwd: CWD })!;
   sem.prewarm();

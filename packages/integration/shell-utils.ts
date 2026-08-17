@@ -1,3 +1,12 @@
+import { afterAll, afterEach, beforeAll, beforeEach } from "@std/testing/bdd";
+
+import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
+import {
+  Identity,
+  InsecureCryptoKeyPair,
+  serializeKeyPairRaw,
+  TransferrableInsecureCryptoKeyPair,
+} from "@commonfabric/identity";
 import {
   Browser,
   dismissDialogs,
@@ -6,14 +15,6 @@ import {
   pipeConsole,
   type PresentationParticipant,
 } from "@commonfabric/integration";
-import { getPresentationSession } from "./presentation/session.ts";
-import {
-  Identity,
-  InsecureCryptoKeyPair,
-  serializeKeyPairRaw,
-  TransferrableInsecureCryptoKeyPair,
-} from "@commonfabric/identity";
-import { afterAll, afterEach, beforeAll, beforeEach } from "@std/testing/bdd";
 import {
   AppState,
   AppView,
@@ -21,12 +22,13 @@ import {
   deserialize,
   isAppViewEqual,
 } from "@commonfabric/shell/shared";
-import { waitFor } from "./utils.ts";
+
 import {
   collectPatternCoverage,
   enablePatternCoverage,
 } from "./pattern-coverage.ts";
-import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
+import { getPresentationSession } from "./presentation/session.ts";
+import { waitFor } from "./utils.ts";
 
 import "../shell/src/globals.ts";
 

@@ -17,12 +17,14 @@
  * THIS IS NOT A TEST. It does not assert anything. It is a one-shot diagnostic
  * tool used during the Phase 1 investigation. Safe to delete after Phase 2.
  */
-import ts from "typescript";
-import { join } from "@std/path";
-import { walk } from "@std/fs";
 
-import { batchTypeCheckFixtures } from "../utils.ts";
+import { walk } from "@std/fs";
+import { join } from "@std/path";
+
+import ts from "typescript";
+
 import { createDataFlowAnalyzer } from "../../src/ast/dataflow.ts";
+import { batchTypeCheckFixtures } from "../utils.ts";
 
 interface Probe {
   fixture: string;

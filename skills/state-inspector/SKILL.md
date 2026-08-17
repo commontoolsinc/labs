@@ -38,7 +38,7 @@ of it all (`entities`/`piece`/`graph`).
   actually rendering. "Converged" / "consistent" describes the durable store,
   not what any client is showing.
 - _A live or production bug from a local snapshot_ — a clean local store does
-  not explain a prod-only misbehaviour; at most it says the local data is
+  not explain a prod-only misbehavior; at most it says the local data is
   healthy, so the cause is concurrency / scale / timing or client-side. Staging
   spaces can be fetched with `--remote` (see below); the dump endpoint is
   deliberately hard-off in production, so a prod space still means copying the
@@ -54,8 +54,8 @@ of it all (`entities`/`piece`/`graph`).
   fixes.
 
 So **reach for it whenever you would otherwise guess at durable or multiplayer
-state from outside a live runtime**; reach for something else for live
-behaviour, client rendering, performance profiling, or reproducing a bug.
+state from outside a live runtime**; reach for something else for live behavior,
+client rendering, performance profiling, or reproducing a bug.
 
 ## The mental model the output assumes
 

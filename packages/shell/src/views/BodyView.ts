@@ -1,12 +1,15 @@
+import { Task } from "@lit/task";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { Task } from "@lit/task";
-import { BaseView } from "./BaseView.ts";
+
 import { RuntimeInternals } from "../lib/runtime.ts";
+import { BaseView } from "./BaseView.ts";
+
 import "../components/OmniLayout.ts";
-import { CellHandle, PageHandle, VNode } from "@commonfabric/runtime-client";
+
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import type { JSONSchema } from "@commonfabric/runner/shared";
+import { CellHandle, PageHandle, VNode } from "@commonfabric/runtime-client";
 
 type SubPages = {
   sidebarUI?: VNode;

@@ -166,7 +166,7 @@ cf piece call --piece <board> addTopic \
 {
   "invocation": "0f4c…",
   "status": "settled",
-  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" },
+  "receipt": "/of:fid1:…",
   "result": { "topic": { "$NAME": "Ship the thing", "…": "…" } }
 }
 ```
@@ -181,11 +181,12 @@ or derives structured authorship from the event returns those in its record;
 the caller could not have computed them.
 
 The `receipt` is where that outcome lives: the address of the cell this
-handling wrote it to. Keep it and the result is re-readable without calling
-anything again —
+handling wrote it to, written as one string in the canonical reference syntax
+`--piece` reads. Keep it and the result is re-readable without calling anything
+again —
 
 ```bash
-cf piece get --piece <the receipt id>
+cf piece get --piece "$(echo "$RESULT" | jq -r .receipt)"
 ```
 
 — which is an ordinary read, so the verb's body does not run a second time.
@@ -196,9 +197,9 @@ receipt to name.
 ### Asking for a smaller result
 
 A verb decides what it returns; the caller decides how much of it to look at.
-`--filter`, `--select`, and `--schema` — the same three flags `cf piece get`
-takes, with the same grammar — shape the `result` before it reaches stdout, and
-go before the callable name:
+`--filter`, `--select`, and `--schema` — the same three flags `cf piece get`,
+`cf wish` and `cf exec` take, with the same grammar — shape the `result` before
+it reaches stdout, and go before the callable name:
 
 ```bash
 cf piece call --piece <topic> --select comment.writtenAt addComment \
@@ -220,6 +221,29 @@ selection to be about — and `--no-wait`, which never reads the receipt back,
 refuses all three flags. `--show-links` composes with a projection, because a
 projection leaves every surviving path where it was; it does not compose with
 `--filter`, which moves the positions a link names.
+
+**A verb reached through a filesystem mount is the same call.** `cf exec` takes
+the three flags too, written before the mounted file, since everything after it
+belongs to the callable's own schema-derived interface. It settles the handling
+under an invocation of its own and prints the same Invocation JSON this section
+shows, so a mounted handler's outcome has an address and a shape rather than
+being unreported:
+
+```bash
+cf exec --select comment.writtenAt \
+  /tmp/cf/<space>/pieces/<piece>/result/addComment.handler \
+  --body first --agent-name Sol
+```
+
+A tool prints its result on stdout as it always did, with the result cell's
+address on stderr. The line spells out the whole command that reads it back,
+and the address is one token that carries all three parts — space, id, and
+scope — as the canonical `/@did:.../of:...` reference `--piece` takes whole.
+Naming the space inside the token is what makes the command portable: `cf exec`
+gets its space from the mount it ran through, while `cf piece get` falls back
+to whichever space the caller has configured, so an address that named only id
+and scope would read the right cell only for a reader configured for the same
+space.
 
 `packages/cli/README.md` has the grammar and the supported schema subset.
 
@@ -249,7 +273,7 @@ cf piece call --piece "$EPIC" addChild -- --title "Session cookie handling"
       "title": "Session cookie handling",
       "status": "open",
       "children": [],
-      "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+      "parent": { "$link": "/of:fid1:…/parent" }
     }
   }
 }
@@ -348,6 +372,50 @@ cf piece call --piece <board> --invocation add-1 \
 That is the difference worth holding onto: a **settled** id replays its original
 result, while a **refused** id was never consumed and is still yours to use.
 
+### A field the verb does not declare
+
+A payload is judged against the verb's declared event schema before anything is
+sent, and a field that schema does not name is refused there. The runtime hands
+a handler the fields its event schema names and drops the rest, so a field
+nobody declared would otherwise reach nothing while the call reported itself
+settled. The refusal names the field, the position it sat at, the vocabulary
+that position takes, and the declared name it is one edit from:
+
+```bash
+cf piece call --piece <board> addTopic '{"titel":"Ship it","agentName":"Sol"}'
+```
+
+```
+Invalid input for "addTopic": "titel" at <event> is not a field this verb
+declares. Did you mean "title"? <event> takes "title", "body", "agentName"
+```
+
+Positions below the root are spelled the way a `--schema` position is —
+`<event>.item`, `<event>.tags[1]` — so one vocabulary covers this refusal and
+the one an unrecognized projection key gets.
+
+Every position that names its fields is judged, however it names them: with a
+stated `type: "object"`, with a `properties` map and no type beside it, with a
+type union admitting an object, or through a conjunction — whose fields are the
+**union** across its members, since a payload satisfying an `allOf` satisfies
+every one of them.
+
+Two kinds of position are passed over, and a call reaching one goes out rather
+than being refused on a guess. Under a **disjunction** (`anyOf`, `oneOf`) a
+payload need satisfy only one branch, so a field missing from one branch may be
+named by another. And a position marked as a cell or a stream may hold a link
+rather than a value, whose `"/"` is nothing anybody declared.
+
+The declared vocabulary is what `cf piece call --piece <id> <verb> --help`
+prints, and it names the fields the verb's handler **reads**. That can be fewer
+than the TypeScript event type declares: a field the body never touches is one
+the runtime would have dropped, so the call is refused rather than accepted and
+quietly emptied. A verb that publishes no event schema at all takes any payload
+— with nothing declared, nothing is dropped either.
+
+Like every other refusal here, this one costs nothing: the invocation id was
+never spent, and the corrected retry can reuse it.
+
 ### Reading is not calling
 
 `cf piece get` reads data. A path that lands on a verb is refused and redirected
@@ -379,11 +447,11 @@ durable, and only the readback is skipped. The envelope still carries the
 {
   "invocation": "add-1",
   "status": "committed",
-  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" }
+  "receipt": "/of:fid1:…"
 }
 ```
 
-— and collecting the outcome later is `cf piece get --piece <the receipt id>`.
+— and collecting the outcome later is `cf piece get --piece <that string>`.
 Replaying the same id and session recovers it too, but that re-runs the handler
 body: a verb that sends mail or spends a model call does it again. Reading the
 address does not.
@@ -470,17 +538,18 @@ cf piece call --show-links --piece <board> createNote '{"title":"Notes"}'
   "status": "settled",
   "result": { "note": { "$NAME": "Notes", "…": "…" } },
   "links": {
-    "/": { "space": "did:key:…", "id": "of:receipt…", "scope": "space" },
-    "/note": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" }
+    "/": "/of:receipt…",
+    "/note": "/of:fid1:…"
   }
 }
 ```
 
-`/note` is the created piece's own document, so it addresses directly —
-`--piece` takes the id exactly as emitted, `of:` prefix included:
+`/note` is the created piece's own document, and each entry is written in the
+canonical reference syntax `--piece` reads — taken exactly as emitted, `of:`
+prefix included — so it addresses directly:
 
 ```bash
-cf piece call --piece <the id from /note> \
+cf piece call --piece "$(echo "$RESULT" | jq -r '.links["/note"]')" \
   append '{"text":"second line"}'
 ```
 
@@ -523,33 +592,35 @@ cf piece get --piece <board> notes \
 
 ```json
 [
-  { "$link": { "id": "of:fid1:…", "space": "did:key:…", "scope": "space", "path": [] } }
+  { "$link": "/of:fid1:…" }
 ]
 ```
 
-Those four fields are always present, so a caller indexes them without
-branching. `id` keeps its scheme, because the scheme is the kind and dropping
-it retargets the address silently. No schema is inlined: a stored link can
+The address is one string in the fabric's canonical reference syntax —
+`/[@did/]<id>[@scope][/path]` — the same form `--piece` reads, so an address a
+read hands you is passed onward as it stands. The space rides in front only
+when it differs from the space the command targeted, and the scope follows the
+id only when it is not the default. No schema is inlined: a stored link can
 carry an entire one, and what was asked for is where the value lives.
 
 Marking a position deeper than a link names the linked document and the path
 below it — `notes[0].title`, where `notes` holds links, renders the note's own
-`id` with `path` `["title"]`. A link is a durable identity for the edge it
+id followed by `/title`. A link is a durable identity for the edge it
 records; the slot that holds it stops naming the same value the moment the
 collection is reordered.
 
 **What comes back is a link to read next, not a claim about canonical
 identity.** Addresses are many-to-one over cells: a holder of one cannot tell a
 canonical id from an alias, and normal use does not require it. Two positions
-holding one piece can render two different `id`s, and a marker and
+holding one piece can render two different addresses, and a marker and
 `cf piece call --show-links` can disagree about the same piece, because a piece
 created inside a handler and pushed into a collection is held through a link
 that redirects to it and the two stop at different points along that redirect.
 
 So feed an address into the next command rather than comparing it to another:
-two ids differing is not evidence of two pieces. Comparing contents answers a
-different question — distinct pieces can hold identical contents, and one
-piece's contents change under it. **Whether two addresses name the same
+two addresses differing is not evidence of two pieces. Comparing contents
+answers a different question — distinct pieces can hold identical contents, and
+one piece's contents change under it. **Whether two addresses name the same
 piece is not a question the CLI answers today.**
 
 The marker sits beside a projection when both are wanted, and the answer
@@ -561,7 +632,7 @@ cf piece get --piece <board> notes --schema \
 ```
 
 ```json
-[{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }]
+[{ "$link": "/of:fid1:…", "title": "First note" }]
 ```
 
 A field list unions the same way, and its two paths meet at the one position.
@@ -572,7 +643,7 @@ cf piece get --piece <board> --step --select 'notes@,noteCount'
 ```
 
 ```json
-{ "notes": [{ "$link": { "id": "of:fid1:…", "…": "…" } }], "noteCount": 3 }
+{ "notes": [{ "$link": "/of:fid1:…" }], "noteCount": 3 }
 ```
 
 A field list applies to each element wherever it crosses an array, and an

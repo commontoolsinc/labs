@@ -1,7 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
-import app from "../../../app.ts";
-import { memoryServer } from "../memory.ts";
+
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { createSession, Identity } from "@commonfabric/identity";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -9,12 +11,12 @@ import {
   MEMORY_PROTOCOL,
   type SessionOpenChallenge,
 } from "@commonfabric/memory/v2";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { createSession, Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
+
+import app from "@/app.ts";
+import { memoryServer } from "@/routes/storage/memory.ts";
 
 const HELLO = {
   type: "hello",

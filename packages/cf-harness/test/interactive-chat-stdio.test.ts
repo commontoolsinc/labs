@@ -14,6 +14,7 @@ import {
 } from "../src/contracts/interactive-chat.ts";
 import { HARNESS_BROWSER_ACCESS_LEASE_TYPE } from "../src/contracts/browser-access.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
+import { DEFAULT_PARENT_TOOL_IDS } from "../src/contracts/tool-descriptor.ts";
 import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
@@ -1050,6 +1051,44 @@ Deno.test("interactive NDJSON transport accepts valid policy prompt slots", asyn
 
   const response = decodeLines(output).find((envelope) =>
     "ok" in envelope && envelope.requestId === "req-good-prompt-slot"
+  );
+  assertEquals(
+    response !== undefined && "ok" in response ? response.ok : false,
+    true,
+  );
+});
+
+Deno.test("interactive NDJSON transport accepts a policy naming the run's default tools", async () => {
+  // The default parent surface is what a run advertises, so a client that
+  // submits it back must be understood — including whichever tools were added
+  // to that surface most recently.
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-default-tools",
+        method: "start_session",
+        params: {
+          sessionId: "session-1",
+          workspace: { hostPath: "/workspace" },
+          policy: {
+            type: "cf-harness.chat-policy",
+            toolMode: "workspace-write",
+            allowedToolIds: [...DEFAULT_PARENT_TOOL_IDS],
+            allowedSubagentProfiles: [],
+          },
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output).find((envelope) =>
+    "ok" in envelope && envelope.requestId === "req-default-tools"
   );
   assertEquals(
     response !== undefined && "ok" in response ? response.ok : false,

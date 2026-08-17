@@ -1,3 +1,11 @@
+/**
+ * Setting up a pattern over a result cell that already holds a projection
+ * writes only when the projection differs from what is stored. A result whose
+ * only difference is inside a `FabricPrimitive` is a difference: those keep
+ * their state in private `#fields`, so a comparison that walks enumerable own
+ * properties sees two distinct values as identical and drops the write.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -9,12 +17,6 @@ import {
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Pattern } from "../src/builder/types.ts";
-
-// Setting up a pattern over a result cell that already holds a projection
-// writes only when the projection differs from what is stored. A result whose
-// only difference is inside a `FabricPrimitive` is a difference: those keep
-// their state in private `#fields`, so a comparison that walks enumerable own
-// properties sees two distinct values as identical and drops the write.
 
 const signer = await Identity.fromPassphrase(
   "result-projection-value-equality",

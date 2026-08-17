@@ -1,9 +1,10 @@
+import type { SchedulerExecutionContextKey } from "@commonfabric/memory/v2";
+
+import { isCellScope } from "../scope.ts";
 import type {
   IMemorySpaceAddress,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
-import type { SchedulerExecutionContextKey } from "@commonfabric/memory/v2";
-import { isCellScope } from "../scope.ts";
 
 export type SchedulerActionKind =
   | "computation"

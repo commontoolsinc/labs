@@ -1,3 +1,7 @@
+import { MetaLinkField } from "@commonfabric/api";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -11,8 +15,7 @@ import {
 } from "./schema-registry.ts";
 import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -26,21 +29,9 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
-import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { toURI } from "./uri-utils.ts";
-import {
-  CellResultInternals,
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { createRef } from "./create-ref.ts";
 import { resolveLink } from "./link-resolution.ts";
-import {
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-} from "./storage/interface.ts";
-import type { Runtime } from "./runtime.ts";
 import {
   areNormalizedLinksSame,
   isNormalizedFullLink,
@@ -51,9 +42,19 @@ import {
   parseLinkPrimitive,
   PrimitiveCellLink,
 } from "./link-types.ts";
-import { MetaLinkField } from "@commonfabric/api";
+import {
+  CellResultInternals,
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import type { Runtime } from "./runtime.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
-import { createRef } from "./create-ref.ts";
+import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
+import {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "./storage/interface.ts";
+import { toURI } from "./uri-utils.ts";
 
 export * from "./link-types.ts";
 
@@ -197,7 +198,7 @@ export function areMaybeLinkAndNormalizedLinkSame(
   return areNormalizedLinksSame(normalizedLink, normalizedLink2);
 }
 
-// Link identity (`areNormalizedLinksSame` and neighbours) lives in
+// Link identity (`areNormalizedLinksSame` and neighbors) lives in
 // ./link-types.ts — one canonical implementation — and reaches importers of
 // this module through the `export *` above.
 

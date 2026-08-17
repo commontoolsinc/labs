@@ -1,5 +1,10 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { FabricMap } from "@commonfabric/data-model/fabric-instances";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
 import {
   addressesToPathByEntity,
   arraysOverlap,
@@ -8,13 +13,10 @@ import {
   type SortedAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
 import type { Action, SpaceScopeAndURI } from "../src/scheduler.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { FabricMap } from "@commonfabric/data-model/fabric-instances";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
 } from "../src/storage/interface.ts";
-import type { MemorySpace } from "@commonfabric/memory/interface";
 
 // Helper function to create IMemorySpaceAddress for testing
 const createAddress = (

@@ -967,10 +967,18 @@ work order is archived with the migration records.
 - Exhaustion (iterations or budget): remaining runnable nodes keep
   `status = invalid` and receive an escalating backoff gate
   (`gate.backoffUntil`, ×2 per consecutive exhaustion, capped); one wake is
-  scheduled; `scheduler.non-settling` telemetry and one author-facing warning
-  fire per episode. The warning names the deferred actions, points to
-  `commonfabric.detectNonIdempotent()`, and does not turn the bounded retry into
-  an action error.
+  scheduled; a `scheduler.non-settling` telemetry marker fires for every such
+  episode, carrying the busy-window summary along with `deferredActions` (the
+  labels of the actions the pass held back, first ten) and
+  `deferredActionCount`, observable through `runtime.telemetry`. A marker says
+  a pass exhausted its budget, which a wave that needs several passes to
+  converge also does; it is not on its own a report that the graph will never
+  converge. The author-facing warning naming those actions and pointing to
+  `commonfabric.detectNonIdempotent()` is emitted at most once per run of
+  settle passes — the latch lives on the settling tracker, which a new
+  continuation replaces, and is the same boundary `scheduler.isNonSettling()`
+  reports — so a permanently non-converging graph does not flood the log.
+  Neither signal turns the bounded retry into an action error.
 
 No node is force-run or force-cleaned. A non-converging subgraph degrades to
 rate-limited convergence attempts while the rest of the system stays
@@ -1505,7 +1513,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
     `isMine`, an aggregate), it **evaluated that computed inline inside the aborted
     tx — value produced, but no commit, no separate `run()`, no counted run** — so
     those sites report literal 0 in `actionStats` while still computing. v2 deleted
-    that whole run-to-observe path in favour of the transformer's *declared* reads
+    that whole run-to-observe path in favor of the transformer's *declared* reads
     annotation + pure P3 demand-gating. With no collect pass there is no
     inline-fold: when the live apex render propagates `liveRefs` up to the
     computeds it reads, each becomes live → demanded → **run in its own transaction
@@ -1519,7 +1527,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
     does not produce discretely. Coarsening it back inline — the only lever for the
     +73 — would forfeit exactly that per-row incremental-edit granularity, per-node
     provenance, and rehydration. So the 2.2× is the genuine price of v2 making
-    every reactive value a persisted, independently-incremental, CFC-labelled,
+    every reactive value a persisted, independently-incremental, CFC-labeled,
     rehydratable node, not extra re-execution (actions +123% but wall only +12–16%).
 
     *Levers ruled out — do not re-try without new evidence.* The surplus is

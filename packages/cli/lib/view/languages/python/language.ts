@@ -3,6 +3,7 @@
  * for direct files, diffs, and live edits. Python does not provide structure
  * navigation or a semantic layer.
  */
+
 import type { Language } from "../language.ts";
 import { utf8Decoder } from "../decoder.ts";
 import {

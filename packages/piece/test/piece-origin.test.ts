@@ -1,7 +1,11 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { FabricInstance } from "@commonfabric/data-model/fabric-value";
+import { createSession, Identity } from "@commonfabric/identity";
 import {
   applyPieceSourceTransition,
+  type Cell,
   getPatternIdentityRef,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
@@ -12,21 +16,11 @@ import {
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { createSession, Identity } from "@commonfabric/identity";
-import {
-  DEFAULT_APP_PATTERN_SOURCE,
-  PiecesController,
-} from "../src/ops/pieces-controller.ts";
+
 import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "../src/ops/clone-data-snapshot.ts";
-import { FabricInstance } from "@commonfabric/data-model/fabric-value";
-
-// The route that ref resolves to.
-const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
-  DEFAULT_APP_PATTERN_SOURCE,
-)!;
 import {
   classifyOrigin,
   PieceOriginError,
@@ -34,7 +28,15 @@ import {
   readPieceSourceState,
   resolvePieceOriginSource,
 } from "../src/ops/piece-origin.ts";
-import type { Cell } from "@commonfabric/runner";
+import {
+  DEFAULT_APP_PATTERN_SOURCE,
+  PiecesController,
+} from "../src/ops/pieces-controller.ts";
+
+// The route that ref resolves to.
+const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
+  DEFAULT_APP_PATTERN_SOURCE,
+)!;
 
 const signer = await Identity.fromPassphrase("piece origin");
 

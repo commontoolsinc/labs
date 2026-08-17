@@ -6,7 +6,7 @@
 // These are deliberately small and fast — they are meant to be the loop you run
 // while working on eviction, rather than a 100 KB suite whose failure you then
 // have to localize. Neither test knows anything about how eviction is
-// configured: they assert the behaviour a reader is entitled to, so they answer
+// configured: they assert the behavior a reader is entitled to, so they answer
 // the question whatever the mechanism turns out to be.
 //
 // What each one is a guard against:

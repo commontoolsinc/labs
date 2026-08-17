@@ -1,39 +1,42 @@
-// Mass-revoke ingest channels — the operator lever for a trust event.
-//
-// Why this is a script and not a runtime concept:
-//
-// A minted token is a durable append capability that outlives the conditions
-// which authorized it. The forcing case is the fix to passphrase-derived space
-// keys: until that lands, anyone who knew a space NAME could sign as that
-// space, grant themselves OWNER, and mint entirely legitimately. Fixing the
-// derivation stops new abuse and retracts nothing already issued.
-//
-// The tempting design is a "trust epoch" stamped on every registration and
-// compared on every POST. That buys a declarative, atomic cutover — and pays
-// for it with a field, an env var, and a hot-path branch that live forever to
-// serve an event that happens once. Not worth it.
-//
-// Revocation already does the job, and it is already the right shape: it is
-// fail-closed (the data plane refuses a revoked channel even with a valid
-// token), it is loud (a correct token gets an actionable 403 telling the device
-// to re-pair, not a blank 401), and it retains the registration as an audit
-// record. Retiring a population is therefore just "revoke all of it" — a
-// deliberate operator action, at a moment of the operator's choosing.
-//
-// Re-minting is the manual conversion: an owner runs `cf ingest mint` again,
-// which re-authorizes the channel under the new conditions and clears the
-// revocation while preserving its history.
-//
-// TRADE-OFF, stated so it is a known property rather than a surprise: this is
-// imperative, so it is not atomic. A channel minted between the run and the
-// cutover is missed. Re-run it (it is idempotent) or take the control plane
-// down for the migration, and use `audit-ingest-channels` to confirm.
-//
-// Usage:
-//   deno task retire-ingest-channels --reason "space-key-derivation-fix"
-//   deno task retire-ingest-channels --reason "..." --confirm
-//
-// Dry run by default; nothing is written without --confirm.
+/**
+ * Mass-revoke ingest channels — the operator lever for a trust event.
+ *
+ * Why this is a script and not a runtime concept:
+ *
+ * A minted token is a durable append capability that outlives the conditions
+ * which authorized it. The forcing case is the fix to passphrase-derived space
+ * keys: until that lands, anyone who knew a space NAME could sign as that
+ * space, grant themselves OWNER, and mint entirely legitimately. Fixing the
+ * derivation stops new abuse and retracts nothing already issued.
+ *
+ * The tempting design is a "trust epoch" stamped on every registration and
+ * compared on every POST. That buys a declarative, atomic cutover — and pays
+ * for it with a field, an env var, and a hot-path branch that live forever to
+ * serve an event that happens once. Not worth it.
+ *
+ * Revocation already does the job, and it is already the right shape: it is
+ * fail-closed (the data plane refuses a revoked channel even with a valid
+ * token), it is loud (a correct token gets an actionable 403 telling the device
+ * to re-pair, not a blank 401), and it retains the registration as an audit
+ * record. Retiring a population is therefore just "revoke all of it" — a
+ * deliberate operator action, at a moment of the operator's choosing.
+ *
+ * Re-minting is the manual conversion: an owner runs `cf ingest mint` again,
+ * which re-authorizes the channel under the new conditions and clears the
+ * revocation while preserving its history.
+ *
+ * TRADE-OFF, stated so it is a known property rather than a surprise: this is
+ * imperative, so it is not atomic. A channel minted between the run and the
+ * cutover is missed. Re-run it (it is idempotent) or take the control plane
+ * down for the migration, and use `audit-ingest-channels` to confirm.
+ *
+ * Usage:
+ *   deno task retire-ingest-channels --reason "space-key-derivation-fix"
+ *   deno task retire-ingest-channels --reason "..." --confirm
+ *
+ * Dry run by default; nothing is written without --confirm.
+ */
+
 import { parseArgs } from "@std/cli/parse-args";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";

@@ -19,35 +19,36 @@
 // multi-tab write mutex is the handle-cell `rev` bump in db.exec (cell.ts), not
 // this read path.
 
-import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
-import type { CfcConfClause } from "../cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { parseLink } from "../link-utils.ts";
-import {
-  computeRowLabelRead,
-  resolveCeilingPlaceholders,
-} from "./sqlite/row-label-read.ts";
-import { type Action } from "../scheduler.ts";
-import { type RawBuiltinResult } from "../module.ts";
-import { type Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
-import type { CellScope } from "../builder/types.ts";
-import { setPatternCell, setResultCell } from "../result-utils.ts";
-import { isCellScope, narrowestScope } from "../scope.ts";
-import { computeInputHashFromValue } from "./fetch-utils.ts";
-import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
-import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
-import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import { stripEntityUriScheme } from "../entity-kind.ts";
+import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
+import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,
   type SqliteDbRef as WireSqliteDbRef,
   type SqliteParamsWire,
 } from "@commonfabric/memory/v2";
-import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+
+import type { CellScope } from "../builder/types.ts";
+import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
+import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
+import { stripEntityUriScheme } from "../entity-kind.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import { parseLink } from "../link-utils.ts";
+import { type RawBuiltinResult } from "../module.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
+import { type Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import { isCellScope, narrowestScope } from "../scope.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { computeInputHashFromValue } from "./fetch-utils.ts";
+import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
+import {
+  computeRowLabelRead,
+  resolveCeilingPlaceholders,
+} from "./sqlite/row-label-read.ts";
 
 // The wire shape (`id`, `tables`, `scope`, `owner`) is the memory protocol's
 // own `SqliteDbRef`; only `rev` is added here.

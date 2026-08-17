@@ -15,10 +15,10 @@ Draft formal spec — extracted from the data model proposal.
 ### 1.1 Overview
 
 The system stores **fabric values** — data that can flow through the runtime
-as modern types and be serialized to wire/storage formats at boundary crossings.
+as typed values and be serialized to wire/storage formats at boundary crossings.
 All persistent data and in-flight messages use this representation.
 
-The key design principle is **late serialization**: modern types flow through the
+The key design principle is **late serialization**: values flow through the
 runtime as themselves; serialization to wire/storage formats happens only at
 boundary crossings (persistence, IPC, network).
 
@@ -2554,7 +2554,7 @@ export interface SerializationContext<SerializedForm = unknown> {
 - `encode(value)` serializes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
 - `decode(data, context)` parses a JSON string, then deserializes tagged
-  forms back into modern runtime types.
+  forms back into runtime types.
 
 > **Why the boundary is this narrow.** Tag wrapping and unwrapping are
 > machinery internal to the context class, leaving only the
@@ -2573,7 +2573,7 @@ Internally, `JsonCodecEngine`'s `encode()` method calls a private encode walker
 (`#encodeValue()`) to walk the `FabricValue` tree and produce a
 `JsonCodecValue` tree, then stringifies it. The `decode()` method parses
 the JSON string, then calls a private decode walker (`#decodeValue()`) to
-walk the `JsonCodecValue` tree and reconstruct modern runtime types. The
+walk the `JsonCodecValue` tree and reconstruct runtime types. The
 recursive descent and codec dispatch are entirely internal to `JsonCodecEngine`.
 
 ### 4.5 Codecs, the Registry, and Internal Tree Walking

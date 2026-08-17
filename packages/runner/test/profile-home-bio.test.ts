@@ -1,11 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
 import { fromFileUrl } from "@std/path";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 
 // CT-1648: profiles carry an owner-authored free-text `bio`. It starts empty,
 // is written ONLY through the authorized `setBio` handler (owner-protected like

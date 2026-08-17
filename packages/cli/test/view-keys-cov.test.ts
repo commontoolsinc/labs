@@ -113,7 +113,7 @@ Deno.test("decode: CSI function keys P/Q/R/S map to f1-f4", () => {
 });
 
 Deno.test("decode: CSI unknown final is 'unknown'", () => {
-  // ESC [ X (0x58) — not a modelled final.
+  // ESC [ X (0x58) — not a modeled final.
   assertEquals(only(raw(0x1b, 0x5b, 0x58)).name, "unknown");
 });
 
@@ -161,7 +161,7 @@ Deno.test("decode: tilde function keys f1-f12", () => {
 });
 
 Deno.test("decode: tilde unknown code is 'unknown'", () => {
-  // ESC [ 9 9 ~ — code 99 is not modelled.
+  // ESC [ 9 9 ~ — code 99 is not modeled.
   const k = only(raw(0x1b, 0x5b, 0x39, 0x39, 0x7e));
   assertEquals(k.name, "unknown");
 });
@@ -186,7 +186,7 @@ Deno.test("decode: SS3 function keys P/Q/R/S map to f1-f4", () => {
 });
 
 Deno.test("decode: SS3 unknown final is 'unknown'", () => {
-  // ESC O X (0x58) — not a modelled SS3 final.
+  // ESC O X (0x58) — not a modeled SS3 final.
   assertEquals(only(raw(0x1b, 0x4f, 0x58)).name, "unknown");
 });
 

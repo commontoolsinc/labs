@@ -4,12 +4,13 @@
 // can tell a clean migration from data loss.
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
+
 import {
   resolveMemoryEngineStoreRootUrl,
   resolveSpaceStoreUrl,
 } from "@commonfabric/memory/v2/storage-path";
+import { Database } from "@db/sqlite";
 
 import {
   clonePaths,

@@ -1,6 +1,4 @@
-import { CFAutocomplete } from "./cf-autocomplete.ts";
-
-import { type AutocompleteItem } from "./cf-autocomplete.ts";
+import { type AutocompleteItem, CFAutocomplete } from "./cf-autocomplete.ts";
 
 if (!customElements.get("cf-autocomplete")) {
   customElements.define("cf-autocomplete", CFAutocomplete);

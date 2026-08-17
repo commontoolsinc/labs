@@ -1,6 +1,7 @@
 /**
  * Tests for CFButton component
  */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { CFButton } from "./index.ts";

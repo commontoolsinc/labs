@@ -1,23 +1,24 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
+
 import { Identity } from "@commonfabric/identity";
 import type { Entity } from "@commonfabric/memory/interface";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { TYPE } from "../src/builder/types.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
+import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   type ExperimentalOptions,
   Runtime,
   type RuntimeOptions,
 } from "../src/runtime.ts";
-import { TYPE } from "../src/builder/types.ts";
 import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "../src/scheduler.ts";
-import { setSchedulerDependencies } from "../src/scheduler/dependency-updates.ts";
-import { toMemorySpaceAddress } from "../src/link-utils.ts";
-import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import type {
   Action,
   ErrorWithContext,
@@ -25,6 +26,7 @@ import type {
   ReactivityLog,
   TelemetryAnnotations,
 } from "../src/scheduler.ts";
+import { setSchedulerDependencies } from "../src/scheduler/dependency-updates.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageNotification,

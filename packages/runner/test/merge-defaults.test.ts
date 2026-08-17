@@ -3,17 +3,18 @@
  * a merged `.default` property for use by processDefaultValue/createCell.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { describe, it } from "@std/testing/bdd";
+
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   internSchema,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
-import { mergeDefaults } from "../src/schema.ts";
+
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import { mergeDefaults } from "../src/schema.ts";
 
 /** Narrow a JSONSchema to JSONSchemaObj or fail the test. */
 function expectNontrivial(schema: JSONSchema): JSONSchemaObj {

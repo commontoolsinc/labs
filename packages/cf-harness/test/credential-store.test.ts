@@ -19,6 +19,13 @@ const credential = (
   accountId: `account-${owner}`,
 });
 
+/** Every `size`-character slice of `text`, for "quotes none of this" checks. */
+function* windows(text: string, size: number): Generator<string> {
+  for (let index = 0; index + size <= text.length; index += 1) {
+    yield text.slice(index, index + size);
+  }
+}
+
 const assertQueuedUpdateCanAbort = async (
   store: HarnessCredentialStore,
 ): Promise<void> => {
@@ -273,6 +280,32 @@ Deno.test("file credential store surfaces malformed storage without overwriting 
   );
   assertEquals(await Deno.readTextFile(path), "{malformed");
   assertEquals(store.lastValidSnapshot(), lastValid);
+});
+
+Deno.test("file credential store keeps stored bytes out of its read failure", async () => {
+  const root = await Deno.makeTempDir();
+  const path = join(root, "auth.json");
+  const refreshToken = "rt-EXTREMELY-SECRET-REFRESH-VALUE";
+  const store = new FileHarnessCredentialStore({ path });
+  await store.set("local", "openai-codex", credential("local", refreshToken));
+  // Unquoting the token is what an external truncation looks like to the
+  // parser: it fails on the token itself, so the token is what it quotes back.
+  const corrupted = (await Deno.readTextFile(path)).replace(
+    `"${refreshToken}"`,
+    refreshToken,
+  );
+  await Deno.writeTextFile(path, corrupted);
+
+  const error = await assertRejects(
+    () => store.get("local", "openai-codex"),
+    Error,
+    "failed to read credential store",
+  );
+  assertEquals(error.message.includes(refreshToken), false, error.message);
+  const echoed = [...windows(corrupted, 8)].filter((window) =>
+    error.message.includes(window)
+  );
+  assertEquals(echoed, [], `error echoed stored bytes: ${error.message}`);
 });
 
 Deno.test("file credential store rejects malformed owners and expiries fail-closed", async () => {

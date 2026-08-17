@@ -9,6 +9,7 @@
  * displayed lines may be a rendered projection. The diff source (in
  * `diffedit.ts`) maps the single editable text back onto the files it touches.
  */
+
 import type { Document, Line, ViewMode } from "./model.ts";
 import type { DiffHunk, DiffModel } from "./diff.ts";
 import type { LineEndingProvenance } from "./editbuffer.ts";
@@ -39,7 +40,7 @@ export type RevertScope = "chunk" | "file" | "message" | "all";
  * `removedAt` is the `@@` header a join took out, also a line of the
  * pre-expansion text, or null when nothing joined. Revealing the last file line
  * between two hunks leaves them touching, and a header between lines that are
- * neighbours in the file describes nothing: the two become one hunk.
+ * neighbors in the file describes nothing: the two become one hunk.
  *
  * So a line `n` of the pre-expansion text is afterwards at
  * `n + (n >= insertedAt ? inserted : 0) - (removedAt !== null && n > removedAt ?
@@ -62,7 +63,7 @@ export interface ExpandResult {
 /** How much context a hunk can still reveal each way, and what stops it where it
  * cannot: `atFileTop` / `atFileBottom` say the hunk's range reaches the file's
  * first or last line, so a zero there is the file running out. A zero without
- * one is the neighbouring hunk butting against it, with nothing in between. */
+ * one is the neighboring hunk butting against it, with nothing in between. */
 export interface HunkRoom {
   up: number;
   down: number;
@@ -114,11 +115,11 @@ export interface EditableSource {
   /** Build an incremental highlighter seeded with `text`, for live highlighting
    * whose cost tracks the size of each edit rather than the whole document. The
    * session re-baselines it on the deferred re-parse. When present it is used in
-   * preference to {@link highlight}. `seedLines` is the already-rendered colour
+   * preference to {@link highlight}. `seedLines` is the already-rendered color
    * of `text` (the current document's lines): a source that cannot recompute a
-   * line's colour cheaply on its own — a diff, whose colouring needs the
+   * line's color cheaply on its own — a diff, whose coloring needs the
    * workspace files — reuses it for the unchanged lines so only edited lines are
-   * recoloured. */
+   * recolored. */
   createHighlighter?(
     text: string,
     seedLines?: readonly Line[],

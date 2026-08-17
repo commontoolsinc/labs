@@ -1,17 +1,22 @@
 import { assertEquals, assertThrows } from "@std/assert";
+
 import ts from "typescript";
-import { transformCfDirective } from "../src/mod.ts";
+
+import { CFC_CANONICAL_ALIAS_NAMES } from "../src/cfc-authoring.ts";
+import {
+  CrossStageState,
+  SchemaInjectionTransformer,
+  transformCfDirective,
+} from "../src/mod.ts";
+import type { CfcPolicyCompilerManifestV1 } from "../src/mod.ts";
+import { compileCfcPolicyManifestsForSource } from "../src/transformers/cfc-policy-authoring.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import {
   transformFiles,
   transformSource,
   validateFiles,
   validateSource,
 } from "./utils.ts";
-import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
-import { CFC_CANONICAL_ALIAS_NAMES } from "../src/cfc-authoring.ts";
-import { CrossStageState, SchemaInjectionTransformer } from "../src/mod.ts";
-import type { CfcPolicyCompilerManifestV1 } from "../src/mod.ts";
-import { compileCfcPolicyManifestsForSource } from "../src/transformers/cfc-policy-authoring.ts";
 
 function normalizePrintedNode(
   node: ts.Node,

@@ -36,7 +36,7 @@
  * them would red every pattern edit while saying nothing about data; every
  * other key is compared, `$NAME` included. Excluding those NAMES is not enough
  * on its own — a `map`-body hoist is a recorded instantiation whose whole
- * result is a vnode, under no `$UI` — so a rendering is recognised by shape
+ * result is a vnode, under no `$UI` — so a rendering is recognized by shape
  * too, wherever it sits. What a root holds at a cell or stream position is
  * compared as the DOCUMENT it points at, so a field that moved to a different
  * doc is still a finding.

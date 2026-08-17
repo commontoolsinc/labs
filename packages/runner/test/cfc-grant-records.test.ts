@@ -1,19 +1,16 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
-import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { preparedDigestFor } from "../src/cfc/canonical.ts";
+import { type CfcConfClause, clausesEqual } from "../src/cfc/clause.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
 import type { CfcGrantResolverQuery } from "../src/cfc/exchange-eval.ts";
-import {
-  buildCfcPolicySnapshot,
-  type CfcPolicyRecordInput,
-  type ExchangeRule,
-} from "../src/cfc/policy.ts";
 import {
   CFC_GRANT_ABSENT_DIGEST,
   CFC_GRANT_ID_PREFIX,
@@ -25,15 +22,19 @@ import {
   prepareCfcGrantWrite,
   verifyCfcGrantDocument,
 } from "../src/cfc/grants.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import {
+  buildCfcPolicySnapshot,
+  type CfcPolicyRecordInput,
+  type ExchangeRule,
+} from "../src/cfc/policy.ts";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import type { PreparedDigestInput } from "../src/cfc/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
-import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
-import { preparedDigestFor } from "../src/cfc/canonical.ts";
-import type { PreparedDigestInput } from "../src/cfc/types.ts";
-import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import type { JSONSchema } from "../src/builder/types.ts";
-import { clausesEqual } from "../src/cfc/clause.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-grant-records");
 

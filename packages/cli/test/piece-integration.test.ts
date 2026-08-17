@@ -1,10 +1,13 @@
-// Integration tests for `cf piece get` against a live toolshed. The suite
-// runs when API_URL names a running toolshed (as in the CI cli-integration
-// jobs) and is skipped otherwise. A throwaway identity keyfile and space are
-// created per run. Run locally with:
-//   API_URL=http://localhost:8000 deno test --allow-net --allow-ffi \
-//     --allow-read --allow-write --allow-env --allow-run \
-//     test/piece-integration.test.ts
+/**
+ * Integration tests for `cf piece get` against a live toolshed. The suite
+ * runs when API_URL names a running toolshed (as in the CI cli-integration
+ * jobs) and is skipped otherwise. A throwaway identity keyfile and space are
+ * created per run. Run locally with:
+ *   API_URL=http://localhost:8000 deno test --allow-net --allow-ffi \
+ *     --allow-read --allow-write --allow-env --allow-run \
+ *     test/piece-integration.test.ts
+ */
+
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";

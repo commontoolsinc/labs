@@ -130,12 +130,37 @@ export function lookupSchemaDocument(
 // on the next ask.
 const completeClosures = new Set<string>();
 
+// Monotonic count of external-resolution misses: bumped whenever a `cid:`
+// resolution fails because the document is unregistered or its closure is
+// incomplete. Derived caches snapshot it around a derivation and memoize
+// only when it did not move — the exact "computed over a hole" hazard, at
+// the cost of two integer reads instead of a schema walk whose first call
+// visits every dormant `$defs` body. Never reset: the comparison is
+// equality of snapshots, and a registry clear only makes misses more
+// likely, never less.
+let externalResolutionMisses = 0;
+
+/** Records a `cid:` resolution miss (see {@link externalResolutionMissCount}). */
+export function noteExternalResolutionMiss(): void {
+  externalResolutionMisses++;
+}
+
+/**
+ * The monotonic external-resolution miss count. A computation that
+ * snapshots this before running and observes the same value after ran
+ * without any `cid:` resolution miss, so its result was not computed over
+ * an absent schema document and is safe to memoize.
+ */
+export function externalResolutionMissCount(): number {
+  return externalResolutionMisses;
+}
+
 /**
  * Whether every external ref `schema` carries has a fully registered
- * closure. Trivially true for a schema with no external refs. Derived
- * caches keyed by schema identity (`schemaHasIfc`'s memo, `schemaAtPath`'s)
- * consult this before memoizing: a verdict computed while part of the
- * closure was absent must not outlive the closure's arrival.
+ * closure. Trivially true for a schema with no external refs. Note the
+ * first call for a schema identity walks the whole schema, dormant
+ * `$defs` bodies included — derived caches guard their memoization with
+ * the miss counter above instead.
  */
 export function isExternalClosureComplete(
   schema: JSONSchema | undefined,

@@ -1,5 +1,7 @@
-import ts from "typescript";
 import { assertEquals } from "@std/assert";
+
+import ts from "typescript";
+
 import {
   shouldLowerLogicalExpression,
   shouldRewriteCollectionMethod,

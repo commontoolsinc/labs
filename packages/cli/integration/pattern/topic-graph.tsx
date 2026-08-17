@@ -66,7 +66,7 @@ interface TopicGraphOutput {
   topics: TopicEntry[];
   topicCount: number;
   /** Reciprocal edges, derived at read time and never persisted — topic id →
-   * ids of the topics whose `references` name it (this fixture's analogue of
+   * ids of the topics whose `references` name it (this fixture's analog of
    * the topics board's crossrefs). */
   referencedBy: Record<string, string[]>;
   createTopic: Stream<CreateTopicEvent, CreateTopicResult>;

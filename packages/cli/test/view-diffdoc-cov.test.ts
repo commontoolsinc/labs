@@ -646,7 +646,7 @@ Deno.test("buildDiffDocument: a missing model entry inside the hunk body is skip
   ];
   const model = craftedModel(lines, 0, 2, 4);
   const { doc } = buildDiffDocument(text, model, NO_WS);
-  // The hunk loop skips the entry-less body line (no diff colouring); it keeps
+  // The hunk loop skips the entry-less body line (no diff coloring); it keeps
   // only the default plain span the top-level "other" pass assigned.
   assertEquals(
     doc.lines[4].spans.map((s) => s.cls),

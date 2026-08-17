@@ -5,6 +5,7 @@
  * covers recording around them. Run by assert-diagnostics.test.ts, which
  * expects the failures; it is not a pattern under test.
  */
+
 import { action, assert, pattern, TESTS } from "commonfabric";
 import Subject from "./subject.tsx";
 

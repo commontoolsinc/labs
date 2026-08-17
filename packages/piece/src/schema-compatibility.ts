@@ -66,7 +66,19 @@ type ActivePairsByRoot = WeakMap<
   WeakMap<object, WeakMap<object, WeakSet<object>>>
 >;
 
-const ANNOTATION_KEYS = new Set([
+/**
+ * The keywords a schema comparison may ignore: they annotate a schema without
+ * constraining the values it admits, so adding or removing one across a piece
+ * update proves nothing about compatibility either way.
+ *
+ * Exported because a second reader classifies keywords and would otherwise
+ * keep its own copy of this list. What it says is which keywords are
+ * validation-neutral **to this checker**; it is not a statement about what any
+ * other consumer of a schema does with a key, and a reader that acts on one —
+ * the runner reserves three `$comment` values as traversal control markers —
+ * has to settle that against that consumer rather than against this set.
+ */
+export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   "$comment",
   "$defs",
   "$id",
@@ -487,9 +499,48 @@ const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
 /** Whether inserting defaults below this schema leaves its own constraints true. */
 function schemaIsStableUnderDescendantDefaults(schema: JSONSchema): boolean {
   if (typeof schema !== "object" || schema === null) return true;
-  return Object.keys(schema).every((key) =>
-    DEFAULT_STABLE_SCHEMA_KEYS.has(key)
-  );
+  return Object.keys(schema).every((key) => {
+    if (DEFAULT_STABLE_SCHEMA_KEYS.has(key)) return true;
+    return (key === "anyOf" || key === "oneOf") &&
+      alternativesDeclareDisjointTypes(schema[key]!);
+  });
+}
+
+/**
+ * Whether composition branches can never change membership after descendant
+ * defaults are inserted because their accepted top-level types do not overlap.
+ */
+function alternativesDeclareDisjointTypes(
+  alternatives: readonly JSONSchema[],
+): boolean {
+  const declared = alternatives.map((alternative) => {
+    if (alternative === false) return [] as string[];
+    if (alternative === true) return undefined;
+    const types = schemaTypes(alternative);
+    return types === undefined || types.includes("unknown")
+      ? undefined
+      : [...types];
+  });
+  if (declared.some((types) => types === undefined)) return false;
+  for (let left = 0; left < declared.length; left++) {
+    for (let right = left + 1; right < declared.length; right++) {
+      if (
+        declared[left]!.some((leftType) =>
+          declared[right]!.some((rightType) =>
+            leftType === rightType ||
+            leftType === "number" && rightType === "integer" ||
+            leftType === "integer" && rightType === "number" ||
+            leftType === "object" &&
+              isFabricPrimitiveSchemaType(rightType) ||
+            isFabricPrimitiveSchemaType(leftType) && rightType === "object"
+          )
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function objectSubsetIssue(
@@ -1102,7 +1153,18 @@ function schemaHasUnsafeMaterializedDefault(
   if (activeForPath.has(schema)) return false;
   activeForPath.add(schema);
   try {
-    if (unstable && Object.hasOwn(schema, "default")) return true;
+    // A default on this schema replaces this schema's value. Constraints on
+    // this same node (for example `anyOf` beside `default`) validate that
+    // replacement directly; they are not ancestors that descendant insertion
+    // can perturb. Fail only when a strict ancestor can observe the inserted
+    // value, or when the same-node default is itself invalid.
+    if (
+      Object.hasOwn(schema, "default") &&
+      (unstableAncestor ||
+        !schemaProvidesValidDefault(schema, resolution.root))
+    ) {
+      return true;
+    }
 
     const children: JSONSchema[] = [];
     for (

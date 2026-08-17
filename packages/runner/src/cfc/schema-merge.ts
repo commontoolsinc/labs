@@ -1,13 +1,14 @@
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import type { CfcConfClause } from "./clause.ts";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   isObjectOrArray,
   isReadonlyObjectOrArray,
 } from "@commonfabric/utils/types";
+
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
+import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";

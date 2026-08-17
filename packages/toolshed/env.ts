@@ -1,5 +1,6 @@
-import { z } from "zod";
 import * as Path from "@std/path";
+
+import { z } from "zod";
 
 // Parse CLI args for --port (needed because deno --watch doesn't pass env vars)
 function parseCliArgs(): Record<string, string> {

@@ -1,15 +1,16 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import type { CellScope, FabricValue, JSONSchema } from "../builder/types.ts";
-import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { findAndInlineDataUriLinks } from "../data-uri.ts";
 import {
   isFabricDataUri,
   valueFromDataUri,
 } from "@commonfabric/data-model/data-uri-codec";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import type { CellScope, FabricValue, JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import type { CfcAddress } from "./types.ts";
+import { findAndInlineDataUriLinks } from "../data-uri.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
+import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { CfcAddress } from "./types.ts";
 
 type UiContractTrustRequirements = {
   trustedPattern?: string;

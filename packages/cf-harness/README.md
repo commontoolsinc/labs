@@ -54,6 +54,8 @@ What works today:
   - `edit_file`
   - `write_file`
   - `delegate_task`
+  - `describe_handle` (shape of a handle's referent, never its value; see
+    [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
 - targeted exact-string edits plus whole-file replace/create and append writes
@@ -67,8 +69,8 @@ What works today:
 - interactive chat NDJSON stdio transport with opt-in SQLite session, turn, and
   event persistence
 - single-child subagent delegation with fresh child prompt context, explicit
-  default/browser/web_fetch/web_search child profiles, retained child run
-  references, and a sanitized summary/state return channel
+  default/browser/web_fetch/web_search/pattern-author child profiles, retained
+  child run references, and a sanitized summary/state return channel
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
@@ -118,8 +120,9 @@ network confinement model.
   device login, refresh-token rotation, live model discovery, resume, and
   owner-bound Loom integration
 - a session-local address handle table: deterministic short `cfh:a:` tokens for
-  cell addresses, minted per run, recorded in run state, and carried across
-  `--resume-run`; see
+  cell addresses, minted per run, recorded in run state, carried across
+  `--resume-run`, and seeded into a subagent's own table by the delegation that
+  names them; see
   [Session-local address handles](#session-local-address-handles)
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` together) that compiles and runs a pattern against a deployed
@@ -130,9 +133,8 @@ network confinement model.
 What is not done yet:
 
 - real runner-driven CFC feedback integration
-- session handle coverage beyond the wired seams: denial-path tool messages,
-  cross-agent handle semantics for `delegate_task` arguments, and value handles
-  (`cfh:v:`)
+- session handle coverage beyond the wired seams: denial-path tool messages, and
+  value handles (`cfh:v:`)
 - richer opaque-handle/pass-through behavior outside schema-validated subagent
   returns, including an explicit release/readback mechanism
 - first-class browser operation policy on top of the provisional browser
@@ -348,11 +350,28 @@ binding existed are deliberately not resumable through the local adapter; it
 fails closed instead of guessing which credential home or billing route created
 them.
 
+Batch argv is a prompt run and nothing else. `--help` and
+`--describe-capabilities` answer without reading provider or auth state; every
+other argv is bound and executed, so argv led by a CLI subcommand — `auth`,
+`config`, `models`, `whoami` — is rejected as `invalid-request` rather than
+billed as a prompt whose text happens to read like a command. Run those against
+the cf-harness CLI itself. The leading token is what decides, so positional
+prompt text opening on one of those four words is refused the same way; pass it
+through `--prompt` to send it as prompt text.
+
 Batch startup failures are one `cf-harness.host-failure` JSON object on stderr.
 Interactive startup failures remain on the NDJSON chat protocol so hosts that do
-not consume stderr still receive the stable provider error code. Run state,
-manifests, reports, child manifests, and structured batch results record only
-provider, the non-secret auth-source label, and the fixed owner reference.
+not consume stderr still receive the stable provider error code. Those failures
+carry `retryable` in HTTP's `Retry-After` sense — set only where waiting alone
+can clear the blocker, which among startup blockers means an unreachable
+provider and nothing else. An unauthenticated or unconfigured provider needs
+someone to act before a retry means anything, so it stays unset, as does a host
+that broke unexpectedly and cannot say. A failure is `invalid-request` only
+while the argv and the recorded binding are still being checked; once a run
+starts being built, an infrastructure fault reports `internal-error`, so a host
+can keep a retry policy keyed on the code. Run state, manifests, reports, child
+manifests, and structured batch results record only provider, the non-secret
+auth-source label, and the fixed owner reference.
 
 Hosted or multi-user Loom must not reuse this single-user adapter. A trusted
 multi-user host must instead:
@@ -586,12 +605,106 @@ bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
 except for `delegate_task`, whose arguments reach the child verbatim, so a token
-there is inert text. And a sealed subagent structured-return string whose raw
-value names an address comes back as a token rather than an opaque `@link`
-object; the return's `linkedStringCount` counts only the positions still sealed.
-Denial-path tool messages are not swapped; that coverage, cross-agent handle
-semantics, value handles, and an explicit release/readback mechanism are listed
+there is inert text to the parent boundary. And a sealed subagent
+structured-return string whose raw value names an address comes back as a token
+rather than an opaque `@link` object; the return's `linkedStringCount` counts
+only the positions still sealed. Denial-path tool messages are not swapped; that
+coverage, value handles, and an explicit release/readback mechanism are listed
 in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+#### Inspecting a handle's shape
+
+A token says nothing about what it refers to, and an agent that holds several
+cannot tell one from another by looking. `describe_handle` closes that gap
+without opening the data: given a token, it reports the recorded schema and the
+path segments of the referent — what field of what piece the token names — and
+never the value. It does not dereference the cell, and it needs no fabric
+session, so it is available in every run that has handles at all.
+
+```json
+{
+  "token": "cfh:a:k7m2q",
+  "known": true,
+  "hasSchema": true,
+  "schema": {
+    "type": "object",
+    "properties": { "doubled": { "type": "number" } }
+  },
+  "path": ["doubled"]
+}
+```
+
+Schemas are captured where they are already free rather than fetched, and only
+from the harness's own work: a `run_pattern` result reference carries the
+compiled pattern's result schema, which compilation produced anyway. Such an
+entry is marked `schemaSource: "harness"`, and that mark is what
+`describe_handle` discloses. A mint never takes a schema off the reference it is
+handed and never reads a cell to fill one in, so `hasSchema: false` means the
+shape was never free to capture, not that the referent has none. A token the
+run's table does not hold comes back `known: false` rather than as an error,
+since a token from another run simply names nothing here. A session-backed
+schema fetch — reading a referent's declared schema without reading its value —
+is a possible extension, and would arrive with a provenance of its own to answer
+for.
+
+Disclosing shape is a policy-governed read, and the current default is
+permissive: any run holding the token gets an answer. That is the same ground
+declassification stands on elsewhere — for a cell whose pattern this harness
+compiled and ran, the shape is ours to state — and it is the contract patterns
+already work under internally: you cannot see the data, you can only describe
+the data flow. The dial belongs beside the other observation boundaries, and
+moving it is a policy change rather than a redesign.
+
+What is not permissive is what counts as a schema worth reporting. Property
+names are a channel — whoever writes them chooses the words — so a schema that
+arrived with data is never disclosed, and none is ever recorded from one. An
+entry carrying a schema with no harness provenance reads as shapeless.
+
+Shape is what makes a chain of steps checkable. An orchestrator that passes a
+reference from one step to the next can confirm the reference is the kind of
+thing the next step expects — before it runs, and without reading the data
+flowing through it.
+
+#### Handles across a delegation
+
+A child resolves the parent's tokens through its own boundary, against a table
+the delegation seeds. When the parent delegates, the tokens written into the
+`goal` and `context` are looked up in the parent's table, and each entry that
+resolves is copied verbatim — same token, same reference — into a fresh table
+salted with the child's run id. Nothing else crosses. A token the parent held
+but did not write into the delegation is not in the child's table, so the child
+cannot resolve it; it stays the inert text an unknown token always is. This is
+the privilege boundary: what a subagent can reach by reference is exactly what
+its delegation handed it, and the decomposition structure is therefore the
+opacity structure.
+
+Copying entries verbatim keeps a reference stable across the hierarchy. Minting
+looks up by address, so a child minting a handle for a seeded address gets the
+parent's token back, and the same address is the same token in both runs.
+
+Returns come back the other way. The child's final text is resolved through the
+child's table into canonical references, and the parent's ordinary outbound swap
+mints those into parent tokens. A seeded address mints to the token the parent
+already holds, so a token the child echoes round-trips unchanged. An address
+only the child ever saw — a `run_pattern` result cell it created, say — becomes
+a new entry in the parent's table and reaches the parent as a token the parent
+can pass straight back into its own tools. The child's raw tokens never appear
+in parent-facing text.
+
+Whatever still looks like a token after that resolution is scrubbed to fixed
+inert text, irreversibly. The two tables share a token grammar but not a salt,
+and the parent's table is the larger one, so token-shaped text a child writes
+for itself would otherwise cross the boundary untouched — the child's table
+resolves nothing, and the parent's outbound pass swaps addresses rather than
+tokens — and then resolve in the PARENT's table, naming an entry the delegation
+deliberately withheld. A token the child holds legitimately has already become
+an address by that point, so the scrub costs nothing real.
+
+A `default`- or `pattern-author`-profile subagent inherits the parent's fabric
+session, so it can call `run_pattern` itself, under the same gate as the parent:
+with no session configured the tool is absent from the child's surface rather
+than present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles
+do not offer it.
 
 ### Running patterns against a Fabric space
 
@@ -615,7 +728,10 @@ configuration error naming the missing flags. The same holds under an explicit
 allowlist: `--allow-tool run_pattern` without the three session flags is a
 configuration error, and the tool is never offered to the model without a
 session. `--fabric-space` accepts a space name or a `did:key`, and
-`--describe-capabilities` reports `runPattern` among its features.
+`--describe-capabilities` reports `runPattern` among its features. The `default`
+and `pattern-author` profiles are offered the tool under the same gate and work
+through the parent's session; the `browser`, `web_fetch`, and `web_search`
+profiles never receive it.
 
 `run_pattern` executes on the trusted host side — it never enters the docker
 sandbox. The session (a `PiecesController` against the deployed API) is built
@@ -652,7 +768,19 @@ pieces yet.
 A successful run returns `{ status: "ok", resultRef }` to the model, where
 `resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
 the schema-sanitized `value` (with `linkedStringCount`) when `resultSchema` was
-given. The ordinary outbound swap turns `resultRef` (and any link strings inside
+given. `resultSchema` is how a caller reads what the pattern computed: without
+one there is no `value` at all, and with one the inert positions the schema
+models — numbers, booleans, `enum` and `const` strings — come back as
+themselves, while unconstrained strings and anything unmodeled come back as
+opaque links. The result is measured as it arrived: the framework's own result
+keys (`$NAME`, `$UI` and the other rendering variants) are named to the
+sanitizer as reserved, so a schema describing only the computed fields does not
+have to declare them and does not lose its numbers to the whole-object seal an
+unmodeled key would otherwise cause. Reserved only excuses a key from the
+unmodeled-key rules: one the schema does model — through a `$ref` or a
+combinator branch as readily as at the top level — is measured against what the
+schema says about it and kept, and one it does not model is dropped rather than
+shown. The ordinary outbound swap turns `resultRef` (and any link strings inside
 `value`) into `cfh:a:` tokens at the model boundary, and the ordinary inbound
 swap resolves such a token passed back through `inputs`; the tool itself carries
 no handle code. The persisted tool-output artifact keeps the raw reference, the
@@ -854,6 +982,124 @@ observations stay in child artifacts, and the parent receives only the sanitized
 subagent return channel. Because this profile overrides the parent model, parent
 `--reasoning-effort` and `--prompt-cache-mode` settings remain on
 model-inheriting loops and do not apply to the search child.
+
+The `pattern-author` profile is where Common Fabric pattern source gets written
+and run. Its child receives `run_pattern` (under the ordinary fabric-session
+gate), plus `read_file`, `bash`, and `read_skill_resource` for reading existing
+patterns and documentation in the workspace, and `describe_handle` for the shape
+of the references it was handed. It receives neither `write_file` nor
+`edit_file`: pattern source goes inline into `run_pattern`'s `sourceText`, and
+the deliverable is a result reference rather than a file. When the run has a
+skill registry, the child preloads the `pattern-dev` and `pattern-schema` skills
+from it. That preload is best-effort — a run whose skills root does not carry
+them, or that configures no skills root at all, still gets the same child with
+the same tools, just without the preloaded guidance.
+
+The profile carries its own turn budget of 24, in place of the default subagent
+cap of 8. Authoring is a write, compile-error, fix loop and each iteration costs
+a turn; at the default the loop runs out before a non-trivial pattern compiles,
+and a child that ran out of turns has nothing to return. A delegation may still
+name its own `maxModelTurns`, bounded by the same maximum of 64 every profile
+is.
+
+The profile also carries a return contract, applied to any `pattern-author`
+delegation that declares no `returnSchema` of its own — so no such delegation is
+unstructured:
+
+```json
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "resultRef": { "type": "string" },
+        "describes": { "type": "string" }
+      },
+      "required": ["ok", "resultRef", "describes"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean", "const": false },
+        "code": {
+          "type": "string",
+          "enum": [
+            "compile-error",
+            "turn-budget-exhausted",
+            "schema-mismatch",
+            "missing-input-shape",
+            "unsupported-request",
+            "other"
+          ]
+        },
+        "detail": { "type": "string" }
+      },
+      "required": ["ok", "code"],
+      "additionalProperties": false
+    }
+  ]
+}
+```
+
+Success and failure are different shapes, not different prose. A child that
+cannot produce a working pattern — the compile loop does not converge, the task
+is impossible against the references it holds, its turns run out — returns the
+failure branch, and a failure carries no `resultRef` at all. That is what stops
+a failed delegation from being answered with some other step's reference: the
+parent reads `ok`, and a reference exists only on the branch that produced one.
+
+The failure branch says why in a fixed vocabulary rather than in prose. A `code`
+is inert by construction — one of a closed set, carrying nothing read out of a
+space — so it survives sanitization as itself and the parent learns why without
+any declassification. The optional `detail` elaborates in free text and reaches
+the parent as an opaque link, which is the right treatment: the code is the
+actionable part, and the detail is for a reader entitled to open it. The
+free-form `describes` string on the success branch travels the same way; the
+discriminant, the `code`, and the minted `resultRef` token are what the parent
+acts on.
+
+`ok: false` is heard as a failure whatever else about a child's return is
+malformed. When a return says it failed but does not fit the declared schema,
+the parent gets `structuredReturn.status: "child-reported-failure"` carrying
+`failureCode`, not a schema complaint — a child that correctly reports failure
+is never turned into a validation error. A `failureCode` is recorded on a
+validating `ok: false` return too, so the code reaches the parent by the same
+name either way.
+
+The same discipline is what the parent-facing guidance asks of any delegation:
+declare the return shape up front, say what the child should do when it cannot
+succeed, and treat a returned reference as meaningful only together with the
+contract it satisfied. `describe_handle` is how the parent checks that a
+returned reference is the shape the next step needs.
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --fabric-api-url https://toolshed.example/ \
+  --fabric-identity ~/.cf/agent.pkcs8 \
+  --fabric-space my-space \
+  --skills-root labs/skills \
+  --allow-subagent-profile pattern-author \
+  --prompt "Answer the question about my space by delegating a pattern to a pattern-author child."
+```
+
+The division of labour is the point. Pattern syntax is expensive to learn from
+the repository and cheap to preload, so a root agent that pays for it once per
+question runs out of turns before it runs a pattern. The root stays an
+orchestrator: it holds the addresses, decides what to compute, and delegates.
+The child holds the pattern knowledge: it writes the source, owns the write,
+compile-error, fix loop against `run_pattern`, and returns the result reference
+plus a short inert description.
+
+Neither side reads the data. The references a delegation hands the child are
+addresses to wire into the pattern as `run_pattern` inputs, not values to fetch
+and transcribe, and the child's return is a reference for the same reason. The
+handle machinery makes that work in both directions: a token the parent writes
+into the goal is seeded into the child's table and resolves inside the child's
+own `run_pattern` call, and the result reference the child returns arrives at
+the parent as a token the parent can pass straight into its next `run_pattern`.
 
 Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
 object or boolean. In that mode the child is required to return a single JSON

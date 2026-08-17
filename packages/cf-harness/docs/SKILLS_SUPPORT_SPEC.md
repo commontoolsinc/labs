@@ -584,6 +584,14 @@ Current rule:
   registry. It exposes `read_skill_resource` and `run_skill_script` in the child
   and allowlists the non-credentialed bundled `agent-browser` browser workflow
   scripts.
+- The `pattern-author` profile activates `pattern-dev` and `pattern-schema` and
+  exposes `read_skill_resource` in the child.
+- Profile-scoped skill preload is best-effort against the run's registry. A
+  profile names the skills its child works best with, while the skills root is
+  configured per run; the child preloads whichever of them the registry carries
+  and runs without the rest. A skills root missing a profile's skills yields a
+  weaker child, not a failed delegation. Caller-requested `--skill` preload is
+  unchanged: an unknown name there is still an error.
 - Browser-profile skill scripts run through the host process runner because they
   need the host `agent-browser` CLI. This is profile-scoped host execution, not
   a general parent-run script mode.

@@ -1,3 +1,7 @@
+import { assert, assertThrows } from "@std/assert";
+
+import * as ed25519 from "@noble/ed25519";
+
 import {
   NativeEd25519Signer,
   NativeEd25519Verifier,
@@ -7,10 +11,8 @@ import {
   NobleEd25519Verifier,
 } from "../src/ed25519/noble.ts";
 import { didToBytes, isNativeEd25519Supported } from "../src/ed25519/utils.ts";
-import { assert, assertThrows } from "@std/assert";
-import { bytesEqual } from "./utils.ts";
 import { DIDKey } from "../src/interface.ts";
-import * as ed25519 from "@noble/ed25519";
+import { bytesEqual } from "./utils.ts";
 
 type SignerImpl<ID extends DIDKey> =
   | NativeEd25519Signer<ID>

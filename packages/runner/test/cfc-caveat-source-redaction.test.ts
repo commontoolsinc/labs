@@ -1,10 +1,12 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+
 import {
   type CfcLabelView,
   redactCaveatSourcesForDisplay,
 } from "../src/cfc/label-view.ts";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 
 // Audit item 28b (inv-12): the pattern-facing introspection surface
 // (`getCfcLabel()` → `handleCellGetCfcLabel`) must not surface `Caveat.source`

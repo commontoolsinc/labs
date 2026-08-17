@@ -6,6 +6,7 @@
  * runs without a real terminal. A separate test exercises the real deps' thin
  * wrappers.
  */
+
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument } from "./view-helpers.ts";
@@ -152,7 +153,7 @@ Deno.test("pager: unknown named files schedule no semantic work", async () => {
   assertEquals(timers.size, 0);
 });
 
-Deno.test("pager: with colour, matches the terminal background to the status bar and restores it", async () => {
+Deno.test("pager: with color, matches the terminal background to the status bar and restores it", async () => {
   // A redraw (the 'j' scroll) in its own read precedes the quit, so the frame is
   // drawn again inside the loop.
   const { deps, writes } = makeFake({
@@ -167,9 +168,9 @@ Deno.test("pager: with colour, matches the terminal background to the status bar
   );
   const all = writes.join("");
   const set = term.setDefaultBg(ui.statusBar.bg!);
-  // OSC 11 sets the terminal default background to the status bar colour, and it
+  // OSC 11 sets the terminal default background to the status bar color, and it
   // is re-asserted on every frame so a terminal that drops it cannot leave a
-  // strip in its own colour; OSC 111 restores it on exit.
+  // strip in its own color; OSC 111 restores it on exit.
   assert(all.includes(set), "set the default background");
   assert(all.split(set).length - 1 >= 2, "re-asserted on redraw");
   assert(all.includes("\x1b]111\x07"), "restored the default background");

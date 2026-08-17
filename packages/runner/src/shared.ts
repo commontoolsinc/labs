@@ -34,6 +34,7 @@ export {
 } from "./sigil-types.ts";
 export {
   CHIP_UI,
+  FRAMEWORK_RESULT_KEYS,
   type JSONSchema,
   type JSONValue,
   NAME,

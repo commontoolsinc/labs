@@ -63,6 +63,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 ## Shipped or superseded designs and decision records
 
 - [action-id-per-instance-decision.md](specs/action-id-per-instance-decision.md) — per-instance action identity.
+- [projection-key-classification.md](plans/projection-key-classification.md) — the four-tier classification of `--schema` projection keywords, the rule that the projection reader never hands the read boundary a schema it did not construct, and the survival rule for a source-derived `required`, August 2026.
 - [declared-verb-results-case.md](plans/declared-verb-results-case.md) — the case for carrying a verb's declared result on `module.resultSchema` in the interim rather than waiting for the Fabric-types stream; decided yes, conditionally, August 2026.
 - [cfc-render-membership-lookup.md](specs/cfc-render-membership-lookup.md) — render-time space-membership lookup.
 - [cfc-s16-default-transition-design.md](specs/cfc-s16-default-transition-design.md) — S16 default-label transition.
@@ -83,6 +84,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Investigations, journals, and working notes
 
+- [development/2026-08-verbs-arc-claims-that-failed-measurement.md](development/2026-08-verbs-arc-claims-that-failed-measurement.md) — twelve load-bearing claims about the verbs arc that were false when measured, three measurement tools that produced transcripts indistinguishable from success, and what the failures had in common: every one was a restatement rather than a fresh reading, and none was caught by a mechanism.
 - [2026-08-lunch-poll-join-name-fill-timeout.md](development/debugging/2026-08-lunch-poll-join-name-fill-timeout.md) — why the lunch poll's intermittent `#lp-join-name` fill timeout is not a fill-helper problem: the field never renders because the "Continue as guest" handler's write does not reach the rendered view, and settling the view before the fill does not change it. Includes a local reproduction, August 2026.
 - [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md) — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
 - [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md) — verification that the December 2025 survey's Bug 3 (Counter values rendering as raw `$alias` objects when instantiated via `fetchAndRunPattern`) does not reproduce; the dynamically-compiled render path resolves reactive and computed values correctly, July 2026.

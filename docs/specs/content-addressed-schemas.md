@@ -141,10 +141,20 @@ Because the external refs are part of a document's content, the reference
 closure is a Merkle DAG: the root document's hash pins the exact content of
 every document reachable from it.
 
+An embedded schema ref — a URL in the runtime's static embedded-schema
+table, such as the renderer's
+`https://commonfabric.org/schemas/vnode.json` — is an allowed leaf inside
+a document. Every realm resolves it from the same table, so it hashes as
+ordinary document content and contributes nothing to the closure. The
+embedded table is transitional: the expectation is that its residents
+retire in favor of ordinary `cid:` documents, at which point the table
+goes with them, while documents already carrying the URLs keep resolving
+until then.
+
 Decomposition refuses input it cannot represent faithfully — a `$ref`
-outside the `#/$defs/<name>` and external vocabularies, a dangling local
-ref, a nested `$defs` scope, the deprecated `definitions` keyword, the
-resource-scope keywords (`$id`, `$anchor`, `$dynamicAnchor`,
+outside the `#/$defs/<name>`, external, and embedded vocabularies, a
+dangling local ref, a nested `$defs` scope, the deprecated `definitions`
+keyword, the resource-scope keywords (`$id`, `$anchor`, `$dynamicAnchor`,
 `$dynamicRef`, and the 2019-09 pair `$recursiveAnchor` and
 `$recursiveRef`, whose scoping the rewrite cannot preserve), and an
 external
@@ -279,6 +289,25 @@ a mismatched document is rejected and never enters the registry. Because
 external refs are hash-covered content, verifying each document
 individually verifies the whole closure against the root reference.
 
+The same identity check is the class test. `cid:` holds more document
+classes than schema documents — blobs among them — and a delivery site
+cannot name the class of a directly pulled document, so a document is a
+schema document exactly when its id is the schema interning of its
+value. Anything that passes is byte-for-byte usable as the schema
+document that id names; anything else is another class, not a rejection
+to warn about.
+
+Content-addressed documents are immutable at the commit boundary: the
+server rejects a `delete` or `patch` of any `cid:` document, whatever
+its class, and rejects a `set` that is neither the first installation
+nor byte-identical to the stored content — conflicting sets of one id
+within a single commit included — because a deleted or altered
+dependency would invalidate every document referencing it. An
+idempotent re-`set` of the same content is how writers install closures
+and stays legal, and a sync frame's removes are watch-result removals,
+not deletions. The commit API therefore cannot create a broken closure
+at all; one that exists anyway is database corruption.
+
 Resolution demands the whole closure: a registered document whose
 transitive closure is not fully registered resolves as a miss, exactly
 like an unregistered document. Resolving it partially would let derived
@@ -307,21 +336,44 @@ exactly two guarantees, both about delivery rather than about values:
   does not hold — the guarantee is the only path through the API.
 - **The read-side guarantee.** A query result is self-sufficient: every
   schema reference embedded in delivered documents resolves within the
-  delivered set. The traversal loader collects each referenced closure
-  from the traversed space (reads at the canonical `"space"` scope,
-  tracked into the query result and watch set), and a schema whose closure
-  the space does not hold selects nothing — the gate sits at the two
-  places a schema enters a traversal, the selector and a link, and
-  availability is closure-transitive, so interior resolution needs no
-  per-lookup scoping. Selecting by an uncollectable schema would produce a
-  result whose shape the receiving client could never reproduce from what
-  arrives.
+  delivered set. Enforcement sits at the result-assembly boundary: after
+  traversal establishes the documents being delivered, the server scans
+  each complete document — a link schema anywhere in its value, or a
+  delivered schema document's own refs — verifies each referenced
+  closure against the delivering space's own store, and joins the whole
+  closure to the delivered set and watch set. A missing or forged
+  closure document fails the query loudly: the write-side guarantee
+  installed closures with their referrers, so a hole is a consistency
+  bug to surface, never to repair around. Scans are document-granular
+  (delivery is), so no selected path can shadow another, and their
+  results are cached per document version, so in steady state a version
+  is scanned once however many sessions or refreshes deliver it.
+  Traversal keeps its own gate where a schema enters it — the selector
+  and a link: a schema whose closure the space does not hold selects
+  nothing, since selecting by an uncollectable schema would produce a
+  result whose shape the receiving client could never reproduce from
+  what arrives.
 
-The recovery path repairs per-space presence when the guarantees meet a
-hole: the loader's reads are tracked (arrival re-runs the reader), the
-missing-target kick requests the fetch, and the arrival-time dependency
-chase and `syncSchemaDocumentClosure` complete a closure within their own
-space — never satisfied by realm-registry presence alone.
+Arrival mirrors the assembly pass rather than trusting it: BEFORE a frame
+applies, every schema ref its documents embed — a registered `cid:`
+schema document's own refs, or a link schema anywhere in an ordinary
+document's value — must reach a document the prospective frame or the
+stored replica holds whose content passes the identity check. Verified
+content, never mere presence: a forged local copy fails even when the
+realm registry holds a valid twin from another space, and content that
+changes under a previously verified `cid:` id fails outright. A broken
+ref rejects the frame whole, with the replica untouched. The repair
+paths that do exist serve callers, not arrival: the traversal loader's
+reads are tracked (arrival re-runs the reader), the missing-target kick
+requests the fetch, and `syncSchemaDocumentClosure` completes a closure
+by hash within its own space — never satisfied by realm-registry
+presence alone.
+
+Walking delivered values is a transitional cost: the intended end state
+moves each document's embedded-ref information into a meta field
+maintained at write time, so assembly consults an index instead of
+scanning content, with the per-version scan cache bounding the cost
+until then.
 
 Outside a traversal — direct runtime resolution of an already-read
 schema — a reader MAY reuse an identical, hash-verified schema another
@@ -338,21 +390,40 @@ question would make the write-side guarantee server-checked as well.
 
 The server's shared traversal already follows the `cfc.schemaHash` seam by
 synthesizing a `cid:` link and adding the document to the query result and
-watch set (`cfcMetaToSigilLink` / `loadMetaLinkedDocs`). This generalizes:
+watch set (`cfcMetaToSigilLink` / `loadMetaLinkedDocs`). Beyond that seam,
+delivery and traversal split the work in two layers:
 
-- A link or selector schema that is an external reference contributes a
-  synthesized link to its root schema document.
-- A schema document's own external refs contribute synthesized links to
-  their targets — the one place `cid:` documents recurse. Today traversal
-  deliberately does not recurse into `cid:` documents; schema documents
-  relax that for schema-document targets only, and the DAG property plus
-  per-(identity, schema) cycle detection bounds the walk.
+- **Traversal** loads the closure where a schema enters it — the selector
+  and a link — because resolution during the traversal needs the
+  documents at hand, and its availability gate (a schema whose closure
+  the space does not hold selects nothing) lives on the same reads.
+  Traversal does not recurse into `cid:` documents.
+- **Result assembly** owns delivery: it scans every complete document the
+  query delivers, verifies each referenced closure against the space's
+  own store, and joins it to the delivered set and watch set — failing
+  the query on a hole. A refresh revalidates the established delivery
+  state too, so a corrupted dependency fails even under an unchanged
+  referrer. Because the commit boundary makes `cid:` documents
+  immutable, an assembly failure can only mean corruption outside the
+  commit API — a tampered store, a pre-immutability hole — never a
+  transient condition: an initial query fails with the error, an
+  established session's watch is terminated loudly (a terminal
+  `session/revoked`, its graph state discarded whole), every other
+  session's fan-out proceeds untouched, and nothing holds, retries, or
+  repairs automatically.
 
 A client that syncs a document therefore receives the schema documents for
 every link it contains in the same round trip, keeping the "resolved means
 locally available" property. Schema documents are immutable, so their
 presence in watch sets is quiet; whether they deserve a fetch-once path
 instead is an open question shared with all `cid:` documents.
+
+Scan results are cached per document version and engine, so in steady
+state a version is scanned once however many sessions deliver it, and
+closure verification memoizes per version the same way. The caches hold
+one version per document and are bounded with wholesale eviction, so
+alternating queries over historical versions, or a working set past the
+bound, can rescan.
 
 On the wire, a reference-bearing link is already small; the sync schema
 table (`schema-ref@2:`) skips reference-only schema positions. Schema

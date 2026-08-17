@@ -156,7 +156,7 @@ describe("Schema: CFC authoring aliases", () => {
       type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
 
       interface SchemaRoot {
-        labelled: Writable<Confidential<string, readonly ["prompt-influence"]>>;
+        labeled: Writable<Confidential<string, readonly ["prompt-influence"]>>;
       }
     `;
 
@@ -165,10 +165,10 @@ describe("Schema: CFC authoring aliases", () => {
       new SchemaGenerator().generateSchema(type, checker),
     );
 
-    const labelled = schema.properties?.labelled as any;
-    expect(labelled.type).toBe("string");
-    expect(labelled.asCell).toEqual(["cell"]);
-    expect(labelled.ifc?.confidentiality).toEqual(["prompt-influence"]);
+    const labeled = schema.properties?.labeled as any;
+    expect(labeled.type).toBe("string");
+    expect(labeled.asCell).toEqual(["cell"]);
+    expect(labeled.ifc?.confidentiality).toEqual(["prompt-influence"]);
   });
 
   // The collection/opaque aliases below are NOT canonical (the helpers were

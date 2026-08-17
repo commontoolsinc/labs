@@ -1,11 +1,17 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
 import {
   bigintFromMinimalTwosComplement,
   bigintFromUnpaddedBase64url,
   bigintToMinimalTwosComplement,
   bigintToUnpaddedBase64url,
 } from "@commonfabric/utils/bigint";
+
 import {
   bigintFromMtcDirect,
   bigintToMtcDirect,
@@ -14,10 +20,6 @@ import {
   bigintFromMtcHex,
   bigintToMtcHex,
 } from "../src/bigint-uint8-hex-string.ts";
-import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "@commonfabric/utils/base64url";
 
 //
 // Reference encoder

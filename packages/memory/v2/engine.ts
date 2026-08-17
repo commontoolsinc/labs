@@ -1,5 +1,6 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatchToDocument,
@@ -5144,6 +5145,49 @@ const applyCommitTransaction = (
     principal,
     sessionId,
   });
+
+  // Content-addressed documents are immutable: the content under a `cid:`
+  // id can never change, so deleting or patching one is a protocol
+  // violation regardless of document class — a deleted or altered
+  // dependency would invalidate every document referencing it — and a
+  // `set` must be the first installation or byte-identical to what is
+  // stored (an idempotent re-`set` is how writers install closures).
+  // Conflicting sets of one id within a single commit are equally
+  // rejected, so the commit API cannot create this corruption at all.
+  // `SessionSync.removes` are watch-result removals, not deletions, and
+  // are unaffected.
+  let cidSetsInCommit: Map<string, unknown> | null = null;
+  for (const operation of commit.operations) {
+    if (operation.op === "sqlite") continue;
+    if (!operation.id.startsWith("cid:")) continue;
+    if (operation.op === "delete" || operation.op === "patch") {
+      throw new ProtocolError(
+        `memory v2 commit cannot ${operation.op} content-addressed document ${operation.id}`,
+      );
+    }
+    const priorInCommit = cidSetsInCommit?.get(operation.id);
+    if (priorInCommit !== undefined) {
+      if (!deepEqual(priorInCommit, operation.value)) {
+        throw new ProtocolError(
+          `memory v2 commit carries conflicting sets of content-addressed document ${operation.id}`,
+        );
+      }
+      continue;
+    }
+    const stored = read(engine, {
+      id: operation.id,
+      branch,
+      scope: operation.scope,
+      principal,
+      sessionId,
+    });
+    if (stored !== null && !deepEqual(stored, operation.value)) {
+      throw new ProtocolError(
+        `memory v2 commit cannot change content-addressed document ${operation.id}`,
+      );
+    }
+    (cidSetsInCommit ??= new Map()).set(operation.id, operation.value);
+  }
 
   if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
     return applySchedulerObservationBatchCommit(engine, {

@@ -1,11 +1,13 @@
 #!/usr/bin/env -S deno run -A
 
 import { assertEquals } from "@std/assert";
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
+
+import app from "../../toolshed/app.ts";
 
 const createRuntime = (identity: Identity, base: URL) =>
   new Runtime({

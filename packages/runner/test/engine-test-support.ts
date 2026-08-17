@@ -13,7 +13,7 @@ export type { RuntimeProgram } from "../src/harness/types.ts";
 
 export const signer = await Identity.fromPassphrase("test operator");
 
-// All authored modules' compiled CommonJS bodies, joined — the ESM analogue of
+// All authored modules' compiled CommonJS bodies, joined — the ESM analog of
 // the old single-bundle `jsScript.js` for transformer-output assertions.
 export const joinedBodies = (graph: CompiledModuleGraph): string =>
   [...graph.compiledBodies.values()].join("\n");

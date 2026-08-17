@@ -1,20 +1,23 @@
-// A CTS-authored `action<Event, Result>` verb, compiled through the real
-// pipeline (`patternManager.compilePattern` → js-compiler → CTS transformers →
-// SES evaluation), delivers its returned value into the event receipt under
-// the `plainResultReceipts` experimental flag (default-on since the flip) —
-// the composition of this
-// package's plain-return projection (scheduler-event-receipts.test.ts, which
-// exercises only the raw trusted-builder `handler`) with the api's declared-
-// result authoring surface. This is the readback half of WS-C's exit
-// criterion, pinned at the runner in addition to the end-to-end fixture
-// (docs/history/plans/pattern-verb-contract-implementation.md, D4).
-//
-// The incidental-cell-return case pins the receipt write's conversion: `set()`
-// returns its cell for chaining, so an expression-body
-// `action(() => cell.set(...))` returns a live Cell. The receipt write goes
-// through the cell's standard write flow, so that return is recorded as a LINK
-// to the mutated cell — receipts reflect what was returned (a raw write fails
-// the whole handling on the live object instead).
+/**
+ * A CTS-authored `action<Event, Result>` verb, compiled through the real
+ * pipeline (`patternManager.compilePattern` → js-compiler → CTS transformers →
+ * SES evaluation), delivers its returned value into the event receipt under
+ * the `plainResultReceipts` experimental flag (default-on since the flip) —
+ * the composition of this
+ * package's plain-return projection (scheduler-event-receipts.test.ts, which
+ * exercises only the raw trusted-builder `handler`) with the api's declared-
+ * result authoring surface. This is the readback half of WS-C's exit
+ * criterion, pinned at the runner in addition to the end-to-end fixture
+ * (docs/history/plans/pattern-verb-contract-implementation.md, D4).
+ *
+ * The incidental-cell-return case pins the receipt write's conversion: `set()`
+ * returns its cell for chaining, so an expression-body
+ * `action(() => cell.set(...))` returns a live Cell. The receipt write goes
+ * through the cell's standard write flow, so that return is recorded as a LINK
+ * to the mutated cell — receipts reflect what was returned (a raw write fails
+ * the whole handling on the live object instead).
+ */
+
 import {
   afterEach,
   beforeEach,

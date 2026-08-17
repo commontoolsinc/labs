@@ -7,6 +7,7 @@
  * through `compilerStack()`, which throws — loudly, with the fix — when a
  * flow forgot its ensure. Boot-path code must do neither.
  */
+
 import type * as CompilerStackModule from "./compiler-stack.ts";
 
 export type CompilerStack = typeof CompilerStackModule;

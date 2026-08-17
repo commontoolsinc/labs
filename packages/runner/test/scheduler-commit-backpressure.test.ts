@@ -18,6 +18,14 @@
 //   6. Three array appends survive a conflict storm so the durable count reaches
 //      three (the profile-append bug in miniature).
 
+import { defer } from "@commonfabric/utils/defer";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+
+import { resolveLink } from "../src/link-resolution.ts";
+import {
+  computeBackoffDelayMs,
+  resolveCommitBackpressure,
+} from "../src/scheduler/backpressure.ts";
 import {
   afterEach,
   beforeEach,
@@ -37,13 +45,6 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { defer } from "@commonfabric/utils/defer";
-import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
-import { resolveLink } from "../src/link-resolution.ts";
-import {
-  computeBackoffDelayMs,
-  resolveCommitBackpressure,
-} from "../src/scheduler/backpressure.ts";
 
 type TransactMessage = { requestId: string };
 type TransactResponse = {

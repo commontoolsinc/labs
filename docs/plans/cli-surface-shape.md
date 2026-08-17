@@ -106,8 +106,9 @@ with the address suffix (`--select 'topic@,topic.title'`), and leaves "shape"
 free as the word for what a caller asks for — covering both spellings rather
 than competing with one of them.
 
-Timing argues for doing it now: `piece call` does not have either form yet, so
-splitting them costs one deprecation on a flag that is still young.
+Both spellings are carried on every command that reads — `piece get`,
+`piece call`, `wish` and `exec` — and a command naming both is refused rather
+than resolved, because it has not said which shape it wants.
 
 **What a reader may not supply, in either syntax.** `asCell`, `default`,
 `scope`, and `ifc` stay the source's — they decide how a value is treated, not

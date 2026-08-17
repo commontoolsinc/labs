@@ -11,14 +11,15 @@
  */
 
 import { assertEquals } from "@std/assert";
-import { WorkerReconciler } from "../src/worker/reconciler.ts";
-import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
 
-import type { VDomOp } from "../src/vdom-ops.ts";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime, UI } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import type { VDomOp } from "../src/vdom-ops.ts";
+import { WorkerReconciler } from "../src/worker/reconciler.ts";
+import type { WorkerRenderNode, WorkerVNode } from "../src/worker/types.ts";
 
 /**
  * Helper to collect ops emitted by the reconciler.

@@ -1,6 +1,11 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
+import { pieceId, SlugResolutionError } from "@commonfabric/piece";
 import {
   type Cell,
   getCellOrThrow,
@@ -14,10 +19,28 @@ import {
   newLoopbackServer,
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
-import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { cf, checkStderr, stripAnsi } from "./utils.ts";
+
+import { toCell } from "../../runner/src/back-to-cell.ts";
+import { setResultCell } from "../../runner/src/result-utils.ts";
+import {
+  checkPieceSourceFromCommand,
+  formatPatternIdentity,
+  formatPatternRef,
+  localPatternEntry,
+  mergePiecePath,
+  normalizeApiUrl,
+  parseLink,
+  parsePieceOptions,
+  parseSpaceOptions,
+  piece,
+  setPieceSourceFromCommand,
+} from "../commands/piece.ts";
+import {
+  CellSelectionError,
+  parseCellSelectionOptions,
+  parseSelectionFilter,
+  parseSelectionProjection,
+} from "../lib/cell-selection.ts";
 import {
   checkPiecePattern,
   getCellValue,
@@ -35,29 +58,8 @@ import {
   type SpaceConfig,
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
-import { pieceId, SlugResolutionError } from "@commonfabric/piece";
-import { setResultCell } from "../../runner/src/result-utils.ts";
-import { toCell } from "../../runner/src/back-to-cell.ts";
-import {
-  checkPieceSourceFromCommand,
-  formatPatternIdentity,
-  formatPatternRef,
-  localPatternEntry,
-  mergePiecePath,
-  normalizeApiUrl,
-  parseLink,
-  parsePieceOptions,
-  parseSpaceOptions,
-  piece,
-  setPieceSourceFromCommand,
-} from "../commands/piece.ts";
 import { safeStringify } from "../lib/render.ts";
-import {
-  CellSelectionError,
-  parseCellSelectionOptions,
-  parseSelectionFilter,
-  parseSelectionProjection,
-} from "../lib/cell-selection.ts";
+import { cf, checkStderr, stripAnsi } from "./utils.ts";
 
 const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
@@ -386,6 +388,33 @@ describe("cli piece parsing", () => {
       piece: LLM_HANDLE,
       embeddedSpaces: [SPACE_DID],
     });
+  });
+
+  it("parseSpaceOptions() takes the space a canonical reference carries when --space is absent", () => {
+    const base = { apiUrl: API_URL, identity: ID };
+    expect(parseSpaceOptions({
+      ...base,
+      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+    })).toMatchObject({
+      space: SPACE_DID,
+      piece: LLM_HANDLE,
+      embeddedSpaces: [SPACE_DID],
+    });
+    // The scope suffix and embedded path ride the same space-carrying token.
+    expect(parsePieceOptions(
+      { ...base, piece: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0` },
+      { acceptsPath: true },
+    )).toMatchObject({
+      space: SPACE_DID,
+      piece: LLM_HANDLE,
+      pieceScope: "user",
+      piecePath: ["items", 0],
+    });
+    // A reference that names no space supplies none: the requirement stands.
+    expect(() => parseSpaceOptions({ ...base, piece: `/${LLM_HANDLE}` }))
+      .toThrow(/--space/);
+    expect(() => parseSpaceOptions({ ...base, piece: PIECE }))
+      .toThrow(/--space/);
   });
 
   it("parsePieceOptions() throws on incomplete input", () => {

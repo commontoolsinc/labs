@@ -8,12 +8,14 @@
  * nothing.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import type { JSONSchema, SchemaPathSelector } from "@commonfabric/api";
-import { watchIdForEntry } from "../src/storage/v2.ts";
-import { normalizeSyncSelector } from "../src/storage/v2-watch.ts";
 import type { MIME, URI } from "@commonfabric/memory/interface";
+
+import { normalizeSyncSelector } from "../src/storage/v2-watch.ts";
+import { watchIdForEntry } from "../src/storage/v2.ts";
 
 const MALFORMED: [label: string, schema: JSONSchema][] = [
   ["additionalProperties holds null", {

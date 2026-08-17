@@ -165,3 +165,91 @@ Deno.test("a valid set still reads back after the validation batteries", async (
     assertEquals(read(engine, { id: "of:fid1:ok" } as never), { value: 7 });
   });
 });
+
+Deno.test("rejects deleting or patching a content-addressed document", async () => {
+  await withEngine((engine) => {
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [setOp("cid:fid1:immutable", { type: "string" })],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(2, {
+            operations: [{ op: "delete", id: "cid:fid1:immutable" } as never],
+          }),
+        }),
+      ProtocolError,
+      "cannot delete content-addressed document",
+    );
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(3, {
+            operations: [
+              { op: "patch", id: "cid:fid1:immutable", patches: [] } as never,
+            ],
+          }),
+        }),
+      ProtocolError,
+      "cannot patch content-addressed document",
+    );
+    // An idempotent re-set stays legal: it is how writers install closures.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(4, {
+        operations: [setOp("cid:fid1:immutable", { type: "string" })],
+      }),
+    });
+  });
+});
+
+Deno.test("rejects a set that changes a content-addressed document", async () => {
+  await withEngine((engine) => {
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [setOp("cid:fid1:settled", { type: "string" })],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(2, {
+            operations: [setOp("cid:fid1:settled", { type: "number" })],
+          }),
+        }),
+      ProtocolError,
+      "cannot change content-addressed document",
+    );
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(3, {
+            operations: [
+              setOp("cid:fid1:conflicted", { type: "string" }),
+              setOp("cid:fid1:conflicted", { type: "number" }),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "conflicting sets of content-addressed document",
+    );
+    // Identical duplicate sets within one commit are the idempotent case.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(4, {
+        operations: [
+          setOp("cid:fid1:duplicated", { type: "boolean" }),
+          setOp("cid:fid1:duplicated", { type: "boolean" }),
+        ],
+      }),
+    });
+  });
+});

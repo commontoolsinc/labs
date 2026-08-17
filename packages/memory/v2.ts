@@ -1,20 +1,20 @@
-import {
-  type EntityRef,
-  getModernCellRepConfig,
-} from "@commonfabric/data-model/cell-rep";
-import {
-  fabricFromJsonValue,
-  jsonFromFabricValue,
-} from "@commonfabric/data-model/codecs";
-import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type {
   FabricPlainObject,
   FabricValue,
   SchemaPathSelector,
 } from "@commonfabric/api";
+import {
+  type EntityRef,
+  getModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import { isObjectNotArray } from "@commonfabric/utils/types";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
+import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;
 export const DEFAULT_BRANCH = "" as const;
@@ -819,7 +819,7 @@ export type SessionRevokedMessage = {
   type: "session/revoked";
   space: string;
   sessionId: SessionId;
-  reason: "taken-over" | "unauthorized";
+  reason: "taken-over" | "unauthorized" | "schema-closure-violation";
 };
 
 export type V2Error = {

@@ -1,11 +1,7 @@
-import {
-  createSchedulerTestRuntime,
-  describe,
-  disposeSchedulerTestRuntime,
-  expect,
-  it,
-  space,
-} from "./scheduler-test-utils.ts";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
+import type { NormalizedFullLink } from "../src/link-utils.ts";
+import type { Runtime } from "../src/runtime.ts";
 import {
   mintEventId,
   scopeCallerEventId,
@@ -14,11 +10,16 @@ import {
   dropQueuedEvent,
   queueSchedulerEvent,
 } from "../src/scheduler/events.ts";
-import type { NormalizedFullLink } from "../src/link-utils.ts";
-import type { Runtime } from "../src/runtime.ts";
 import type { QueuedEvent } from "../src/scheduler/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import {
+  createSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  it,
+  space,
+} from "./scheduler-test-utils.ts";
 
 const eventLink: NormalizedFullLink = {
   id: "of:event-stream",

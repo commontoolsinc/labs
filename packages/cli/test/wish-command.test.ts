@@ -11,6 +11,7 @@ import {
 } from "../commands/wish.ts";
 import { setQuietMode } from "../commands/piece.ts";
 import type { WishReadConfig, WishReadResult } from "../lib/wish.ts";
+import { CellSelectionError } from "../lib/cell-selection.ts";
 import { withEnv } from "./utils.ts";
 
 // Drives the `cf wish` action body in-process with a stubbed readWish/exit
@@ -18,8 +19,12 @@ import { withEnv } from "./utils.ts";
 // shaping, JSON output and the error/exit paths are covered without a live
 // server. The wish resolution itself is covered in test/wish.test.ts.
 
-/** Stub readWish that records the config and returns a canned result. */
-function stubDeps(result: WishReadResult): {
+/**
+ * Stub readWish that records the config and returns a canned result, or
+ * rejects with `throws` — the shape a selection that fails against what the
+ * wish resolved to arrives in.
+ */
+function stubDeps(result: WishReadResult, throws?: Error): {
   deps: WishCommandDeps;
   calls: WishReadConfig[];
   exits: number[];
@@ -30,6 +35,7 @@ function stubDeps(result: WishReadResult): {
     deps: {
       readWish: (config: WishReadConfig) => {
         calls.push(config);
+        if (throws) return Promise.reject(throws);
         return Promise.resolve(result);
       },
       exit: (code: number) => {
@@ -187,6 +193,40 @@ describe("cf wish command action", () => {
     expect(errors.join("\n")).toContain("No profile exists yet");
   });
 
+  it("reports a malformed selection through the exit seam, not Deno.exit", async () => {
+    const { deps, calls, exits } = stubDeps({ result: { name: "Ada" } });
+
+    const errors = await captureStderr(() =>
+      captureStdout(() =>
+        wishAction({ ...BASE_OPTIONS, filter: "" }, "#profile", deps)
+      ).then((out) => expect(out).toBe(""))
+    );
+
+    // Reaching the assertions at all is half the point: a direct `Deno.exit`
+    // on this path takes the test runner down rather than failing, so an
+    // earlier version of it could not be covered from here.
+    expect(exits).toEqual([1]);
+    expect(errors.join("\n")).toContain("--filter predicate must not be empty");
+    // Refused before the wish was issued, so no read was attempted.
+    expect(calls).toEqual([]);
+  });
+
+  it("reports a selection that fails against the target through the seam", async () => {
+    const { deps, exits } = stubDeps(
+      { result: null },
+      new CellSelectionError("kept nothing over the target"),
+    );
+
+    const errors = await captureStderr(() =>
+      captureStdout(() =>
+        wishAction({ ...BASE_OPTIONS, select: "absent" }, "#profile", deps)
+      ).then((out) => expect(out).toBe(""))
+    );
+
+    expect(exits).toEqual([1]);
+    expect(errors.join("\n")).toContain("kept nothing over the target");
+  });
+
   it("wish.parse routes missing config through cliffy as exit 1", async () => {
     // Drives the registered .action() through cliffy's parser: with no
     // identity/api-url configured the ValidationError becomes help output and
@@ -256,6 +296,51 @@ describe("cf wish command action", () => {
     expect(out).not.toContain("circular reference");
     expect(out.length).toBeLessThan(600);
     expect(exits).toEqual([]);
+  });
+
+  it("parses the read options and hands the selection to readWish", async () => {
+    const { deps, calls } = stubDeps({ result: { name: "Ada" } });
+    await captureStdout(() =>
+      wishAction(
+        { ...BASE_OPTIONS, quiet: true, select: "name,bio", filter: undefined },
+        "#profile",
+        deps,
+      )
+    );
+
+    // The parsed selection, not the raw flag text: `cf wish` reads the same
+    // grammar `cf piece get` and `cf piece call` read, through the same
+    // parser, so a caller learns it once.
+    expect(calls[0].selection?.projection?.source).toBe("name,bio");
+    expect(calls[0].selection?.projection?.flag).toBe("--select");
+    expect(calls[0].selection?.filter).toBeUndefined();
+  });
+
+  it("parses --filter into the predicate the shared grammar defines", async () => {
+    const { deps, calls } = stubDeps({ result: [] });
+    await captureStdout(() =>
+      wishAction(
+        { ...BASE_OPTIONS, quiet: true, filter: '.status == "open"' },
+        "#mentionable",
+        deps,
+      )
+    );
+
+    expect(calls[0].selection?.filter?.source).toBe('.status == "open"');
+    expect(calls[0].selection?.filter?.paths).toEqual([["status"]]);
+    expect(calls[0].selection?.projection).toBeUndefined();
+  });
+
+  it("names no selection at all when no read option is given", async () => {
+    const { deps, calls } = stubDeps({ result: { name: "Ada" } });
+    await captureStdout(() =>
+      wishAction({ ...BASE_OPTIONS, quiet: true }, "#profile", deps)
+    );
+
+    // Absent rather than empty: a wish that asked for nothing reads the whole
+    // target, and an empty selection object would send it through the
+    // projection machinery for no reason.
+    expect("selection" in calls[0]).toBe(false);
   });
 
   it("--allow-empty prints null and does not exit on an empty result", async () => {

@@ -40,7 +40,7 @@ import {
 const signer = await Identity.fromPassphrase("pattern vintage gate test");
 const KEY = "vintage-gate-subject.tsx";
 
-/** Keep the fixture representative of the CFC-labelled system roots it gates. */
+/** Keep the fixture representative of the CFC-labeled system roots it gates. */
 const PRELUDE = [
   "import { Confidential, Default, Stream, Writable, handler, pattern } from 'commonfabric';",
   "const ATOM = {",
@@ -254,7 +254,7 @@ const undeclaredTest = [
  * `system/profile-create.tsx` uses, where each profile lives in its own
  * `ProfileHome.inSpace()` space.
  *
- * The child owns its own CFC-labelled root in that space, so the fixture has to
+ * The child owns its own CFC-labeled root in that space, so the fixture has to
  * CARRY that space and the replay has to READ the child's root out of it. Get
  * either wrong and the read finds a fresh empty space, today's source
  * materializes onto it, and the entry counts as updated cleanly.
@@ -593,7 +593,7 @@ describe("the vintage gate, end to end", () => {
     // well; the root then reads as something. Every check the replay makes
     // passes, the pattern counts as covered, and NOTHING was replayed.
     //
-    // Measured that it is the real behaviour and not a worry: with the
+    // Measured that it is the real behavior and not a worry: with the
     // identity control removed, this case goes green while the rest of the
     // file stays green too — no other assertion here can see it.
     const dir = `${roots.vintagesRoot}/${KEY}/${PINNED}`;
@@ -786,7 +786,7 @@ describe("the vintage gate, end to end", () => {
     // The filename records which pattern version wrote the state. A fixture
     // whose manifest holds only other identities is not the state its name
     // claims — provenance and content disagreeing, which makes every later
-    // judgement about it meaningless.
+    // judgment about it meaningless.
     await captureMissing(
       roots,
       [TEST_KEY],
@@ -1031,7 +1031,7 @@ describe("the vintage gate, end to end", () => {
       expect(failures.length, `${shape.name}: produced no failure`)
         .toBeGreaterThan(0);
       // EVERY failure names what to do. `remedy` is the only string that does,
-      // and it is recognisable by the delete-then-update instruction.
+      // and it is recognizable by the delete-then-update instruction.
       for (const failure of failures) {
         expect(
           failure.detail,
@@ -1478,7 +1478,7 @@ describe("the vintage gate, end to end", () => {
 
       // A synthetic replay, so the dummy fixtures above do not have to be
       // replayable: this function takes the run it should judge precisely so
-      // the judgement can be driven directly.
+      // the judgment can be driven directly.
       const outcome = await captureChangedGenerations(roots, {
         failures: [],
         perVintage: [{

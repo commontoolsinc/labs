@@ -24,13 +24,20 @@
  */
 
 import {
+  dataUriFromValue,
+  isFabricDataUri,
+  valueFromDataUri,
+} from "@commonfabric/data-model/data-uri-codec";
+import {
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
+
 import { type Cell, isCell } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,
@@ -38,13 +45,7 @@ import {
   KeepAsCell,
   parseLink,
 } from "./link-utils.ts";
-import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
-import {
-  dataUriFromValue,
-  isFabricDataUri,
-  valueFromDataUri,
-} from "@commonfabric/data-model/data-uri-codec";
 
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id

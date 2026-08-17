@@ -1,23 +1,25 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { describe, it } from "@std/testing/bdd";
+
+import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { Identity } from "@commonfabric/identity";
 import {
   clearMockResponses,
   enableMockMode,
   loadConversationFixture,
 } from "@commonfabric/llm/client";
-import type { BuiltInLLMMessage } from "@commonfabric/api";
-import { StorageManager } from "../src/storage/cache.deno.ts";
+
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { Runtime } from "../src/runtime.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
+import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { type JSONSchema } from "../src/builder/types.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 import { waitForLlmMessages } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-llm-derived-stamp");
 

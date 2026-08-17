@@ -1,56 +1,22 @@
 import { AnyCellWrapping } from "@commonfabric/api";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { getLogger } from "@commonfabric/utils/logger";
-import {
-  isObjectNotArray,
-  isObjectOrArray,
-  isReadonlyObjectOrArray,
-} from "@commonfabric/utils/types";
-import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
-import {
-  cloneIfNecessary,
-  type FabricValue,
-  shallowMutableClone,
-} from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
+  cloneIfNecessary,
   FabricInstance,
   FabricPrimitive,
+  type FabricValue,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
-import { createCell, isCell } from "./cell.ts";
-import { canFollowScopedLink } from "./scope.ts";
-import { forEachSubschema } from "./schema-walk.ts";
 import {
-  isExternalClosureComplete,
+  externalResolutionMissCount,
   onSchemaRegistryClear,
 } from "./schema-registry.ts";
-import { arrayMatchesPositionally } from "./schema-match.ts";
-import {
-  readMaybeLink,
-  resolveLink,
-  undefinedDataLink,
-} from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
-import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
-import { type Runtime } from "./runtime.ts";
-import {
-  type IMemorySpaceValueAddress,
-  type NormalizedFullLink,
-} from "./link-utils.ts";
-import {
-  createQueryResultProxy,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { toCell } from "./back-to-cell.ts";
-import { materializeSchemaView } from "./schema-view.ts";
 import {
   canBranchMatch,
   combineOptionalSchema,
@@ -61,9 +27,19 @@ import {
   mergeSchemaFlags,
   SchemaObjectTraverser,
 } from "@commonfabric/runner/traverse";
-import { ignoreReadForScheduling } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isReadonlyObjectOrArray,
+} from "@commonfabric/utils/types";
+
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { toCell } from "./back-to-cell.ts";
+import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
+import { createCell, isCell } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereference,
@@ -72,12 +48,34 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import type { CfcAddress } from "./cfc/types.ts";
-import { isCellScope } from "./scope.ts";
+import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
 } from "./cfc/schema-refs.ts";
+import type { CfcAddress } from "./cfc/types.ts";
+import {
+  readMaybeLink,
+  resolveLink,
+  undefinedDataLink,
+} from "./link-resolution.ts";
+import {
+  type IMemorySpaceValueAddress,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
+import {
+  createQueryResultProxy,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import { type Runtime } from "./runtime.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
+import { arrayMatchesPositionally } from "./schema-match.ts";
+import { materializeSchemaView } from "./schema-view.ts";
+import { forEachSubschema } from "./schema-walk.ts";
+import { canFollowScopedLink, isCellScope } from "./scope.ts";
+import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
+import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -132,6 +130,7 @@ const asCellCompoundCandidates = (
     const cached = compoundAsCellCandidatesCache.get(schema);
     if (cached !== undefined) return cached;
   }
+  const missesBefore = externalResolutionMissCount();
   const branches = [
     ...(Array.isArray(schema.anyOf) ? schema.anyOf : []),
     ...(Array.isArray(schema.oneOf) ? schema.oneOf : []),
@@ -151,11 +150,10 @@ const asCellCompoundCandidates = (
       }
     }
   }
-  // Populate only when every external ref's document closure is at hand: a
-  // branch whose cid: ref missed resolves to nothing and would be missing
-  // from a memoized candidate list forever, though the document can still
-  // arrive.
-  if (cacheable && isExternalClosureComplete(schema)) {
+  // Populate only when no `cid:` resolution missed while building: a branch
+  // whose ref missed resolves to nothing and would be missing from a
+  // memoized candidate list forever, though the document can still arrive.
+  if (cacheable && externalResolutionMissCount() === missesBefore) {
     compoundAsCellCandidatesCache.set(schema, candidates);
   }
   return candidates;
@@ -576,13 +574,15 @@ export function schemaHasIfc(
     }
     context.seenByRoot.set(rootKey, initialSeen);
   }
+  const missesBefore = externalResolutionMissCount();
   const result = _schemaHasIfcUncached(schema, fullSchema, context);
   // Populate only under a deep-frozen guard (see the invariant comment
-  // above `_hasIfcCache`), and only when every external ref's document
-  // closure is at hand — a verdict computed over an absent schema document
-  // must not outlive the document's arrival.
+  // above `_hasIfcCache`), and only when no `cid:` resolution missed while
+  // computing — a verdict computed over an absent schema document must not
+  // outlive the document's arrival.
   if (
-    isTopLevel && isDeepFrozen(schema) && isExternalClosureComplete(schema)
+    isTopLevel && isDeepFrozen(schema) &&
+    externalResolutionMissCount() === missesBefore
   ) {
     _hasIfcCache.set(schema, result);
   }

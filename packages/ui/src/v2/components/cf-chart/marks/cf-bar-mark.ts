@@ -6,6 +6,7 @@
  *
  * @element cf-bar-mark
  */
+
 import type { MarkType } from "../types.ts";
 import { MarkElement } from "./base-mark.ts";
 

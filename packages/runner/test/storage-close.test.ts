@@ -1,11 +1,13 @@
 import { assertEquals } from "@std/assert";
-import { Identity } from "@commonfabric/identity";
+
 import type { SchemaPathSelector } from "@commonfabric/api";
+import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
 import type { CellScope } from "@commonfabric/memory/v2";
-import type { Result, Unit } from "../src/storage/interface.ts";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+
+import type { Result, Unit } from "../src/storage/interface.ts";
 import type { SessionFactory } from "../src/storage/v2.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,

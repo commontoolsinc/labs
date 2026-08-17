@@ -1,7 +1,13 @@
-import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import {
+  hasDataUriScheme,
+  valueFromDataUri,
+} from "@commonfabric/data-model/data-uri-codec";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { aclDocId } from "@commonfabric/memory/acl";
+import { assert, unclaimed } from "@commonfabric/memory/fact";
 import type { Entity } from "@commonfabric/memory/interface";
-import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import {
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
@@ -12,9 +18,6 @@ import {
   type TransactionError,
   type URI,
 } from "@commonfabric/memory/interface";
-import { assert, unclaimed } from "@commonfabric/memory/fact";
-import { aclDocId } from "@commonfabric/memory/acl";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type CellScope,
   type ClientCommit,
@@ -37,34 +40,38 @@ import {
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
-import {
-  applyPatchToDocument,
-  PatchApplyError,
-} from "../../../memory/v2/patch.ts";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import type { Cell } from "../cell.ts";
+
+import {
+  applyPatchToDocument,
+  PatchApplyError,
+} from "../../../memory/v2/patch.ts";
 import type { JSONSchema } from "../builder/types.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import type { Cancel } from "../cancel.ts";
+import type { Cell } from "../cell.ts";
+import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
-import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import { isSubschema } from "../schema-walk.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import type { Cancel } from "../cancel.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
+import { normalizeCellScope } from "../scope.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
+import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
@@ -90,12 +97,6 @@ import type {
   TransactionCommitOptions,
   Unit,
 } from "./interface.ts";
-import { SelectorTracker } from "./selector-tracker.ts";
-import * as SubscriptionManager from "./subscription.ts";
-import {
-  getDirectTransactionMergeableOpAddresses,
-  getDirectTransactionReadActivities,
-} from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
   isMergeableOpRead,
@@ -105,6 +106,27 @@ import {
   notifyCommitRejected,
   recordCoverageWait,
 } from "./reactivity-log.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
+import * as SubscriptionManager from "./subscription.ts";
+import {
+  getDirectTransactionMergeableOpAddresses,
+  getDirectTransactionReadActivities,
+} from "./transaction-inspection.ts";
+import { toTransactionDocumentValue } from "./v2-document.ts";
+import {
+  createStorageAddressResolver,
+  RemoteSessionFactory,
+  type SessionFactory,
+  storageAddressForHost,
+  toWebSocketAddress,
+} from "./v2-remote-session.ts";
+import * as V2Transaction from "./v2-transaction.ts";
+import {
+  compactWatchEntries,
+  normalizeSyncEntries,
+  normalizeSyncSelector,
+  watchIdForEntry,
+} from "./v2-watch.ts";
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
 // part of the write; that read is dropped from its conflict set.
@@ -135,24 +157,6 @@ const isArrayLengthChildPath = (
   path.length === arrayPath.length + 1 &&
   path[arrayPath.length] === "length" &&
   arrayPath.every((segment, index) => path[index] === segment);
-import { toTransactionDocumentValue } from "./v2-document.ts";
-import {
-  compactWatchEntries,
-  normalizeSyncEntries,
-  normalizeSyncSelector,
-  watchIdForEntry,
-} from "./v2-watch.ts";
-import {
-  createStorageAddressResolver,
-  RemoteSessionFactory,
-  type SessionFactory,
-  storageAddressForHost,
-  toWebSocketAddress,
-} from "./v2-remote-session.ts";
-import * as V2Transaction from "./v2-transaction.ts";
-import { normalizeCellScope } from "../scope.ts";
-import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 
 export { watchIdForEntry } from "./v2-watch.ts";
 export type { SessionFactory } from "./v2-remote-session.ts";
@@ -166,6 +170,8 @@ const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
   level: "warn",
   logCountEvery: 0,
 });
+
+const EMPTY_OVERLAY: ReadonlyMap<string, unknown> = new Map();
 
 function withCommitTiming<T>(
   keys: string[],
@@ -977,7 +983,6 @@ export class StorageManager implements IStorageManager {
             }, routeSignal),
         syncReplayDependencies: (document) =>
           this.syncCfcSchemaDocument(space, document),
-        trackPendingWork: (work) => this.trackUntilSettled(work),
         getTelemetry: () => this.#telemetry,
       });
       this.#providers.set(space, provider);
@@ -1515,8 +1520,9 @@ export class StorageManager implements IStorageManager {
    * Syncs the schema document behind `taggedHash` and, transitively, every
    * document its external refs reach, so a subsequent resolution of
    * `cid:<taggedHash>` finds a complete closure. Registration happens as
-   * each document's frame is applied (`#registerArrivedSchemaDocuments`);
-   * this helper drives the pulls and checks between them.
+   * each document's frame is validated, before any of it applies
+   * (`#validateArrivedSchemaDocuments`); this helper drives the pulls and
+   * checks between them.
    *
    * Success promises PER-SPACE VERIFIED PRESENCE: every document in the
    * closure is stored in `space` and its stored content hashes to its id.
@@ -1792,14 +1798,6 @@ type ProviderOptions = {
   syncReplayDependencies: (
     document: EntityDocument | undefined,
   ) => Promise<Error | undefined>;
-  /**
-   * Registers background work (the schema-document dependency chase) with
-   * the manager's cross-space ledger, so `synced()` awaits it to
-   * quiescence — the ledger's resolve loop re-checks after every settle,
-   * which is what lets a chased document's arrival enqueue the next chase
-   * and still be covered by one `synced()`.
-   */
-  trackPendingWork?: (work: Promise<unknown>) => void;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
 };
@@ -2203,12 +2201,6 @@ class SpaceReplica implements ISpaceReplica {
   #schedulerObservationFlushPromise:
     | Promise<Result<Unit, StorageTransactionRejected>>
     | undefined;
-  readonly #trackPendingWork?: (work: Promise<unknown>) => void;
-  // cid: schema documents seen IN THIS SPACE — arrived in a frame or already
-  // chased from here. Chase dedup keys on this, never on the realm-global
-  // registry: a document another space registered still needs syncing here,
-  // so this space's replica holds it and its watch set covers it.
-  readonly #schemaDocsSeenHere = new Set<string>();
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
@@ -2290,7 +2282,6 @@ class SpaceReplica implements ISpaceReplica {
     this.#settings = options.settings;
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
-    this.#trackPendingWork = options.trackPendingWork;
   }
 
   did(): MemorySpace {
@@ -3026,7 +3017,15 @@ class SpaceReplica implements ISpaceReplica {
       }
 
       this.#watchView = view;
-      this.applySessionSync(sync, type);
+      try {
+        this.applySessionSync(sync, type);
+      } catch (error) {
+        // The frame failed validation, so this refresh's view never gets a
+        // consumer; without a close it leaks when a later refresh
+        // overwrites `#watchView`.
+        view.close();
+        throw error;
+      }
       if (this.#updatePromises.size === 0) {
         this.#subscribedWatchView = view;
         const updates = this.consumeUpdates(view.subscribeSync())
@@ -3547,7 +3546,7 @@ class SpaceReplica implements ISpaceReplica {
   /**
    * Mark a commit's outcome as finalized and remove it from the cascade scan
    * set. Idempotent — pushCommit's finally may run after reset() already
-   * signalled a local rejection for the same entry.
+   * signaled a local rejection for the same entry.
    */
   private settleInFlightCommit(localSeq: number): void {
     const entry = this.#inFlightCommits.get(localSeq);
@@ -4243,66 +4242,128 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   /**
-   * Registers the `cid:` schema documents a sync frame delivered
-   * (`docs/specs/content-addressed-schemas.md`), and chases the unregistered
-   * documents behind each one's external refs so the closure completes
-   * without a reader having to trip over every hole in turn. Registration
-   * is hash-verified; a mismatched document is warned about and skipped —
-   * it never enters the registry, so refs to it stay unresolved. A `cid:`
-   * document that is not a schema (a blob) either fails the subschema shape
-   * check or registers harmlessly: the registry asserts content-addressed
-   * identity, nothing more.
+   * Validates the read-side delivery guarantee over a whole frame BEFORE
+   * any of it is applied (`docs/specs/content-addressed-schemas.md`), and
+   * registers the frame's schema documents: every schema ref a delivered
+   * document embeds — a registered schema document's own refs, or a link
+   * schema anywhere in an ordinary document's value — must reach a
+   * VERIFIED schema document delivered by this frame (the prospective
+   * overlay) or already stored. A broken ref throws with the replica
+   * untouched, because it is a delivery consistency bug to surface, never
+   * a hole to quietly repair; the asynchronous closure pull for callers
+   * who ask for a closure by hash lives in `syncSchemaDocumentClosure`.
+   * Direct refs suffice: a stored verified dependency was itself validated
+   * when it arrived, and a locally written one carried its closure in its
+   * own transaction. Registration is safe pre-apply — it is hash-verified
+   * and realm-global, so a rejected frame leaves only true content behind.
    *
-   * The chase syncs within this space and is handed to the manager's
-   * cross-space ledger, so `synced()` covers the whole chain.
+   * Which `cid:` documents are schema documents is decided by
+   * content-addressed identity, the classifier the server's assembly pass
+   * also uses: a document is a schema document exactly when its id is the
+   * schema interning of its value. Validation applies the same identity
+   * check to each dependency — mere presence under the id is not delivery,
+   * and a forged local copy fails even when the realm registry holds a
+   * valid twin from another space.
    */
-  #registerArrivedSchemaDocuments(upserts: SessionSync["upserts"]): void {
-    for (const upsert of upserts) {
-      if (upsert.deleted === true) continue;
+  #validateArrivedSchemaDocuments(sync: SessionSync): void {
+    const registered: [string, JSONSchema][] = [];
+    // Dependency hash → the id of the first delivered document that
+    // embeds it, for the violation report.
+    const embedded = new Map<string, string>();
+    // The prospective frame: what the replica will hold once this frame
+    // applies. Dependencies resolve against it first.
+    const overlay = new Map<string, unknown>();
+    const deletedInFrame = new Set<string>();
+    for (const remove of sync.removes) {
+      if (typeof remove.id === "string") deletedInFrame.add(remove.id);
+    }
+    for (const upsert of sync.upserts) {
       const id = upsert.id;
-      if (typeof id !== "string" || !id.startsWith("cid:")) continue;
-      const value = isObjectOrArray(upsert.doc)
-        ? (upsert.doc as { value?: unknown }).value
-        : undefined;
-      if (!isSubschema(value)) continue;
-      // Arrived means present in this space, verified or not.
-      this.#schemaDocsSeenHere.add(id.slice("cid:".length));
-      let registered: JSONSchema;
-      try {
-        registered = registerSchemaDocument(
-          id.slice("cid:".length),
-          value as JSONSchema,
-        );
-      } catch (error) {
-        logger.warn("schema-doc-reject", () => [
-          "Rejected arrived schema document (content does not match its id):",
-          id,
-          error,
-        ]);
+      if (typeof id !== "string") continue;
+      if (upsert.deleted === true) {
+        deletedInFrame.add(id);
         continue;
       }
-      for (const dep of collectExternalSchemaRefHashes(registered)) {
-        // Dedupe on THIS SPACE's history, not on the realm registry: a
-        // dependency verified elsewhere still has to exist and be watched
-        // here (the space-boundary rule in the spec).
-        if (this.#schemaDocsSeenHere.has(dep)) continue;
-        this.#schemaDocsSeenHere.add(dep);
-        const uri = `cid:${dep}` as URI;
-        const chase = this.sync(uri, { path: [], schema: false }).then(
-          (result) => {
-            // A settle without a locally stored document must not suppress
-            // the next chase: the marker means "present here", not "tried".
-            if (
-              result.error !== undefined || this.getDocument(uri) === undefined
-            ) {
-              this.#schemaDocsSeenHere.delete(dep);
-            }
-            return result;
-          },
-        );
-        this.#trackPendingWork?.(chase);
+      const doc = upsert.doc;
+      if (!isObjectOrArray(doc)) continue;
+      overlay.set(id, doc);
+      deletedInFrame.delete(id);
+      if (id.startsWith("cid:")) {
+        const value = (doc as { value?: unknown }).value;
+        const hash = id.slice("cid:".length);
+        if (
+          isSubschema(value) &&
+          internSchemaAsTaggedHashString(value as JSONSchema) === hash
+        ) {
+          registered.push([
+            id,
+            registerSchemaDocument(hash, value as JSONSchema),
+          ]);
+          // A schema document's own refs are collected below from its
+          // registered form; schema keywords such as `default` may carry
+          // link-shaped DATA, so it is not link-scanned.
+          continue;
+        }
+        // Content addressing forbids the content under an id to change:
+        // when the replica already stores content that IS the schema
+        // document this id names — however it got here, an earlier frame
+        // or a local write — an arriving copy that fails the identity
+        // check is a forged replacement, not another document class.
+        if (this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)) {
+          throw new Error(
+            `Schema document ${id} was replaced with content that does ` +
+              `not hash to its id — content under a content-addressed id ` +
+              `must never change.`,
+          );
+        }
+      }
+      mapLinkSchemas(doc as FabricValue, (schema) => {
+        for (
+          const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+        ) {
+          if (!embedded.has(hash)) embedded.set(hash, id);
+        }
+        return schema;
+      });
+    }
+    for (const [id, document] of registered) {
+      for (const dep of collectExternalSchemaRefHashes(document)) {
+        if (!embedded.has(dep)) embedded.set(dep, id);
       }
     }
+    // Validation runs after the whole frame is collected: a dependency may
+    // follow its dependent within the frame, and intra-frame order must
+    // not matter.
+    for (const [dep, referrer] of embedded) {
+      if (
+        deletedInFrame.has(`cid:${dep}`) ||
+        !this.#isVerifiedSchemaDocDelivered(dep, overlay)
+      ) {
+        throw new Error(
+          `Document ${referrer} was delivered with a broken schema ref: ` +
+            `cid:${dep} is not delivered and verified in this replica. ` +
+            `Every delivered document's refs must resolve within the ` +
+            `delivered set (docs/specs/content-addressed-schemas.md).`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Whether the prospective frame (`overlay`) or the stored replica holds
+   * content under `cid:<hash>` that IS the schema document that id names —
+   * the identity check, not presence.
+   */
+  #isVerifiedSchemaDocDelivered(
+    hash: string,
+    overlay: ReadonlyMap<string, unknown>,
+  ): boolean {
+    const doc = overlay.get(`cid:${hash}`) ??
+      this.getDocument(`cid:${hash}` as URI);
+    if (!isObjectOrArray(doc)) return false;
+    const value = (doc as { value?: unknown }).value;
+    return isSubschema(value) &&
+      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
   }
 
   private applySessionSync(
@@ -4321,6 +4382,10 @@ class SpaceReplica implements ISpaceReplica {
       this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
+
+    // Validation precedes every record mutation: a frame that fails the
+    // delivery guarantee is rejected whole, never half-installed.
+    this.#validateArrivedSchemaDocuments(sync);
 
     const touched = [
       ...sync.upserts.map((upsert) => ({
@@ -4363,10 +4428,6 @@ class SpaceReplica implements ISpaceReplica {
       record.materialized = undefined;
       this.#watchedIds.delete(docKey(id, remove.scope));
     }
-
-    // Before notifications: readers re-run on the notification, and their
-    // resolution must find the documents this frame delivered.
-    this.#registerArrivedSchemaDocuments(sync.upserts);
 
     // Parked accepts apply BEFORE the differential compare: when the frame
     // authoritatively covers a doc the session itself wrote (mixed

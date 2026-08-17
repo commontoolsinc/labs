@@ -1,4 +1,21 @@
+import {
+  type DID,
+  type Identity,
+  KeyStore,
+  type TransferrableInsecureCryptoKeyPair,
+} from "@commonfabric/identity";
+import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
+import {
+  type ErrorNotification,
+  type RuntimeClient,
+  RuntimeErrorCode,
+} from "@commonfabric/runtime-client";
+import { runtimeContext, spaceContext } from "@commonfabric/ui";
+import { provide } from "@lit/context";
+import { Task, TaskStatus } from "@lit/task";
 import { css, html, PropertyValues } from "lit";
+import { property, state } from "lit/decorators.js";
+
 import {
   AppState,
   AppStateConfigKey,
@@ -14,40 +31,24 @@ import {
   ShellApp,
 } from "../../shared/mod.ts";
 import {
+  clearRuntimeDebugGlobals,
+  type CommonfabricDebugState,
+  exposeCommonfabricGlobals,
+} from "../lib/debug-utils.ts";
+import { COMMIT_SHA, ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
+import { runtimeHostFlags } from "../lib/host-toggles.ts";
+import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
+import { shouldRecreateRuntime } from "../lib/runtime-lifecycle.ts";
+import {
+  getThemePreference,
+  type ThemePreference,
+} from "../lib/theme-preference.ts";
+import {
   BaseView,
   type Command,
   createDefaultAppState,
   SHELL_COMMAND,
 } from "./BaseView.ts";
-import {
-  type Identity,
-  KeyStore,
-  type TransferrableInsecureCryptoKeyPair,
-} from "@commonfabric/identity";
-import { property, state } from "lit/decorators.js";
-import { Task, TaskStatus } from "@lit/task";
-import {
-  type ErrorNotification,
-  type RuntimeClient,
-  RuntimeErrorCode,
-} from "@commonfabric/runtime-client";
-import { type DID } from "@commonfabric/identity";
-import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
-import { shouldRecreateRuntime } from "../lib/runtime-lifecycle.ts";
-import {
-  clearRuntimeDebugGlobals,
-  type CommonfabricDebugState,
-  exposeCommonfabricGlobals,
-} from "../lib/debug-utils.ts";
-import { runtimeContext, spaceContext } from "@commonfabric/ui";
-import { provide } from "@lit/context";
-import {
-  getThemePreference,
-  type ThemePreference,
-} from "../lib/theme-preference.ts";
-import { COMMIT_SHA, ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
-import { runtimeHostFlags } from "../lib/host-toggles.ts";
-import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
 import type { LoadError } from "./BodyView.ts";
 
 function getCommonfabricGlobal(): typeof globalThis & {

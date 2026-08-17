@@ -1190,7 +1190,7 @@ One integration test (runner-level, in-process, two "deploys"):
   follow the replay, which also loads dependencies discovered from the hinted
   data. A different-host hint can replace an operation that is waiting for a
   session. The route becomes fixed when the session accepts a stateful
-  operation for issue, even if acknowledgement later fails. Initial site-table
+  operation for issue, even if acknowledgment later fails. Initial site-table
   hydration selects the last entry for each space that contains only an HTTP or
   HTTPS origin, with no credentials, path, query, or fragment. It does not
   replace a route already accepted through IPC.

@@ -56,7 +56,7 @@ dashboard/
 collects each tile that is due (respecting its `intervalMs`), renders the
 results uniformly, mounts any drill-down routes a tile declares, and pushes new
 tile markup as each independent collection completes. Every registered tile has
-a gray placeholder labelled with its id in its registered position until its
+a gray placeholder labeled with its id in its registered position until its
 first collection completes, so slow collectors do not leave holes in the board.
 A later ticker pass skips a tile or shared workflow fetch that is still
 updating. It starts every other due collection, so pending work does not pause
@@ -642,7 +642,7 @@ Notes:
   **Only a broad, across-the-board move shifts an index.** A regression in one
   benchmark barely registers, however slow that benchmark is. The drill-down
   covers individual benchmarks. A summed total would instead be dominated by
-  the few slowest benchmarks. Each CPU has its own coloured line. The headline
+  the few slowest benchmarks. Each CPU has its own colored line. The headline
   shows the largest established CPU trend. A second line names how many
   benchmarks the latest run measured and the highlighted window when applicable.
   **Red** marks the **most recent run failing outright, or finishing green on CI
@@ -661,7 +661,7 @@ Notes:
   with nothing readable reads **no benchmark data**. A **running** badge sits in
   the header while a run is under way, wherever in the list it sits — a rerun
   keeps its original place instead of moving to the head. The badge says the
-  colour may be about to move; the runs that have finished still set it. The red
+  color may be about to move; the runs that have finished still set it. The red
   state reads the workflow-run list and the latest run's cached result. It
   therefore fires when the artifacts cannot be read. **Orange** means at least
   one CPU index is **trending up** past 5%. Each CPU trend uses the runs in the
@@ -736,9 +736,9 @@ Notes:
   - The tile drills through to the per-benchmark history behind `/bench`, which the
     tile's collection keeps warm in the background. The collection lists
     benchmark runs on main. It samples one completed run per shortest-view
-    bucket, whatever colour it finished, downloads that artifact, and unzips it
+    bucket, whatever color it finished, downloads that artifact, and unzips it
     in the process. It then reads each benchmark's timings and CPU. A run's
-    colour does not say whether it measured anything: `deno bench` exits
+    color does not say whether it measured anything: `deno bench` exits
     non-zero when one benchmark throws, having already written a complete report
     of the rest, and dropping those runs cost about a seventh of the history in
     blocks a dozen runs long. The artifact decides instead. A report without a
@@ -751,7 +751,7 @@ Notes:
     finished. Only new runs and attempts are fetched after the first fill or a
     server restart. The shortest-view buckets are about 8 minutes wide. The
     first cache fill can therefore download more artifacts.
-  - Its **runtime benchmarks** view at `/bench?view=runtime` shows one coloured
+  - Its **runtime benchmarks** view at `/bench?view=runtime` shows one colored
     line per CPU for **every** benchmark. The lines share a calendar-time axis.
     A late-starting CPU line sits at the right. A single sample appears as a
     point. A stale line visibly ends short of the current date. The dashboard
@@ -759,7 +759,7 @@ Notes:
     Selectors choose which measurement to plot (**p0** = the fastest sample,
     **mean** = the arithmetic mean, **p75**, **p99**, **p99.5**, **p99.9**,
     **p100** = the slowest) and whether to group by source **file** or sort by
-    latest **duration** or **trend**. The mean selector was once labelled
+    latest **duration** or **trend**. The mean selector was once labeled
     `p50`, and `?stat=p50` still opens it so that a saved link does not quietly
     fall back to the default column.
     A "hide green" checkbox drops the steady ones. A slider from 1
@@ -775,9 +775,9 @@ Notes:
     directly. Each row shows one latest value and trend from the CPU with the
     most benchmark samples in the selected window. A tie uses the CPU with the
     newest sample, then its name for a stable result. That representative CPU
-    also sets the row colour and sorting. A numbered CPU key identifies the
+    also sets the row color and sorting. A numbered CPU key identifies the
     representative series and links to its definition. The same key and a
-    colour swatch appear in one CPU legend after all benchmark graphs instead
+    color swatch appear in one CPU legend after all benchmark graphs instead
     of repeating processor names in every row. It includes the full processor
     identity reported by the artifacts, the number of benchmark graphs and runs
     shown for that CPU, and the observed date range. The page reads from the

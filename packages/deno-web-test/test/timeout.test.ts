@@ -1,6 +1,8 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import { applyDefaults, DEFAULT_TEST_TIMEOUT_MS } from "../config.ts";
+
 import { decode } from "@commonfabric/utils/encoding";
+
+import { applyDefaults, DEFAULT_TEST_TIMEOUT_MS } from "../config.ts";
 import { runDenoWebTest } from "./utils.ts";
 
 // A test that waits on something which never arrives used to take the whole run

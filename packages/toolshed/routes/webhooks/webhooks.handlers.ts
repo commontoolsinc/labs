@@ -1,9 +1,12 @@
-// Design spec: docs/specs/webhook-ingress/README.md
-//
-// Auth note: The list and create endpoints are intentionally unauthed,
-// consistent with all other toolshed admin endpoints (google-oauth, plaid,
-// patterns, etc.). When the platform adds HTTP-level auth
-// infrastructure, these endpoints should adopt it.
+/**
+ * Design spec: docs/specs/webhook-ingress/README.md
+ *
+ * Auth note: The list and create endpoints are intentionally unauthed,
+ * consistent with all other toolshed admin endpoints (google-oauth, plaid,
+ * patterns, etc.). When the platform adds HTTP-level auth
+ * infrastructure, these endpoints should adopt it.
+ */
+
 import env from "@/env.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {

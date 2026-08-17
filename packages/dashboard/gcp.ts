@@ -12,7 +12,7 @@
  *
  * BigQuery has no API-key authentication: a key does not identify a principal,
  * and every query runs as some service account. So this is the closest
- * analogue to the bearer token the GitHub tiles use — a token obtained without
+ * analog to the bearer token the GitHub tiles use — a token obtained without
  * a command-line tool.
  */
 

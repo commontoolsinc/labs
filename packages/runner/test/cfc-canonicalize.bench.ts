@@ -12,17 +12,18 @@
  * charts on its /bench page.
  */
 
-import { preparedDigestFor, type PreparedDigestInput } from "../src/cfc/mod.ts";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
+import type { JSONSchema } from "../src/builder/types.ts";
 import {
   canonicalizeLogicalPath,
   canonicalizePreparedDigestInput,
 } from "../src/cfc/canonical.ts";
-import { watchIdForEntry } from "../src/storage/v2-watch.ts";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import { preparedDigestFor, type PreparedDigestInput } from "../src/cfc/mod.ts";
 import type { WritePolicyInput } from "../src/cfc/types.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import { watchIdForEntry } from "../src/storage/v2-watch.ts";
 
 const SPACE: MemorySpace =
   "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSdoom8Beere1L9DwwTm";
