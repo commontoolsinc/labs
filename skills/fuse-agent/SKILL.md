@@ -30,7 +30,7 @@ ID=$(cf piece new packages/patterns/<path>.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 
 # 3. Set title
-cf piece call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
+cf call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
 
 # 4. Step to materialize
 cf piece step --piece $ID --space SPACE
@@ -100,8 +100,8 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c \
 
 | Operation                     | Step needed?                               |
 | ----------------------------- | ------------------------------------------ |
-| `cf piece call` (CLI)         | Always                                     |
-| `cf piece set` (CLI)          | Always                                     |
+| `cf call` (CLI)               | Always                                     |
+| `cf set` (CLI)                | Always                                     |
 | FUSE handler invocation       | Sometimes — if count suffix doesn't update |
 | Read/Write/Edit on `index.md` | Never                                      |
 
@@ -265,8 +265,8 @@ repeatable `--test` flags here and on every later `setsrc` update.
 ID=$(cf piece new packages/patterns/annotation.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 echo '"Standup notes mention 5 people with no structured contact list"' \
-  | cf piece set --piece $ID content --space SPACE
-echo '"wish"' | cf piece set --piece $ID kind --space SPACE
+  | cf set --piece $ID content --space SPACE
+echo '"wish"' | cf set --piece $ID kind --space SPACE
 cf piece step --piece $ID --space SPACE
 # Re-read pieces.json — name now reflects content: "Standup notes mention..."
 ```
@@ -287,7 +287,7 @@ cf piece step --piece $ID --space SPACE
 **Mark a wish resolved** (when fulfilling another agent's annotation):
 
 ```bash
-echo '"resolved"' | cf piece set --piece $WISH_ID status --space SPACE
+echo '"resolved"' | cf set --piece $WISH_ID status --space SPACE
 cf piece step --piece $WISH_ID --space SPACE
 ```
 

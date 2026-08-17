@@ -82,7 +82,7 @@ deno task cf piece inspect --piece <ID> --identity cf.key --api-url $CF_API_URL 
 **Test handler via CLI:**
 
 ```bash
-deno task cf piece call handlerName --piece PIECE_ID
+deno task cf call --piece PIECE_ID handlerName
 deno task cf piece step --piece PIECE_ID    # Required! Triggers recomputation
 deno task cf piece inspect --piece PIECE_ID  # Now shows updated state
 ```
