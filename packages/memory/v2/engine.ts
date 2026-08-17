@@ -1,6 +1,6 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatchToDocument,
@@ -5150,8 +5150,10 @@ const applyCommitTransaction = (
   // id can never change, so deleting or patching one is a protocol
   // violation regardless of document class — a deleted or altered
   // dependency would invalidate every document referencing it — and a
-  // `set` must be the first installation or byte-identical to what is
+  // `set` must be the first installation or content-identical to what is
   // stored (an idempotent re-`set` is how writers install closures).
+  // Equality is `valueEqual`, canonical content-hash equality: a special
+  // object's state lives in private fields a structural walk cannot see.
   // Conflicting sets of one id within a single commit are equally
   // rejected, so the commit API cannot create this corruption at all.
   // `SessionSync.removes` are watch-result removals, not deletions, and
@@ -5165,9 +5167,16 @@ const applyCommitTransaction = (
         `memory v2 commit cannot ${operation.op} content-addressed document ${operation.id}`,
       );
     }
-    const priorInCommit = cidSetsInCommit?.get(operation.id);
-    if (priorInCommit !== undefined) {
-      if (!deepEqual(priorInCommit, operation.value)) {
+    // `has()`, not a `get() !== undefined` check: a malformed set can carry
+    // an omitted value, and treating it as absent would let a later set of
+    // the same id skip the conflict comparison.
+    if (cidSetsInCommit?.has(operation.id)) {
+      if (
+        !valueEqual(
+          cidSetsInCommit.get(operation.id) as FabricValue,
+          operation.value as FabricValue,
+        )
+      ) {
         throw new ProtocolError(
           `memory v2 commit carries conflicting sets of content-addressed document ${operation.id}`,
         );
@@ -5181,7 +5190,10 @@ const applyCommitTransaction = (
       principal,
       sessionId,
     });
-    if (stored !== null && !deepEqual(stored, operation.value)) {
+    if (
+      stored !== null &&
+      !valueEqual(stored as FabricValue, operation.value as FabricValue)
+    ) {
       throw new ProtocolError(
         `memory v2 commit cannot change content-addressed document ${operation.id}`,
       );

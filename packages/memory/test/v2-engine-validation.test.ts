@@ -17,6 +17,7 @@ import {
   read,
 } from "../v2/engine.ts";
 import { encodeMemoryBoundary } from "../v2.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 const withEngine = async (
   fn: (engine: Engine) => void | Promise<void>,
@@ -205,6 +206,49 @@ Deno.test("rejects deleting or patching a content-addressed document", async () 
         operations: [setOp("cid:fid1:immutable", { type: "string" })],
       }),
     });
+  });
+});
+
+Deno.test("compares content-addressed sets by content inside special objects", async () => {
+  await withEngine((engine) => {
+    // A special object keeps its state in private fields, which a naive
+    // structural walk conflates across distinct instances (CT-1770); the
+    // guard compares canonical content, so a difference inside one is a
+    // difference.
+    const bytesDoc = (byte: number) => ({
+      payload: new FabricBytes(new Uint8Array([byte])),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [
+              setOp("cid:fid1:special", bytesDoc(1)),
+              setOp("cid:fid1:special", bytesDoc(2)),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "conflicting sets of content-addressed document",
+    );
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [setOp("cid:fid1:special", bytesDoc(1))],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(3, {
+            operations: [setOp("cid:fid1:special", bytesDoc(2))],
+          }),
+        }),
+      ProtocolError,
+      "cannot change content-addressed document",
+    );
   });
 });
 

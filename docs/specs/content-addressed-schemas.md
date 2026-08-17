@@ -297,7 +297,8 @@ to warn about.
 Content-addressed documents are immutable at the commit boundary: the
 server rejects a `delete` or `patch` of any `cid:` document, whatever
 its class, and rejects a `set` that is neither the first installation
-nor byte-identical to the stored content — conflicting sets of one id
+nor content-identical to the stored document (canonical value equality,
+which compares special objects by content hash) — conflicting sets of one id
 within a single commit included — because a deleted or altered
 dependency would invalidate every document referencing it. An
 idempotent re-`set` of the same content is how writers install closures
