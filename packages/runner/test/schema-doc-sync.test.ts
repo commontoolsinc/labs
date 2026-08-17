@@ -581,7 +581,19 @@ describe("schema-doc-sync", () => {
     expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
   });
 
-  it("fails a sync after an established dependency is replaced with forged content", async () => {
+  it("holds an established watch over a forged dependency and resumes it once the content is restored", async () => {
+    const forgedSwapLink = (extra: Record<string, FabricValue>) => ({
+      linked: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:forged-swap-target",
+            path: [],
+            schema: { $ref: decomposed.rootRef },
+          },
+        },
+      },
+      ...extra,
+    });
     const decomposed = decomposeSchema({
       type: "object",
       properties: { forgedSwap: { $ref: "#/$defs/ForgedSwapLeaf" } },
@@ -597,17 +609,7 @@ describe("schema-doc-sync", () => {
       .find((hash) => hash !== rootHash)!;
     await writeSchemaDocs(decomposed);
     await writeDocs({
-      "of:forged-swap-carrier": {
-        linked: {
-          "/": {
-            [LINK_V1_TAG]: {
-              id: "of:forged-swap-target",
-              path: [],
-              schema: { $ref: decomposed.rootRef },
-            },
-          },
-        },
-      } as FabricValue,
+      "of:forged-swap-carrier": forgedSwapLink({}) as FabricValue,
     });
     const provider = readerStorage.open(space);
     const first = await provider.sync("of:forged-swap-carrier" as URI, {
@@ -616,13 +618,15 @@ describe("schema-doc-sync", () => {
     });
     expect(first.error).toBeUndefined();
 
-    // The leaf's stored content is swapped for a forgery (still
-    // schema-shaped, so only the identity check can catch it). Assembly
-    // re-verifies the changed version, so a fresh session reading the
-    // latest store fails loudly — a valid realm-registry copy
-    // notwithstanding.
-    await writeDocs({
-      [`cid:${leafHash}`]: { type: "boolean", title: "forged replacement" },
+    // The leaf's stored content is swapped for a forgery through the
+    // direct out-of-band write path (still schema-shaped, so only the
+    // identity check can catch it; the commit boundary refuses the patch
+    // a runner transaction would produce). Assembly re-verifies the
+    // changed version, so a fresh session reading the latest store fails
+    // loudly — a valid realm-registry copy notwithstanding.
+    await server.writeDocument(space, `cid:${leafHash}`, {
+      type: "boolean",
+      title: "forged replacement",
     });
     const probeStorage = EmulatedStorageManager.connectTo(server, {
       as: await Identity.fromPassphrase("schema-doc-sync"),
@@ -637,6 +641,98 @@ describe("schema-doc-sync", () => {
       );
     } finally {
       await probeStorage.close();
+    }
+
+    // The established session's delivery was held over the forgery. Once
+    // the true content is restored, its held dirty ids retry with the
+    // next flush — a carrier marker's arrival through the SAME watch
+    // proves the hold released.
+    const repaired = defer<void>();
+    const cancel = (provider as unknown as {
+      sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
+    }).sink("of:forged-swap-carrier" as URI, (doc: unknown) => {
+      if (
+        doc !== null && typeof doc === "object" && doc !== undefined &&
+        (doc as { value?: { repaired?: unknown } }).value?.repaired === true
+      ) {
+        repaired.resolve();
+      }
+    });
+    await server.writeDocument(
+      space,
+      `cid:${leafHash}`,
+      decomposed.documents.get(leafHash)! as FabricValue,
+    );
+    await writeDocs({
+      "of:forged-swap-carrier": forgedSwapLink({
+        repaired: true,
+      }) as FabricValue,
+    });
+    await repaired.promise;
+    cancel();
+    expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
+  });
+
+  it("holds only the affected session: an unrelated watch keeps receiving updates", async () => {
+    await writeDocs({
+      "of:isolated-broken-carrier": { plain: "v1" } as FabricValue,
+      "of:isolated-bystander": { counter: 1 } as FabricValue,
+    });
+    const bystanderStorage = EmulatedStorageManager.connectTo(server, {
+      as: await Identity.fromPassphrase("schema-doc-sync"),
+    });
+    try {
+      const brokenProvider = readerStorage.open(space);
+      const bystanderProvider = bystanderStorage.open(space);
+      const firstBroken = await brokenProvider.sync(
+        "of:isolated-broken-carrier" as URI,
+        { path: [], schema: false },
+      );
+      expect(firstBroken.error).toBeUndefined();
+      const firstBystander = await bystanderProvider.sync(
+        "of:isolated-bystander" as URI,
+        { path: [], schema: false },
+      );
+      expect(firstBystander.error).toBeUndefined();
+
+      // The first session's carrier gains a ref no document backs; its
+      // delivery is held. The bystander session's watch must keep
+      // flowing — this hangs if one session's hole freezes the space.
+      const missing = internSchemaAsTaggedHashString({
+        type: "object",
+        properties: { isolatedMissing: { type: "string" } },
+      });
+      await writeDocs({
+        "of:isolated-broken-carrier": {
+          linked: {
+            "/": {
+              [LINK_V1_TAG]: {
+                id: "of:isolated-broken-target",
+                path: [],
+                schema: { $ref: `cid:${missing}` },
+              },
+            },
+          },
+        } as FabricValue,
+      });
+      const bystanderSaw = defer<void>();
+      const cancel = (bystanderProvider as unknown as {
+        sink: (uri: URI, callback: (doc: unknown) => void) => () => void;
+      }).sink("of:isolated-bystander" as URI, (doc: unknown) => {
+        if (
+          doc !== null && typeof doc === "object" && doc !== undefined &&
+          (doc as { value?: { counter?: unknown } }).value?.counter === 2
+        ) {
+          bystanderSaw.resolve();
+        }
+      });
+      await writeDocs({
+        "of:isolated-bystander": { counter: 2 } as FabricValue,
+      });
+      await bystanderSaw.promise;
+      cancel();
+    } finally {
+      await bystanderStorage.close();
     }
   });
 

@@ -3244,11 +3244,19 @@ export class Server {
           }
           if (dirtyIds !== undefined) {
             const startedAt = performance.now();
-            let touched = false;
-            for (const dirtyId of dirtyIds) {
-              if (session.trackedIds.has(dirtyId)) {
-                touched = true;
-                break;
+            // A session holding dirty ids from a schema-closure failure
+            // retries them on every flush of the space; any other session's
+            // fan-out is untouched by that hold.
+            const effectiveDirtyIds = session.heldDirtyIds === null
+              ? dirtyIds
+              : new Set([...session.heldDirtyIds, ...dirtyIds]);
+            let touched = session.heldDirtyIds !== null;
+            if (!touched) {
+              for (const dirtyId of effectiveDirtyIds) {
+                if (session.trackedIds.has(dirtyId)) {
+                  touched = true;
+                  break;
+                }
               }
             }
             span.setAttribute("ct.touched", touched);
@@ -3260,38 +3268,59 @@ export class Server {
             const fromSeq = session.lastSyncedSeq;
             const updates = new Map<string, SessionCacheEntry>();
 
-            for (const graph of session.graphs.values()) {
-              const refreshed = tracer.startActiveSpan(
-                "memory.watch.refresh",
-                (watchSpan) => {
-                  watchSpan.setAttribute("space.did", space);
-                  try {
-                    return refreshTrackedGraph(
-                      space,
-                      engine,
-                      graph,
-                      dirtyIds,
-                    );
-                  } finally {
-                    watchSpan.end();
-                  }
-                },
-              );
-              if (refreshed === null) {
-                continue;
-              }
-              for (const entity of refreshed.updates.values()) {
-                const entry = toCacheEntry(entity);
-                updates.set(
-                  cacheKeyForEntity(
-                    entry.branch,
-                    entry.id,
-                    declaredScope(entry.scope),
-                  ),
-                  entry,
+            try {
+              for (const graph of session.graphs.values()) {
+                const refreshed = tracer.startActiveSpan(
+                  "memory.watch.refresh",
+                  (watchSpan) => {
+                    watchSpan.setAttribute("space.did", space);
+                    try {
+                      return refreshTrackedGraph(
+                        space,
+                        engine,
+                        graph,
+                        effectiveDirtyIds,
+                      );
+                    } finally {
+                      watchSpan.end();
+                    }
+                  },
                 );
+                if (refreshed === null) {
+                  continue;
+                }
+                for (const entity of refreshed.updates.values()) {
+                  const entry = toCacheEntry(entity);
+                  updates.set(
+                    cacheKeyForEntity(
+                      entry.branch,
+                      entry.id,
+                      declaredScope(entry.scope),
+                    ),
+                    entry,
+                  );
+                }
               }
+            } catch (error) {
+              // A schema-closure failure is deterministic over the store
+              // and specific to THIS session's watches: hold the session's
+              // dirty ids (a failed refresh mutated nothing — assembly is
+              // two-phase) and deliver nothing to it, while every other
+              // session's fan-out proceeds. The repairing write flushes
+              // the space again, which retries the held ids above.
+              if (
+                error instanceof Error && error.name === "SchemaClosureError"
+              ) {
+                session.heldDirtyIds = new Set(effectiveDirtyIds);
+                console.warn(
+                  `memory v2: schema-closure violation; delivery held for session ${sessionId} until the space is repaired`,
+                  error,
+                );
+                return null;
+              }
+              throw error;
             }
+            session.heldDirtyIds = null;
 
             if (updates.size === 0) {
               return await emptyCatchUp();
@@ -3745,11 +3774,6 @@ export class Server {
 
   private async refreshLoop(initial?: Set<string>): Promise<void> {
     let pending = initial;
-    // Spaces whose fan-out failed deterministically this pass
-    // (schema-closure violations): their requeued dirty state must not be
-    // re-picked by the SAME loop, or the pass never terminates. They stay
-    // dirty for the next flush, which the repairing write triggers.
-    const held = new Set<string>();
     while (true) {
       if (initial === undefined && this.#dirtySpaces.size > 0) {
         await this.waitForConnectionQueuesToDrain(
@@ -3759,8 +3783,7 @@ export class Server {
           ),
         );
       }
-      const spaces = (pending ? [...pending] : [...this.#dirtySpaces])
-        .filter((space) => !held.has(space));
+      const spaces = pending ? [...pending] : [...this.#dirtySpaces];
       if (spaces.length === 0) {
         return;
       }
@@ -3852,25 +3875,6 @@ export class Server {
                   currentOrigins.set(id, origin);
                 }
               }
-            }
-            // A schema-closure failure is deterministic over the store: a
-            // rescheduled retry against the same state fails identically,
-            // so hold the requeued dirty state without rescheduling — the
-            // repairing write re-dirties the space and re-triggers
-            // delivery through the normal path. It is contained here
-            // rather than rethrown: the generic failure path would poison
-            // unrelated synchronization points (the space's
-            // publication-lock waiters, `idle()`) with a failure that is
-            // not theirs.
-            if (
-              error instanceof Error && error.name === "SchemaClosureError"
-            ) {
-              held.add(space);
-              console.warn(
-                "memory v2: schema-closure violation; delivery held until the space is repaired",
-                error,
-              );
-              return;
             }
             this.scheduleRefresh();
             throw error;

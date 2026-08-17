@@ -294,6 +294,13 @@ value. Anything that passes is byte-for-byte usable as the schema
 document that id names; anything else is another class, not a rejection
 to warn about.
 
+Content-addressed documents are immutable at the commit boundary: the
+server rejects a `delete` or `patch` of any `cid:` document, whatever
+its class, because a deleted or altered dependency would invalidate
+every document referencing it. An idempotent re-`set` of the same
+content is how writers install closures and stays legal, and a sync
+frame's removes are watch-result removals, not deletions.
+
 Resolution demands the whole closure: a registered document whose
 transitive closure is not fully registered resolves as a miss, exactly
 like an unregistered document. Resolving it partially would let derived
@@ -391,9 +398,11 @@ delivery and traversal split the work in two layers:
   commit), so a failed query or refresh leaves session state untouched,
   and a refresh revalidates the established delivery state, so a
   dependency deleted or replaced with forged content fails even under an
-  unchanged referrer. A deterministic assembly failure holds the
-  session's delivery (its consistent pre-violation view keeps serving)
-  until the repairing write re-triggers it.
+  unchanged referrer. A deterministic assembly failure holds delivery
+  for the affected session alone — its consistent pre-violation view
+  keeps serving, its dirty ids retry on every later flush of the space,
+  the repairing write's included — while every other session's fan-out
+  proceeds untouched.
 
 A client that syncs a document therefore receives the schema documents for
 every link it contains in the same round trip, keeping the "resolved means
@@ -402,10 +411,11 @@ presence in watch sets is quiet; whether they deserve a fetch-once path
 instead is an open question shared with all `cid:` documents.
 
 Scan results are cached per document version and engine, so in steady
-state a version is scanned once however many sessions deliver it
-(alternating queries over historical versions can rescan, since the cache
-holds one version per document), and closure verification memoizes
-per version the same way.
+state a version is scanned once however many sessions deliver it, and
+closure verification memoizes per version the same way. The caches hold
+one version per document and are bounded with wholesale eviction, so
+alternating queries over historical versions, or a working set past the
+bound, can rescan.
 
 On the wire, a reference-bearing link is already small; the sync schema
 table (`schema-ref@2:`) skips reference-only schema positions. Schema

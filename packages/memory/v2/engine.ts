@@ -5145,6 +5145,25 @@ const applyCommitTransaction = (
     sessionId,
   });
 
+  // Content-addressed documents are immutable: the content under a `cid:`
+  // id can never change, so deleting or patching one is a protocol
+  // violation regardless of document class — a deleted or altered
+  // dependency would invalidate every document referencing it. An
+  // idempotent re-`set` of the same content is how writers install
+  // closures and stays legal (mismatched content is caught by the class's
+  // own verification), and `SessionSync.removes` are watch-result
+  // removals, not deletions, so they are unaffected.
+  for (const operation of commit.operations) {
+    if (
+      (operation.op === "delete" || operation.op === "patch") &&
+      operation.id.startsWith("cid:")
+    ) {
+      throw new ProtocolError(
+        `memory v2 commit cannot ${operation.op} content-addressed document ${operation.id}`,
+      );
+    }
+  }
+
   if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
     return applySchedulerObservationBatchCommit(engine, {
       sessionId,

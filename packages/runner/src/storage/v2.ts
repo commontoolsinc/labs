@@ -168,6 +168,8 @@ const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
   logCountEvery: 0,
 });
 
+const EMPTY_OVERLAY: ReadonlyMap<string, unknown> = new Map();
+
 function withCommitTiming<T>(
   keys: string[],
   fn: () => T,
@@ -1515,8 +1517,9 @@ export class StorageManager implements IStorageManager {
    * Syncs the schema document behind `taggedHash` and, transitively, every
    * document its external refs reach, so a subsequent resolution of
    * `cid:<taggedHash>` finds a complete closure. Registration happens as
-   * each document's frame is applied (`#validateArrivedSchemaDocuments`);
-   * this helper drives the pulls and checks between them.
+   * each document's frame is validated, before any of it applies
+   * (`#validateArrivedSchemaDocuments`); this helper drives the pulls and
+   * checks between them.
    *
    * Success promises PER-SPACE VERIFIED PRESENCE: every document in the
    * closure is stored in `space` and its stored content hashes to its id.
@@ -4235,12 +4238,6 @@ class SpaceReplica implements ISpaceReplica {
     };
   }
 
-  // `cid:` hashes whose schema documents verified in this replica: the
-  // forged-replacement detector's memory. Content addressing forbids the
-  // content under an id to change, so a later frame whose copy fails the
-  // identity check for one of these ids is a violation, not another class.
-  readonly #verifiedSchemaDocHashes = new Set<string>();
-
   /**
    * Validates the read-side delivery guarantee over a whole frame BEFORE
    * any of it is applied (`docs/specs/content-addressed-schemas.md`), and
@@ -4295,7 +4292,6 @@ class SpaceReplica implements ISpaceReplica {
           isSubschema(value) &&
           internSchemaAsTaggedHashString(value as JSONSchema) === hash
         ) {
-          this.#verifiedSchemaDocHashes.add(hash);
           registered.push([
             id,
             registerSchemaDocument(hash, value as JSONSchema),
@@ -4305,7 +4301,12 @@ class SpaceReplica implements ISpaceReplica {
           // link-shaped DATA, so it is not link-scanned.
           continue;
         }
-        if (this.#verifiedSchemaDocHashes.has(hash)) {
+        // Content addressing forbids the content under an id to change:
+        // when the replica already stores content that IS the schema
+        // document this id names — however it got here, an earlier frame
+        // or a local write — an arriving copy that fails the identity
+        // check is a forged replacement, not another document class.
+        if (this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)) {
           throw new Error(
             `Schema document ${id} was replaced with content that does ` +
               `not hash to its id — content under a content-addressed id ` +

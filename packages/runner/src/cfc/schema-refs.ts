@@ -24,7 +24,6 @@ import {
 } from "../embedded-schemas.ts";
 import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 import {
-  containsExternalSchemaRef,
   type ExternalSchemaRef,
   isExternalSchemaRef,
   parseExternalSchemaRef,
