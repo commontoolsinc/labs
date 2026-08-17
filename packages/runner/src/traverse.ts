@@ -1369,6 +1369,25 @@ export function mergeAnyOfMatches<T>(
       for (const match of matches) {
         Object.assign(unified, match);
       }
+      // `Object.assign` copies enumerable string keys, so it leaves behind the
+      // back-to-cell annotation each match carries — a non-enumerable symbol —
+      // and the merged value stops naming the position it was read from:
+      // `equals()` refuses it, and writing it back stores an inline copy where
+      // a link belongs. Every match describes the same position, so the first
+      // annotation is the one to carry, and the descriptor travels with it to
+      // keep the symbol off `Object.keys` and out of a spread.
+      for (const match of matches) {
+        for (const key of Object.getOwnPropertySymbols(match as object)) {
+          if (Object.hasOwn(unified, key)) continue;
+          const descriptor = Object.getOwnPropertyDescriptor(
+            match as object,
+            key,
+          );
+          if (descriptor !== undefined) {
+            Object.defineProperty(unified, key, descriptor);
+          }
+        }
+      }
       return unified;
     }
   }
