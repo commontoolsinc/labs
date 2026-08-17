@@ -18,13 +18,14 @@ import {
 const LINK_TARGET_ATTR = "data-topics-link-target";
 
 /**
- * Find the resolved `cf-cell-link` labelled `targetLabel` and tag both it and
+ * Find the resolved `cf-cell-link` showing `targetLabel` and tag both it and
  * the native button inside it with `targetToken`. Self-contained: it is
  * serialized and run in the page, so it closes over nothing in this module.
  *
- * A link counts as resolved once it carries the address it points at and the
- * cell behind that address, and its button has been laid out. A link that is
- * still forming has a label and no destination.
+ * A link is named by what it shows: its authored `label` when it carries one,
+ * and otherwise the `[NAME]` of the cell it points at. It counts as resolved
+ * once it holds that cell and its button has been laid out. A link that is
+ * still forming shows a name and has resolved nothing.
  */
 const markCellLink = (
   probe: ProbeApi,
@@ -36,10 +37,10 @@ const markCellLink = (
   for (const element of probe.collect("cf-cell-link")) {
     const link = element as HTMLElement & {
       label?: string;
-      link?: string;
+      _name?: string;
       _resolvedCell?: unknown;
     };
-    if (link.label !== targetLabel || !link.link || !link._resolvedCell) {
+    if ((link.label ?? link._name) !== targetLabel || !link._resolvedCell) {
       continue;
     }
     const chip = link.shadowRoot?.querySelector("cf-chip");
@@ -54,8 +55,9 @@ const markCellLink = (
 
 /**
  * Wait for a resolved cf-cell-link, mark its native button, then issue one
- * trusted browser click. Returning the link's fid lets the caller confirm the
- * shell selected exactly the destination represented by the rendered data.
+ * trusted browser click. Returning the id of the cell the link resolved lets
+ * the caller confirm the shell selected exactly the destination the rendered
+ * data points at.
  *
  * The view is settled before marking, so the link is resolved against a page
  * that has caught up rather than one mid-render. `clickMarked` carries the rest:
@@ -84,8 +86,16 @@ export async function clickCellLink(
         const root = stack.pop()!;
         const found = root.querySelector(
           `[${linkTargetAttribute}="${targetToken}"]`,
-        ) as (HTMLElement & { link?: string }) | null;
-        if (found?.link) return found.link;
+        ) as
+          | (HTMLElement & {
+            _resolvedCell?: {
+              id(): string;
+              ref(): { path: readonly unknown[] };
+            };
+          })
+          | null;
+        const cell = found?._resolvedCell;
+        if (cell) return { id: cell.id(), depth: cell.ref().path.length };
         for (const element of root.querySelectorAll("*")) {
           if (element.shadowRoot) stack.push(element.shadowRoot);
         }
@@ -94,15 +104,24 @@ export async function clickCellLink(
     },
     { args: [token, LINK_TARGET_ATTR] },
   );
-  if (!target?.startsWith("/of:")) {
-    throw new Error(`Cell link "${label}" had invalid target: ${target}`);
+  if (!target) {
+    throw new Error(`Cell link "${label}" resolved no destination cell`);
+  }
+  // The shell selects a piece, so a link the click can follow addresses a cell
+  // root. Saying so here names the link that points inside one; the click
+  // itself would only report that navigation never happened.
+  if (target.depth > 0) {
+    throw new Error(
+      `Cell link "${label}" points ${target.depth} step(s) inside ${target.id}, ` +
+        "which is not a cell the shell can select",
+    );
   }
 
   await clickMarked(page, {
     token,
     remark: { predicate: markCellLink, args: markArgs },
   });
-  return target.slice(1);
+  return target.id;
 }
 
 /**

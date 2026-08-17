@@ -646,11 +646,17 @@ export default pattern(() => {
   const assert_cell_link_markup = assert(() => {
     const openLinks = findAllByTag(board[UI], "cf-cell-link");
     if (openLinks.length === 0) return false;
+    const topics = board.topics ?? [];
     return openLinks.every((link) =>
       propValue(link.props.label) === "Open" &&
       propValue(link.props.static) === true &&
       link.props.onClick === undefined &&
-      link.props["oncf-click"] === undefined
+      link.props["oncf-click"] === undefined &&
+      // What the link points at is half the contract, and the half a rendered
+      // card still looks right without. A binding to anything but the topic —
+      // a view built for the card, a step into the board's own list — renders
+      // the same chip, and only a browser following it finds it leads nowhere.
+      topics.some((topic) => equals(topic, link.props["$cell"]))
     );
   });
 
