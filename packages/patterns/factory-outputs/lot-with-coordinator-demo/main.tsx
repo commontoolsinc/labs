@@ -14,7 +14,11 @@ import { action, computed, NAME, pattern, UI, Writable } from "commonfabric";
 import ParkingCoordinator, {
   DEFAULT_SPOTS,
 } from "../parking-coordinator/main.tsx";
-import type { ParkingSpot, Person } from "../parking-coordinator/main.tsx";
+import type {
+  ParkingSpot,
+  Person,
+  TrustedParkingSpotList,
+} from "../parking-coordinator/main.tsx";
 
 import LotWatch from "../lot-watch/main.tsx";
 
@@ -61,7 +65,9 @@ const DEFAULT_PEOPLE: Person[] = [
 export default pattern<Record<string, never>, Out>(() => {
   // ---- Shared cells (the whole point of the demo) ----
   const sharedPeople = Writable.perSpace.of<Person[]>(DEFAULT_PEOPLE);
-  const sharedSpots = Writable.perSpace.of<ParkingSpot[]>(DEFAULT_SPOTS);
+  const sharedSpots = Writable.perSpace.of<TrustedParkingSpotList>(
+    DEFAULT_SPOTS as TrustedParkingSpotList,
+  );
 
   // ---- Instantiate the two inner patterns wired to the shared cells ----
   // Casts: each pattern's input type uses its own private PeopleCell/SpotsCell

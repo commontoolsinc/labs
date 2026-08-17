@@ -1020,6 +1020,15 @@ test exercises the trusted fallback. Record the resulting public contract as
 a compatible baseline and run the complete manager and admin interaction under
 strict enforcement.
 
+## 44. Label explicit parking seeds at their trusted call sites
+
+The parking pattern test and the composed Lot Watch demo intentionally supply
+the coordinator's default spots instead of using its fallback. Those values
+therefore need the same trusted schema as the internal seed. Export that schema
+type, apply it to the pattern-test fixture, and create the composed demo's
+shared spot cell with it. Lot Watch continues to consume the same cell through
+its structurally compatible, less restrictive spot contract.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an

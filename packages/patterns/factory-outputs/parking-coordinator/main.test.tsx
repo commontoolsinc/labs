@@ -29,8 +29,18 @@ import {
   hasText,
   propValue,
 } from "../../test/vnode-helpers.ts";
-import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
-import type { ParkingSpot, Person, SpotRequest, Vehicle } from "./main.tsx";
+import ParkingCoordinator, {
+  DEFAULT_SPOTS as RAW_DEFAULT_SPOTS,
+} from "./main.tsx";
+import type {
+  ParkingSpot,
+  Person,
+  SpotRequest,
+  TrustedParkingSpotList,
+  Vehicle,
+} from "./main.tsx";
+
+const DEFAULT_SPOTS = RAW_DEFAULT_SPOTS as TrustedParkingSpotList;
 
 const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
