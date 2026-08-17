@@ -324,7 +324,7 @@ against"). Debt in unchanged groups is still reported, but does not block the
 PR.
 
 Accept one group's increase with the narrow per-group marker in the PR
-description, starting its own line:
+description, on a line of its own and flush against the left margin:
 
 ```text
 ACCEPT_COVERAGE_DEBT: packages/runner +12 lines
@@ -351,10 +351,16 @@ accepting exactly the debt its author accepted and no more.
 
 The check prints the line to paste, with the rise it measured already filled in,
 under `---BEGIN COPY-PASTE---` at the end of the Coverage Check job's log. A line
-that opens with `ACCEPT_COVERAGE_DEBT:` and that the check cannot read fails the
+that starts with `ACCEPT_COVERAGE_DEBT:` and that the check cannot read fails the
 job and says what form to write instead, rather than being passed over as though
-it were not there. `ACCEPT_COVERAGE_DEBT:` further along a line is prose, so a
-description can discuss the marker without being read as carrying one.
+it were not there.
+
+The left margin is what tells an acceptance from a mention of one. A description
+can name the marker in a sentence, and can indent an example of it into a code
+block, without either being read as accepting anything — or as a malformed
+attempt at it. Indent the line to show the form, and write it flush to use it. A
+pull request description often starts life as a commit message body, so a line
+indented there arrives indented, and stays an example.
 
 Use the broad reset marker only to bootstrap coverage data for the first time,
 or when the `main` baseline is known to be bogus and should be re-seeded for one

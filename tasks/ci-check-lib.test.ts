@@ -312,7 +312,7 @@ Deno.test("baseline override parser rejects a name no source group could have", 
   );
 });
 
-Deno.test("baseline override parser reads only a marker that opens a line", () => {
+Deno.test("baseline override parser reads only a marker starting a line", () => {
   // A description explaining the mechanism carries no acceptance, and is not a
   // malformed one either.
   const prose =
@@ -320,11 +320,19 @@ Deno.test("baseline override parser reads only a marker that opens a line", () =
     "accepts a rise instead.";
   assertEquals(parseBaselineOverrides(prose).metrics.size, 0);
 
-  // Indentation still opens a line, so a marker inside a fenced block counts.
-  const indented = parseBaselineOverrides(
-    "Accepting the flapping lines:\n\n    ACCEPT_COVERAGE_DEBT: tasks +3 lines\n",
+  // An indented example of the marker is an example. A description showing the
+  // form — as this change's own does — accepts nothing by showing it.
+  const example = parseBaselineOverrides(
+    "Accept a rise above the baseline instead:\n\n" +
+      "    ACCEPT_COVERAGE_DEBT: packages/runner +12 lines\n",
   );
-  assertEquals(indented.metrics.get("coverage-debt: tasks uncovered lines"), 3);
+  assertEquals(example.metrics.size, 0);
+
+  // Flush against the left margin, the same line is an acceptance.
+  const accepted = parseBaselineOverrides(
+    "Accepting the flapping lines:\n\nACCEPT_COVERAGE_DEBT: tasks +3 lines\n",
+  );
+  assertEquals(accepted.metrics.get("coverage-debt: tasks uncovered lines"), 3);
 });
 
 Deno.test("baseline override parser reads legacy coverage-debt acceptance only when asked", () => {

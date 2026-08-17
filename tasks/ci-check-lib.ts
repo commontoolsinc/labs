@@ -1400,16 +1400,17 @@ export async function fetchCurrentPRBody(
 // ---------------------------------------------------------------------------
 
 /**
- * Each `ACCEPT_COVERAGE_DEBT:` marker that opens a line, and the rest of that
- * line. Anchoring to the line start leaves a mention of the marker in prose as
- * prose, so writing about the mechanism in a description is not writing a
- * malformed acceptance into it.
+ * Each `ACCEPT_COVERAGE_DEBT:` marker that starts a line, and the rest of that
+ * line. An acceptance is written flush against the left margin, which is what
+ * lets a description also talk about the mechanism: the marker named in a
+ * sentence is prose, and an indented example of one is an example. Neither is
+ * read as an acceptance, and neither is reported as a malformed one.
  */
-const COVERAGE_ACCEPTANCE_MARKER = /^[ \t]*ACCEPT_COVERAGE_DEBT:[^\n]*/gm;
+const COVERAGE_ACCEPTANCE_MARKER = /^ACCEPT_COVERAGE_DEBT:[^\n]*/gm;
 
 /** The source group and the rise a well-formed acceptance names. */
 const COVERAGE_ACCEPTANCE_TERMS =
-  /^[ \t]*ACCEPT_COVERAGE_DEBT:\s*(\S+)\s*\+\s*(\d+)\s*lines?\b/;
+  /^ACCEPT_COVERAGE_DEBT:[ \t]*(\S+)[ \t]*\+[ \t]*(\d+)[ \t]*lines?\b/;
 
 /** A coverage source group: `workspace`, `tasks`, `packages/runner`. */
 const COVERAGE_GROUP_NAME = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?$/;
@@ -1417,7 +1418,7 @@ const COVERAGE_GROUP_NAME = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?$/;
 /**
  * Parse a PR body for coverage-debt overrides.
  *
- * Format (visible markdown, each starting its own line):
+ * Format (visible markdown, each flush against the left margin):
  *   ACCEPT_COVERAGE_DEBT: packages/runner +12 lines
  *   NEW_COVERAGE_BASELINE
  *
