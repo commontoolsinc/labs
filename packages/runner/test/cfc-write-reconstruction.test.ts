@@ -90,6 +90,35 @@ Deno.test("writeDetailValueForTarget: coarse whole-object write reconstructs as-
   });
 });
 
+Deno.test("writeDetailValueForTarget: raw document creation unwraps the value envelope", () => {
+  const created = detail([], {
+    value: { profiles: ["alice"] },
+  });
+  created.present = true;
+  created.previousPresent = false;
+  assertEquals(
+    writeDetailValueForTarget(txWith([created]), target(["profiles"]), "value"),
+    ["alice"],
+  );
+});
+
+Deno.test("writeDetailValueForTarget: raw document replacement unwraps both envelopes", () => {
+  const replaced = detail([], {
+    value: { profiles: ["bob"] },
+  });
+  replaced.previousValue = {
+    value: { profiles: ["alice"] },
+  };
+  assertEquals(
+    writeDetailValueForTarget(
+      txWith([replaced]),
+      target(["profiles"]),
+      "previousValue",
+    ),
+    ["alice"],
+  );
+});
+
 Deno.test("writeDetailValueForTarget: granular envelope + field writes reconstruct the full object", () => {
   // This is the shape produced when an object is written field-by-field (e.g.
   // a deep-frozen value): an empty envelope at the root plus per-field writes.

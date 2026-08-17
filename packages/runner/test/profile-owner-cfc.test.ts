@@ -70,12 +70,14 @@ const profileSchema = (ownerDid: string): JSONSchema => ({
   required: ["name", "avatar", "elements"],
 });
 
-const createRuntime = () => {
-  const storageManager = StorageManager.emulate({ as: alice });
+const createRuntime = (
+  cfcEnforcementMode: "observe" | "enforce-explicit" = "enforce-explicit",
+  storageManager = StorageManager.emulate({ as: alice }),
+) => {
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
+    cfcEnforcementMode,
   });
   return { runtime, storageManager };
 };
@@ -702,28 +704,27 @@ describe("profile owner CFC policy", () => {
   });
 
   it("rejects direct untrusted writes to the home profiles list", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const storageManager = StorageManager.emulate({ as: alice });
+    const { runtime } = createRuntime("enforce-explicit", storageManager);
+    const { runtime: seedRuntime } = createRuntime("observe", storageManager);
     try {
       const homePattern = await compileHomePattern(runtime);
-      const tx = runtime.edit();
-      runtime.getCell(
-        alice.did(),
-        "home-profile-link-untrusted",
-        homePattern.resultSchema,
-        tx,
-      );
-      const profileDefault = runtime.getCell(
+      const profileHomePattern = await compileProfileHomePattern(seedRuntime);
+      const tx = seedRuntime.edit();
+      const profileDefault = seedRuntime.getCell(
         alice.did(),
         "home-profile-link-untrusted-target",
-        undefined,
+        profileHomePattern.resultSchema,
         tx,
       );
-      profileDefault.set({
-        name: "Ada",
-        avatar: "",
-        elements: [],
-      });
-      await tx.commit();
+      seedRuntime.runner.run(
+        tx,
+        profileHomePattern,
+        { initialName: "Ada" },
+        profileDefault,
+      );
+      tx.prepareCfc();
+      expect((await tx.commit()).error).toBeUndefined();
 
       const writeTx = runtime.edit();
       const protectedHomeDefault = runtime.getCell(
@@ -737,6 +738,7 @@ describe("profile owner CFC policy", () => {
       const result = await writeTx.commit();
       expect(result.error?.message).toContain("trusted");
     } finally {
+      await seedRuntime.dispose();
       await runtime.dispose();
       await storageManager.close();
     }

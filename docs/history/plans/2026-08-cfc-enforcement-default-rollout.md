@@ -803,12 +803,13 @@ New storage documents are written at the document root as an envelope whose
 `value` member contains the logical cell value. Later edits are commonly
 reported below that `value` member. Treat both representations as writes to the
 same logical path when reconstructing current values, previous values, and
-presence.
+presence. Apply the same normalization when a wildcard policy inspects changed
+values beneath a document-root write.
 
 This normalization makes writer-fit and floor checks see a creation write in
 the same form as a later field edit. Tests cover current and previous envelope
-reconstruction and prove that an untrusted creation of a protected profile list
-is rejected.
+reconstruction, wildcard-label persistence on creation, and rejection of an
+untrusted creation of a protected profile list.
 
 ## 32. Validate compilation-cache dependencies before importers
 

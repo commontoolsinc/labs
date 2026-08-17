@@ -2990,23 +2990,38 @@ export const writeDetailValueForTarget = (
 ): FabricValue => {
   const writeDetails = [...(tx.getWriteDetails?.(target.space) ?? [])];
   const targetPath = target.path.map((entry) => String(entry));
-  let matchingWrite:
-    | {
-      address: {
-        id: URI;
-        type?: MediaType;
-        path: readonly string[];
-      };
-      value?: FabricValue;
-      previousValue?: FabricValue;
+  const logicalWritePath = (write: TransactionWriteDetail): string[] =>
+    write.address.path.length === 0
+      ? []
+      : write.address.path.slice(1).map(String);
+  const logicalWriteValue = (
+    write: TransactionWriteDetail,
+    valueKey: "value" | "previousValue",
+  ): FabricValue => {
+    const value = write[valueKey];
+    return write.address.path.length === 0 && isObjectOrArray(value)
+      ? value.value as FabricValue
+      : value;
+  };
+  const logicalWritePresent = (
+    write: TransactionWriteDetail,
+    valueKey: "value" | "previousValue",
+  ): boolean => {
+    if (write.address.path.length === 0) {
+      const value = write[valueKey];
+      return isObjectOrArray(value) && Object.hasOwn(value, "value");
     }
-    | undefined;
+    return valueKey === "value"
+      ? write.present !== false
+      : write.previousPresent !== false;
+  };
+  let matchingWrite: TransactionWriteDetail | undefined;
   let matchingWritePath: string[] | undefined;
   if (key === "value") {
     const relevant = writeDetails.filter((write) =>
       write.address.id === target.id &&
       normalizeCellScope(write.address.scope) === target.scope &&
-      write.address.path[0] === "value"
+      (write.address.path.length === 0 || write.address.path[0] === "value")
     );
     const keyForPath = (path: readonly string[]): string =>
       encodePointer(path.map(String));
@@ -3023,7 +3038,7 @@ export const writeDetailValueForTarget = (
         const attempts = (tx.getWriteAttemptLog?.() ?? []).filter((attempt) =>
           attempt.space === target.space && attempt.id === target.id &&
           normalizeCellScope(attempt.scope) === target.scope &&
-          attempt.path[0] === "value"
+          (attempt.path.length === 0 || attempt.path[0] === "value")
         );
         const lastAttemptByPath = new Map<string, number>();
         attempts.forEach((attempt, index) => {
@@ -3050,7 +3065,7 @@ export const writeDetailValueForTarget = (
     let present = false;
     let result: FabricValue | undefined;
     for (const write of ordered) {
-      const writePath = write.address.path.slice(1).map(String);
+      const writePath = logicalWritePath(write);
       const writeIsAncestor = writePath.length <= targetPath.length &&
         writePath.every((segment, index) => segment === targetPath[index]);
       const writeIsDescendant = writePath.length > targetPath.length &&
@@ -3059,8 +3074,8 @@ export const writeDetailValueForTarget = (
 
       if (writeIsAncestor) {
         resolved = true;
-        present = write.present !== false;
-        result = write.value;
+        present = logicalWritePresent(write, "value");
+        result = logicalWriteValue(write, "value");
         for (const segment of targetPath.slice(writePath.length)) {
           if (
             !present || !isObjectOrArray(result) ||
@@ -3107,19 +3122,22 @@ export const writeDetailValueForTarget = (
       if (normalizeCellScope(write.address.scope) !== target.scope) {
         return false;
       }
-      if (write.address.path[0] !== "value") return false;
-      const writePath = write.address.path.slice(1).map(String);
+      if (
+        write.address.path.length !== 0 && write.address.path[0] !== "value"
+      ) return false;
+      const writePath = logicalWritePath(write);
       return writePath.length <= targetPath.length &&
         writePath.every((segment, index) => segment === targetPath[index]);
     }).toSorted((left, right) =>
       left.firstJournalIndex! - right.firstJournalIndex!
     )[0];
     if (earliest !== undefined) {
-      const writePath = earliest.address.path.slice(1).map(String);
+      const writePath = logicalWritePath(earliest);
+      const previousValue = logicalWriteValue(earliest, "previousValue");
       return writePath.length === targetPath.length
-        ? earliest.previousValue
+        ? previousValue
         : getValueAtPath(
-          earliest.previousValue,
+          previousValue,
           targetPath.slice(writePath.length),
         );
     }
@@ -3128,10 +3146,12 @@ export const writeDetailValueForTarget = (
   for (const write of writeDetails) {
     if (write.address.id !== target.id) continue;
     if (normalizeCellScope(write.address.scope) !== target.scope) continue;
-    if (write.address.path[0] !== "value") {
+    if (
+      write.address.path.length !== 0 && write.address.path[0] !== "value"
+    ) {
       continue;
     }
-    const writePath = write.address.path.slice(1).map((entry) => String(entry));
+    const writePath = logicalWritePath(write);
     if (writePath.length > targetPath.length) continue;
     if (!writePath.every((segment, index) => segment === targetPath[index])) {
       continue;
@@ -3145,10 +3165,11 @@ export const writeDetailValueForTarget = (
     }
   }
 
-  const value = matchingWrite?.[key];
-  if (value === undefined || matchingWritePath === undefined) {
+  if (matchingWrite === undefined || matchingWritePath === undefined) {
     return undefined;
   }
+  const value = logicalWriteValue(matchingWrite, key);
+  if (!logicalWritePresent(matchingWrite, key)) return undefined;
   const baseValue = matchingWritePath.length === targetPath.length
     ? value
     : getValueAtPath(value, targetPath.slice(matchingWritePath.length));
@@ -3181,14 +3202,14 @@ const writeValuePresenceForTarget = (
     (write) =>
       write.address.id === target.id &&
       normalizeCellScope(write.address.scope) === target.scope &&
-      write.address.path[0] === "value",
+      (write.address.path.length === 0 || write.address.path[0] === "value"),
   );
   const pathKey = (path: readonly string[]): string =>
     encodePointer(path.map(String));
   const attempts = (tx.getWriteAttemptLog?.() ?? []).filter((attempt) =>
     attempt.space === target.space && attempt.id === target.id &&
     normalizeCellScope(attempt.scope) === target.scope &&
-    attempt.path[0] === "value"
+    (attempt.path.length === 0 || attempt.path[0] === "value")
   );
   const selectedAttemptByPath = new Map<string, number>();
   attempts.forEach((attempt, index) => {
@@ -3208,7 +3229,10 @@ const writeValuePresenceForTarget = (
   let bestOrder = previous ? Number.POSITIVE_INFINITY : -1;
   for (let index = 0; index < writes.length; index++) {
     const write = writes[index];
-    const writePath = write.address.path.slice(1).map(String);
+    const documentRootWrite = write.address.path.length === 0;
+    const writePath = documentRootWrite
+      ? []
+      : write.address.path.slice(1).map(String);
     if (writePath.length > targetPath.length) continue;
     if (!writePath.every((segment, index) => segment === targetPath[index])) {
       continue;
@@ -3223,8 +3247,15 @@ const writeValuePresenceForTarget = (
         : bestPath === undefined || writePath.length > bestPath.length
     ) {
       bestPath = writePath;
-      bestValue = previous ? write.previousValue : write.value;
-      bestPresent = previous ? write.previousPresent : write.present;
+      const rawValue = previous ? write.previousValue : write.value;
+      bestValue = documentRootWrite && isObjectOrArray(rawValue)
+        ? rawValue.value as FabricValue
+        : rawValue;
+      bestPresent = documentRootWrite
+        ? isObjectOrArray(rawValue) && Object.hasOwn(rawValue, "value")
+        : previous
+        ? write.previousPresent
+        : write.present;
       bestOrder = writeOrder ?? index;
     }
   }
@@ -3824,13 +3855,21 @@ const ifcEntryAppliesToAttemptedWrite = (
     }
     if (concretePathHasPrefix(prefix, writePath)) {
       const relativePrefix = prefix.slice(writePath.length);
-      const value = getValueAtPath(write.value, relativePrefix);
-      const previousValue = write.previousValue === undefined
+      const documentRootWrite = write.address.path.length === 0;
+      const value = documentRootWrite && isObjectOrArray(write.value)
+        ? write.value.value
+        : write.value;
+      const previousValue = documentRootWrite &&
+          isObjectOrArray(write.previousValue)
+        ? write.previousValue.value
+        : write.previousValue;
+      const valueAtPrefix = getValueAtPath(value, relativePrefix);
+      const previousValueAtPrefix = previousValue === undefined
         ? undefined
-        : getValueAtPath(write.previousValue, relativePrefix);
+        : getValueAtPath(previousValue, relativePrefix);
       const matches = changedValuesAtPatternPath(
-        value,
-        previousValue,
+        valueAtPrefix,
+        previousValueAtPrefix,
         path.slice(wildcardIndex),
         unevaluableMatches,
       );
