@@ -17,10 +17,32 @@ deno task test
 
 ### Browser tests in agent sandboxes
 
-On macOS, an agent must request unsandboxed execution before its first attempt
-to run a command that can launch a browser. Headless Chrome still registers
-with AppKit and needs access to Launch Services and WindowServer. The macOS
-agent sandbox can deny that access and make Chrome abort during startup.
+Headless Chrome still registers with AppKit and needs access to Launch Services
+and WindowServer. The macOS agent sandbox can deny that access and make Chrome
+abort during startup. That abort is an artifact of the sandbox rather than a
+test result, and running the same command in the same sandbox reproduces it.
+
+So the rule turns on where a browser command will actually run, not on whether
+permission was asked for first:
+
+- Already running unsandboxed, because the session started that way or because
+  unsandboxed execution has since been granted: run the command. There is
+  nothing left to request, and pausing to ask for permission the session
+  already holds only delays the test.
+- Running sandboxed: request unsandboxed execution for the command through the
+  agent environment's narrowly scoped escalation mechanism, and run it there.
+  Do not try it inside the sandbox first to see whether it fails.
+
+Which of the two applies is a fact about the agent's own execution state, and
+the agent's harness is what reports it — not this document, and not the command
+about to run. A harness that sandboxes commands says so, and carries the escape
+hatch that goes with it: a per-command flag, a permission mode, or a prompt
+raised when a command asks for more than the sandbox allows. An escape hatch
+that is available and unused means the next command runs sandboxed; a session
+already running unsandboxed has no hatch left to take. When that state is
+genuinely unreadable, take the escalation path anyway. Asking for unsandboxed
+execution that is already in effect changes nothing, while a browser launched
+inside the sandbox yields a failure that says nothing about the code.
 
 The following repository commands and test paths launch a browser:
 
@@ -41,15 +63,13 @@ can be a type-only import or support a fake browser. When it is not clear
 whether a focused test starts a browser, inspect its suite setup and launch
 call path before running it.
 
-Use the agent environment's narrowly scoped escalation mechanism for the test
-command. Do not run the command in the sandbox first to see whether it fails.
-Deno's `-A` flag changes Deno's permission checks but does not escape the outer
-agent sandbox. Chrome's `--no-sandbox` flag disables a different protection;
-do not add it as a workaround.
+Neither flag that looks like a way out is one. Deno's `-A` changes Deno's own
+permission checks and does not escape the outer agent sandbox. Chrome's
+`--no-sandbox` disables a different protection; do not add it as a workaround.
 
-If a browser command was accidentally run inside the agent sandbox, disregard
-its browser-startup failure and rerun it outside the sandbox before
-interpreting the test result.
+If a browser command did run inside the agent sandbox, disregard its
+browser-startup failure and rerun it outside the sandbox before interpreting
+the test result.
 
 ### Tests that start Deno
 
