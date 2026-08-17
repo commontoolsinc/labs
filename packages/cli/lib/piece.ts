@@ -16,6 +16,7 @@ import {
 import { setLLMUrl } from "@commonfabric/llm";
 import {
   assignSlug,
+  listSlugs,
   pieceId,
   resolvePieceAddress as resolveStoredPieceAddress,
   resolveSlugTargetCell,
@@ -700,6 +701,41 @@ export async function listPieces(
       } catch (err) {
         return {
           id: piece.id,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }),
+  );
+}
+
+/** One `cf piece slugs` row: a name the space's slug index records, and the
+ * piece it resolves to. A row carries `error` instead of `piece` when the
+ * name does not resolve to one — a slug pointing at a plain cell path, or at
+ * a document that no longer loads, is still a name the space has, and a
+ * listing that dropped it would misreport the namespace. */
+export interface SlugSummary {
+  slug: string;
+  piece?: string;
+  error?: string;
+}
+
+/** Every slug the space's index records, each resolved to the piece id
+ * `--piece` would resolve it to. The index bounds the listing: it names
+ * slugs assigned since it existed, so an older slug still resolves but is
+ * not listed — nothing can enumerate what it was never told the name of. */
+export async function listSpaceSlugs(
+  config: SpaceConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<SlugSummary[]> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const slugs = await listSlugs(pieces);
+  return Promise.all(
+    slugs.map(async (slug) => {
+      try {
+        return { slug, piece: await resolveStoredPieceAddress(pieces, slug) };
+      } catch (err) {
+        return {
+          slug,
           error: err instanceof Error ? err.message : String(err),
         };
       }

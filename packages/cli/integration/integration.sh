@@ -409,6 +409,18 @@ run_piece_links() {
 
   cf piece get $SPACE_ARGS --piece resolved-counter value > /dev/null
 
+  # The slug index: both names just assigned are enumerable, and each resolves
+  # to a piece. Names are compared exactly; the resolved ids are only checked
+  # non-null, because an address is something to read next, not an identifier
+  # to compare (docs/common/verb-session-walkthrough.md, "An address is not an
+  # identifier to compare").
+  SLUGS_JSON=$(cf piece slugs $SPACE_ARGS --json)
+  echo "$SLUGS_JSON" | jq -e '[.[].slug] == ["counter-alias", "resolved-counter"]' > /dev/null ||
+    error "The slug listing should name both assigned slugs, got: $SLUGS_JSON"
+  echo "$SLUGS_JSON" | jq -e 'all(.[]; .piece != null)' > /dev/null ||
+    error "Every listed slug should resolve to a piece, got: $SLUGS_JSON"
+  echo "Successfully listed the slug index."
+
   # Create a second piece from the same pattern
   PIECE_ID2=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
   echo "Created second piece: $PIECE_ID2"
