@@ -1373,6 +1373,62 @@ export function findLowerableExpressionSite(
   return deferredArrayMethodReceiverSite;
 }
 
+/**
+ * A carrier site for an expression whose own site walk stops at a callback
+ * boundary: the expression sits inside an inline callback argument, and the
+ * callback's owning call lowers at an expression site of its own. The lift
+ * wrapping that site absorbs the callback, so the expression runs on resolved
+ * values — `rows.get().toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))`
+ * carries the comparator's `?.` inside the lift body.
+ *
+ * Callbacks of the array-method families (`map`/`filter`/`flatMap`) are
+ * excluded: those lower through their `*WithPattern` counterparts, whose
+ * callback-pattern machinery models elements on its own terms.
+ */
+export function findInlineCallbackCarrierSite(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): LowerableExpressionSite | undefined {
+  let current: ts.Node | undefined = expression.parent;
+
+  while (current) {
+    if (ts.isFunctionLike(current)) {
+      // Parentheses around the callback are transparent, here as everywhere
+      // in the site rules: `toSorted(((a, b) => ...))` carries like
+      // `toSorted((a, b) => ...)`.
+      let argument: ts.Node = current;
+      let parent: ts.Node | undefined = current.parent;
+      while (parent && ts.isParenthesizedExpression(parent)) {
+        argument = parent;
+        parent = parent.parent;
+      }
+      if (
+        !parent || !ts.isCallExpression(parent) ||
+        !ts.isExpression(argument) || !parent.arguments.includes(argument)
+      ) {
+        return undefined;
+      }
+
+      if (classifyArrayMethodCall(parent)) {
+        return undefined;
+      }
+
+      const site = findLowerableExpressionSite(parent, context, analyze);
+      if (site) {
+        return site;
+      }
+
+      current = parent.parent;
+      continue;
+    }
+
+    current = current.parent;
+  }
+
+  return undefined;
+}
+
 export function findPreferredNestedLowerableExpressionSite(
   expression: ts.Expression,
   context: TransformationContext,
