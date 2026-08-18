@@ -118,6 +118,27 @@ const BUMP_PATTERN = [
   ">(({ value }) => ({ value, bump: bump({ value }) }));",
 ].join("\n");
 
+// Stage C (verification-coverage.md OW32): a served HANDLER bound to an
+// interval-`#now` derivation records what it READ at dispatch. The lunch
+// residual was mis-attributed to "the served handler reads `nowTick` null
+// at dispatch and no-ops"; this pins the read itself: the handler writes
+// the bound `nowTick` (or -1 when null) into the argument doc.
+const NOW_READ_PATTERN = [
+  "import { computed, handler, pattern, Stream, wish, Writable } from 'commonfabric';",
+  "const record = handler<",
+  "  unknown,",
+  "  { nowTick: number | null; value: Writable<number> }",
+  ">((_ev, { nowTick, value }) => { value.set(nowTick ?? -1); });",
+  "export default pattern<",
+  "  { value: Writable<number> },",
+  "  { value: number; nowTick: number | null; record: Stream<unknown> }",
+  ">(({ value }) => {",
+  "  const nowWish = wish<number>({ query: '#now/1' });",
+  "  const nowTick = computed(() => nowWish.result ?? null);",
+  "  return { value, nowTick, record: record({ nowTick, value }) };",
+  "});",
+].join("\n");
+
 const CASCADE_PATTERN = [
   "import { handler, pattern, Stream, Writable } from 'commonfabric';",
   "const secondHandler = handler<unknown, { value: Writable<number> }>(",
@@ -365,6 +386,83 @@ describe("Phase 3 events-down (serving side)", () => {
       "the durable-ack settle callback",
     );
     expect(ackStatus).not.toBe("error");
+    cancelDemand();
+  });
+
+  it("a SERVED handler bound to an interval-#now derivation reads a CURRENT nowTick at dispatch — never null (Stage C, verification-coverage.md OW32: the handler-read half of the refuted served-wish-timing premise)", async () => {
+    // Real clock (this file is in clock-preload.ts `realClockFiles`), so the
+    // interval timer arms for real — on the serving runtime AND on the ON
+    // client, which runs the pattern too and may feed the shared tick doc
+    // with authored ticks; which runtime lands a tick is immaterial here.
+    // The pin is about the served HANDLER's read: the ON client fires the
+    // durable event, the drain dispatches it to the served handler, and the
+    // handler's write of the bound `nowTick` into the ARGUMENT doc (which
+    // only the served run writes durably — the client's echo diverts to
+    // the overlay) is the witness: a coarsened current instant, NOT the -1
+    // sentinel a null read would leave (the F4 hypothesis: "`castVote`
+    // reads `nowTick` null and returns without writing"). It does not
+    // distinguish one dispatch from two (a second run rewrites the same
+    // value) — the served `#now` SUPPLY is pinned in
+    // executor-serving-loop.test.ts.
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(
+      clientRuntime,
+      NOW_READ_PATTERN,
+      { arg: "now-read-arg", result: "now-read-result" },
+    );
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const before = Engine.serverSeq(engine);
+    result.key("record").send({});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    // The served handler ran and wrote what it READ: a coarsened, current
+    // instant — durably, in a DERIVED commit that consequences the event.
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const storedValue = (): number | undefined =>
+      (Engine.read(engine, { id: argumentId })?.value as
+        | { value?: number }
+        | undefined)?.value;
+    await waitUntil(
+      () => {
+        const v = storedValue();
+        return typeof v === "number" && v !== 0 && v !== -1;
+      },
+      "the served handler's nowTick write to land durably",
+    );
+    const read = storedValue()!;
+    expect(read).not.toBe(-1);
+    expect(read % 1000).toBe(0);
+    expect(Math.abs(Date.now() - read)).toBeLessThan(5_000);
+
+    await waitUntil(
+      () => sidecarIdsIn(engine).length >= 1,
+      "the event append to land",
+    );
+    const consequenceRows = engine.database.prepare(
+      `SELECT seq, consequence_of FROM "commit"
+       WHERE seq > :from_seq AND class = 'derived'
+         AND consequence_of IS NOT NULL`,
+    ).all({ from_seq: before }) as Array<
+      { seq: number; consequence_of: string }
+    >;
+    // The write rides a derived commit consequencing the fired event.
+    const writers = engine.database.prepare(
+      `SELECT c.seq AS seq, c.class AS class FROM revision r
+       JOIN "commit" c ON c.seq = r.commit_seq
+       WHERE r.id = :id AND r.data LIKE :needle ORDER BY r.seq DESC LIMIT 1`,
+    ).get({ id: argumentId, needle: `%${read}%` }) as
+      | { seq: number; class: string }
+      | undefined;
+    expect(writers?.class).toBe("derived");
+    expect(consequenceRows.some((row) => row.seq === writers?.seq)).toBe(
+      true,
+    );
     cancelDemand();
   });
 

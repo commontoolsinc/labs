@@ -371,6 +371,178 @@ describe("stage F serving loop", () => {
     ).toBeGreaterThanOrEqual(authored2);
   });
 
+  it("SERVES an interval #now/1 wish: the timer ARMS on the serving runtime (real clock) and a served run reads a CURRENT, advancing nowTick — not null/stale (Stage C: nowTick supply, verification-coverage.md OW32)", async () => {
+    // Stage C (verification-coverage.md OW32): the served interval-`#now`
+    // SUPPLY, pinned positively on a served host with a REAL clock. The
+    // runner suite's mandatory fake clock freezes the interval timer, so
+    // this could be witnessed only by the bimodal lunch browser gate — where
+    // it was mis-attributed to a NULL `nowTick`. This file is on the real
+    // clock (clock-preload.ts `realClockFiles`), so the interval `#now/N`
+    // timer's wall-clock `setTimeout` (builtins/wish.ts
+    // `scheduleIntervalNowTick`) fires for real. The pin proves the serving
+    // runtime SUPPLIES a current, ADVANCING tick — the timer armed on the
+    // serving runtime, not a one-shot frozen at boot — refuting the
+    // register's "the served `#now/300` wish resolves null/stale on the
+    // serving loop". (The served HANDLER's read of the bound `nowTick` at
+    // dispatch is pinned separately in executor-events-down.test.ts.)
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+
+    // A served pattern that wishes the 1-second `#now` grid and re-exposes
+    // its value — the same shape the lunch poll uses for `nowTick`, minus
+    // the vote machinery. The wish node runs SERVER-SIDE at activation, so
+    // the interval timer arms on the serving runtime (never the client).
+    onServingRuntime = async (runtime) => {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern, wish } from 'commonfabric';",
+            "export default pattern<{ seed: number }, { nowTick: number | null }>(",
+            "  () => {",
+            "    const nowWish = wish<number>({ query: '#now/1' });",
+            "    return { nowTick: computed(() => nowWish.result ?? null) };",
+            "  },",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const argument = runtime.getCell<{ seed: number }>(
+        space,
+        "now-serving-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ nowTick: number | null }>(
+        space,
+        "now-serving-result",
+        compiled.resultSchema,
+      );
+      for (let attempt = 0;; attempt++) {
+        await argument.sync();
+        await result.sync();
+        const tx = runtime.edit();
+        runtime.run(tx, compiled, argument, result);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `serving #now pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await runtime.idle();
+    };
+
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    // The client's DEMAND activates the serving loop; an authored write
+    // wakes it so the wish node's structure loads and derives.
+    const clientResult = clientRuntime.getCell<{ nowTick: number | null }>(
+      space,
+      "now-serving-result",
+      undefined,
+    );
+    await clientResult.sync();
+    const clientArg = clientRuntime.getCell<{ seed: number }>(
+      space,
+      "now-serving-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const tx = clientRuntime.edit();
+    clientArg.withTx(tx).set({ seed: 1 });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    // Wait for the SpaceServer to be ACTIVE first: activation installs the
+    // seal destination and only then flips `active` (space-server.ts, the
+    // `installSealDestination` → `#active = true` order). The interval
+    // timer arms earlier, inside `createRuntime`, so a 1-second boundary
+    // that fires in the pre-install window commits an AUTHORED tick (no
+    // stamper yet); reading `firstTick` only after `active` guarantees the
+    // ADVANCE asserted below fires post-install and rides the wave.
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the space server to activate",
+      15_000,
+    );
+    // The served run reads a CURRENT tick — a real coarsened wall-clock
+    // instant, never null. This is the property the lunch residual was
+    // (wrongly) blamed on: a served handler reading `nowTick` sees a
+    // current value.
+    await waitUntil(
+      () => {
+        const v = clientResult.key("nowTick").get();
+        return typeof v === "number" && v > 0 && v % 1000 === 0;
+      },
+      "the client to observe a current served nowTick",
+      15_000,
+    );
+    const firstTick = clientResult.key("nowTick").get() as number;
+    expect(typeof firstTick).toBe("number");
+    expect(firstTick % 1000).toBe(0);
+    // CURRENT, not merely a coarsened number: the served instant sits
+    // within a few seconds of the (shared, real) wall clock — a stale or
+    // boot-frozen value would drift away from `Date.now()`.
+    expect(Math.abs(Date.now() - firstTick)).toBeLessThan(5_000);
+
+    // …and it keeps ADVANCING: a wall second later the grid moves to the
+    // next instant on the SERVING runtime (the client reads the pushed
+    // value), so `nowTick` is a live clock, not a one-shot frozen at boot.
+    // Only the serving runtime's interval timer can write this advance —
+    // the client here is a plain OFF runtime that never runs the pattern.
+    await waitUntil(
+      () => {
+        const v = clientResult.key("nowTick").get();
+        return typeof v === "number" && v > firstTick;
+      },
+      () =>
+        `the served nowTick to advance past ${firstTick} (got ${
+          clientResult.key("nowTick").get()
+        })`,
+      15_000,
+    );
+    const advanced = clientResult.key("nowTick").get() as number;
+    expect(advanced).toBeGreaterThan(firstTick);
+    expect(advanced % 1000).toBe(0);
+    expect(Math.abs(Date.now() - advanced)).toBeLessThan(5_000);
+
+    // The timer ARMED ON THE SERVING RUNTIME: the ADVANCED tick's revision
+    // of the shared interval-tick doc (the content-addressed cell
+    // `{wish:{now:true,interval:1000}}` builtins/wish.ts acquires) is a
+    // DERIVED-class commit under THIS space server's holder — the serving
+    // runtime's own `writeIntervalNowTick` (a bookkeeping-stamped
+    // `editWithRetry` riding the wave), never an authored client write.
+    // Asserted on the ADVANCE (post-`installSealDestination`, since
+    // `firstTick` was read only after `active`), not on the initial
+    // acquire-time write.
+    expect(servingRuntime).toBeDefined();
+    const tickDocId = servingRuntime!.getCell<number>(
+      space,
+      { wish: { now: true, interval: 1000 } },
+      undefined,
+    ).getAsNormalizedFullLink().id;
+    const advancedRow = engine.database.prepare(
+      `SELECT c.class AS class, c.holder AS holder FROM revision r
+       JOIN "commit" c ON c.seq = r.commit_seq
+       WHERE r.id = :id AND r.data LIKE :needle
+       ORDER BY r.seq DESC LIMIT 1`,
+    ).get({ id: tickDocId, needle: `%${advanced}%` }) as
+      | { class: string; holder: string | null }
+      | undefined;
+    expect(advancedRow).toBeDefined();
+    expect(advancedRow?.class).toBe("derived");
+    expect(advancedRow?.holder).toBe(host.spaceServer(space)?.holder);
+
+    // The serving loop stayed healthy across the interval ticks (no park,
+    // no lease loss): the tick's bookkeeping commits ride the wave, never
+    // storming it.
+    const stats = host.stats();
+    expect(stats.lease.lost).toBe(0);
+    expect(host.spaceServer(space)?.active).toBe(true);
+  });
+
   it("retries a demanded root the loader could not start YET: demand precedes the instantiation commit (the creation race), the deferred ensure re-attempts on a later cycle, and the piece serves", async () => {
     host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
     // NO onServingRuntime pattern run: unlike the tests above, the

@@ -178,6 +178,30 @@ prototype, 2026-08-16): 45–56 k → 55–137 client action runs per
 5-minute two-browser gate, zero non-settling episodes, `runtime:idle`
 resolving, both two-browser gates booting in < 3 s.
 
+Revisited at Stage C (2026-08-17) against fan-out A/B's per-demander
+run supply and the F2 transient-demander preflight — VERDICT KEEP, no
+code change. Those are SERVER-side fixes (they make the per-user
+instance get SERVED and RE-ARMED); this gate is CLIENT-side and treats
+the orthogonal symptom — an echo must not retire on watermark COVERAGE
+before the authoritative value ARRIVES at this client's replica, the
+frame-coupling window stated above as an assumption — so the server
+supply does not subsume it (a serving runtime never speculates and
+never reaches this gate; a server change that guaranteed same-frame
+delivery of value + watermark for every watched instance would shrink
+the window, and is the arrival re-sweep already named above, but none
+of A/B/F2 is that change). The gate remains the client's backstop for
+the design's first-demand transient (§E residual 1) and walk-coverage
+gap (§E residual 4), which persist as fan-out B's own residuals; the
+OW32-shape pin's gate-removed mutation shows the retire-to-nothing loop
+returning without it, and the Stage-C live instrumentation saw the gate
+holding echoes in exactly its window. One EDGE is recorded, not ruled:
+a LATE echo of a non-idempotent handler (a cascade run that sealed after
+the served consequence had already landed at this client) is divergent
+by construction and its written doc's confirmed seq sits below the
+entry's floor for good, so the gate keeps it indefinitely — a rule for
+echoes of already-consequenced intents is owed (verification-coverage.md's
+Stage-C delta).
+
 ## 5. Offline
 
 - Events accumulate locally in fired order (events.md §5), speculation

@@ -172,34 +172,83 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "the wish runs per demander and provisions with its " +
         "`demanded-run:<user>` carriage — 'both join lands' 35–640 ms), " +
         "and OW34 (the renderer-trust attestation on the durable entry). " +
-        "Under the full ON posture on a fresh store this gate is " +
-        "BIMODAL (stage B build `store-lunch4` GREEN 2m28s; the fixer " +
-        "pass on the independent review reproduced 1/2 on binary " +
-        "fadc2efb1b — run 1 RED at 'both browsers see 2 love it (merge)' " +
-        "hanging to the 300 s timeout with '1 love it', run 2 GREEN " +
-        "1m18s). The residual mechanism, triaged (review F4) as " +
-        "SERVED-WISH TIMING and NOT a stage-B B7 dirtiness miss: the " +
-        "served `castVote` handler run as the second voter reads " +
-        "`nowTick` (the `#now/300` interval wish's value) null and " +
-        "returns without writing (`main.tsx` `if (!now) return`), so " +
-        "ONE vote no-ops; `todaysVotes`/`ranked` read only SHARED inputs " +
-        "(they are SPACE-scoped, not fanned out — a `nowTick` change is a " +
-        "space cause that dirties them and any per-user swatch VDOM " +
-        "downstream via `dirtyFanOutAll`, never a missed re-dirty), so " +
-        "the review's swatch flip [Bob,Alice]→[Alice]→[Bob,Alice] is " +
-        "`todaysVotes`' `dayKeyOf(nowTick)` filter flipping as `nowTick` " +
-        "resolves, not a per-instance dirtiness bug. The two-browsers " +
-        "gate (no `#now`/`nowTick` dependency) is GREEN 2/2 under the " +
-        "same binary and load, isolating the failure to the `nowTick` " +
-        "chain. Compounded by the pre-existing client-instantiate-vs-" +
-        "server-derive re-fetch race at piece creation (the ~6 s " +
-        "`compile-cache-hit` churn the 300 ms demand-wake grace only " +
-        "softens). Owed at Stage C (NOT stage-B-owned): the served " +
-        "`#now/300` value for a serving runtime at dispatch, or a wall " +
-        "clock the serving runtime supplies to the `if (!now)` guard. " +
-        "Recorded in verification-coverage.md (OW32's row); lifts when " +
-        "this gate greens ≥2/2 fresh-store under the full ON posture; " +
-        "the flip PR needs this list EMPTY.",
+        "Under the full ON posture on a fresh store this gate is BIMODAL " +
+        "(builder `store-lunch4` GREEN 2m28s; fixer 1/2; Stage C 0/2 " +
+        "clean runs green, both RED — at the merge, or at 'option B' " +
+        "after a transient '2 love it'). STAGE C RE-CHARACTERIZED THE " +
+        "RESIDUAL (2026-08-17), REFUTING the fan-out-B review-F4 " +
+        "SERVED-WISH-TIMING triage: the cause is NOT a null/stale " +
+        "`nowTick`. Instrumented on the ON binary (serving loop + client " +
+        "overlay + a `castVote` probe read from the serving runtime), 5 " +
+        "fresh-store runs show `nowTick` ALWAYS valid — the served " +
+        "`#now/300` interval timer arms on the SERVING runtime and writes " +
+        "valid coarsened ticks (derived-class commits), every served " +
+        "`castVote` run reads a current `nowTick`, and every vote doc the " +
+        "served runs wrote carries a valid `castAt` (pinned: the served " +
+        "`#now` SUPPLY by `executor-serving-loop` 'SERVES an interval " +
+        "#now/1 wish', and the served HANDLER's read at dispatch by " +
+        "`executor-events-down` 'a SERVED handler bound to an interval-#now " +
+        "derivation reads a CURRENT nowTick at dispatch'). The real " +
+        "residual is a served " +
+        "castVote DOUBLE DISPATCH of ONE durable event: per click the " +
+        "store holds exactly ONE castVote sidecar entry (one stream, one " +
+        "eventId minted once at the LT1 send), and that ONE event id is " +
+        "consequenced by 2–5 derived commits — the served handler RAN 2–5 " +
+        "times per click, alternating CAST / TOGGLE-OFF (`main.tsx` " +
+        "`castVote`'s `sameColorToday` arm), so the durable tally is the " +
+        "INTERLEAVING of the duplicate runs — the parity of the count in " +
+        "the common case (clean run 2: Bob 2 runs → lost, Alice 4 → lost → " +
+        "RED at option B; clean run 1: Alice 3 kept, Bob 5 with the last " +
+        "two reading the same view → lost). Mechanism " +
+        "(`cell.ts`/`space-server.ts` at the tip): the " +
+        "served click handler's `castVote.send()` takes the LT1 same-space " +
+        "arm (`cell.ts:1703-1819`) — it writes the durable entry into its " +
+        "tx AND queues the event IN-PROCESS for same-wave processing " +
+        "(`:1799`, no `streamEntry`); when that run misses the wave's " +
+        "flush deadline (`wavesBudgetExhausted` ≈ `waves` here) it stays " +
+        "queued and runs in a LATER wave UNMARKED (the batch marks only " +
+        "same-wave appends, `wave.ts:2137-2239`), while the drain " +
+        "(`space-server.ts:1791`, store-driven) re-queues the still-" +
+        "pending id WITH a `streamEntry` (`:1920`) — a second run; a " +
+        "second variant re-queues an entry the drain queued but the " +
+        "scheduler had not yet run when a cycle ended without a commit " +
+        "and the scan was re-armed (`:1607`, `:1725-1730`) — no cascade " +
+        "needed. Both diag-witnessed (the same id dispatched once without " +
+        "and once with `streamEntry`; one id drain-queued twice). Under " +
+        "OFF the same pattern is exactly-once BY CONSTRUCTION (one " +
+        "in-process queue, `cell.ts:1918` → `scheduler/events.ts:330`; no " +
+        "second path; the OFF lunch gate passes 9–11 s) — a served-" +
+        "execution PARITY GAP, not a pattern bug. (The two references to " +
+        "`boundCastVote` — exported API + child-card arg — are NOT the " +
+        "mechanism: one stream cell; removing the export did not stop the " +
+        "multiple runs.) `events.processed > appended` is NOT a " +
+        "discriminating signature (re-drains inflate it). A SECOND, " +
+        "client-side coin rides the same runs: when the browser's local " +
+        "dispatch of its own click is delayed past the served round trip " +
+        "(15–20 s in the RED runs, during the re-fetch/piece-restart " +
+        "churn), its castVote echo runs against a replica that already " +
+        "holds the vote, computes the TOGGLE-OFF, and the arrival gate " +
+        "strands that divergent echo indefinitely (written doc " +
+        "`confirmedSeq` < the entry's floor; the fixer's preserved RED " +
+        "store had NO server-side loss yet its host showed '1 love it' " +
+        "for 300 s) — an arrival-gate edge flagged in the register's " +
+        "Part 2 revisit, not filled. Same class: the " +
+        "two-browsers admin-lockdown toggle (`trusted.tsx:667`, bound " +
+        "directly to the checkbox click, toggle branch on a plain click) " +
+        "is exposed to the re-drain variant. Compounded (secondary) by the " +
+        "pre-existing client-instantiate-vs-server-derive re-fetch race at " +
+        "piece creation (residual x; the 300 ms demand-wake grace only " +
+        "softens). FLAGGED, not filled — owner ruling OWED on the delivery " +
+        "invariant (verification-coverage.md OW32's row carries the three " +
+        "costed resolutions and the recommendation: state 'one durable " +
+        "entry = one COMPLETED delivery' in events.md §4 and enforce it in " +
+        "the serving loop — a deadline-time purge of unrun LT1 leftovers " +
+        "(`served.streamEntry === undefined`) + a drain dedupe keyed on a " +
+        "mark-bearing `streamEntry` copy, shaper-held events included; NOT " +
+        "handler idempotency, which contradicts OFF). Lifting needs BOTH " +
+        "coins (the server-side ruling and the client-side late-echo " +
+        "edge); lifts when this gate greens ≥2/2 fresh-store under the " +
+        "full ON posture; the flip PR needs this list EMPTY.",
     },
   ],
   runner: [

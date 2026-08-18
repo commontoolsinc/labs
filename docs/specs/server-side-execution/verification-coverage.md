@@ -2767,7 +2767,237 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   (or the pattern's `if (!now) return` guard reading a wall clock the
   serving runtime supplies) — plus the pre-existing
   client-instantiate-vs-server-derive race at piece creation (the
-  300 ms demand-wake grace mitigates, does not close it; residual x).**
+  300 ms demand-wake grace mitigates, does not close it; residual x).
+  **STAGE C RE-CHARACTERIZED THE LUNCH RESIDUAL (2026-08-17), REFUTING
+  the served-wish/`nowTick` premise above.** Evidence: 5 instrumented
+  fresh-store runs on the ON binary (the serving loop's dispatch/drain/
+  wave-close, the client overlay's seal/sweep/arrival gate, and a
+  `castVote` probe read from the SERVING runtime's log — the browsers'
+  worker consoles were captured separately) plus store forensics on the
+  2 un-instrumented clean runs and on the fixer's preserved RED store.
+  Established (each item's discriminator named):
+  - `nowTick` is NOT null/stale. The served `#now/300` interval timer
+    arms on the serving runtime and writes valid coarsened ticks (the
+    store's tick doc advances `…600000 → …900000` by derived-class
+    commits), and EVERY served `castVote` run in the probe read a
+    current `nowTick`; every vote doc the served runs wrote carries a
+    valid `castAt` (the fixer's RED store: both votes, `castAt`
+    `1787005500000`). `castVote` does not no-op — it TOGGLES (below).
+    The supply half is now durably pinned by `executor-serving-loop.
+    test.ts` "SERVES an interval #now/1 wish" (a served host on the real
+    clock: the timer arms server-side and a served run reads a current,
+    advancing coarsened instant — the advancing tick's revision is
+    derived-class under the space server's holder). The HANDLER-AT-
+    DISPATCH read (F4's precise hypothesis) is pinned too:
+    `executor-events-down.test.ts` "a SERVED handler bound to an
+    interval-#now derivation reads a CURRENT nowTick at dispatch" — an
+    ON client fires the durable event, the drain dispatches it, and the
+    served handler writes the bound `nowTick` it read (or a `-1`
+    sentinel when null) into the argument doc: a coarsened current
+    instant lands, in a derived commit consequencing the event;
+    mutation (the handler writes `-1`) → RED.
+  - The real residual is a served castVote **DOUBLE DISPATCH of ONE
+    durable event** (never a second event, never a second stream). Per
+    click the store holds exactly ONE castVote sidecar entry (clean run
+    1: `f3f7bd73` Alice green, `5c2d7a90` Bob green, `bcc76f69` Bob red
+    — one sidecar `izXSNtW1rR…`, one entry each; the entry's eventId is
+    minted ONCE at the emitting run's LT1 send, `cell.ts:1718`), and
+    that ONE event id is consequenced by 2–5 derived commits, i.e. the
+    served handler RAN 2–5 times for one click. The runs alternate
+    CAST/TOGGLE-OFF (`main.tsx` `castVote`'s `sameColorToday` arm), so
+    the durable outcome is the INTERLEAVING of the duplicate runs — the
+    parity of the run count in the common case; two duplicates dispatched
+    together can read the same pre-state and toggle the same way.
+    Observed served run counts per click: clean run 2 — Bob 2 (cast, off
+    → LOST), Alice 4 (cast, off, cast, off → LOST) → RED at "option B"
+    (both greens gone; the merge had passed on the transient "2 love
+    it"); clean run 1 — Alice 3 (cast, off, cast → kept), Bob 5 (cast,
+    off, cast, off, off — the last two read the same view → LOST) → RED;
+    the served-runtime probe: Bob 4 / Alice 5 (one run), Alice 3 / Bob 1
+    (another). The review's swatch flip is the same alternation seen
+    through the swatch VDOM.
+    (The `castVote` stream being referenced at two sites — the exported
+    API `main.tsx:2035` and the child-card arg `:1664` — is NOT the
+    mechanism: both are links to the same stream cell, and removing the
+    export in one experiment did not stop the multiple runs — Alice's
+    handler still ran 3×; the merge passed only because 3 is odd.)
+  - MECHANISM (the exact path, `cell.ts`/`space-server.ts` at the tip):
+    a served click handler's `castVote.send()` takes the LT1 same-space
+    arm (`cell.ts:1703-1819`): it writes the durable entry into its own
+    tx (`:1776-1783`) AND queues the event IN-PROCESS for same-wave
+    processing (`:1799-1819` — no `streamEntry` on that queue: "the
+    batch owns the mark"). If that in-process run does not happen
+    before the wave seals (the flush deadline — `wavesBudgetExhausted`
+    ≈ `waves` on this gate, `space-server.ts:2702-2708`), (α) the event
+    STAYS in the scheduler's queue and runs in a LATER wave carrying no
+    `streamEntry`, so its consequences commit UNMARKED (the batch marks
+    only entries APPENDED in that wave, `wave.ts:2137-2239`; the
+    stamper's mark needs `streamEntry`, `space-server.ts:1159-1180`);
+    and (β) the wave that appended the entry re-arms the scan
+    (`:2951-2962`), so the next drain (`#drainStreamEvents`, `:1791`;
+    `selectPendingStreamEventDocs` = the STORE's unconsequenced entries)
+    queues the SAME event id again WITH a `streamEntry` (`:1920-2016`)
+    — the second run. Both are diag-witnessed (DIAG-DISPATCH: the same
+    id once without and once with `streamEntry`; e.g. Bob's `1e731bc9`
+    LT1-queued at 51.1 s, wave sealed 56.08 s, in-process run 56.09 s,
+    drain re-queue 60.10 s, both committed in wave 78 as cast+off). A
+    second variant needs no cascade: an entry the drain queued but the
+    scheduler had not yet run when the cycle ended is queued AGAIN by
+    the next cycle's drain when the scan is re-armed — and the re-arm
+    doors are many: the post-commit re-arm at ANY committing wave close
+    with a drained-but-unrun entry still pending (`:2951-2962`), any new
+    event append (`:1717-1720`), `#armDeferredRescan` (`:1607`), and a
+    feed record while deferrals are outstanding (`:1725-1730`) — where
+    `#eventDeferrals` is cleared only at activation (`:700`), drop
+    (`:1992`) and non-deferred failure (`:2006`), NEVER on a later
+    success, so after one deferral (routine at piece start) EVERY feed
+    record re-arms the scan for the life of the activation (a small leak
+    of its own; why the re-scan is near-continuous on this gate) —
+    witnessed on a directly-bound handler (`9f8b1916` drain-queued twice
+    at 22.28 s and 22.52 s, dispatched twice, one wave). The design
+    comment covers
+    the REQUEUED case ("a requeued run leaves the entry unmarked and the
+    next wave's drain re-runs it (C8b)", `cell.ts:1784-1798`) but
+    nothing removes an UNRUN in-process LT1 event at wave close, and
+    nothing dedupes the drain's dispatch against an event already queued
+    or already run in the still-open wave. `space-server.ts:1182-1188`
+    already names "consequences committing unmarked → re-run on the next
+    drain → double consequences" as the class to prevent — this is that
+    class through two other doors.
+  - OFF-ARM PARITY: under OFF the same pattern is exactly-once BY
+    CONSTRUCTION — a client `send` from a handler takes the plain
+    `queueEvent` (`cell.ts:1918`) into the ONE in-process queue
+    (`scheduler/events.ts:330 queueSchedulerEvent` → one
+    `findEventHandler` registration per stream link, `:347`); there is
+    no durable-entry/drain second path, and two links to one stream
+    resolve to one handler. No dedupe mechanism exists because none is
+    needed. The OFF-arm lunch gate PASSES 9–11 s (the wall triage's OFF
+    runs). So the served path's second producer (durable entry + drain)
+    beside the in-process queue, with no dedupe between them, is a
+    served-execution PARITY GAP — a defect of the serving loop, not a
+    pattern bug.
+  - A SECOND, CLIENT-side mechanism rides the same runs — independent
+    of the double dispatch and enabled by residual x: the client's LATE
+    speculative echo of its own click's cascade. When the client's local
+    dispatch of the click is delayed past the server's round trip (the
+    RED runs' "both cast green concurrently" step took 15–20 s versus
+    0.5–2.5 s in green runs — the browser was mid re-fetch/piece-restart
+    churn; the overlay seal of Alice's castVote echo landed 3–4 s AFTER
+    the server's consequence commit had already been applied to her
+    replica: entry floor 78 vs her vote doc's `confirmedSeq` 77 in the
+    instrumented run), the echo runs against a replica that ALREADY
+    holds its own vote, so the non-idempotent handler computes the
+    TOGGLE-OFF — a DIVERGENT echo whose written vote doc sits at
+    `confirmedSeq` < the entry's floor. The arrival gate (working as
+    specified) then KEEPS it — indefinitely, since the server never
+    rewrites that doc — and the client renders a state the store never
+    held: the fixer's own RED run 1 (`gate/store-lunch1`, preserved) has
+    NO server-side loss at all (Alice 1 run, Bob 3 → both KEPT, store
+    "2 love it") yet its host showed "1 love it" / swatch [Bob] / "1
+    votes today" for 300 s; the instrumented run 1's host showed "0
+    votes today" for 120+ s while the store held Alice's vote. So the
+    gate's bimodality has TWO independent coins: the parity of the
+    served run count (store-side) AND whether the client's echo ran
+    before or after the served consequence (client-side). This is an
+    ARRIVAL-GATE EDGE, recorded in the Part 2 revisit (KEEP, edge
+    flagged for a ruling — not filled here): an intent-origin cascade
+    echo whose parent intent was ALREADY consequenced when the echo
+    sealed is a re-derivation of a served intent; a candidate rule is to
+    not register (or to retire at seal) such an echo, which is a
+    speculation.md §4 semantic the spec does not state.
+  - The `events.processed`/`events.appended` counters are NOT a
+    discriminating signature: `processed` counts drain queueings
+    (`:2024`) and re-drains, `appended` counts feed-notified/activation
+    appends (`:707`, `:1719`) — an LT1 cascade processed in-wave counts
+    in neither, so a gap also arises from ordinary re-drains. (Corrects
+    the earlier Stage-C wording; the run counts above are the evidence.)
+  - Secondary, unchanged: residual x — the pre-existing
+    client-instantiate-vs-server-derive race at piece creation
+    (`piece-start-commit-failed` ×4 + one deferred-start ConflictError +
+    the ~6 s `compile-cache-hit` re-fetch churn per run; the 300 ms
+    demand-wake grace softens, does not close). It does not gate the
+    merge here.
+  - Same class elsewhere: the two-browsers gate's admin-lockdown toggle
+    (`cfc-group-chat-demo/trusted.tsx:667 commitTrustedAdminToggle`,
+    bound DIRECTLY to the checkbox `onClick` at `:947`/`:1022` — the
+    click, not `cf-checkbox`'s `cf-change`, so the event carries no
+    `detail.checked` and `:692`'s fallback takes the toggle branch
+    `!chatAdminEveryoneIsAdmin(adminRegistry)`) flips BACK under a
+    double dispatch — it is exposed to the second (re-drain) variant only
+    (no LT1 cascade), the same class; a ruling on the delivery invariant
+    covers both.
+  - Gate status: the un-instrumented lunch gate is 0/2 green at Stage C
+    (both RED by the run-count interleaving above; the fixer's preserved
+    RED run is RED by the client-side stranded echo alone); the 5
+    instrumented runs reached the vote steps green twice and RED three
+    times (none counted as gate-green). The lifting condition (≥2/2
+    fresh-store green) is not met — the skip STAYS.
+  - DISPOSITION: FLAG, do not fill (owner ruling OWED). NOTE the lift
+    condition (≥2/2 green) needs BOTH coins: this dossier's ruling (the
+    server-side double dispatch) AND the client-side late-echo edge filed
+    under the Part 2 revisit below. Three candidate resolutions for the
+    server-side coin, costs stated, none chosen here:
+    - (i) the serving loop dedupes dispatch per event id across its two
+      queue paths — parity with OFF's single queue: (α) at the wave's
+      DEADLINE decision (`:2702-2708`, synchronously — the scheduler
+      keeps executing through `await commitWave` at `:2925`, so a purge
+      after it can lose the race to the leftover's next turn), purge
+      from the scheduler queue every LT1 in-process cascade event that
+      did not run — the discriminator is `served !== undefined &&
+      served.streamEntry === undefined` (a plain in-process event on the
+      serving runtime carries no `served` and no durable entry and must
+      never be purged); its durable entry is the truth and the next drain
+      re-runs it WITH a `streamEntry`, so the mark lands — the fallback
+      `cell.ts:1784-1798` already intends; (β) the drain skips an entry
+      whose id is already queued, or already ran in the still-open wave,
+      ONLY when that other copy carries a mark path (a `streamEntry`-
+      bearing dispatch) — never on the strength of a `streamEntry`-less
+      LT1 leftover, which cannot mark (skipping for it would leave the
+      entry unmarked and re-drained the NEXT wave: the double one wave
+      later); and "already queued" must include shaper-HELD events
+      (renderer-trusted click events take `holdShapedEvent` and sit
+      outside `eventQueue` until released — a queue-only walk misses
+      them, the pre-existing blind spot `transientEventDemandersFor`
+      shares). Cost: a scheduler queue inspect/remove seam keyed on
+      eventId (`transientEventDemandersFor` already walks `eventQueue`;
+      `dropQueuedEvent` exists) that also sees the shaper's held set, a
+      deadline-time hook, a per-wave dispatched-id set cleared on
+      close/abort. Risk, stated: (α)'s safety holds for EVENT-HANDLER
+      emitters (the append and the emitter's own mark ride one tx; a
+      requeue withdraws whole and the parent's re-run re-emits under a
+      fresh id — C8d) but NOT for DERIVATION-kind LT1 emitters
+      (`cell.ts:1692`/`:1726` admit them): a derivation's sidecar append
+      on a conflicted doc is dropped per-doc as superseded (`wave.ts:
+      1420-1429`, "re-arms nothing"), nothing re-emits, so a purge would
+      lose that event silently — today it runs as an ORPHAN consequence
+      (zero durable entries, one delivery: the same invariant broken
+      from the other side), which (ii)'s sentence must also decide.
+      Contained to `space-server.ts` + a facade helper; OFF byte-identical
+      (both seams behind the serving posture);
+    - (ii) events.md §4 states the invariant — "one durable entry = one
+      COMPLETED delivery to its handler, regardless of dispatch path or
+      reference count (a requeued run is legitimately re-delivered by
+      the drain); an entry not completed in the wave that appended it is
+      dispatched by the drain alone; and a delivery with no durable entry
+      is [refused | tolerated as an orphan] (the derivation-emitter case
+      above, to be decided)" — and the drain enforces it (= (i) with the
+      sentence written down; §4 today states exactly-once only via the
+      consequenced mark on the drain path); cost: (i) + spec sentence +
+      register row;
+    - (iii) patterns must make handlers idempotent (castVote's toggle is
+      the pattern's bug) — the harshest; it contradicts the OFF arm
+      (exactly-once by construction, gate green with this pattern), and
+      would make every non-idempotent handler (append/increment/toggle)
+      wrong under serving, which events.md §4's exactly-once exists to
+      prevent.
+  - RECOMMENDATION (the implementer's, not a decision): (ii) — state the
+    invariant (with the orphan-delivery clause decided) and enforce it
+    via (i)'s two seams as sharpened above; NOT (iii). Evidence: OFF
+    parity; `space-server.ts:1182-1188`'s own statement of the class;
+    the LT1 fallback comment intending the drain as the one re-run path.
+    Papering it in the pattern is refused; a blind dedupe without the
+    stated invariant risks the legitimate same-wave LT1 cascade path.
+    The skip entry names this mechanism.
 - OW34 — a CFC-serving POLICY item: served handler runs carry NO
   renderer-trusted event mark, so a per-user served handler's write to a
   UI-contract-gated (owner-protected) cell is refused by CFC at prepare
@@ -3219,6 +3449,90 @@ supply; OW29/OW32/OW34 closed):
   draft) — a recurrence in CI is evidence about B7 (a keyed cascade
   not dirtying a walk instance) and should be read as such, not
   retried.
+
+Delta 2026-08-17 — Stage C follow-ups (the lunch residual + the
+arrival-gate revisit):
+
+- OW32's lunch residual RE-CHARACTERIZED (the row above carries the
+  full dossier): the served-wish/`nowTick` premise is REFUTED; the
+  residual is a served castVote DOUBLE DISPATCH of one durable event
+  (the LT1 in-process leftover + the drain, and the drain re-scan) whose
+  alternating cast/toggle-off runs make the durable tally a parity
+  question. The skip STAYS (0/2 clean runs green), the mechanism is
+  FLAGGED with three costed resolutions and a recommendation for the
+  owner, and the served `#now` SUPPLY is pinned positively —
+  `executor-serving-loop.test.ts` "SERVES an interval #now/1 wish": a
+  served host on the real clock arms the interval timer server-side and
+  a served run reads a current, advancing `nowTick`, the advancing
+  tick's revision derived-class under the space server's holder — and
+  the HANDLER-at-dispatch read is pinned in `executor-events-down.
+  test.ts` "a SERVED handler bound to an interval-#now derivation reads
+  a CURRENT nowTick at dispatch" (mutation: a `-1` null-sentinel write →
+  RED). No spec sentence (test pins + register correction; no new
+  binding claim).
+- Register STALENESS corrected: OW17's "a reliable MWISH pin is OWED as
+  a served-host wish E2E" — that pin LANDED on the fan-out-B tip as
+  `f5a0cac5c` (`executor-cross-space.test.ts` "a wish sidecar's OWN
+  actions are demanded through the wish's OWNING piece root"); the row
+  text above is left as history, this delta records the landing.
+- **THE CLIENT ARRIVAL GATE (speculation.md §4) — REVISITED ON
+  EVIDENCE, VERDICT: KEEP.** The question the revisit answers: now that
+  fan-out A/B supply per-demander runs and the F2 transient-demander
+  preflight re-arms a served handler's not-current instances, is the
+  client arrival gate redundant or subsumed? It is NOT. The gate is
+  CLIENT-side (it lives in the non-serving overlay's `#sweep`,
+  `overlay-destination.ts:1010-1031`; serving runtimes never speculate,
+  so they never reach it — `runtime.ts:1897-1899`
+  `#speculationDestination` returns undefined under the serving
+  posture); every fan-out fix — the arrival RE-ARM
+  (`scheduler/facade.ts:845 invalidateActionsForDemandRoots`, called
+  from `space-server.ts`), the per-demander run supply, the F2
+  `rearmNotCurrentFanOutForActor` (`facade.ts:940`, wired only under
+  the serving posture) — is SERVER-side. They fix the CAUSE (per-user
+  instances are served / re-armed on the server); the gate treats the
+  CLIENT-side SYMPTOM (an echo must not retire on watermark COVERAGE
+  before the authoritative value ARRIVES at this client's replica), the
+  frame-coupling window §4 already states as an ASSUMPTION. Stated
+  precisely: no server-side SUPPLY change lands the value in the
+  client's replica frame-coupled to the covering watermark; a server
+  change that guaranteed same-frame delivery of value + watermark for
+  every watched instance would SHRINK the window (and is the "arrival
+  re-sweep" follow-up §4 already names), but none of A/B/F2 is that
+  change. Evidence for KEEP: (1) LIVE — under the full ON posture on the
+  lunch gate the Stage-C client-overlay instrumentation showed the gate
+  HOLDING per-user echoes whose written instance had `confirmedSeq` 0
+  (never served yet) or `< floor` (arrived a frame late) — exactly its
+  window; (2) UNIT — the OW32-shape pin in
+  `speculation-arrival-gate.test.ts` carries the gate-removed mutation
+  (`arrived` check dropped → the entry retires to nothing → the
+  retire-to-nothing loop returns); the other two pins (own-retirement
+  source; supersede-by-newer) pin the gate's RIDERS with their own
+  mutations, not the gate's removal; (3) the design's §E residuals the
+  gate backstops — residual 1 (the first-demand transient) and residual
+  4 (a walk-coverage gap) — PERSIST as fan-out B's own documented
+  residuals (OW17 viii/ix + F2's transitive not-current-for-actor gap);
+  post-B the loop the gate prevents is a bounded transient for a served
+  instance and unbounded only for a never-served one — still the case
+  the gate exists for. No SIMPLIFY keeps the OW32-shape pin green.
+  (4) ONE EDGE OBSERVED, FLAGGED, NOT FILLED (it needs a ruling on
+  late-echo semantics, and it is orthogonal to the KEEP question — the
+  loop returns without the gate either way): a LATE speculative echo of
+  a NON-IDEMPOTENT handler — the client's local cascade run of its own
+  click, delayed past the served consequence (residual x's re-fetch
+  churn) — computes a DIVERGENT result against a replica that already
+  holds the authoritative write, and the gate strands it indefinitely
+  (its written doc's `confirmedSeq` is below the entry's floor and the
+  server never rewrites the doc). Evidence: the fixer's RED lunch run 1
+  (store correct, host rendering "1 love it"/[Bob] for 300 s) and the
+  Stage-C instrumented run 1 (floor 78 vs `confirmedSeq` 77 on Alice's
+  vote doc; host "0 votes today" for 120+ s). Candidate rule (an owner
+  call): an intent-origin echo whose parent intent is already
+  consequenced at seal is not registered (or retires at seal) — the
+  served consequence IS the authoritative run of that intent. Recorded
+  in the OW32 row's dossier as the second lunch coin.
+  Verdict recorded; NO code change (KEEP). speculation.md §4 gains the
+  Stage-C revisit sentence (the server supply does not subsume the
+  client gate; the late-echo edge named).
 
 ## 4. Standing rule
 
