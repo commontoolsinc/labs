@@ -723,6 +723,29 @@ export default pattern(() => {
     (graphBoard.topics?.[0]?.referencedBy ?? []).length === 1
   );
 
+  // The same topic listed twice, which the board's own verbs cannot produce but
+  // a hand-wired or merged list can. Its self-mention must stay inert through
+  // BOTH entries: a skip that asked about array position rather than identity
+  // would let the row built at one index count the twin at the other, and the
+  // topic would show itself as an inbound reference.
+  const twinTopics = new Writable<TopicPiece[] | Default<[]>>([]);
+  const twinBoard = Topics({ topics: twinTopics });
+  const action_add_twin = action(() => {
+    twinBoard.addTopic.send({ title: "Twin", agentName: "Sol" });
+  });
+  const action_list_twin_again = action(() => {
+    twinTopics.push(twinBoard.topics?.[0]);
+  });
+  const action_twin_mentions_itself = action(() => {
+    twinBoard.topics?.[0]?.mention?.send({ topic: twinBoard.topics?.[0] });
+  });
+  const assert_twin_earns_no_edge = assert(() =>
+    (twinBoard.topics ?? []).length === 2 &&
+    (twinBoard.topics?.[0]?.mentions ?? []).length === 1 &&
+    (twinBoard.topics?.[0]?.referencedBy ?? []).length === 0 &&
+    (twinBoard.topics?.[1]?.referencedBy ?? []).length === 0
+  );
+
   // Nothing was written into the target: retract the mention and the edge is
   // simply gone from the topic that was being referenced.
   const action_source_retracts_mention = action(() => {
@@ -861,6 +884,10 @@ export default pattern(() => {
       { assertion: assert_reference_edge },
       { action: action_target_mentions_itself },
       { assertion: assert_self_reference_ignored },
+      { action: action_add_twin },
+      { action: action_list_twin_again },
+      { action: action_twin_mentions_itself },
+      { assertion: assert_twin_earns_no_edge },
       { action: action_source_retracts_mention },
       { assertion: assert_reference_retracted },
       { action: action_ui_mentions_two },

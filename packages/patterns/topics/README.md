@@ -70,27 +70,28 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   space. So every derivation here is a module-scope `lift`, because a `lift`'s
   declared parameter type is a ceiling an opaque helper cannot widen.
 
-  `boardRows`, the one derivation that runs over the whole board, declares
-  `TopicSummary` — a title and four scalars. Building every row therefore
-  expands no topic's body, thread, verbs, or rendered UI.
+  Two derivations run over the whole board, and each declares only what it
+  reads. `crossrefTable` takes one list of references per topic and builds the
+  mention pivot from it; `cardsByActivity` takes a single timestamp per topic
+  and orders the cards by it. Neither expands a topic's title, prose, thread,
+  verbs, or rendered UI.
 
-  A lift's parameter and its result are one type in TypeScript, which looks like
-  it forces a choice: narrow the parameter to bound the read, and the row's
-  `topic` narrows with it, so a card could no longer render a body snippet. It
-  is not a real choice. A reference that passes through a lift is a link, and a
-  link resolves to the whole topic however little of it the lift declared — so
-  `boardRows` reads `TopicSummary` and asserts each row's reference back to
-  `TopicPiece`. The parameter bounds the read; the assertion states what the row
-  actually holds. It carries a `HACK:` note: the runtime already guarantees
-  this, and a generic lift that carried the input reference type through to the
-  output would say it without a cast.
+  A lift's parameter and its result look like one type, which seems to force a
+  choice: narrow the parameter to bound the read, and what comes out narrows
+  with it, so a card could no longer render a body snippet. It is not a real
+  choice, and it is not settled by a cast either. A generic lift states the two
+  separately — the CONSTRAINT is what the body reads, the type parameter is what
+  the caller handed in — and a reference that passes through resolves to the
+  whole topic however little the lift declared. `cardsByActivity` is written
+  that way: it reads one timestamp and gives back the topics themselves.
 
-  What each reader of a row gets from that one link is then its own declared
-  schema's business. The published `index` declares the five scalars a survey
-  reads, so a survey cannot expand a topic past them; `TopicCard`, which the
-  board's ordering and card rendering are declared over, projects two display
-  fields out of it. Neither reader widens the row, which is what leaves both
-  free to be that narrow.
+  What each reader of a topic gets is then its own declared schema's business.
+  The published `index` declares the five scalars a survey reads, so a survey
+  cannot expand a topic past them, while the card list's argument schema is
+  shrunk to the handful of fields its body renders. Neither widens the topic,
+  which is what leaves both free to be that narrow — and it is why every field a
+  card renders carries a default, since that schema is what a piece holding
+  older topics is updated against.
 
   The rule for new code stands regardless: prefer a scalar reduction
   (`topics.get().length`) over anything that hands the array to a helper.

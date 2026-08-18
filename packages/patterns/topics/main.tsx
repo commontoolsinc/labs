@@ -147,7 +147,7 @@ const crossrefTable = lift(
     const list = Array.from(sources);
     // Each topic's mention list, read once, for the same reason.
     const mentions = list.map((topic) => topic?.get().mentions);
-    list.forEach((topic, index) => {
+    list.forEach((topic) => {
       // An entry with nothing behind it yet (mid-sync) has no identity to
       // address a row by, and `Writable.for(undefined)` is not a cause. It gets
       // no row rather than a junk one — the lookup is by identity, not by
@@ -157,10 +157,12 @@ const crossrefTable = lift(
       // is no id to key a map by — and nothing to mint, keep in step, or
       // migrate when a piece moves. At board scale this is a few hundred
       // comparisons of already-resolved links.
-      const mentionedBy = list.filter((_other, from) =>
+      const mentionedBy = list.filter((other, from) =>
         // A topic mentioning itself is not an edge, the rule a self-link has
-        // always had here.
-        from !== index &&
+        // always had here — asked of the topic rather than of its position, so
+        // a board listing one topic twice cannot route a self-mention through
+        // the twin and call it an inbound edge.
+        !equals(other, topic) &&
         // `equals` resolves BOTH sides before comparing, so it returns "do
         // these name the same document" whether each side arrived as a cell or
         // as the raw link a read left behind. A method call on the value would
@@ -248,6 +250,11 @@ export interface TopicsOutput {
 export const submitProfileTopic = handler<void, {
   topics: Writable<TopicPiece[] | Default<[]>>;
   mentionable: Writable<TopicPiece[] | Default<[]>>;
+  /** `Writable` only because that is what the factory boundary accepts: the
+   * input this is handed straight to declares `ReadonlyCell`, and a
+   * `ReadonlyCell` held in handler state is not assignable to it — handler
+   * state keeps a cell whole while `StripCell` unwraps the input's. Nothing
+   * here writes a row. */
   boardCrossrefs: Writable<TopicCrossrefRow[] | Default<[]>>;
   newTitle: Writable<string>;
   myName: Writable<string | Default<"">>;
