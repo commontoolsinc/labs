@@ -64,8 +64,11 @@ browsers.
 
 `start-local-dev.sh` validates required commands before launching anything and
 waits for both servers to bind their ports and return HTTP 200 before reporting
-success. Set `LOCAL_DEV_STARTUP_TIMEOUT` to adjust the readiness timeout in
-seconds.
+success. It then waits on the toolshed's `/`, the page a browser loads, which
+the toolshed answers by fetching the shell dev server and passing the result
+back; that is the one probe covering the hop between the two servers, which
+can be broken while each of them answers on its own port. Set
+`LOCAL_DEV_STARTUP_TIMEOUT` to adjust the readiness timeout in seconds.
 
 **Exit codes (`start-local-dev.sh`):**
 | Code | Meaning |
@@ -92,6 +95,11 @@ and the inspector port when `--inspect` is passed, and `deno task integration`
 leaves every offset that reaches one out of the range it generates from. Within
 the offsets that command generates, `827` puts the shell dev server on `6000`
 and `851` puts the inspector on `10080`.
+
+`restart-local-dev.sh` makes the same check on the ports it was asked for,
+before it stops a server or acts on `--clear-cache` or
+`--dangerously-clear-all-spaces`, so an offset the start it ends with would
+refuse costs nothing on the way to that refusal.
 
 **URLs:**
 | What | URL |
@@ -198,8 +206,11 @@ ss -tlnp 'sport = :5173'  # Shell
 ```
 
 This checks both process presence and HTTP health, exiting non-zero if
-anything is wrong. It supports the same `--port-offset`, `--shell-port`, and
-`--toolshed-port` flags as the other scripts.
+anything is wrong. It reports three things: the toolshed on its own port, the
+shell on its own port, and the shell through the toolshed — the last being the
+page a browser loads, which can fail while the other two are healthy. It
+supports the same `--port-offset`, `--shell-port`, and `--toolshed-port` flags
+as the other scripts.
 
 When `--port-offset` changes the toolshed port, `start-local-dev.sh` also sets
 toolshed's internal `API_URL` and `MEMORY_URL` to the offset toolshed URL unless

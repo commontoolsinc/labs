@@ -98,6 +98,14 @@ done
 SHELL_PORT=${SHELL_PORT:-$((BASE_SHELL_PORT + PORT_OFFSET))}
 TOOLSHED_PORT=${TOOLSHED_PORT:-$((BASE_TOOLSHED_PORT + PORT_OFFSET))}
 
+# Checked here, ahead of the stop and the cache and space clearing below, so an
+# offset start-local-dev.sh will refuse costs nothing on the way to the refusal.
+require_reachable_port "shell" "$SHELL_PORT"
+require_reachable_port "toolshed" "$TOOLSHED_PORT"
+if [[ "$INSPECT" == "true" && -n "$INSPECT_PORT" ]]; then
+    require_reachable_port "inspector" "$INSPECT_PORT"
+fi
+
 # Export for child scripts
 export SHELL_PORT
 export TOOLSHED_PORT
