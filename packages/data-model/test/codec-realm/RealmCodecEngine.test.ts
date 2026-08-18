@@ -565,6 +565,27 @@ describe("RealmCodecEngine", () => {
       }
     });
 
+    it("refuses an envelope that is not exactly two slots", () => {
+      // An envelope is `[marker, tree]` and a tagged form is
+      // `[marker, tag, state]`, so the slot count is the only thing telling
+      // one from the other at the top level. Without it a bare tagged form
+      // arriving here would be read as an envelope and its TAG handed back as
+      // the tree -- this format's structure served to a caller as data, which
+      // is the confusion the marker exists to prevent.
+      const marker = ["fvr1"];
+
+      for (
+        const wrong of [
+          [marker],
+          [marker, "Tagged@1", { a: 1 }],
+          [marker, { a: 1 }, "extra"],
+        ]
+      ) {
+        expect(() => fabricFromRealmValue(wrong as never))
+          .toThrow(/expected a two-element outer envelope/);
+      }
+    });
+
     it("decodes an outer envelope headed by a peer's own equal marker", () => {
       // The control for the case above, and the property that lets a peer
       // send a well-formed payload at all: what is checked is the marker's
