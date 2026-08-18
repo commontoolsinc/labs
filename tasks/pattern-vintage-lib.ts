@@ -73,7 +73,11 @@
 
 import { exists } from "@std/fs";
 
-import { resolveSystemPatternSource } from "@commonfabric/runner";
+import {
+  isStoredArgumentSchemaRefusal,
+  resolveSystemPatternSource,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
+} from "@commonfabric/runner";
 
 import {
   VINTAGE_SPACES_SUFFIX,
@@ -1180,6 +1184,51 @@ export function armVerdictGuard(
  * `replayed` is part of the condition and not just a number to print: zero
  * replays is the shape a broken gate takes, not the shape a clean tree takes.
  */
+/**
+ * Whether a recorded instantiation is a transformer-emitted pattern hoist —
+ * an anonymous sub-pattern the compiler derives from the source (a mapped
+ * row's body), as opposed to a pattern an author exports. The `__cfPattern_N`
+ * name is the transformer's own emission convention, and N is a builder node
+ * id with no stability across edits — which is exactly why nothing durable
+ * may be addressed by it.
+ */
+export function isDerivedHoistSymbol(symbol: string): boolean {
+  return /^__cfPattern_\d+$/.test(symbol);
+}
+
+/**
+ * Whether a materialization error is setup refusing the STORED ARGUMENT
+ * against the candidate schema — the classification the runner exports a
+ * constant for, tolerated here in both the Error and the stringified form a
+ * replay outcome may carry.
+ */
+export function isStoredArgumentRefusal(error: unknown): boolean {
+  if (isStoredArgumentSchemaRefusal(error)) return true;
+  return typeof error === "string" &&
+    error.startsWith(`${STORED_ARGUMENT_SCHEMA_REFUSAL}:`);
+}
+
+/**
+ * Whether a materialization error says today's source no longer DEFINES the
+ * recorded symbol. For a derived hoist that is the renumbering face of the
+ * same supersession as a capture drift — hoist ids are builder node ids with
+ * no stability across edits, so an edited pattern routinely re-derives the
+ * same rows under different numbers — and the caller pairs this with
+ * `isDerivedHoistSymbol` so an AUTHORED export that disappeared still fails
+ * as the retirement it is.
+ */
+export function isMissingArtifactRefusal(
+  symbol: string,
+  error: unknown,
+): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+    ? error
+    : "";
+  return message.includes(`defines no "${symbol}"`);
+}
+
 export function isClean(
   failures: readonly ReplayFailure[],
   uncovered: readonly string[],

@@ -20,6 +20,9 @@ import {
   autoGenerationsToPrune,
   collectVintages,
   describeError,
+  isDerivedHoistSymbol,
+  isMissingArtifactRefusal,
+  isStoredArgumentRefusal,
   newestAutoGeneration,
   patternKeyFromMain,
   PINNED,
@@ -277,6 +280,18 @@ export interface ReplayReport {
    * unless the run counts where each was used. Keyed by the entry's pattern.
    */
   dropsApplied: Set<string>;
+  /**
+   * Derived-hoist targets whose STORED ARGUMENTS today's schema refused —
+   * held back from failing, because a hoist's arguments are the captures of a
+   * derivation the updated source re-runs and re-supplies wholesale. The real
+   * update channel (`setPattern`) validates only the root contract, so
+   * failing here held vintages to a stricter rule than any deployed piece
+   * experiences. Only the stored-argument refusal is held back: any other
+   * error on a hoist still fails, and so does the readback comparison for
+   * every hoist that applies — which is what keeps a row-allocated cell's
+   * cause-stability (the moved-`.for()` class) gated.
+   */
+  capturesSuperseded: string[];
   failures: ReplayFailure[];
 }
 
@@ -315,6 +330,7 @@ export async function replayVintage(
     covered: new Set<string>(),
     recorded,
     dropsApplied: new Set<string>(),
+    capturesSuperseded: [],
     failures: [{ ...where, detail }],
   });
   /** Every pattern key a manifest names, for attributing a failed fixture. */
@@ -459,6 +475,7 @@ export async function replayVintage(
       covered: new Set<string>(),
       recorded: new Set<string>(),
       dropsApplied: new Set<string>(),
+      capturesSuperseded: [],
       failures: [],
     };
     // A recorded root nothing can address is a FAILURE, not a note. The replay
@@ -701,6 +718,18 @@ export async function replayVintage(
         },
       );
       if (outcome.error !== undefined) {
+        // A derived hoist whose stored arguments no longer satisfy today's
+        // schema is not a stranded piece: see `capturesSuperseded` on the
+        // report. Held back and reported, never silently dropped. Any other
+        // refusal of a hoist — compile, commit, storage — still fails.
+        if (
+          isDerivedHoistSymbol(entry.symbol) &&
+          (isStoredArgumentRefusal(outcome.error) ||
+            isMissingArtifactRefusal(entry.symbol, outcome.error))
+        ) {
+          report.capturesSuperseded.push(`${entry.main} ${entry.symbol}`);
+          continue;
+        }
         report.failures.push({
           ...where,
           detail:
@@ -916,6 +945,8 @@ export async function replayAll(
     perVintage: VintageOutcome[];
     /** Accepted-drop entries that forgave something somewhere in this run. */
     dropsApplied: Set<string>;
+    /** Derived-hoist targets held back from stored-argument validation. */
+    capturesSuperseded: string[];
     failures: ReplayFailure[];
   }
 > {
@@ -924,6 +955,7 @@ export async function replayAll(
   const covered = new Set<string>();
   const coveredBy = new Map<string, VintageAttribution>();
   const dropsApplied = new Set<string>();
+  const capturesSuperseded: string[] = [];
   let servedRoute = 0;
   let candidates = 0,
     targets = 0,
@@ -966,6 +998,7 @@ export async function replayAll(
     servedRoute += report.servedRoute;
     for (const key of report.covered) covered.add(key);
     for (const key of report.dropsApplied) dropsApplied.add(key);
+    capturesSuperseded.push(...report.capturesSuperseded);
     for (const key of report.recorded) {
       // From `recorded`, NOT `covered`: a pattern that was credited needs no
       // attribution, because it never reaches an uncovered report. The one
@@ -1000,6 +1033,7 @@ export async function replayAll(
     coveredBy,
     perVintage,
     dropsApplied,
+    capturesSuperseded,
     failures,
   };
 }
