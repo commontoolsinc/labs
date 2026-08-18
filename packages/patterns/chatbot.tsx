@@ -91,6 +91,8 @@ const handlePinToChat = handler<
 });
 
 export type ChatOutput = {
+  [NAME]: string;
+  [UI]: VNode;
   messages: Array<BuiltInLLMMessage>;
   pending: boolean | undefined;
   addMessage: Stream<BuiltInLLMMessage>;

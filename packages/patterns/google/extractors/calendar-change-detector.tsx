@@ -266,6 +266,8 @@ interface PatternInput {
 
 /** Calendar change detector for tracking schedule changes. #calendarChanges */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   changes: ScheduleChange[];
   criticalChanges: ScheduleChange[];
   urgentChanges: ScheduleChange[];

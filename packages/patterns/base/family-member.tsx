@@ -13,6 +13,7 @@ import {
   handler,
   NAME,
   pattern,
+  type Stream,
   UI,
   type VNode,
   Writable,
@@ -143,7 +144,7 @@ const togglePicker = handler<unknown, { showPicker: Writable<boolean> }>(
   },
 );
 
-const toggle = handler<unknown, { section: Writable<boolean> }>(
+const toggle = handler<Record<string, never>, { section: Writable<boolean> }>(
   (_event, { section }) => {
     section.set(!section.get());
   },
@@ -164,7 +165,10 @@ function buildSectionHeaderLabel(
   return `${arrow} ${label}${suffix}`;
 }
 
-function header(labelContent: any, onClick: any) {
+function header(
+  labelContent: string,
+  onClick: Stream<Record<string, never>>,
+) {
   return (
     <cf-hstack
       style={{
@@ -249,6 +253,15 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
     buildSectionHeaderLabel("Notes", showNotes.get())
   );
 
+  // Each section's toggle is bound here rather than inside the rendered tree.
+  // A handler bound inside a JSX expression that also calls a helper is
+  // compiled as part of that expression, and the binding is not available
+  // there.
+  const toggleFamilyInfo = toggle({ section: showFamilyInfo });
+  const toggleHealth = toggle({ section: showHealth });
+  const toggleGifts = toggle({ section: showGifts });
+  const toggleNotes = toggle({ section: showNotes });
+
   // Computed: autocomplete items from reactive sibling source, filtering self
   const sameAsItems = computed(() => {
     if (!sameAs) return [];
@@ -326,7 +339,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
            */
           }
           <div>
-            {header(familyHeader, toggle({ section: showFamilyInfo }))}
+            {header(familyHeader, toggleFamilyInfo)}
             {computed(() => {
               if (!showFamilyInfo.get()) return null;
               return (
@@ -353,7 +366,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Health & Diet Section */}
           <div>
-            {header(healthHeader, toggle({ section: showHealth }))}
+            {header(healthHeader, toggleHealth)}
             {computed(() => {
               if (!showHealth.get()) return null;
               return (
@@ -383,7 +396,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Gift Ideas Section */}
           <div>
-            {header(giftIdeasHeader, toggle({ section: showGifts }))}
+            {header(giftIdeasHeader, toggleGifts)}
             {computed(() => {
               if (!showGifts.get()) return null;
               return (
@@ -399,7 +412,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
           {/* Notes Section */}
           <div>
-            {header(notesHeader, toggle({ section: showNotes }))}
+            {header(notesHeader, toggleNotes)}
             {computed(() => {
               if (!showNotes.get()) return null;
               return (

@@ -512,6 +512,8 @@ interface Input {
 
 /** United Airlines flight tracker. #unitedFlights */
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   emailCount: number;
   flights: TrackedFlight[];
   upcomingFlights: TrackedFlight[];

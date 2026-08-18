@@ -701,6 +701,8 @@ interface PatternInput {
 
 /** Berkeley Public Library book tracker. #berkeleyLibrary */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   trackedItems: TrackedItem[];
   holdsReady: TrackedItem[];
   overdueCount: number;
