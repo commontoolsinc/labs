@@ -68,6 +68,23 @@ describe("program-root", () => {
     );
   });
 
+  it("ignores a named deno.jsonc shadowed by a nameless deno.json", async () => {
+    await write("pkg/deno.json", `{"name": "@cf-test/pkg"}`);
+    await write("pkg/sub/deno.json", `{"tasks": {"test": "echo none"}}`);
+    await write("pkg/sub/deno.jsonc", `{"name": "@cf-test/ignored"}`);
+    expect(inferProgramRoot(join(dir, "pkg/sub/main.test.tsx"))).toBe(
+      join(dir, "pkg"),
+    );
+  });
+
+  it("anchors on a named deno.json beside a nameless deno.jsonc", async () => {
+    await write("pkg/deno.json", `{"name": "@cf-test/pkg"}`);
+    await write("pkg/deno.jsonc", `{"tasks": {"test": "echo none"}}`);
+    expect(inferProgramRoot(join(dir, "pkg/main.test.tsx"))).toBe(
+      join(dir, "pkg"),
+    );
+  });
+
   it("continues past a config that does not parse", async () => {
     await write("pkg/deno.json", `{"name": "@cf-test/pkg"}`);
     await write("pkg/sub/deno.json", `{not json`);

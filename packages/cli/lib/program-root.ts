@@ -3,8 +3,11 @@ import { parse } from "@std/jsonc";
 
 /**
  * Infer the root directory for resolving a test pattern's relative imports:
- * the nearest ancestor of the entry file whose `deno.json`/`deno.jsonc`
- * declares a package `name`.
+ * the nearest ancestor of the entry file whose effective Deno config declares
+ * a package `name`. The effective config of a directory is what Deno itself
+ * would read there — `deno.json` when it exists, else `deno.jsonc`; a
+ * `deno.jsonc` beside a `deno.json` is ignored, so a name in it must not
+ * anchor the walk.
  *
  * The `name` field is the boundary test because a config file without one
  * commonly exists only to wire tasks for a directory — a workspace member
@@ -20,7 +23,17 @@ export function inferProgramRoot(entryPath: string): string | undefined {
   let dir = dirname(entryPath);
   while (true) {
     for (const file of ["deno.json", "deno.jsonc"]) {
-      if (declaresPackageName(join(dir, file))) return dir;
+      let text: string;
+      try {
+        text = Deno.readTextFileSync(join(dir, file));
+      } catch {
+        continue;
+      }
+      if (declaresPackageName(text)) return dir;
+      // This file is the directory's effective config and declares no name,
+      // so the directory is not a package root; the companion file Deno
+      // ignores cannot make it one.
+      break;
     }
     const parent = dirname(dir);
     if (parent === dir) return undefined;
@@ -28,20 +41,14 @@ export function inferProgramRoot(entryPath: string): string | undefined {
   }
 }
 
-function declaresPackageName(configPath: string): boolean {
-  let text: string;
-  try {
-    text = Deno.readTextFileSync(configPath);
-  } catch {
-    return false;
-  }
+function declaresPackageName(text: string): boolean {
   try {
     const config = parse(text);
     return config !== null && typeof config === "object" &&
       !Array.isArray(config) &&
       typeof (config as { name?: unknown }).name === "string";
   } catch {
-    // An unparseable config cannot declare a name; the walk continues rather
+    // An unparseable config cannot declare a name; the walk moves on rather
     // than failing the run over a file the test never imports.
     return false;
   }
