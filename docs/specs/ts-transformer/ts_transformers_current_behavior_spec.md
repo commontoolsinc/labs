@@ -458,6 +458,13 @@ Diagnostics emitted in all modes:
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks
+  - the allowed-callback determination reads the callback's call-argument
+    position through parentheses, so `toSorted(((a, b) => ...))` classifies
+    like `toSorted((a, b) => ...)` — target-language spec §5.7
+    paren-invariance (`test/validation.test.ts` "allows a parenthesized
+    inline callback argument"); parentheses grant nothing outside argument
+    position ("still errors on a parenthesized arrow function in pattern
+    body")
   - class expression or declaration in pattern context unless inside compute
     wrappers; the whole class is flagged once with a class-specific message
 - **Error** `pattern-context:object-member`
@@ -504,7 +511,11 @@ Diagnostics emitted in all modes:
     callback's owning call when that call is outside the lowered array-method
     families and itself sits at a lowerable expression site: the site's lift
     absorbs the callback, so the access runs on resolved values
-    (`rows.get().toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))`)
+    (`rows.get().toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))`);
+    parentheses around the inline callback change neither the carrier nor
+    the callback allowance (`test/validation.test.ts` "allows optional
+    access inside a parenthesized inline comparator" pins the spelling at
+    zero diagnostics)
   - optional calls do not receive this diagnostic merely because they are
     optional: their underlying call root is classified by the same policy as a
     non-optional call

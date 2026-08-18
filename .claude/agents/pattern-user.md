@@ -63,6 +63,12 @@ CF_API_URL=<url> deno task cf call --piece <piece_id> --identity <key_path> <han
 same test flags on every `setsrc`, because each update defines the complete
 source package for that revision.
 
+Repeatable `--datafile <path>` attaches a file that is not code — a fixture or
+lookup table the pattern is deployed with. Its bytes are stored verbatim and
+never parsed, compiled, or importable; the pattern reads one with
+`dataFile(path)` from `commonfabric`. The complete-revision rule covers it
+too: repeat every data-file flag on each `setsrc`.
+
 ## Done When
 
 Automated tests pass, every test entry is attached to the deployed source

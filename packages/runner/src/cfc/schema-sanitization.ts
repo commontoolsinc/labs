@@ -17,7 +17,11 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
 
 import { isSubschema } from "../schema-walk.ts";
 import {
@@ -1430,8 +1434,7 @@ const unmarkSchemaValueActive = (
 
 const isSchemaObject = (
   schema: JSONSchema | undefined,
-): schema is Record<string, unknown> =>
-  typeof schema === "object" && schema !== null && !Array.isArray(schema);
+): schema is ReadonlyRecord => isObjectNotArray(schema);
 
 /**
  * Follow `$ref` chains to the schema they name, so a `default` behind one is

@@ -16,7 +16,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
@@ -184,7 +184,7 @@ describe("FabricHash", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricHash[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Hash;
-      const context = EMPTY_DECODE_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Hash` wire type tag", () => {
@@ -217,7 +217,7 @@ describe("FabricHash", () => {
           const decoded = codec.decode(
             expectedTag,
             { tag: "fid1", hash: cid.hashString },
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(FabricHash);
           expect((decoded as FabricHash).taggedHashString).toBe(
@@ -226,7 +226,7 @@ describe("FabricHash", () => {
         });
 
         it("decodes non-object state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 123, context);
+          const decoded = codec.decode(expectedTag, 123, env);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
@@ -234,7 +234,7 @@ describe("FabricHash", () => {
           const decoded = codec.decode(
             expectedTag,
             { tag: "fid1" },
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -243,7 +243,7 @@ describe("FabricHash", () => {
           const decoded = codec.decode(
             expectedTag,
             { tag: "fid1", hash: "not valid base64!!" },
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -255,7 +255,7 @@ describe("FabricHash", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(cid),
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(FabricHash);
           expect((decoded as FabricHash).tag).toBe("sha3");

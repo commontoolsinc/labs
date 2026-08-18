@@ -119,6 +119,7 @@ export {
   canonicalizeLogicalPath,
   canonicalizePreparedDigestInput,
   canonicalizeWritePolicyInput,
+  cfcDereferenceTracesEqual,
   logicalPathToPointer,
   preparedDigestFor,
 } from "./canonical.ts";

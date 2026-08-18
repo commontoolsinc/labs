@@ -21,7 +21,10 @@ import { Engine } from "../src/harness/engine.ts";
 import { computeModuleHashes } from "../src/harness/module-identity.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { CachedCompiledModule } from "../src/sandbox/module-record-compiler.ts";
+import {
+  buildRecordsFromCompiled,
+  type CachedCompiledModule,
+} from "../src/sandbox/module-record-compiler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("load-by-identity");
@@ -249,6 +252,201 @@ describe("load by module identity (warm + version-bump recovery)", () => {
       }
     } finally {
       await coldRuntime.dispose({ closeStorage: false });
+    }
+  });
+
+  it("cold-loads an exact attached data-file package", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json", "/data/notes.txt"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            "export default pattern(() => ({ value: 1 }));",
+          ].join("\n"),
+        },
+        {
+          name: "/data/cities.json",
+          contents: '{"cities": ["Oslo", "Lima"]}',
+        },
+        {
+          // Not TypeScript, and readable as an import edge by a parser that
+          // should never see it.
+          name: "/data/notes.txt",
+          contents: 'import { pattern } from "commonfabric";\nplain text',
+        },
+      ],
+    };
+    const compiled = await engine.compileToRecordGraph(program);
+    writeSourceDocs(
+      runtime,
+      space,
+      compiled.modules,
+      compiled.entryIdentity,
+      tx,
+    );
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    await runtime.storageManager.synced();
+
+    const coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const loaded = await coldRuntime.patternManager.loadPatternByIdentity(
+        compiled.entryIdentity,
+        "default",
+        space,
+      );
+      expect(typeof loaded).toBe("function");
+      const recovered = await coldRuntime.patternManager
+        .getPatternSourceProgramByIdentity(compiled.entryIdentity, space);
+      expect(recovered?.dataFiles).toEqual([
+        "/data/cities.json",
+        "/data/notes.txt",
+      ]);
+      expect(
+        recovered?.files.find((file) => file.name === "/data/cities.json")
+          ?.contents,
+      ).toBe('{"cities": ["Oslo", "Lima"]}');
+      await coldRuntime.patternManager.flushCompileCacheWrites();
+      await coldRuntime.storageManager.synced();
+
+      const warmRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      try {
+        const warm = await warmRuntime.patternManager.loadPatternByIdentity(
+          compiled.entryIdentity,
+          "default",
+          space,
+        );
+        expect(typeof warm).toBe("function");
+        const warmSource = await warmRuntime.patternManager
+          .getPatternSourceProgramByIdentity(compiled.entryIdentity, space);
+        expect(warmSource?.dataFiles).toEqual([
+          "/data/cities.json",
+          "/data/notes.txt",
+        ]);
+      } finally {
+        await warmRuntime.dispose({ closeStorage: false });
+      }
+    } finally {
+      await coldRuntime.dispose({ closeStorage: false });
+    }
+  });
+
+  it("carries attached data-file bytes through the compiled set", async () => {
+    // The warm path never reads the source set, so the compiled closure alone
+    // has to carry everything the pattern needs — including its data.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            "export default pattern(() => ({ value: 1 }));",
+          ].join("\n"),
+        },
+        { name: "/data/cities.json", contents: '{"cities": ["Oslo"]}' },
+      ],
+    };
+    const compiled = await engine.compileToRecordGraph(program);
+    expect(compiled.graph.dataByPath.get("/data/cities.json")).toBe(
+      '{"cities": ["Oslo"]}',
+    );
+
+    writeSourceDocs(
+      runtime,
+      space,
+      compiled.modules,
+      compiled.entryIdentity,
+      tx,
+    );
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    await runtime.storageManager.synced();
+
+    // Cold load first, so the compiled set gets written back.
+    const coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      expect(
+        typeof await coldRuntime.patternManager.loadPatternByIdentity(
+          compiled.entryIdentity,
+          "default",
+          space,
+        ),
+      ).toBe("function");
+      await coldRuntime.patternManager.flushCompileCacheWrites();
+      await coldRuntime.storageManager.synced();
+    } finally {
+      await coldRuntime.dispose({ closeStorage: false });
+    }
+
+    // Warm load: the compiled closure alone must yield the data bytes, and the
+    // data entry must never become a module record.
+    const warmRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const runtimeVersion = await getCompileCacheRuntimeVersion();
+      expect(runtimeVersion).toBeDefined();
+      const readTx = warmRuntime.edit();
+      const closure = await loadCompiledClosure(
+        warmRuntime,
+        space,
+        compiled.entryIdentity,
+        { runtimeVersion: runtimeVersion! },
+        readTx,
+      );
+      readTx.abort?.("warm data-file read complete");
+
+      const dataDoc = [...closure.values()].find((doc) =>
+        doc.filename === "/data/cities.json"
+      );
+      expect(dataDoc?.kind).toBe("data");
+      expect(dataDoc?.code).toBe('{"cities": ["Oslo"]}');
+
+      const graph = buildRecordsFromCompiled(
+        [...closure].map(([identity, doc]) => ({
+          identity,
+          filename: doc.filename,
+          code: doc.code,
+          ...(doc.kind === "data" ? { isData: true } : {}),
+          imports: doc.imports.map((edge) => ({
+            specifier: edge.specifier,
+            targetIdentity: edge.identity,
+          })),
+        })),
+      );
+      expect(graph.dataByPath.get("/data/cities.json")).toBe(
+        '{"cities": ["Oslo"]}',
+      );
+      expect(
+        [...graph.specifierByPath.keys()].includes("/data/cities.json"),
+      ).toBe(false);
+
+      expect(
+        typeof await warmRuntime.patternManager.loadPatternByIdentity(
+          compiled.entryIdentity,
+          "default",
+          space,
+        ),
+      ).toBe("function");
+    } finally {
+      await warmRuntime.dispose({ closeStorage: false });
     }
   });
 

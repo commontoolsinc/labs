@@ -1,6 +1,10 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { schemaToTypeString } from "@commonfabric/runner";
+import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
 import { cliCommand } from "./cli-name.ts";
 // A value import back to callable.ts, whose own import of this module is
 // type-only and therefore erased — so this creates no runtime cycle.
@@ -77,9 +81,8 @@ interface ParsedInputMode {
   usedJsonInput: boolean;
 }
 
-function isSchemaObject(schema: JSONSchema): schema is Record<string, unknown> {
-  return typeof schema === "object" && schema !== null &&
-    !Array.isArray(schema);
+function isSchemaObject(schema: JSONSchema): schema is ReadonlyRecord {
+  return isObjectNotArray(schema);
 }
 
 /**

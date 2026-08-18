@@ -16,7 +16,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/EmptyDecodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
@@ -65,7 +65,7 @@ describe("FabricEpochDays", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricEpochDays[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochDays;
-      const context = EMPTY_DECODE_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `EpochDays` wire type tag", () => {
@@ -93,14 +93,14 @@ describe("FabricEpochDays", () => {
           const decoded = codec.decode(
             expectedTag,
             "AA",
-            context,
+            env,
           ) as unknown as FabricEpochDays;
           expect(decoded).toBeInstanceOf(FabricEpochDays);
           expect(decoded.value).toBe(0n);
         });
 
         it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 42, context);
+          const decoded = codec.decode(expectedTag, 42, env);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
@@ -108,7 +108,7 @@ describe("FabricEpochDays", () => {
           const decoded = codec.decode(
             expectedTag,
             "not valid base64!!",
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -120,7 +120,7 @@ describe("FabricEpochDays", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sd),
-            context,
+            env,
           ) as unknown as FabricEpochDays;
           expect(decoded).toBeInstanceOf(FabricEpochDays);
           expect(decoded.value).toBe(0n);
@@ -132,7 +132,7 @@ describe("FabricEpochDays", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sd),
-            context,
+            env,
           ) as unknown as FabricEpochDays;
           expect(decoded).toBeInstanceOf(FabricEpochDays);
           expect(decoded.value).toBe(days);
@@ -144,7 +144,7 @@ describe("FabricEpochDays", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sd),
-            context,
+            env,
           ) as unknown as FabricEpochDays;
           expect(decoded).toBeInstanceOf(FabricEpochDays);
           expect(decoded.value).toBe(days);

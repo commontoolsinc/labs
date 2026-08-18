@@ -2763,7 +2763,9 @@ export class Runner {
     // repair the home ROOT got in startEnsuredDefaultPattern, reachable at last
     // for the nested pieces that never pass through it.
     //
-    // Gated on the systemPatternAutoUpdate experimental flag. On EXACTLY that
+    // The repair is not gated by `systemPatternAutoUpdate`: that flag governs
+    // updates which move the durable identity pointer, while this setup replays
+    // the pattern the pointer already names. On exactly that
     // failure, re-run the pinned pattern's OWN setup state (samePattern=true:
     // materializes the missing internal cells but leaves the existing argument
     // — the piece's data — untouched; no roll-forward, no user-data rewrite),
@@ -2783,7 +2785,6 @@ export class Runner {
         if (
           useTx !== undefined ||
           ref === undefined ||
-          !this.runtime.experimental.systemPatternAutoUpdate ||
           !isMissingStreamMarkerFailure(instantiateError) ||
           // The root/default pattern is the PieceController's to repair (it has
           // the richer roll-forward + clear-error path); defer to it there.

@@ -8,23 +8,27 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
-import { EMPTY_DECODE_CONTEXT } from "@/codec-interface/index.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/index.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import { EncodeContext } from "@/codec-common/EncodeContext.ts";
+import { DecodeContext } from "@/codec-common/DecodeContext.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import {
   Marker,
   NESTED,
   newProbeEngine,
   NONTERMINAL_HOST,
+  ProbeEngine,
   type ProbeValue,
   Tagged,
   TERMINAL_HOST,
 } from "./probe-engine.ts";
 
-const CONTEXT = EMPTY_DECODE_CONTEXT;
+const ENV = NULL_LIVE_ENVIRONMENT;
 
 describe("BaseCodecEngine", () => {
   describe("terminal vs. nonterminal codecs", () => {
@@ -61,7 +65,7 @@ describe("BaseCodecEngine", () => {
       // Hand-built so that both hosts are given the identical wire state.
       const wire = new Tagged("T@1", { inner: new Tagged("X@1", "encoded-X") });
 
-      engine.decode(wire, CONTEXT);
+      engine.decode(wire, ENV);
 
       const seen = record.decoded[0] as { inner: unknown };
       // Undecoded: the inner tag is still a tag, not the value it stands for.
@@ -72,7 +76,7 @@ describe("BaseCodecEngine", () => {
       const { engine, record } = newProbeEngine();
       const wire = new Tagged("N@1", { inner: new Tagged("X@1", "encoded-X") });
 
-      engine.decode(wire, CONTEXT);
+      engine.decode(wire, ENV);
 
       const seen = record.decoded[0] as { inner: unknown };
       // Decoded: the walk reached the inner tag before this codec was called.
@@ -153,7 +157,7 @@ describe("BaseCodecEngine", () => {
       const data: Record<string, ProbeValue> = { a: 1 };
       data.self = data;
 
-      const result = engine.decode(data, CONTEXT) as Record<
+      const result = engine.decode(data, ENV) as Record<
         string,
         FabricValue
       >;
@@ -173,7 +177,7 @@ describe("BaseCodecEngine", () => {
       const tagged = new Tagged("Zz@1", state);
       state.back = tagged;
 
-      const result = engine.decode(tagged, CONTEXT);
+      const result = engine.decode(tagged, ENV);
 
       expect(result).toBeInstanceOf(UnknownValue);
       const inner = (result as UnknownValue).state as Record<
@@ -190,7 +194,7 @@ describe("BaseCodecEngine", () => {
       const data: Record<string, ProbeValue> = { a: 1 };
       data.self = data;
 
-      expect(() => engine.decode(data, CONTEXT))
+      expect(() => engine.decode(data, ENV))
         .toThrow(ProblematicStateError);
     });
 
@@ -205,7 +209,7 @@ describe("BaseCodecEngine", () => {
       expect(() =>
         engine.decode(
           { a: shared, b: shared, c: tagged, d: tagged },
-          CONTEXT,
+          ENV,
         )
       ).not.toThrow();
     });
@@ -216,7 +220,7 @@ describe("BaseCodecEngine", () => {
       const { engine } = newProbeEngine();
       const result = engine.decode(
         new Tagged("Nope@1", new Tagged("X@1", "encoded-X")),
-        CONTEXT,
+        ENV,
       );
 
       expect(result).toBeInstanceOf(UnknownValue);
@@ -228,7 +232,7 @@ describe("BaseCodecEngine", () => {
     it("rejects an empty tag rather than naming an `UnknownValue` with one", () => {
       const { engine } = newProbeEngine();
 
-      expect(() => engine.decode(new Tagged("", "x"), CONTEXT))
+      expect(() => engine.decode(new Tagged("", "x"), ENV))
         .toThrow(/malformed tag/);
     });
 
@@ -238,7 +242,7 @@ describe("BaseCodecEngine", () => {
       // it, and nowhere else a type this or any registry could carry.
       const { engine } = newProbeEngine();
 
-      expect(() => engine.decode(new Tagged("hole", 5), CONTEXT))
+      expect(() => engine.decode(new Tagged("hole", 5), ENV))
         .toThrow(/malformed tag/);
     });
 
@@ -247,7 +251,7 @@ describe("BaseCodecEngine", () => {
       // finds off the wire need not be a string.
       const { engine } = newProbeEngine();
 
-      expect(() => engine.decode(new Tagged(42 as never, "x"), CONTEXT))
+      expect(() => engine.decode(new Tagged(42 as never, "x"), ENV))
         .toThrow(/malformed tag/);
     });
 
@@ -256,10 +260,188 @@ describe("BaseCodecEngine", () => {
       // codec here returns a primitive, which is deep-frozen however the
       // engine behaves, and so could not witness this.
       const { engine } = newProbeEngine();
-      const result = engine.decode(new Tagged("M@1", "m"), CONTEXT);
+      const result = engine.decode(new Tagged("M@1", "m"), ENV);
 
       expect(result).toEqual({ deep: { n: 1 } });
       expect(isDeepFrozen(result)).toBe(true);
+    });
+  });
+
+  describe("per-act contexts", () => {
+    it("mints a fresh encode context for each `encode()` call", () => {
+      // Driven through `encode()` rather than by calling the factory twice:
+      // what needs pinning is that the entry point consults the factory per
+      // call, and a test that only calls the factory stays green even if
+      // `encode()` starts memoizing one context for the engine's lifetime.
+      const seen: unknown[] = [];
+      const { registry } = newProbeEngine();
+      const engine = new (class extends ProbeEngine {
+        protected override encodeArray(
+          value: readonly FabricValue[],
+          ctx: EncodeContext,
+        ): ProbeValue {
+          seen.push(ctx);
+          return super.encodeArray(value, ctx);
+        }
+      })({ registry });
+
+      engine.encode([1] as unknown as FabricValue);
+      engine.encode([1] as unknown as FabricValue);
+
+      expect(seen.length).toBe(2);
+      expect(seen[0]).not.toBe(seen[1]);
+    });
+
+    it("mints a fresh decode context for each `decode()` call", () => {
+      const seen: unknown[] = [];
+      const { registry } = newProbeEngine();
+      const engine = new (class extends ProbeEngine {
+        protected override decodeValue(
+          data: ProbeValue,
+          ctx: DecodeContext,
+        ): FabricValue {
+          seen.push(ctx);
+          return super.decodeValue(data, ctx);
+        }
+      })({ registry });
+
+      engine.decode([1] as unknown as ProbeValue, ENV);
+      engine.decode([1] as unknown as ProbeValue, ENV);
+
+      expect(seen.length).toBeGreaterThanOrEqual(2);
+      expect(seen[0]).not.toBe(seen[seen.length - 1]);
+    });
+
+    it("gives a re-entrant encode its own in-progress set", () => {
+      // The property the per-act context exists for, and it needs a genuinely
+      // nested call to show: sequential calls prove nothing, since the set is
+      // empty again by the time the second one starts. With walk state on the
+      // engine rather than per act, an encode reached from INSIDE another one
+      // shares the outer walk's set, so entering a container the outer walk is
+      // currently inside reports a cycle that is not there.
+      class Reentrant {}
+
+      const outer: FabricValue[] = [];
+      let reentered = false;
+      let innerResult: unknown;
+
+      const codec =
+        new (class ReentrantCodec extends BaseTerminalCodec<ProbeValue> {
+          constructor() {
+            super("Reentrant@1", Reentrant);
+          }
+
+          encode(): ProbeValue {
+            if (!reentered) {
+              reentered = true;
+              innerResult = engine.encode(outer as unknown as FabricValue);
+            }
+            return 1;
+          }
+
+          decode(): FabricValue {
+            return 1;
+          }
+        })();
+
+      const { engine } = newProbeEngine({ extraCodecs: [codec] });
+      outer.push(new Reentrant() as unknown as FabricValue);
+
+      expect(() => engine.encode(outer as unknown as FabricValue)).not
+        .toThrow();
+      expect(reentered).toBe(true);
+      // Shape rather than mere existence: this says the inner act ran to
+      // completion, not merely that it returned something.
+      expect(innerResult).toEqual([new Tagged("Reentrant@1", 1)]);
+    });
+
+    it("leaves a value even when its codec throws", () => {
+      // The context outlives a throw, being the act's rather than the node's,
+      // so a value left entered would make a later visit report a cycle that
+      // is not there. The differential is the message: with the leave in a
+      // `finally` the second visit fails the same way the first did; without
+      // it, the second fails as a circular reference instead.
+      class Boom {}
+
+      const codec = new (class BoomCodec extends BaseTerminalCodec<ProbeValue> {
+        constructor() {
+          super("Boom@1", Boom);
+        }
+
+        encode(): ProbeValue {
+          throw new Error("codec refused");
+        }
+
+        decode(): FabricValue {
+          return 1;
+        }
+      })();
+
+      const { engine } = newProbeEngine({ extraCodecs: [codec] });
+      const boom = new Boom() as unknown as FabricValue;
+      const ctx = new EncodeContext(ENV);
+      const probe = engine as unknown as {
+        encodeValue(value: FabricValue, ctx: EncodeContext): unknown;
+      };
+
+      expect(() => probe.encodeValue(boom, ctx)).toThrow("codec refused");
+      expect(() => probe.encodeValue(boom, ctx)).toThrow("codec refused");
+    });
+
+    it("gives a re-entrant decode its own in-progress set", () => {
+      // The decode-side twin of the encode re-entrancy test, and the reason
+      // the decode context is per act too. The probe format's transport is the
+      // tree itself, so its walk guards cycles; with one context shared across
+      // acts, an inner decode entering a node the outer walk is inside would
+      // report a cycle that is not there.
+      let reentered = false;
+      let innerResult: unknown;
+      const outer: ProbeValue[] = [];
+
+      const codec =
+        new (class ReentrantDecodeCodec extends BaseTerminalCodec<ProbeValue> {
+          constructor() {
+            super("ReentrantDecode@1", class ReentrantDecode {});
+          }
+
+          encode(): ProbeValue {
+            return 1;
+          }
+
+          decode(): FabricValue {
+            if (!reentered) {
+              reentered = true;
+              innerResult = engine.decode(outer as unknown as ProbeValue, ENV);
+            }
+            return 1;
+          }
+        })();
+
+      const { engine } = newProbeEngine({ extraCodecs: [codec] });
+      outer.push(new Tagged("ReentrantDecode@1", 0));
+
+      expect(() => engine.decode(outer as unknown as ProbeValue, ENV))
+        .not.toThrow();
+      expect(reentered).toBe(true);
+      expect(innerResult).toEqual([1]);
+    });
+
+    it("carries the live environment on the encode context", () => {
+      const { engine } = newProbeEngine();
+      const probe = engine as unknown as {
+        newEncodeContext(env: unknown): { env: unknown };
+      };
+
+      expect(probe.newEncodeContext(ENV).env).toBe(ENV);
+    });
+
+    it("carries the live environment on the decode context", () => {
+      const { engine } = newProbeEngine();
+      const probe = engine as unknown as {
+        newDecodeContext(env: unknown): { env: unknown };
+      };
+
+      expect(probe.newDecodeContext(ENV).env).toBe(ENV);
     });
   });
 
@@ -290,7 +472,7 @@ describe("BaseCodecEngine", () => {
       it("raises a codec's throw", () => {
         const { engine } = newProbeEngine();
 
-        expect(() => engine.decode(THROWN, CONTEXT))
+        expect(() => engine.decode(THROWN, ENV))
           .toThrow(/rejected by throwing/);
       });
 
@@ -299,14 +481,14 @@ describe("BaseCodecEngine", () => {
         // before, so the setting governed only the codecs that threw.
         const { engine } = newProbeEngine();
 
-        expect(() => engine.decode(RETURNED, CONTEXT))
+        expect(() => engine.decode(RETURNED, ENV))
           .toThrow(/rejected by returning/);
       });
 
       it("raises a malformation the walk itself found", () => {
         const { engine } = newProbeEngine();
 
-        expect(() => engine.decode(MALFORMED, CONTEXT)).toThrow(
+        expect(() => engine.decode(MALFORMED, ENV)).toThrow(
           /malformed tag/,
         );
       });
@@ -315,7 +497,7 @@ describe("BaseCodecEngine", () => {
         // Not a rejection, so the setting has no say in it.
         const { engine } = newProbeEngine();
 
-        expect(engine.decode(UNCLAIMED, CONTEXT)).toBeInstanceOf(UnknownValue);
+        expect(engine.decode(UNCLAIMED, ENV)).toBeInstanceOf(UnknownValue);
       });
 
       it("carries tag and state however the codec reported it", () => {
@@ -332,7 +514,7 @@ describe("BaseCodecEngine", () => {
           ]] as const
         ) {
           try {
-            engine.decode(wire, CONTEXT);
+            engine.decode(wire, ENV);
             throw new Error(`Should have thrown (${label}).`);
           } catch (e) {
             expect(e).toBeInstanceOf(ProblematicStateError);
@@ -347,7 +529,7 @@ describe("BaseCodecEngine", () => {
         const { engine } = newProbeEngine();
 
         try {
-          engine.decode(MALFORMED, CONTEXT);
+          engine.decode(MALFORMED, ENV);
           throw new Error("Should have thrown.");
         } catch (e) {
           expect(e).toBeInstanceOf(ProblematicStateError);
@@ -362,7 +544,7 @@ describe("BaseCodecEngine", () => {
         const { engine } = newProbeEngine();
 
         try {
-          engine.decode(THROWN, CONTEXT);
+          engine.decode(THROWN, ENV);
           throw new Error("Should have thrown.");
         } catch (e) {
           expect(e).toBeInstanceOf(ProblematicStateError);
@@ -376,7 +558,7 @@ describe("BaseCodecEngine", () => {
     describe("when `lenient === true`", () => {
       it("turns a codec's throw into a `ProblematicValue`", () => {
         const { engine } = newProbeEngine({ lenient: true });
-        const result = engine.decode(THROWN, CONTEXT);
+        const result = engine.decode(THROWN, ENV);
 
         expect(result).toBeInstanceOf(ProblematicValue);
         // Carrying the codec's own message, so what went wrong survives the
@@ -388,7 +570,7 @@ describe("BaseCodecEngine", () => {
 
       it("lets a `ProblematicValue` a codec returned stand", () => {
         const { engine } = newProbeEngine({ lenient: true });
-        const result = engine.decode(RETURNED, CONTEXT);
+        const result = engine.decode(RETURNED, ENV);
 
         expect(result).toBeInstanceOf(ProblematicValue);
         expect((result as ProblematicValue).error)
@@ -397,7 +579,7 @@ describe("BaseCodecEngine", () => {
 
       it("keeps a malformation the walk itself found", () => {
         const { engine } = newProbeEngine({ lenient: true });
-        const result = engine.decode(MALFORMED, CONTEXT);
+        const result = engine.decode(MALFORMED, ENV);
 
         expect(result).toBeInstanceOf(ProblematicValue);
         expect((result as ProblematicValue).error).toMatch(/malformed tag/);
@@ -407,7 +589,7 @@ describe("BaseCodecEngine", () => {
         // The codec arm's freeze: this report is the codec's own product.
         const { engine } = newProbeEngine({ lenient: true });
 
-        expect(isDeepFrozen(engine.decode(RETURNED, CONTEXT))).toBe(true);
+        expect(isDeepFrozen(engine.decode(RETURNED, ENV))).toBe(true);
       });
 
       it("deep-freezes a `ProblematicValue` it built itself", () => {
@@ -416,14 +598,14 @@ describe("BaseCodecEngine", () => {
         // Neither stands in for the other.
         const { engine } = newProbeEngine({ lenient: true });
 
-        expect(isDeepFrozen(engine.decode(THROWN, CONTEXT))).toBe(true);
-        expect(isDeepFrozen(engine.decode(MALFORMED, CONTEXT))).toBe(true);
+        expect(isDeepFrozen(engine.decode(THROWN, ENV))).toBe(true);
+        expect(isDeepFrozen(engine.decode(MALFORMED, ENV))).toBe(true);
       });
 
       it("wraps an unclaimed tag in an `UnknownValue` regardless", () => {
         const { engine } = newProbeEngine({ lenient: true });
 
-        expect(engine.decode(UNCLAIMED, CONTEXT)).toBeInstanceOf(UnknownValue);
+        expect(engine.decode(UNCLAIMED, ENV)).toBeInstanceOf(UnknownValue);
       });
     });
   });

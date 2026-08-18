@@ -144,6 +144,12 @@ Deno.test("--test defers to pattern file completion", async () => {
   ]);
 });
 
+Deno.test("--datafile defers to unfiltered file completion", async () => {
+  assertEquals(await completeFor("cf piece new --datafile "), [
+    ":cf:files",
+  ]);
+});
+
 Deno.test("a live slot with no resolvable context yields nothing, not an error", async () => {
   // Mid-keystroke with no identity configured: silence is the correct signal.
   const previous = Deno.env.get("CF_IDENTITY");

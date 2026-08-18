@@ -49,6 +49,7 @@ import {
   LinkValidationError,
   listPieceCallables,
   listPieces,
+  listSpaceSlugs,
   MapFormat,
   newPiece,
   partitionVerbListing,
@@ -418,6 +419,36 @@ export function renderPieceSummaries(
   if (rows.length > 1) render(Table.from(rows).toString());
 }
 
+/** `cf piece slugs` output: one row per indexed name, the piece it resolves
+ * to where it resolves to one, and the resolution's own error where it does
+ * not. The error rides the JSON too — a machine reader has no table to read
+ * a `<error: …>` marker off. */
+export function renderSlugSummaries(
+  slugs: Array<{ slug: string; piece?: string; error?: string }>,
+  json: boolean,
+): void {
+  if (json) {
+    render(
+      slugs.map((entry) => ({
+        slug: entry.slug,
+        piece: entry.piece ?? null,
+        ...(entry.error !== undefined ? { error: entry.error } : {}),
+      })),
+      { json: true },
+    );
+    return;
+  }
+
+  const rows = [
+    ["SLUG", "PIECE"],
+    ...slugs.map((entry) => [
+      entry.slug,
+      entry.error !== undefined ? `<error: ${entry.error}>` : entry.piece!,
+    ]),
+  ];
+  if (rows.length > 1) render(Table.from(rows).toString());
+}
+
 export function localPatternEntry(
   mainPath: string,
   options: {
@@ -425,6 +456,7 @@ export function localPatternEntry(
     repository?: string;
     root?: string;
     test?: string[];
+    datafile?: string[];
   },
 ): EntryConfig {
   return {
@@ -433,6 +465,7 @@ export function localPatternEntry(
     repository: options.repository,
     rootPath: options.root ? absPath(options.root) : undefined,
     testPaths: options.test?.map((path) => absPath(path)),
+    dataFilePaths: options.datafile?.map((path) => absPath(path)),
   };
 }
 
@@ -1825,6 +1858,20 @@ export const piece = targetOptions(
   )
   .option("--json", "Output machine-readable JSON.")
   .action(listPiecesFromCommand)
+  /* piece slugs */
+  .command(
+    "slugs",
+    "List the space's slugs and the piece each resolves to. The index " +
+      "covers slugs assigned since it existed; an older slug still " +
+      "resolves but is not listed.",
+  )
+  .usage(spaceUsage)
+  .example(
+    cliText(`cf piece slugs ${EX_ID} ${EX_COMP}`),
+    `List the slugs of "${RAW_EX_COMP.space}".`,
+  )
+  .option("--json", "Output machine-readable JSON.")
+  .action(listSlugsFromCommand)
   /* piece search */
   .command("search", "Search input and result data in registered pieces.")
   .usage(`${spaceUsage} <query>`)
@@ -1873,6 +1920,11 @@ export const piece = targetOptions(
   .option(
     "--test <path:string>",
     "Attach a test pattern source file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
+  .option(
+    "--datafile <path:string>",
+    "Attach a data file to the deployed source package. Repeatable.",
     { collect: true },
   )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
@@ -2010,6 +2062,11 @@ export const piece = targetOptions(
   .option(
     "--test <path:string>",
     "Attach a test pattern source file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
+  .option(
+    "--datafile <path:string>",
+    "Attach a data file to the deployed source package. Repeatable.",
     { collect: true },
   )
   .option(
@@ -2614,6 +2671,11 @@ updated effective label view.`),
     "Attach a test pattern source file to the deployed source package. Repeatable.",
     { collect: true },
   )
+  .option(
+    "--datafile <path:string>",
+    "Attach a data file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
   .arguments("[main:string]")
   .action(async (options, main?: string) => {
     setQuietMode(!!options.quiet);
@@ -2639,6 +2701,12 @@ updated effective label view.`),
     if (options.reset && options.test !== undefined) {
       throw new ValidationError(
         "Cannot use --test with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.datafile !== undefined) {
+      throw new ValidationError(
+        "Cannot use --datafile with --reset.",
         { exitCode: 1 },
       );
     }
@@ -2669,6 +2737,7 @@ export interface PieceCLIOptions {
   repository?: string;
   root?: string;
   test?: string[];
+  datafile?: string[];
   dangerouslyAllowIncompatibleSchema?: boolean;
   json?: boolean;
 }
@@ -2851,6 +2920,21 @@ export async function listPiecesFromCommand(
     parseSpaceOptions(options),
   );
   (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
+}
+
+export interface SlugListCommandDependencies {
+  listSpaceSlugs?: typeof listSpaceSlugs;
+  renderSlugSummaries?: typeof renderSlugSummaries;
+}
+
+export async function listSlugsFromCommand(
+  options: PieceSummaryCLIOptions,
+  deps: SlugListCommandDependencies = {},
+): Promise<void> {
+  const slugs = await (deps.listSpaceSlugs ?? listSpaceSlugs)(
+    parseSpaceOptions(options),
+  );
+  (deps.renderSlugSummaries ?? renderSlugSummaries)(slugs, !!options.json);
 }
 
 export interface PieceDescribeCommandDependencies {

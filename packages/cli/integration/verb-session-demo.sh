@@ -146,18 +146,32 @@ broken() {
 # does not get, and reports itself rather than printing a result under a line
 # that says it was turned down.
 refused() {
-  local why=$1
-  shift
+  local why=$1 signature=$2
+  shift 2
   printf '\n%s   $ %s%s\n' "$C" "$(shown "$@")" "$N"
   printf '%s     REFUSED — %s%s\n' "$D" "$why" "$N"
-  "$@" >/dev/null 2>"$ERR"
+  # The version-skew note prints on failure exits, and this failure is the
+  # act's success condition — "a possible cause" under a refusal the act
+  # ordered is noise, so the check is skipped here and only here. An
+  # unexpected failure in `run` keeps the diagnosis.
+  CF_SKIP_VERSION_CHECK=1 "$@" >/dev/null 2>"$ERR"
   local rc=$?
   grep -v '^invocation:\|^session:\|^TIP:\|^(Use --quiet\|^NEXT STEPS:\|^  *→' \
     "$ERR" | grep -v '^$' | sed 's/^/       /'
+  # The claim is matched against the refusal's own message, not the exit
+  # status alone: a parser slip or a server hiccup also exits nonzero, and an
+  # act that cannot tell those apart keeps its claim through failures that
+  # have nothing to do with it — the same discriminator rule
+  # verb-session-gaps.sh applies to its gap probe.
   if [ "$rc" = "0" ]; then
     printf '%s     NOT REFUSED — this act says the surface turns this down,%s\n' \
       "$R" "$N"
     printf '%s     and it was accepted%s\n' "$R" "$N"
+    UNREFUSED=$((UNREFUSED + 1))
+  elif ! grep -q "$signature" "$ERR"; then
+    printf '%s     REFUSED FOR ANOTHER REASON — the failure above is not the%s\n' \
+      "$R" "$N"
+    printf '%s     refusal this act claims%s\n' "$R" "$N"
     UNREFUSED=$((UNREFUSED + 1))
   fi
 }
@@ -274,6 +288,7 @@ run cf get -s "$SPACE" "$EPIC" children --select title --filter '.status == "ope
 # The two halves of that question do not combine, and the refusal's own message
 # carries the reason, so nothing restates it here.
 refused "an address suffix under a filter" \
+  "cannot be combined with an \`@\` suffix" \
   cf get -s "$SPACE" "$EPIC" children \
   --select @,title --filter '.status == "open"'
 
@@ -286,9 +301,11 @@ say "the other half of a surface knowing its own vocabulary."
 # reason, and an act that cannot tell those apart would read the same before and
 # after this capability arrived.
 refused "a field the verb does not declare" \
+  "is not a field this verb declares" \
   cf call -s "$SPACE" --piece board addItem \
   '{"title":"Ship it","titel":"typo"}'
 refused "a keyword the projection reader does not recognize" \
+  "is not a projection schema keyword" \
   cf get -s "$SPACE" "$EPIC" children \
   --schema '{"type":"array","items":{"type":"object","propertes":{"title":true}}}'
 say "One shape of answer from both ends: what was wrong, the position it sat at,"
@@ -300,6 +317,7 @@ say "The tracker is a graph, not just a tree: an item can wait on any other."
 say "The spelling this session taught throughout — the address as printed — is"
 say "the one thing still refused here (references-as-arguments.md)."
 refused "the address a read emits, as a verb argument" \
+  "value does not match type object" \
   cf call -s "$SPACE" "$KID" blockOn -- --on "$CSRF"
 say "The capability itself landed: wrap the same address in the link envelope"
 say "by hand, and the edge that lands is the target rather than a copy. The"
@@ -339,10 +357,11 @@ if [ "$UNEXPECTED" != "0" ]; then
 fi
 
 if [ "$UNREFUSED" != "0" ]; then
-  printf '\n%s━━ %d act(s) marked REFUSED were accepted%s\n' \
+  printf '\n%s━━ %d act(s) marked REFUSED did not get their refusal%s\n' \
     "$R" "$UNREFUSED" "$N"
-  say "A refusal this demo shows as a capability is no longer being made. Either"
-  say "it was withdrawn, or the payload it was written against became valid."
+  say "A refusal this demo shows as a capability is no longer being made as"
+  say "claimed: the call was accepted, or it failed for some other reason —"
+  say "either way the act's claim about the surface did not hold."
 fi
 
 if [ "$CLOSED" != "0" ]; then

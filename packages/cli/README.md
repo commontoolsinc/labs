@@ -118,6 +118,12 @@ positional path spelling.
 the default pattern and starts each registered piece to obtain its name and
 pattern metadata. It does not enumerate every stored piece root.
 
+`cf piece slugs` lists the space's slug index: every name assigned through
+`--slug` or `set-slug`, each resolved to the piece it names. The index records
+assignments made since it existed, so a slug written by an older client still
+resolves but is not listed — a slug document's id is derived from its name, and
+nothing can enumerate names it was never told.
+
 `cf piece search` also starts from the registry. It searches readable input and
 result data, but returns registered pieces only. `cf piece map` likewise shows
 connections among registered pieces rather than walking the complete stored
@@ -929,6 +935,7 @@ such as `--log-level` — plus live values read from the fabric:
 | `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints           |
 | `--space`                       | space DIDs of local memory-v2 stores        |
 | `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell      |
+| `--datafile`                    | any file, via the shell                     |
 
 Live values need an identity and an api-url. Both are read from the line being
 typed (`-i`, `-a`, `-u`) before falling back to `CF_IDENTITY`/`CF_API_URL`, so

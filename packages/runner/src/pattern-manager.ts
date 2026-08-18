@@ -54,6 +54,7 @@ import {
 } from "./sandbox/fabric-import-specifier.ts";
 import {
   type CachedCompiledModule,
+  DATA_FILE_SPECIFIER,
   SOURCE_ROOT_SPECIFIER,
 } from "./sandbox/module-record-compiler.ts";
 import type {
@@ -229,6 +230,23 @@ function uniqueCacheableImports(
     out.push(imp);
   }
   return out;
+}
+
+/**
+ * The authored filenames an entry document's source-package edges point at, for
+ * one edge kind — {@link SOURCE_ROOT_SPECIFIER} for attached source entry
+ * points, {@link DATA_FILE_SPECIFIER} for attached data files. An edge whose
+ * target is not in the closure contributes nothing.
+ */
+function sourcePackagePaths(
+  entry: { imports: readonly { specifier: string; identity: string }[] },
+  docsByIdentity: ReadonlyMap<string, { filename: string }>,
+  specifierPrefix: string,
+): string[] {
+  return entry.imports
+    .filter((edge) => edge.specifier.startsWith(specifierPrefix))
+    .map((edge) => docsByIdentity.get(edge.identity)?.filename)
+    .filter((filename): filename is string => filename !== undefined);
 }
 
 export class PatternManager {
@@ -666,6 +684,7 @@ export class PatternManager {
       graph,
       mainSpecifier,
       program.files,
+      program.dataFiles,
     );
     return this.patternFromEvaluation(result, program);
   }
@@ -739,6 +758,7 @@ export class PatternManager {
       graph,
       mainSpecifier,
       program.files,
+      program.dataFiles,
     );
     this.registerEvaluatedModules(result);
     return result;
@@ -806,6 +826,7 @@ export class PatternManager {
         graph,
         mainSpecifier,
         program.files,
+        program.dataFiles,
       );
       return this.patternFromEvaluation(result, program, entryIdentity);
     }
@@ -976,6 +997,7 @@ export class PatternManager {
       graph,
       mainSpecifier,
       program.files,
+      program.dataFiles,
     );
     logger.time(evalStart, "compile-cache", "evaluate");
 
@@ -1066,6 +1088,9 @@ export class PatternManager {
         identity,
         filename: doc.filename,
         code: doc.code,
+        // A data entry rides the closure to reach the compartment; the record
+        // builder takes it out before anything reads `code` as a body.
+        ...(doc.kind === "data" ? { isData: true } : {}),
         ...(doc.sourceMap !== undefined
           ? { sourceMap: doc.sourceMap as never }
           : {}),
@@ -1088,7 +1113,8 @@ export class PatternManager {
         imports: doc.imports
           .filter((i) =>
             !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
-            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER)
+            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER) &&
+            !i.specifier.startsWith(DATA_FILE_SPECIFIER)
           )
           .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
       }),
@@ -1103,6 +1129,9 @@ export class PatternManager {
         // security boundary — skip redundant SES body re-verification.
         {
           sourceFiles: program.files,
+          ...(program.dataFiles === undefined
+            ? {}
+            : { dataFiles: program.dataFiles }),
           trustedBodies: true,
           ...(patternCoverage ? { patternCoverage } : {}),
         },
@@ -1252,6 +1281,9 @@ export class PatternManager {
         identity,
         filename: doc.filename,
         code: doc.code,
+        // A data entry rides the closure to reach the compartment; the record
+        // builder takes it out before anything reads `code` as a body.
+        ...(doc.kind === "data" ? { isData: true } : {}),
         ...(doc.sourceMap !== undefined
           ? { sourceMap: doc.sourceMap as never }
           : {}),
@@ -1272,7 +1304,8 @@ export class PatternManager {
         imports: doc.imports
           .filter((i) =>
             !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
-            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER)
+            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER) &&
+            !i.specifier.startsWith(DATA_FILE_SPECIFIER)
           )
           .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
       }),
@@ -1340,10 +1373,16 @@ export class PatternManager {
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
-    const sourceRoots = entry.imports
-      .filter((edge) => edge.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
-      .map((edge) => sourceDocs.get(edge.identity)?.filename)
-      .filter((filename): filename is string => filename !== undefined);
+    const sourceRoots = sourcePackagePaths(
+      entry,
+      sourceDocs,
+      SOURCE_ROOT_SPECIFIER,
+    );
+    const dataFiles = sourcePackagePaths(
+      entry,
+      sourceDocs,
+      DATA_FILE_SPECIFIER,
+    );
 
     const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
       name: doc.filename,
@@ -1359,6 +1398,7 @@ export class PatternManager {
           fabricImports: { space },
           ...(patternCoverage ? { patternCoverage } : {}),
           ...(sourceRoots.length === 0 ? {} : { sourceRoots }),
+          ...(dataFiles.length === 0 ? {} : { dataFiles }),
         },
       );
       if (compiled.entryIdentity !== entryIdentity) {
@@ -1371,6 +1411,7 @@ export class PatternManager {
           identity: module.identity,
           filename: module.filename,
           code: module.js,
+          ...(module.isData ? { isData: true } : {}),
           ...(module.sourceMap !== undefined
             ? { sourceMap: module.sourceMap as never }
             : {}),
@@ -1386,6 +1427,7 @@ export class PatternManager {
         entryIdentity,
         {
           sourceFiles,
+          ...(dataFiles.length === 0 ? {} : { dataFiles }),
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
@@ -2115,8 +2157,9 @@ export class PatternManager {
    * cell's `program`: the source docs are written (awaited) by every cold
    * compile, so this returns the same bytes that produced the identity. `main`
    * is the executable entry document's authored filename. `sourceRoots` names
-   * retained source entry points such as attached tests. Returns `undefined`
-   * when no verified source closure exists in the space.
+   * retained source entry points such as attached tests, and `dataFiles` names
+   * attached data files. Returns `undefined` when no verified source closure
+   * exists in the space.
    */
   async getPatternSourceProgramByIdentity(
     entryIdentity: string,
@@ -2127,6 +2170,7 @@ export class PatternManager {
       main: string;
       files: { name: string; contents: string }[];
       sourceRoots?: string[];
+      dataFiles?: string[];
     } | undefined
   > {
     const readTx = this.runtime.edit();
@@ -2170,12 +2214,16 @@ export class PatternManager {
     if (sourceDocs === undefined) return undefined;
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
-    const sourceRoots = entry.imports
-      .filter((edge) => edge.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
-      .map((edge) => sourceDocs.get(edge.identity)?.filename)
-      .filter((filename): filename is string =>
-        filename?.startsWith("/") === true
-      );
+    const sourceRoots = sourcePackagePaths(
+      entry,
+      sourceDocs,
+      SOURCE_ROOT_SPECIFIER,
+    ).filter((filename) => filename.startsWith("/"));
+    const dataFiles = sourcePackagePaths(
+      entry,
+      sourceDocs,
+      DATA_FILE_SPECIFIER,
+    ).filter((filename) => filename.startsWith("/"));
     // Return only the AUTHORED files — the faithful replacement for the old
     // meta-cell `program`. The verified source closure also contains
     // runtime-INJECTED helper modules (e.g. `cfc.ts`), which the compiler
@@ -2191,6 +2239,7 @@ export class PatternManager {
           contents: doc.code,
         })),
       ...(sourceRoots.length === 0 ? {} : { sourceRoots }),
+      ...(dataFiles.length === 0 ? {} : { dataFiles }),
     };
   }
 

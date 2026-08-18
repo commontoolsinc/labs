@@ -1,11 +1,10 @@
 export {
   CODEC,
   type CodecForFormat,
-  type DecodeContext,
-  type EncodeContext,
   type FabricClassWithNonterminalCodec,
   type FabricCodec,
   JSON_CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
   type TerminalCodec,
   type WireFormat,
@@ -18,8 +17,8 @@ export { BaseFabricCodec } from "./BaseFabricCodec.ts";
 export { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
 export { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 
-export { BaseDecodeContext } from "./BaseDecodeContext.ts";
+export { BaseLiveEnvironment } from "./BaseLiveEnvironment.ts";
 export {
-  EMPTY_DECODE_CONTEXT,
-  EmptyDecodeContext,
-} from "./EmptyDecodeContext.ts";
+  NULL_LIVE_ENVIRONMENT,
+  NullLiveEnvironment,
+} from "./NullLiveEnvironment.ts";

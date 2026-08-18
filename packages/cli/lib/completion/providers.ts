@@ -335,6 +335,9 @@ const OPTION_VALUE_PROVIDERS: Readonly<
   identity: () => Promise.resolve(directive({ kind: "files", glob: "*.key" })),
   root: () => Promise.resolve(directive({ kind: "dirs" })),
   test: patternFiles,
+  // A data file has no fixed extension; the shell's own file completion is the
+  // only honest candidate set.
+  datafile: () => Promise.resolve(directive({ kind: "files" })),
   // `cf space clone --to <dir>` builds a clone directory.
   to: () => Promise.resolve(directive({ kind: "dirs" })),
   "log-file": () => Promise.resolve(directive({ kind: "files" })),

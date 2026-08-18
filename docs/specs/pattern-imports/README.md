@@ -205,6 +205,62 @@ therefore creates a distinct revision even when the executable source is
 unchanged. Test dependencies remain ordinary source files in that revision, but
 only paths supplied with `--test` are recovered as test entry points.
 
+### Data files
+
+The same three local deployment commands accept a repeatable
+`--datafile <path>` flag, which attaches a file that is stored with the source
+package and never treated as code. A data file is a file the pattern's author
+keeps beside the pattern source and its tests — a fixture, a table, a list of
+names — and wants deployed with them so that every checkout of the piece
+receives the same bytes.
+
+The bytes are stored verbatim. They are never scanned for imports, never
+transformed, never type-checked, and never compiled or executed, so a data file
+may hold anything a source package can carry. A source package holds text, so a
+data file must be valid UTF-8; the CLI refuses one that is not, by name, rather
+than storing replacement characters. Nothing imports a data file: an import
+specifier that would land on one does not resolve, and fails the compile.
+
+When `--root` is omitted, the CLI uses the common directory containing the main
+entry, every test entry, and every data file. An explicit `--root` remains
+authoritative, and a data file outside it is refused — including one reached
+through a symbolic link. A data file's stored name is its path relative to that
+root, so `--datafile ./data/cities.json` deployed from a root of `.` is stored
+as `/data/cities.json`.
+
+Attached data files participate in the deployed source revision's identity, on
+the same footing as attached test entry points and through the same kind of
+identity-only edge from the entry module. Changing, adding, or removing a data
+file therefore creates a distinct revision even when the executable source is
+unchanged, and each revision stays independently recoverable with its own
+bytes. Source recovery and `cf piece getsrc` return the executable source, its
+attached tests, and its data files together, and report which files are data.
+Repeat the complete set of `--datafile` flags on every `setsrc` because each
+update defines a complete source revision. `set-home --reset` rejects
+`--datafile` because a reset deploys no local source package.
+
+A pattern reads an attached data file with `dataFile(path)` from
+`commonfabric`, naming the path the file is stored under. A data file belongs
+to the package rather than to any one module, so that path is absolute within
+the package and does not resolve relative to the caller — every module in the
+package names a given file the same way, and a sub-pattern reads one as readily
+as the entry does. A path naming no attached data file throws.
+
+The read is immediate. A data file's bytes travel with the pattern's code in
+the same content-addressed closure, so they are present before any module
+executes and the read needs no storage access. It therefore returns the same
+bytes on every load of a given source revision, cold or warm. A data file is
+still not importable: an import specifier that would land on one does not
+resolve.
+
+Data files are fixed at deploy time. Data that changes while the pattern runs
+belongs in its cells; a data file changes only by deploying a new source
+revision.
+
+The same bytes are read by whatever reads the source package: `cf piece
+getsrc`, the FUSE `.src/` view, and any tool working from a recovered
+checkout.
+
 ## Specifier syntax
 
 ### One grammar, no type tag
@@ -267,8 +323,8 @@ Parsing rules (each form is disjoint by prefix; no segment counting needed):
   always space-scoped (slug ids are `slugIdForSpace(space, slug)`), with the
   current space as default. A parsed `pattern:` ref with a subpath is rejected
   during resolution because one module identity does not bind an exports map.
-- The emitted-namespace specifiers `cf:module/<hash>` and `cf:cache-root/`
-  remain compiler-internal and are **rejected in authored source**.
+- The compiler-internal specifiers `cf:module/<hash>`, `cf:cache-root/`,
+  `cf:source-root/`, and `cf:data-file/` are **rejected in authored source**.
 
 ### Resolution and target selection
 
@@ -550,7 +606,7 @@ expose arbitrary filenames or infer names from entry-module re-exports.
 | `./ ../ /` | program-relative files | today |
 | bare (`commonfabric`, `turndown`, …) | **reserved for runtime modules only**, allowlist | today; never used for packages |
 | `cf:` (authored reference grammar above) | this spec | today for content-addressed and same-toolshed entry references; host-qualified routing, explicit exports maps, and subpaths planned |
-| `cf:module/`, `cf:cache-root/` | compiled output / cache internals; rejected in authored source | today |
+| `cf:module/`, `cf:cache-root/`, `cf:source-root/`, `cf:data-file/` | compiled output, cache internals, and source-package identity edges; rejected in authored source | today |
 | `npm: jsr: https:` | future external packages | reserved now |
 
 Reserving bare specifiers for runtime modules is the load-bearing rule: future
@@ -597,7 +653,8 @@ with storage and network access, and `ProgramResolver.resolveSource` is async)
   `isSlugAddress`/`validateSlug`.
 - `runtime-module-policy.ts`: `isAllowedAuthoredImportSpecifier` accepts
   specifiers parsing under the `cf:` reference grammar (and continues to
-  reject the emitted namespaces `cf:module/`, `cf:cache-root/`).
+  reject the compiler-internal namespaces `cf:module/`, `cf:cache-root/`,
+  `cf:source-root/`, `cf:data-file/`).
 
 ### 2. Resolution (a `FabricProgramResolver` wrapper)
 
@@ -822,8 +879,8 @@ unchanged.
 
 - **Grammar**: parse/format round-trips; prefix-form table (`cf:ref`,
   `cf:/space/ref`, `cf://host/space/ref`, subpaths, pins, DIDs-as-space,
-  `of:`/`pattern:` refs); rejection of `cf:module/` and `cf:cache-root/` in
-  authored source.
+  `of:`/`pattern:` refs); rejection of `cf:module/`, `cf:cache-root/`,
+  `cf:source-root/`, and `cf:data-file/` in authored source.
 - **Resolution chase**: slug→piece→pattern, slug→pattern (direct
   publication), `of:<patternId>` start, `pattern:<hash>` terminal; "not a
   pattern" failures per chain shape.

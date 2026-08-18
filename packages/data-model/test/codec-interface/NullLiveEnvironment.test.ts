@@ -14,22 +14,22 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
-  EMPTY_DECODE_CONTEXT,
-  EmptyDecodeContext,
-} from "@/codec-interface/EmptyDecodeContext.ts";
+  NULL_LIVE_ENVIRONMENT,
+  NullLiveEnvironment,
+} from "@/codec-interface/NullLiveEnvironment.ts";
 
-describe("EmptyDecodeContext", () => {
-  describe("EMPTY_DECODE_CONTEXT", () => {
+describe("NullLiveEnvironment", () => {
+  describe("NULL_LIVE_ENVIRONMENT", () => {
     it("is a singleton (re-import yields the same instance)", async () => {
       const reimported =
-        (await import("@/codec-interface/EmptyDecodeContext.ts"))
-          .EMPTY_DECODE_CONTEXT;
-      expect(reimported).toBe(EMPTY_DECODE_CONTEXT);
+        (await import("@/codec-interface/NullLiveEnvironment.ts"))
+          .NULL_LIVE_ENVIRONMENT;
+      expect(reimported).toBe(NULL_LIVE_ENVIRONMENT);
     });
 
     it("throws on `getCell()`", () => {
       expect(() =>
-        EMPTY_DECODE_CONTEXT.getCell({
+        NULL_LIVE_ENVIRONMENT.getCell({
           id: "of:bafyabc",
           path: [],
           space: "did:key:z1",
@@ -39,7 +39,7 @@ describe("EmptyDecodeContext", () => {
 
     it("includes the requested ref id in the throw for debuggability", () => {
       expect(() =>
-        EMPTY_DECODE_CONTEXT.getCell({
+        NULL_LIVE_ENVIRONMENT.getCell({
           id: "of:bafySPECIFIC",
           path: [],
           space: "did:key:z1",
@@ -48,40 +48,40 @@ describe("EmptyDecodeContext", () => {
     });
 
     it("is frozen (cannot have `getCell()` replaced)", () => {
-      expect(Object.isFrozen(EMPTY_DECODE_CONTEXT)).toBe(true);
+      expect(Object.isFrozen(NULL_LIVE_ENVIRONMENT)).toBe(true);
     });
 
     it("reports `shouldDeepFreeze` as `true` (the safe default, mirrors `cloneIfNecessary()` frozen)", () => {
-      expect(EMPTY_DECODE_CONTEXT.shouldDeepFreeze).toBe(true);
+      expect(NULL_LIVE_ENVIRONMENT.shouldDeepFreeze).toBe(true);
     });
   });
 
-  describe("`EmptyDecodeContext` (exported class)", () => {
+  describe("`NullLiveEnvironment` (exported class)", () => {
     it("throws the expected default message (default ctor)", () => {
-      const ctx = new EmptyDecodeContext(true);
+      const ctx = new NullLiveEnvironment(true);
       expect(() =>
         ctx.getCell({ id: "of:bafyDEFAULT", path: [], space: "did:key:z1" })
       ).toThrow(
-        "Cannot decode cell reference `of:bafyDEFAULT`: no runtime context provided.",
+        "Cannot decode cell reference `of:bafyDEFAULT`: no live environment provided.",
       );
     });
 
     it("correctly passes `shouldDeepFreeze` to the superclass", () => {
-      expect(new EmptyDecodeContext(false).shouldDeepFreeze).toBe(
+      expect(new NullLiveEnvironment(false).shouldDeepFreeze).toBe(
         false,
       );
-      expect(new EmptyDecodeContext(true).shouldDeepFreeze).toBe(true);
+      expect(new NullLiveEnvironment(true).shouldDeepFreeze).toBe(true);
     });
 
     it("parameterizes only the after-colon clause via the `getCellMessage` arg", () => {
-      const ctx = new EmptyDecodeContext(true, "custom");
+      const ctx = new NullLiveEnvironment(true, "custom");
       expect(() =>
         ctx.getCell({ id: "of:bafyCUSTOM", path: [], space: "did:key:z1" })
       ).toThrow("Cannot decode cell reference `of:bafyCUSTOM`: custom");
     });
 
     it("correctly accepts the two-argument form", () => {
-      const ctx = new EmptyDecodeContext(false, "deep-clone path.");
+      const ctx = new NullLiveEnvironment(false, "deep-clone path.");
       expect(ctx.shouldDeepFreeze).toBe(false);
       expect(() =>
         ctx.getCell({ id: "of:bafyX", path: [], space: "did:key:z1" })

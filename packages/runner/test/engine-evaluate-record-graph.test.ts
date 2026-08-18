@@ -203,6 +203,209 @@ describe("Engine.evaluateRecordGraph()", () => {
     expect(graph.registrationSink.size).toBe(0);
   });
 
+  it("retains data files without compiling them", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json", "/data/notes.txt"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: "export default 42;",
+        },
+        {
+          name: "/data/cities.json",
+          contents: '{"cities": ["Oslo", "Lima"]}',
+        },
+        {
+          // Bytes that are not TypeScript, and that a parser would read as an
+          // import edge if a data file were ever scanned.
+          name: "/data/notes.txt",
+          contents: 'import nonsense from "./nowhere.ts";\nnot code at all',
+        },
+      ],
+    };
+
+    const { id, graph, mainSpecifier, modules, entryIdentity } = await engine
+      .compileToRecordGraph(program);
+
+    expect(
+      [...graph.specifierByPath.keys()].some((path) =>
+        path.endsWith("/data/cities.json")
+      ),
+    ).toBe(false);
+
+    const stored = new Map(modules.map((m) => [m.filename, m]));
+    expect(stored.get("/data/cities.json")?.source).toBe(
+      '{"cities": ["Oslo", "Lima"]}',
+    );
+    // A data entry's compiled form is its own bytes, so the compiled set alone
+    // carries what a warm load needs.
+    expect(stored.get("/data/cities.json")?.js).toBe(
+      '{"cities": ["Oslo", "Lima"]}',
+    );
+    expect(stored.get("/data/cities.json")?.isData).toBe(true);
+    expect(stored.get("/main.tsx")).not.toHaveProperty("isData");
+    expect(stored.get("/data/notes.txt")?.imports).toEqual([]);
+
+    const entry = modules.find((m) => m.identity === entryIdentity)!;
+    expect(
+      entry.imports.map((edge) => edge.specifier).filter((specifier) =>
+        specifier.startsWith("cf:data-file/")
+      ),
+    ).toEqual(["cf:data-file/data/cities.json", "cf:data-file/data/notes.txt"]);
+
+    const result = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+      program.dataFiles,
+    );
+    expect(result.main?.default).toBe(42);
+    expect(
+      Object.keys(result.exportMap ?? {}).some((path) =>
+        path.startsWith("/data/")
+      ),
+    ).toBe(false);
+  });
+
+  it("reads an attached data file's bytes from the pattern", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            // A value computed at module scope is a top-level value like any
+            // other, so it takes the same `__cf_data` snapshot the SES verifier
+            // requires of one. Reading inside a pattern body needs no wrapper.
+            "const cities = __cf_data(",
+            '  JSON.parse(dataFile("/data/cities.json")).cities,',
+            ");",
+            "export default cities;",
+          ].join("\n"),
+        },
+        { name: "/data/cities.json", contents: '{"cities": ["Oslo", "Lima"]}' },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect(main?.default).toEqual(["Oslo", "Lima"]);
+  });
+
+  it("names the attached data files when a path matches none", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      dataFiles: ["/data/cities.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { __cf_data, dataFile } from "commonfabric";',
+            'export default __cf_data(dataFile("/data/absent.json"));',
+          ].join("\n"),
+        },
+        { name: "/data/cities.json", contents: "[]" },
+      ],
+    };
+
+    await expect(engine.compileAndEvaluateModules(program)).rejects.toThrow(
+      'No attached data file "/data/absent.json". Attached: /data/cities.json.',
+    );
+  });
+
+  it("separates identities for data files differing only in line endings", async () => {
+    // A data file's bytes are the payload a pattern reads, so CRLF and LF are
+    // different content — unlike source text, where they are formatting.
+    const compile = (contents: string) =>
+      engine.compileToRecordGraph({
+        main: "/main.tsx",
+        dataFiles: ["/data/rows.csv"],
+        files: [
+          { name: "/main.tsx", contents: "export default 42;" },
+          { name: "/data/rows.csv", contents },
+        ],
+      });
+
+    const lf = await compile("a,b\nc,d\n");
+    const crlf = await compile("a,b\r\nc,d\r\n");
+
+    expect(lf.entryIdentity).not.toBe(crlf.entryIdentity);
+    const dataIdentity = (r: Awaited<ReturnType<typeof compile>>) =>
+      r.modules.find((m) => m.filename === "/data/rows.csv")!.identity;
+    expect(dataIdentity(lf)).not.toBe(dataIdentity(crlf));
+  });
+
+  it("refuses a program naming its entry as a data file", async () => {
+    await expect(engine.compileToRecordGraph({
+      main: "/main.tsx",
+      dataFiles: ["/main.tsx"],
+      files: [{ name: "/main.tsx", contents: "export default 42;" }],
+    })).rejects.toThrow("cannot be a data file");
+  });
+
+  it("refuses an import that lands on a data file", async () => {
+    await expect(engine.compileToRecordGraph({
+      main: "/main.tsx",
+      dataFiles: ["/data.json"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: 'import data from "./data.json";\nexport default data;',
+        },
+        { name: "/data.json", contents: "{}" },
+      ],
+    })).rejects.toThrow(/Could not resolve ".*\/data\.json"/);
+  });
+
+  it("refuses a program naming a data file it does not carry", async () => {
+    await expect(engine.compileToRecordGraph({
+      main: "/main.tsx",
+      dataFiles: ["/absent.json"],
+      files: [{ name: "/main.tsx", contents: "export default 42;" }],
+    })).rejects.toThrow(
+      "Program names data files it does not carry: /absent.json",
+    );
+  });
+
+  it("separates load identities for different data-file sets", async () => {
+    const files = [
+      { name: "/main.tsx", contents: "export default 42;" },
+      { name: "/a.json", contents: '{"a": 1}' },
+      { name: "/b.json", contents: '{"b": 2}' },
+    ];
+
+    const aOnly = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      dataFiles: ["/a.json"],
+    });
+    const both = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      dataFiles: ["/a.json", "/b.json"],
+    });
+    const reordered = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      dataFiles: ["/b.json", "/a.json", "/a.json"],
+    });
+    const contentChanged = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files: files.map((file) =>
+        file.name === "/a.json" ? { ...file, contents: '{"a": 9}' } : file
+      ),
+      dataFiles: ["/a.json", "/b.json"],
+    });
+
+    expect(aOnly.entryIdentity).not.toBe(both.entryIdentity);
+    expect(reordered.id).toBe(both.id);
+    expect(reordered.entryIdentity).toBe(both.entryIdentity);
+    expect(contentChanged.entryIdentity).not.toBe(both.entryIdentity);
+  });
+
   it("separates load identities for different source-root sets", async () => {
     const files = [
       {

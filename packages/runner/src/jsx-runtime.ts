@@ -1,5 +1,5 @@
 /**
- * JSX automatic runtime for @commonfabric/html
+ * JSX automatic runtime for @commonfabric/runner
  *
  * This module provides the JSX runtime implementation compatible with
  * TypeScript's "jsx": "react-jsx" configuration.
@@ -9,7 +9,7 @@
 
 import type { JSXElement, RenderNode, VNode } from "@commonfabric/api";
 
-import { h } from "./h.ts";
+import { h } from "./builder/h.ts";
 
 /**
  * Props type for JSX elements, including children

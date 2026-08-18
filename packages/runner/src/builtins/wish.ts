@@ -11,13 +11,13 @@ import {
 } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
-import { h } from "@commonfabric/html";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
 
+import { h } from "../builder/h.ts";
 import {
   type CellScope,
   type JSONSchema,

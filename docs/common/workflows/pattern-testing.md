@@ -51,7 +51,7 @@ export default pattern(() => {
     counter.increment.send();
   });
 
-  // 3. Define assertions (reactive booleans that report their operands)
+  // 3. Define assertions (reactive conditions that report their operands)
   const assert_is_zero = assert(() => counter.value === 0);
   const assert_is_one = assert(() => counter.value === 1);
 
@@ -197,7 +197,7 @@ and exporting it would only serve the test.
 
 ## Writing Assertions
 
-Use `assert()` to create reactive boolean assertions:
+Use `assert()` to state each condition a test checks:
 
 ```tsx
 // Shown for illustration only.

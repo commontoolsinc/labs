@@ -1,18 +1,18 @@
 /**
- * Base class for `DecodeContext` implementations. Centralizes the
- * `shouldDeepFreeze` getter so every context declares the (required) member
+ * Base class for `LiveEnvironment` implementations. Centralizes the
+ * `shouldDeepFreeze` getter so every live environment declares the (required) member
  * via a single shared implementation instead of repeating it.
  */
 
 import type { FabricInstance } from "@/interface.ts";
-import type { DecodeContext } from "./interface.ts";
+import type { LiveEnvironment } from "./interface.ts";
 
 /**
  * Abstract base that supplies the `shouldDeepFreeze` getter from a
  * constructor argument. Subclasses implement `getCell()` for their own
  * boundary semantics; they inherit `shouldDeepFreeze` for free.
  */
-export abstract class BaseDecodeContext implements DecodeContext {
+export abstract class BaseLiveEnvironment implements LiveEnvironment {
   readonly #shouldDeepFreeze: boolean;
 
   /**
@@ -38,7 +38,7 @@ export abstract class BaseDecodeContext implements DecodeContext {
 
   /**
    * Whether a decode call should produce a deep-frozen result. See
-   * `DecodeContext.shouldDeepFreeze`.
+   * `LiveEnvironment.shouldDeepFreeze`.
    */
   get shouldDeepFreeze(): boolean {
     return this.#shouldDeepFreeze;
