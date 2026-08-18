@@ -40,7 +40,10 @@ import {
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { MemorySpace } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { readWatermarkSeq } from "../src/executor/watermark.ts";
 import {
@@ -365,6 +368,116 @@ describe("Phase 3 events-down (serving side)", () => {
       "the durable-ack settle callback",
     );
     expect(ackStatus).not.toBe("error");
+    cancelDemand();
+  });
+
+  it("exactly-once under an HONEST flush deadline (stage C tuning): a fire that lands while the serving scheduler is mid-settle is drained ONCE — the re-drains that follow every cut cycle skip the still-in-flight copy; the counter reads exactly 1 and ONE commit consequences the event (mutation: the drain's in-flight guard removed → a copy per cut cycle, processed ≫ appended, value ≫ 1)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "inflight-arg",
+      result: "inflight-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    // T3's honest deadline: cycles are cut every 100 ms of settle. The
+    // host activates on the next ADMISSION (the client's session was
+    // already open): a plain authored write triggers it, so the serving
+    // runtime exists before the walk is registered.
+    host = newHost({ flushDeadlineMs: 100, idleParkMs: 600_000 });
+    {
+      const poke = clientRuntime.getCell<{ n: number }>(
+        space,
+        "inflight-activate",
+        undefined,
+      );
+      const tx = clientRuntime.edit();
+      poke.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    // Let the boot serve settle so the walk below is the only work.
+    const bootSeq = Engine.serverSeq(engine);
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= bootSeq,
+      "the boot serve to settle",
+      15_000,
+    );
+    // A synthetic 1.2-s settle on the SERVING runtime (30 × 40 ms of
+    // synchronous work, one sealed write each): the fire's dispatch waits
+    // behind it, and ~10 cut cycles re-drain the still-pending entry
+    // meanwhile.
+    const serving = servingRuntime!;
+    const trigger = serving.getCell<{ value: number }>(
+      space,
+      "inflight-walk-trigger",
+      undefined,
+    );
+    for (let step = 0; step < 30; step++) {
+      const out = serving.getCell<{ step: number }>(
+        space,
+        `inflight-walk-out-${step}`,
+        undefined,
+      );
+      const walk = (tx: IExtendedStorageTransaction): void => {
+        trigger.withTx(tx).get();
+        const until = performance.now() + 40;
+        while (performance.now() < until) {
+          // spin
+        }
+        out.withTx(tx).set({ step });
+      };
+      serving.scheduler.register(walk, undefined, { isEffect: true });
+    }
+    // Fire NOW: the append lands mid-walk.
+    result.key("bump").send({});
+    await clientRuntime.storageManager.synced();
+
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        return value?.entries?.[0]?.consequenced === true;
+      },
+      "the entry to consequence",
+      20_000,
+    );
+    // Let any duplicate copy that was queued run its course before the
+    // negative assertions.
+    await serving.idle();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await serving.idle();
+    const entry = (Engine.read(engine, { id: sidecarId })
+      ?.value as StreamEventsDocValue).entries![0];
+    const stats = host.stats();
+    // THE PIN: one durable entry, ONE delivery, ONE consequence commit,
+    // the counter incremented exactly once — with the guard having
+    // skipped at least one re-drain (the cut cycles did re-scan).
+    expect(stats.events.appended).toBe(1);
+    expect(stats.events.processed).toBe(1);
+    expect(stats.events.drainInFlightSkips).toBeGreaterThanOrEqual(1);
+    const carrying = (engine.database.prepare(
+      `SELECT seq, consequence_of FROM "commit"
+       WHERE class = 'derived' AND consequence_of IS NOT NULL`,
+    ).all() as Array<{ seq: number; consequence_of: string }>).filter((
+      row,
+    ) => row.consequence_of.includes(entry.eventId));
+    expect(carrying.length).toBe(1);
+    const doc = Engine.read(engine, {
+      id: argument.getAsNormalizedFullLink().id,
+    });
+    expect((doc?.value as { value?: number })?.value).toBe(1);
     cancelDemand();
   });
 

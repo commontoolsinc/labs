@@ -297,6 +297,17 @@ export class SpaceServer implements TransactionSealDestination {
    * `now − lastRenewAt ≥ TTL/3`, i.e. exactly when the interval timer
    * would have fired had the wave's settle let it. */
   #lastRenewAt = 0;
+  /** EventIds the drain has queued into the serving scheduler whose
+   * dispatch has not yet reached its final commit callback (stage C
+   * tuning, T3's companion guard — see `events.drainInFlightSkips`): a
+   * re-drain must not queue a SECOND copy of an entry whose first copy
+   * is still queued, shaper-held, or running. Every id here was queued
+   * WITH its `streamEntry` (the mark path), which is #5969's stated
+   * safety condition for skipping a re-drain on the strength of another
+   * copy; the LT1 in-process cascade copy (no streamEntry) is a
+   * different producer and is deliberately NOT tracked here. Cleared at
+   * park (the scheduler queue dies with the runtime). */
+  readonly #drainInFlight = new Set<string>();
   #currentWave: WaveAccumulator | undefined;
   #sealChain: Promise<unknown> = Promise.resolve();
   #feed: AdmittedCommitNotice[] = [];
@@ -1928,6 +1939,19 @@ export class SpaceServer implements TransactionSealDestination {
           this.#sealEventConsequenceNotice(runtime, entry, streamEntry);
           continue;
         }
+        // The in-flight guard (stage C tuning; #5969's (β), drain-own
+        // copies only): an entry whose earlier drain copy is still
+        // queued/held/running in the scheduler is not queued AGAIN — the
+        // honest flush deadline (T3) ends cycles before a just-drained
+        // event has run, and the post-commit re-arm re-drains the
+        // still-pending entry every cut cycle. The copy completes (its
+        // commit callback removes the id) or fails/defers (onFailure
+        // removes it too), and a still-pending entry then re-drains as
+        // before — the requeue and deferral retries are untouched.
+        if (this.#drainInFlight.has(entry.eventId)) {
+          this.#options.stats.events.drainInFlightSkips += 1;
+          continue;
+        }
         const link: NormalizedFullLink = {
           space,
           id: entry.stream.id as NormalizedFullLink["id"],
@@ -1960,6 +1984,8 @@ export class SpaceServer implements TransactionSealDestination {
           if (entry.rendererTrusted === true) {
             markRendererTrustedEvent(entry.payload);
           }
+          this.#drainInFlight.add(entry.eventId);
+          const eventId = entry.eventId;
           runtime.scheduler.queueEvent(
             link,
             entry.payload,
@@ -1967,7 +1993,12 @@ export class SpaceServer implements TransactionSealDestination {
             // the entry unconsequenced and durable, and the post-wave
             // re-arm rescans it — the wave IS the retry cadence.
             false,
-            undefined,
+            // The queued copy's FINAL callback (every terminal path of the
+            // dispatch — commit result, drop, deferral, name-resolution
+            // drop, error): the in-flight guard releases the id here.
+            () => {
+              this.#drainInFlight.delete(eventId);
+            },
             false,
             {
               eventId: entry.eventId,
@@ -2016,6 +2047,9 @@ export class SpaceServer implements TransactionSealDestination {
                   : {}),
                 streamEntry,
                 onFailure: (outcome) => {
+                  // Belt: a failed/deferred/dropped copy is no longer in
+                  // flight (its commit callback releases too).
+                  this.#drainInFlight.delete(eventId);
                   if (outcome.kind === "deferred") {
                     const deferrals =
                       (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
@@ -3193,6 +3227,8 @@ export class SpaceServer implements TransactionSealDestination {
       this.#deferredRescanTimer = undefined;
     }
     this.#feedArrived?.resolve();
+    // The drain's in-flight copies die with the scheduler queue below.
+    this.#drainInFlight.clear();
     for (const cancel of this.#demandSinks.values()) {
       try {
         cancel();

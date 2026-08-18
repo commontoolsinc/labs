@@ -1950,6 +1950,15 @@ export interface ChurnCounters {
   scheduleRunErrors: number;
   /** Event handlers that lost the receipt race permanently (`scheduler/event-lost-race`). */
   eventLostRaces: number;
+  /** Server-execution v2 stage C tuning T2 (flag-ON clients only, else 0):
+   * event-handler echoes dropped at seal because their intent was already
+   * terminal (`speculation-overlay/late-echo-dropped`) — the late-echo
+   * class the two-browsers lockdown stall belonged to. */
+  overlayLateEchoDrops: number;
+  /** Stage C tuning T2: overlay sweeps the replica's arrival wake ran
+   * (`speculation-overlay/arrival-sweep`) — served values arriving
+   * decoupled from a watermark advance. */
+  overlayArrivalSweeps: number;
 }
 
 export interface BrowserLoadSummary {
@@ -2087,6 +2096,8 @@ export async function collectBrowserLoadSummary(
       commitRejected: 0,
       scheduleRunErrors: 0,
       eventLostRaces: 0,
+      overlayLateEchoDrops: 0,
+      overlayArrivalSweeps: 0,
     };
     try {
       const workerCounts = await cf?.rt?.getLoggerCounts?.();
@@ -2139,6 +2150,14 @@ export async function collectBrowserLoadSummary(
       churn.commitRejected = countOf("storage.v2", "commit-rejected");
       churn.scheduleRunErrors = countOf("scheduler", "schedule-run-error");
       churn.eventLostRaces = countOf("scheduler", "event-lost-race");
+      churn.overlayLateEchoDrops = countOf(
+        "speculation-overlay",
+        "late-echo-dropped",
+      );
+      churn.overlayArrivalSweeps = countOf(
+        "speculation-overlay",
+        "arrival-sweep",
+      );
     } catch {
       // Worker may be disposed during teardown — main-thread IPC still tells
       // the contention story.
@@ -2210,7 +2229,9 @@ export function logBrowserLoadSummary(summary: BrowserLoadSummary): void {
     ` commitConflicts=${c.commitConflicts} commitReverts=${c.commitReverts}` +
     ` commitRejected=${c.commitRejected}` +
     ` scheduleRunErrors=${c.scheduleRunErrors}` +
-    ` eventLostRaces=${c.eventLostRaces}`;
+    ` eventLostRaces=${c.eventLostRaces}` +
+    ` overlayLateEchoDrops=${c.overlayLateEchoDrops}` +
+    ` overlayArrivalSweeps=${c.overlayArrivalSweeps}`;
   const pendingLine = summary.pendingIpc.length === 0
     ? "    (none)"
     : summary.pendingIpc.map((row) =>

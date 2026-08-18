@@ -151,6 +151,18 @@ export type ServingLoopStats = {
     processed: number;
     coalescedPerWaveMax: number;
     skippedIdempotent: number;
+    /** Stage C tuning (T3's companion guard): drain passes that found a
+     * pending entry whose EARLIER drain copy is still queued or in flight
+     * in the serving scheduler (its dispatch has not reached its commit
+     * callback yet) and did NOT queue it again. With an honest flush
+     * deadline (T3) a cycle routinely ends before a just-drained event
+     * has run, and the post-commit re-arm re-drains the still-pending
+     * entry next cycle — pre-guard that queued a second copy per cut
+     * cycle (4× dispatch of the lockdown toggle on the two-browsers gate;
+     * #5969's re-scan variant, (β)). Counted per skipped re-queue; a count
+     * that grows without `processed` settling names a drain copy that
+     * never completes. */
+    drainInFlightSkips: number;
   };
   memo: { hits: number; misses: number; inflight: number };
   outbox: {
@@ -194,6 +206,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     processed: 0,
     coalescedPerWaveMax: 0,
     skippedIdempotent: 0,
+    drainInFlightSkips: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
   outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },
