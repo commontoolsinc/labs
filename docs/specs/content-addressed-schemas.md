@@ -508,12 +508,20 @@ phased on the op-migration playbook:
   links keep reading forever — links rewrite on every re-instantiation, so
   inline forms age out without a data migration. A canary pins the inline
   vintage.
-- **Phase 2 — clients send references in selectors.** Watch specs and
-  one-shot queries carry references for persisted schemas. The server side
-  already ships with Phase 0 — selector schemas resolve through the shared
-  traversal, per space, under the availability scope — so this phase is
-  the client emission plus the loud protocol error for an unresolvable
-  selector reference.
+- **Phase 2 — clients send references in selectors, and `$alias`
+  bindings shed their embedded schemas.** Watch specs and one-shot
+  queries carry references for persisted schemas. The server side
+  already ships with Phase 0 — selector schemas resolve through the
+  shared traversal, per space, under the availability scope — so the
+  selector half is the client emission plus the loud protocol error for
+  an unresolvable selector reference. Measured traffic puts selector
+  schemas at roughly six percent of mixed pattern-test bytes with over
+  seventy percent repetition, and higher in watch-heavy interactive
+  sessions. The `$alias` half is not a traffic win (under half a
+  percent measured) — it is a representation fix: an embedded schema
+  can carry `FabricValue` defaults, which puts special objects inside
+  otherwise plain binding records; a reference keeps binding objects
+  plain JSON and confines schema content to schema documents.
 - **Phase 3 — retire transport compression for link positions.**
   `syncSchemaTableV2` stops matching
   anything on link positions once reference-bearing links dominate; the
