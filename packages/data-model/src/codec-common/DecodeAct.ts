@@ -10,10 +10,10 @@ import type { LiveEnvironment } from "@/codec-interface/interface.ts";
  * -- a wire marker read off the incoming envelope, say -- subclasses this and
  * holds that alongside.
  *
- * Per call rather than per engine, for the reason `EncodeContext` gives, and
+ * Per call rather than per engine, for the reason `EncodeAct` gives, and
  * additionally because the environment is a per-call argument to begin with.
  */
-export class DecodeContext {
+export class DecodeAct {
   readonly #env: LiveEnvironment;
 
   /**

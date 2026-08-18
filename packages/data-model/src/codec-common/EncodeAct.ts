@@ -13,7 +13,7 @@ import type { LiveEnvironment } from "@/codec-interface/interface.ts";
  * codec can reach back through a public entry point while a walk is already in
  * progress, and state held on the engine would be shared between the two.
  */
-export class EncodeContext {
+export class EncodeAct {
   readonly #env: LiveEnvironment;
 
   /**
@@ -25,9 +25,9 @@ export class EncodeContext {
   /**
    * Constructs an instance.
    *
-   * The environment is held here rather than threaded beside the context
+   * The environment is held here rather than threaded beside the act
    * through every walk method, matching the decode side. Nothing on the
-   * encode path reads it yet -- a codec is handed a value, not a context --
+   * encode path reads it yet -- a codec is handed a value, not an act --
    * and it is here so that a format whose codecs come to need the running
    * system has somewhere for it to be. An engine whose caller named no
    * environment passes the null one, which fails by name when asked for a
@@ -48,7 +48,7 @@ export class EncodeContext {
    * The set behind this is created here rather than in the constructor, so
    * that encoding a lone self-representing value -- much the commonest case,
    * and the one where a fixed cost shows up most -- allocates nothing beyond
-   * the context itself.
+   * the act itself.
    *
    * @throws If `value` is already being encoded. A cycle has no encoding at
    *   all, so this refuses rather than reporting, unlike its decode-side
