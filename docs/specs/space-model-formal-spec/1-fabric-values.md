@@ -3979,12 +3979,16 @@ Visited objects are tracked in a per-call `Set` for cycle safety.
 The deep-freeze contract is enforced at the points where decoded
 values cross from internal codec machinery to callers:
 
-- **Every arm of the decode walker's dispatch.** Each value returned passes
-  through `deepFreeze()` before returning: the codec-produced value (often a
-  `FabricPrimitive` subclass, already frozen — the cache hit makes this
-  O(1)), the lenient-mode `ProblematicValue` fallback, and the unknown-tag
-  arm's `UnknownValue`. Which arm produced a value is therefore not something
-  a caller has to know. See Section 4.5 step 4.
+- **Every value the decode walker returns is deep-frozen at the boundary**,
+  whichever arm produced it. The arms reach that by two routes. A leaf arm
+  calls `deepFreeze()`: the codec-produced value (often a `FabricPrimitive`
+  subclass, already frozen — the cache hit makes this O(1)), the lenient-mode
+  `ProblematicValue` fallback, and the unknown-tag arm's `UnknownValue`. A
+  container arm calls `Object.freeze()` on the array or object it has just
+  built, whose children the leaf arms have already deep-frozen, so the
+  guarantee holds without walking them a second time. Which arm produced a
+  value is therefore not something a caller has to know. See Section 4.5
+  step 4.
 
 - **`ProblematicStateError.asProblematicValue()`.** The rendering of a thrown
   refusal as a returned value is deep-frozen where it is built, rather than at
