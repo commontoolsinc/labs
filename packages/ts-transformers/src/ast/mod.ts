@@ -81,6 +81,7 @@ export {
   isSyntheticNode,
   preserveLineage,
   preserveSourceMapRange,
+  recoverAuthoredPosition,
   setParentPointers,
   visitEachChildWithJsx,
 } from "./utils.ts";

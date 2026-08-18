@@ -4,6 +4,7 @@ import {
   FUNCTION_HARDENING_HELPER_NAME,
   VERIFIED_BINDING_METADATA_FIELD,
 } from "@commonfabric/utils/sandbox-contract";
+import { recoverAuthoredPosition } from "../ast/utils.ts";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
@@ -31,6 +32,7 @@ export class ModuleScopeFunctionHardeningTransformer extends Transformer {
         bindingHelperName: bindingHelperName.text,
         trustedBindingNames,
         sourceFileName,
+        authoredSourceFile: context.program.getSourceFile(sourceFile.fileName),
         useHelper: () => {
           helperNeeded = true;
         },
@@ -66,6 +68,12 @@ interface HardeningState {
   readonly bindingHelperName: string;
   readonly trustedBindingNames: ReadonlySet<string>;
   readonly sourceFileName: string;
+  /**
+   * The parsed AUTHORED file. Recovered lineage ranges index into its text, so
+   * it is what resolves them to a line/column and to the authored binding name
+   * that encloses them. Absent only if the file left the program.
+   */
+  readonly authoredSourceFile: ts.SourceFile | undefined;
   readonly useHelper: () => void;
   readonly useBindingHelper: () => void;
 }
@@ -125,7 +133,7 @@ function transformFunctionDeclaration(
         factory.createExpressionStatement(
           annotateBindingIdentifier(
             factory.createIdentifier(statement.name.text),
-            statement.name.text,
+            { trustedBindingName: statement.name.text, site: statement },
             factory,
             state,
           ),
@@ -206,10 +214,14 @@ function transformVariableStatement(
       let rewritten = declaration.initializer;
       if (isTrustedCallable) {
         state.useBindingHelper();
+        const metadata: BindingIdentityMetadataInput = {
+          trustedBindingName: declaration.name.text,
+          site: initializer,
+        };
         if (inlineBindingAnnotation) {
           rewritten = annotateBindingIdentifier(
             rewritten,
-            declaration.name.text,
+            metadata,
             factory,
             state,
           );
@@ -218,7 +230,7 @@ function transformVariableStatement(
             factory.createExpressionStatement(
               annotateBindingIdentifier(
                 factory.createIdentifier(declaration.name.text),
-                declaration.name.text,
+                metadata,
                 factory,
                 state,
               ),
@@ -289,9 +301,20 @@ function wrapWithFunctionHardener(
   );
 }
 
+/** What a binding-identity annotation describes. */
+interface BindingIdentityMetadataInput {
+  /**
+   * The binding's own name, present only when it is in the trusted
+   * (`WriteAuthorizedBy`) scope. It is what becomes `bindingPath`.
+   */
+  readonly trustedBindingName?: string;
+  /** The annotated node, whose authored site the metadata reports. */
+  readonly site?: ts.Node;
+}
+
 function annotateBindingIdentifier(
   identifier: ts.Expression,
-  bindingName: string,
+  input: BindingIdentityMetadataInput,
   factory: ts.NodeFactory,
   state: HardeningState,
 ): ts.CallExpression {
@@ -300,28 +323,171 @@ function annotateBindingIdentifier(
     undefined,
     [
       identifier,
-      createBindingIdentityMetadata(bindingName, factory, state),
+      createBindingIdentityMetadata(input, factory, state),
     ],
   );
 }
 
+/**
+ * The metadata object the binding-identity helper stamps onto an annotated
+ * value (and onto its `implementation`, when it has one). Fields:
+ *
+ * - `sourceFile` — the module's normalized writer-identity file name. Always
+ *   present.
+ * - `bindingPath` — the binding's name, as a one-element path. Present ONLY
+ *   for a binding in the trusted (`WriteAuthorizedBy`) scope: together with
+ *   `sourceFile` it forms the verified binding identity that authorizes writes,
+ *   so a value outside that scope must not carry it.
+ * - `position` — where the annotated function was AUTHORED, as
+ *   `{ line, col }`. `line` is 1-based and `col` is 0-based, i.e. TypeScript's
+ *   own line/character pair with 1 added to the line. Both index into the file
+ *   the pipeline transformed, which is the authored file plus the one-line
+ *   helper-import prelude injection prepends, so a reader that wants authored
+ *   coordinates subtracts that prelude's line (the runner's
+ *   `helperInjectionLineOffset` computes it from the authored bytes). Absent
+ *   when the value's lineage reaches this stage with no recoverable authored
+ *   position.
+ * - `bindingName` — the authored name the function was declared under, for
+ *   debug display. Absent when it was authored as an inline expression under no
+ *   declaration, such as a lifted JSX expression or a `.map` callback.
+ */
 function createBindingIdentityMetadata(
-  bindingName: string,
+  input: BindingIdentityMetadataInput,
   factory: ts.NodeFactory,
   state: HardeningState,
 ): ts.ObjectLiteralExpression {
-  return factory.createObjectLiteralExpression([
+  const properties: ts.PropertyAssignment[] = [
     factory.createPropertyAssignment(
       factory.createIdentifier("sourceFile"),
       factory.createStringLiteral(state.sourceFileName),
     ),
-    factory.createPropertyAssignment(
-      factory.createIdentifier("bindingPath"),
-      factory.createArrayLiteralExpression([
-        factory.createStringLiteral(bindingName),
-      ]),
-    ),
-  ], true);
+  ];
+
+  if (input.trustedBindingName !== undefined) {
+    properties.push(
+      factory.createPropertyAssignment(
+        factory.createIdentifier("bindingPath"),
+        factory.createArrayLiteralExpression([
+          factory.createStringLiteral(input.trustedBindingName),
+        ]),
+      ),
+    );
+  }
+
+  const site = resolveAuthoredSite(input, state);
+  if (site) {
+    properties.push(
+      factory.createPropertyAssignment(
+        factory.createIdentifier("position"),
+        factory.createObjectLiteralExpression([
+          factory.createPropertyAssignment(
+            factory.createIdentifier("line"),
+            factory.createNumericLiteral(site.line),
+          ),
+          factory.createPropertyAssignment(
+            factory.createIdentifier("col"),
+            factory.createNumericLiteral(site.col),
+          ),
+        ]),
+      ),
+    );
+    if (site.bindingName !== undefined) {
+      properties.push(
+        factory.createPropertyAssignment(
+          factory.createIdentifier("bindingName"),
+          factory.createStringLiteral(site.bindingName),
+        ),
+      );
+    }
+  }
+
+  return factory.createObjectLiteralExpression(properties, true);
+}
+
+/** Where an annotated value was authored, in the shape the metadata reports. */
+interface AuthoredSite {
+  /** 1-based. */
+  readonly line: number;
+  /** 0-based. */
+  readonly col: number;
+  readonly bindingName: string | undefined;
+}
+
+/**
+ * Resolve the authored line/column — and the authored binding name enclosing
+ * it — for the value an annotation describes.
+ */
+function resolveAuthoredSite(
+  input: BindingIdentityMetadataInput,
+  state: HardeningState,
+): AuthoredSite | undefined {
+  const authoredSourceFile = state.authoredSourceFile;
+  if (!authoredSourceFile) return undefined;
+
+  const candidates = input.site ? [input.site] : [];
+
+  for (const candidate of candidates) {
+    const range = recoverAuthoredPosition(candidate);
+    if (!range) continue;
+    const enclosing = findAuthoredNodeAt(authoredSourceFile, range.pos);
+    // A recovered range starts before the construct's leading trivia; the
+    // parsed node covering it reports where its first real token begins.
+    const start = enclosing?.node.getStart(authoredSourceFile) ?? range.pos;
+    const position = authoredSourceFile.getLineAndCharacterOfPosition(
+      start >= range.pos && start < range.end ? start : range.pos,
+    );
+    return {
+      line: position.line + 1,
+      col: position.character,
+      bindingName: enclosing?.bindingName,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Descend the authored tree to the innermost node covering `pos`, carrying the
+ * name of the nearest declaration that encloses it.
+ *
+ * The name is dropped on the way down through a function, because the
+ * declaration a function is assigned to does not name what is written INSIDE
+ * it: a lift hoisted out of `const doubled = computed(() => count * 2)` is
+ * `doubled`, while one hoisted out of a JSX expression in the same pattern's
+ * body is anonymous.
+ */
+function findAuthoredNodeAt(
+  sourceFile: ts.SourceFile,
+  pos: number,
+): { node: ts.Node; bindingName: string | undefined } | undefined {
+  let node: ts.Node = sourceFile;
+  let bindingName: string | undefined;
+  let found = false;
+
+  for (;;) {
+    const child = ts.forEachChild(
+      node,
+      (candidate) =>
+        candidate.pos <= pos && pos < candidate.end ? candidate : undefined,
+    );
+    if (!child) break;
+    if (ts.isFunctionLike(node)) bindingName = undefined;
+    bindingName = authoredDeclarationName(child) ?? bindingName;
+    node = child;
+    found = true;
+  }
+
+  return found ? { node, bindingName } : undefined;
+}
+
+/** The name a declaration binds its value under, for the debug binding name. */
+function authoredDeclarationName(node: ts.Node): string | undefined {
+  if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+    return node.name.text;
+  }
+  if (ts.isFunctionDeclaration(node) && node.name) {
+    return node.name.text;
+  }
+  return undefined;
 }
 
 function createFunctionHardeningHelper(
