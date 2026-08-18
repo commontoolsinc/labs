@@ -763,13 +763,13 @@ const UNMODELED_SCHEMA_KEYWORDS: readonly string[] = [
  * loses nothing. A cell is tagged iff:
  * - it has at least one writer (a node listing its root under
  *   `node.outputs`) — zero-writer cells are seeded state, never tagged — and
- *   no writer disqualifies (`writerDisqualifies`): handler wrappers,
- *   writable-proxy modules, effects, raw/isolated modules, and builtin refs
- *   not proven replayable by name (see `builtin-replayability.ts`);
+ *   no writer disqualifies (`writerDisqualifies`): handler wrappers, effects,
+ *   raw/isolated modules, and builtin refs not proven replayable by name (see
+ *   `builtin-replayability.ts`);
  * - its root is never handed WRITABLE into another node
  *   (`collectInputDisqualifiedRoots`): read-only handler captures no longer
  *   disqualify, but `asCell` bindings granting a write-capable handle,
- *   schema-less / writable-proxy handlers, sub-pattern arguments,
+ *   schema-less handlers, sub-pattern arguments,
  *   op-sub-pattern builtin inputs (map/filter/flatMap), and every input of a
  *   non-replayable node (`llmDialog` writes through its inputs) still do;
  * - it is not a stream.

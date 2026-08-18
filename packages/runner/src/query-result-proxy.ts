@@ -207,12 +207,11 @@ export function createQueryResultProxy<T>(
  * The shared proxy body.
  *
  * Reads go through `readTx()`: the transaction fixed at creation when
- * `pinned`, and one resolved per access otherwise. Writes and cell minting go
- * through `tx` — the transaction the caller actually supplied, which is
- * `undefined` when they supplied none and is what the write traps test to
- * refuse a mutation. The proxy cache is keyed on `viewTx`, the transaction the
- * proxies in it actually read through, so a cached proxy is never handed to a
- * caller reading through a different one.
+ * `pinned`, and one resolved per access otherwise. Cell minting goes through
+ * `tx` — the transaction the caller actually supplied, which is `undefined`
+ * when they supplied none. Every write trap refuses. The proxy cache is keyed
+ * on `viewTx`, the transaction the proxies in it actually read through, so a
+ * cached proxy is never handed to a caller reading through a different one.
  */
 function createViewProxy<T>(
   runtime: Runtime,
@@ -384,9 +383,7 @@ function createViewProxy<T>(
 
   // Check if we already have a proxy for this target in the cache.
   // The cache key is the original `value` (not the stub), ensuring that
-  // the same frozen object always maps to the same proxy instance -- and the
-  // value index is consulted for the writability actually asked for, so a view
-  // built for one never answers a request for the other.
+  // the same frozen object always maps to the same proxy instance.
   const existingProxy = txCache.byLink.get(cacheKey) ??
     (cfcLabelView === undefined ? txCache.byValue.get(value) : undefined);
   if (existingProxy) return remember(existingProxy);

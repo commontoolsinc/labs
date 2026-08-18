@@ -414,8 +414,7 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
  * at all, which is what keeps a declared result opt-in.
  *
  * The schema-injected call spreads any options the author wrote into this same
- * object, so a member here may be one this builder does not read: the writable
- * proxy is asked for in the state-schema slot above.
+ * object, so a member here may be one this builder does not read.
  */
 export interface HandlerOptions {
   resultSchema?: JSONSchema;

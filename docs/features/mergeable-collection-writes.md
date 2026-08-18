@@ -254,9 +254,7 @@ missing value is a zero default, `increment` is always zero-based: a counter
 whose displayed starting value should be non-zero must be `set` to that value
 first, since the op carries only the delta.
 
-- **Call sites** — `Cell.push` (`packages/runner/src/cell.ts`) and the
-  query-result-proxy's `push` (`packages/runner/src/query-result-proxy.ts`,
-  which routes array mutators through `diffAndUpdate`) both call
+- **Call sites** — `Cell.push` (`packages/runner/src/cell.ts`) calls
   `recordMergeableOp` with an `append` delta after writing the combined array, so
   id anchoring,
   cross-space link elements, and CFC write-policy recording continue to run

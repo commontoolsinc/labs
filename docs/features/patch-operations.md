@@ -57,9 +57,8 @@ Take `Cell.increment(2)`:
    one intent, so `recordMergeableOp` poisons the path — it drops the intent and
    the commit falls back to the whole-array diff for that path (correct, but not
    merge-friendly), rather than letting the second op replace and silently drop
-   the first. A foreign write that reshapes the array after an op — a proxy
-   in-place mutator (`sort`/`splice`/`unshift`/…) or a whole-value `Cell.set` —
-   poisons the same way via `poisonMergeableOp`.
+   the first. A foreign write that reshapes the array after an op — a
+   whole-value `Cell.set` — poisons the same way via `poisonMergeableOp`.
 3. **Commit** — at commit the intent becomes wire ops plus the diff-suppression
    they imply (`buildMergeableIntent`), and the whole-value diff for the paths the
    op covers is dropped. The op travels in `ClientCommit.operations`. A builder
@@ -172,7 +171,7 @@ What catches a mistake, and how loudly:
 | Whole-value diff → structural/`replace`/`splice` ops | `runner storage/v2-transaction.ts` |
 | Mergeable intent fold + build | `runner storage/mergeable-ops.ts` |
 | Intent transport (`recordMergeableOp`) | `runner storage/interface.ts`, `extended-storage-transaction.ts` |
-| Author methods (impl) | `runner cell.ts`, `query-result-proxy.ts` |
+| Author methods (impl) | `runner cell.ts` |
 | Author methods (types) | `api/index.ts` (`IWritable`) |
 | Author-method catalog | `api/index.ts` (`MERGEABLE_OP_METHODS`) |
 | Transformer classification | `ts-transformers` capability-analysis + reactive-root-lowering |
