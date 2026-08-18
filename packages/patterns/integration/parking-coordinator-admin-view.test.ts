@@ -135,6 +135,18 @@ describe("parking coordinator admin view integration test", () => {
       adminChangeIntegrity.includes("parking-admin-manager"),
       "the trusted grant must carry the administrator-manager endorsement",
     );
+    (resultCell.key("removePerson") as unknown as {
+      send(event: { name: string }): void;
+    }).send({ name: "Alice" });
+    await cc.runtime.idle();
+    await cc.synced();
+    await resultCell.pull();
+    assert(
+      (resultCell.key("people").get() as { name: string }[]).some(
+        ({ name }) => name === "Alice",
+      ),
+      "an active administrator must not be removable",
+    );
     await waitForText(
       page,
       '[data-parking-admin-toggle="Alice"]',
@@ -164,6 +176,18 @@ describe("parking coordinator admin view integration test", () => {
       page,
       '[data-parking-admin-toggle="Alice"]',
       "Make admin",
+    );
+    (resultCell.key("removePerson") as unknown as {
+      send(event: { name: string }): void;
+    }).send({ name: "Alice" });
+    await cc.runtime.idle();
+    await cc.synced();
+    await resultCell.pull();
+    assert(
+      !(resultCell.key("people").get() as { name: string }[]).some(
+        ({ name }) => name === "Alice",
+      ),
+      "a former administrator must become removable after revocation",
     );
   });
 });
