@@ -7,6 +7,7 @@ import {
   ensurePersonFolder,
   ensureServiceAccount,
   isGitHubUsername,
+  mintKey,
   usernameOfDisplayName,
 } from "./test-records-mint.ts";
 
@@ -179,6 +180,80 @@ describe("test-records-mint", () => {
         "sa@x",
       );
       expect(log.length).toBe(2);
+    });
+  });
+
+  describe("mintKey()", () => {
+    const keyData = btoa(JSON.stringify({
+      client_email: "sa@x",
+      private_key: "pem",
+      token_uri: "https://oauth2.googleapis.com/token",
+    }));
+
+    it("returns the key file with the username added", async () => {
+      const log: { method: string; url: string; body?: string }[] = [];
+      const keyFile = await mintKey(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            { status: 200, json: { keys: [] } },
+            { status: 200, json: { privateKeyData: keyData } },
+          ], log),
+        },
+        "sa@x",
+        "octocat",
+      );
+      expect(JSON.parse(keyFile).cf_username).toBe("octocat");
+      expect(log[0]?.url).toContain("keyTypes=USER_MANAGED");
+    });
+
+    it("revokes every key the account held before", async () => {
+      const log: { method: string; url: string; body?: string }[] = [];
+      await mintKey(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            {
+              status: 200,
+              json: {
+                keys: [
+                  { name: "projects/p/serviceAccounts/sa@x/keys/old1" },
+                  { name: "projects/p/serviceAccounts/sa@x/keys/old2" },
+                ],
+              },
+            },
+            { status: 200, json: { privateKeyData: keyData } },
+            { status: 200, json: {} },
+            { status: 200, json: {} },
+          ], log),
+        },
+        "sa@x",
+        "octocat",
+      );
+      const deletes = log.filter((entry) => entry.method === "DELETE");
+      expect(deletes.length).toBe(2);
+      expect(deletes[0]?.url).toContain("/keys/old1");
+      expect(deletes[1]?.url).toContain("/keys/old2");
+    });
+
+    it("throws when a superseded key cannot be revoked", async () => {
+      await expect(mintKey(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            {
+              status: 200,
+              json: {
+                keys: [{ name: "projects/p/serviceAccounts/sa@x/keys/old" }],
+              },
+            },
+            { status: 200, json: { privateKeyData: keyData } },
+            { status: 403 },
+          ], []),
+        },
+        "sa@x",
+        "octocat",
+      )).rejects.toThrow("revoking");
     });
   });
 });

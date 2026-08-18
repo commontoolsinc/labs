@@ -20,7 +20,9 @@ export const MINT_WORKFLOW_FILE = "test-records-mint.yml";
 
 /**
  * Dataset prefixes whose submissions/local/<username>/ folders a minted
- * key can write. Grows as other repositories adopt the system.
+ * key can write. Grows as other repositories adopt the system. This list
+ * must contain the effective storePrefix() — the minting workflow checks
+ * that and refuses to issue keys that could not write where uploads go.
  */
 export const DATASET_PREFIXES = ["labs/test-records"];
 
@@ -66,6 +68,14 @@ export interface PersonalKeyFile {
   cf_username: string;
 }
 
+/**
+ * The one token endpoint a personal key may name. The uploader sends a
+ * signed assertion wherever this field points, so the parser accepts
+ * exactly Google's HTTPS endpoint — the value every minted key carries —
+ * and nothing else.
+ */
+export const KEY_TOKEN_URI = "https://oauth2.googleapis.com/token";
+
 /** Parses a personal key file, returning undefined when it is not one. */
 export function parsePersonalKeyFile(
   text: string,
@@ -81,7 +91,7 @@ export function parsePersonalKeyFile(
   if (
     typeof key.client_email !== "string" ||
     typeof key.private_key !== "string" ||
-    typeof key.token_uri !== "string"
+    key.token_uri !== KEY_TOKEN_URI
   ) {
     return undefined;
   }
@@ -94,7 +104,7 @@ export function parsePersonalKeyFile(
   return {
     client_email: key.client_email,
     private_key: key.private_key,
-    token_uri: key.token_uri,
+    token_uri: KEY_TOKEN_URI,
     cf_username: username as string,
   };
 }

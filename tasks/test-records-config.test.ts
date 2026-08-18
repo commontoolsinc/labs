@@ -72,5 +72,16 @@ describe("test-records-config", () => {
     it("returns undefined for malformed JSON", () => {
       expect(parsePersonalKeyFile("{nope")).toBeUndefined();
     });
+
+    it("returns undefined for any token endpoint but Google's", () => {
+      expect(parsePersonalKeyFile(JSON.stringify({
+        ...KEY,
+        token_uri: "http://oauth2.googleapis.com/token",
+      }))).toBeUndefined();
+      expect(parsePersonalKeyFile(JSON.stringify({
+        ...KEY,
+        token_uri: "https://oauth2.example/token",
+      }))).toBeUndefined();
+    });
   });
 });

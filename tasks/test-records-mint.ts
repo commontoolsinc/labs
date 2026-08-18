@@ -24,6 +24,7 @@ import {
   DATASET_PREFIXES,
   GCP_PROJECT,
   storeBucket,
+  storePrefix,
 } from "./test-records-config.ts";
 
 /**
@@ -212,18 +213,35 @@ export async function ensurePersonFolder(
   }
 }
 
-/** Mints one key and returns the key file JSON with cf_username added. */
+/**
+ * Mints one key and returns the key file JSON with cf_username added.
+ * Every user-managed key the account held before is deleted once the new
+ * one exists: a person holds one live key, so re-requesting rotates —
+ * a lost or compromised key stops working the moment its replacement is
+ * minted — and the account can never creep toward the key limit.
+ */
 export async function mintKey(
   client: GcpClient,
   email: string,
   username: string,
 ): Promise<string> {
-  const minted = await gcp(
+  const account = `${IAM}/projects/${GCP_PROJECT}/serviceAccounts/${email}`;
+  const before = await gcp(
     client,
-    "POST",
-    `${IAM}/projects/${GCP_PROJECT}/serviceAccounts/${email}/keys`,
-    {},
+    "GET",
+    `${account}/keys?keyTypes=USER_MANAGED`,
   );
+  if (before.status !== 200) {
+    throw new Error(
+      `listing the keys of ${email} failed: HTTP ${before.status}`,
+    );
+  }
+  const superseded = ((before.json as { keys?: { name?: string }[] })
+    .keys ?? [])
+    .map((key) => key.name)
+    .filter((name): name is string => typeof name === "string");
+
+  const minted = await gcp(client, "POST", `${account}/keys`, {});
   if (minted.status !== 200) {
     throw new Error(
       `minting a key for ${email} failed: HTTP ${minted.status} ${
@@ -235,6 +253,16 @@ export async function mintKey(
   if (keyData === undefined) {
     throw new Error("the key response carried no privateKeyData");
   }
+
+  for (const name of superseded) {
+    const deleted = await gcp(client, "DELETE", `${IAM}/${name}`);
+    if (deleted.status !== 200) {
+      throw new Error(
+        `revoking the superseded key ${name} failed: HTTP ${deleted.status}`,
+      );
+    }
+  }
+
   const decoded = atob(keyData);
   const keyFile = JSON.parse(decoded) as Record<string, unknown>;
   keyFile.cf_username = username;
@@ -283,6 +311,18 @@ async function main(): Promise<void> {
   }
   if (!isGitHubUsername(username)) {
     throw new Error(`not a GitHub username: ${username}`);
+  }
+  // GitHub logins are case-insensitive, so the login is canonicalized to
+  // lowercase before it names anything: the account id, the folder, the
+  // display name, and the key's cf_username all agree however the person
+  // typed it into the dispatch form.
+  username = username.toLowerCase();
+  if (!DATASET_PREFIXES.includes(storePrefix())) {
+    throw new Error(
+      `the configured store prefix ${storePrefix()} is not in ` +
+        "DATASET_PREFIXES; a key minted now could not write where " +
+        "uploads go",
+    );
   }
   const token = readEnv("TEST_RECORDS_GCP_TOKEN");
   if (token === undefined || token.length === 0) {

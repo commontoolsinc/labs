@@ -14,6 +14,11 @@
  * finds its own delivery without reading anyone else's.
  */
 
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
+
 const RECIPIENT_PREFIX = "cfr1";
 const HKDF_INFO = "common-fabric test-records key delivery v1";
 
@@ -34,23 +39,6 @@ export interface KeyDeliveryIdentity {
   privateKey: string;
 }
 
-export function b64urlEncode(bytes: Uint8Array): string {
-  let base64 = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    base64 += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(base64)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/, "");
-}
-
-export function b64urlDecode(text: string): Uint8Array {
-  const padded = text.replaceAll("-", "+").replaceAll("_", "/") +
-    "=".repeat((4 - text.length % 4) % 4);
-  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
-}
-
 /** Generates a fresh delivery identity. */
 export async function generateIdentity(): Promise<KeyDeliveryIdentity> {
   const pair = await crypto.subtle.generateKey(
@@ -65,8 +53,8 @@ export async function generateIdentity(): Promise<KeyDeliveryIdentity> {
     await crypto.subtle.exportKey("pkcs8", pair.privateKey),
   );
   return {
-    recipient: RECIPIENT_PREFIX + b64urlEncode(rawPublic),
-    privateKey: b64urlEncode(pkcs8),
+    recipient: RECIPIENT_PREFIX + toUnpaddedBase64url(rawPublic),
+    privateKey: toUnpaddedBase64url(pkcs8),
   };
 }
 
@@ -74,7 +62,7 @@ export async function generateIdentity(): Promise<KeyDeliveryIdentity> {
 export function isRecipient(text: string): boolean {
   if (!text.startsWith(RECIPIENT_PREFIX)) return false;
   try {
-    return b64urlDecode(text.slice(RECIPIENT_PREFIX.length)).length === 32;
+    return fromBase64url(text.slice(RECIPIENT_PREFIX.length)).length === 32;
   } catch {
     return false;
   }
@@ -134,7 +122,7 @@ export async function seal(
   if (!isRecipient(recipient)) {
     throw new Error("not a test-records delivery recipient");
   }
-  const recipientRaw = b64urlDecode(recipient.slice(RECIPIENT_PREFIX.length));
+  const recipientRaw = fromBase64url(recipient.slice(RECIPIENT_PREFIX.length));
   const recipientKey = await crypto.subtle.importKey(
     "raw",
     recipientRaw as BufferSource,
@@ -166,9 +154,9 @@ export async function seal(
   );
   return {
     v: 1,
-    epk: b64urlEncode(epkRaw),
-    iv: b64urlEncode(iv),
-    ct: b64urlEncode(ct),
+    epk: toUnpaddedBase64url(epkRaw),
+    iv: toUnpaddedBase64url(iv),
+    ct: toUnpaddedBase64url(ct),
   };
 }
 
@@ -180,12 +168,12 @@ export async function open(
   if (box.v !== 1) throw new Error(`unknown sealed-box version ${box.v}`);
   const privateKey = await crypto.subtle.importKey(
     "pkcs8",
-    b64urlDecode(identity.privateKey) as BufferSource,
+    fromBase64url(identity.privateKey) as BufferSource,
     { name: "X25519" },
     false,
     ["deriveBits"],
   );
-  const epkRaw = b64urlDecode(box.epk);
+  const epkRaw = fromBase64url(box.epk);
   const ephemeralPublic = await crypto.subtle.importKey(
     "raw",
     epkRaw as BufferSource,
@@ -193,7 +181,7 @@ export async function open(
     false,
     [],
   );
-  const recipientRaw = b64urlDecode(
+  const recipientRaw = fromBase64url(
     identity.recipient.slice(RECIPIENT_PREFIX.length),
   );
   const aesKey = await deriveAesKey(
@@ -203,9 +191,9 @@ export async function open(
     recipientRaw,
   );
   const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: b64urlDecode(box.iv) as BufferSource },
+    { name: "AES-GCM", iv: fromBase64url(box.iv) as BufferSource },
     aesKey,
-    b64urlDecode(box.ct) as BufferSource,
+    fromBase64url(box.ct) as BufferSource,
   );
   return new Uint8Array(plaintext);
 }

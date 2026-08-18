@@ -1,7 +1,18 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { keyHolderAccounts, leaseAction } from "./test-records-janitor.ts";
+import {
+  hasRecentActivity,
+  keyHolderAccounts,
+  leaseAction,
+} from "./test-records-janitor.ts";
+
+function searchFetch(payload: unknown): typeof fetch {
+  return (() =>
+    Promise.resolve(
+      new Response(JSON.stringify(payload), { status: 200 }),
+    )) as typeof fetch;
+}
 
 describe("test-records-janitor", () => {
   describe("leaseAction()", () => {
@@ -36,6 +47,39 @@ describe("test-records-janitor", () => {
         username: "octocat",
         disabled: false,
       }]);
+    });
+  });
+
+  describe("hasRecentActivity()", () => {
+    const clients = (payload: unknown) => ({
+      gcpToken: "t",
+      fetchImpl: searchFetch(payload),
+    });
+
+    it("returns true for a positive search count", async () => {
+      expect(
+        await hasRecentActivity(clients({ total_count: 2 }), "o", "2026-07-19"),
+      ).toBe(true);
+    });
+
+    it("returns false for a complete zero", async () => {
+      expect(
+        await hasRecentActivity(
+          clients({ total_count: 0, incomplete_results: false }),
+          "o",
+          "2026-07-19",
+        ),
+      ).toBe(false);
+    });
+
+    it("returns unknown for a partial zero", async () => {
+      expect(
+        await hasRecentActivity(
+          clients({ total_count: 0, incomplete_results: true }),
+          "o",
+          "2026-07-19",
+        ),
+      ).toBeUndefined();
     });
   });
 });

@@ -2,8 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
-  b64urlDecode,
-  b64urlEncode,
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
+import {
   generateIdentity,
   isRecipient,
   open,
@@ -12,13 +14,6 @@ import {
 } from "./test-records-crypto.ts";
 
 describe("test-records-crypto", () => {
-  describe("b64urlEncode()", () => {
-    it("round-trips arbitrary bytes through b64urlDecode()", () => {
-      const bytes = crypto.getRandomValues(new Uint8Array(97));
-      expect(b64urlDecode(b64urlEncode(bytes))).toEqual(bytes);
-    });
-  });
-
   describe("generateIdentity()", () => {
     it("returns a recipient the validator accepts", async () => {
       const identity = await generateIdentity();
@@ -30,7 +25,7 @@ describe("test-records-crypto", () => {
     it("returns false for other prefixes and wrong lengths", () => {
       expect(isRecipient("age1qqqq")).toBe(false);
       expect(isRecipient("cfr1")).toBe(false);
-      expect(isRecipient("cfr1" + b64urlEncode(new Uint8Array(31)))).toBe(
+      expect(isRecipient("cfr1" + toUnpaddedBase64url(new Uint8Array(31)))).toBe(
         false,
       );
     });
@@ -80,9 +75,9 @@ describe("test-records-crypto", () => {
     it("rejects a tampered ciphertext", async () => {
       const identity = await generateIdentity();
       const box = await seal(identity.recipient, new Uint8Array([9, 9, 9]));
-      const bytes = b64urlDecode(box.ct);
+      const bytes = fromBase64url(box.ct);
       bytes[0]! ^= 0xff;
-      const tampered = { ...box, ct: b64urlEncode(bytes) };
+      const tampered = { ...box, ct: toUnpaddedBase64url(bytes) };
       await expect(open(identity, tampered)).rejects.toThrow();
     });
   });

@@ -123,8 +123,16 @@ export async function hasRecentActivity(
       );
       return undefined;
     }
-    const result = await res.json() as { total_count?: number };
+    const result = await res.json() as {
+      total_count?: number;
+      incomplete_results?: boolean;
+    };
     if (typeof result.total_count !== "number") return undefined;
+    // A search that timed out reports what it found so far; a partial
+    // zero is not evidence of inactivity, so it reads as unknown.
+    if (result.incomplete_results === true && result.total_count === 0) {
+      return undefined;
+    }
     return result.total_count > 0;
   } catch (error) {
     console.warn(`janitor: activity lookup for ${username} failed: ${error}`);

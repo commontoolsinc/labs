@@ -187,13 +187,29 @@ async function collectCommand(): Promise<void> {
         "set GH_TOKEN or sign in with `gh auth login`",
     );
   }
+  // The collector's login is read first: the delivered key must be for
+  // whoever collects it, and listing only the collector's own dispatches
+  // keeps the delivery findable however many other minting runs happened
+  // since the request.
+  const whoAmI = await github(token, "GET", "/user");
+  const login = whoAmI.ok
+    ? (await whoAmI.json() as { login?: string }).login
+    : undefined;
+  if (!whoAmI.ok) await whoAmI.text();
+  if (login === undefined) {
+    throw new Error(
+      "cannot read your GitHub login to confirm the key is yours; " +
+        "use a token that can GET /user",
+    );
+  }
   const fingerprint = await recipientFingerprint(identity.recipient);
   const artifactName = `test-records-key-${fingerprint}`;
 
   const runsRes = await github(
     token,
     "GET",
-    `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/runs?per_page=20`,
+    `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/runs` +
+      `?actor=${encodeURIComponent(login)}&per_page=100`,
   );
   if (!runsRes.ok) {
     throw new Error(`listing minting runs failed: HTTP ${runsRes.status}`);
@@ -247,30 +263,14 @@ async function collectCommand(): Promise<void> {
     ) as SealedBox;
     const keyFile = await openSealed(identity, box);
     // Decrypting proves the delivery was sealed to this identity, not that
-    // its content is a key worth installing: validate the shape, require
-    // the Google token endpoint (the uploader will authenticate wherever
-    // this URL points), and require the key to be for whoever collects it.
+    // its content is a key worth installing: validate the shape — which
+    // requires exactly Google's HTTPS token endpoint, since the uploader
+    // authenticates wherever that URL points — and require the key to be
+    // for whoever collects it.
     const keyText = new TextDecoder().decode(keyFile);
     const parsedKey = parsePersonalKeyFile(keyText);
     if (parsedKey === undefined) {
       throw new Error("the delivery is not a personal test-records key file");
-    }
-    if (new URL(parsedKey.token_uri).host !== "oauth2.googleapis.com") {
-      throw new Error(
-        `the delivered key's token endpoint is ${parsedKey.token_uri}, ` +
-          "not Google's; refusing to install it",
-      );
-    }
-    const whoAmI = await github(token, "GET", "/user");
-    const login = whoAmI.ok
-      ? (await whoAmI.json() as { login?: string }).login
-      : undefined;
-    if (!whoAmI.ok) await whoAmI.text();
-    if (login === undefined) {
-      throw new Error(
-        "cannot read your GitHub login to confirm the key is yours; " +
-          "use a token that can GET /user",
-      );
     }
     if (parsedKey.cf_username.toLowerCase() !== login.toLowerCase()) {
       throw new Error(

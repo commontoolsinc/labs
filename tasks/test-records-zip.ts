@@ -30,13 +30,16 @@ async function inflateRaw(compressed: Uint8Array): Promise<Uint8Array> {
 /** Reads every member of a zip archive. */
 export async function readZip(bytes: Uint8Array): Promise<ZipMember[]> {
   // Find the end-of-central-directory record from the tail; its comment can
-  // push it up to 65535 bytes before the end.
+  // push it up to 65535 bytes before the end. A candidate counts only when
+  // its comment-length field reaches exactly the end of the archive, so
+  // the signature bytes appearing inside a comment are not mistaken for
+  // the record itself.
   let eocd = -1;
   const earliest = Math.max(0, bytes.length - 65557);
   for (let i = bytes.length - 22; i >= earliest; i--) {
     if (
       bytes[i] === 0x50 && bytes[i + 1] === 0x4b && bytes[i + 2] === 0x05 &&
-      bytes[i + 3] === 0x06
+      bytes[i + 3] === 0x06 && i + 22 + u16(bytes, i + 20) === bytes.length
     ) {
       eocd = i;
       break;
