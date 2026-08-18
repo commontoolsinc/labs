@@ -204,9 +204,7 @@ async function main() {
     recordsFragment?.append({
       line: "record",
       test: { k: "gate", s: "repo", n: `pattern-compat ${key}` },
-      outcome: failedKeys.has(key) || unexpectedKeys.has(key)
-        ? "fail"
-        : "pass",
+      outcome: failedKeys.has(key) || unexpectedKeys.has(key) ? "fail" : "pass",
       durationMs: Math.round(
         (compileMsByKey.get(key) ?? 0) + (checkMsByKey.get(key) ?? 0),
       ),
