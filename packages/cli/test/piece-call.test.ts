@@ -4847,7 +4847,7 @@ describe("renderPieceCallOutcome", () => {
     // address unguessable, and an argument is readable in a process listing.
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+      "CF_INVOCATION_SESSION=ses-7 cf call",
     );
     assertStringIncludes(hinted[0], "--invocation inv-1");
     // And it says what the replay costs: the receipt witnesses the commit,
@@ -4905,7 +4905,7 @@ describe("renderPieceCallOutcome", () => {
     assertStringIncludes(hinted[0], "cf get --piece /of:receipt-1");
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+      "CF_INVOCATION_SESSION=ses-7 cf call",
     );
     expect(hinted[0].indexOf("cf get --piece /of:receipt-1"))
       .toBeLessThan(hinted[0].indexOf("CF_INVOCATION_SESSION"));

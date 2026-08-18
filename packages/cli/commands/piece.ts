@@ -944,7 +944,7 @@ export function renderPieceCallOutcome(
     return;
   }
   const nextSteps = cliText(`NEXT STEPS:
-  → Verify state:  cf piece get --piece ${piece} <path> ...
+  → Verify state:  cf get --piece ${piece} <path> ...
   → Full inspect:  cf piece inspect --piece ${piece} ...`);
   if (result.invocation) {
     // The machine surface for a handler invocation: stdout carries the
@@ -979,7 +979,7 @@ export function renderPieceCallOutcome(
   → Read the outcome: cf get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
   → Or replay it:     CF_INVOCATION_SESSION=${
               opts.invocation?.session ?? "<session>"
-            } cf piece call --piece ${piece} --invocation ${
+            } cf call --piece ${piece} --invocation ${
               opts.invocation?.id ?? "<id>"
             } ${callableName} ... (the commit is durable and the replay loses the race for the receipt, so nothing commits twice — but the handler body RUNS AGAIN, repeating effects outside its transaction, and any write it made into another space)
   → Verify state:     cf get --piece ${piece} <path> ...`,
@@ -1274,7 +1274,7 @@ const pieceDescription = cliText(`Interact with pieces running on a server.
 COMMON WORKFLOWS:
   Deploy:    cf piece new ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
   Update:    cf piece setsrc --piece <ID> ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
-  Test:      cf piece call --piece <ID> callableName -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Test:      cf call --piece <ID> callableName -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
   Inspect:   cf piece inspect --piece <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
 ${pieceEnvStatus()}
 TIPS:
@@ -1955,7 +1955,7 @@ export const piece = targetOptions(
     hint(cliText(`NEXT STEPS:
   → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
   → Update code:     cf piece setsrc --piece ${pieceId} ${main} ...
-  → Test a callable: cf piece call --piece ${pieceId} <callableName> ...
+  → Test a callable: cf call --piece ${pieceId} <callableName> ...
   → Inspect state:   cf piece inspect --piece ${pieceId} ...`));
   })
   /* piece set-slug */
@@ -2104,7 +2104,7 @@ export const piece = targetOptions(
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
-  → Test a callable: cf piece call --piece ${pieceConfig.piece} <callableName> ...
+  → Test a callable: cf call --piece ${pieceConfig.piece} <callableName> ...
   → Check state:     cf piece inspect --piece ${pieceConfig.piece} ...`));
   })
   /* piece inspect */

@@ -1110,6 +1110,17 @@ run_spelling_parity() {
   [ "$RESULT" = "$((LEGACY_BEFORE + 1))" ] ||
     error "A handler dispatched via cf call should commit once, got legacyCount=$RESULT"
 
+  # The one place the two mounts deliberately differ: each verb help page
+  # names the mount that was invoked. Asserted from both ends here, in the
+  # section that dies with the piece-mounted spellings, so "the page names
+  # what you typed" cannot regress on either branch while both exist.
+  cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search --help |
+    grep -q "cf call ... search --help" ||
+    error "cf call's verb help should name the top-level mount"
+  cf piece call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search --help |
+    grep -q "cf piece call ... search --help" ||
+    error "cf piece call's verb help should name the piece mount"
+
   echo "Successfully ran CLI spelling parity tests for ${API_URL}/${SPACE}."
 }
 
