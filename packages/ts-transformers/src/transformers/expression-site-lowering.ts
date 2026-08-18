@@ -7,6 +7,7 @@ import {
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import { shouldTransformArrayMethod } from "../closures/strategies/array-method-policy.ts";
 import { transformArrayMethodCallback } from "../closures/strategies/array-method-transform.ts";
 import {
@@ -232,7 +233,9 @@ function rewriteLateArrayMethodCallbackCall(
   context: TransformationContext,
   visit: ts.Visitor,
 ): ts.CallExpression | undefined {
-  const callback = node.arguments[0];
+  // Read the callback through paren spelling — a blind read here skips the
+  // lowering and a raw reactive method call reaches the runtime.
+  const callback = node.arguments[0] && unwrapExpression(node.arguments[0]);
   if (!callback || !isFunctionLikeExpression(callback)) {
     return undefined;
   }

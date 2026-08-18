@@ -5,6 +5,7 @@ import {
   isFunctionLikeExpression,
   type ReactiveContextInfo,
 } from "../../ast/mod.ts";
+import { unwrapExpression } from "../../utils/expression.ts";
 import { shouldTransformArrayMethod } from "./array-method-policy.ts";
 import { transformArrayMethodCallback } from "./array-method-transform.ts";
 import { rewriteArrayMethodCallbackExpressionSites } from "../../transformers/expression-site-lowering.ts";
@@ -30,7 +31,9 @@ export function transformArrayMethodCall(
     return undefined;
   }
 
-  const callback = node.arguments[0];
+  // Read the callback through paren spelling — a blind read here skips the
+  // lowering and a raw reactive method call reaches the runtime.
+  const callback = node.arguments[0] && unwrapExpression(node.arguments[0]);
   if (callback && isFunctionLikeExpression(callback)) {
     assertValidSyntheticComputeOwnedArrayMethodContext(
       node,
