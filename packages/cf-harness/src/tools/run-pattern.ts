@@ -2,6 +2,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import {
   type Cell,
   compileAndSavePattern,
+  getPatternIdentityRef,
   validateSlug,
 } from "@commonfabric/runner";
 import { validateAgainstSchema } from "@commonfabric/runner/cfc";
@@ -955,12 +956,25 @@ export const runPatternTool: HarnessToolDefinition<
           }${registrationNote}`,
         );
       }
-      const episodes = observations.episodesSince(observationStart);
-      if (episodes.length > 0) {
+      // A convergence-budget episode is claimed only when its deferred-action
+      // labels name this pattern's module identity — another piece churning
+      // during this invocation's settle window is not evidence about this
+      // one. An episode lists at most its first ten deferred actions, so a
+      // wide episode can omit this pattern and under-report, which falls
+      // back to the plain ok-with-valueError rather than misattributing.
+      const patternIdentity = getPatternIdentityRef(resultCell)?.identity;
+      const ownEpisodes = patternIdentity === undefined
+        ? []
+        : observations.episodesSince(observationStart).filter((episode) =>
+          episode.deferredActions.some((label) =>
+            label.includes(patternIdentity)
+          )
+        );
+      if (ownEpisodes.length > 0) {
         return errorOutput(
           "error",
           `the pattern ran but its writes never landed: the scheduler deferred ${
-            episodes[episodes.length - 1].deferredActionCount
+            ownEpisodes[ownEpisodes.length - 1].deferredActionCount
           } action(s) past its convergence budget while settling. A reactive cycle, a non-idempotent computation, or a write the space's policy refuses all produce this shape${registrationNote}`,
         );
       }

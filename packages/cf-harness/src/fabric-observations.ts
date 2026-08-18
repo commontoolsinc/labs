@@ -1,13 +1,13 @@
 /**
  * What the fabric session's runtime reported while a `run_pattern`
- * invocation settled: action errors attributed to a piece, and non-settling
- * episodes in which the scheduler deferred actions after exhausting a pass's
- * convergence budget. `run_pattern` reads these to name the cause when a
- * piece it created settles to an empty or schema-failing result — the two
- * silent shapes observed live were a computation that throws on every rerun,
- * and a commit the CFC boundary refuses, which the scheduler retries and
- * which surfaces nowhere else (CT-2037 tracks giving the refusal a reason
- * channel of its own).
+ * invocation settled: action errors attributed to a piece, and
+ * convergence-budget episodes in which the scheduler deferred actions after
+ * exhausting a pass's budget. `run_pattern` reads these to name the cause
+ * when a piece it created settles to an empty or schema-failing result — the
+ * two silent shapes observed live were a computation that throws on every
+ * rerun, and a commit the CFC boundary refuses, which the scheduler retries
+ * and which surfaces nowhere else (CT-2037 tracks giving the refusal a
+ * reason channel of its own).
  *
  * One observer is installed per runtime, memoized, because the scheduler's
  * `onError` registry has no removal — a per-invocation subscription would
@@ -20,6 +20,7 @@
 
 import type { Runtime } from "@commonfabric/runner";
 import { RuntimeTelemetryEvent } from "@commonfabric/runner";
+import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 
 export interface FabricActionErrorRecord {
   sequence: number;
@@ -42,15 +43,32 @@ export interface FabricRuntimeObservations {
     since: number,
     pieceId: string,
   ): readonly FabricActionErrorRecord[];
-  /** Non-settling episodes recorded after `since`. */
+  /** Convergence-budget episodes recorded after `since`. */
   episodesSince(since: number): readonly FabricDeferredEpisodeRecord[];
 }
 
 const BUFFER_LIMIT = 128;
 
-/** `of:fid1:…` and `fid1:…` name the same entity at different seams. */
-const normalizedPieceId = (id: string): string =>
-  id.startsWith("of:") ? id.slice("of:".length) : id;
+/**
+ * The hash both sides of an attribution compare by, through the canonical
+ * entity-id seam: `of:` ids reduce to their hash, a bare hash passes
+ * through, and a kinded id — which the canonical helper refuses rather than
+ * silently aliasing to its `of:` sibling — or an absent id yields
+ * `undefined`, so the record never matches instead of matching wrongly. An
+ * error without a pattern frame reaches the handler with no `pieceId`
+ * despite the declared type, which is why absence is handled rather than
+ * assumed away.
+ */
+const comparableEntityHash = (id: unknown): string | undefined => {
+  if (typeof id !== "string" || id.length === 0) {
+    return undefined;
+  }
+  try {
+    return hashStringForEntityAddress(id);
+  } catch {
+    return undefined;
+  }
+};
 
 const observers = new WeakMap<Runtime, FabricRuntimeObservations>();
 
@@ -71,10 +89,17 @@ export const fabricRuntimeObservations = (
     }
   };
   runtime.scheduler.onError((error) => {
+    // A record that cannot be attributed can never be surfaced, so it is
+    // not recorded — and nothing here may throw, because the scheduler
+    // walks its error handlers without a guard.
+    const pieceHash = comparableEntityHash(error.pieceId);
+    if (pieceHash === undefined) {
+      return;
+    }
     push(errors, {
       sequence: ++sequence,
-      pieceId: normalizedPieceId(error.pieceId),
-      patternId: error.patternId,
+      pieceId: pieceHash,
+      patternId: typeof error.patternId === "string" ? error.patternId : "",
       message: error.message,
     });
   });
@@ -83,19 +108,30 @@ export const fabricRuntimeObservations = (
       return;
     }
     const marker = event.marker;
-    if (marker.type !== "scheduler.non-settling") {
+    // The `scheduler.non-settling` marker carries two kinds of episode: a
+    // convergence-budget pass that deferred named actions, and a busy-window
+    // heuristic crossing that defers nothing. Only the first says anything
+    // about a specific pattern's writes, so only it is recorded.
+    if (
+      marker.type !== "scheduler.non-settling" ||
+      typeof marker.deferredActionCount !== "number" ||
+      marker.deferredActionCount <= 0
+    ) {
       return;
     }
     push(episodes, {
       sequence: ++sequence,
       deferredActions: marker.deferredActions ?? [],
-      deferredActionCount: marker.deferredActionCount ?? 0,
+      deferredActionCount: marker.deferredActionCount,
     });
   });
   const observations: FabricRuntimeObservations = {
     sequence: () => sequence,
     errorsSince: (since, pieceId) => {
-      const wanted = normalizedPieceId(pieceId);
+      const wanted = comparableEntityHash(pieceId);
+      if (wanted === undefined) {
+        return [];
+      }
       return errors.filter((record) =>
         record.sequence > since && record.pieceId === wanted
       );

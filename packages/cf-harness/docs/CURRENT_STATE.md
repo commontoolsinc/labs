@@ -120,23 +120,25 @@ The current package provides:
   match, so the message says the name may still resolve to the created piece and
   reports the piece list as that path left it; scrubs bare fabric identifiers
   from model-facing diagnostics; reports a result that settles to empty or
-  schema-failing as an error naming its observed cause — an action error
-  attributed to the piece, or actions deferred past the scheduler's convergence
-  budget — instead of an ok over nothing; returns the result cell's canonical
-  reference plus an optionally schema-sanitized value, and leaves the piece
-  detached (no recorded origin) and, unless `register` asked for a named
-  address, out of the space's registered piece list, with run→piece provenance
-  carried by the run's persisted artifacts; without the session configuration
-  the tool is absent from the tool surface, for a `default`- or
-  `pattern-author`-profile subagent as much as for the parent — a child shares
-  the one session the parent built; `--fabric-cfc-enforcement-mode` (raise-only:
-  `enforce-explicit` or `enforce-strict`) and `--fabric-cfc-flow-labels`
-  (`off`/`observe`/`persist`) set the session runtime's CFC dials, so with
-  labels persisted a confidentiality-tainted pattern write is refused at commit
-  under strict — these are the fabric session's dials, independent of the
-  harness's own `--cfc-enforcement-mode`, and the resolved posture (each dial's
-  value and source) is recorded as `fabricSessionCfc` in run state and printed
-  in the operator summary;
+  schema-failing as an error when the invocation's settle window observed a
+  cause — an action error attributed to the piece, or a convergence-budget
+  episode whose deferred actions name this pattern — and otherwise still reports
+  ok, since an empty result with no observed cause is not evidence of failure;
+  returns the result cell's canonical reference plus an optionally
+  schema-sanitized value, and leaves the piece detached (no recorded origin)
+  and, unless `register` asked for a named address, out of the space's
+  registered piece list, with run→piece provenance carried by the run's
+  persisted artifacts; without the session configuration the tool is absent from
+  the tool surface, for a `default`- or `pattern-author`-profile subagent as
+  much as for the parent — a child shares the one session the parent built;
+  `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
+  `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
+  set the session runtime's CFC dials, so with labels persisted a
+  confidentiality-tainted pattern write is refused at commit under strict —
+  these are the fabric session's dials, independent of the harness's own
+  `--cfc-enforcement-mode`, and the resolved posture (each dial's value and
+  source) is recorded as `fabricSessionCfc` in run state and printed in the
+  operator summary;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable
