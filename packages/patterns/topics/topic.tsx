@@ -2,7 +2,6 @@ import {
   action,
   cellFromUrl,
   type ComparableCell,
-  computed,
   Default,
   equals,
   handler,
@@ -780,9 +779,9 @@ export default pattern<TopicInput, TopicOutput>(
     // the fields once here would pin the page to the empty profile the topic
     // opened with: the composer's controls never enable, and a comment or edit
     // made through them carries blank attribution.
-    const profileName = computed(() => profileWish.result?.name ?? "");
-    const profileAvatar = computed(() => profileWish.result?.avatar ?? "");
-    const hasProfile = computed(() => profileName.trim().length > 0);
+    const profileName = profileWish.result?.name ?? "";
+    const profileAvatar = profileWish.result?.avatar ?? "";
+    const hasProfile = profileName.trim().length > 0;
     const createdByView = createdByOf({ createdBy, createdByName });
 
     // --- Streams (external API; also usable headlessly via CLI) ---
@@ -958,15 +957,9 @@ export default pattern<TopicInput, TopicOutput>(
       bodyUpdatedAt,
     });
 
-    // `computed()` here and for `linksView` below is not ceremony: a `.get()`
-    // whose result is the array itself — bare, or fed to a callback-taking
-    // method — is the shape the transformer rejects at pattern scope. Scalar
-    // reductions like `comments.get().length` need no wrapper.
-    const commentsView = computed(() =>
-      comments.get().toSorted((a, b) => a.sentAt - b.sentAt)
-    );
+    const commentsView = comments.get().toSorted((a, b) => a.sentAt - b.sentAt);
 
-    const linksView = computed(() => links.get());
+    const linksView = links.get();
     const hasLinks = linksView.length > 0;
     const hasComments = commentCount > 0;
     const hasBody = body.get().trim().length > 0;
@@ -982,7 +975,7 @@ export default pattern<TopicInput, TopicOutput>(
     // also carries the editor's map and the link resolutions, and a control
     // here could not honestly retract either: a mention in the prose is removed
     // by editing the prose, and a link's reference belongs to the link.
-    const mentionedView = computed(() => mentioned.get());
+    const mentionedView = mentioned.get();
     const hasMentioned = mentionedView.length > 0;
 
     const topicName = title.get().trim() || "(untitled topic)";
@@ -1281,7 +1274,7 @@ export default pattern<TopicInput, TopicOutput>(
 
     // A link's URL, asked of `cellFromUrl` once per link. Most answer with no
     // cell — they are web pages — and those simply are not mentions.
-    const linkUrls = computed(() => links.get().map((link) => link.url ?? ""));
+    const linkUrls = links.get().map((link) => link.url ?? "");
     const linkTargets = linkUrls.map((url) => cellFromUrl({ url }));
     // Outbound: what this topic points at. Only this half depends on the
     // topic's own content, which is what keeps the board's join reading one
