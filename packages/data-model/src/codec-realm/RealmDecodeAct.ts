@@ -3,10 +3,8 @@ import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
-import { DecodeAct } from "@/codec-common/DecodeAct.ts";
-import type { CodecEngineConfig } from "@/codec-common/CodecEngineConfig.ts";
+import { BaseDecodeAct } from "@/codec-common/BaseDecodeAct.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
-import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import {
   REALM_FORMAT_VERSION,
   type RealmCodecValue,
@@ -24,18 +22,14 @@ import { markerOf } from "./marker.ts";
  * data rather than structure.
  */
 export class RealmDecodeAct
-  extends DecodeAct<RealmCodecValue, RealmEncodedValue> {
-  readonly #marker: RealmFormatMarker | undefined;
-
-  /** Constructs an instance, around the marker the envelope arrived with. */
-  constructor(
-    config: CodecEngineConfig<RealmCodecValue>,
-    env: LiveEnvironment,
-    marker?: RealmFormatMarker,
-  ) {
-    super(config, env);
-    this.#marker = marker;
-  }
+  extends BaseDecodeAct<RealmCodecValue, RealmEncodedValue> {
+  /**
+   * The marker this act's envelope arrived with, and `undefined` until
+   * {@link #encodedFromSerializedForm} has taken one off it. Nothing reads it
+   * before then: that method runs first, exactly once, and the walk it feeds
+   * is what reads this.
+   */
+  #marker: RealmFormatMarker | undefined;
 
   /**
    * @inheritDoc
@@ -57,7 +51,9 @@ export class RealmDecodeAct
       );
     }
 
-    if (!markerOf(data)) {
+    const marker = markerOf(data);
+
+    if (!marker) {
       throw new ProblematicStateError(
         "",
         toCompactDebugString(data, 50),
@@ -66,6 +62,8 @@ export class RealmDecodeAct
         } marker`,
       );
     }
+
+    this.#marker = marker;
 
     return data[1] as RealmCodecValue;
   }

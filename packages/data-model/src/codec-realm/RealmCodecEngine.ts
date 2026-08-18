@@ -3,7 +3,6 @@ import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { RealmDecodeAct } from "./RealmDecodeAct.ts";
 import { RealmEncodeAct } from "./RealmEncodeAct.ts";
-import { markerOf } from "./marker.ts";
 import { type RealmCodecValue, type RealmEncodedValue } from "./interface.ts";
 
 /**
@@ -35,7 +34,7 @@ import { type RealmCodecValue, type RealmEncodedValue } from "./interface.ts";
  * TODO(danfuzz): A memo from each visited object to its encoded counterpart
  * closes cycles and sharing at once: a repeat visit yields the node already
  * built for it, which preserves sharing through a rebuild and lets a back-edge
- * resolve instead of recursing. It belongs on `EncodeAct` and `DecodeAct`,
+ * resolve instead of recursing. It belongs on `BaseEncodeAct` and `BaseDecodeAct`,
  * beside the in-progress set, since a cycle can run through
  * a codec-matched object as readily as through a container and both walks
  * need it.
@@ -60,19 +59,14 @@ export class RealmCodecEngine extends BaseCodecEngine<
   /**
    * @inheritDoc
    *
-   * Takes the sender's marker off the envelope, which is what every tagged
-   * form beneath it is then recognized by.
-   *
-   * Sniffs rather than validates, as the contract says: this runs before
-   * anything has established that `data` is this format's, so a form
-   * carrying no recognizable marker yields an act holding none -- one
-   * that recognizes nothing -- and {@link #encodedFromSerializedForm} does
-   * the refusing.
+   * The form is not read here. The act takes the sender's marker off the
+   * envelope in `encodedFromSerializedForm()`, which the base calls before any
+   * of the walk -- so there is nothing this needs the form for.
    */
   protected override newDecodeAct(
     env: LiveEnvironment,
-    data: RealmEncodedValue,
+    _data: RealmEncodedValue,
   ): RealmDecodeAct {
-    return new RealmDecodeAct(this, env, markerOf(data));
+    return new RealmDecodeAct(this, env);
   }
 }

@@ -1,5 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import { EncodeAct } from "@/codec-common/EncodeAct.ts";
+import { BaseEncodeAct } from "@/codec-common/BaseEncodeAct.ts";
 import type { CodecEngineConfig } from "@/codec-common/CodecEngineConfig.ts";
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import {
@@ -21,7 +21,7 @@ import {
  * data becomes another's structure.
  */
 export class RealmEncodeAct
-  extends EncodeAct<RealmCodecValue, RealmEncodedValue> {
+  extends BaseEncodeAct<RealmCodecValue, RealmEncodedValue> {
   readonly #marker: RealmFormatMarker;
 
   /** Constructs an instance, minting this act's marker. */
