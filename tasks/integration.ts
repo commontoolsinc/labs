@@ -97,6 +97,53 @@ async function stopServers(portOffset: number, rootDir: string): Promise<void> {
 // use. Other failures use different codes and are not worth retrying.
 const PORT_IN_USE_EXIT = 3;
 
+/** The bounds a generated port offset is drawn between, both included. */
+export const GENERATED_PORT_OFFSET_RANGE = { first: 100, last: 1000 };
+
+/**
+ * Every port a run puts a server on for `offset`. The offset shifts all of them
+ * together, so one offset stands for the whole set.
+ */
+export function offsetPorts(offset: number): number[] {
+  return [
+    ports.toolshed + offset,
+    ports.shell + offset,
+    ports.inspector + offset,
+  ];
+}
+
+/**
+ * The offsets a generated choice draws from: the whole range, less every offset
+ * that would put a server on a port clients refuse to connect to. Such a server
+ * binds and reports itself healthy while every browser navigation and every
+ * server-to-server hop to it fails, so an offset that reaches one is dropped
+ * rather than tried. The inspector port counts here even though only an
+ * `--inspect` run binds it, so one generated offset serves both.
+ */
+const USABLE_PORT_OFFSETS: number[] = (() => {
+  const blocked = new Set<number>(ports.blockedPorts);
+  const { first, last } = GENERATED_PORT_OFFSET_RANGE;
+  const usable: number[] = [];
+  for (let offset = first; offset <= last; offset++) {
+    if (!offsetPorts(offset).some((port) => blocked.has(port))) {
+      usable.push(offset);
+    }
+  }
+  return usable;
+})();
+
+/**
+ * Picks the offset for a run that did not name one. `random` returns a number
+ * in `[0, 1)`; pass a stand-in to enumerate what the choice can produce.
+ */
+export function chooseGeneratedPortOffset(
+  random: () => number = Math.random,
+): number {
+  return USABLE_PORT_OFFSETS[
+    Math.floor(random() * USABLE_PORT_OFFSETS.length)
+  ];
+}
+
 // Starts the dev servers for the given offset. Returns the start-local-dev.sh
 // exit code: 0 on success, PORT_IN_USE_EXIT on a port collision, or another
 // non-zero code for any other startup failure.
@@ -813,7 +860,7 @@ async function main(): Promise<void> {
         // every offset, so it stops the run.
         const maxStartAttempts = 5;
         for (let attempt = 1; attempt <= maxStartAttempts; attempt++) {
-          portOffset = Math.floor(Math.random() * 901) + 100; // 100-1000
+          portOffset = chooseGeneratedPortOffset();
           apiUrl = `http://localhost:${ports.toolshed + portOffset}`;
           console.log(`PORT_OFFSET: ${portOffset}${offsetSource}`);
           console.log(`API_URL: ${apiUrl}`);
