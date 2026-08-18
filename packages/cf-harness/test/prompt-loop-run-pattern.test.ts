@@ -249,12 +249,13 @@ describe("prompt-loop run_pattern model boundary", () => {
       const defaultRoot = await pieces.create(
         [
           "/// <cf-disable-transform />",
-          "import { handler, pattern } from 'commonfabric';",
-          "const addPiece = handler<{ piece: unknown }, { pieceRegistry: unknown[] }>(",
+          "import { handler, pattern, type Cell } from 'commonfabric';",
+          "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Cell<unknown[]> }>(",
+          "  true,",
+          "  { type: 'object', properties: { pieceRegistry: { type: 'array', asCell: ['cell'] } } },",
           "  ({ piece }, { pieceRegistry }) => {",
           "    pieceRegistry.push(piece);",
           "  },",
-          "  { proxy: true },",
           ");",
           "export default pattern<{ pieceRegistry: unknown[] }>(",
           "  ({ pieceRegistry }) => ({",
