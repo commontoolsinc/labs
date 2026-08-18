@@ -10,6 +10,7 @@ import {
   newLoopbackServer,
 } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { getLogger } from "@commonfabric/utils/logger";
 import { createSigilLinkFromParsedLink } from "../src/link-utils.ts";
 import type { NormalizedLink } from "../src/link-types.ts";
 import {
@@ -240,6 +241,104 @@ describe("schema-doc-writer", () => {
     const stamped = payloadSchema(sigilFor(schema)) as JSONSchemaObj;
     expect(stamped.$ref).toBeUndefined();
     expect(stamped.properties).toBeDefined();
+  });
+
+  it("skips a reference the registry cannot supply; the commit boundary rejects it", async () => {
+    // Only a hand-crafted value carries a reference its writer never
+    // registered: the materializer logs and skips it, and the server's
+    // commit-time closure validation rejects the commit outright. The
+    // module logger is constructed disabled; the log IS the skip's only
+    // client-side signal, so the test speaks it.
+    const materializeLogger = getLogger("extended-storage-transaction");
+    const previousDisabled = materializeLogger.disabled;
+    const previousLevel = materializeLogger.level;
+    materializeLogger.disabled = false;
+    materializeLogger.level = "warn";
+    const absentHash = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "never-registered-writer-ref",
+    });
+    const handCrafted = {
+      "/": {
+        "link@1": {
+          id: "of:unsupplied-target",
+          path: [],
+          schema: { $ref: `cid:${absentHash}` },
+        },
+      },
+    };
+    const tx = writer.edit();
+    tx.writeValueOrThrow(
+      { space, id: "of:unsupplied-root" as URI, scope: "space", path: [] },
+      { crafted: handCrafted },
+    );
+    try {
+      const result = await tx.commit();
+      expect(result.ok).toBeUndefined();
+      expect(String(result.error?.message)).toContain(
+        "neither included in the commit nor stored in the space",
+      );
+    } finally {
+      materializeLogger.disabled = previousDisabled;
+      materializeLogger.level = previousLevel;
+    }
+  });
+
+  it("materializes a schema document once for two links that share it", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { sharedField: { type: "string" } },
+    };
+    const first = sigilFor(schema);
+    const second = sigilFor(schema);
+    // Both links bind to the same reference, so the materializer meets the
+    // hash a second time within one transaction and serves it from its
+    // dedupe set instead of writing again.
+    expect(payloadSchema(second)).toEqual(payloadSchema(first));
+    const tx = writer.edit();
+    tx.writeValueOrThrow(
+      { space, id: "of:shared-root-a" as URI, scope: "space", path: [] },
+      { person: first },
+    );
+    tx.writeValueOrThrow(
+      { space, id: "of:shared-root-b" as URI, scope: "space", path: [] },
+      { person: second },
+    );
+    expect((await tx.commit()).ok).toBeDefined();
+  });
+
+  it("scans past a delete while collecting references", async () => {
+    const setup = writer.edit();
+    setup.writeValueOrThrow(
+      { space, id: "of:doomed-doc" as URI, scope: "space", path: [] },
+      { shortLived: true },
+    );
+    expect((await setup.commit()).ok).toBeDefined();
+
+    // A transaction carrying both a delete (a write detail with no value)
+    // and a reference-bearing link: the scan passes over the former and
+    // still delivers the latter's closure.
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { survivorField: { type: "string" } },
+    };
+    const sigil = sigilFor(schema);
+    const tx = writer.edit();
+    tx.writeValuesOrThrow!([{
+      address: {
+        id: "of:doomed-doc" as URI,
+        space,
+        path: [],
+        type: "application/json",
+      } as never,
+      value: undefined as never,
+      delete: true,
+    }]);
+    tx.writeValueOrThrow(
+      { space, id: "of:survivor-root" as URI, scope: "space", path: [] },
+      { person: sigil },
+    );
+    expect((await tx.commit()).ok).toBeDefined();
   });
 
   it("leaves inline-vintage links readable with the flag on", async () => {
