@@ -89,6 +89,11 @@ shell. Keys stay valid while you stay active: a daily janitor disables the
 accounts of people with no pull-request activity for a month and re-enables
 them when they return — the same key file simply starts working again.
 
+You hold one live key: minting revokes the previous ones, so running
+`request` again is how a lost or leaked key is rotated, and a second
+machine gets the existing key file copied to it rather than a fresh
+mint that would kill the first machine's.
+
 ## How records move
 
 Locally, the entry point that owns the run stamps the spool with the
@@ -132,9 +137,12 @@ validating reader; `deno task` scripts built on it:
 - `packages/dashboard/test-records-history.ts` — the dashboard's collector:
   cached per-identity daily series shaped for `trend.ts`.
 
-Readers that join history across renames apply the alias file. Consumers
-that feed decisions read only `submissions/ci/`, whose writer credential
-never exists as key material. The relay's member gate means everything
+Readers that join history across renames apply the alias file through
+`loadAliasResolver` in `@commonfabric/test-support/records`, which the
+report tool and the dashboard collector already do. Consumers that feed
+decisions read only `submissions/ci/`, whose writer credential never
+exists as key material, and exclude fork-authored reports the way those
+two do. The relay's member gate means everything
 stored was authored under the write-access group's trust — `ci.fork`
 marks a team member's fork run — so the remaining distinction for a
 decision consumer is code provenance, not author trust: pull-request

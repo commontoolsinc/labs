@@ -44,7 +44,11 @@ the task name as a prefix, and the two are distinct identities.
 
 An uploaded object is gzip-encoded NDJSON (`Content-Encoding: gzip`, so a
 plain HTTPS reader receives text): one context line, then one record line
-per test execution.
+per test execution. A rollup object concatenates a day of such reports;
+in every object, a context line opens a report and each record line
+belongs to the report whose context most recently preceded it, which is
+how per-report provenance — the fork flag among it — survives
+compaction.
 
 ```json
 { "line": "record", "test": { "k": "unit", "s": "bakery", "n": "glaze > thickens when heated" }, "outcome": "pass", "durationMs": 12 }
@@ -94,13 +98,19 @@ spool under the per-user spool root (`CF_TEST_RECORDS_SPOOL_ROOT`, or the
 user cache directory; not the temporary directory, which a reboot
 clears), stamps the context file at start while its facts are certainly
 true, exports the variable to its producers, and holds an advisory file
-lock the kernel releases on any process death. An entry point that finds
-the variable already set joins the enclosing run as a producer. Shipping
-consumes exactly one spool directory and deletes it afterward; fragments
-are read line by line and a torn final line is dropped with a warning.
-Every opted-in run also sweeps the spool root, adopting any directory
-whose owner's lock is free — liveness is a kernel-reported fact, never a
-timestamp guess — and ships it under its own stamped context.
+lock the kernel releases on any process death. The spool is built under a
+`staging-` name and renamed into place only after the lock is held and
+the context is stamped — the lock lives on the open file handle, so it
+survives the rename — which is what keeps a concurrent sweep from
+adopting a spool whose owner has not locked it yet. An entry point that
+finds the variable already set joins the enclosing run as a producer.
+Shipping consumes exactly one spool directory and deletes it afterward;
+fragments are read line by line and a torn final line is dropped with a
+warning. Every opted-in run also sweeps the spool root, adopting any
+directory whose owner's lock is free — liveness is a kernel-reported
+fact, never a timestamp guess — and ships it under its own stamped
+context; an abandoned staging directory never had producers and is
+deleted.
 
 Every shipper makes exactly one attempt, and object names are
 deterministic, so re-shipping collides on create (which is not overwrite)
@@ -129,15 +139,20 @@ Three writer principals exist. The **relay** — the only CI principal —
 holds create on `submissions/ci/` through a Workload Identity provider
 pinned to one workflow file on the default branch, with the impersonation
 binding keyed to that exact workflow ref. **People** hold per-person
-service accounts (`test-records-gh-<username>`) with create on their own
-`submissions/local/<username>/` folders, minted by a dispatch-gated
-workflow and delivered sealed to a requester-generated X25519 identity; a
-daily janitor disables accounts after a month without pull-request
-activity and re-enables them on return. The **compactor**, when
-provisioned, holds create on `aggregated/` and rewrites each closed day
-of raw records — after a seven-day late-arrival lag — as one validated
-rollup; rollups are a read optimization, and full-fidelity readers list
-the raw area.
+service accounts (`test-records-gh-<username>`, the login lowercased)
+with create on their own `submissions/local/<username>/` folders, minted
+by a dispatch-gated workflow and delivered sealed to a
+requester-generated X25519 identity. Minting revokes the account's
+previous keys once the new one exists — a person holds one live key, and
+re-requesting is how a lost or compromised key is rotated — and a daily
+janitor disables accounts after a month without pull-request activity
+and re-enables them on return. The **compactor**, when provisioned,
+holds create on `aggregated/` and rewrites each closed day of raw
+records — after a seven-day late-arrival lag — as one validated rollup
+that keeps each report's context line ahead of its records; a day with
+no records stays open, since a write-once rollup would permanently
+exclude late arrivals. Rollups are a read optimization, and
+full-fidelity readers list the raw area.
 
 ## CI movement
 
@@ -145,7 +160,10 @@ Test jobs hold no credentials. Each job spools records (and its JUnit
 XML: leaf cases become records, container cases — one per describe level,
 with overlapping times — are dropped by a name-prefix rule) and uploads
 one credential-free `test-records-<job>-a<attempt>` artifact,
-`if: always()`. The attempt lives in the artifact name because artifacts
+`if: always()`. The artifact holds `records.ndjson` — always written,
+zero records or not — and `job.json`; an artifact without a readable
+`records.ndjson` is truncated, and the relay fails it visibly rather
+than ship a context-only object that would read as a run with no tests. The attempt lives in the artifact name because artifacts
 are scoped to the run: a re-run's relay re-ships an earlier attempt's
 artifacts into collisions and ships the re-run jobs' new artifacts as new
 objects, so re-runs neither drop nor double-count records. The relay
