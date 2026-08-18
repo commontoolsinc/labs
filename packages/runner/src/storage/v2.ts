@@ -185,13 +185,6 @@ function withCommitTiming<T>(
 }
 
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
-// Backstop for the inline conflict read-repair wait. In the connected path the
-// caught-up sync arrives within a refresh cycle; this only fires if the sync is
-// permanently undelivered on a still-open, never-reconnecting session, so the
-// commit cannot hang forever. On expiry we surface the conflict and let the
-// scheduler retry path re-gate on readiness.
-const CONFLICT_READ_REPAIR_TIMEOUT_MS = 30_000;
-
 // Strategy 1 — client-side conflict admission control (EXPERIMENT, default off).
 // Once a commit conflicts, the client knows its read set is behind on the
 // touched ids until the server catches it up. "preempt" (coarse) gates what we
@@ -2099,6 +2092,43 @@ type InFlightCommit = {
 const docKey = (id: URI, scope?: CellScope): string =>
   `${normalizeCellScope(scope)}\0${id}`;
 
+const waitWithAbortSignal = async <T>(
+  startWork: () => Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> => {
+  if (signal === undefined) {
+    return await startWork();
+  }
+  if (signal.aborted) {
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new DOMException("Conflict readiness wait canceled", "AbortError");
+  }
+  const work = startWork();
+  const canceled = Promise.withResolvers<never>();
+  const cancel = () =>
+    canceled.reject(
+      signal.reason instanceof Error
+        ? signal.reason
+        : new DOMException("Conflict readiness wait canceled", "AbortError"),
+    );
+  signal.addEventListener("abort", cancel, { once: true });
+  if (signal.aborted) {
+    cancel();
+  }
+  try {
+    return await Promise.race([work, canceled.promise]);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
+};
+
+type CaughtUpLocalSeqWaiter = {
+  localSeq: number;
+  pending: PromiseWithResolvers<void>;
+  removeAbortListener?: () => void;
+};
+
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
@@ -2201,10 +2231,7 @@ class SpaceReplica implements ISpaceReplica {
      * subscribed view as one reflecting the committed write. */
     settled: PromiseWithResolvers<void>;
   }>();
-  #caughtUpLocalSeqWaiters: {
-    localSeq: number;
-    pending: PromiseWithResolvers<void>;
-  }[] = [];
+  #caughtUpLocalSeqWaiters: CaughtUpLocalSeqWaiter[] = [];
   // docKey -> required caughtUpLocalSeq. An entry means "this id conflicted and
   // is stale until we observe caughtUpLocalSeq >= value". Pruned as the runner
   // catches up; only populated while conflict admission control is enabled.
@@ -2637,18 +2664,19 @@ class SpaceReplica implements ISpaceReplica {
         entry.settled.resolve();
       }
     }
-    const ready: PromiseWithResolvers<void>[] = [];
+    const ready: CaughtUpLocalSeqWaiter[] = [];
     this.#caughtUpLocalSeqWaiters = this.#caughtUpLocalSeqWaiters.filter(
       (waiter) => {
         if (waiter.localSeq <= this.#caughtUpLocalSeq) {
-          ready.push(waiter.pending);
+          ready.push(waiter);
           return false;
         }
         return true;
       },
     );
-    for (const pending of ready) {
-      pending.resolve();
+    for (const waiter of ready) {
+      waiter.removeAbortListener?.();
+      waiter.pending.resolve();
     }
     // Ids whose staleness has now been caught up are fresh again; stop
     // pre-empting commits that read them.
@@ -2661,15 +2689,47 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
+  private waitForCaughtUpLocalSeq(
+    localSeq: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (this.#closed) {
       return Promise.reject(new Error("memory replica closed"));
     }
     if (this.#caughtUpLocalSeq >= localSeq) {
       return Promise.resolve();
     }
+    if (signal?.aborted) {
+      return Promise.reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("Conflict readiness wait canceled", "AbortError"),
+      );
+    }
     const pending = Promise.withResolvers<void>();
-    this.#caughtUpLocalSeqWaiters.push({ localSeq, pending });
+    const waiter: CaughtUpLocalSeqWaiter = {
+      localSeq,
+      pending,
+    };
+    if (signal !== undefined) {
+      const onAbort = () => {
+        const index = this.#caughtUpLocalSeqWaiters.indexOf(waiter);
+        if (index < 0) {
+          return;
+        }
+        this.#caughtUpLocalSeqWaiters.splice(index, 1);
+        pending.reject(
+          signal.reason instanceof Error ? signal.reason : new DOMException(
+            "Conflict readiness wait canceled",
+            "AbortError",
+          ),
+        );
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      waiter.removeAbortListener = () =>
+        signal.removeEventListener("abort", onAbort);
+    }
+    this.#caughtUpLocalSeqWaiters.push(waiter);
     return pending.promise;
   }
 
@@ -2677,6 +2737,7 @@ class SpaceReplica implements ISpaceReplica {
     const waiters = this.#caughtUpLocalSeqWaiters;
     this.#caughtUpLocalSeqWaiters = [];
     for (const waiter of waiters) {
+      waiter.removeAbortListener?.();
       waiter.pending.reject(error);
     }
   }
@@ -4024,12 +4085,26 @@ class SpaceReplica implements ISpaceReplica {
     const readRepairReadyToRetry = rejection.name === "ConflictError"
       ? rejection.readyToRetry
       : undefined;
+    const canQueryConflictReads = rejection.name === "ConflictError" &&
+      rejection.retryAfterSeq !== undefined &&
+      [
+        ...rejection.transaction.reads.confirmed,
+        ...rejection.transaction.reads.pending,
+      ].some((read) => read.id === String(rejection.conflict.of));
+    const readRepairOutcome = Promise.withResolvers<Error | undefined>();
     if (rejection.name === "ConflictError") {
-      rejection.readyToRetry = async () => {
-        await readRepairReadyToRetry?.();
-        await dropped.promise;
-        await Promise.all(repairSettled);
-      };
+      rejection.readyToRetry = (signal) =>
+        waitWithAbortSignal(
+          async () => {
+            const repairError = await readRepairOutcome.promise;
+            if (repairError !== undefined) {
+              throw repairError;
+            }
+            await dropped.promise;
+            await Promise.all(repairSettled);
+          },
+          signal,
+        );
     }
     let releasedRepairDocuments = false;
     try {
@@ -4051,10 +4126,14 @@ class SpaceReplica implements ISpaceReplica {
           touched.map(({ id, scope }) => snapshotState(this, id, scope)),
         )
         : undefined;
-      await this.waitForConflictReadRepair(
+      const readRepairError = await this.waitForConflictReadRepair(
         rejection,
         readRepairReadyToRetry,
+        canQueryConflictReads
+          ? (signal) => this.queryConflictReadRepair(rejection, signal)
+          : undefined,
       );
+      readRepairOutcome.resolve(readRepairError);
       this.dropPending(localSeq);
       // Every drop funnels through here (server conflict, preempt, cascade,
       // reset — this is dropPending's only call site), so scanning right
@@ -4062,7 +4141,17 @@ class SpaceReplica implements ISpaceReplica {
       // recursion (a victim's own finalizeRejection lands back here with its
       // localSeq).
       this.cascadeDroppedDependency(localSeq);
-      await this.refreshConflictReads(rejection, hasSemanticOperations);
+      if (readRepairReadyToRetry === undefined && !canQueryConflictReads) {
+        try {
+          await this.refreshConflictReads(rejection, hasSemanticOperations);
+        } catch (error) {
+          logger.warn(
+            "conflict-read-refresh",
+            "conflict selector refresh failed while preserving original result",
+            error,
+          );
+        }
+      }
       const released = this.releaseRejectedRepairDocuments(repairClaims);
       releasedRepairDocuments = true;
       if (repairDocumentKeys.size > 0) {
@@ -4828,43 +4917,195 @@ class SpaceReplica implements ISpaceReplica {
     if (readyToRetry === undefined) {
       return;
     }
-    rejection.readyToRetry = async () => {
-      await readyToRetry();
-      await this.waitForCaughtUpLocalSeq(localSeq);
+    rejection.readyToRetry = async (signal) => {
+      await readyToRetry(signal);
+      await this.waitForCaughtUpLocalSeq(localSeq, signal);
     };
   }
 
   private async waitForConflictReadRepair(
     rejection: StorageTransactionRejected,
-    readyToRetry: (() => Promise<void>) | undefined,
-  ): Promise<void> {
+    readyToRetry: ((signal?: AbortSignal) => Promise<void>) | undefined,
+    queryRepair: ((signal?: AbortSignal) => Promise<SessionSync>) | undefined,
+  ): Promise<Error | undefined> {
     if (rejection.name !== "ConflictError") {
-      return;
+      return undefined;
     }
-    if (readyToRetry === undefined) {
-      return;
+    if (readyToRetry === undefined && queryRepair === undefined) {
+      return undefined;
     }
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        logger.warn(
-          "conflict-read-repair-timeout",
-          "caught-up sync not received within timeout; surfacing conflict",
-        );
-        resolve();
-      }, CONFLICT_READ_REPAIR_TIMEOUT_MS);
+    const providerAbort = new AbortController();
+    const queryAbort = new AbortController();
+    let repairComplete = false;
+    const closed = this.#closeSignal.promise.then(() => {
+      throw new Error("memory replica closed");
     });
     try {
-      await Promise.race([readyToRetry(), timedOut]);
+      const candidates: Promise<void>[] = [];
+      if (queryRepair !== undefined) {
+        candidates.push(
+          Promise.resolve().then(() => queryRepair(queryAbort.signal)).then(
+            (sync) => {
+              if (repairComplete) {
+                return;
+              }
+              this.applySessionSync(sync, "integrate");
+              this.clearQueriedReadStaleFloors(rejection);
+              repairComplete = true;
+              providerAbort.abort(
+                new DOMException("Query repair completed", "AbortError"),
+              );
+            },
+          ).catch((error) => {
+            if (!repairComplete) {
+              logger.warn(
+                "conflict-read-query",
+                "authoritative conflict query failed; waiting for provider readiness",
+                error,
+              );
+            }
+            throw error;
+          }),
+        );
+      }
+      if (readyToRetry !== undefined) {
+        candidates.push(
+          Promise.resolve().then(() => readyToRetry(providerAbort.signal)).then(
+            () => {
+              if (!repairComplete) {
+                repairComplete = true;
+                queryAbort.abort(
+                  new DOMException("Provider repair completed", "AbortError"),
+                );
+              }
+            },
+          ),
+        );
+      }
+      await Promise.race([Promise.any(candidates), closed]);
+      return undefined;
     } catch (error) {
       logger.warn(
         "conflict-read-repair",
-        "readyToRetry rejected while preserving original conflict result",
+        "conflict read repair failed while preserving original conflict result",
         error,
       );
+      return error instanceof Error ? error : new Error(String(error));
     } finally {
-      if (timer !== undefined) {
-        clearTimeout(timer);
+      repairComplete = true;
+      providerAbort.abort(
+        new DOMException("Conflict repair completed", "AbortError"),
+      );
+      queryAbort.abort(
+        new DOMException("Conflict repair completed", "AbortError"),
+      );
+    }
+  }
+
+  private async queryConflictReadRepair(
+    rejection: StorageTransactionRejected,
+    signal?: AbortSignal,
+  ): Promise<SessionSync> {
+    if (rejection.name !== "ConflictError") {
+      throw new Error("conflict read repair requires a conflict rejection");
+    }
+    const conflictId = String(rejection.conflict.of);
+    const transactionReads = [
+      ...rejection.transaction.reads.confirmed,
+      ...rejection.transaction.reads.pending,
+    ];
+    const conflictReads = transactionReads.filter((read) =>
+      read.id === conflictId
+    );
+    if (conflictReads.length === 0) {
+      throw new Error("conflict rejection has no matching read to query");
+    }
+    const entries = normalizeSyncEntries(transactionReads.map((read) => [{
+      id: read.id as URI,
+      type: DOCUMENT_MIME as MIME,
+      scope: read.scope,
+    }, {
+      path: read.path,
+      schema: true,
+    }]));
+    const { session } = await this.activeSessionHandle();
+    const result = await session.queryGraph(
+      {
+        roots: entries.map(([address, selector]) => ({
+          id: address.id,
+          scope: normalizeCellScope(address.scope),
+          selector,
+        })),
+      },
+      signal,
+    );
+    const repairAddresses = new Map(entries.map(([address]) => [
+      docKey(address.id, address.scope),
+      address,
+    ]));
+    const unrepaired = conflictReads.filter((read) => {
+      const basisSeq = "seq" in read ? read.seq : read.basisSeq;
+      const entity = result.entities.find((entity) =>
+        entity.branch === "" && entity.id === read.id &&
+        normalizeCellScope(entity.scope) === normalizeCellScope(read.scope)
+      );
+      return basisSeq === undefined ||
+        (entity?.seq ?? result.serverSeq) <= basisSeq;
+    });
+    if (unrepaired.length > 0) {
+      throw new Error(
+        "conflict query did not advance the confirmed read basis",
+      );
+    }
+    return {
+      type: "sync",
+      fromSeq: result.serverSeq,
+      toSeq: result.serverSeq,
+      upserts: [...repairAddresses.values()].map((address) => {
+        const entity = result.entities.find((candidate) =>
+          candidate.branch === "" && candidate.id === address.id &&
+          normalizeCellScope(candidate.scope) ===
+            normalizeCellScope(address.scope)
+        );
+        return entity === undefined
+          ? {
+            branch: "",
+            id: address.id,
+            scope: address.scope,
+            seq: result.serverSeq,
+            deleted: true as const,
+          }
+          : {
+            branch: entity.branch,
+            id: entity.id,
+            scope: entity.scope,
+            seq: entity.seq,
+            ...(entity.document === null
+              ? { deleted: true as const }
+              : { doc: entity.document }),
+          };
+      }),
+      removes: [],
+    };
+  }
+
+  private clearQueriedReadStaleFloors(
+    rejection: StorageTransactionRejected,
+  ): void {
+    if (rejection.name !== "ConflictError") {
+      return;
+    }
+    const localSeq = rejection.transaction.localSeq;
+    for (
+      const read of [
+        ...rejection.transaction.reads.confirmed,
+        ...rejection.transaction.reads.pending,
+      ]
+    ) {
+      const key = docKey(read.id as URI, read.scope);
+      const floor = this.#staleFloor.get(key);
+      if (floor !== undefined && floor <= localSeq) {
+        this.#staleFloor.delete(key);
       }
     }
   }
@@ -4892,11 +5133,7 @@ class SpaceReplica implements ISpaceReplica {
       }])),
     );
     if (result.error !== undefined) {
-      logger.warn(
-        "conflict-read-refresh",
-        "conflict selector refresh failed while preserving original result",
-        result.error,
-      );
+      throw result.error;
     }
   }
 
@@ -5350,7 +5587,8 @@ const toRejectedError = (
       rejected.retryAfterSeq = retryAfterSeq;
     }
     if (typeof readyToRetry === "function") {
-      rejected.readyToRetry = () => Promise.resolve(readyToRetry.call(error));
+      rejected.readyToRetry = (signal) =>
+        Promise.resolve(readyToRetry.call(error, signal));
     }
     return rejected;
   }

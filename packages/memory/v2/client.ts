@@ -262,8 +262,15 @@ export class Client {
     this.#spaces.delete(session);
   }
 
-  async request<Result>(message: FabricPlainObject): Promise<Result> {
-    await this.ensureConnected();
+  async request<Result>(
+    message: FabricPlainObject,
+    signal?: AbortSignal,
+  ): Promise<Result> {
+    await runWithAbortSignal(
+      signal,
+      "memory request canceled",
+      () => this.ensureConnected(),
+    );
     // `ensureConnected()` is async even when the transport is already live, so
     // close() can run while this request is suspended there. Recheck before
     // registering the request; otherwise it can miss close()'s rejectPending()
@@ -281,26 +288,58 @@ export class Client {
     // observes the rejection.
     pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundary(message));
-    const result = await pending.promise as ResponseMessage<Result>;
-    if (result.error) {
-      const error = new Error(result.error.message);
-      error.name = result.error.name;
-      if (result.error.precondition !== undefined) {
-        (error as Error & { precondition?: string }).precondition =
-          result.error.precondition;
+    const cancel = () => {
+      if (this.#pending.get(requestId) !== pending) {
+        return;
       }
-      if (result.error.retryAfterSeq !== undefined) {
-        (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
-          result.error.retryAfterSeq;
-      }
-      if (result.error.retriable !== undefined) {
-        (error as Error & { retriable?: boolean }).retriable =
-          result.error.retriable;
-      }
-      throw error;
+      this.#pending.delete(requestId);
+      pending.reject(
+        signal?.reason instanceof Error
+          ? signal.reason
+          : new DOMException("Memory request canceled", "AbortError"),
+      );
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) {
+      cancel();
     }
-    return result.ok as Result;
+    try {
+      if (this.#pending.get(requestId) === pending) {
+        void this.transport.send(encodeMemoryBoundary(message)).catch(
+          (error) => {
+            if (this.#pending.get(requestId) !== pending) {
+              return;
+            }
+            this.#pending.delete(requestId);
+            pending.reject(error);
+          },
+        );
+      }
+      const result = await pending.promise as ResponseMessage<Result>;
+      if (result.error) {
+        const error = new Error(result.error.message);
+        error.name = result.error.name;
+        if (result.error.precondition !== undefined) {
+          (error as Error & { precondition?: string }).precondition =
+            result.error.precondition;
+        }
+        if (result.error.retryAfterSeq !== undefined) {
+          (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
+            result.error.retryAfterSeq;
+        }
+        if (result.error.retriable !== undefined) {
+          (error as Error & { retriable?: boolean }).retriable =
+            result.error.retriable;
+        }
+        throw error;
+      }
+      return result.ok as Result;
+    } finally {
+      signal?.removeEventListener("abort", cancel);
+      if (this.#pending.get(requestId) === pending) {
+        this.#pending.delete(requestId);
+      }
+    }
   }
 
   async openSession(
@@ -580,6 +619,12 @@ export class Client {
   }
 }
 
+type CaughtUpLocalSeqWaiter = {
+  localSeq: number;
+  pending: PromiseWithResolvers<void>;
+  removeAbortListener?: () => void;
+};
+
 export class SpaceSession {
   #outstandingCommits = new Map<number, {
     commit: ClientCommit;
@@ -626,10 +671,7 @@ export class SpaceSession {
   // caughtUpLocalSeq via the top-level SessionOpenResult field (no sync) must
   // be forwarded explicitly or their conflict-retry waiters strand.
   #forwardedCaughtUpLocalSeq = 0;
-  #caughtUpLocalSeqWaiters: {
-    localSeq: number;
-    pending: PromiseWithResolvers<void>;
-  }[] = [];
+  #caughtUpLocalSeqWaiters: CaughtUpLocalSeqWaiter[] = [];
 
   constructor(
     private readonly client: Client,
@@ -709,15 +751,21 @@ export class SpaceSession {
     return await pending.promise;
   }
 
-  async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
+  async queryGraph(
+    query: GraphQuery,
+    signal?: AbortSignal,
+  ): Promise<GraphQueryResult> {
     this.#assertOpen();
-    const result = await this.client.request<GraphQueryResult>({
-      type: "graph.query",
-      requestId: crypto.randomUUID(),
-      space: this.space,
-      sessionId: this.#sessionId,
-      query,
-    });
+    const result = await this.client.request<GraphQueryResult>(
+      {
+        type: "graph.query",
+        requestId: crypto.randomUUID(),
+        space: this.space,
+        sessionId: this.#sessionId,
+        query,
+      },
+      signal,
+    );
 
     this.noteResult(result.serverSeq);
     return result;
@@ -1224,18 +1272,19 @@ export class SpaceSession {
       return;
     }
     this.#caughtUpLocalSeq = Math.max(this.#caughtUpLocalSeq, localSeq);
-    const ready: PromiseWithResolvers<void>[] = [];
+    const ready: CaughtUpLocalSeqWaiter[] = [];
     this.#caughtUpLocalSeqWaiters = this.#caughtUpLocalSeqWaiters.filter(
       (waiter) => {
         if (waiter.localSeq <= this.#caughtUpLocalSeq) {
-          ready.push(waiter.pending);
+          ready.push(waiter);
           return false;
         }
         return true;
       },
     );
-    for (const pending of ready) {
-      pending.resolve();
+    for (const waiter of ready) {
+      waiter.removeAbortListener?.();
+      waiter.pending.resolve();
     }
   }
 
@@ -1265,7 +1314,10 @@ export class SpaceSession {
     });
   }
 
-  private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
+  private waitForCaughtUpLocalSeq(
+    localSeq: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (this.#closed) {
       return Promise.reject(
         this.#closeError ?? new Error("memory session closed"),
@@ -1274,8 +1326,37 @@ export class SpaceSession {
     if (this.#caughtUpLocalSeq >= localSeq) {
       return Promise.resolve();
     }
+    if (signal?.aborted) {
+      return Promise.reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("Conflict readiness wait canceled", "AbortError"),
+      );
+    }
     const pending = Promise.withResolvers<void>();
-    this.#caughtUpLocalSeqWaiters.push({ localSeq, pending });
+    const waiter: CaughtUpLocalSeqWaiter = {
+      localSeq,
+      pending,
+    };
+    if (signal !== undefined) {
+      const onAbort = () => {
+        const index = this.#caughtUpLocalSeqWaiters.indexOf(waiter);
+        if (index < 0) {
+          return;
+        }
+        this.#caughtUpLocalSeqWaiters.splice(index, 1);
+        pending.reject(
+          signal.reason instanceof Error ? signal.reason : new DOMException(
+            "Conflict readiness wait canceled",
+            "AbortError",
+          ),
+        );
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      waiter.removeAbortListener = () =>
+        signal.removeEventListener("abort", onAbort);
+    }
+    this.#caughtUpLocalSeqWaiters.push(waiter);
     return pending.promise;
   }
 
@@ -1283,6 +1364,7 @@ export class SpaceSession {
     const waiters = this.#caughtUpLocalSeqWaiters;
     this.#caughtUpLocalSeqWaiters = [];
     for (const waiter of waiters) {
+      waiter.removeAbortListener?.();
       waiter.pending.reject(error ?? new Error("memory session closed"));
     }
   }
@@ -1411,7 +1493,8 @@ export class SpaceSession {
           this.#outstandingCommits.delete(localSeq);
         }
         if (isRetryableConflict(error)) {
-          error.readyToRetry = () => this.waitForCaughtUpLocalSeq(localSeq);
+          error.readyToRetry = (signal) =>
+            this.waitForCaughtUpLocalSeq(localSeq, signal);
         }
         pendingCommit.pending.reject(
           error instanceof Error ? error : new Error(String(error)),
@@ -1426,7 +1509,7 @@ export class SpaceSession {
 type RetryableConflictError = Error & {
   name: "ConflictError";
   retryAfterSeq: number;
-  readyToRetry?: () => Promise<void>;
+  readyToRetry?: (signal?: AbortSignal) => Promise<void>;
 };
 
 function isRetryableConflict(error: unknown): error is RetryableConflictError {

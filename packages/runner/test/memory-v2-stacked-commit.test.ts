@@ -2,6 +2,7 @@ import {
   assert,
   assertEquals,
   assertExists,
+  assertRejects,
   assertStrictEquals,
 } from "@std/assert";
 
@@ -15,6 +16,7 @@ import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
+  type CellScope,
   type CommitPrecondition,
   type EntityDocument,
   getMemoryProtocolFlags,
@@ -46,7 +48,9 @@ import {
 import type {
   IStorageProvider,
   StorageNotification,
+  StorageTransactionRejected,
 } from "../src/storage/interface.ts";
+import { registerCommitRejectionListener } from "../src/storage/reactivity-log.ts";
 import { setConflictAdmissionMode } from "../src/storage/v2.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import {
@@ -413,7 +417,14 @@ class ScriptedServerModel {
 }
 
 class ScriptedModelTransport extends ScriptedSessionTransport {
-  constructor(readonly model: ScriptedServerModel) {
+  readonly queryReceived = Promise.withResolvers<void>();
+
+  constructor(
+    readonly model: ScriptedServerModel,
+    private readonly querySyncFromModel = false,
+    private readonly queryIncludesUnrequestedEntities = false,
+    private readonly queryResponseGate?: Promise<void>,
+  ) {
     super({ name: "stacked", sessionId: model.sessionId, space });
   }
 
@@ -445,10 +456,9 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
     switch (message.type) {
       case "session.watch.set":
       case "session.watch.add":
-        // Registers the watch but returns an empty sync: the harness NEVER
-        // volunteers document state — catch-up only arrives when a test
-        // explicitly delivers it via pushSync, so tests control the wire
-        // order of verdicts vs updates.
+        // Registers the watch but returns an empty sync: catch-up arrives only
+        // when a test explicitly delivers it through pushSync, so tests
+        // control the wire order of verdicts and updates.
         this.respond({
           type: "response",
           requestId: message.requestId!,
@@ -464,6 +474,51 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
           },
         });
         break;
+      case "graph.query": {
+        this.queryReceived.resolve();
+        if (!this.querySyncFromModel) {
+          this.respond({
+            type: "response",
+            requestId: message.requestId!,
+            error: {
+              name: "QueryError",
+              message: "scripted authoritative query unavailable",
+            },
+          });
+          break;
+        }
+        const roots = ((message as unknown as { query: unknown }).query as {
+          roots: Array<{ id: URI; scope?: CellScope }>;
+        }).roots;
+        const respond = () =>
+          this.respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: {
+              serverSeq: this.model.serverSeq,
+              entities: (this.queryIncludesUnrequestedEntities
+                ? [...this.model.confirmed.keys()].map((id) => ({ id }))
+                : roots).flatMap((root) => {
+                  const state = this.model.confirmed.get(root.id);
+                  return state === undefined || state.value === undefined
+                    ? []
+                    : [{
+                      branch: "",
+                      id: root.id,
+                      scope: "scope" in root ? root.scope : undefined,
+                      seq: state.seq,
+                      document: { value: state.value },
+                    }];
+                }),
+            },
+          });
+        if (this.queryResponseGate === undefined) {
+          respond();
+        } else {
+          void this.queryResponseGate.then(respond);
+        }
+        break;
+      }
       case "transact": {
         const commit = message.commit as ClientCommit;
         // Receipt-time bookkeeping: `transactLocalSeqs` records that a commit
@@ -3887,6 +3942,408 @@ Deno.test("memory v2 stacked commits: conflict rejection delivered before the wi
     ]);
     assertEquals(raced, "ready");
   } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: surfaced readiness shares one completed repair", async () => {
+  const harness = await createHarness({
+    transport: (model) => new ScriptedModelTransport(model, true),
+  });
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.model.injectRemote({
+      label: "client-2-wins",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("v2winner") }],
+    });
+    const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+
+    const retryReplica = harness.replica as unknown as {
+      waitForConflictReadRepair(
+        rejection: unknown,
+        readyToRetry: ((signal?: AbortSignal) => Promise<void>) | undefined,
+        queryRepair:
+          | ((signal?: AbortSignal) => Promise<SessionSync>)
+          | undefined,
+      ): Promise<Error | undefined>;
+    };
+    const waitForConflictReadRepair = retryReplica.waitForConflictReadRepair
+      .bind(
+        retryReplica,
+      );
+    let providerCalls = 0;
+    let queryCalls = 0;
+    retryReplica.waitForConflictReadRepair = (
+      rejection,
+      readyToRetry,
+      queryRepair,
+    ) => {
+      const countedReadyToRetry = readyToRetry === undefined
+        ? undefined
+        : (signal?: AbortSignal) => {
+          providerCalls += 1;
+          return readyToRetry(signal);
+        };
+      const countedQueryRepair = queryRepair === undefined
+        ? undefined
+        : (signal?: AbortSignal) => {
+          queryCalls += 1;
+          return queryRepair(signal);
+        };
+      return waitForConflictReadRepair(
+        rejection,
+        countedReadyToRetry,
+        countedQueryRepair,
+      );
+    };
+
+    const mine = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("v1mine"),
+      sourceFromReads([{ id: DOCS.A, seq: 1 }]),
+    );
+    harness.model.setOutcome(mine.localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeq,
+    });
+
+    const result = await mine.promise;
+    assertExists(result.error);
+    assertEquals(result.error.name, "ConflictError");
+    assertEquals(providerCalls, 1);
+    assertEquals(queryCalls, 1);
+    expectVisible(harness, { A: valueFor("v2winner") });
+    assertEquals(currentSeq(harness, DOCS.A), winnerSeq);
+
+    const readyToRetry = (result.error as {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    let retryReady = false;
+    void readyToRetry().then(() => {
+      retryReady = true;
+    });
+    for (let turn = 0; turn < 8; turn += 1) {
+      await Promise.resolve();
+    }
+    assertEquals(retryReady, true);
+    assertEquals(providerCalls, 1);
+    assertEquals(queryCalls, 1);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: surfaced readiness cancels one caller without canceling repair", async () => {
+  const harness = await createHarness({
+    transport: (model) => new ScriptedModelTransport(model, true),
+  });
+  const repairGate = Promise.withResolvers<Error | undefined>();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+
+    const retryReplica = harness.replica as unknown as {
+      waitForConflictReadRepair(): Promise<Error | undefined>;
+    };
+    retryReplica.waitForConflictReadRepair = () => repairGate.promise;
+
+    const source = sourceFromReads([{ id: DOCS.A, seq: 1 }]);
+    const rejected = Promise.withResolvers<StorageTransactionRejected>();
+    registerCommitRejectionListener(source, rejected.resolve);
+    const mine = beginSet(harness, DOCS.A, valueFor("v1mine"), source);
+    harness.model.setOutcome(mine.localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: 2,
+    });
+
+    const rejection = await rejected.promise;
+    if (rejection.name !== "ConflictError") {
+      throw new Error(`expected ConflictError, got ${rejection.name}`);
+    }
+    const readyToRetry = rejection.readyToRetry;
+    assertExists(readyToRetry);
+    const controller = new AbortController();
+    const canceled = readyToRetry(controller.signal);
+    const survivor = readyToRetry();
+
+    controller.abort(new Error("caller stopped waiting"));
+    await assertRejects(() => canceled, Error, "caller stopped waiting");
+    repairGate.resolve(undefined);
+    await survivor;
+    const result = await mine.promise;
+    assertStrictEquals(result.error, rejection);
+  } finally {
+    repairGate.resolve(undefined);
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: already-canceled readiness does not start a failing wait", async () => {
+  const harness = await createHarness({
+    transport: (model) => new ScriptedModelTransport(model, true),
+  });
+  const repairGate = Promise.withResolvers<Error | undefined>();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+    const retryReplica = harness.replica as unknown as {
+      waitForConflictReadRepair(): Promise<Error | undefined>;
+    };
+    retryReplica.waitForConflictReadRepair = () => repairGate.promise;
+
+    const source = sourceFromReads([{ id: DOCS.A, seq: 1 }]);
+    const rejected = Promise.withResolvers<StorageTransactionRejected>();
+    registerCommitRejectionListener(source, rejected.resolve);
+    const mine = beginSet(harness, DOCS.A, valueFor("v1mine"), source);
+    harness.model.setOutcome(mine.localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: 2,
+    });
+
+    const rejection = await rejected.promise;
+    if (rejection.name !== "ConflictError") {
+      throw new Error(`expected ConflictError, got ${rejection.name}`);
+    }
+    const readyToRetry = rejection.readyToRetry;
+    assertExists(readyToRetry);
+    const controller = new AbortController();
+    controller.abort(new Error("caller was already gone"));
+    await assertRejects(
+      () => readyToRetry(controller.signal),
+      Error,
+      "caller was already gone",
+    );
+
+    const repairFailure = new Error("shared repair failed");
+    repairGate.resolve(repairFailure);
+    const result = await mine.promise;
+    assertStrictEquals(result.error, rejection);
+    await assertRejects(() => readyToRetry(), Error, "shared repair failed");
+  } finally {
+    repairGate.resolve(undefined);
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: provider repair wins a held query", async () => {
+  const queryGate = Promise.withResolvers<void>();
+  let transport: ScriptedModelTransport | undefined;
+  const harness = await createHarness({
+    transport: (model) => {
+      transport = new ScriptedModelTransport(
+        model,
+        true,
+        false,
+        queryGate.promise,
+      );
+      return transport;
+    },
+  });
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.model.injectRemote({
+      label: "client-2-wins",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("v2winner") }],
+    });
+    const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+
+    const repairReplica = harness.replica as unknown as {
+      queryConflictReadRepair(
+        rejection: StorageTransactionRejected,
+        signal?: AbortSignal,
+      ): Promise<SessionSync>;
+    };
+    const queryConflictReadRepair = repairReplica.queryConflictReadRepair.bind(
+      repairReplica,
+    );
+    const querySettled = Promise.withResolvers<void>();
+    repairReplica.queryConflictReadRepair = async (rejection, signal) => {
+      try {
+        return await queryConflictReadRepair(rejection, signal);
+      } finally {
+        querySettled.resolve();
+      }
+    };
+
+    const mine = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("v1mine"),
+      sourceFromReads([{ id: DOCS.A, seq: 1 }]),
+    );
+    harness.model.setOutcome(mine.localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeq,
+    });
+
+    await transport!.queryReceived.promise;
+    transport!.pushSync({
+      upserts: [{ id: DOCS.A, seq: winnerSeq, value: valueFor("v2winner") }],
+      caughtUpLocalSeq: mine.localSeq,
+    });
+
+    const result = await mine.promise;
+    assertExists(result.error);
+    assertEquals(result.error.name, "ConflictError");
+    expectVisible(harness, { A: valueFor("v2winner") });
+    assertEquals(currentSeq(harness, DOCS.A), winnerSeq);
+    const readyToRetry = (result.error as {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    await readyToRetry();
+    await querySettled.promise;
+
+    harness.model.injectRemote({
+      label: "late-query-value",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("v3late") }],
+    });
+    queryGate.resolve();
+    await Promise.resolve();
+
+    expectVisible(harness, { A: valueFor("v2winner") });
+    assertEquals(currentSeq(harness, DOCS.A), winnerSeq);
+  } finally {
+    queryGate.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: query repair handles deletion without applying linked results", async () => {
+  const harness = await createHarness({
+    transport: (model) => new ScriptedModelTransport(model, true, true),
+  });
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("a-v1"));
+    await seedAccepted(harness, DOCS.B, valueFor("b-v1"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ], [
+        { id: DOCS.B, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.notifications.clear();
+
+    harness.model.injectRemote({
+      label: "delete-conflict-root-and-update-linked-result",
+      operations: [
+        { op: "delete", id: DOCS.A },
+        { op: "set", id: DOCS.B, value: valueFor("b-v2-unrequested") },
+      ],
+    });
+    const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+    const mine = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("a-v1-mine"),
+      sourceFromReads([{ id: DOCS.A, seq: 1 }]),
+    );
+    harness.model.setOutcome(mine.localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeq,
+    });
+
+    const result = await mine.promise;
+    assertExists(result.error);
+    assertEquals(result.error.name, "ConflictError");
+    expectVisible(harness, { A: undefined, B: valueFor("b-v1") });
+    assertEquals(currentSeq(harness, DOCS.B), 2);
+    assertEquals(
+      changedIdsFor(harness.notifications.notifications, "revert"),
+      [[DOCS.A]],
+    );
+
+    const readyToRetry = (result.error as {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    await readyToRetry();
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: repeated query repairs clear their admission floors", async () => {
+  setConflictAdmissionMode("preempt");
+  const harness = await createHarness({
+    transport: (model) => new ScriptedModelTransport(model, true),
+  });
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+
+    for (const label of ["v2", "v3"]) {
+      const basisSeq = currentSeq(harness, DOCS.A);
+      harness.model.injectRemote({
+        label: `${label}-winner`,
+        operations: [{
+          op: "set",
+          id: DOCS.A,
+          value: valueFor(`${label}-winner`),
+        }],
+      });
+      const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+      const mine = beginSet(
+        harness,
+        DOCS.A,
+        valueFor(`${label}-mine`),
+        sourceFromReads([{ id: DOCS.A, seq: basisSeq }]),
+      );
+      harness.model.setOutcome(mine.localSeq, {
+        kind: "rejectConflict",
+        retryAfterSeq: winnerSeq,
+      });
+      await assertConflict(mine.promise, "stale confirmed read");
+      assertEquals(currentSeq(harness, DOCS.A), winnerSeq);
+    }
+
+    const final = beginSet(
+      harness,
+      DOCS.B,
+      valueFor("accepted-after-query-repairs"),
+      sourceFromReads([{
+        id: DOCS.A,
+        seq: currentSeq(harness, DOCS.A),
+      }]),
+    );
+    await assertResultOk(final.promise);
+    assertEquals(
+      harness.model.transactLocalSeqs.includes(final.localSeq),
+      true,
+    );
+  } finally {
+    setConflictAdmissionMode(undefined);
     await harness.close();
   }
 });

@@ -1182,6 +1182,48 @@ Deno.test("memory v2 client readyToRetry waits for caught-up local sequence", as
   }
 });
 
+Deno.test("memory v2 client readyToRetry removes a canceled waiter", async () => {
+  const transport = new ConflictReadyTransport();
+  const client = await connect({ transport });
+  const session = await client.mount("did:key:z6Mk-memory-v2-ready-cancel");
+
+  try {
+    const error = await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:doc:1",
+            value: { value: { version: 2 } },
+          }],
+        }),
+      Error,
+      "conflict",
+    );
+    const readyToRetry = (error as Error & {
+      readyToRetry?: (signal?: AbortSignal) => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+
+    const controller = new AbortController();
+    const canceled = readyToRetry(controller.signal);
+    const survivor = readyToRetry();
+    controller.abort(new Error("query repair completed"));
+    await assertRejects(
+      () => canceled,
+      Error,
+      "query repair completed",
+    );
+
+    transport.emitCatchUp(1);
+    await survivor;
+  } finally {
+    await client.close();
+  }
+});
+
 Deno.test("memory v2 client readyToRetry rejects after session close", async () => {
   const transport = new ConflictReadyTransport();
   const client = await connect({ transport });

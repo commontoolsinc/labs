@@ -157,7 +157,7 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     expect(docB.get()).toEqual({ v: "v1" });
   });
 
-  it("fires verdict callbacks at rejection receipt, while commit callbacks and the promise wait for read repair", async () => {
+  it("settles callbacks after the query repairs a rejected commit", async () => {
     const CAUSE = "verdict-before-repair-doc";
 
     // Same choreography as above: A seeds and bumps with verdict-resolving
@@ -192,13 +192,9 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     }
     expect(docB.get()).toEqual({ v: "v0" });
 
-    // B's commit will be REJECTED. The rejection response arrives promptly,
-    // but the read-repair frame that releases the commit promise rides the
-    // fan-out, which this manual server withholds until the test flushes.
-    // So at the settle() fixpoint the fate is sealed and the VERDICT
-    // callback must have run, while the promise — and with it the COMMIT
-    // callbacks, whose consumers act on the repaired base — is still held
-    // by the repair gate.
+    // B's commit is rejected. Its verdict callback runs when the response
+    // arrives. The one-shot query then repairs B directly from the server,
+    // without waiting for this manual server's subscription fan-out.
     let verdictResult: { error?: unknown } | undefined;
     txB.addVerdictCallback((_tx, result) => {
       verdictResult = result;
@@ -218,23 +214,16 @@ describe("read-repair: stale read after cross-replica conflict", () => {
       (verdictResult?.error as { name?: string } | undefined)?.name,
       "verdict callback fired with the rejection at rejection receipt",
     ).toBe("ConflictError");
-    expect(commitCallbackFired, "commit callback still held by the repair gate")
-      .toBe(false);
-    expect(promiseSettled, "commit promise still held by the repair gate")
-      .toBe(false);
-
-    // The test releases the repair fan-out: the frame arrives, the promise
-    // resolves with the same rejection the verdict callback saw, and the
-    // commit callback fires with it.
-    await server.flushSessions([space]);
-    await clock.settle();
+    expect(commitCallbackFired, "commit callback ran after query repair")
+      .toBe(true);
+    expect(promiseSettled, "commit promise settled after query repair")
+      .toBe(true);
     const resB = await commitP;
     expect(resB.error?.name).toBe("ConflictError");
-    expect(commitCallbackFired, "commit callback fired at promise settlement")
-      .toBe(true);
+    expect(docB.get()).toEqual({ v: "v1" });
   });
 
-  it("returns a rejected resolveAt-verdict commit at rejection receipt, while its commit callback waits for repair", async () => {
+  it("repairs a rejected verdict-mode commit before its callback", async () => {
     const CAUSE = "verdict-mode-rejection-doc";
 
     // Same choreography again: A seeds and bumps; B stages a stale write.
@@ -268,10 +257,9 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     }
     expect(docB.get()).toEqual({ v: "v0" });
 
-    // B commits in VERDICT mode. The rejection receipt must settle the
-    // returned promise at the settle() fixpoint — no read-repair wait —
-    // while the commit callback stays on the settlement timeline, gated on
-    // the repair frame this manual server has not been told to send yet.
+    // B commits in verdict mode. The returned promise resolves at rejection
+    // receipt. Its commit callback remains on the settlement timeline and
+    // runs after the one-shot query repairs the stale read.
     const commitCallbackDone = Promise.withResolvers<void>();
     let commitCallbackFired = false;
     txB.addCommitCallback(() => {
@@ -293,15 +281,10 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     ).toBe("ConflictError");
     expect(
       commitCallbackFired,
-      "commit callback still held by the repair gate",
-    ).toBe(false);
-
-    // The test releases the repair fan-out: the frame arrives and the
-    // settlement timeline (and with it the commit callback) completes.
-    await server.flushSessions([space]);
-    await clock.settle();
+      "commit callback ran after query repair",
+    ).toBe(true);
     await commitP;
     await commitCallbackDone.promise;
-    expect(commitCallbackFired).toBe(true);
+    expect(docB.get()).toEqual({ v: "v1" });
   });
 });

@@ -94,3 +94,59 @@ the ordinary conflict path again and keeps the original event payload.
 Extend the successor-generation test so the later repair remains blocked while
 the earlier commit settles, its readiness resolves, and its revert is emitted.
 Then release the successor and verify that it produces its own final revert.
+
+## 3. Share one completed conflict repair with retry callers
+
+Storage first waited for the conflict rejection's provider readiness function.
+If that function did not settle, a fixed repair timer let storage move on to an
+explicit selector refresh. Once the refresh completed, the rejected commit
+settled with a repaired base. The surfaced readiness function called the same
+provider function again before the event scheduler could requeue the handler.
+That second call had no escape path. A provider that never produced its
+caught-up marker could therefore strand the event even though the explicit
+refresh had already repaired its reads.
+
+Issue a one-shot graph query containing the rejected transaction's read
+selectors. Unlike replacing the session's watch set, this query does not
+re-evaluate every live watcher or feed their unchanged values back through the
+scheduler. Accept the query as a repair only when its authoritative result
+advances every conflicted read past the sequence used by the rejected commit.
+An omitted root is an authoritative deletion at the query's server sequence.
+Apply only the requested root addresses from the graph closure so linked
+documents do not bypass their ordinary notifications. The normal notification
+filter folds the conflicted root into the repair generation and reports changes
+to any other queried read.
+
+Start the query and the provider readiness function together. Apply a
+successful query result as a silent conflict-repair sync before dropping the
+rejected optimistic layer. Accept the first repair that succeeds. When the
+query succeeds first, cancel and remove both provider caught-up waiters. When
+provider catch-up succeeds first, cancel and remove the pending graph request.
+Ignore a response that arrives after cancellation. This lets either
+authoritative signal complete the repair without leaving a waiter or request,
+or allowing a late response to overwrite newer subscribed state. Clear
+stale-read admission floors only for the queried reads and only through the
+rejected commit's local sequence. A later conflict's floor remains intact. Race
+the repair with replica closure, which is an event the storage layer already
+exposes. Remove the fixed repair timer.
+
+Share that completed repair outcome with the readiness function carried by the
+rejection. That function also waits for the local optimistic layer to be
+removed and for its finite repair generation to settle. It never invokes the
+provider or query repair again. Each caller can cancel its own wait without
+canceling the shared repair or another caller's wait. An already canceled
+caller does not start an unused wait on the shared repair.
+
+Add storage regressions whose query returns the server's winning value or omits
+a deleted conflict root. Prove that the local sequence and visible value are
+repaired before the surfaced readiness function resolves. Count both repair
+functions and prove that the surfaced readiness function does not repeat
+either one. Hold a query response, deliver provider catch-up, and prove that
+the commit and surfaced readiness settle while the graph request is canceled
+and its response remains held. Cancel one surfaced readiness caller and prove
+another caller still completes with the shared repair. Prove an already
+canceled caller cannot leave an unobserved failure behind. Include an
+unrequested graph-closure result and prove it is not silently applied. Make a
+failed query application complete through the provider. Run the two-browser
+Lunch Poll regression to prove that concurrent votes settle without repeatedly
+re-evaluating the whole watch set.

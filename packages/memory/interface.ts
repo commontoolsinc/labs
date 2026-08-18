@@ -223,7 +223,9 @@ export interface ConflictError extends Error {
   transaction: ClientCommit;
   conflict: Conflict;
   retryAfterSeq?: number;
-  readyToRetry?: () => Promise<void>;
+
+  /** Wait for authoritative state to cover the rejected commit. */
+  readyToRetry?: (signal?: AbortSignal) => Promise<void>;
 }
 
 export interface SystemError extends Error {

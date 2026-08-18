@@ -105,12 +105,17 @@ const staleReadSource = (uri: URI, seq: number) => ({
 
 type RetryRepairHarness = {
   noteCaughtUpLocalSeq(localSeq: number | undefined): void;
-  waitForCaughtUpLocalSeq(localSeq: number): Promise<void>;
+  waitForCaughtUpLocalSeq(
+    localSeq: number,
+    signal?: AbortSignal,
+  ): Promise<void>;
   rejectCaughtUpLocalSeqWaiters(error: Error): void;
   closeNow(): void;
   waitForConflictReadRepair(
     rejection: StorageTransactionRejected,
-  ): Promise<void>;
+    readyToRetry?: (signal?: AbortSignal) => Promise<void>,
+    queryRepair?: (signal?: AbortSignal) => Promise<SessionSync>,
+  ): Promise<Error | undefined>;
 };
 
 type WatchRefreshHarness = {
@@ -569,10 +574,67 @@ describe("Memory v2 storage notifications", () => {
     expect(replica.get(factAddress)?.is).toEqual({ value: { version: 3 } });
 
     await storageManager.close();
-    await assertRejects(
-      () => reason.readyToRetry?.() ?? Promise.resolve(),
-      Error,
-    );
+    await reason.readyToRetry?.();
+  });
+
+  it("repairs a concurrent deletion through the authoritative query", async () => {
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+
+    const uri = `of:memory-v2-delete-retry-${Date.now()}` as URI;
+    const provider = storageManager.open(space);
+    const replica = provider.replica as typeof provider.replica & {
+      commitNative: (
+        transaction: unknown,
+        source?: unknown,
+      ) => Promise<{ ok?: unknown; error?: unknown }>;
+    };
+    await provider.sync(uri);
+
+    const gotVersion1 = defer<void>();
+    subscription.onNotification = (notification) => {
+      if (notificationCarries(notification, uri, { value: { version: 1 } })) {
+        gotVersion1.resolve();
+      }
+    };
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { version: 1 } },
+      }],
+    });
+    await gotVersion1.promise;
+
+    await remoteSession.transact({
+      localSeq: remoteLocalSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{ op: "delete", id: uri }],
+    });
+
+    const source = staleReadSource(uri, 1);
+    const factAddress = { id: uri, type: "application/json" as MIME };
+    const result = await replica.commitNative({
+      operations: [{
+        op: "set",
+        id: uri,
+        type: "application/json",
+        value: { value: { version: 2 } },
+      }],
+    }, source);
+
+    expect(result.ok).toBeFalsy();
+    expect(replica.get(factAddress)?.is).toBeUndefined();
+    const reason = subscription.reverts.at(-1)?.reason;
+    if (reason?.name !== "ConflictError") {
+      throw new Error(`Expected ConflictError, got ${reason?.name}`);
+    }
+    expect(reason.retryAfterSeq).toBe(2);
+    expect(typeof reason.readyToRetry).toBe("function");
+    await reason.readyToRetry?.();
+    expect(replica.get(factAddress)?.is).toBeUndefined();
   });
 
   it("returns the original conflict when closing during retry read repair", async () => {
@@ -590,9 +652,17 @@ describe("Memory v2 storage notifications", () => {
     const repairHarness = retryRepairHarness(replica);
     const originalWaitForConflictReadRepair = repairHarness
       .waitForConflictReadRepair.bind(repairHarness);
-    repairHarness.waitForConflictReadRepair = async (rejection) => {
+    repairHarness.waitForConflictReadRepair = async (
+      rejection,
+      readyToRetry,
+      queryRepair,
+    ) => {
       repairStarted.resolve();
-      await originalWaitForConflictReadRepair(rejection);
+      return await originalWaitForConflictReadRepair(
+        rejection,
+        readyToRetry,
+        queryRepair,
+      );
     };
     const firstUri = `of:memory-v2-close-retry-a-${Date.now()}` as URI;
     const secondUri = `of:memory-v2-close-retry-b-${Date.now()}` as URI;
@@ -646,9 +716,11 @@ describe("Memory v2 storage notifications", () => {
       throw new Error(`Expected ConflictError, got ${reason?.name}`);
     }
     expect(result.error).toBe(reason);
+    expect(typeof reason.readyToRetry).toBe("function");
     await assertRejects(
-      () => reason?.readyToRetry?.() ?? Promise.resolve(),
+      () => reason.readyToRetry!(),
       Error,
+      "memory replica closed",
     );
   });
 
@@ -672,6 +744,23 @@ describe("Memory v2 storage notifications", () => {
     );
   });
 
+  it("removes a canceled caught-up waiter", async () => {
+    const provider = storageManager.open(space);
+    const harness = retryRepairHarness(provider.replica);
+    const controller = new AbortController();
+    const canceled = harness.waitForCaughtUpLocalSeq(2, controller.signal);
+    const survivor = harness.waitForCaughtUpLocalSeq(2);
+
+    controller.abort(new Error("query repair completed"));
+    await assertRejects(
+      () => canceled,
+      Error,
+      "query repair completed",
+    );
+    harness.noteCaughtUpLocalSeq(2);
+    await survivor;
+  });
+
   it("swallows a rejecting readyToRetry during read repair", async () => {
     const provider = storageManager.open(space);
     const harness = retryRepairHarness(provider.replica);
@@ -682,17 +771,63 @@ describe("Memory v2 storage notifications", () => {
     // thrown, so the original conflict result is preserved for the caller. If
     // the repair short-circuited, `called` stays 0; if it rethrew, the await
     // would reject and fail the test.
+    const rejection = syntheticConflict(
+      `of:memory-v2-retry-reject-${Date.now()}` as URI,
+      () => {
+        called += 1;
+        return Promise.reject(retryError);
+      },
+    );
     await harness.waitForConflictReadRepair(
-      syntheticConflict(
-        `of:memory-v2-retry-reject-${Date.now()}` as URI,
-        () => {
-          called += 1;
-          return Promise.reject(retryError);
-        },
-      ),
+      rejection,
+      (rejection as { readyToRetry: () => Promise<void> }).readyToRetry,
     );
 
     expect(called).toBe(1);
+  });
+
+  it("uses provider repair when applying the query repair fails", async () => {
+    const provider = storageManager.open(space);
+    const harness = provider.replica as unknown as RetryRepairHarness & {
+      applySessionSync(
+        sync: SessionSync,
+        type: "pull" | "integrate" | "conflict-repair",
+      ): void;
+    };
+    const applySessionSync = harness.applySessionSync.bind(harness);
+    let queryCalls = 0;
+    let providerCalls = 0;
+    harness.applySessionSync = () => {
+      throw new Error("invalid query repair");
+    };
+    const rejection = syntheticConflict(
+      `of:memory-v2-query-apply-fallback-${Date.now()}` as URI,
+      () => {
+        providerCalls += 1;
+        return Promise.resolve();
+      },
+    );
+    const querySync: SessionSync = {
+      type: "sync",
+      fromSeq: 1,
+      toSeq: 1,
+      upserts: [],
+      removes: [],
+    };
+
+    const repairError = await harness.waitForConflictReadRepair(
+      rejection,
+      (rejection as { readyToRetry: () => Promise<void> }).readyToRetry,
+      () => {
+        queryCalls += 1;
+        return Promise.resolve(querySync);
+      },
+    );
+
+    expect(repairError).toBeUndefined();
+    expect(queryCalls).toBe(1);
+    expect(providerCalls).toBe(1);
+    harness.applySessionSync = applySessionSync;
   });
 
   it("closes a watch refresh view that resolves after replica close", async () => {
