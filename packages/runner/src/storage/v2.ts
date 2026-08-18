@@ -3942,7 +3942,9 @@ class SpaceReplica implements ISpaceReplica {
         scope: read.scope,
       })),
     ];
-    const repairDocumentKeys = rejection.name === "ConflictError"
+    const hasSemanticOperations = operations.length > 0;
+    const repairDocumentKeys = rejection.name === "ConflictError" &&
+        hasSemanticOperations
       ? new Set(touched.map(({ id, scope }) => docKey(id, scope)))
       : new Set<string>();
     for (const key of repairDocumentKeys) {
@@ -3965,7 +3967,6 @@ class SpaceReplica implements ISpaceReplica {
       if (source !== undefined) {
         notifyCommitRejected(source, rejection);
       }
-      const hasSemanticOperations = operations.length > 0;
       const shouldNotifySubscribers = hasSemanticOperations &&
         this.hasNotificationSubscribers();
       const shouldNotifySinks = hasSemanticOperations &&
@@ -3984,7 +3985,7 @@ class SpaceReplica implements ISpaceReplica {
       // recursion (a victim's own finalizeRejection lands back here with its
       // localSeq).
       this.cascadeDroppedDependency(localSeq);
-      await this.refreshConflictReads(rejection);
+      await this.refreshConflictReads(rejection, hasSemanticOperations);
       if (before !== undefined) {
         const changes = before.compare(this);
         // The revert snapshots CURRENT confirmed state (which already includes
@@ -4725,6 +4726,7 @@ class SpaceReplica implements ISpaceReplica {
 
   private async refreshConflictReads(
     rejection: StorageTransactionRejected,
+    silent: boolean,
   ): Promise<void> {
     if (rejection.name !== "ConflictError") return;
     const conflictId = String(rejection.conflict.of);
@@ -4734,7 +4736,7 @@ class SpaceReplica implements ISpaceReplica {
     ].filter((read) => read.id === conflictId);
     if (conflictReads.length === 0) return;
     const result = await this.enqueueWatchRefresh(
-      "conflict-repair",
+      silent ? "conflict-repair" : "pull",
       normalizeSyncEntries(conflictReads.map((read) => [{
         id: read.id as URI,
         type: DOCUMENT_MIME as MIME,

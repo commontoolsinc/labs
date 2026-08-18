@@ -3841,6 +3841,70 @@ Deno.test("memory v2 stacked commits: conflict rejection delivered before the wi
   }
 });
 
+Deno.test("memory v2 stacked commits: read-only conflict catch-up notifies subscribers", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.notifications.clear();
+
+    harness.model.injectRemote({
+      label: "client-2-wins",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("v2winner") }],
+    });
+    const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+    const localSeq = 2;
+    harness.model.setOutcome(localSeq, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeq,
+    });
+
+    const conflict = harness.replica.commitNative(
+      {
+        operations: [],
+        sqliteOps: [{
+          op: "sqlite",
+          db: { id: "of:read-only-conflict-notification" },
+          sql: "CREATE TABLE notification_test (value TEXT)",
+        }],
+      },
+      sourceFromReads([{ id: DOCS.A, seq: 1 }]),
+      {
+        resolveAt: "verdict",
+      },
+    );
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(localSeq),
+      "the SQLite-only commit to reach the wire",
+    );
+    await harness.transport.drainVerdicts();
+
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: winnerSeq, value: valueFor("v2winner") }],
+      caughtUpLocalSeq: localSeq,
+    });
+    await assertConflict(conflict, "stale confirmed read");
+
+    expectVisible(harness, { A: valueFor("v2winner") });
+    assertEquals(
+      changedIdsFor(harness.notifications.notifications, "integrate"),
+      [[DOCS.A]],
+    );
+    assertEquals(
+      changedIdsFor(harness.notifications.notifications, "revert"),
+      [],
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: a commit minted during the read repair is not sent against the rejected layer", async () => {
   const harness = await createHarness();
   // Debug level so the refusal's own lazy log closure runs: the count is how
