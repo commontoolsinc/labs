@@ -26,8 +26,8 @@ import {
   type RealmTaggedValue,
 } from "@/codec-realm/interface.ts";
 import { RealmCodecEngine } from "@/codec-realm/RealmCodecEngine.ts";
-import { RealmDecodeContext } from "@/codec-realm/RealmDecodeContext.ts";
-import { RealmEncodeContext } from "@/codec-realm/RealmEncodeContext.ts";
+import { RealmDecodeAct } from "@/codec-realm/RealmDecodeAct.ts";
+import { RealmEncodeAct } from "@/codec-realm/RealmEncodeAct.ts";
 import {
   createDefaultRealmRegistry,
   fabricFromRealmValue,
@@ -107,20 +107,13 @@ describe("RealmCodecEngine", () => {
       // where the real fault was the child. The differential is the message:
       // both attempts must fail the same way the first did.
       const engine = newDefaultRealmCodecEngine();
-      const ctx = new RealmEncodeContext(NULL_LIVE_ENVIRONMENT);
+      const act = new RealmEncodeAct(engine, NULL_LIVE_ENVIRONMENT);
       // A function is no kind of fabric value, so encoding the element throws
       // from inside the array's own descent.
       const holder = [() => 1] as unknown as FabricValue;
-      const probe = engine as unknown as {
-        encodeValue(value: FabricValue, ctx: RealmEncodeContext): unknown;
-      };
 
-      expect(() => probe.encodeValue(holder, ctx)).toThrow(
-        /Cannot encode function/,
-      );
-      expect(() => probe.encodeValue(holder, ctx)).toThrow(
-        /Cannot encode function/,
-      );
+      expect(() => act.encodeValue(holder)).toThrow(/Cannot encode function/);
+      expect(() => act.encodeValue(holder)).toThrow(/Cannot encode function/);
     });
 
     it("mints a marker equal to every other call's and identical to none", () => {
@@ -459,10 +452,8 @@ describe("RealmCodecEngine", () => {
       // would match it and read the array as a tagged form.
       class Exposed extends RealmCodecEngine {
         decodeWithoutMarker(data: unknown): FabricValue {
-          const ctx = new RealmDecodeContext(NULL_LIVE_ENVIRONMENT);
-          return (this as unknown as {
-            decodeValue(d: unknown, c: unknown): FabricValue;
-          }).decodeValue(data, ctx);
+          const act = new RealmDecodeAct(this, NULL_LIVE_ENVIRONMENT);
+          return act.decodeValue(data as never);
         }
       }
 

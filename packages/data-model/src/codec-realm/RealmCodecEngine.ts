@@ -1,20 +1,10 @@
-import { backtickQuote } from "@commonfabric/utils/markdown";
-import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
-
-import type { FabricValue } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
-import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
-import { RealmDecodeContext } from "./RealmDecodeContext.ts";
-import { RealmEncodeContext } from "./RealmEncodeContext.ts";
+
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
-import {
-  REALM_FORMAT_VERSION,
-  type RealmCodecValue,
-  type RealmEncodedValue,
-  type RealmFormatMarker,
-  type RealmTaggedValue,
-} from "./interface.ts";
+import { RealmDecodeAct } from "./RealmDecodeAct.ts";
+import { RealmEncodeAct } from "./RealmEncodeAct.ts";
+import { markerOf } from "./marker.ts";
+import { type RealmCodecValue, type RealmEncodedValue } from "./interface.ts";
 
 /**
  * Whole-value codec engine for the realm-crossing wire format: the form a
@@ -53,18 +43,18 @@ import {
 export class RealmCodecEngine extends BaseCodecEngine<
   RealmCodecValue,
   RealmEncodedValue,
-  RealmEncodeContext,
-  RealmDecodeContext
+  RealmEncodeAct,
+  RealmDecodeAct
 > {
   //
   // Instance members
   //
 
   /** @inheritDoc */
-  protected override newEncodeContext(
+  protected override newEncodeAct(
     env: LiveEnvironment,
-  ): RealmEncodeContext {
-    return new RealmEncodeContext(env);
+  ): RealmEncodeAct {
+    return new RealmEncodeAct(this, env);
   }
 
   /**
@@ -79,11 +69,11 @@ export class RealmCodecEngine extends BaseCodecEngine<
    * that recognizes nothing -- and {@link #encodedFromSerializedForm} does
    * the refusing.
    */
-  protected override newDecodeContext(
+  protected override newDecodeAct(
     env: LiveEnvironment,
     data: RealmEncodedValue,
-  ): RealmDecodeContext {
-    return new RealmDecodeContext(env, RealmCodecEngine.#markerOf(data));
+  ): RealmDecodeAct {
+    return new RealmDecodeAct(this, env, markerOf(data));
   }
 
   /**
@@ -99,370 +89,4 @@ export class RealmCodecEngine extends BaseCodecEngine<
    * The marker is minted here, after `value` exists, which is what Section 2.2
    * requires of it and why it cannot be forged from within a payload.
    */
-  /**
-   * @inheritDoc
-   *
-   * Wraps the walked tree in this act's outer envelope. The marker is the
-   * act's own, minted when its context was, which is what Section 2.2
-   * requires: created after the value exists, so nothing already assembled can
-   * hold a reference to it.
-   */
-  protected override serializedFromEncoded(
-    encoded: RealmCodecValue,
-    ctx: RealmEncodeContext,
-  ): RealmEncodedValue {
-    return [ctx.marker, encoded];
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Checks the outer envelope in full before anything is read from it -- two
-   * elements, headed by a one-element array holding this format's version --
-   * and returns what it wraps. Refusing by throwing lets the base settle it
-   * against `lenient`, so a peer's malformed envelope degrades to a
-   * `ProblematicValue` where a lenient caller asked for that.
-   */
-  protected override encodedFromSerializedForm(
-    data: RealmEncodedValue,
-  ): RealmCodecValue {
-    if (!Array.isArray(data) || (data.length !== 2)) {
-      throw new ProblematicStateError(
-        "",
-        toCompactDebugString(data, 50),
-        "not a value this format emits: expected a two-element outer envelope",
-      );
-    }
-
-    if (!RealmCodecEngine.#markerOf(data)) {
-      throw new ProblematicStateError(
-        "",
-        toCompactDebugString(data, 50),
-        `not a value this format emits: expected an outer envelope headed by a ${
-          backtickQuote(REALM_FORMAT_VERSION)
-        } marker`,
-      );
-    }
-
-    return data[1] as RealmCodecValue;
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * The marker comes from the act this form belongs to, so a form built
-   * without one is not a state this can reach: an encode context has a
-   * marker from the moment it exists, and only an encode context arrives
-   * here.
-   */
-  protected override wrapTag(
-    tag: string,
-    state: RealmCodecValue,
-    ctx: RealmEncodeContext,
-  ): RealmTaggedValue {
-    return [ctx.marker, tag, state];
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Holes need no representation: cloning carries a sparse array's length and
-   * its absent indices directly, so skipping an absent index here leaves it
-   * absent in the result.
-   */
-  protected override encodeArray(
-    value: readonly FabricValue[],
-    ctx: RealmEncodeContext,
-  ): RealmCodecValue {
-    ctx.enter(value);
-
-    const length = value.length;
-    let result: RealmCodecValue[] | undefined;
-
-    try {
-      for (let i = 0; i < length; i++) {
-        if (!(i in value)) {
-          continue;
-        }
-
-        const original = value[i]!;
-        const encoded = this.encodeValue(original, ctx);
-
-        if (result !== undefined) {
-          result[i] = encoded;
-        } else if (!Object.is(encoded, original)) {
-          // The first element that changed: copy what came before it, holes and
-          // all, and write into the copy from here on.
-          result = new Array<RealmCodecValue>(length);
-          for (let j = 0; j < i; j++) {
-            if (j in value) {
-              result[j] = value[j] as RealmCodecValue;
-            }
-          }
-          result[i] = encoded;
-        }
-      }
-    } finally {
-      ctx.leave(value);
-    }
-
-    return result ?? (value as RealmCodecValue);
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Keys are visited in their own order rather than sorted. JSON sorts to make
-   * its text canonical, which is what lets an encoding be hashed and compared
-   * as bytes; cloning preserves key order and nothing here is compared that
-   * way, so sorting would buy nothing and would force a rebuild of every
-   * object.
-   *
-   * A `/`-prefixed key needs no escaping either, this format reserving no key
-   * at all. A name this runtime reserves is still refused: the rebuild below
-   * cannot reproduce one, and a silent reshaping is worse than a refusal.
-   */
-  protected override encodePlainObject(
-    value: Record<string, FabricValue>,
-    ctx: RealmEncodeContext,
-  ): RealmCodecValue {
-    ctx.enter(value);
-
-    const keys = Object.keys(value);
-    let result: Record<string, RealmCodecValue> | undefined;
-
-    try {
-      for (let i = 0; i < keys.length; i++) {
-        const key = keys[i]!;
-
-        // Checked on every object, not just the ones that get rebuilt, so that
-        // the answer does not depend on whether some sibling happened to change.
-        RealmCodecEngine.assertEncodableKey(key);
-
-        const original = value[key]!;
-        const encoded = this.encodeValue(original, ctx);
-
-        if (result !== undefined) {
-          result[key] = encoded;
-        } else if (!Object.is(encoded, original)) {
-          result = {};
-          for (let j = 0; j < i; j++) {
-            result[keys[j]!] = value[keys[j]!] as RealmCodecValue;
-          }
-          result[key] = encoded;
-        }
-      }
-    } finally {
-      ctx.leave(value);
-    }
-
-    return result ?? (value as RealmCodecValue);
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Every object node goes through the guard, whichever arm then takes it. The
-   * tagged form needs it as much as a container does: `decodeTagged()` walks
-   * the state again for a nonterminal codec, for a tag no codec claims, and
-   * for a tag that is not one, so a graph of tagged forms can close a cycle
-   * with no plain container in it at all, and cloning carries such a graph
-   * faithfully.
-   */
-  protected override decodeValue(
-    data: RealmCodecValue,
-    ctx: RealmDecodeContext,
-  ): FabricValue {
-    // Self-representing primitives pass straight through. A `symbol` and a
-    // function are not among them and are refused here rather than returned:
-    // cloning carries neither, so neither can reach this across the boundary
-    // -- but `decode()` is callable in the realm that built its argument, and
-    // what this format never emits is refused wherever it is found rather
-    // than only where a transport would have stopped it. `encode()` refuses
-    // both too, from the other side.
-    if (data === null) {
-      return null;
-    }
-
-    if ((typeof data === "symbol") || (typeof data === "function")) {
-      return this.reportMalformed(
-        "",
-        toCompactDebugString(data, 50),
-        `Cannot decode ${typeof data}: not a form this format emits.`,
-      );
-    }
-
-    if (typeof data !== "object") {
-      return data as FabricValue;
-    }
-
-    {
-      const cycle = this.enterOrReport(ctx, data);
-      if (cycle !== null) {
-        return cycle;
-      }
-    }
-
-    try {
-      const unwrapped = this.#unwrapTag(data, ctx);
-
-      if (unwrapped !== null) {
-        return this.decodeTagged(unwrapped.tag, unwrapped.state, ctx);
-      } else if (Array.isArray(data)) {
-        return this.#decodeArray(data, ctx);
-      } else if (isPlainObject(data)) {
-        return this.#decodePlainObject(data, ctx);
-      }
-
-      // Wire data is untrusted, and cloning carries a good deal this format
-      // never emits -- a bare `Uint8Array`, a `Date`, a multi-entry `Map` --
-      // all of which reach here.
-      return this.reportMalformed(
-        "",
-        data,
-        `Cannot decode ${
-          backtickQuote(toCompactDebugString(data, 50))
-        }: not a form this format emits.`,
-      );
-    } finally {
-      ctx.leave(data);
-    }
-  }
-
-  /**
-   * Decodes an array. Holes arrive as holes and are left alone, so there is no
-   * run-length form to validate, and so no count off the wire that could name
-   * a length an array cannot hold.
-   *
-   * Frozen on the way out whether it was rebuilt or passed through, per what
-   * {@link #decode} says a caller cedes to it.
-   */
-  #decodeArray(
-    data: readonly RealmCodecValue[],
-    ctx: RealmDecodeContext,
-  ): FabricValue {
-    const length = data.length;
-    let result: FabricValue[] | undefined;
-
-    for (let i = 0; i < length; i++) {
-      if (!(i in data)) {
-        continue;
-      }
-
-      const original = data[i]!;
-      const decoded = this.decodeValue(original, ctx);
-
-      if (result !== undefined) {
-        result[i] = decoded;
-      } else if (!Object.is(decoded, original)) {
-        result = new Array<FabricValue>(length);
-        for (let j = 0; j < i; j++) {
-          if (j in data) {
-            result[j] = data[j] as FabricValue;
-          }
-        }
-        result[i] = decoded;
-      }
-    }
-
-    return Object.freeze(result ?? (data as FabricValue));
-  }
-
-  /**
-   * Decodes a plain object. A `/`-prefixed key needs no attention, unlike
-   * under JSON: this format reserves no key at all, its tags living in a
-   * container a payload cannot produce.
-   *
-   * Frozen on the way out whether it was rebuilt or passed through, per what
-   * {@link #decode} says a caller cedes to it.
-   */
-  #decodePlainObject(
-    data: Record<string, RealmCodecValue>,
-    ctx: RealmDecodeContext,
-  ): FabricValue {
-    const keys = Object.keys(data);
-    let result: Record<string, FabricValue> | undefined;
-
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i]!;
-
-      if (isUnsafeObjectKey(key)) {
-        return this.reportReservedKey(key, data);
-      }
-
-      const original = data[key]!;
-      const decoded = this.decodeValue(original, ctx);
-
-      if (result !== undefined) {
-        result[key] = decoded;
-      } else if (!Object.is(decoded, original)) {
-        result = {};
-        for (let j = 0; j < i; j++) {
-          result[keys[j]!] = data[keys[j]!] as FabricValue;
-        }
-        result[key] = decoded;
-      }
-    }
-
-    return Object.freeze(result ?? (data as FabricValue));
-  }
-
-  /**
-   * Unwraps a tagged wire representation. Returns `{ tag, state }`, or `null`
-   * if `data` is not one. The `state` is extracted directly from `data`.
-   *
-   * Slot zero decides, and only by identity: an array of the right length
-   * whose first element is some *other* object -- or an equal-looking marker
-   * some payload built for itself -- is a payload's own array and is walked as
-   * one. Nothing about the shape is evidence, which is why the comparison is
-   * `===` and not a structural test.
-   *
-   * With no marker in hand there is nothing to compare against, so nothing is
-   * a tagged form. Stated rather than left to `===`: `undefined` is a value
-   * this format carries directly, so a payload can put one in slot zero for
-   * free, and identity against an absent marker would match it. The walk
-   * reaches here only from `decode()`, which always has one, and this is the
-   * counterpart to `wrapTag()` refusing to build a tagged form without one.
-   *
-   * The tag is handed over as it was found, of whatever type.
-   * {@link RealmTaggedValue} says a tag is a `string`, but that describes what
-   * this format _emits_, and decoding is where data from somewhere else
-   * arrives. Whether what sits there is a tag belongs to `decodeTagged()`,
-   * which asks it the same way for every format and settles the answer against
-   * `lenient`.
-   */
-  #unwrapTag(
-    data: RealmCodecValue,
-    ctx: RealmDecodeContext,
-  ): { tag: any; state: RealmCodecValue } | null {
-    if (
-      (ctx.marker === undefined) || !Array.isArray(data) ||
-      (data.length !== 3) || (data[0] !== ctx.marker)
-    ) {
-      return null;
-    }
-
-    return { tag: data[1], state: data[2] as RealmCodecValue };
-  }
-
-  /**
-   * The marker at slot zero of an outer envelope, or `undefined` if what is
-   * there is not one this build implements.
-   *
-   * The one place the envelope's shape is decided, so that the context's
-   * sniffing and the conversion's refusal cannot come to disagree about what
-   * counts as a marker.
-   */
-  static #markerOf(data: unknown): RealmFormatMarker | undefined {
-    if (!Array.isArray(data) || (data.length !== 2)) {
-      return undefined;
-    }
-
-    const marker = data[0];
-
-    return (Array.isArray(marker) && (marker.length === 1) &&
-        (marker[0] === REALM_FORMAT_VERSION))
-      ? marker as unknown as RealmFormatMarker
-      : undefined;
-  }
 }
