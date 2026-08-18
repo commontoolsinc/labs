@@ -457,3 +457,88 @@ Deno.test("rejects incomplete or forged closures included in a commit", async ()
     );
   });
 });
+
+Deno.test("serves a repeat schema reference from the per-engine verification cache", async () => {
+  await withEngine((engine) => {
+    const schema = { type: "string", title: "cache-hit-leaf" } as const;
+    const hash = internSchemaAsTaggedHashString(schema);
+    const carrier = (target: string) => ({
+      linked: {
+        "/": {
+          "link@1": {
+            id: target,
+            path: [],
+            schema: { $ref: `cid:${hash}` },
+          },
+        },
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [setOp(`cid:${hash}`, schema)],
+      }),
+    });
+    // The first stored-backed reference verifies by re-hashing the stored
+    // content and caches the verdict...
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [setOp("of:cache-carrier-1", carrier("of:t1"))],
+      }),
+    });
+    // ...and a repeat reference is served from that cache: the document is
+    // immutable, so its unchanged seq revalidates it without re-hashing.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        operations: [setOp("of:cache-carrier-2", carrier("of:t2"))],
+      }),
+    });
+    assertEquals(read(engine, { id: "of:cache-carrier-2" } as never), {
+      value: carrier("of:t2"),
+    });
+  });
+});
+
+Deno.test("rejects a reference backed by a stored cid: document holding other content", async () => {
+  await withEngine((engine) => {
+    const claimed = { type: "string", title: "impostor-claim" } as const;
+    const claimedHash = internSchemaAsTaggedHashString(claimed);
+    // A cid: install nothing references is admitted without a class check —
+    // the boundary cannot name an unreferenced document's class...
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [
+          setOp(`cid:${claimedHash}`, { type: "boolean", title: "impostor" }),
+        ],
+      }),
+    });
+    // ...but it cannot back a schema reference: satisfaction re-hashes the
+    // stored content against the id the reference claims.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(2, {
+            operations: [
+              setOp("of:impostor-carrier", {
+                linked: {
+                  "/": {
+                    "link@1": {
+                      id: "of:impostor-target",
+                      path: [],
+                      schema: { $ref: `cid:${claimedHash}` },
+                    },
+                  },
+                },
+              }),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "whose stored content does not verify",
+    );
+  });
+});
