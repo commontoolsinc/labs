@@ -21,18 +21,6 @@ import type { AgentsHostTargetDescription } from "./host.ts";
 const AGENT_SESSIONS_DEBUG_CAUSE_PREFIX = "agent-sessions-debug";
 const AGENT_SESSIONS_DEBUG_REGISTRATION_CAUSE =
   "agent-sessions-debug-registration-v1";
-const SUPERSEDED_PIECE_META_FIELDS = [
-  "pattern",
-  "argument",
-  "result",
-  "patternIdentity",
-  "patternSource",
-  "patternRepository",
-  "internal",
-  "schema",
-  "slug",
-] as const;
-
 const SHALLOW_PIECE_LINK_LIST_SCHEMA = internSchema({
   type: "array",
   items: { type: "unknown" },
@@ -49,6 +37,7 @@ const DEBUG_REGISTRATION_SCHEMA = internSchema({
     pieceId: { type: "string" },
     patternIdentity: { type: "string" },
     patternSymbol: { type: "string" },
+    deploymentId: { type: "string" },
     retiredCauses: {
       type: "array",
       items: { type: "string" },
@@ -69,6 +58,7 @@ interface DebugRegistration extends FabricPlainObject {
   pieceId: string;
   patternIdentity: string;
   patternSymbol: string;
+  deploymentId?: string;
   retiredCauses: string[];
 }
 
@@ -195,6 +185,8 @@ function asDebugRegistration(
     typeof candidate.pieceId !== "string" ||
     typeof candidate.patternIdentity !== "string" ||
     typeof candidate.patternSymbol !== "string" ||
+    (candidate.deploymentId !== undefined &&
+      typeof candidate.deploymentId !== "string") ||
     !Array.isArray(candidate.retiredCauses) ||
     candidate.retiredCauses.some((cause) => typeof cause !== "string")
   ) {
@@ -205,6 +197,9 @@ function asDebugRegistration(
     pieceId: candidate.pieceId,
     patternIdentity: candidate.patternIdentity,
     patternSymbol: candidate.patternSymbol,
+    ...(typeof candidate.deploymentId === "string" && {
+      deploymentId: candidate.deploymentId,
+    }),
     retiredCauses: candidate.retiredCauses as string[],
   };
 }
@@ -218,10 +213,57 @@ function debugRegistrationsMatch(
     left.pieceId === right.pieceId &&
     left.patternIdentity === right.patternIdentity &&
     left.patternSymbol === right.patternSymbol &&
+    left.deploymentId === right.deploymentId &&
     left.retiredCauses.length === right.retiredCauses.length &&
     left.retiredCauses.every((cause, index) =>
       cause === right.retiredCauses[index]
     );
+}
+
+function debugRegistrationTargets(
+  registration: DebugRegistration | undefined,
+  cause: string,
+  candidatePieceId: string | undefined,
+  patternRef: { identity: string; symbol: string },
+): boolean {
+  return registration?.cause === cause &&
+    registration.pieceId === candidatePieceId &&
+    registration.patternIdentity === patternRef.identity &&
+    registration.patternSymbol === patternRef.symbol;
+}
+
+function isPieceRunningLocally(
+  manager: PiecesController,
+  piece: Cell<unknown>,
+): boolean {
+  const { space, id, scope } = piece.getAsNormalizedFullLink();
+  const key = `${space}/${scope}/${id}`;
+  for (const runningKey of manager.runtime.runner.cancels.keys()) {
+    if (runningKey === key) return true;
+  }
+  return false;
+}
+
+async function stopAndDrainPieces(
+  manager: PiecesController,
+  pieces: Iterable<Cell<unknown>>,
+): Promise<void> {
+  const failures: unknown[] = [];
+  for (const piece of pieces) {
+    try {
+      manager.runtime.runner.stop(piece);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  try {
+    await manager.runtime.idle();
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "debug view runner cleanup failed");
+  }
 }
 
 async function debugRegistration(
@@ -270,7 +312,10 @@ async function registerDebugPiece(
   piece: Cell<unknown>,
   cause: string,
   patternRef: { identity: string; symbol: string },
+  deploymentId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const [lists, registration] = await Promise.all([
     debugRegistrationLists(defaultPattern),
     debugRegistration(manager),
@@ -296,17 +341,14 @@ async function registerDebugPiece(
     ...retiredPieces,
     ...(precedingPiece === undefined ? [] : [precedingPiece]),
   ];
-  const piecesToRetire = precedingPiece === undefined ? [] : [precedingPiece];
-  await Promise.all(
-    piecesToRetire.map((supersededPiece) =>
-      syncDocumentRoot(manager, supersededPiece)
-    ),
-  );
+  const precedingWasRunningLocally = precedingPiece !== undefined &&
+    isPieceRunningLocally(manager, precedingPiece);
   const nextRegistration: DebugRegistration = {
     cause,
     pieceId: pieceId(piece) ?? "",
     patternIdentity: patternRef.identity,
     patternSymbol: patternRef.symbol,
+    deploymentId,
     retiredCauses: [
       ...new Set([
         ...(registration.value?.retiredCauses ?? []).filter((retiredCause) =>
@@ -319,7 +361,40 @@ async function registerDebugPiece(
   if (!nextRegistration.pieceId) {
     throw new Error("debug view piece has no entity ID");
   }
+  const priorListValues = new Map<
+    "allPieces" | "recentPieces",
+    FabricValue[]
+  >();
+  const removedListValues = new Map<
+    "allPieces" | "recentPieces",
+    FabricValue[]
+  >();
+  signal?.throwIfAborted();
   const { error } = await manager.runtime.editWithRetry((tx) => {
+    const candidateLink = piece.getAsNormalizedFullLink();
+    const candidatePattern = asPatternIdentityRef(tx.readOrThrow({
+      space: candidateLink.space,
+      id: candidateLink.id,
+      path: ["patternIdentity"],
+      ...(candidateLink.scope !== undefined && {
+        scope: candidateLink.scope,
+      }),
+    }));
+    const candidateArgument = tx.readOrThrow({
+      space: candidateLink.space,
+      id: candidateLink.id,
+      path: ["argument"],
+      ...(candidateLink.scope !== undefined && {
+        scope: candidateLink.scope,
+      }),
+    });
+    if (
+      candidatePattern?.identity !== patternRef.identity ||
+      candidatePattern.symbol !== patternRef.symbol ||
+      candidateArgument === undefined
+    ) {
+      throw new Error("debug view piece changed during deployment");
+    }
     const activeRegistration = asDebugRegistration(
       tx.readValueOrThrow(registration.link),
     );
@@ -348,9 +423,16 @@ async function registerDebugPiece(
       if (!Array.isArray(current)) {
         throw new Error(`default pattern ${name} is not an array`);
       }
+      priorListValues.set(name, [...current]);
       const remove = name === "allPieces"
         ? [...piecesToUnregister, piece]
         : piecesToUnregister;
+      removedListValues.set(
+        name,
+        current.filter((value) =>
+          remove.some((target) => areLinksSame(value, target, listWithTx))
+        ),
+      );
       const retained = current.filter((value) =>
         !remove.some((target) => areLinksSame(value, target, listWithTx))
       );
@@ -365,19 +447,6 @@ async function registerDebugPiece(
         changed = true;
       }
     }
-    for (const supersededPiece of piecesToRetire) {
-      const link = supersededPiece.getAsNormalizedFullLink();
-      tx.writeValueOrThrow(link, undefined);
-      for (const field of SUPERSEDED_PIECE_META_FIELDS) {
-        tx.writeOrThrow({
-          space: link.space,
-          id: link.id,
-          path: [field],
-          ...(link.scope !== undefined && { scope: link.scope }),
-        }, undefined);
-      }
-      changed = true;
-    }
     tx.writeValueOrThrow(registration.link, nextRegistration);
     changed = true;
     return changed;
@@ -391,10 +460,165 @@ async function registerDebugPiece(
       cause: error,
     });
   }
-  for (const supersededPiece of piecesToUnregister) {
-    manager.runtime.runner.stop(supersededPiece);
+  let supersededPiecesStopped = false;
+  const stopPreceding = async (): Promise<void> => {
+    if (precedingPiece === undefined) return;
+    await stopAndDrainPieces(manager, [precedingPiece]);
+  };
+  const rollbackForAbort = async (): Promise<void> => {
+    const abortSignal = signal;
+    if (!abortSignal?.aborted) return;
+    let abortError: unknown;
+    try {
+      abortSignal.throwIfAborted();
+    } catch (error) {
+      abortError = error;
+    }
+    let precedingStarted = false;
+    if (
+      supersededPiecesStopped && precedingPiece !== undefined &&
+      precedingWasRunningLocally
+    ) {
+      try {
+        await manager.startPiece(precedingPiece);
+        precedingStarted = true;
+      } catch (startError) {
+        try {
+          await stopPreceding();
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [abortError, startError, cleanupError],
+            "previous debug view restart and cleanup failed",
+          );
+        }
+        throw new AggregateError(
+          [abortError, startError],
+          "previous debug view restart failed",
+        );
+      }
+    }
+    const rollback = await manager.runtime.editWithRetry((tx) => {
+      const activeRegistration = asDebugRegistration(
+        tx.readValueOrThrow(registration.link),
+      );
+      if (!debugRegistrationsMatch(activeRegistration, nextRegistration)) {
+        return false;
+      }
+      for (const [name, list] of lists) {
+        const previous = priorListValues.get(name);
+        const removed = removedListValues.get(name);
+        if (previous === undefined || removed === undefined) {
+          throw new Error(`default pattern ${name} snapshot is missing`);
+        }
+        const listWithTx = list.withTx(tx);
+        const current = listWithTx.getRawUntyped({ frozen: false });
+        if (!Array.isArray(current)) {
+          throw new Error(`default pattern ${name} is not an array`);
+        }
+        const restored = current.filter((value) =>
+          !areLinksSame(value, piece, listWithTx)
+        );
+        const valuesToRestore = [
+          ...removed,
+          ...previous.filter((value) => areLinksSame(value, piece, listWithTx)),
+        ];
+        for (const removedValue of valuesToRestore) {
+          if (
+            restored.some((value) =>
+              areLinksSame(value, removedValue, listWithTx)
+            )
+          ) {
+            continue;
+          }
+          const previousIndex = previous.indexOf(removedValue);
+          const following = previous.slice(previousIndex + 1).find((value) =>
+            restored.some((candidate) =>
+              areLinksSame(candidate, value, listWithTx)
+            )
+          );
+          if (following !== undefined) {
+            const followingIndex = restored.findIndex((candidate) =>
+              areLinksSame(candidate, following, listWithTx)
+            );
+            restored.splice(followingIndex, 0, removedValue);
+            continue;
+          }
+          const preceding = previous.slice(0, previousIndex).findLast((value) =>
+            restored.some((candidate) =>
+              areLinksSame(candidate, value, listWithTx)
+            )
+          );
+          if (preceding === undefined) {
+            restored.push(removedValue);
+            continue;
+          }
+          const precedingIndex = restored.findLastIndex((candidate) =>
+            areLinksSame(candidate, preceding, listWithTx)
+          );
+          restored.splice(precedingIndex + 1, 0, removedValue);
+        }
+        listWithTx.setRawUntyped(restored);
+      }
+      tx.writeValueOrThrow(registration.link, registration.value);
+      return true;
+    });
+    if (rollback.error) {
+      let registrationWasRestored = true;
+      try {
+        registrationWasRestored = debugRegistrationsMatch(
+          (await debugRegistration(manager)).value,
+          registration.value,
+        );
+      } catch {
+        // Registration ownership is unknown. The preceding piece is preserved.
+      }
+      if (precedingStarted && !registrationWasRestored) {
+        try {
+          await stopPreceding();
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [abortError, rollback.error, cleanupError],
+            "debug view rollback and cleanup failed",
+          );
+        }
+      }
+      throw new AggregateError(
+        [abortError, rollback.error],
+        "debug view rollback failed",
+      );
+    }
+    if (!rollback.ok && precedingStarted) {
+      try {
+        await stopPreceding();
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [abortError, cleanupError],
+          "debug view abort cleanup failed",
+        );
+      }
+    }
+    throw abortError;
+  };
+  await rollbackForAbort();
+  let cleanupError: unknown;
+  supersededPiecesStopped = true;
+  try {
+    await stopAndDrainPieces(manager, piecesToUnregister);
+  } catch (error) {
+    cleanupError = error;
   }
-  await manager.runtime.idle();
+  try {
+    await rollbackForAbort();
+  } catch (rollbackError) {
+    if (cleanupError !== undefined) {
+      throw new AggregateError(
+        [cleanupError, rollbackError],
+        "debug view cleanup and rollback failed",
+      );
+    }
+    throw rollbackError;
+  }
+  if (cleanupError !== undefined) throw cleanupError;
 }
 
 export function defaultDebugPatternLocation(): {
@@ -470,10 +694,12 @@ async function deployAgentSessionsDebugViewNow(
     cause,
   );
   const existingRegistration = (await debugRegistration(manager)).value;
-  const pieceWasRegistered = existingRegistration?.cause === cause &&
-    existingRegistration.pieceId === pieceId(piece) &&
-    existingRegistration.patternIdentity === patternRef.identity &&
-    existingRegistration.patternSymbol === patternRef.symbol;
+  const pieceWasRegistered = debugRegistrationTargets(
+    existingRegistration,
+    cause,
+    pieceId(piece),
+    patternRef,
+  );
   const stopStartingPiece = () => manager.runtime.runner.stop(piece);
   if (!pieceWasRegistered) {
     signal?.addEventListener("abort", stopStartingPiece, { once: true });
@@ -483,8 +709,14 @@ async function deployAgentSessionsDebugViewNow(
     signal?.throwIfAborted();
   } catch (error) {
     if (!pieceWasRegistered) {
-      stopStartingPiece();
-      await manager.runtime.idle();
+      try {
+        await stopAndDrainPieces(manager, [piece]);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "debug view startup and cleanup failed",
+        );
+      }
     }
     throw error;
   } finally {
@@ -492,16 +724,45 @@ async function deployAgentSessionsDebugViewNow(
       signal?.removeEventListener("abort", stopStartingPiece);
     }
   }
+  const deploymentId = crypto.randomUUID();
   try {
-    await registerDebugPiece(manager, defaultPattern, piece, cause, patternRef);
+    await registerDebugPiece(
+      manager,
+      defaultPattern,
+      piece,
+      cause,
+      patternRef,
+      deploymentId,
+      signal,
+    );
   } catch (error) {
-    if (!pieceWasRegistered) {
-      manager.runtime.runner.stop(piece);
-      await manager.runtime.idle();
+    let registrationIsOwned = true;
+    try {
+      const activeRegistration = (await debugRegistration(manager)).value;
+      registrationIsOwned = debugRegistrationTargets(
+        activeRegistration,
+        cause,
+        pieceId(piece),
+        patternRef,
+      ) && (activeRegistration?.deploymentId === deploymentId ||
+        (pieceWasRegistered &&
+          activeRegistration?.deploymentId ===
+            existingRegistration?.deploymentId));
+    } catch {
+      // Registration ownership is unknown. The running piece is preserved.
+    }
+    if (!registrationIsOwned) {
+      try {
+        await stopAndDrainPieces(manager, [piece]);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "debug view deployment and cleanup failed",
+        );
+      }
     }
     throw error;
   }
-  signal?.throwIfAborted();
   const id = pieceId(piece);
   if (!id) throw new Error("debug view piece has no entity ID");
   return id;

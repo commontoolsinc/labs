@@ -1473,8 +1473,8 @@ Deno.test("debug deployment replaces a view when its pattern identity changes", 
       false,
       SHALLOW_PIECE_SCHEMA,
     );
-    assertEquals(originalPiece.getRaw(), undefined);
-    assertEquals(originalPiece.getMetaRaw("patternIdentity"), undefined);
+    assertNotEquals(originalPiece.getRaw(), undefined);
+    assertNotEquals(originalPiece.getMetaRaw("patternIdentity"), undefined);
     const alternatePiece = await manager.get(
       alternatePieceId,
       false,
@@ -1671,6 +1671,256 @@ Deno.test("debug deployment preserves a view when its replacement fails", async 
   }
 });
 
+Deno.test("debug replacement stops every superseded local runner", async () => {
+  const session = await createSession({
+    identity,
+    spaceName: `debug-stop-failures-${crypto.randomUUID()}`,
+  });
+  const storageManager = StorageManager.emulate({ as: session.as });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const manager = new PiecesController(session, runtime);
+    await manager.synced();
+    const defaultPattern = await installDefaultPattern(manager);
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: session.space,
+    });
+    const originalPieceId = await deployAgentSessionsDebugView(manager, target);
+    const registration = runtime.getCell(
+      session.space,
+      "agent-sessions-debug-registration-v1",
+    );
+    await registration.sync();
+    const addRetiredResult = await runtime.editWithRetry((tx) => {
+      const cell = registration.withTx(tx);
+      const current = cell.getRawUntyped({ frozen: false });
+      if (typeof current !== "object" || current === null) {
+        throw new Error("debug registration is missing");
+      }
+      cell.setRawUntyped({
+        ...current,
+        retiredCauses: ["agent-sessions-debug:retired-test-piece"],
+      });
+    });
+    if (addRetiredResult.error) throw addRetiredResult.error;
+
+    const originalStop = runtime.runner.stop;
+    let stopCalls = 0;
+    runtime.runner.stop = ((piece) => {
+      stopCalls++;
+      originalStop.call(runtime.runner, piece);
+      if (stopCalls === 1) {
+        throw new Error("retired runner cancellation failed");
+      }
+    }) as typeof runtime.runner.stop;
+    try {
+      const defaultLocation = defaultDebugPatternLocation();
+      await assertRejects(
+        () =>
+          deployAgentSessionsDebugView(manager, target, {
+            rootPath: defaultLocation.rootPath,
+            mainPath: fromFileUrl(
+              new URL("./fixtures/alternate-debug-view.tsx", import.meta.url),
+            ),
+          }),
+        AggregateError,
+        "debug view runner cleanup failed",
+      );
+    } finally {
+      runtime.runner.stop = originalStop;
+    }
+
+    assertEquals(stopCalls, 2);
+    assertEquals(
+      (await registeredPieceIds(defaultPattern, "allPieces")).includes(
+        originalPieceId,
+      ),
+      false,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("debug deployment rolls back an aborted registration", async () => {
+  const session = await createSession({
+    identity,
+    spaceName: `debug-aborted-registration-${crypto.randomUUID()}`,
+  });
+  const storageManager = StorageManager.emulate({ as: session.as });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const manager = new PiecesController(session, runtime);
+    await manager.synced();
+    const defaultPattern = await installDefaultPattern(manager);
+    const target = await AgentFabricTarget.open({
+      runtime,
+      spaceDid: session.space,
+    });
+    const originalPieceId = await deployAgentSessionsDebugView(
+      manager,
+      target,
+    );
+    const defaultLocation = defaultDebugPatternLocation();
+    const alternateLocation = {
+      rootPath: defaultLocation.rootPath,
+      mainPath: fromFileUrl(
+        new URL("./fixtures/alternate-debug-view.tsx", import.meta.url),
+      ),
+    };
+    const recentPieces = defaultPattern.asSchema(undefined)
+      .key("recentPieces")
+      .resolveAsCell();
+    const abortRegistration = async (
+      location: ReturnType<typeof defaultDebugPatternLocation>,
+      options: {
+        addCandidateToRecent?: boolean;
+        commitNumber?: number;
+        abortAfterCommit?: boolean;
+      } = {},
+    ): Promise<void> => {
+      const commitEntered = Promise.withResolvers<void>();
+      const releaseCommit = Promise.withResolvers<void>();
+      const controller = new AbortController();
+      const originalStartPiece = manager.startPiece;
+      const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+      let candidatePiece: Cell<unknown> | undefined;
+      let interceptRegistrationCommit = false;
+      let commitCount = 0;
+      manager.startPiece = (async (piece, options) => {
+        await originalStartPiece.call(manager, piece, options);
+        if (typeof piece !== "string") candidatePiece = piece;
+        interceptRegistrationCommit = true;
+      }) as typeof manager.startPiece;
+      runtime.editWithRetry = (async (action, maxRetries) => {
+        if (interceptRegistrationCommit) commitCount++;
+        const shouldIntercept = commitCount === (options.commitNumber ?? 1);
+        const result = await originalEditWithRetry((transaction) => {
+          const result = action(transaction);
+          if (shouldIntercept) {
+            const originalCommit = transaction.commit.bind(transaction);
+            transaction.commit = async () => {
+              commitEntered.resolve();
+              await releaseCommit.promise;
+              const result = await originalCommit();
+              if (options.abortAfterCommit) {
+                controller.abort(new Error("debug deployment cancelled"));
+              }
+              return result;
+            };
+          }
+          return result;
+        }, maxRetries);
+        if (shouldIntercept && options.addCandidateToRecent && !result.error) {
+          const candidate = candidatePiece;
+          if (candidate === undefined) {
+            throw new Error("candidate piece was not started");
+          }
+          const concurrentUpdate = await originalEditWithRetry(
+            (transaction) => {
+              const list = recentPieces.withTx(transaction);
+              const current = list.getRawUntyped({ frozen: false });
+              if (!Array.isArray(current)) {
+                throw new Error("recentPieces is not an array");
+              }
+              list.setRawUntyped([
+                ...current,
+                candidate.getAsLink({ base: list, includeSchema: true }),
+              ]);
+            },
+          );
+          if (concurrentUpdate.error) throw concurrentUpdate.error;
+        }
+        return result;
+      }) as typeof runtime.editWithRetry;
+      try {
+        const deployment = deployAgentSessionsDebugView(
+          manager,
+          target,
+          location,
+          controller.signal,
+        );
+        await commitEntered.promise;
+        if (!options.abortAfterCommit) {
+          controller.abort(new Error("debug deployment cancelled"));
+        }
+        releaseCommit.resolve();
+        await assertRejects(
+          () => deployment,
+          Error,
+          "debug deployment cancelled",
+        );
+      } finally {
+        releaseCommit.resolve();
+        manager.startPiece = originalStartPiece;
+        runtime.editWithRetry = originalEditWithRetry;
+      }
+    };
+
+    const originalPiece = await manager.get(originalPieceId, false);
+    await target.publish([{
+      source: sourceDescriptor(),
+      sessions: [sessionSnapshot(1)],
+      errors: [],
+      complete: true,
+    }]);
+    await abortRegistration(alternateLocation, {
+      addCandidateToRecent: true,
+      abortAfterCommit: true,
+    });
+    assertEquals(
+      await registeredPieceIds(defaultPattern, "allPieces"),
+      [originalPieceId],
+    );
+    assertEquals(
+      await registeredPieceIds(defaultPattern, "recentPieces"),
+      [],
+    );
+    assertEquals(await originalPiece.result.get(["sessionCount"]), 1);
+
+    const addRecentResult = await runtime.editWithRetry((transaction) => {
+      const list = recentPieces.withTx(transaction);
+      const current = list.getRawUntyped({ frozen: false });
+      if (!Array.isArray(current)) {
+        throw new Error("recentPieces is not an array");
+      }
+      list.setRawUntyped([
+        ...current,
+        originalPiece.getCell().getAsLink({
+          base: list,
+          includeSchema: true,
+        }),
+      ]);
+    });
+    if (addRecentResult.error) throw addRecentResult.error;
+    await abortRegistration(defaultLocation);
+    assertEquals(
+      await registeredPieceIds(defaultPattern, "recentPieces"),
+      [originalPieceId],
+    );
+
+    await target.publish([{
+      source: sourceDescriptor(),
+      sessions: [sessionSnapshot(1), sessionSnapshot(2)],
+      errors: [],
+      complete: true,
+    }]);
+    await runtime.settled();
+    assertEquals(await originalPiece.result.get(["sessionCount"]), 2);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("debug deployment rejects stale registration across runtimes", async () => {
   const server = newSharedServer();
   const spaceName = `debug-registration-race-${crypto.randomUUID()}`;
@@ -1800,6 +2050,102 @@ Deno.test("debug deployment rejects stale registration across runtimes", async (
   } finally {
     await readerRuntime.dispose();
     await readerStorage.close();
+    await server.close();
+  }
+});
+
+Deno.test("debug replacement preserves a piece owned by another runtime", async () => {
+  const server = newSharedServer();
+  const spaceName = `debug-cross-runtime-replacement-${crypto.randomUUID()}`;
+  const firstSession = await createSession({ identity, spaceName });
+  const firstStorage = SharedServerStorageManager.connectTo(server, {
+    as: firstSession.as,
+  });
+  const firstRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: firstStorage,
+  });
+  try {
+    const firstManager = new PiecesController(firstSession, firstRuntime);
+    await firstManager.synced();
+    await installDefaultPattern(firstManager);
+    const firstTarget = await AgentFabricTarget.open({
+      runtime: firstRuntime,
+      spaceDid: firstSession.space,
+    });
+    const originalPieceId = await deployAgentSessionsDebugView(
+      firstManager,
+      firstTarget,
+    );
+    await firstStorage.synced();
+
+    const secondSession = await createSession({ identity, spaceName });
+    const secondStorage = SharedServerStorageManager.connectTo(server, {
+      as: secondSession.as,
+    });
+    const secondRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: secondStorage,
+    });
+    try {
+      const secondManager = new PiecesController(secondSession, secondRuntime);
+      await secondManager.synced();
+      const secondTarget = await AgentFabricTarget.open({
+        runtime: secondRuntime,
+        spaceDid: secondSession.space,
+      });
+      const defaultLocation = defaultDebugPatternLocation();
+      await deployAgentSessionsDebugView(secondManager, secondTarget, {
+        rootPath: defaultLocation.rootPath,
+        mainPath: fromFileUrl(
+          new URL("./fixtures/alternate-debug-view.tsx", import.meta.url),
+        ),
+      });
+
+      await firstTarget.publish([{
+        source: sourceDescriptor(),
+        sessions: [sessionSnapshot(1)],
+        errors: [],
+        complete: true,
+      }]);
+      await firstRuntime.settled();
+      const originalPiece = await firstManager.get(originalPieceId, false);
+      assertEquals(await originalPiece.result.get(["sessionCount"]), 1);
+      await firstStorage.synced();
+      await secondStorage.synced();
+
+      assertEquals(
+        await deployAgentSessionsDebugView(secondManager, secondTarget),
+        originalPieceId,
+      );
+
+      await deployAgentSessionsDebugView(secondManager, secondTarget, {
+        rootPath: defaultLocation.rootPath,
+        mainPath: fromFileUrl(
+          new URL("./fixtures/alternate-debug-view.tsx", import.meta.url),
+        ),
+      });
+      await firstTarget.publish([{
+        source: sourceDescriptor(),
+        sessions: [sessionSnapshot(1), sessionSnapshot(2)],
+        errors: [],
+        complete: true,
+      }]);
+      await firstRuntime.settled();
+      assertEquals(await originalPiece.result.get(["sessionCount"]), 2);
+      await firstStorage.synced();
+      await secondStorage.synced();
+      assertEquals(
+        await deployAgentSessionsDebugView(secondManager, secondTarget),
+        originalPieceId,
+      );
+    } finally {
+      await secondRuntime.dispose();
+      await secondStorage.close();
+    }
+  } finally {
+    await firstRuntime.dispose();
+    await firstStorage.close();
     await server.close();
   }
 });

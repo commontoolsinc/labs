@@ -74,7 +74,7 @@ export class RunningAgentsHost {
   async #stop(reason: string): Promise<void> {
     const failures: unknown[] = [];
     await this.host.stop(reason).catch((error) => failures.push(error));
-    await this.runtime.settled().catch((error) => failures.push(error));
+    await this.runtime.settled(Infinity).catch((error) => failures.push(error));
     await this.runtime.storageManager.synced().catch((error) =>
       failures.push(error)
     );
@@ -214,7 +214,7 @@ export async function startAgentsHost(
           cleanupFailures.push(result.reason);
         }
       }
-      await fabric?.runtime.settled().catch((settledError) => {
+      await fabric?.runtime.settled(Infinity).catch((settledError) => {
         cleanupFailures.push(settledError);
       });
       await fabric?.runtime.dispose().catch((disposeError) => {
@@ -227,7 +227,7 @@ export async function startAgentsHost(
       await host?.stop(stopReason).catch((stopError) => {
         cleanupFailures.push(stopError);
       });
-      await fabric?.runtime.settled().catch((settledError) => {
+      await fabric?.runtime.settled(Infinity).catch((settledError) => {
         cleanupFailures.push(settledError);
       });
       await fabric?.runtime.dispose().catch((disposeError) => {

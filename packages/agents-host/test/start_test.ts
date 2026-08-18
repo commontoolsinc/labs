@@ -14,8 +14,8 @@ Deno.test("RunningAgentsHost settles runtime work before disposal", async () => 
   } as unknown as AgentsHost;
   const fabric = {
     runtime: {
-      settled: () => {
-        events.push("runtime.settled");
+      settled: (rounds?: number) => {
+        events.push(`runtime.settled:${rounds}`);
         return Promise.resolve();
       },
       storageManager: {
@@ -49,7 +49,7 @@ Deno.test("RunningAgentsHost settles runtime work before disposal", async () => 
 
   assertEquals(events, [
     "host.stop",
-    "runtime.settled",
+    "runtime.settled:Infinity",
     "storage.synced",
     "runtime.dispose",
     "lock.release",
