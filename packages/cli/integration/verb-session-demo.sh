@@ -185,6 +185,10 @@ pending() {
 }
 
 printf '%s\n' "${B}A work tracker, driven entirely through cf${N}"
+say "Three words carry the session. A pattern is TypeScript declaring state"
+say "and verbs. Deploying one makes a piece — a running instance. Both live in"
+say "a space, the shared durable place every command below names with -s."
+say ""
 say "space $SPACE · nothing here was written for this pattern"
 say "CF_API_URL=$CF_API_URL and CF_IDENTITY are exported; everything else you see"
 say "is the whole command."
@@ -193,6 +197,9 @@ act "1 · Arrive by name"
 say "A slug is a name in the space: the board is 'board' from here on, and the"
 say "fid this command prints is never typed again."
 run cf piece new "$FIXTURE" -s "$SPACE" --slug board
+say "The name is discoverable, not folklore: the space lists its slugs, so a"
+say "session in a space someone else populated starts from this same command."
+run cf piece slugs -s "$SPACE"
 
 act "2 · Ask what it is, and what it can do"
 say "One command is the piece's man page: name, purpose, state, inputs, and"
@@ -202,6 +209,9 @@ run cf piece describe -s "$SPACE" --piece board
 say "And the callable rows again as a table, the shape a client matches"
 say "against. Both are derived from the deployed pattern, not from a manifest."
 run cf piece verbs -s "$SPACE" --piece board
+say "In the table, ON names the cell a verb lives on and MARKS flags wrapper"
+say "or deprecated rows. The listings all take --json for tooling — the tables"
+say "are for the room; reads and calls already answer in JSON."
 
 act "3 · Ask what a verb wants"
 say "Flags, types, required-ness and result all come from the author's TypeScript."
