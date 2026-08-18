@@ -407,6 +407,11 @@ const defaultForAbsentValue = (
  * the reader's shape and the link's own. `value` is the container read at that
  * link, which the caller has already taken.
  *
+ * The view describes the instant it is built at: the keys `value` carried, an
+ * array's length and iteration order, and every value below, which resolve
+ * against the epoch taken here rather than against whatever the reader writes
+ * afterwards. Taking the read again is what fixes a later instant.
+ *
  * At the root a mismatch is `undefined` — the answer an eager read gives for
  * the same data. Below it, a mismatch throws.
  */
@@ -535,6 +540,11 @@ export function materializeSchemaView(
 
   const viewLink: NormalizedFullLink = { ...link, schema };
 
+  // The instant this view describes. Taken even where the transaction has not
+  // written yet — that is the ordinary case, and it is the asking that puts a
+  // later write on notice to keep the root it displaces.
+  const epoch = tx.issueReadEpoch();
+
   if (Array.isArray(value)) {
     return createArrayView(
       runtime,
@@ -543,6 +553,7 @@ export function materializeSchemaView(
       value,
       cfcLabelView,
       synced,
+      epoch,
     );
   }
 
@@ -566,7 +577,15 @@ export function materializeSchemaView(
     }
   }
 
-  return createObjectView(runtime, tx, viewLink, value, cfcLabelView, synced);
+  return createObjectView(
+    runtime,
+    tx,
+    viewLink,
+    value,
+    cfcLabelView,
+    synced,
+    epoch,
+  );
 }
 
 /** The keys a reader sees: the data's own keys the schema selects, plus any
@@ -662,10 +681,11 @@ function createObjectView(
   value: Record<string, FabricValue>,
   cfcLabelView: CfcLabelView | undefined,
   synced: boolean,
+  epoch: number | undefined,
 ): unknown {
   const schema = link.schema;
   const required = new Set(requiredKeys(schema));
-  const childOrAbsent = (key: string): unknown => {
+  const resolveChild = (key: string): unknown => {
     const narrowed = childSchema(schema, key);
     if (isExcluded(narrowed)) return undefined;
     if (!Object.hasOwn(value, key)) {
@@ -706,6 +726,22 @@ function createObjectView(
       // the reader back when the data arrives.
       tx.clearSchemaRefusal(error);
       return ABSENT;
+    }
+  };
+
+  // Every read this view takes goes through here, so this is where it steps
+  // into the instant it describes. Before the transaction's first write there
+  // is nothing to step into — every epoch names the same root — so the common
+  // case pays one boolean and no more. Entered by hand rather than around a
+  // callback: a reader walking a large value touches this per property, and a
+  // callback would allocate a closure each time.
+  const childOrAbsent = (key: string): unknown => {
+    if (!tx.hasWrites()) return resolveChild(key);
+    const previous = tx.enterReadEpoch(epoch);
+    try {
+      return resolveChild(key);
+    } finally {
+      tx.exitReadEpoch(previous);
     }
   };
 
@@ -766,9 +802,10 @@ function createArrayView(
   value: FabricValue[],
   cfcLabelView: CfcLabelView | undefined,
   synced: boolean,
+  epoch: number | undefined,
 ): unknown {
   const schema = link.schema;
-  const element = (index: number): unknown => {
+  const resolveElement = (index: number): unknown => {
     const key = String(index);
     const itemSchema = childSchema(schema, key);
     const item = value[index];
@@ -810,6 +847,19 @@ function createArrayView(
       );
     }
     return readChildAt(runtime, tx, slotLink, [key], cfcLabelView, synced);
+  };
+
+  // The array's counterpart to the object view's gate: every element read steps
+  // into the instant this view describes, and skips the step entirely until the
+  // transaction has written. See the note there for why it is entered by hand.
+  const element = (index: number): unknown => {
+    if (!tx.hasWrites()) return resolveElement(index);
+    const previous = tx.enterReadEpoch(epoch);
+    try {
+      return resolveElement(index);
+    } finally {
+      tx.exitReadEpoch(previous);
+    }
   };
 
   // A read-only array method runs against element views built on demand. The
