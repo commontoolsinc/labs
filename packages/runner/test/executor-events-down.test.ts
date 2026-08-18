@@ -40,6 +40,7 @@ import {
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { Cell } from "../src/cell.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -61,7 +62,14 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
  * settle in EVERY cycle (empty ones included), so an unconditional gate
  * would catch some idle cycle already in flight and starve the drain
  * the test needs — the predicate lets exactly the cycle that SEALED the
- * watched state hang. Undefined everywhere else. */
+ * watched state hang. Undefined everywhere else.
+ *
+ * The second seam, the drain's SYNC gate (`syncGate` / `syncGateWhen`,
+ * the seal→outcome-window pin): the serving drain awaits the sidecar
+ * doc's `syncCell` BEFORE any entry's in-flight guard check, so a drain
+ * parked here (after the real sync — the doc IS synced; only the drain's
+ * continuation is held) reaches the guard check exactly when the test
+ * lets it. `syncGateWhen` receives the synced doc's id. */
 class GatedStorageManager extends EmulatedStorageManager {
   static override connectTo(
     server: MemoryV2Server.Server,
@@ -72,12 +80,32 @@ class GatedStorageManager extends EmulatedStorageManager {
 
   settleGate: Promise<void> | undefined;
   settleGateWhen: (() => boolean) | undefined;
+  syncGate: Promise<void> | undefined;
+  syncGateWhen: ((id: string) => boolean) | undefined;
+  /** How many syncs the sync gate has parked (a pin's evidence that a
+   * drain WAS held in the window it constructs). */
+  syncGateHits = 0;
 
   override async inputSynced(): Promise<void> {
     await super.inputSynced();
     if (this.settleGate !== undefined && (this.settleGateWhen?.() ?? true)) {
       await this.settleGate;
     }
+  }
+
+  override async syncCell<T>(
+    cell: Cell<T>,
+    options?: Parameters<EmulatedStorageManager["syncCell"]>[1],
+  ): Promise<Cell<T>> {
+    const synced = await super.syncCell(cell, options);
+    if (
+      this.syncGate !== undefined &&
+      (this.syncGateWhen?.(cell.getAsNormalizedFullLink().id) ?? true)
+    ) {
+      this.syncGateHits += 1;
+      await this.syncGate;
+    }
+    return synced;
   }
 }
 
@@ -478,6 +506,177 @@ describe("Phase 3 events-down (serving side)", () => {
       id: argument.getAsNormalizedFullLink().id,
     });
     expect((doc?.value as { value?: number })?.value).toBe(1);
+    cancelDemand();
+  });
+
+  it("the guard holds through the SEAL→OUTCOME window (stage C tuning; self-review finding 1): a re-drain that reaches the entry AFTER its copy's consequence has SEALED into a wave the store has not yet committed skips it — the copy is released by the wave OUTCOME, never at seal (mutation: release at the seal → that re-drain queues a second copy: processed 2, value 2)", async () => {
+    // The window the exactly-once pin above cannot see (it passes with
+    // EITHER release point): the copy's mark rides an uncommitted wave
+    // while the entry is still pending in the store, and a re-drain
+    // whose guard check lands in that window must still skip. Held
+    // deterministically here: the re-drain is parked at the sidecar
+    // sync (which the drain awaits BEFORE any entry's guard check) until
+    // the copy's consequence is visible SEALED on the serving overlay
+    // and — witnessed — NOT in the store; then the drain proceeds to the
+    // check.
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "sealwindow-arg",
+      result: "sealwindow-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost({ flushDeadlineMs: 100, idleParkMs: 600_000 });
+    {
+      const poke = clientRuntime.getCell<{ n: number }>(
+        space,
+        "sealwindow-activate",
+        undefined,
+      );
+      const tx = clientRuntime.edit();
+      poke.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const bootSeq = Engine.serverSeq(engine);
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= bootSeq,
+      "the boot serve to settle",
+      15_000,
+    );
+    // The serving-side view of the consequence doc: a SEALED write is
+    // visible through it (the open wave's overlay) before the store
+    // holds it. Synced before the fire.
+    const serving = servingRuntime!;
+    const servingArg = serving.getCell<{ value: number }>(
+      space,
+      "sealwindow-arg",
+      undefined,
+    );
+    await servingArg.sync();
+    const argId = argument.getAsNormalizedFullLink().id;
+    const storedValue = (): number | undefined =>
+      (Engine.read(engine, { id: argId })?.value as
+        | { value?: number }
+        | undefined)?.value;
+    expect(storedValue()).toBe(0);
+
+    // The same 1.2-s synthetic walk as above, ahead of the fire: the
+    // copy's dispatch queues BEHIND it (events run at the next execute
+    // pass), the honest deadline cuts cycles meanwhile, and every cut
+    // cycle re-drains the still-pending entry.
+    const trigger = serving.getCell<{ value: number }>(
+      space,
+      "sealwindow-walk-trigger",
+      undefined,
+    );
+    const outs: Cell<{ step: number }>[] = [];
+    for (let step = 0; step < 30; step++) {
+      const out = serving.getCell<{ step: number }>(
+        space,
+        `sealwindow-walk-out-${step}`,
+        undefined,
+      );
+      outs.push(out);
+      const walk = (tx: IExtendedStorageTransaction): void => {
+        trigger.withTx(tx).get();
+        const until = performance.now() + 40;
+        while (performance.now() < until) {
+          // spin
+        }
+        out.withTx(tx).set({ step });
+      };
+      serving.scheduler.register(walk, undefined, { isEffect: true });
+    }
+    // The walk is under way (its first step sealed) before the fire, so
+    // the copy is queued mid-walk, never ahead of it.
+    await waitUntil(() => outs[0].get() !== undefined, "the walk to start");
+
+    // The sync gate: engaged for RE-drains only — the drain that queues
+    // the copy counts it at its end (`processed`), so the first drain
+    // passes and every later one parks after its sidecar sync.
+    const gate = Promise.withResolvers<void>();
+    servingManager!.syncGate = gate.promise;
+    servingManager!.syncGateWhen = (id) =>
+      id.startsWith("of:stream-events:") &&
+      host!.stats().events.processed >= 1;
+    let sidecarId: string;
+    try {
+      result.key("bump").send({});
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => sidecarIdsIn(engine).length === 1,
+        "the event append to land",
+      );
+      sidecarId = sidecarIdsIn(engine)[0];
+      await waitUntil(
+        () => host!.stats().events.processed === 1,
+        "the copy to be queued once",
+      );
+      // The copy runs after the walk and its consequence SEALS — visible
+      // on the serving overlay while the store still holds the pre-fire
+      // value and the entry is unconsequenced: the seal→outcome window
+      // is open, and a re-drain is parked in it (the gate was hit).
+      await waitUntil(
+        () => (servingArg.key("value").get() as number | undefined) === 1,
+        "the copy's consequence to SEAL into the open wave",
+        20_000,
+      );
+      expect(storedValue()).toBe(0);
+      const sealedEntry = (Engine.read(engine, { id: sidecarId })
+        ?.value as StreamEventsDocValue).entries![0];
+      expect(sealedEntry.consequenced).not.toBe(true);
+      expect(servingManager!.syncGateHits).toBeGreaterThanOrEqual(1);
+      expect(host!.stats().events.processed).toBe(1);
+      // Let the parked re-drain reach the entry's guard check now — copy
+      // sealed, wave uncommitted.
+      gate.resolve();
+    } finally {
+      gate.resolve();
+      servingManager!.syncGate = undefined;
+      servingManager!.syncGateWhen = undefined;
+    }
+
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        return value?.entries?.[0]?.consequenced === true;
+      },
+      "the entry to consequence",
+      20_000,
+    );
+    // Let any duplicate copy that was queued run its course before the
+    // negative assertions.
+    await serving.idle();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await serving.idle();
+    const entry = (Engine.read(engine, { id: sidecarId })
+      ?.value as StreamEventsDocValue).entries![0];
+    const stats = host.stats();
+    // THE PIN: the re-drain that reached the check inside the window
+    // SKIPPED the sealed copy (the guard held it `marked` until the wave
+    // outcome) — one delivery, ONE consequence commit, value 1. Released
+    // at the seal instead, that re-drain queues the second copy:
+    // processed 2, value 2.
+    expect(stats.events.appended).toBe(1);
+    expect(stats.events.processed).toBe(1);
+    expect(stats.events.drainInFlightSkips).toBeGreaterThanOrEqual(1);
+    const carrying = (engine.database.prepare(
+      `SELECT seq, consequence_of FROM "commit"
+       WHERE class = 'derived' AND consequence_of IS NOT NULL`,
+    ).all() as Array<{ seq: number; consequence_of: string }>).filter((
+      row,
+    ) => row.consequence_of.includes(entry.eventId));
+    expect(carrying.length).toBe(1);
+    expect(storedValue()).toBe(1);
     cancelDemand();
   });
 

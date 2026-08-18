@@ -15,13 +15,13 @@
 //   (exhausted) wave within ~one step of the deadline, not after the whole
 //   walk. Mutation (the yield removed from settle.ts) → the first commit
 //   lands only after the full 1.2 s → RED.
-// - (ii) MID-WAVE RENEW: the same walk with a 600-ms lease TTL, the renew
-//   TIMER inert (600 s) and a 5-s deadline — the wave outlives the TTL
-//   twice over and still COMMITS under a live lease, because the yield
-//   observer renewed it mid-wave; `lease.lost` stays 0 and the lease row's
-//   expiry moved during the wave. Mutation (the observer's renew removed,
-//   or the yield removed) → the lease lapses at 600 ms and the wave's
-//   commit is refused at admission → RED.
+// - (ii) MID-WAVE RENEW: a 45-step (1.8-s) walk with a 900-ms lease TTL,
+//   the renew TIMER inert (600 s) and a 5-s deadline — the wave outlives
+//   the TTL twice over and still COMMITS under a live lease, because the
+//   yield observer renewed it mid-wave; `lease.lost` stays 0 and the
+//   lease row's expiry moved during the wave. Mutation (the observer's
+//   renew removed, or the yield removed) → the lease lapses at 900 ms and
+//   the wave's commit is refused at admission → RED.
 // - (iii) POSTURE GATE: a runtime without `servingPosture` constructs no
 //   yielder — the OFF arm and flag-ON clients keep their settle loops'
 //   exact microtask shape.

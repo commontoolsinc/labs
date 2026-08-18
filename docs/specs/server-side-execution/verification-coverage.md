@@ -2150,7 +2150,13 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   (MINOR-3) the receipt-race divert is PINNED structurally: zero
   authored-class commits touch the served navigation's target doc
   (the divert-neutralization probe that left the full runner suite
-  green now goes red);
+  green now goes red) — NOTE (2026-08-18, the stage-C tuning
+  independent review): this pin FLAKES under load, PRE-EXISTING and
+  not the tuning trio's — its 20-s `waitUntil` for the served intent
+  to land times out at 1-min load ≈ 5 (the fan-out-B base tip 2/20,
+  the trio's tip 2/16, ≈10 %); a sweep should read a red here as the
+  wait budget, not the divert, until the budget or the wake is
+  addressed;
   (MINOR-4) the `locallyPresent` suppression gate deleted — see
   (vii) above;
   (MINOR-5) same-principal two-session isolation pinned BOTH
@@ -3230,7 +3236,13 @@ supply; OW29/OW32/OW34 closed):
   (fresh store per run, ON binary posture-verified via `/api/meta` +
   `servingLoop` present, load recorded, NO configured LLM model — the
   attribution found the 08-17 daytime greens masked by exactly that
-  churn):**
+  churn). Provenance: the figures below are the FINAL binaries' — ON
+  `a2d9a2b7…` / OFF `e8d8ae60…`, both built from the PR tip
+  `2e9d86478` — with the interim reps (`a9534d18…` ON, `6ac8a606…` OFF,
+  and earlier scratch builds) kept where they add evidence and labeled
+  as such; this register's first cut (`5c296cefe`) carried the interim
+  figures alone and was reconciled 2026-08-18 by the independent
+  review's fix batch:**
   - **T1 — one CFC flow-label probe per commit** (`cfc/prepare.ts`
     `flowLabelWorkExists`, evaluated by both `Runtime.prepareTxForCommit`
     and the commit chokepoint on the same unprepared, not-yet-relevant
@@ -3247,18 +3259,23 @@ supply; OW29/OW32/OW34 closed):
     never memoized; both arms) with mutations (memo disabled → red;
     read-bump removed → the invalidation pin red). Re-measured, note
     create n=20 (`default-app.test.ts`, `CF_NOTE_CREATE_TIMING_SERIES=20`):
-    ON createToView p50 **4 224 / 4 361 ms** (two reps, loads 3.3 / 3.0)
-    vs the attribution's baseline **8 927 / 5 841 ms**; p95 **8 165 /
-    7 358 ms** vs **23 335 / 26 451**; the series completed n=20 in
-    253 / 227 s (baseline 502 s, and a 780-s cap hit at note 18); the
-    adjacent OFF control (OFF binary from the same tip, load 3.6)
-    createToView p50 **1 129 ms** / p95 1 236 — inside the baseline OFF
-    band (1 085–1 171 / 1 328–1 496): the OFF arm's timing is unchanged.
-    ON/OFF ratio 3.7× (was 5.4–8.2×). The per-note growth is still
-    monotone (1.2 → 14.9 s at note 20): the O(events²) intent-tracking
-    term is the design half's, as predicted; the console-gate red on the
-    ON reps is the pre-existing `splitDefinitions` error the
-    attribution's §6 records, unrelated to timing.
+    ON createToView p50 **5 758 / 3 838 ms** on the FINAL binary
+    (`a2d9a2b7…`, FN1/FN2, loads 6.0 / 5.1) and **4 224 / 4 361 ms** on
+    the interim `a9534d18…` (N1/N2, loads 3.3 / 3.0) vs the
+    attribution's baseline **8 927 / 5 841 ms**; p95 **10 003 / 9 908 ms**
+    (final) and **8 165 / 7 358 ms** (interim) vs **23 335 / 26 451**;
+    the series completed n=20 in 292 / 229 s (final) and 253 / 227 s
+    (interim) — every rep — vs 502 s and a 780-s cap hit at note 18; the
+    adjacent OFF controls (OFF binaries from the same tips: final
+    `e8d8ae60…` at load 5.8, interim `6ac8a606…` at load 3.6)
+    createToView p50 **1 205 / 1 129 ms**, p95 1 447 / 1 236 — inside the
+    baseline OFF band (1 085–1 171 / 1 328–1 496): the OFF arm's timing
+    is unchanged. ON/OFF ratio 3.2–4.8× (was 5.4–8.2×). The per-note
+    growth is still monotone (1.2 → 14.9 s at note 20 on the interim
+    reps): the O(events²) intent-tracking term is the design half's, as
+    predicted; the console-gate red on some ON reps is the pre-existing
+    `splitDefinitions` error the attribution's §6 records, unrelated to
+    timing.
   - **T2 — retirement on ARRIVAL, and the late-echo rule** (the
     attribution's §4: a correctly served + pushed derived value held 48 s
     by the client's overlay). (a) The owed arrival re-sweep LANDED: the
@@ -3289,7 +3306,11 @@ supply; OW29/OW32/OW34 closed):
     evidence, not witnessed by a client trace (the report's "last
     inch"): the re-measured runs never reproduced the late dispatch
     (`overlayLateEchoDrops` 0), so the rule's live firing is unobserved;
-    its unit pin covers the mechanism. The rule reaches the late echo's
+    its unit pin covers the mechanism. The rule's sentence in
+    speculation.md §4 step 2 is DATED (2026-08-18), not RULED —
+    **pending owner ratification** (#5969 had called it a candidate
+    rule, owner call; it landed here as the retirement condition the
+    step already states). The rule reaches the late echo's
     client CASCADE too (a child echo whose `parentEventId` is the jobless
     intent, and its children), and a dropped late echo's enactable
     effects are owned and not enacted (the closed-overlay arm's shape).
@@ -3299,10 +3320,12 @@ supply; OW29/OW32/OW34 closed):
     removed → the entry stands; the trigger-not-relaxation scripted pin;
     the late-echo rule scripted with its mutation). Re-measured, the
     two-browsers lockdown gate at night-like conditions (no LLM model,
-    loads 2.2–6.5): **GREEN 10/10** — 7/7 on the final binary
-    (`a9534d18…`, G3–G9: 30–58 s walls) + I1 (instrumented, byte-equal
-    code) + G1/G2 on interim builds — vs the attribution's 5 stalls in 12
-    night attempts; per browser, `overlayArrivalSweeps` 15–25 per run
+    loads 2.2–6.5): **GREEN 16/16** — 6/6 on the FINAL binary
+    (`a2d9a2b7…`, F10–F15: 36–43 s walls), 7/7 on the interim
+    `a9534d18…` (G3–G9: 31–58 s walls), I1 (instrumented, byte-equal
+    code) and G1/G2 on earlier interim builds — vs the attribution's 5
+    stalls in 12 night attempts; per browser, `overlayArrivalSweeps`
+    14–25 per run
     (the wake fires routinely — served values now arrive decoupled from W
     as the ordinary shape), `overlayLateEchoDrops` 0 (the late dispatch
     did not recur: Alice's `ipc/runtime:idle` max fell to 0.66–2.3 s per
@@ -3333,16 +3356,18 @@ supply; OW29/OW32/OW34 closed):
     TTL/3 without a renewal (`leaseTtlMs` policy knob for tests). Pinned:
     `executor-cooperative-yield.test.ts` — (i) a 1.2-s synthetic walk
     under a 100-ms deadline commits its first exhausted wave in < 600 ms
-    (mutation: yield removed → 1 239 ms, red); (ii) a wave outliving a
-    600-ms TTL twice over commits under a live lease with the timer inert
-    (mutation: renew-on-yield removed → the commit is refused, red);
-    (iii) posture gate; unit. Live (I1, instrumented scratch build):
-    deadline lateness on exhausted cycles p50 **25 ms**, p90 152, max
-    399 ms (was p50 125 / p90 443 / max 1 155 on the note run, and
-    seconds on chat event waves); renew gaps p50 **5 020 ms**, max 5 120
-    (was p50 5.0–7.9 s, max 10.0 s); `lease.lost` **0** in all 13
-    re-measured runs; `wavesBudgetExhausted` now an honest count
-    (140–210 per chat run vs 29 — it counts every cut cycle). Its
+    (mutation: yield removed → 1 239 ms, red); (ii) a 45-step, 1.8-s
+    walk outliving a 900-ms TTL twice over commits under a live lease
+    with the timer inert (mutation: renew-on-yield removed → the commit
+    is refused, red); (iii) posture gate; unit. Live (I1, instrumented
+    scratch build): deadline lateness on exhausted cycles p50 **25 ms**,
+    p90 152, max 399 ms (was p50 125 / p90 443 / max 1 155 on the note
+    run, and seconds on chat event waves); renew gaps p50 **5 020 ms**,
+    max 5 120 (was p50 5.0–7.9 s, max 10.0 s); `lease.lost` **0** in
+    all 22 re-measured runs (the 16 gate runs and the 4 ON note runs hold
+    leases; the 2 OFF note controls hold none); `wavesBudgetExhausted`
+    now an honest count (117–210 per chat run vs 29 — it counts every
+    cut cycle). Its
     COMPANION, forced by honesty: with cycles cut before a drained event
     ran, the post-commit re-arm re-drained the still-pending entry every
     cycle and queued a second copy each time — G1 (pre-guard) showed
@@ -3362,6 +3387,16 @@ supply; OW29/OW32/OW34 closed):
     `executor-events-down.test.ts` (exactly-once under an honest
     deadline: one fire mid-settle → processed 1, ONE consequence commit,
     the counter reads 1; mutation: guard removed → processed 11, red).
+    The RELEASE POINT itself is pinned too (the independent review's
+    MINOR-2, 2026-08-18 — the exactly-once pin above passes with either
+    release point): the same file's SEAL→OUTCOME-window pin parks a
+    re-drain at the sidecar sync (the serving manager's `syncCell` seam,
+    engaged on re-drains only) until the copy's consequence has SEALED
+    into a wave the store has not committed — the store still holds the
+    pre-fire value, the entry is unconsequenced — then lets the drain
+    reach the entry's guard check: it skips (`marked`), the wave commits,
+    processed 1, value 1; mutation: release at the seal → that re-drain
+    queues a second copy (processed 2, value 2), red.
     Every guarded run: `processed == appended`.
   - OFF witness: T1 is arm-independent by design (verdicts pinned);
     T2 lives in the flag-ON client overlay (constructed only under the
