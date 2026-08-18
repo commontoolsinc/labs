@@ -1,10 +1,7 @@
 /**
- * What an arriving envelope is recognized by.
- *
- * This is the one thing both an engine and a decoding act read off wire data
- * before anything has established that the data is this format's at all, so it
- * sniffs rather than validates: every case here is about what it declines to
- * recognize, and nothing here throws.
+ * What an arriving envelope is recognized by. It runs before anything has
+ * established that the data is this format's, so it sniffs rather than
+ * validates: nothing here throws.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -20,10 +17,8 @@ describe("markerOf()", () => {
   });
 
   it("returns `undefined` for an envelope that is not two slots", () => {
-    // An envelope is `[marker, tree]` and a tagged form is
-    // `[marker, tag, state]`. Recognizing a three-slot array here would mean
-    // sniffing a marker off this format's own tagged form as though it were an
-    // envelope.
+    // An envelope is `[marker, tree]`; a tagged form is `[marker, tag, state]`.
+    // The slot count is what tells them apart.
     const marker = ["fvr1"];
 
     expect(markerOf([marker])).toBeUndefined();

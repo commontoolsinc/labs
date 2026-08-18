@@ -566,12 +566,8 @@ describe("RealmCodecEngine", () => {
     });
 
     it("refuses an envelope that is not exactly two slots", () => {
-      // An envelope is `[marker, tree]` and a tagged form is
-      // `[marker, tag, state]`, so the slot count is the only thing telling
-      // one from the other at the top level. Without it a bare tagged form
-      // arriving here would be read as an envelope and its TAG handed back as
-      // the tree -- this format's structure served to a caller as data, which
-      // is the confusion the marker exists to prevent.
+      // Without the slot count, a tagged form arriving here would be read as
+      // an envelope and its tag handed back as the tree.
       const marker = ["fvr1"];
 
       for (
