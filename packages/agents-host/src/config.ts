@@ -54,7 +54,7 @@ function nonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${label} must be a non-empty string`);
   }
-  return value.trim();
+  return value;
 }
 
 function optionalString(
@@ -104,7 +104,7 @@ function parseSource(value: unknown, index: number): AgentSourceConfig {
     }
   }
 
-  const rawId = nonEmptyString(source.id, `${label}.id`);
+  const rawId = nonEmptyString(source.id, `${label}.id`).trim();
   const id = normalizeSourceId(rawId);
   if (rawId !== id) {
     throw new Error(`${label}.id must already be normalized as "${id}"`);

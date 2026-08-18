@@ -297,10 +297,6 @@ async function registerDebugPiece(
     ...(precedingPiece === undefined ? [] : [precedingPiece]),
   ];
   const piecesToRetire = precedingPiece === undefined ? [] : [precedingPiece];
-  for (const supersededPiece of piecesToUnregister) {
-    manager.runtime.runner.stop(supersededPiece);
-  }
-  await manager.runtime.idle();
   await Promise.all(
     piecesToRetire.map((supersededPiece) =>
       syncDocumentRoot(manager, supersededPiece)
@@ -395,6 +391,9 @@ async function registerDebugPiece(
       cause: error,
     });
   }
+  for (const supersededPiece of piecesToUnregister) {
+    manager.runtime.runner.stop(supersededPiece);
+  }
   await manager.runtime.idle();
 }
 
@@ -453,25 +452,55 @@ async function deployAgentSessionsDebugViewNow(
   );
   if (!patternRef) throw new Error("debug view pattern has no identity");
   const cause = debugPieceCause(patternRef);
-  const piece = await currentDebugPiece(manager, pattern, cause) ??
-    await manager.setupPersistent(
-      pattern,
-      {
-        recentIndex: target.cells.index,
-        allIndex: target.cells.allIndex,
-        health: target.cells.health,
-        commands: target.cells.commands,
-        receipts: target.cells.receipts,
-        recentIndexCell: target.cells.index,
-        allIndexCell: target.cells.allIndex,
-        healthCell: target.cells.health,
-        commandsCell: target.cells.commands,
-        receiptsCell: target.cells.receipts,
-      },
-      cause,
-    );
-  signal?.throwIfAborted();
-  await registerDebugPiece(manager, defaultPattern, piece, cause, patternRef);
+  const currentPiece = await currentDebugPiece(manager, pattern, cause);
+  const piece = currentPiece ?? await manager.setupPersistent(
+    pattern,
+    {
+      recentIndex: target.cells.index,
+      allIndex: target.cells.allIndex,
+      health: target.cells.health,
+      commands: target.cells.commands,
+      receipts: target.cells.receipts,
+      recentIndexCell: target.cells.index,
+      allIndexCell: target.cells.allIndex,
+      healthCell: target.cells.health,
+      commandsCell: target.cells.commands,
+      receiptsCell: target.cells.receipts,
+    },
+    cause,
+  );
+  const existingRegistration = (await debugRegistration(manager)).value;
+  const pieceWasRegistered = existingRegistration?.cause === cause &&
+    existingRegistration.pieceId === pieceId(piece) &&
+    existingRegistration.patternIdentity === patternRef.identity &&
+    existingRegistration.patternSymbol === patternRef.symbol;
+  const stopStartingPiece = () => manager.runtime.runner.stop(piece);
+  if (!pieceWasRegistered) {
+    signal?.addEventListener("abort", stopStartingPiece, { once: true });
+  }
+  try {
+    await manager.startPiece(piece);
+    signal?.throwIfAborted();
+  } catch (error) {
+    if (!pieceWasRegistered) {
+      stopStartingPiece();
+      await manager.runtime.idle();
+    }
+    throw error;
+  } finally {
+    if (!pieceWasRegistered) {
+      signal?.removeEventListener("abort", stopStartingPiece);
+    }
+  }
+  try {
+    await registerDebugPiece(manager, defaultPattern, piece, cause, patternRef);
+  } catch (error) {
+    if (!pieceWasRegistered) {
+      manager.runtime.runner.stop(piece);
+      await manager.runtime.idle();
+    }
+    throw error;
+  }
   signal?.throwIfAborted();
   const id = pieceId(piece);
   if (!id) throw new Error("debug view piece has no entity ID");

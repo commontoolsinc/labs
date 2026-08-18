@@ -74,6 +74,7 @@ export class RunningAgentsHost {
   async #stop(reason: string): Promise<void> {
     const failures: unknown[] = [];
     await this.host.stop(reason).catch((error) => failures.push(error));
+    await this.runtime.settled().catch((error) => failures.push(error));
     await this.runtime.storageManager.synced().catch((error) =>
       failures.push(error)
     );
@@ -196,17 +197,29 @@ export async function startAgentsHost(
         interruptInFlight: true,
         publishHealth: false,
       });
-      const disposeTask = fabric?.runtime.dispose();
-      const cleanupTasks = [
-        ...(stopTask ? [stopTask] : []),
-        ...(disposeTask ? [disposeTask] : []),
-      ];
-      const cleanupResults = await Promise.allSettled(cleanupTasks);
-      for (const result of cleanupResults) {
+      const startupResults = await Promise.allSettled(outstandingStartupTasks);
+      for (const result of startupResults) {
+        if (
+          result.status === "rejected" &&
+          result.reason !== options.signal.reason
+        ) {
+          cleanupFailures.push(result.reason);
+        }
+      }
+      const stopResults = await Promise.allSettled(
+        stopTask ? [stopTask] : [],
+      );
+      for (const result of stopResults) {
         if (result.status === "rejected") {
           cleanupFailures.push(result.reason);
         }
       }
+      await fabric?.runtime.settled().catch((settledError) => {
+        cleanupFailures.push(settledError);
+      });
+      await fabric?.runtime.dispose().catch((disposeError) => {
+        cleanupFailures.push(disposeError);
+      });
     } else {
       const stopReason = options.signal?.aborted
         ? "startup-owned-shutdown"
@@ -214,11 +227,14 @@ export async function startAgentsHost(
       await host?.stop(stopReason).catch((stopError) => {
         cleanupFailures.push(stopError);
       });
+      await fabric?.runtime.settled().catch((settledError) => {
+        cleanupFailures.push(settledError);
+      });
       await fabric?.runtime.dispose().catch((disposeError) => {
         cleanupFailures.push(disposeError);
       });
     }
-    if (options.signal?.aborted) {
+    if (options.signal?.aborted && healthOwnership) {
       const startupResults = await Promise.allSettled(outstandingStartupTasks);
       for (const result of startupResults) {
         if (

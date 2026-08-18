@@ -17,7 +17,7 @@ export class CollectionRequestQueue {
   request(reason: string): CollectionRequestResult {
     if (this.#closed) return "closed";
     if (this.#active) {
-      if (this.#pendingReason) return "already-queued";
+      if (this.#pendingReason !== undefined) return "already-queued";
       this.#pendingReason = reason;
       return "queued";
     }
@@ -43,7 +43,7 @@ export class CollectionRequestQueue {
       }
       const pendingReason = this.#pendingReason;
       this.#pendingReason = undefined;
-      if (pendingReason) this.#start(pendingReason);
+      if (pendingReason !== undefined) this.#start(pendingReason);
     };
     void task.then(settled, settled);
   }
