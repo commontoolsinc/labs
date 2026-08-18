@@ -3592,6 +3592,56 @@ Deno.test("memory v2 stacked commits: a rejected scheduler-batch flush rejects t
   }
 });
 
+Deno.test("memory v2 stacked commits: one rejected scheduler batch independently settles two waiting writes", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = await createHarness();
+  try {
+    const observation = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor(
+        "action:two-waiting-writes",
+      ),
+    });
+    const first = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("first-write") },
+      }],
+    });
+    const second = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("second-write") },
+      }],
+    });
+    harness.model.setOutcome(4, {
+      kind: "rejectConflict",
+      message: "shared observation batch rejected",
+    });
+
+    const [observationResult, firstResult, secondResult] = await Promise.all([
+      observation,
+      first,
+      second,
+    ]);
+    assertExists(observationResult.error);
+    assertEquals(observationResult.error.name, "ConflictError");
+    assertExists(firstResult.error);
+    assertEquals(firstResult.error.name, "ConflictError");
+    assertExists(secondResult.error);
+    assertEquals(secondResult.error.name, "ConflictError");
+    assert(firstResult.error !== secondResult.error);
+    assertEquals(harness.model.transactLocalSeqs, [4]);
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
 Deno.test("memory v2 stacked commits: a scheduler-batch conflict does not wait for an unsent write sequence", async () => {
   setPersistentSchedulerStateConfig(true);
   setConflictAdmissionMode("preempt");
@@ -3905,6 +3955,307 @@ Deno.test("memory v2 stacked commits: read-only conflict catch-up notifies subsc
   }
 });
 
+Deno.test("memory v2 stacked commits: ordinary syncs fold into the conflict repair revert", async () => {
+  const harness = await createHarness();
+  const repairGate = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, { left: 0, right: 0 });
+    await seedAccepted(harness, DOCS.B, valueFor("read-basis"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ], [
+        { id: DOCS.B, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.notifications.clear();
+
+    const repairEntered = Promise.withResolvers<void>();
+    const repairHarness = harness.replica as unknown as {
+      waitForConflictReadRepair(): Promise<void>;
+    };
+    repairHarness.waitForConflictReadRepair = () => {
+      repairEntered.resolve();
+      return repairGate.promise;
+    };
+
+    const readBasisSeq = harness.model.confirmed.get(DOCS.B)!.seq;
+    harness.model.injectRemote({
+      label: "advance-read-basis",
+      operations: [{ op: "set", id: DOCS.B, value: valueFor("winner") }],
+    });
+    const conflictLocalSeq = 3;
+    harness.model.setOutcome(conflictLocalSeq, { kind: "rejectConflict" });
+    const conflict = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "replace", path: "/value/left", value: 1 }],
+      { left: 1, right: 0 },
+      sourceFromReads([{ id: DOCS.B, seq: readBasisSeq }]),
+    );
+    await repairEntered.promise;
+
+    harness.model.injectRemote({
+      label: "accepted-independent-path",
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        value: { left: 0, right: 2 },
+      }],
+    });
+    const acceptedSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+    harness.pushSync({
+      upserts: [{
+        id: DOCS.A,
+        seq: acceptedSeq,
+        value: { left: 0, right: 2 },
+      }],
+    });
+    await clock.settle();
+
+    expectVisible(harness, { A: { left: 1, right: 2 } });
+    assertEquals(
+      changedIdsFor(harness.notifications.notifications, "integrate"),
+      [],
+    );
+
+    repairGate.resolve();
+    await assertConflict(conflict, "stale confirmed read");
+    expectVisible(harness, { A: { left: 0, right: 2 } });
+    const reverts = harness.notifications.notifications.filter(
+      (notification) => notification.type === "revert",
+    );
+    assertEquals(reverts.length, 1);
+    assertEquals(
+      [...reverts[0].changes].map((change) => change.address.path).sort(),
+      [["value", "left"], ["value", "right"]],
+    );
+  } finally {
+    repairGate.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: overlapping repairs settle and notify as one epoch", async () => {
+  const harness = await createHarness();
+  const firstRepair = Promise.withResolvers<void>();
+  const secondRepair = Promise.withResolvers<void>();
+  const firstRepairEntered = Promise.withResolvers<void>();
+  const secondRepairEntered = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, { left: 0, right: 0 });
+    await seedAccepted(harness, DOCS.B, valueFor("read-basis"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ], [
+        { id: DOCS.B, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.notifications.clear();
+
+    harness.model.injectRemote({
+      label: "advance-read-basis",
+      operations: [{ op: "set", id: DOCS.B, value: valueFor("winner") }],
+    });
+    const repairHarness = harness.replica as unknown as {
+      waitForConflictReadRepair(rejection: {
+        transaction: { localSeq: number };
+      }): Promise<void>;
+    };
+    repairHarness.waitForConflictReadRepair = (rejection) => {
+      if (rejection.transaction.localSeq === 3) {
+        firstRepairEntered.resolve();
+        return firstRepair.promise;
+      }
+      if (rejection.transaction.localSeq === 4) {
+        secondRepairEntered.resolve();
+        return secondRepair.promise;
+      }
+      throw new Error(
+        `unexpected conflict localSeq=${rejection.transaction.localSeq}`,
+      );
+    };
+
+    const source = sourceFromReads([{ id: DOCS.B, seq: 2 }]);
+    const first = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "replace", path: "/value/left", value: 1 }],
+      { left: 1, right: 0 },
+      source,
+    );
+    const second = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "replace", path: "/value/right", value: 2 }],
+      { left: 1, right: 2 },
+      source,
+    );
+    harness.model.setOutcome(3, { kind: "rejectConflict" });
+    harness.model.setOutcome(4, { kind: "rejectConflict" });
+    await Promise.all([
+      firstRepairEntered.promise,
+      secondRepairEntered.promise,
+    ]);
+
+    let secondSettled = false;
+    void second.then(() => {
+      secondSettled = true;
+    });
+    secondRepair.resolve();
+    await clock.settle();
+
+    assertEquals(secondSettled, false);
+    expectVisible(harness, { A: { left: 1, right: 0 } });
+    assertEquals(
+      changedIdsFor(harness.notifications.notifications, "revert"),
+      [],
+    );
+
+    firstRepair.resolve();
+    await assertConflict(first, "stale confirmed read");
+    await assertConflict(second, "stale confirmed read");
+
+    expectVisible(harness, { A: { left: 0, right: 0 } });
+    const reverts = harness.notifications.notifications.filter(
+      (notification) => notification.type === "revert",
+    );
+    assertEquals(reverts.length, 1);
+    assertEquals(
+      [...reverts[0].changes].map((change) => change.address.path).sort(),
+      [["value", "left"], ["value", "right"]],
+    );
+  } finally {
+    firstRepair.resolve();
+    secondRepair.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a post-cutoff repair uses a finite successor epoch", async () => {
+  const harness = await createHarness();
+  const firstRepair = Promise.withResolvers<void>();
+  const secondRepair = Promise.withResolvers<void>();
+  const firstRepairEntered = Promise.withResolvers<void>();
+  const secondRepairEntered = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, { left: 0, right: 0 });
+    await seedAccepted(harness, DOCS.B, valueFor("read-basis"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ], [
+        { id: DOCS.B, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.notifications.clear();
+
+    harness.model.injectRemote({
+      label: "advance-read-basis",
+      operations: [{ op: "set", id: DOCS.B, value: valueFor("winner") }],
+    });
+    const repairHarness = harness.replica as unknown as {
+      waitForConflictReadRepair(rejection: {
+        transaction: { localSeq: number };
+      }): Promise<void>;
+    };
+    repairHarness.waitForConflictReadRepair = (rejection) => {
+      if (rejection.transaction.localSeq === 3) {
+        firstRepairEntered.resolve();
+        return firstRepair.promise;
+      }
+      if (rejection.transaction.localSeq === 4) {
+        secondRepairEntered.resolve();
+        return secondRepair.promise;
+      }
+      throw new Error(
+        `unexpected conflict localSeq=${rejection.transaction.localSeq}`,
+      );
+    };
+
+    const source = sourceFromReads([{ id: DOCS.B, seq: 2 }]);
+    const first = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "replace", path: "/value/left", value: 1 }],
+      { left: 1, right: 0 },
+      source,
+    );
+    harness.model.setOutcome(3, { kind: "rejectConflict" });
+    await firstRepairEntered.promise;
+
+    const second = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "replace", path: "/value/right", value: 2 }],
+      { left: 1, right: 2 },
+      source,
+    );
+    harness.model.setOutcome(4, { kind: "rejectConflict" });
+    await secondRepairEntered.promise;
+
+    let secondSettled = false;
+    void second.then(() => {
+      secondSettled = true;
+    });
+    firstRepair.resolve();
+    const firstResult = await first;
+    assertExists(firstResult.error);
+    assertEquals(firstResult.error.name, "ConflictError");
+    assert(
+      firstResult.error.message?.includes("stale confirmed read") === true,
+    );
+    const readyToRetry = (firstResult.error as {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    let retryReady = false;
+    const retryReadiness = readyToRetry().then(() => {
+      retryReady = true;
+    });
+    await Promise.resolve();
+
+    assertEquals(secondSettled, false);
+    assertEquals(retryReady, false);
+    expectVisible(harness, { A: { left: 0, right: 2 } });
+    assertEquals(
+      harness.notifications.notifications.filter(
+        (notification) => notification.type === "revert",
+      ).length,
+      0,
+    );
+
+    secondRepair.resolve();
+    await assertConflict(second, "stale confirmed read");
+    await retryReadiness;
+    assertEquals(retryReady, true);
+
+    expectVisible(harness, { A: { left: 0, right: 0 } });
+    const reverts = harness.notifications.notifications.filter(
+      (notification) => notification.type === "revert",
+    );
+    assertEquals(reverts.length, 1);
+    assertEquals(
+      [...reverts[0].changes].map((change) => change.address.path).sort(),
+      [["value", "left"], ["value", "right"]],
+    );
+  } finally {
+    firstRepair.resolve();
+    secondRepair.resolve();
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: a commit minted during the read repair is not sent against the rejected layer", async () => {
   const harness = await createHarness();
   // Debug level so the refusal's own lazy log closure runs: the count is how
@@ -4154,6 +4505,8 @@ Deno.test("memory v2 stacked commits: a commit sitting on two rejected layers wa
       upserts: [{ id: DOCS.B, seq: winnerSeqB, value: valueFor("b2winner") }],
       caughtUpLocalSeq: loserB.localSeq,
     });
+    await assertConflict(loserA.promise, "stale confirmed read");
+    assertEquals(loserASettled, true);
     await assertConflict(loserB.promise, "stale confirmed read");
     await assertConflict(
       riderResult,

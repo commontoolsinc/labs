@@ -57,6 +57,7 @@ type EventCommitError = {
   readonly name?: string;
   readonly message: string;
   readonly precondition?: IPreconditionFailedError["precondition"];
+  readonly readyToRetry?: () => Promise<unknown> | unknown;
 };
 
 function normalizeEventCommitRejection(reason: unknown): EventCommitError {
@@ -69,12 +70,20 @@ function normalizeEventCommitRejection(reason: unknown): EventCommitError {
         candidate.precondition === "receipt-exists"
       ? candidate.precondition
       : undefined;
+    const readyToRetry = typeof candidate.readyToRetry === "function"
+      ? candidate.readyToRetry
+      : undefined;
     return {
       ...(typeof candidate.name === "string" ? { name: candidate.name } : {}),
       message: typeof candidate.message === "string"
         ? candidate.message
         : "Storage commit promise rejected",
       ...(precondition ? { precondition } : {}),
+      ...(readyToRetry !== undefined
+        ? {
+          readyToRetry: () => readyToRetry.call(reason),
+        }
+        : {}),
     };
   }
   return new Error(
@@ -1205,7 +1214,9 @@ export async function dispatchQueuedEvent(state: {
     // commit() registers itself with the storage manager's pending-commit
     // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
     // waits on without blocking the scheduler loop here.
-    const handleCommitResult = (error: EventCommitError | undefined): void => {
+    const handleCommitResult = async (
+      error: EventCommitError | undefined,
+    ): Promise<void> => {
       const permanentRejection = error && isPermanentRejection(error)
         ? error.precondition
         : undefined;
@@ -1278,6 +1289,17 @@ export async function dispatchQueuedEvent(state: {
               `(attempt ${disposition.attempts})`,
             { handlerId },
           );
+          if (typeof error?.readyToRetry === "function") {
+            try {
+              await error.readyToRetry();
+            } catch (readyError) {
+              logger.debug(
+                "conflict-retry-readiness-aborted",
+                "conflict catch-up readiness aborted; re-queuing event anyway",
+                readyError,
+              );
+            }
+          }
           requeueForBackoff(
             disposition.attempts,
             disposition.deadline,

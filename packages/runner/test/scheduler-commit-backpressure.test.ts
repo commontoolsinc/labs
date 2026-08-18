@@ -390,6 +390,74 @@ describe("committed-write backpressure", () => {
   );
 
   it(
+    "waits for conflict readiness before rerunning an event handler",
+    async () => {
+      const piece = buildCounterPiece(runtime, tx, "backpressure-ready-root");
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const ready = defer<void>();
+      const readinessEntered = defer<void>();
+      const markers = collectEventCommitMarkers(runtime);
+      const editableRuntime = runtime as unknown as {
+        edit: Runtime["edit"];
+      };
+      const originalEdit = runtime.edit.bind(runtime);
+      let rejectNextCommit = true;
+      editableRuntime.edit = ((...args: Parameters<Runtime["edit"]>) => {
+        const eventTx = originalEdit(...args);
+        const originalCommit = eventTx.commit.bind(eventTx);
+        eventTx.commit = (() => {
+          if (
+            (eventTx as { isReadOnly?: () => boolean }).isReadOnly?.() === true
+          ) {
+            return originalCommit();
+          }
+          if (!rejectNextCommit) return originalCommit();
+          rejectNextCommit = false;
+          const rejection = Object.assign(
+            new Error("forced conflict with a pending readiness gate"),
+            {
+              name: "ConflictError",
+              readyToRetry: () => {
+                readinessEntered.resolve();
+                return ready.promise;
+              },
+            },
+          );
+          eventTx.abort(rejection);
+          return Promise.resolve({ error: rejection });
+        }) as typeof eventTx.commit;
+        return eventTx;
+      }) as Runtime["edit"];
+
+      try {
+        piece.queueAdd(3, "evt:backpressure-ready:0:backpressure-ready-root");
+        await readinessEntered.promise;
+        await markers.firstMarker;
+        await Promise.resolve();
+
+        expect(piece.invocations()).toBe(1);
+
+        ready.resolve();
+        await waitFor(
+          runtime,
+          () => piece.total() === 3,
+          "event handler did not rerun after conflict readiness resolved",
+        );
+
+        expect(piece.invocations()).toBe(2);
+        expect(piece.total()).toBe(3);
+      } finally {
+        ready.resolve();
+        markers.dispose();
+        editableRuntime.edit = originalEdit;
+      }
+    },
+  );
+
+  it(
     "drops a write on a non-stale-basis transient error rather than windowing it",
     async () => {
       // Only a stale basis (a ConflictError, or a StorageTransactionInconsistent)

@@ -2006,6 +2006,25 @@ type WatchRefreshBatch = {
   pending: PromiseWithResolvers<Result<Unit, PullError>>;
 };
 
+type RejectedRepairEpoch = {
+  cutoffLocalSeq: number;
+  count: number;
+  address: { id: URI; type: MIME; scope?: CellScope };
+  before: ReturnType<typeof Differential.checkout>[];
+  settled: PromiseWithResolvers<void>;
+};
+
+type RejectedRepairDocument = {
+  epochs: RejectedRepairEpoch[];
+  drained: PromiseWithResolvers<void>;
+};
+
+type RejectedRepairClaim = {
+  key: string;
+  document: RejectedRepairDocument;
+  epoch: RejectedRepairEpoch;
+};
+
 type NativeCommitOperation =
   | {
     op: "set";
@@ -2119,7 +2138,10 @@ class SpaceReplica implements ISpaceReplica {
   // commit locally and gates its retry on that promise, so the retry rebuilds
   // against the repaired base rather than the dead one.
   readonly #rejectedPendingLayers = new Map<number, Promise<void>>();
-  readonly #rejectedRepairDocuments = new Map<string, number>();
+  readonly #rejectedRepairDocuments = new Map<
+    string,
+    RejectedRepairDocument
+  >();
   // Every unsettled commit's outcome promise, keyed by localSeq (a superset
   // of #inFlightCommits: zero-read commits appear here too). The old-server
   // scalarization hold awaits these for the OMITTED lower dependencies —
@@ -3825,7 +3847,10 @@ class SpaceReplica implements ISpaceReplica {
         const schedulerDependencyRejection =
           cause instanceof StorageTransactionRejectionError ? cause : undefined;
         const rejection = schedulerDependencyRejection !== undefined
-          ? schedulerDependencyRejection.rejection
+          ? this.copyRejectionForCommit(
+            schedulerDependencyRejection.rejection,
+            commit,
+          )
           : toRejectedError(cause, commit, this.#space);
         telemetry?.submit({
           type: "storage.push.error",
@@ -3943,22 +3968,75 @@ class SpaceReplica implements ISpaceReplica {
       })),
     ];
     const hasSemanticOperations = operations.length > 0;
-    const repairDocumentKeys = rejection.name === "ConflictError" &&
-        hasSemanticOperations
-      ? new Set(touched.map(({ id, scope }) => docKey(id, scope)))
-      : new Set<string>();
-    for (const key of repairDocumentKeys) {
-      this.#rejectedRepairDocuments.set(
-        key,
-        (this.#rejectedRepairDocuments.get(key) ?? 0) + 1,
-      );
+    const repairAddresses = new Map<
+      string,
+      { id: URI; type: MIME; scope?: CellScope }
+    >();
+    if (rejection.name === "ConflictError" && hasSemanticOperations) {
+      for (const { id, scope } of touched) {
+        repairAddresses.set(docKey(id, scope), {
+          id,
+          type: DOCUMENT_MIME as MIME,
+          scope,
+        });
+      }
     }
+    const repairClaims: RejectedRepairClaim[] = [];
+    for (const [key, address] of repairAddresses) {
+      let document = this.#rejectedRepairDocuments.get(key);
+      if (document === undefined) {
+        document = {
+          epochs: [],
+          drained: Promise.withResolvers<void>(),
+        };
+        this.#rejectedRepairDocuments.set(key, document);
+      }
+      const epochs = document.epochs;
+      const before = Differential.checkout(this, [
+        snapshotState(this, address.id, address.scope),
+      ]);
+      let epoch = epochs.find((candidate) =>
+        localSeq <= candidate.cutoffLocalSeq
+      );
+      if (epoch === undefined) {
+        epoch = {
+          cutoffLocalSeq: this.#nextLocalSeq - 1,
+          count: 1,
+          address,
+          before: [before],
+          settled: Promise.withResolvers<void>(),
+        };
+        epochs.push(epoch);
+      } else {
+        epoch.count += 1;
+        epoch.before.push(before);
+      }
+      repairClaims.push({ key, document, epoch });
+    }
+    const repairDocumentKeys = new Set(repairAddresses.keys());
+    const repairSettled = repairClaims.map(({ epoch }) =>
+      epoch.settled.promise
+    );
+    const repairDrained = repairClaims.map(({ document }) =>
+      document.drained.promise
+    );
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
     // Mark the layer dead for that window so no new commit is minted and sent
     // against it; the promise settles once the drop and its revert are done.
     const dropped = Promise.withResolvers<void>();
     this.#rejectedPendingLayers.set(localSeq, dropped.promise);
+    const readRepairReadyToRetry = rejection.name === "ConflictError"
+      ? rejection.readyToRetry
+      : undefined;
+    if (rejection.name === "ConflictError") {
+      rejection.readyToRetry = async () => {
+        await readRepairReadyToRetry?.();
+        await dropped.promise;
+        await Promise.all(repairDrained);
+      };
+    }
+    let releasedRepairDocuments = false;
     try {
       // The fate is sealed here. The verdict-gated effect layer (verdict
       // callbacks, outbox clearing) fires on this notification; the
@@ -3969,15 +4047,19 @@ class SpaceReplica implements ISpaceReplica {
       }
       const shouldNotifySubscribers = hasSemanticOperations &&
         this.hasNotificationSubscribers();
-      const shouldNotifySinks = hasSemanticOperations &&
+      const shouldNotifySinks = repairDocumentKeys.size === 0 &&
+        hasSemanticOperations &&
         this.hasSinkSubscribers(touched);
-      const before = shouldNotifySubscribers
+      const before = repairDocumentKeys.size === 0 && shouldNotifySubscribers
         ? Differential.checkout(
           this,
           touched.map(({ id, scope }) => snapshotState(this, id, scope)),
         )
         : undefined;
-      await this.waitForConflictReadRepair(rejection);
+      await this.waitForConflictReadRepair(
+        rejection,
+        readRepairReadyToRetry,
+      );
       this.dropPending(localSeq);
       // Every drop funnels through here (server conflict, preempt, cascade,
       // reset — this is dropPending's only call site), so scanning right
@@ -3986,7 +4068,36 @@ class SpaceReplica implements ISpaceReplica {
       // localSeq).
       this.cascadeDroppedDependency(localSeq);
       await this.refreshConflictReads(rejection, hasSemanticOperations);
-      if (before !== undefined) {
+      const released = this.releaseRejectedRepairDocuments(repairClaims);
+      releasedRepairDocuments = true;
+      if (repairDocumentKeys.size > 0) {
+        if (released.length > 0) {
+          const changes = Differential.create();
+          for (const repair of released) {
+            for (const before of repair.before) {
+              for (const change of before.compare(this)) {
+                changes.add(change);
+              }
+            }
+          }
+          logger.debug("commit-revert", () => [
+            `revert after ${rejection.name ?? "rejection"}`,
+          ]);
+          if (shouldNotifySubscribers) {
+            this.#subscription.next({
+              type: "revert",
+              space: this.#space,
+              changes,
+              reason: rejection,
+              source,
+            });
+          }
+          const releasedAddresses = released.map((repair) => repair.address);
+          if (this.hasSinkSubscribers(releasedAddresses)) {
+            this.notifySinks(changes);
+          }
+        }
+      } else if (before !== undefined) {
         const changes = before.compare(this);
         // The revert snapshots CURRENT confirmed state (which already includes
         // any newer seq received by subscription since this commit started)
@@ -4008,19 +4119,43 @@ class SpaceReplica implements ISpaceReplica {
       } else if (shouldNotifySinks) {
         this.notifySinksForIds(touched);
       }
+      // Cascaded finalizers can proceed once this optimistic layer is gone.
+      // The rejected commit itself remains unsettled until every overlapping
+      // repair epoch covering the same documents has closed.
+      dropped.resolve();
+      await Promise.all(repairSettled);
       return { error: rejection };
     } finally {
       this.#rejectedPendingLayers.delete(localSeq);
-      for (const key of repairDocumentKeys) {
-        const count = this.#rejectedRepairDocuments.get(key);
-        if (count === undefined || count <= 1) {
-          this.#rejectedRepairDocuments.delete(key);
-        } else {
-          this.#rejectedRepairDocuments.set(key, count - 1);
-        }
+      if (!releasedRepairDocuments) {
+        this.releaseRejectedRepairDocuments(repairClaims);
       }
       dropped.resolve();
     }
+  }
+
+  private releaseRejectedRepairDocuments(
+    claims: readonly RejectedRepairClaim[],
+  ): RejectedRepairEpoch[] {
+    const released: RejectedRepairEpoch[] = [];
+    for (const { key, document, epoch } of claims) {
+      epoch.count -= 1;
+      if (epoch.count === 0) {
+        const index = document.epochs.indexOf(epoch);
+        if (index !== -1) document.epochs.splice(index, 1);
+        if (document.epochs.length === 0) {
+          if (this.#rejectedRepairDocuments.get(key) === document) {
+            this.#rejectedRepairDocuments.delete(key);
+          }
+          document.drained.resolve();
+          released.push(epoch);
+        } else {
+          document.epochs[0].before.push(...epoch.before);
+        }
+        epoch.settled.resolve();
+      }
+    }
+    return released;
   }
 
   private buildReads(
@@ -4374,8 +4509,9 @@ class SpaceReplica implements ISpaceReplica {
       })),
     ];
 
-    // A rejected document's catch-up is reported by its revert after the dead
-    // pending layer is removed. Other documents in the same sync still notify.
+    // A rejected document's catch-up is reported by the coordinated revert
+    // after every dead pending layer covering it has been removed. Other
+    // documents in the same ordinary sync still notify immediately.
     const notificationTouched = type === "conflict-repair"
       ? []
       : touched.filter(({ id, scope }) =>
@@ -4538,6 +4674,23 @@ class SpaceReplica implements ISpaceReplica {
     };
   }
 
+  private copyRejectionForCommit(
+    rejection: StorageTransactionRejected,
+    commit: ClientCommit,
+  ): StorageTransactionRejected {
+    const descriptors = Object.getOwnPropertyDescriptors(rejection);
+    descriptors.transaction = {
+      value: commit,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    };
+    return Object.defineProperties(
+      Object.create(Object.getPrototypeOf(rejection)),
+      descriptors,
+    ) as StorageTransactionRejected;
+  }
+
   // Locally-fabricated rejection for a commit whose doom is provable
   // client-side (dropped pending dependency, dependency rejected but not yet
   // dropped, or replica reset). Modeled on makePreemptRejection.
@@ -4691,11 +4844,11 @@ class SpaceReplica implements ISpaceReplica {
 
   private async waitForConflictReadRepair(
     rejection: StorageTransactionRejected,
+    readyToRetry: (() => Promise<void>) | undefined,
   ): Promise<void> {
     if (rejection.name !== "ConflictError") {
       return;
     }
-    const readyToRetry = rejection.readyToRetry;
     if (readyToRetry === undefined) {
       return;
     }

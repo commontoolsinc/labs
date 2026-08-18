@@ -164,7 +164,7 @@ export interface JoinEvent {
 export type ClaimHostEvent = Record<PropertyKey, never>;
 
 export interface AddOptionEvent {
-  title?: string;
+  title: string;
 }
 
 export interface RemoveOptionEvent {
@@ -569,7 +569,7 @@ const addOption = handler<AddOptionEvent, {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
-  const trimmed = trimmedName(title ?? optionDraft.get());
+  const trimmed = trimmedName(title);
   if (!trimmed) return;
   // Address the option by its id so later edits and removal reach it without a
   // positional index. addUnique merges concurrent adds (distinct ids) and is
@@ -1934,7 +1934,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         <cf-button
                           id="lp-add-option-button"
                           aria-label="Add option"
-                          onClick={boundAddOption}
+                          onClick={() =>
+                            boundAddOption.send({
+                              title: optionDraft.get(),
+                            })}
                         >
                           Add
                         </cf-button>
