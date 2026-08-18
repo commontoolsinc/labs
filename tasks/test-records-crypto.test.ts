@@ -25,9 +25,10 @@ describe("test-records-crypto", () => {
     it("returns false for other prefixes and wrong lengths", () => {
       expect(isRecipient("age1qqqq")).toBe(false);
       expect(isRecipient("cfr1")).toBe(false);
-      expect(isRecipient("cfr1" + toUnpaddedBase64url(new Uint8Array(31)))).toBe(
-        false,
-      );
+      expect(isRecipient("cfr1" + toUnpaddedBase64url(new Uint8Array(31))))
+        .toBe(
+          false,
+        );
     });
   });
 
