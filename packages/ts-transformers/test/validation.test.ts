@@ -4287,6 +4287,26 @@ Deno.test("Standalone Function Validation", async (t) => {
     },
   );
 
+  await t.step(
+    "errors on computed() inside a parenthesized standalone function",
+    async () => {
+      const source = `      import { computed, Cell } from "commonfabric";
+
+      declare const count: Cell<number>;
+
+      const helper = (() => {
+        return computed(() => count.get() * 2);
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "standalone-function:reactive-operation");
+    },
+  );
+
   const builderFactoryCases = [
     {
       name: "action()",
@@ -4945,4 +4965,237 @@ Deno.test("Module-extracted reactive callback bodies (CT-1587)", async (t) => {
       assert(hasKeyPathRead(root, "0", "foo"));
     },
   );
+});
+
+Deno.test("Paren-Invariance Twins", async (t) => {
+  // Target-language spec §5.7: parentheses around a site are spelling and do
+  // not change its classification. Each step validates a bare/parenthesized
+  // source pair: the bare spelling must match the expected diagnostic types
+  // (so a twin can never pass because both sides broke the same way), and the
+  // parenthesized spelling must reproduce the bare spelling exactly.
+  const assertTwins = async (
+    bare: string,
+    paren: string,
+    expectedBareErrorTypes: string[],
+  ) => {
+    const bareResult = await validateSource(bare, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const parenResult = await validateSource(paren, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const typesOf = (diagnostics: typeof bareResult.diagnostics) =>
+      getErrors(diagnostics).map((error) => error.type).sort();
+    assertEquals(
+      typesOf(bareResult.diagnostics),
+      expectedBareErrorTypes.slice().sort(),
+      "bare spelling expectation",
+    );
+    assertEquals(
+      typesOf(parenResult.diagnostics),
+      typesOf(bareResult.diagnostics),
+      "parenthesized spelling matches its bare twin",
+    );
+  };
+
+  const countPattern = (body: string) =>
+    `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        ${body}
+      });
+    `;
+
+  const rowsPattern = (body: string) =>
+    `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        sentAt?: number;
+        label: string;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        ${body}
+      });
+    `;
+
+  await t.step("variable-initializer site", async () => {
+    await assertTwins(
+      countPattern(`const v = count.get();
+        return { v };`),
+      countPattern(`const v = (count.get());
+        return { v };`),
+      [],
+    );
+  });
+
+  await t.step("object-property site", async () => {
+    await assertTwins(
+      countPattern(`return { value: count.get() };`),
+      countPattern(`return { value: (count.get()) };`),
+      [],
+    );
+  });
+
+  await t.step("array-element site", async () => {
+    await assertTwins(
+      countPattern(`return { list: [count.get()] };`),
+      countPattern(`return { list: [(count.get())] };`),
+      [],
+    );
+  });
+
+  await t.step("call-argument site", async () => {
+    const bare =
+      `      import { ifElse, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number>; show: boolean }>(
+        ({ count, show }) => {
+          return { v: ifElse(show, count.get(), 0) };
+        },
+      );
+    `;
+    const paren =
+      `      import { ifElse, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number>; show: boolean }>(
+        ({ count, show }) => {
+          return { v: ifElse(show, (count.get()), 0) };
+        },
+      );
+    `;
+    await assertTwins(bare, paren, []);
+  });
+
+  await t.step("computation-over-read site", async () => {
+    await assertTwins(
+      countPattern(`const v = count.get() * 2;
+        return { v };`),
+      countPattern(`const v = (count.get()) * 2;
+        return { v };`),
+      [],
+    );
+  });
+
+  await t.step("receiver-chain site", async () => {
+    await assertTwins(
+      rowsPattern(`const s = rows.get().map((r) => r.label).join(",");
+        return { s };`),
+      rowsPattern(`const s = (rows.get()).map((r) => r.label).join(",");
+        return { s };`),
+      [],
+    );
+  });
+
+  await t.step("JSX expression site", async () => {
+    const bare = `      import { h, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        return { ui: <div>{count.get()}</div> };
+      });
+    `;
+    const paren = `      import { h, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        return { ui: <div>{(count.get())}</div> };
+      });
+    `;
+    await assertTwins(bare, paren, []);
+  });
+
+  await t.step("statement-position read stays rejected", async () => {
+    await assertTwins(
+      countPattern(`count.get();
+        return { done: true };`),
+      countPattern(`(count.get());
+        return { done: true };`),
+      ["pattern-context:get-call"],
+    );
+  });
+
+  await t.step("inline comparator with optional access", async () => {
+    await assertTwins(
+      rowsPattern(
+        `const sorted = rows.get().toSorted((a, b) =>
+          (a?.sentAt ?? 0) - (b?.sentAt ?? 0)
+        );
+        return { sorted };`,
+      ),
+      rowsPattern(
+        `const sorted = rows.get().toSorted(((a, b) =>
+          (a?.sentAt ?? 0) - (b?.sentAt ?? 0)
+        ));
+        return { sorted };`,
+      ),
+      [],
+    );
+  });
+
+  await t.step("parenthesized reactive map callback", async () => {
+    await assertTwins(
+      rowsPattern(`const out = rows.map((r) => r.label);
+        return { out };`),
+      rowsPattern(`const out = rows.map(((r) => r.label));
+        return { out };`),
+      [],
+    );
+  });
+
+  await t.step("parenthesized builder callback", async () => {
+    const bare =
+      `      import { computed, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        const doubled = computed(() => count.get() * 2);
+        return { doubled };
+      });
+    `;
+    const paren =
+      `      import { computed, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        const doubled = computed((() => count.get() * 2));
+        return { doubled };
+      });
+    `;
+    await assertTwins(bare, paren, []);
+  });
+
+  await t.step("standalone helper with reactive operation", async () => {
+    const bare = `      import { computed, Cell } from "commonfabric";
+
+      declare const count: Cell<number>;
+
+      const helper = () => {
+        return computed(() => count.get() * 2);
+      };
+    `;
+    const paren = `      import { computed, Cell } from "commonfabric";
+
+      declare const count: Cell<number>;
+
+      const helper = (() => {
+        return computed(() => count.get() * 2);
+      });
+    `;
+    await assertTwins(bare, paren, [
+      "standalone-function:reactive-operation",
+    ]);
+  });
+
+  await t.step("parenthesized JSX event handler", async () => {
+    const bare = `      import { h, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        return { ui: <button onClick={() => count.set(1)}>x</button> };
+      });
+    `;
+    const paren = `      import { h, pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        return { ui: <button onClick={(() => count.set(1))}>x</button> };
+      });
+    `;
+    await assertTwins(bare, paren, []);
+  });
 });

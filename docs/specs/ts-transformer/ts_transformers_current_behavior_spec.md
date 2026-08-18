@@ -501,7 +501,9 @@ Diagnostics emitted in all modes:
     spelling of the read (`layout["get"]()`) do not change the decision, and
     neither does optionality — `layout?.get()` and `layout?.get?.()` on a cell
     lower like their non-optional spellings, per the 2026-07-23
-    optionality-orthogonality resolution. Each lift's input schema shrinks to
+    optionality-orthogonality resolution. The bare/parenthesized spelling
+    pairs across site kinds are pinned by the `test/validation.test.ts`
+    "Paren-Invariance Twins" battery. Each lift's input schema shrinks to
     what its body reads (`test/validation.test.ts:3179`; goldens
     `cell-get-binding-autowrap`, `cell-get-terminal-binding-autowrap`,
     `with-reactive`). This is the ratified has-a-lowerable-site rule —
@@ -542,6 +544,9 @@ Diagnostics emitted in all modes:
   - in standalone functions (except inline first arg to `patternTool`):
     `computed(...)`, `lift(...)`, or reactive collection methods on reactive
     receivers
+  - what counts as a standalone definition is read through transparent
+    parentheses: `const helper = (() => ...)` is validated (and context-
+    classified) like its bare spelling
   - collection-method diagnostics currently use `.map(...)`-style guidance and
     suggest eager `<cell>.get().map(...)` when explicit eager mapping is
     acceptable

@@ -555,9 +555,10 @@ The intended split is:
      - `const sorted = rows.get().toSorted(byDate)`
      - JSX expression sites like `{input.key("foo").get()}`
      - `ifElse(show, count.get(), 0)`
-   - the spelling of the read does not change the classification: parentheses
-     around the site, the computed-key form `cell["get"]()`, and the optional
-     forms `cell?.get()` and `cell.get?.()` all follow the same rule (§5.6)
+   - the spelling of the read does not change the classification
+     (paren-invariance): parentheses around the site, the computed-key form
+     `cell["get"]()`, and the optional forms `cell?.get()` and `cell.get?.()`
+     all follow the same rule (§5.6)
 4. **eager read with no lowerable expression site**
    - not part of the target language, even for true cells — there is no site
      to lower into a lift, so the read cannot be kept live
