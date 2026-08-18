@@ -3,11 +3,11 @@
 # not work yet. Its companion `verb-session-demo.sh` shows the session as it is
 # meant to read; this one is the thing that keeps that honest.
 #
-# Some steps assert a GAP rather than a capability. Each fails loudly the day
-# the gap closes, so this script is how we find out that a capability arrived
-# rather than discovering it months later in a stale document. How many are
-# open is tallied as they run and printed on the last line, so no prose here
-# can fall out of step with the assertions below.
+# A step may assert a GAP rather than a capability. Such a step fails loudly
+# the day its gap closes, so this script is how we find out that a capability
+# arrived rather than discovering it months later in a stale document. How
+# many are open is tallied as they run and printed on the last line, so no
+# prose here can fall out of step with the assertions below.
 #
 # Documented in docs/common/verb-session-walkthrough.md.
 #
@@ -322,21 +322,24 @@ V=$($CF call --quiet --piece "$KID" $ARGS archive '{}' 2>/dev/null)
 check "settled" "$(echo "$V" | jq -r '.status')" "archive settled"
 check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witness"
 
-step "10. A reference argument dispatches; the emitted spelling is the GAP"
-# blockOn declares `on: Writable<ItemOutput>` — a reference. The capability
-# landed with #5880: a link ENVELOPE in that position passes the gate and the
-# edge that comes back is the target, not a copy. What has not landed is the
-# round-trip spelling docs/plans/references-as-arguments.md holds out for —
-# the address exactly as a read emits it. The two halves are asserted apart,
-# so neither can hide behind the other.
+step "10. A reference argument dispatches — the envelope, and the address as emitted"
+# blockOn declares `on: Writable<ItemOutput>` — a reference. #5880 landed the
+# ENVELOPE spelling: a link envelope in that position passes the gate and the
+# edge that comes back is the target, not a copy. The round-trip spelling
+# docs/plans/references-as-arguments.md held out for — the address exactly as
+# a read emits it — landed with the dispatch gate reading the declared
+# contract (docs/plans/verb-input-contract.md), and the same contract is what
+# refuses the two payloads that could only ever be mistakes at a reference
+# position. Every spelling is asserted apart, so none can hide behind
+# another.
 OTHER=$($CF get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
   jq -r '.[0]["$link"] // empty')
 if [ -z "$OTHER" ] || [ -z "${KID:-}" ]; then
   bad "no address to probe blockOn with (item=$OTHER target=${KID:-})"
 else
-  # The capability half: the envelope is assembled from the very address the
-  # read above emitted, so the target is one the session was handed.
+  # The envelope: assembled from the very address the read above emitted, so
+  # the target is one the session was handed.
   SIGIL="{\"on\":{\"/\":{\"link@1\":{\"id\":\"${OTHER#/}\"}}}}"
   BLOCKED=$($CF call --quiet --piece "$KID" $ARGS \
     blockOn "$SIGIL" 2>/dev/null)
@@ -348,19 +351,34 @@ else
     --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
     jq -r '.[0]["$link"] // empty')
   check "$OTHER" "$EDGE" "the edge reads back as the address that was named"
-  # The gap half. Guarded, and matched against the SPECIFIC refusal: an empty
-  # address, a renamed verb, or a server hiccup would also exit nonzero, and a
-  # probe that reads any failure as "gap still open" is a probe that cannot
+  # The emitted spelling: the same address, fed back exactly as printed.
+  BLOCKED2=$($CF call --quiet --piece "$KID" $ARGS \
+    blockOn "{\"on\":\"$OTHER\"}" 2>/dev/null)
+  check "2" "$(echo "$BLOCKED2" | jq -r '.result.blockedOnCount // empty')" \
+    "the address a read emits, fed back as written, dispatches"
+  EDGE2=$($CF get --quiet --piece "$KID" blockedOn $ARGS \
+    --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
+    jq -r '.[1]["$link"] // empty')
+  check "$OTHER" "$EDGE2" "and its edge is the target, not a copy"
+  # The refusals guarding the same position, each matched against its
+  # SPECIFIC message: a renamed verb or a server hiccup also exits nonzero,
+  # and a probe that reads any failure as the refusal is a probe that cannot
   # fail.
-  BLOCK_ERR=$($CF call --quiet --piece "$KID" $ARGS \
-    blockOn "{\"on\":\"$OTHER\"}" 2>&1 >/dev/null)
-  BLOCK_RC=$?
-  if [ "$BLOCK_RC" = "0" ]; then
-    gap 0 "blockOn with the address a read emits"
-  elif printf '%s' "$BLOCK_ERR" | grep -q "does not match type object"; then
-    gap 1 "blockOn with the address a read emits (the gate still refuses the string)"
+  NOT_ERR=$($CF call --quiet --piece "$KID" $ARGS \
+    blockOn '{"on":"not-an-address"}' 2>&1 >/dev/null)
+  NOT_RC=$?
+  if [ "$NOT_RC" != "0" ] && printf '%s' "$NOT_ERR" | grep -q "is not an address"; then
+    ok "a string that is no address is refused naming the reference position"
   else
-    bad "blockOn failed for a reason that is not the known refusal: $BLOCK_ERR"
+    bad "the not-an-address refusal did not fire (rc=$NOT_RC): $NOT_ERR"
+  fi
+  COPY_ERR=$($CF call --quiet --piece "$KID" $ARGS \
+    blockOn '{"on":{"title":"a copy"}}' 2>&1 >/dev/null)
+  COPY_RC=$?
+  if [ "$COPY_RC" != "0" ] && printf '%s' "$COPY_ERR" | grep -q "detached document"; then
+    ok "an inline copy is refused as a detached document"
+  else
+    bad "the detached-copy refusal did not fire (rc=$COPY_RC): $COPY_ERR"
   fi
 fi
 

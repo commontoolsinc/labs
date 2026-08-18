@@ -287,13 +287,15 @@ model and by nothing else. `traverseAndCellify`
 live cell before dispatch, so the LLM boundary had a complete round trip while
 the CLI rejected the address and the webhook path forwarded it unresolved.
 
-**The refusal that protects it is not built.** A shape-matching payload is
-still accepted, still stores a detached copy, and still reports success — so a
-caller who sends the shape rather than the address is told it worked. Refusing
-that needs to identify a reference position, which needs the `asCell` marker,
-and the marker reaches nothing the CLI can read: the served event schema is the
-handler's narrowed read, and the stored pattern's declared schema has lost it
-too. #5560 carries the measurements.
+**The refusal that protects it is built beside the emitted spelling.**
+Refusing a shape-matching payload needs a reference position identified,
+which needs the `asCell` marker — and the marker survives on exactly one
+serialized surface: the handler module inside the compiled pattern
+(`Pattern.resultSchema` and every link-carried schema are sanitized to stream
+markers only). The CLI's dispatch gate reads it there, on the repair path a
+shape refusal opens, converts the emitted address into the link envelope, and
+refuses the two payloads that could only ever be mistakes at the position.
+#5560 carries the original measurements.
 
 *The refusal was drift, not policy, and #5880 removed it.*
 `closedWorldEventRejection` (`packages/runner/src/runner.ts`) has always
@@ -499,7 +501,7 @@ its own track.
 | 12 | An unrecognized projection key is refused | **on main** (#5817) — item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md) |
 | 12a | `cf` refuses an undeclared field on a call | **on main** (#5835) — item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says. Built against #5817's wording rather than its code, since that branch is unmerged |
 | 13 | `cf wish` and `cf exec` take the read options | **on main** (#5844) — item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
-| 14 | A caller may name a reference | **capability on main** (#5880) — item 11, #5560 | — | A caller can now name an existing cell where a verb declares a reference, and the edge that comes back is the target rather than a copy of it. What remains is the REFUSAL that protects it: a shape-matching payload still **stores a detached copy and reports success**, so a caller who sends the shape instead of the address is still told it worked. Refusing it needs to identify a reference position, which needs the `asCell` marker, which reaches nothing the CLI can read — see #5560 for the measurements |
+| 14 | A caller may name a reference | **on main** — item 11, #5560; envelope #5880, emitted spelling and refusals via the contract ruling | — | A caller names an existing cell where a verb declares a reference in either spelling — the link envelope (#5880) or the address exactly as a read emits it — and the edge that lands is the target rather than a copy. The refusals that protect the position are built with it: a string that is no address, and the shape-matching payload that would have **stored a detached copy and reported success**, are both refused naming the position. The reference marker reaches the CLI through the handler module in the compiled pattern — the one serialized surface link sanitization leaves it on — read at the dispatch gate per [the input contract](verb-input-contract.md) |
 
 **`--show-links` is not redundant, and nothing should schedule its removal
 yet.** [Verb result selection](verb-result-selection.md) prices it as a stopgap
@@ -539,12 +541,11 @@ Keep `--show-links` meanwhile; retire it when a replacement exists or the need
 is confirmed dead. Note that `cf piece get` has never had an equivalent, so
 bulk resolution on a *read* is a gap that predates all of this.
 
-**Running beside all of the above.** A caller naming a reference (item 11, #5560) waits on confirming
-that a sigil resolves through a *declared* event field rather than an untyped
-one; it decides nothing item 1 decides — a declared result makes an *output*
-self-describing, this is what an *input* accepts — but it shares
-`schema-injection.ts` with that emission, so the one-file rule applies to the
-pair and one holder suits both.
+**Running beside all of the above.** A caller naming a reference (item 11,
+#5560) is landed in both spellings — the sigil resolves through a *declared*
+event field, and the emitted address converts to the sigil at the CLI's
+dispatch gate. It decided nothing item 1 decides: a declared result makes an
+*output* self-describing, and this is what an *input* accepts.
 
 **Where a doc comment actually goes, measured against the compile pipeline.**
 Step 5a rests on this, and it is not what either symptom looked like from the

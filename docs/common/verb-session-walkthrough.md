@@ -60,7 +60,7 @@ verbs, and they differ in nothing but what the new item is filed under:
 | `recordNote` | returns what only the pattern could compute: the clock is a handler capability, so the stamp cannot come from the caller | act 7 |
 | `finish` | returns a derived fact — `openBelow` takes a walk of the whole subtree, which a caller would pay N reads for | act 8 |
 | `archive` | declares no result: the invocation settles carrying no `result` at all, and what it changed is a separate read | act 9 |
-| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12 — the envelope spelling works, the printed-address spelling is refused |
+| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12 — the address as printed, standing where the verb declares a reference |
 
 Those act numbers are `packages/cli/integration/verb-session-demo.sh`, which
 drives the session and prints each command before running it — the transcript is
@@ -547,75 +547,81 @@ their own options go.
 The demo's act 10 is this step run against the session's own tree: the whole
 board first, then only what is open, then the refusal.
 
-## 7. Relate two items **[today]**, minus one spelling
+## 7. Relate two items **[today]**
 
 ```bash
-cf call "$KID" blockOn -- --on "$CSRF"
-```
-
-That spelling — the address exactly as a read printed it — is the one still
-refused (#5880 landed the capability, not the round trip). Wrap the same
-address in the link envelope by hand and the call dispatches, the edge that
-lands is the target rather than a copy, and the graph read below shows one
-item under two paths:
-
-```bash
-cf call --select blocked@,on@,blockedOnCount "$KID" blockOn '{"on":{"/":{"link@1":{"id":"of:fid1:…"}}}}'
+cf call --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
 
 cf get "$EPIC" children --select @,title,blockedOn@
 ```
 
-The demo's acts 12 and 13 run all three: the refusal as a claim that
-self-reports the day the printed address is accepted, the envelope as the
-workaround it is, and the two-paths read as the payoff addresses exist for.
+That spelling — the address exactly as a read printed it — dispatches where
+the verb declares a reference, and the edge that lands is the target rather
+than a copy: the graph read shows one item under two paths. The dispatch gate
+reads the DECLARED contract ([verb input
+contract](../plans/verb-input-contract.md)) to know which positions declare
+references, and the same contract refuses the two payloads that could only
+ever be mistakes at one:
+
+```bash
+cf call "$KID" blockOn -- --on "not-an-address"
+
+cf call "$KID" blockOn '{"on":{"title":"a copy"}}'
+```
+
+A string that is no address is refused naming the position and the `/of:…`
+form a read prints. An inline copy is refused outright, because a
+shape-matching payload at a reference position stores a detached document
+inside the caller's own item and reports success. The link envelope #5880
+landed stays accepted beside the emitted spelling —
+`verb-session-gaps.sh` step 10 asserts every spelling apart.
+
+The demo's acts 12 and 13 run all of it: the conversion, both refusals, and
+the two-paths read as the payoff addresses exist for.
 
 ## The composition axis
 
-Steps 5 and 7 are the same move — take an address out of one command and put it
-into the next — and the receiver half works in full while the argument half
-works only under a spelling no read emits.
+Steps 5 and 7 are the same move — take an address out of one command and put
+it into the next — and both halves now hold: the receiver half in full, and
+the argument half under every spelling a caller might be holding.
 
 | Direction | State |
 | --- | --- |
 | address → the receiver (first positional, or `--piece`) | works |
 | a link envelope → an argument field | works (#5880) — the edge that lands is the target, not a copy |
-| the address a read emits → an argument field | refused |
+| the address a read emits → an argument field | works — converted against the declared contract at the dispatch gate |
 
-The pre-dispatch gate now passes a link envelope opaquely where a verb
-declares a reference (#5880), matching the ruling the runtime's own dispatch
-gate had already made. What it still refuses is the canonical string a read
-prints — the one spelling a caller is actually holding, since every `$link`
-and `receipt` in this session emits exactly that form. A caller who wants the
-edge today must assemble the envelope from the string by hand, which is the
-round-trip property failing one level in.
+The pre-dispatch gate passes a link envelope opaquely where a verb declares a
+reference (#5880), and converts the canonical string a read prints — the one
+spelling a caller is actually holding, since every `$link` and `receipt` in
+this session emits exactly that form. The positions it converts at come from
+the DECLARED contract read off the compiled pattern, because the schema a
+dispatch cell carries keeps only stream markers; the [verb input
+contract](../plans/verb-input-contract.md) is what makes that declaration
+authoritative.
 
-A tree mostly hides this, because the natural shape is to call the verb *on* the
-parent — the receiver carries the relationship, so no address needs to be an
-argument. It surfaces the moment two items must be related to each other:
-`blockOn`, a `duplicates` edge, a `move`, or a removal that names a child rather than an
-index. Indices are not addresses; a position shifts under concurrent writes.
+A tree mostly hides the argument half, because the natural shape is to call
+the verb *on* the parent — the receiver carries the relationship, so no
+address needs to be an argument. It surfaces the moment two items must be
+related to each other: `blockOn`, a `duplicates` edge, a `move`, or a removal
+that names a child rather than an index. Indices are not addresses; a
+position shifts under concurrent writes.
 
 [CLI surface shape](../plans/cli-surface-shape.md) states the property for
-commands — an address printed by one command is accepted by the next. This is
-the same property one level in, on arguments. A second instance sits on
-`cf piece set-slug`, whose source positional resolves through its own path
-rather than the one `--piece` uses.
-
-This gap is independent of whether a verb's declared result reaches the runtime.
-Declared results make an **output** self-describing; this is about what an
-**input** accepts.
+commands — an address printed by one command is accepted by the next. The
+argument half is the same property one level in, on arguments. A second
+instance sits on `cf piece set-slug`, whose source positional resolves
+through its own path rather than the one `--piece` uses.
 
 ## What the session is waiting on
 
 | Gap | Needs |
 | --- | --- |
 | An event interface's own comment absent everywhere | The one prose level that does not compile ([#5937](https://github.com/commontoolsinc/labs/issues/5937)). Nothing downstream can serve what was never emitted |
-| A declared event field the handler body never reads is absent from the served input schema | A decision, not a patch: the served schema is the handler's read and the declared type is the contract, and which one a caller is owed is open |
 | `--select` completion, and refusal before the call | A provider reading the declared result the help page already resolves |
-| The address a read emits accepted as an argument | The string form beside the envelope #5880 accepts — the round-trip property above. And beside it the protective refusal: a shape-matching payload still stores a detached copy and reports success |
 
-Four rows and four distinct gaps, and the first two are worth reading
-together because they look like one. They are not: the first is a comment
-nothing emits, and the second is a *field* — not prose at all — and an open
-question rather than a defect. Only the first is an author's words going
-missing.
+Two rows, and two that used to sit beside them are gone the way this table
+intends: the served input schema now carries every declared event field —
+the [verb input contract](../plans/verb-input-contract.md) ruled the
+authored event authoritative — and the address a read emits dispatches as an
+argument, with the detached-copy refusal standing guard beside it (step 7).

@@ -3,35 +3,40 @@
 ## The short version
 
 **A pattern handler that declares a reference should accept one — a live
-read/write cell — from any external caller. Today only a model can pass one:**
-the LLM dialog builtin resolves `{"@link": "…"}` into a live cell before
-dispatch (`traverseAndCellify`). The CLI, a webhook, and the ingest path reach
-the same handler, and none of them resolves a reference — the CLI rejects the
-address, the webhook sends it through unresolved. **The shape-matching payload
-the CLI does accept stores a detached copy instead of an edge, and reports
-success.**
+read/write cell — from any external caller. Today a model and the CLI can
+pass one:** the LLM dialog builtin resolves `{"@link": "…"}` into a live cell
+before dispatch (`traverseAndCellify`), and the CLI's dispatch gate accepts
+the link envelope and converts the address a read emits into it, reading
+reference positions off the declared contract
+([verb input contract](verb-input-contract.md)) — refusing, at those
+positions, the shape-matching payload that would have **stored a detached
+copy instead of an edge and reported success**. The webhook and ingest paths
+reach the same handler and still resolve nothing — the payload goes through
+unresolved.
 
 **The fix:** move that resolution to the boundary every external caller
 crosses, and give the outer gates the link acceptance the dispatch gate already
-has. Medium work, mostly relocating code that already runs in production.
+has. Medium work, mostly relocating code that already runs in production. The
+CLI's half is done — its gate accepts the envelope (#5880) and converts the
+emitted address — so what remains is the webhook and ingest half.
 
 **One constraint, not a second decision:** what is accepted inbound has to
 include the shape a read already emits. Otherwise a caller still cannot submit
-the address it was just handed, and the capability does not compose. Which
-spelling wins is the implementer's call.
+the address it was just handed, and the capability does not compose. The CLI
+satisfied it by converting that shape into the envelope at its gate.
 
 **Not a confinement decision — the runtime already took a position.** The
 dispatch-side closed-world gate accepts a link value opaquely and defers its
 schema check to the handler's own reads (`closedWorldEventRejection`,
 `packages/runner/src/runner.ts`, via its `acceptOpaqueValue: isCellLink`
-option). The CLI's pre-dispatch gate calls the same validator without that
-option (`verbInputSchemaError`, `packages/cli/lib/callable.ts`); the webhook
-path has no gate at all. The refusal is drift between the outer layers and the
-gate they feed, not policy. CFC gets a heads-up — an existing capability
-widening to external principals — not a ruling to wait for.
+option). The CLI's pre-dispatch gate passes the same option since #5880; the
+webhook path has no gate at all. The remaining refusal is drift between that
+path and the gate it feeds, not policy. CFC gets a heads-up — an existing
+capability widening to external principals — not a ruling to wait for.
 
 **Independent of all of it:** refusing the structural copy, instead of storing
-it, needs no encoding decision and no gate change.
+it, needs no encoding decision and no gate change — and the CLI now refuses
+it at every declared reference position.
 
 The rest of this document is the evidence for the paragraphs above.
 
@@ -55,10 +60,10 @@ second-class:
 | Consumer | Can pass a reference? |
 | --- | --- |
 | LLM tool call (`llm-dialog`) | **yes** — `@link`, resolved before dispatch |
-| `cf piece call` | no — validated structurally, an address is rejected |
+| `cf piece call` | **yes** — the link envelope, and the emitted address converted against the declared contract at the dispatch gate |
 | Webhook POST (`sendToStream`, `packages/toolshed/routes/webhooks/`) | no — the raw payload is sent unresolved |
 | [Ingest channels](ingest-channels-journal-sink.md) | no — builds on the same dispatch |
-| `cf exec` and the FUSE projection | no — JSON in, same path as the CLI |
+| `cf exec` and the FUSE projection | **yes** — JSON in, the same gate as `cf piece call` |
 
 The same handler, reached two ways, accepts a reference from one and not the
 other. Nothing about the verb differs; only the door the caller came through.
@@ -79,23 +84,26 @@ address a piece but cannot pass one in. Accepting the form a read emits is what
 makes the capability compose, and it is the property
 [CLI surface shape](cli-surface-shape.md) already states for commands.
 
-## What this costs today, measured
+## What this cost when it was measured, and where that cost remains
 
-Not "you cannot do this yet." The boundary **accepts a wrong payload and stores
-the wrong thing.**
-
-Declaring a reference on an event and calling it three ways:
-
-| Payload | Result |
-| --- | --- |
-| `{"on": "fid1:…"}` | rejected — *value does not match type object* |
-| the runtime link envelope | rejected — *missing required property title* |
-| a literal shape-matching object | **accepted** |
-
-The accepted one settles, reports a plausible result, and stores a **detached
-copy inside the caller's own document**. The edge does not point at the target.
-Nothing reports an error. Measured addresses and reproduction:
+The original harm was not "you cannot do this yet" but the boundary
+**accepting a wrong payload and storing the wrong thing** — a shape-matching
+copy settled, reported a plausible result, and stored a **detached copy
+inside the caller's own document**, with nothing reporting an error. Measured
+addresses and reproduction:
 [#5560](https://github.com/commontoolsinc/labs/issues/5560).
+
+At the CLI that table now reads:
+
+| Payload | Result at a declared reference position |
+| --- | --- |
+| the address a read emits (`/of:…`) | converted to the link envelope; the edge lands on the target |
+| the runtime link envelope | accepted (#5880); the edge lands on the target |
+| a string in no address form | refused naming the position and the `/of:…` form |
+| a literal shape-matching object | refused — an inline copy would store a detached document |
+
+The webhook and ingest paths still take the original table: the raw payload
+goes through unresolved, and the detached copy is still stored as success.
 
 The verbs this reaches are not hypothetical. Every event field across the
 shipped patterns that declares a reference:
@@ -116,61 +124,46 @@ the class of operation that must name something that already exists. The
 sharpest is the root pattern's, since every space has one:
 
 ```bash
-$ cf piece call --piece <root> addPiece '{"piece":"fid1:…"}'
-Invalid input for "addPiece": piece: value does not match type object
+$ cf piece call --piece <root> addPiece '{"piece":"/of:fid1:…"}'
 ```
 
-`pieces.add` sends to that exact stream from inside the runtime. An LLM could
-invoke it. A webhook could not, and neither can the CLI.
+`pieces.add` sends to that exact stream from inside the runtime. An LLM can
+invoke it, and so can the CLI — the address as printed, at the position
+`addPiece` declares. A webhook still cannot.
 
 ## What is missing
 
-**Resolution at the shared boundary rather than in one consumer.**
-`traverseAndCellify` is the working reference implementation; what it needs is a
-home where every caller reaches it. Beside it, the CLI's pre-dispatch gate
-needs the `acceptOpaqueValue` option the dispatch gate already passes, so the
-two gates stop disagreeing about link values.
+**Resolution at the shared boundary rather than per consumer.**
+`traverseAndCellify` is the working reference implementation; what it needs
+is a home where every caller reaches it. The CLI settled its own half — its
+pre-dispatch gate passes the `acceptOpaqueValue` option the dispatch gate
+passes (#5880), and converts the emitted address one gate earlier — but that
+conversion lives in the CLI, so the webhook and ingest paths still forward a
+payload unresolved.
 
-**A schema emission fix, and a marker for one road only.** A verb carries two
-event schemas, and they diverge by construction. The handler-side schema — the
-one the deployed stream cell carries, which the CLI gate validates against and
-discovery serves — is a **usage summary of the handler body**:
-`applyCapabilitySummaryToArgument`
-(`packages/ts-transformers/src/transformers/schema-injection.ts`) shrinks the
-event parameter to what the body uses, so a declared reference field the body
-never reads disappears from the emitted `properties` and `required` — named
-and inline spellings alike — while a field the body does read emits for both
-spellings with a capability-narrowed `asCell` (`["readonly"]` for a read-only
-body), not the authored `Writable`. The pattern's durable `$defs` meanwhile
-keeps the full declared event. Measured both ways at the emitted output.
-
-The divergence needs fixing under any road: a field the stream schema does not
-name cannot be validated or documented, and once anything refuses on that
-schema (plan item 12's CLI refusal) cannot be supplied at all. Which of the
-two schemas is a verb's input contract — the body's usage summary or the
-authored event — is an open question for whoever owns items 11 and 12,
-adjacent to the open evolution-policy discussion; this document does not
-decide it. The `asCell` marker is needed only if resolution becomes
-schema-directed — and note that today's emitted marker records the body's
-usage, not the author's declaration — while schema-blind acceptance already
-composes with closed-world validation, as `closedWorldEventRejection`
-demonstrates: a link value passes opaquely in any declared position while an
-undeclared key still rejects.
-
-*Whether resolution should stay schema-blind or become schema-directed is an
-implementation question this document does not settle.* Schema-blind is proven
-twice — `traverseAndCellify` and the dispatch gate; schema-directed is
-checkable and refuses a typo. The answer decides whether the `asCell` emission
-is required or merely useful.
+**The schema questions this document once held open are ruled.** Which of a
+verb's two event schemas is the input contract — the body's usage summary or
+the authored event — was decided for the authored event
+([verb input contract](verb-input-contract.md)), and emission now serves it:
+a declared reference field the body never reads stays in the served
+`properties` and `required`, carrying the capability its usage earned as its
+`asCell` marker. Resolution at the CLI became schema-DIRECTED off that
+contract — the marker names the positions to convert at, and a typo'd
+payload is refused rather than resolved — while the runtime's own dispatch
+gate remains schema-blind (`closedWorldEventRejection` passes a link value
+opaquely in any declared position). A boundary that adopts resolution for the
+webhook and ingest paths chooses between those two proven shapes; the
+contract ruling means the schema-directed one is available everywhere the
+compiled pattern is.
 
 ## Size
 
-**Medium**, and smaller than it looks because the hard part is written. The
-emission change lands in
-`packages/ts-transformers/src/transformers/schema-injection.ts`, the same file
-that carries a verb's declared result. Resolution is a lift-and-share of
-existing, exercised code, and the gate alignment is one option at one call
-site — pass the `acceptOpaqueValue` the dispatch gate already passes. Nothing
+**Medium**, and most of it landed. The emission change shipped with the input
+contract's `contract` mode in
+`packages/ts-transformers/src/transformers/schema-injection.ts`, the gate
+alignment was one option at one call site (#5880), and the CLI's address
+conversion rides its dispatch gate. What remains — resolution the webhook and
+ingest paths reach — is a lift-and-share of existing, exercised code. Nothing
 durable is written, so it reverses by assignment rather than migration.
 
 ## The refusal is drift, not policy
@@ -187,12 +180,12 @@ stop a caller smuggling undeclared *keys* through links without ever banning
 link *values*. That is a considered position on exactly this question, taken in
 the layer most careful about what a caller may submit.
 
-**The CLI gate is the same validator minus the option.** `verbInputSchemaError`
-(`packages/cli/lib/callable.ts`) calls the identical `validateSchemaValue` with
-no `acceptOpaqueValue`. It has no link concept, so it descends into a link
-envelope as if it were the declared object — the measured rejections above.
-The comments around that gate give its purpose: refuse a malformed payload
-before it spends the invocation id. Nothing there elects to refuse references.
+**The CLI gate is the same validator, aligned since #5880.**
+`verbInputSchemaError` (`packages/cli/lib/callable.ts`) calls the identical
+`validateSchemaValue` and now passes `acceptOpaqueValue`, so a link envelope
+passes it opaquely — and one gate earlier, the emitted address is converted
+into that envelope against the declared contract. Its purpose is unchanged:
+refuse a malformed payload before it spends the invocation id.
 
 **The webhook path takes no position.** `sendToStream`
 (`packages/toolshed/routes/webhooks/webhooks.utils.ts`) forwards the raw
@@ -207,12 +200,12 @@ resolved target — its own properties, and its `title` read back. The door is
 already open under the native spelling, so this plan names a capability rather
 than adding one.
 
-That also bounds what the gate change alone buys. The CLI's gate is the only
-thing between a sigil payload and a `send()` that already resolves it, so
-aligning it should make the native spelling work end to end without any
-resolution work — worth confirming against a declared field rather than the
-`any` the probe used. Shared resolution then serves the *other* spellings,
-which is composition rather than basic capability.
+That also bounds what the gate change alone bought. The CLI's gate was the
+only thing between a sigil payload and a `send()` that already resolves it,
+and aligning it made the native spelling work end to end — confirmed against
+a declared field: the edge that lands is the target, read back by address.
+Shared resolution now serves the *other* callers, which is composition rather
+than basic capability.
 
 What remains for whoever owns CFC is a notification, not a ruling: opening the
 outer doors widens an existing exposure — an external principal, not just the
@@ -223,5 +216,6 @@ change extends is the runtime's own gate, not a workaround.
 ## What is correct regardless
 
 Refusing a structural copy where a reference is declared stands on its own: no
-new vocabulary, no encoding decision, no gate change, and it converts today's
-silent corruption into an error.
+new vocabulary, no encoding decision, no gate change. The CLI's refusal now
+converts that silent corruption into an error; a boundary resolution for the
+remaining callers owes the same refusal beside it.
