@@ -32,12 +32,12 @@ export type PollOptionLinkTargetCell = Writable<string | null | undefined>;
 
 const myVoteFor = (
   votes: readonly Vote[],
-  me: LunchProfileCell | undefined,
+  viewerProfile: LunchProfileCell | undefined,
   optionId: string,
 ): VoteColor | undefined => {
-  if (!me) return undefined;
+  if (!viewerProfile) return undefined;
   return votes.find(
-    (v) => v.optionId === optionId && equals(v.voter, me),
+    (v) => v.optionId === optionId && equals(v.voter, viewerProfile),
   )?.voteType;
 };
 
@@ -60,7 +60,7 @@ const formatRank = lift<{ rank: number | undefined }, string>(({ rank }) =>
  * The parent owns all durable and shared UI state. This pattern receives one
  * option, current viewer/admin facts, shared per-session editor state, and the
  * streams it should emit for mutations. When rendering inside `options.map()`,
- * pass the resolved `me` value from the parent, not the raw `myName` PerUser
+ * pass the resolved `viewerProfile` value from the parent, not the raw name
  * cell.
  */
 export interface PollOptionCardInput {
@@ -72,7 +72,7 @@ export interface PollOptionCardInput {
 
   /** Resolved current viewer name; required for per-option vote styling. */
   /** The viewer's profile cell — identity, compared with `equals()`. */
-  me?: LunchProfileCell;
+  viewerProfile?: LunchProfileCell;
 
   /** Whether the current viewer is allowed to vote. */
   isJoined: boolean;
@@ -129,7 +129,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     {
       option,
       rank,
-      me,
+      viewerProfile,
       isJoined,
       isAdmin,
       votes,
@@ -143,7 +143,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     const oid = option.id;
     const optionTitle = option.title;
     const displayRank = formatRank({ rank });
-    const myVote = computed(() => myVoteFor(votes, me, oid));
+    const myVote = computed(() => myVoteFor(votes, viewerProfile, oid));
     const isRemoveConfirm = computed(() => removeConfirmTarget.get() === oid);
 
     // Generated cuisine thumbnail. The stored option image is the shared

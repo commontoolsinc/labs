@@ -50,7 +50,7 @@ export const JOIN_NEEDS_PROFILE =
  */
 const joinAs = handler<JoinEvent, {
   users: ParticipantIdentityUsersCell;
-  host: HostCell;
+  host: HostCell | undefined;
   profile: LunchProfileCell | undefined;
   // Display strings arrive pre-resolved from `#profileName` / `#profileAvatar`.
   // Field reads off the live `#profile` result are not a reliable display
@@ -103,8 +103,9 @@ const joinAs = handler<JoinEvent, {
       avatar: (profileAvatar ?? "").trim(),
       color: colorForIndex(existing.length),
     }]);
-    // First to join hosts the poll.
-    if ((host.get() ?? {}).profile === undefined) {
+    // First to join hosts the poll. (`host` is typed optional only for the
+    // legacy-instantiation schema; the pattern always binds it.)
+    if (host !== undefined && (host.get() ?? {}).profile === undefined) {
       host.set({ profile: identity });
     }
   },
@@ -112,11 +113,11 @@ const joinAs = handler<JoinEvent, {
 
 const claimHost = handler<ClaimHostEvent, {
   users: ParticipantIdentityUsersCell;
-  host: HostCell;
+  host: HostCell | undefined;
   profile: LunchProfileCell | undefined;
   profileName: string;
 }>((_event, { users, host, profile, profileName }) => {
-  if (!trimmedName(profileName) || !profile) return;
+  if (!trimmedName(profileName) || !profile || host === undefined) return;
   // Terminal cell for storage, and it must READ as present — both per the
   // joinAs comments (a truthy handle is not an identity).
   const identity = profile.resolveAsCell();
@@ -124,7 +125,7 @@ const claimHost = handler<ClaimHostEvent, {
   // Only a participant may host, and taking a host role you already hold is a
   // no-op rather than a redundant write.
   if (!(users.get() ?? []).some((u) => equals(u.profile, identity))) return;
-  const current = (host.get() ?? {}).profile;
+  const current = (host?.get() ?? {}).profile;
   if (current !== undefined && equals(current, identity)) return;
   host.set({ profile: identity });
 });
@@ -144,8 +145,12 @@ export interface ParticipantIdentityCardInput {
   /** Shared roster of participants who have joined. */
   users: ParticipantIdentityUsersCell;
 
-  /** Shared pointer to whoever hosts the poll. */
-  host: HostCell;
+  /**
+   * Shared pointer to whoever hosts the poll. Optional ONLY so card
+   * instantiations stored by the name-keyed predecessor (which had no host
+   * pointer) still satisfy this schema; the pattern always passes it.
+   */
+  host?: HostCell;
 
   /**
    * The viewer's resolved `#profile` cell — their identity. Undefined until it
@@ -216,14 +221,14 @@ export default pattern<
     });
     const isAdmin = computed(() => {
       const mine = profile;
-      const current = (host.get() ?? {}).profile;
+      const current = (host?.get() ?? {}).profile;
       if (!mine || current === undefined) return false;
       return equals(current, mine);
     });
     const hasProfile = computed(() => trimmedName(profileName) !== "");
     const canonicalProfileName = computed(() => trimmedName(profileName));
     const hostName = computed(() => {
-      const current = (host.get() ?? {}).profile;
+      const current = (host?.get() ?? {}).profile;
       if (current === undefined) return "";
       const entry = (users.get() ?? []).find((u) => equals(u.profile, current));
       return entry ? entry.name : "";

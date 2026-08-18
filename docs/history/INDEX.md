@@ -70,6 +70,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 - [topics-crossref-identity-break.md](topics-crossref-identity-break.md) — decision record for the topics reference-graph contract break shipped in #5921, the first accepted break in the pattern-update registries; backfilled when the registries gained their `record` linkage.
 - [parking-admin-floor-contract-break.md](parking-admin-floor-contract-break.md) — decision record for the parking-coordinator admin-roster contract break shipped in #6091: why correcting a `requiredIntegrity` floor nothing could satisfy had to change the `ifc` at the roster's path, and why a piece holding a roster loses nothing it could have written, August 2026.
+- [lunch-poll-identity-break.md](lunch-poll-identity-break.md) — decision record for the lunch-poll identity contract break: display-name identity replaced by profile cells; the second accepted break in the pattern-update registries, applying in place with optional identity fields rather than stranding stored rows.
 - [action-id-per-instance-decision.md](specs/action-id-per-instance-decision.md) — per-instance action identity.
 - [per-doc-rehydration-persisted-form.md](specs/scheduler-v2/per-doc-rehydration-persisted-form.md) — the per-doc restore design for the deleted persisted-observation form.
 - [persistent-scheduler-state.md](specs/persistent-scheduler-state.md) — the persisted scheduler-observation form, reduced to the v2 basis index by server-execution v2 stage C.

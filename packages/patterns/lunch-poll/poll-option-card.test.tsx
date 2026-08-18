@@ -94,7 +94,7 @@ export default pattern(() => {
   const card = PollOptionCard({
     option: STORED_OPTION,
     rank: reactiveRank,
-    me: alex,
+    viewerProfile: alex,
     isJoined: true,
     isAdmin: true,
     votes,
@@ -213,7 +213,7 @@ export default pattern(() => {
   const generatingCard = PollOptionCard({
     option: GENERATING_OPTION,
     rank: 2,
-    me: alex,
+    viewerProfile: alex,
     isJoined: true,
     isAdmin: true,
     votes,

@@ -120,6 +120,48 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "retired per-topic row is listed here.",
     record: "docs/history/topics-crossref-identity-break.md",
   },
+  {
+    // Lunch-poll identity moved from display names to profile cells — see
+    // docs/history/lunch-poll-identity-break.md and the matching entries in
+    // tasks/pattern-compat-accepted-breaks.ts. Name-keyed vintages hold no
+    // profile cells, so under the new model their capture user derives as
+    // not-joined (a "display ghost"): `adminName` is the removed surface
+    // itself, and `myName`/`isJoined`/`isAdmin` are its derived shadows.
+    // `todaysVotes`/`todayVoteCount` empty for a second reason the entry is
+    // honest about: they are current-day views, and a pinned vintage replayed
+    // weeks after capture holds no votes cast "today" — the stored `votes`
+    // themselves survive unchanged.
+    pattern: "lunch-poll/main.tsx",
+    paths: [
+      "adminName",
+      "myName",
+      "isJoined",
+      "isAdmin",
+      // The name-keyed identity field on each stored vote. The vote itself
+      // survives (id, color, timestamp); its identity is the `voter` profile
+      // cell on votes this pattern casts.
+      "votes[].voterName",
+      "todaysVotes",
+      "todayVoteCount",
+    ],
+    capturedThrough: "2026-07-30T21-32-46.548Z",
+    reason: "Lunch-poll identity moved from display names to profile cells. " +
+      "A name-keyed vintage's capture user matches no profile, so the " +
+      "name-derived membership surface — `adminName` and the joined-ness it " +
+      "anchored — does not survive on purpose; the current-day vote views " +
+      "additionally empty because the pinned vintage is replayed long after " +
+      "its capture day, while the stored votes survive whole.",
+  },
+  {
+    // The card half of the same decision: it published the viewer's name as
+    // `me`, now removed, and derived joined-ness/host status from it.
+    pattern: "lunch-poll/participant-identity-card.tsx",
+    paths: ["me", "isJoined", "isAdmin"],
+    capturedThrough: "2026-07-30T21-32-46.548Z",
+    reason: "Lunch-poll identity moved from display names to profile cells. " +
+      "The card's published viewer-name identity is removed, and a name-keyed " +
+      "vintage's capture user derives as not-joined under profile comparison.",
+  },
 ];
 
 /** One `(pattern, path)` drop, for reporting which entries were needed. */

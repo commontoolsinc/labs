@@ -116,8 +116,14 @@ export type LunchProfileCell = Cell<LunchProfile>;
  * display, snapshotted at join and free to go stale or collide.
  */
 export interface User {
-  /** Identity. Compare with `equals()`. */
-  profile: LunchProfileCell;
+  /**
+   * Identity. Compare with `equals()`. Optional ONLY for rows stored by the
+   * name-keyed predecessor of this pattern: every row THIS pattern writes
+   * carries it (the join gate refuses an identity that does not read as
+   * present). A row without one is a display ghost — it matches no viewer,
+   * so its person can re-join with a profile and appear as themselves.
+   */
+  profile?: LunchProfileCell;
   /** Display name at join time — cosmetic, may duplicate another participant. */
   name: string;
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
@@ -179,8 +185,13 @@ export interface Option {
 export type VoteColor = "green" | "yellow" | "red";
 
 export interface Vote {
-  /** Whose vote this is. Identity — found with `equals()`, never by name. */
-  voter: LunchProfileCell;
+  /**
+   * Whose vote this is. Identity — found with `equals()`, never by name.
+   * Optional ONLY for votes stored by the name-keyed predecessor; every vote
+   * THIS pattern casts carries it. A legacy vote tallies anonymously and,
+   * matching no voter, can never be toggled or recast by anyone.
+   */
+  voter?: LunchProfileCell;
   optionId: string;
   voteType: VoteColor;
   /**
@@ -235,8 +246,11 @@ export type ResetVotesEvent = Record<PropertyKey, never>;
 export interface VoteSnapshot {
   /** Display name at snapshot time — cosmetic; the profile below is identity. */
   voter: string;
-  /** Live identity link, so a badge stays right even after a rename. */
-  voterProfile: LunchProfileCell;
+  /**
+   * Live identity link, so a badge stays right even after a rename. Optional
+   * only for snapshots stored by the name-keyed predecessor.
+   */
+  voterProfile?: LunchProfileCell;
   optionTitle: string;
   color: VoteColor;
 }
@@ -251,12 +265,23 @@ export interface VoteSnapshot {
 export interface HistoryEntry {
   id: string;
   title: string;
-  /** Display name at log time — cosmetic. */
-  loggedByName: string;
-  /** Live identity link to whoever logged it. */
-  loggedBy: LunchProfileCell;
-  wentAt: number;
-  votes: VoteSnapshot[];
+  /**
+   * Display name at log time — cosmetic. Defaulted so entries stored by the
+   * name-keyed predecessor (which had no such field) read back as `""`.
+   */
+  loggedByName: string | Default<"">;
+  /**
+   * Live identity link to whoever logged it. Optional only for entries
+   * stored by the name-keyed predecessor, which recorded no identity link.
+   */
+  loggedBy?: LunchProfileCell;
+  /**
+   * Both defaulted so entries stored by the SQL-era predecessor (separate
+   * tables, text timestamps) read back — a zero `wentAt` sorts a legacy row
+   * last rather than refusing the update, and its snapshot list reads empty.
+   */
+  wentAt: number | Default<0>;
+  votes: VoteSnapshot[] | Default<[]>;
 }
 
 /**
@@ -266,10 +291,15 @@ export interface HistoryEntry {
  */
 export interface PlaceStat {
   title: string;
-  visits: number;
-  greens: number;
-  yellows: number;
-  reds: number;
+  /**
+   * Counts are defaulted so rows stored by the SQL-era predecessor (whose
+   * derived stat rows carried different fields) read back as zeros instead
+   * of refusing the update.
+   */
+  visits: number | Default<0>;
+  greens: number | Default<0>;
+  yellows: number | Default<0>;
+  reds: number | Default<0>;
 }
 
 /**
@@ -833,10 +863,14 @@ const logVisit = handler<LogVisitEvent, {
     const voteSnapshot: VoteSnapshot[] = [];
     for (const v of votes.get()) {
       if (
-        nowDay === null || typeof v.castAt !== "number" ||
+        nowDay === null || v.voter === undefined ||
+        typeof v.castAt !== "number" ||
         dayKeyOf(v.castAt) !== nowDay
       ) {
-        continue; // stale (previous-day or pre-castAt) vote → not current
+        // Stale (previous-day or pre-castAt) vote → not current. A legacy
+        // voterless vote has no attributable snapshot either — and it also
+        // has no castAt, so the day filter already excludes it.
+        continue;
       }
       const optTitle = trimmedName(titleById.get(v.optionId));
       if (!optTitle) continue; // vote for an already-removed option → skip
@@ -918,8 +952,10 @@ const tallyOptions = (
   // roster still tallies; they just render without a name.
   const participantNames = users.map((u) => u.name);
   const initialsByName = getInitialsByName(participantNames);
-  const rosterOf = (voter: LunchProfileCell): User | undefined =>
-    users.find((u) => equals(u.profile, voter));
+  const rosterOf = (voter: LunchProfileCell | undefined): User | undefined =>
+    voter === undefined
+      ? undefined
+      : users.find((u) => equals(u.profile, voter));
   const tallies = options.map((option): OptionTally => {
     const optionVotes = votes.filter((v) => v.optionId === option.id);
     return {
@@ -1733,7 +1769,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     <PollOptionCard
                       option={cardOption}
                       rank={rank}
-                      me={viewerProfileCell}
+                      viewerProfile={viewerProfileCell}
                       isJoined={isJoined}
                       isAdmin={isAdmin}
                       votes={todaysVotes}
