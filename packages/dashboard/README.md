@@ -617,11 +617,13 @@ Notes:
   `CI_MONTHLY_BUDGET` overrides provider budgets. A single provider otherwise
   uses its own configured budget. With both providers, their budgets are added
   only when both exist. Blacksmith's budget is its monthly spending-alert
-  threshold. A failed configured source turns the tile gray and shows `$???`
-  for that source. The values from responding sources remain as a lower bound.
-  A source that has stopped reporting fails the same way. Both feeds report a
-  day or two after a day ends, and a settled day neither has a row for is a day
-  that cost nothing — which holds only while the feed is still being written.
+  threshold. A budget that resolves to no number is left out of the status line
+  rather than shown as an unknown amount. A failed configured source turns the
+  tile gray and shows `$???` for that source. The values from responding sources
+  remain as a lower bound. A source that has stopped reporting fails the same
+  way. Both feeds report a day or two after a day ends, and a settled day
+  neither has a row for is a day that cost nothing — which holds only while the
+  feed is still being written.
   Each is read no further than its own newest row reaches: GitHub's report is
   one pipeline across every product the org uses, so any product's row dates it,
   and Blacksmith's daily endpoint dates itself. Four days without a row is a
