@@ -277,9 +277,11 @@ adding a fourth.
 *Exit:* the same cell, reached four ways, renders identically under the same
 selection.
 
-**11. A caller may name a reference.** *(M)* **The capability is on main
-as #5880.** A caller names an existing cell where a verb declares a reference,
-and the edge that comes back is the target rather than a copy of it.
+**11. A caller may name a reference.** *(M)* **On main** — the envelope
+spelling as #5880, the emitted-address spelling and the protective refusals
+with row 14. A caller names an existing cell where a verb declares a
+reference, and the edge that comes back is the target rather than a copy of
+it.
 
 What it removes: a verb whose event declared `Writable<T>` was callable by a
 model and by nothing else. `traverseAndCellify`
@@ -323,41 +325,38 @@ nothing gated it: the handler saw the target's own properties and read its
 means the door is already open under the native spelling. This item names a
 capability rather than adding one.
 
-Four parts. Two are independent of everything:
+Four parts, three of them landed:
 
-- **Refuse the structural copy.** Correct under any road, needs no vocabulary
-  and no gate change, and converts silent corruption into an error.
-- **Give the CLI gate the option the dispatch gate already passes.** One
-  argument at one call site — and on the measurement above, *sufficient on its
-  own* for the native sigil spelling, since the gate is the only thing between
-  that payload and a `send()` that already resolves it. Worth confirming
-  against a declared field rather than the `any` the probe used.
+- **Refuse the structural copy.** *Landed.* Correct under any road, needs no
+  vocabulary and no gate change, and converts silent corruption into an error.
+- **Give the CLI gate the option the dispatch gate already passes.** *Landed
+  as #5880.* One argument at one call site — and on the measurement above,
+  sufficient on its own for the native sigil spelling, since the gate is the
+  only thing between that payload and a `send()` that already resolves it.
+  Confirmed since against a declared field rather than the `any` the probe
+  used: the edge that lands reads back as the address that was named.
 - **Lift resolution to a shared home**, beside `parseLink` and the LLM-friendly
-  pair in `packages/runner/src/link-utils.ts`. This is what admits the *other*
-  spelling — the canonical reference string a read emits under a `$link`
-  marker — so it serves composition rather than basic capability.
-- **Fix event-schema emission.** The handler-side stream schema is a usage
-  summary: `applyCapabilitySummaryToArgument`
-  (`packages/ts-transformers/src/transformers/schema-injection.ts`) shrinks
-  the event parameter to what the body uses, so a declared reference field
-  the body never reads — named and inline spellings alike — disappears from
-  the emitted properties and `required`, while the pattern's durable `$defs`
-  keeps the full declared event. That half is independent and needed under
-  any road, doubly once anything refuses on the stream schema, since a field
-  it does not name cannot be supplied at all. Which of the two schemas is a
-  verb's input contract is the open question
-  [references as arguments](references-as-arguments.md) records; only the
-  `asCell` marker hangs on the decision below — and today's emitted marker
-  records the body's usage (`["readonly"]` for a read-only body), not the
-  author's `Writable`.
+  pair in `packages/runner/src/link-utils.ts`. *Still owed.* The CLI resolves
+  the emitted spelling at its own dispatch gate, which serves every caller that
+  comes through `cf`; the webhook and ingest paths reach the same handlers
+  through no gate at all, and a shared home is what would serve them.
+- **Fix event-schema emission.** *Landed as #5964.* The handler-side stream
+  schema was a usage summary — `applyCapabilitySummaryToArgument`
+  (`packages/ts-transformers/src/transformers/schema-injection.ts`) shrank the
+  event parameter to what the body used, so a declared reference field the body
+  never read disappeared from the emitted properties and `required`. It now
+  serves the authored event, per
+  [the input contract](../history/plans/verb-input-contract.md), with the
+  usage-derived capability riding the marker rather than the shape.
 
-*One decision inside the item:* schema-blind or schema-directed resolution.
-Schema-blind is proven twice — `traverseAndCellify` and the dispatch gate;
-schema-directed is checkable and refuses a typo. It decides whether the `asCell`
-marker is required or merely useful, so reach it before starting that half.
+*The decision inside the item is taken:* resolution at the CLI is
+schema-DIRECTED, off the declared contract, so a typo at a reference position
+is refused rather than resolved. The runtime's own dispatch gate stays
+schema-blind. A shared home for the remaining callers chooses between those
+two proven shapes.
 
-*A constraint rather than a decision:* what is accepted inbound must include the
-shape a read emits, or a caller cannot submit the address it was just handed.
+*A constraint rather than a decision, and met:* what is accepted inbound
+includes the shape a read emits.
 
 *CFC gets a notification, not a ruling* — an existing capability widening from
 the user's own model session to external principals.
@@ -368,9 +367,10 @@ the user's own model session to external principals.
 and by no other caller; a CLI caller now reaches it too, and the edge that comes
 back is the target rather than a copy of it.
 
-*The exit the item still owes:* the same call sending the target's SHAPE rather
-than its address is refused, instead of storing a detached copy and reporting
-success.
+*Exit, met by row 14:* the same call sending the target's SHAPE rather than
+its address is refused — including a copy carrying every field the target
+declares, which the published schema alone cannot tell from the real thing —
+instead of storing a detached copy and reporting success.
 
 **12. `cf` refuses an undeclared field on a call.** *(S)* **On main as
 #5835.** The failure it removes: a payload carrying a field the verb does not
