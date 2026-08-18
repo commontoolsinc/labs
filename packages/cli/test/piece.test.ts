@@ -24,7 +24,6 @@ import { toCell } from "../../runner/src/back-to-cell.ts";
 import { setResultCell } from "../../runner/src/result-utils.ts";
 import {
   checkPieceSourceFromCommand,
-  dataCommandAction,
   formatPatternIdentity,
   formatPatternRef,
   getCellValueFromCommand,
@@ -35,13 +34,11 @@ import {
   parsePieceOptions,
   parseSpaceOptions,
   piece,
-  PIECE_DATA_SPELLING_END_DATE,
+  pieceDataCommand,
   readCallTarget,
   readTargetPositionals,
   setCellValueFromCommand,
   setPieceSourceFromCommand,
-  warnDeprecatedPieceSpelling,
-  withDeprecatedSpellingWarning,
 } from "../commands/piece.ts";
 import {
   CellSelectionError,
@@ -482,54 +479,6 @@ describe("cli piece parsing", () => {
   it('parseLink() rejects the "#argument" suffix on a link endpoint', () => {
     expect(() => parseLink(`/${LLM_HANDLE}#argument`))
       .toThrow(/does not apply to a link endpoint/);
-  });
-
-  it("warnDeprecatedPieceSpelling() names the short spelling and the end date", () => {
-    const lines: string[] = [];
-    warnDeprecatedPieceSpelling("piece get", {
-      writeError: (text) => lines.push(text),
-    });
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("'cf piece get' is deprecated");
-    expect(lines[0]).toContain("spell it 'cf get'");
-    expect(lines[0]).toContain(
-      `stops working on ${PIECE_DATA_SPELLING_END_DATE}`,
-    );
-  });
-
-  it("withDeprecatedSpellingWarning() warns once, then delegates with `this` intact", () => {
-    const calls: Array<{ self: unknown; args: unknown[] }> = [];
-    const warned: string[] = [];
-    const original = console.error;
-    console.error = (...parts: unknown[]) => {
-      warned.push(parts.join(" "));
-    };
-    try {
-      const wrapped = withDeprecatedSpellingWarning(
-        "piece call",
-        function (this: unknown, ...args: unknown[]) {
-          calls.push({ self: this, args });
-          return "delegated";
-        },
-      );
-      const self = { marker: true };
-      expect(wrapped.call(self, "a", 1)).toBe("delegated");
-    } finally {
-      console.error = original;
-    }
-    // `this` passes through untouched: `call`'s action reads
-    // `this.getLiteralArgs()` off the Cliffy command it runs under.
-    expect(calls).toEqual([{ self: { marker: true }, args: ["a", 1] }]);
-    expect(warned).toHaveLength(1);
-    expect(warned[0]).toContain("'cf piece call' is deprecated");
-  });
-
-  it("dataCommandAction() wraps only the piece-mounted spellings", () => {
-    const action = () => "ran";
-    // The top-level spelling mounts the action untouched — identity, not a
-    // silent wrapper — so the two mounts differ in nothing but the notice.
-    expect(dataCommandAction("get", action)).toBe(action);
-    expect(dataCommandAction("piece get", action)).not.toBe(action);
   });
 
   it("parseSpaceOptions() refuses a piece reference beside a URL that names a piece", () => {
@@ -1014,7 +963,7 @@ describe("cli piece parsing", () => {
   });
 
   it("offers computed transforms for piece reads", () => {
-    const getFlags = piece.getCommand("get")!.getOptions().flatMap((option) =>
+    const getFlags = pieceDataCommand("get").getOptions().flatMap((option) =>
       option.flags
     );
     expect(getFlags).toContain("--step");
@@ -1028,7 +977,7 @@ describe("cli piece parsing", () => {
     // description is the only place a caller reading `--help` learns so. A
     // description naming one of the two languages sends a caller who wants
     // both a field list and a schema shape to the wrong flag.
-    const schemaOption = piece.getCommand("get")!.getOptions().find((option) =>
+    const schemaOption = pieceDataCommand("get").getOptions().find((option) =>
       option.flags.includes("--schema")
     )!;
     expect(schemaOption.description).toContain("--select field list");
@@ -1075,7 +1024,7 @@ describe("cli piece parsing", () => {
 
   it("refuses a piece get command that names both projection flags", async () => {
     const { code, stderr } = await cf(
-      "piece get " +
+      "get " +
         "--identity ./definitely-missing-piece-get-review.key " +
         "--api-url https://cf.dev --space common-knowledge " +
         `--piece ${PIECE} --select id --schema id`,
@@ -1088,7 +1037,7 @@ describe("cli piece parsing", () => {
 
   it("passes a --select projection through the piece get command action", async () => {
     const { code, stderr } = await cf(
-      "piece get " +
+      "get " +
         "--identity ./definitely-missing-piece-get-review.key " +
         "--api-url https://cf.dev --space common-knowledge " +
         `--piece ${PIECE} --select id,title`,
@@ -1101,7 +1050,7 @@ describe("cli piece parsing", () => {
 
   it("passes a parsed selection through the piece get command action", async () => {
     const { code, stderr } = await cf(
-      "piece get " +
+      "get " +
         "--identity ./definitely-missing-piece-get-review.key " +
         "--api-url https://cf.dev --space common-knowledge " +
         `--piece ${PIECE} --filter .active --schema id`,
@@ -1339,14 +1288,14 @@ describe("cli piece parsing", () => {
   });
 
   it("offers per-phase timing output for piece call", () => {
-    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+    const callFlags = pieceDataCommand("call").getOptions().flatMap((option) =>
       option.flags
     );
     expect(callFlags).toContain("--verbose");
   });
 
   it("offers wait control for piece call", () => {
-    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+    const callFlags = pieceDataCommand("call").getOptions().flatMap((option) =>
       option.flags
     );
     expect(callFlags).toContain("--await");
@@ -1355,7 +1304,7 @@ describe("cli piece parsing", () => {
   });
 
   it("offers result-link annotation for piece call", () => {
-    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+    const callFlags = pieceDataCommand("call").getOptions().flatMap((option) =>
       option.flags
     );
     expect(callFlags).toContain("--show-links");
@@ -1366,7 +1315,7 @@ describe("cli piece parsing", () => {
     // takes every form the read's does. Its own `--help` line is where a
     // caller learns which, and one naming fewer forms than the parser takes
     // reads as a narrowing that is not there.
-    const schemaOption = piece.getCommand("call")!.getOptions().find((option) =>
+    const schemaOption = pieceDataCommand("call").getOptions().find((option) =>
       option.flags.includes("--schema")
     )!;
     expect(schemaOption.description).toContain("--select field list");

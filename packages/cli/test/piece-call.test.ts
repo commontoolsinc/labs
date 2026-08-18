@@ -1922,7 +1922,7 @@ describe("forced-stream fallback dispatch", () => {
   });
 });
 
-describe("piece call stdin payloads", () => {
+describe("call stdin payloads", () => {
   it("identifies JSON output without treating delimited fields as selectors", () => {
     expect(
       pieceCallInvocation(["--json", '{"query":"milk"}'], []),
@@ -2546,7 +2546,7 @@ describe("piece call stdin payloads", () => {
   });
 });
 
-describe("piece call wait control", () => {
+describe("call wait control", () => {
   const config = {
     apiUrl: "http://localhost:8000",
     identity: "/tmp/test-identity.pem",
@@ -3407,7 +3407,7 @@ describe("collectInvocationResultLinks", () => {
   });
 });
 
-describe("piece call --show-links", () => {
+describe("call --show-links", () => {
   const config = {
     apiUrl: "http://localhost:8000",
     identity: "/tmp/test-identity.pem",
@@ -3623,7 +3623,7 @@ function recordingSelector(answer: unknown) {
   return { calls, derive };
 }
 
-describe("piece call selection", () => {
+describe("call selection", () => {
   const config = {
     apiUrl: "http://localhost:8000",
     identity: "/tmp/test-identity.pem",
@@ -3921,7 +3921,7 @@ describe("piece call selection", () => {
 
     it("reports a malformed selection without naming an invocation to retry", async () => {
       const { code, stderr } = await cf(
-        "piece call " +
+        "call " +
           "--identity ./definitely-missing-piece-call-review.key " +
           "--api-url https://cf.dev --space common-knowledge " +
           "--piece fid1:piece-123 --select a..b addTopic",
@@ -3943,7 +3943,7 @@ const selectionSigner = await Identity.fromPassphrase(
   "cf-piece-call-selection",
 );
 
-describe("piece call over a live runtime", () => {
+describe("call over a live runtime", () => {
   const signer = selectionSigner;
   const space = signer.did();
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -4161,7 +4161,7 @@ describe("piece call over a live runtime", () => {
   });
 });
 
-describe("piece get data errors", () => {
+describe("get data errors", () => {
   it("classifies unresolved-path failures as data errors, not usage errors", () => {
     expect(
       isPieceGetDataError(
@@ -4310,7 +4310,7 @@ describe("piece link data errors", () => {
   });
 });
 
-describe("piece call input errors", () => {
+describe("call input errors", () => {
   it("reports the rejection with a pointer at the verb listing", () => {
     const report = verbInputErrorReport(
       new VerbInputValidationError(

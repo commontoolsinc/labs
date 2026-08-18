@@ -1165,68 +1165,6 @@ run_bulk_survey_drill() {
   echo "Successfully ran the bulk-survey drill for ${API_URL}."
 }
 
-# The top-level spellings are the same commands as their `cf piece`
-# counterparts (docs/plans/cli-surface-shape.md, step 5). The unit guard
-# (test/piece-data-spellings.test.ts) proves the two mounts share one
-# surface and refuse identically; what it cannot do is complete an
-# operation. This section is the successful-path half: each spelling
-# performs a real write, read, and dispatch against a live space, and every
-# assertion crosses spellings, so "identical surface" is backed by
-# "identical outcome" rather than by two green paths that never met.
-run_spelling_parity() {
-  setup_space
-
-  # Reads and writes: the stepped counter fixture, whose result cell exists
-  # and accepts a value write.
-  create_stepped_counter_piece 7
-
-  # Write through the new spelling, read back through the old.
-  echo '5' | cf set $SPACE_ARGS --piece $PIECE_ID value
-  RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID value)
-  [ "$RESULT" = '5' ] ||
-    error "cf piece get should read what cf set wrote, got: $RESULT"
-
-  # Write through the old spelling, read back through the new — once by
-  # flag, once through the positional canonical address, the composed form
-  # the surface arc exists for.
-  echo '9' | cf piece set $SPACE_ARGS --piece $PIECE_ID value
-  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID value)
-  [ "$RESULT" = '9' ] ||
-    error "cf get should read what cf piece set wrote, got: $RESULT"
-  RESULT=$(cf get $SPACE_ARGS "/of:$PIECE_ID/value")
-  [ "$RESULT" = '9' ] ||
-    error "cf get with a positional address should read the same cell, got: $RESULT"
-
-  # Dispatch: the callable fixture. The same tool through both spellings
-  # answers identically.
-  PARITY_CALLABLE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
-  echo "Created parity callable piece: $PARITY_CALLABLE_ID"
-  OLD_CALL=$(cf piece call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search -- --query parity)
-  NEW_CALL=$(cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search -- --query parity)
-  assert_json_eq "$NEW_CALL" "$OLD_CALL" \
-    "cf call and cf piece call should return the same tool result"
-
-  # A handler dispatched through the new spelling commits like the old one.
-  LEGACY_BEFORE=$(read_piece_value_or_default "$PARITY_CALLABLE_ID" "legacyCount" "0")
-  cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID legacyWrite
-  RESULT=$(cf piece get $SPACE_ARGS --piece $PARITY_CALLABLE_ID legacyCount)
-  [ "$RESULT" = "$((LEGACY_BEFORE + 1))" ] ||
-    error "A handler dispatched via cf call should commit once, got legacyCount=$RESULT"
-
-  # The one place the two mounts deliberately differ: each verb help page
-  # names the mount that was invoked. Asserted from both ends here, in the
-  # section that dies with the piece-mounted spellings, so "the page names
-  # what you typed" cannot regress on either branch while both exist.
-  cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search --help |
-    grep -q "cf call ... search --help" ||
-    error "cf call's verb help should name the top-level mount"
-  cf piece call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search --help |
-    grep -q "cf piece call ... search --help" ||
-    error "cf piece call's verb help should name the piece mount"
-
-  echo "Successfully ran CLI spelling parity tests for ${API_URL}/${SPACE}."
-}
-
 run_wish() {
   setup_space
 
@@ -1353,8 +1291,6 @@ case "$SECTION" in
     run_piece_call_retry
     cf_test_step_begin three-topic-fixture
     run_three_topic_fixture
-    cf_test_step_begin spelling-parity
-    run_spelling_parity
     cf_test_step_begin wish
     run_wish
     ;;
@@ -1369,12 +1305,6 @@ case "$SECTION" in
     run_piece_values
     cf_test_step_begin piece-data-files
     run_piece_data_files
-    cf_test_step_begin spelling-parity
-    run_spelling_parity
-    ;;
-  spelling-parity)
-    cf_test_step_begin spelling-parity
-    run_spelling_parity
     ;;
   piece-links)
     cf_test_step_begin piece-links

@@ -24,18 +24,18 @@ Deno.test("extractNoColor leaves payload args after -- untouched", () => {
   // `--no-color` after `--` is a schema-derived flag for the target handler,
   // not a color directive; eating it would silently drop handler input.
   assertEquals(
-    extractNoColor(["piece", "call", "h", "--", "--no-color", "x"]),
+    extractNoColor(["call", "h", "--", "--no-color", "x"]),
     {
       noColor: false,
-      args: ["piece", "call", "h", "--", "--no-color", "x"],
+      args: ["call", "h", "--", "--no-color", "x"],
     },
   );
   // Both positions: the leading one is consumed, the payload one survives.
   assertEquals(
-    extractNoColor(["--no-color", "piece", "call", "h", "--", "--no-color"]),
+    extractNoColor(["--no-color", "call", "h", "--", "--no-color"]),
     {
       noColor: true,
-      args: ["piece", "call", "h", "--", "--no-color"],
+      args: ["call", "h", "--", "--no-color"],
     },
   );
 });
@@ -166,8 +166,8 @@ Deno.test("help colors follow the Cliffy help option", () => {
   try {
     main.reset().help({ colors: false });
     assertFalse(main.getHelp().includes("\x1b["));
-    const pieceGet = main.getCommand("piece")?.getCommand("get");
-    assert(pieceGet, "piece get subcommand exists");
+    const pieceGet = main.getCommand("get");
+    assert(pieceGet, "cf get command exists");
     assertFalse(
       pieceGet.getHelp().includes("\x1b["),
       "subcommands inherit the root help colors",

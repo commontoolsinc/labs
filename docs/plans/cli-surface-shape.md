@@ -594,7 +594,10 @@ than taking anything away.
    literal, fixed when this step merges, not a window recomputed per run: a
    caller who reads the warning today and acts on it next week must be told
    the same date both times.
-6b. **Remove the old spellings** on the date the warnings named.
+6b. **Remove the old spellings** on the date the warnings named. Done: the
+   piece-mounted `get`, `set` and `call`, the 6a notice and its dated
+   constant, and the parity coverage that existed only while both spellings
+   did, are gone.
 7. **Merge the duplicated nouns** — the two `inspect`s, the two `view`s, `piece
    map` against `inspect graph`, and `apply` against `set`.
 
