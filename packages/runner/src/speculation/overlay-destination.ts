@@ -1025,7 +1025,13 @@ export class SpeculationOverlayDestination
     if (this.#arrivalObserverReleases.has(space)) return;
     try {
       const replica = this.#runtime.storageManager.open(space).replica;
-      if (!("speculationArrivalObserver" in replica)) return;
+      // Capability probe by METHOD, not by `in` on the observer field: the
+      // browser worker bundle drops uninitialized class fields, so an `in`
+      // probe on the field read false there and the install silently
+      // returned (the ack observer below had exactly that latent gap).
+      // A replica that implements the retirement view is the one that
+      // fires these wakes.
+      if (typeof replica.speculationRetirementView !== "function") return;
       const observable = replica as {
         speculationArrivalObserver:
           | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
@@ -1081,7 +1087,11 @@ export class SpeculationOverlayDestination
     if (this.#ackObserverReleases.has(space)) return;
     try {
       const replica = this.#runtime.storageManager.open(space).replica;
-      if (!("speculationAckObserver" in replica)) return;
+      // Capability probe by method (see #ensureArrivalObserver): the `in`
+      // probe on the observer FIELD read false in the browser worker
+      // bundle (uninitialized class fields are dropped there), so this
+      // wake had never installed in a browser client.
+      if (typeof replica.speculationRetirementView !== "function") return;
       const observable = replica as {
         speculationAckObserver: (() => void) | undefined;
       };

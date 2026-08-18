@@ -2405,7 +2405,15 @@ class SpaceReplica implements ISpaceReplica {
   // one input whose dirtiness arrives WITHOUT a new admitted commit on
   // the host feed (the commit was drained waves ago; only its
   // VISIBILITY changed).
-  shadowFlipObserver: (() => void) | undefined;
+  // Initialized EXPLICITLY (`= undefined`), as are the two overlay wakes
+  // below: the browser worker bundle compiles class fields without define
+  // semantics, so an UNINITIALIZED field is dropped from the class body and
+  // an `"observer" in replica` probe reads false — the overlay's install
+  // silently returned and the wake never fired in browsers (found while
+  // landing stage C tuning T2's arrival wake; the ack wake had the same
+  // shape). The overlay now probes by capability method instead, and the
+  // initializers keep the fields visible either way.
+  shadowFlipObserver: (() => void) | undefined = undefined;
   // localSeq -> the store seq its accept committed at (server-execution
   // v2 Phase 2, speculation.md §4): the overlay destination's retirement
   // floor is "the origin ACKED and W ≥ that commit's seq", and the ack
@@ -2431,7 +2439,7 @@ class SpaceReplica implements ISpaceReplica {
   // then-quiet space: rejected origins cascade into the entry, but
   // ACCEPTED origins had no client-side wake. Guarded at the call
   // site — an observer throw must not corrupt accept settlement.
-  speculationAckObserver: (() => void) | undefined;
+  speculationAckObserver: (() => void) | undefined = undefined;
   // The overlay destination's retirement WAKE for authoritative ARRIVALS
   // (ISpaceReplica.speculationArrivalObserver, stage C tuning T2 —
   // speculation.md §4's owed arrival re-sweep): fired at the end of
@@ -2440,7 +2448,7 @@ class SpaceReplica implements ISpaceReplica {
   // corrupt frame integration.
   speculationArrivalObserver:
     | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
-    | undefined;
+    | undefined = undefined;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
