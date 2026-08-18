@@ -3405,6 +3405,116 @@ supply; OW29/OW32/OW34 closed):
     construction (the yielder does not exist elsewhere) and the drain
     guard sits inside the serving loop. Whole-suite witness in the PR.
 
+- **Stage C coordination delta (2026-08-18) — the coordination state is
+  carried ON-BRANCH (owner directive 2026-08-18: files, not agent
+  memory).** The arc's live state — the train, the owner's landing
+  posture (confidence verdict → land the stack with the flag OFF →
+  optimize on main; the flip later), stage-C outcomes, ordered next
+  actions, open rulings — is the plan's "Coordination state" section
+  (`docs/plans/server-execution-v2.md`); the frozen record with the
+  evidence beside it is
+  [`docs/history/plans/server-execution-v2/stage-c-closeout.md`](../../history/plans/server-execution-v2/stage-c-closeout.md)
+  (the two benchmarks, the attribution, the three stage-C review
+  reports, the fan-out design + panel). Bookkeeping about the SIBLING
+  stage-C branches, so a reader of THIS branch is not misled: OW28's
+  LANDED delta and its three owed rows (`OW28-supersession-family`,
+  `OW28-instance-family`, `OW28-createRef`) live on #5968's branch
+  (`463ea3887`); OW32's stage-C block was REWRITTEN into the
+  double-dispatch dossier on #5969's branch (`eb64d8694`) — the row
+  above still carries the pre-dossier "served-wish timing" wording,
+  which #5969 REFUTED (`nowTick` is valid at every served dispatch; the
+  residual is double dispatch, OW35 below); both arrive when the
+  siblings are stacked. Rows minted here (the siblings mint no new
+  numbers; the coordination delta owns OW35–OW38):
+  - **OW35 — the served-handler DOUBLE-DISPATCH parity gap: (α) + the
+    cross-producer invariant sentence — OWNER RULING OWED.** One
+    durable entry, one eventId, dispatched N× (2–5 on the lunch gate;
+    the two-browsers lockdown toggle is the same class, re-drain
+    variant only) via the LT1 in-process leftover (α), the drain
+    re-queue (β), and the re-armed re-scan; under OFF exactly-once by
+    construction (one in-process queue, one handler registration per
+    stream link) — a served-execution parity gap, not a pattern bug
+    (#5969's Flag 1 is the dossier, `file:line` at `fb2292a24`; the
+    attribution quantified it ≤1.2× on chat/note, 1.15–1.67× on the
+    lunch `nowTick` shape; the re-benchmark shows it intact — `appended
+    11 / processed 17` in both green lunch runs). CLOSED NARROWLY by the
+    tuning trio: the drain dedupes against ITSELF (events.md §4's
+    at-most-one-copy sentence; `events.drainInFlightSkips`; released
+    on the wave outcome, not the seal). STILL OWED: (α) — a
+    deadline-time purge of unrun LT1 in-process leftovers
+    (discriminator `served !== undefined && served.streamEntry ===
+    undefined`, synchronous at the deadline decision) — and the
+    events.md §4 sentence across BOTH producers. Recommendation on file
+    (#5969's (ii); the coordinator concurs): *"one durable entry = one
+    COMPLETED delivery to its handler, regardless of dispatch path or
+    reference count; an entry not completed in the wave that appended
+    it is dispatched by the drain alone"*, with the sub-clause decided
+    for DERIVATION-kind LT1 emitters (a superseded per-doc drop re-emits
+    nothing; today an orphan consequence — refuse or tolerate); NOT
+    "make handlers idempotent". `events.processed > events.appended` is
+    NOT the signature; per-event run counts are. Trigger: before the
+    lunch skip lifts and before the ON arm is called correct on
+    non-idempotent handlers — i.e. before the confidence verdict is
+    stated as "no fundamental issue" without this qualification.
+  - **OW36 — the late-echo arrival-gate rule, PENDING RATIFICATION.**
+    Implemented in #5991 (T2 (b)) as speculation.md §4 step 2 read as a
+    state predicate — an event-handler echo sealed after its intent's
+    terminal consequence already arrived is jobless and NOT registered;
+    its client cascade is jobless via `parentEventId`; its enactable
+    effects are owned and not enacted — DATED 2026-08-18, no RULED
+    marker; #5969 had called it a candidate rule / owner call. Never
+    fired live (`overlayLateEchoDrops` 0 in every re-measured run — 16
+    gate runs, the re-benchmark's 2 chat runs); its unit pin covers the
+    mechanism (`speculation-arrival-gate.test.ts`, with mutation). E2's
+    mechanism is INFERRED (no prompt echo, a busy worker, the
+    click-bound toggle re-toggling), not witnessed by a client trace.
+    Owed: the owner ratifies the sentence (or marks it pending) — with
+    the trio's landing; the sub-questions in the tuning review's Q1/Q2
+    (cascade semantics; effects) are answered by option (a) as built.
+  - **OW37 — the §4 amplification ratio, a hair over budget under the
+    honest deadline — a testing.md §4 TRIGGER breach that needs its
+    human inspection.** Re-benchmark: chat 2.05 / 2.14 (≤2 pure), lunch
+    2.11 / 2.15 (≤2), note 3.07 / 3.20 (≤3 effectful) — where the first
+    benchmark sat just under (1.7–2.8). Mechanism named: with T3's
+    honest deadline `derivedCommits == waves` still holds but the settle
+    commits MORE, SMALLER waves per authored input, so the ratio tracks
+    the cycle count, not per-write amplification; total store commits
+    remain 2.1–3.1× BELOW OFF (chat 195–201 vs 608–612; note 460–475 vs
+    989). Owed (the metric's owner): either a "per logical write"
+    reading of the denominator/numerator or a re-baselined budget line
+    with this reason recorded in testing.md §4 — never silenced in the
+    test. Trigger: before the §4 counter assertion is asserted in CI's
+    ON arm on these workloads; naturally with the design pass's
+    re-benchmark (whose fewer, larger walks may move it back under).
+  - **OW38 — the flip's performance metric and BAR: measure SERVER
+    SETTLE TIME explicitly; the bar is an owner ruling.** The owner's
+    2026-08-18 measurement caveat: the OFF "4–42 ms" client-local
+    numbers (and the 0.22-s chat series) are the client rendering its
+    own run; speculative client-side execution stays under ON and stays
+    fast, so that number is not necessarily the comparator. The honest
+    server metric is TIME-TO-SETTLE ON THE SERVER — authored input
+    admitted → derived consequences committed and W covering them
+    (`waitForSettled` / `derivedThrough`), measured explicitly and
+    reported beside the send→other-browser series (which stays: the
+    several-second sends are far too high under any comparator). Owed:
+    (i) the next benchmark's protocol adds the settle-time series (the
+    `sx2-scale` `settleWrite` shape and the two-controllers-one-space
+    partial number the plan already names are the building blocks); (ii)
+    the flip's performance BAR restated against it — the design pass's
+    pre-recommendation is "sub-second, within a small constant of OFF"
+    on the cross-user step; the owner rules. Trigger: the design pass's
+    re-benchmark; the flip gate (plan Phase 7 task 1 item 4) reads
+    against the RULED bar, not against the client-local OFF number.
+  - OW31 (unchanged row above): unruled at 2026-08-18; travels with the
+    flip PR and does not gate landing the stack OFF (the grant is
+    flag-gated; OFF uses the configured list verbatim).
+  - Not rows, recorded: #5991's ledger comment is pending; the design
+    pass's reconciled report (`stage-c-design.md`) was pending at the
+    handoff and, when written, belongs beside the closeout with the
+    history header; #5968's Flags 1–4 (instantiation seat,
+    `resolvedHash`, fetch-parity on live completion failure,
+    `plainProgramOf`) await the owner's ratify-or-direct.
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row

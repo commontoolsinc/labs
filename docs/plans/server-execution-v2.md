@@ -32,6 +32,116 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
+## Coordination state (2026-08-18) — read this first
+
+The arc's coordination state is carried HERE, on the branch, not in any
+agent's memory (owner directive 2026-08-18). This block is LIVE: update
+it in the PR that moves the state. The consolidated stage-C record —
+benchmark verdicts, attribution, the tuning trio, the double-dispatch
+dossier, the design-pass state, the process rules — is the frozen
+[stage-C closeout](../history/plans/server-execution-v2/stage-c-closeout.md),
+with the evidence files beside it; the owed rows are the register's
+(`verification-coverage.md` §3, the 2026-08-18 coordination delta).
+
+**The train — 21 PRs, all OPEN, none merged; one linear stack (each
+PR's base is the previous branch), merge-base with `origin/main`
+`30fdbb92f` (#5786; the handoff's `9d6c9fe00` is an earlier merge point
+on the same branch); stacked PRs get NO CI, every green is a local
+run:** A #5339 → B #5349 → C.1 #5356 → C.2 #5367 → C.3 #5369 → D #5371 →
+E #5374 → F #5439 → G #5461 → Phase 2 #5522 → P2-F #5789 → Phase 3
+#5612 → Phase 4 #5613 → Phase 5 #5837 → Phase 6 #5841 → Phase 7 #5849
+(`a73147f75`; flip-ready landed DARK, the constant `false`) → fan-out A
+#5903 (`ea74739f2`) → fan-out B #5924 (`fb2292a24`) → three stage-C
+siblings off fan-out B, to be STACKED (order the stacker's; all three
+append at the end of the register's §3): OW28 #5968
+(`463ea3887`), lunch #5969 (`eb64d8694`), the tuning trio #5991
+(`b54bf5215`); this docs branch rides the tuning tip. The full per-PR
+table is the closeout's §1.
+
+**The owner's landing posture (2026-08-18, verbatim intent):** *"get
+confidence that we're on the right track, then merge everything to main
+with flag OFF, then continue optimizing. I don't want to land this stack
+if there are fundamental issues that warrant big changes."* So the
+near-term goal is a CONFIDENCE VERDICT (are there fundamental issues?)
+→ land the stack OFF → optimize on main; the flip is later and keeps its
+ordered gates (Phase 7 task 1), which no longer gate landing.
+
+**Stage C outcomes:**
+
+- **OW28 (#5968) — DONE**: compile-and-run served as an outbox effect;
+  self-review + the coordinator-round independent review (the PR's
+  ledger comment; supersession wedge + fan-out cardinality-2 wedge fixed
+  as `463ea3887`; three owed rows `OW28-*` minted on that branch).
+- **The lunch gate (#5969) — RE-CHARACTERIZED, skip STAYS**: not
+  `nowTick` timing (refuted; two positive pins) but a served-handler
+  DOUBLE DISPATCH of one durable event (2–5× per click) plus a late
+  divergent client echo the arrival gate strands; no production code;
+  the dossier is the PR's Flag 1; owner ruling owed (below); the
+  arrival gate KEEP.
+- **The tuning trio (#5991) — DONE, ledger comment pending**: T1 one CFC
+  probe per commit; T2 retirement on arrival + the late-echo rule; T3
+  honest deadline + mid-wave renew; the drain's in-flight guard. Every
+  target met: two-browsers gate 16/16 at night-like conditions,
+  `lease.lost` 0 in 22 runs, deadline lateness p50 25 ms, note
+  createToView p50 8.9/5.8 s → 3.9–4.2 s.
+- **Benchmarks (the gates table below carries the rows)**: FIRST
+  (fan-out B tip) — ON could not COMPLETE the two-user journeys (chat
+  0/3 series; lunch 0/1), note 5.4–8.2× slower: SLOWER / UNMEASURABLE.
+  ATTRIBUTION — steady state masked by daytime LLM churn; two dominant
+  terms: the server's per-demander DEMAND WALK and the client's
+  whole-sidecar INTENT WATCH; the lease feedback loop; the chat "no-op"
+  was the CLIENT arrival gate holding a correctly served value.
+  RE-BENCHMARK (trio tip `b54bf5215`) — ON COMPLETES everything (chat
+  2/2 n=20, lunch 2/2, note 2/2; `lease.lost` 0) but SLOWER: chat
+  cross-user p50 7.4–9.7 s vs OFF 0.22–0.24 s; note createToView
+  3.9–4.2 s vs 1.13–1.19 s. Flip performance gate NOT MET.
+- **The owner's MEASUREMENT CAVEAT (2026-08-18)**: the OFF "4–42 ms"
+  client-local number may not be the right comparator — speculative
+  client-side execution stays (and stays fast); the honest server metric
+  is TIME-TO-SETTLE ON THE SERVER; the several-second chat sends are
+  clearly far too high regardless. The next benchmark measures server
+  settle time EXPLICITLY (register OW38); the flip's performance BAR is
+  an owner ruling.
+- **The design pass — NEXT.** Two design-class terms named: (d) the
+  demand walk → redesign as a STRUCTURAL WALK (one shallow read per
+  container, one probe per leaf, whole reads at links; value-only
+  changes do not fire it; one walk node per (scope-name, root id)); (e)
+  the intent watch → a non-reactive storage-notification listener keyed
+  on the outstanding intent set (interim: a schema-narrowed sink). Three
+  lens reports are in; the convener's reconciled `stage-c-design.md` was
+  PENDING at the handoff. Its owner rulings (all pre-recommended as
+  stated): no lazy demand; the walk as a "structural subscription"
+  (amend serving-loop.md §1's per-pair wording); walk re-runs on
+  structural change only; the intent watch need not be a scheduler
+  effect; tracked-entry-only sidecar read; no idle-demander tier;
+  per-entry `consequenced` mark not a client dependency; pin
+  drops/errors ride `consequenceOf`; amend scopes.md §9's ragged
+  tripwire against §2; the flip's performance BAR.
+
+**Ordered next actions:** (1) #5991's ledger comment; (2) the design
+pass — reconciled report → owner rulings → the two redesigns, re-
+benchmarked measuring server settle time; (3) the CONFIDENCE VERDICT to
+the owner; (4) on "no fundamental issue", land the train on main with
+the flag OFF (siblings stacked; default lanes OFF) and continue on
+main; (5) the flip's ordered gates as listed under Phase 7 (skip list
+EMPTY, deployed binaries exercised ON, OW31 ruled, the benchmark against
+the ruled bar), then the flip PR and the soak.
+
+**Open owner rulings (unruled at 2026-08-18; recommendations on file):**
+(1) served-handler DOUBLE-DISPATCH parity gap — rec: events.md §4 states
+"one durable entry = one COMPLETED delivery regardless of dispatch path
+or reference count; not completed in its appending wave → the drain
+alone dispatches", enforced by the deadline-time purge of unrun LT1
+leftovers + the per-eventId drain skip (the trio's guard is the drain
+half), with the orphan-delivery sub-clause for derivation-kind LT1
+emitters decided (register OW35); (2) the late-echo arrival-gate rule —
+implemented in #5991 as a DATED speculation.md §4 step-2 predicate,
+never fired live — ratify or mark pending (OW36); (3) OW31's
+write-authority posture (owner-everywhere vs a read-only ACL class) —
+travels with the flip PR; (4) the design-pass set above; (5) #5968's
+Flags (instantiation seat, `resolvedHash`, fetch-parity on live
+completion failure, `plainProgramOf`).
+
 ## Phase 0 — Rulings and guardrails
 
 Tasks:
@@ -435,7 +545,11 @@ Tasks:
       port (stage G's out-of-scope note) lands, so fresh
       compile-and-run is INERT in the ON arm everywhere until that
       port (memo'd results still read through; the gate's both-arms
-      pins live in `packages/runner/test/compile-and-run.test.ts`);
+      pins live in `packages/runner/test/compile-and-run.test.ts`) —
+      THAT PORT LANDED in stage C (#5968, 2026-08-17/18: the compile as
+      an outbox effect, the completion re-arms, the derivation
+      instantiates in-run; the client reads through for every outcome;
+      see the "Coordination state" block above);
       result-as-pattern children ride the derivation run's overlay
       writes.
 - [x] UI bindings untouched: authored writes under existing ACL + CAS
@@ -883,10 +997,27 @@ Tasks:
       walk + wish-sidecar chain, output-scope attribution, B7, OW34's
       trust carriage) — LANDED (`claude/server-exec-v2-fanout-b`; OW17
       and OW29 CLOSED, OW32 CLOSED as a cause, OW34 CLOSED); STAGE C =
-      closeout (the lunch gate's residual, the honest benchmark)*; (3)
+      closeout (the lunch gate's residual, the honest benchmark) — *RUN
+      2026-08-17/18 as three sibling PRs off fan-out B plus two
+      benchmarks and an attribution (the "Coordination state" block
+      above; the closeout record): the lunch residual RE-CHARACTERIZED
+      as served-handler double dispatch (#5969, skip STAYS, owner ruling
+      owed — OW35); the tuning trio (#5991) restored COMPLETION (ON
+      finishes every journey, `lease.lost` 0); latency remains
+      design-class — the design pass is next*; (3)
       OW28 — compile-and-run as an outbox effect kind + completion-class
-      writeback; (4) the HONEST propagation benchmark (criterion below)
-      once the two-user family works; (5) the ON skip list EMPTY and the
+      writeback — *DONE on #5968 (`463ea3887`, stage C; instantiation in
+      the derivation, the completion re-arms — a recorded refinement;
+      reviewed twice, fixed; its `OW28-*` owed rows ride that branch)*;
+      (4) the HONEST propagation benchmark (criterion below)
+      once the two-user family works — *MEASURED TWICE (stage C, rows in
+      the table below): NOT MET — first at the fan-out B tip (ON could
+      not complete the two-user journeys), then at the trio tip (ON
+      completes; chat cross-user p50 7.4–9.7 s vs OFF 0.22–0.24 s;
+      note createToView 3.9–4.2 s vs 1.13–1.19 s); the owner's
+      2026-08-18 measurement caveat re-frames the comparator — the next
+      benchmark measures SERVER SETTLE TIME explicitly and the BAR is an
+      owner ruling (OW38)*; (5) the ON skip list EMPTY and the
       deployed-topology binaries the presets flip
       (`background-piece-service`, the CLI, cf-harness, every
       `PiecesController`) exercised ON by a gate — the flip PR's own
@@ -930,11 +1061,28 @@ Success criteria:
       B's replica sinks the served consequence — timed under explicit ON
       vs explicit OFF, fresh store per arm, n ≥ 20, gives a byte-identical
       cross-user propagation number for the Deno client posture today.)
+      **Stage C (2026-08-17/18) — MEASURED, still NOT ticked.** The
+      harness is no longer red under ON: after the tuning trio the
+      two-browsers series COMPLETES (n=20, 2/2 fresh-store), so an honest
+      ON browser number exists — and it is SLOWER: chat send→other-browser
+      p50 7 397 / 9 734 ms vs OFF 220–242 ms (31–44×), every cross-user
+      step 2.6–10 s vs 2–120 ms, note createToView 3.9–4.2 s vs
+      1.13–1.19 s (rows below; the closeout's §4). Attributed to two
+      design-class terms (the per-demander demand walk; the client's
+      whole-sidecar intent watch), which the design pass owns. The
+      owner's measurement caveat: the OFF client-local number is not
+      necessarily the comparator (speculative client execution stays);
+      the honest server metric is time-to-SETTLE on the server — the next
+      benchmark measures it explicitly and the bar is an owner ruling.
 
 **Phase-7 gates table (re-tensed 2026-08-16 by the fixer pass; the
 independent review's re-runs at head `97cb7aa47` and the unmodified
 Phase-6 base `c75f04f37`, plus the fixer's local runs on the fixed tree;
-fresh store per run, private port offset, loaded box):**
+fresh store per run, private port offset, loaded box; the STAGE-C
+benchmark / attribution / re-benchmark rows appended 2026-08-18 —
+their protocol and full numbers are in the
+[stage-C closeout](../history/plans/server-execution-v2/stage-c-closeout.md)
+and the reports beside it):**
 
 | gate | posture | result |
 | --- | --- | --- |
@@ -950,3 +1098,10 @@ fresh store per run, private port offset, loaded box):**
 | lunch (`lunch-poll-vote`) | full ON — HEAD 2/2 (review); **fan-out stage B: 2 fresh-store runs on the final binary (2026-08-17)** | Phase 7: RED (the identity-less served `#profile` wish + the OW32 loop). **Fan-out stage B: BIMODAL 1/2 — run 4 GREEN 2m28s (login 1.6 s, runtimes idle 1.0 s, joins 12–640 ms, votes and merges in seconds); run 5 RED at "both browsers see 2 love it (merge)" — both vote events consequenced with no error, one vote's served `castVote` no-op'd (`nowTick` null in the actor's run); stays ON-skip-listed with that residual named** |
 | the deployed-topology binaries the presets flip (`background-piece-service`, CLI, cf-harness, `PiecesController` hosts) | ON | NO gate exercises them ON (review finding 8) — recorded as the flip PR's own obligation; with the constant `false` none flips today |
 | OFF-arm neutrality | full runner suite (OFF ambient) + memory + toolshed unit suites + explicit-OFF sx2 | see the PR's bar |
+| **STAGE-C BENCHMARK 1** (2026-08-17, `59b5329ae` ≡ fan-out B runtime; built binaries, posture-verified, fresh store, OFF→ON→OFF, loads 3–9; [report](../history/plans/server-execution-v2/stage-c/stage-c-benchmark-report.md)) — chat two-browsers series n=20 @2 s | OFF ×3 / ON ×3 (+1 at `fadc2efb1b`) | OFF median **227 / 328 / 477 ms** (p95 498–1 069); ON **0 series** — lockdown stall 300 s (t1, smoke0) or lease churn from t≈0 (t2: `lease.lost` 33, load 3.9); per-step ON 3.0–7.2 s vs OFF 4–47 ms where ON reached the step |
+| same benchmark — lunch two-user vote | OFF ×2 / ON ×1 | OFF ✓ 11 s, 16 s; ON **RED** at "both browsers see 2 love it (merge)" 300 s (option A propagates 7 873 ms vs 53/80; both cast green 22 943 ms vs 440/843) |
+| same benchmark — note-create n=20 (actor-side) | OFF ×3 / ON ×2 | createToView p50 OFF **1 085 / 1 171 / 1 090 ms**, ON **8 927 / 5 841 ms** (rep 2 capped at 17/20 by 780 s), p95 23–26 s vs 1.3–1.5 s; per-note cost monotone 1.6 → 25 s; §4 ratio 1.7–2.8 (met); **verdict SLOWER / UNMEASURABLE; flip gate NOT MET** |
+| **STAGE-C ATTRIBUTION** (2026-08-18, instrumented, `fb2292a24`; [report](../history/plans/server-execution-v2/stage-c/stage-c-attribution-report.md)) | ON, night vs day | two-browsers gate bimodal ~40 % stall on a quiet space, 5/12 night vs 0/7 day (masked by a configured LLM model's SummaryIndex churn); dominant terms: server per-demander demand walk (96 % of an event wave's settle; deadline 2.5–8.3 s late, no macrotask yield), client whole-sidecar intent sink + double CFC probe (65 % of a saturated worker); lease loop confirmed (renew gaps to 10 s / 15-s TTL); the chat "no-op" = the CLIENT arrival gate holding a correctly served + pushed value 48 s; double dispatch ≤1.2× chat/note, 1.15–1.67× lunch |
+| **STAGE-C RE-BENCHMARK** (2026-08-18, trio tip `b54bf5215`, no LLM model, loads 2–5; [report](../history/plans/server-execution-v2/stage-c/stage-c-rebenchmark-report.md)) — chat series n=20 @2 s | OFF ×3 / ON ×2 | ON **COMPLETES 2/2** (272 s, 251 s walls): p50 **9 734 / 7 397 ms**, p95 14 020 / 13 805 vs OFF p50 **242 / 221 / 220 ms**, p95 400 / 288 / 367 (31–44×); steps: message propagation 2.6–3.0 s vs 6–17 ms, lockdown 3.3–4.1 s vs 3–21 ms, room 9.5–10.2 s vs 2–3 ms; `overlayArrivalSweeps` 85–95 per browser, `overlayLateEchoDrops` 0; ON per-post cost climbs 5 → 14 s across the series |
+| same re-benchmark — lunch | OFF ×2 / ON ×2 | ON **GREEN 2/2** (43 s, 57 s); `events.appended 11 / processed 17` both runs (the (α) class, intact, did not break the merge); merge 3.7–6.3 s vs 35–42 ms |
+| same re-benchmark — note-create n=20 | OFF ×3 / ON ×2 | ON series **2/2 complete** (214 s, 237 s): createToView p50 **4 154 / 3 879 ms** vs OFF **1 185 / 1 133 / 1 145** (3.4–3.7×), p95 6.6–10.5 s vs 1.24–1.34; per-note cost still monotone 1 → 13 s; `lease.lost` 0 in 6/6 ON runs; `processed == appended` chat/note; §4 ratio chat 2.05/2.14, lunch 2.11/2.15, note 3.07/3.20 — a hair over the ≤2/≤3 TRIGGER by the honest-deadline cycle-count mechanism (total commits 2.1–3.1× BELOW OFF; OW37); **verdict SLOWER (attributed); flip gate NOT MET; the design pass's baseline. Owner caveat: measure server settle time next (OW38)** |
