@@ -2051,6 +2051,29 @@ export class PatternManager {
   }
 
   /**
+   * The SYNCHRONOUS side of {@link compileOrGetPattern}'s content cache:
+   * the already-compiled pattern for `input`, or undefined when it has
+   * not been compiled in THIS process (never triggers a compile, never
+   * touches the space cell cache). Used by the served `compile-and-run`
+   * builtin (server-execution v2 stage C, OW28): the compile is an
+   * outbox EFFECT, and once it has run and cached the pattern, the
+   * builtin's derivation instantiates the child in-run from this sync
+   * hit — the loop's own run, correctly scoped, never a racing async
+   * flush. A cold process (recovery) misses here and re-issues the
+   * compile effect (§6 step 3; the child's durable pattern pointer also
+   * lets the loop resume it independently).
+   */
+  getCompiledPatternForProgramSync(
+    input: string | RuntimeProgram,
+  ): Pattern | undefined {
+    const program: RuntimeProgram = typeof input === "string"
+      ? { main: "/main.tsx", files: [{ name: "/main.tsx", contents: input }] }
+      : input;
+    const dedupeKey = toURI(createRef({ src: program }, "pattern source"));
+    return this.compiledByContent.get(dedupeKey)?.pattern;
+  }
+
+  /**
    * Compile a pattern from source, or return a cached/in-flight result.
    * Provides single-flight deduplication based on program content.
    *

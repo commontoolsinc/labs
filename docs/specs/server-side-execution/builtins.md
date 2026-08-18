@@ -64,6 +64,54 @@ toolshed — reuse that path. Async work stays on the post-commit outbox
 (the v1 lesson that ported: never block the loop on compilation).
 Instantiated pieces join the space's graph and are served like any other.
 
+**Served shape — LANDED (OW28, stage C 2026-08-17).** The COMPILE is the
+outbox effect (kind `compile-and-run`), memoized on the program hash (a
+`{ requestHash, resolvedHash, compiledHash }` memo cell — the §4 shape):
+a served derivation MISS enqueues it, the SpaceOutbox performs it
+post-wave-commit, and it lands a marked COMPLETION commit
+(`markEffectCompletion`, §4 — its own derived-class commit, never through
+§3d's sealing, never unstamped). The completion does NOT instantiate; it
+RE-ARMS the derivation (`compiledHash`). The INSTANTIATION is then an
+ordinary consequence of the served graph run — the derivation reads the
+compiled pattern from the process cache and instantiates the child IN-RUN
+(the result-as-pattern shape below; derivation-class setup, correctly
+scoped per demander, the child's own body served as ordinary
+derivations). This split is deliberate: a post-commit flush that
+instantiated would RACE the serving loop's own resume of the prior child
+(the loop re-runs a demanded piece from its stored `patternIdentity`
+pointer, and a flush's `run`/`runSynced` loses the re-instantiation to
+it), so a program change would keep serving the OLD child. The §4 HIT
+rule keys on `resolvedHash` (set on every TERMINAL outcome — a landed
+piece, an error-shaped result, or a synchronous invalid-inputs/
+main-not-found), NOT on `pending`: the builtin's cell-init writes
+`pending=false` on a fresh closure's first run, so a pending-based hit
+would FALSELY fire for a durable mid-compile request on recovery — the
+piece would render empty forever (the recovery-mid-flight wedge). A
+compile FAILURE lands an error-shaped result keyed by the program hash
+(retry input-driven — never a timer, T14). Recovery re-uses a LANDED
+piece: the loop resumes the child from its pointer, and the hit rule
+reads through; a mid-flight request (issued, never resolved) RE-MISSES
+and re-fires the compile (§6 step 3) — every park / crash /
+dropped-or-refused completion ends the serving runtime, and the fresh
+one's first evaluation re-fires (pinned live: a park mid-compile
+resolves on re-activation). A re-arm that landed but whose process
+compile-cache entry was since evicted also re-fires rather than wedging.
+Posture, stated (the request-hash builtins' identical one — fetch's
+in-memory claim blocks re-issue the same way): a completion commit that
+FAILS on a LIVE runtime that did not park (an infrastructure failure the
+outbox counts as `outbox.failed`) stays pending until the space
+re-activates or the inputs change; no dirtiness- or timer-driven retry
+is invented. The CLIENT reads through (speculation.md §2) for EVERY
+outcome: a flag-ON non-serving run never compiles and writes nothing
+speculatively — not even the synchronous invalid-inputs / main-not-found
+outcomes, which the server decides identically and lands as committed
+cells — so the served `pending`/`result`/`error` render directly (a
+speculative echo only delayed the read-through). Content-cache note: the
+served path normalizes the program to a PLAIN object before keying the
+compile cache — `createRef({ src })` is insensitive to nested `contents`
+on the `asSchema` query-result proxy, which would collapse distinct
+programs to one cache key.
+
 Result-as-pattern instantiation — a lift or handler RETURNING a
 pattern, instantiated into a deterministic result cell — is a RUNNER
 path distinct from `compile-and-run` (no compilation step), and it runs

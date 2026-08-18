@@ -87,5 +87,10 @@ installFakeClock({
     // virtual timers diverge from the bucket's time source (Date.now) —
     // the rate gate would regenerate its refill sleep unboundedly.
     "executor-outbox-budget",
+    // The stage-C compile-and-run suite (OW28) drives a live ExecutorHost
+    // + a flag-ON client under the same wall-clock policies (renew
+    // cadence, flush deadline, park/re-activate), waiting on store/replica
+    // edges with bounded timeouts.
+    "executor-compile-and-run",
   ],
 });

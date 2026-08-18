@@ -552,11 +552,13 @@ client does not; this PR):
   handler run diverts — the same suite now asserts that posture),
   unstamped/binding writes untouched, egress effect kinds dropped
   with `navigateTo` enacting (the egress rule), `compile-and-run`
-  gated at the builtin — the gate's true interim scope is wider than
-  "not speculable": it suppresses fresh compiles for EVERY flag-ON
-  non-wave run and the serving side refuses the writebacks, so fresh
-  compile-and-run is INERT ON-arm until the serving port (stage G's
-  out-of-scope note) lands; both-arms pins in
+  gated at the builtin — the gate's interim scope was wider than
+  "not speculable": it suppressed fresh compiles for EVERY flag-ON
+  non-wave run and the serving side refused the writebacks, so fresh
+  compile-and-run was INERT ON-arm until the serving port (OW28, LANDED
+  stage C 2026-08-17): the client now READS THROUGH to the served result
+  (no fresh compile client-side; no speculative write) and the SERVER
+  serves the compile as an outbox effect; both-arms pins in
   `packages/runner/test/compile-and-run.test.ts` (the review's m5) —
   retirement on watermark coverage of the entry's read basis + acked
   origins via success-shaped `superseded` withdrawals that cascade
@@ -2551,6 +2553,64 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   the client keeps reading through (speculation.md §2). Trigger: a
   named flip blocker — third in the flip's ordered gates (plan Phase 7
   task 1); nothing in CI exercises fresh compile-and-run in the ON arm.
+  **LANDED (stage C, 2026-08-17).** `compile-and-run` is served as an
+  OUTBOX EFFECT KIND (`compile-and-run`) memoized on the program hash,
+  with one REFINEMENT of the fix shape (recorded, not silently
+  substituted): the COMPILE is the effect's egress and lands a marked
+  COMPLETION commit that RE-ARMS the derivation (`compiledHash`) rather
+  than instantiating; the INSTANTIATION is then an ordinary consequence
+  of the served graph run — the derivation reads the process compile
+  cache and instantiates the child in-run (builtins.md §3's
+  result-as-pattern shape, correctly scoped per demander). This is
+  because a post-commit flush that instantiates RACES the serving loop's
+  own resume of the prior child (the loop re-runs the piece from its
+  stored `patternIdentity` pointer, and the flush's `run`/`runSynced`
+  loses the re-instantiation to it — a program change would keep serving
+  the OLD child). The §4 HIT rule keys on a `resolvedHash` marker (set on
+  every terminal outcome), NOT on `pending`: the builtin's cell-init
+  writes `pending=false` on a fresh closure's first run, so a
+  pending-based hit FALSELY fires for a durable mid-compile request on
+  recovery (the piece renders empty forever — the recovery-mid-flight
+  wedge, pinned + mutation-verified in `compile-and-run.test.ts` and
+  LIVE in `executor-compile-and-run.test.ts`'s mid-compile-park step). The
+  client keeps reading through (speculation.md §2) for EVERY outcome: a
+  flag-ON non-serving run writes NOTHING speculatively — not even the
+  synchronous invalid-inputs / main-not-found outcomes — it renders the
+  committed served cells, so no overlay entry delays the served
+  `pending=false`. Failures are error-shaped results keyed by the program
+  hash (retry input-driven — the T14 posture); recovery re-uses a LANDED
+  piece (the loop resumes the child from its pointer), a mid-flight
+  request re-misses and re-fires the compile (§6 step 3), and a re-arm
+  whose process compile-cache entry was evicted re-fires rather than
+  wedging. Posture (stated, the request-hash builtins' identical one): a
+  completion commit that fails on a LIVE runtime that did NOT park stays
+  pending until re-activation or an input change — no dirtiness/timer
+  retry invented. A
+  ROOT DEFECT surfaced and fixed in passing: `createRef({ src: program })`
+  — the content-cache key — is INSENSITIVE to nested `contents` when the
+  program is the `asSchema` query-result PROXY (two distinct programs
+  collapse to one key, so a re-compile got the PRIOR program), even
+  though `hashOf` reads the proxy correctly; the served path normalizes
+  to a PLAIN program (`plainProgramOf`) for both the compile and the sync
+  lookup. Pins: `compile-and-run.test.ts` (the deterministic bare-runtime
+  seams — compile-as-effect/not-from-action, re-arm, first instantiation,
+  memo hit; recovery mid-flight re-fire; cache-eviction re-fire; the
+  failure leg; the client read-through incl. the sync outcomes; OFF-arm
+  neutrality), and `executor-compile-and-run.test.ts` — the piece-creation
+  flow END TO END against a real SpaceServer + flag-ON client (the
+  client's authored creation + demand → served miss → outbox → compile →
+  completion → the client reads through to the child, never compiling; a
+  program change re-compiles and re-instantiates with the NEW value;
+  recovery re-uses; the failure leg lands error-shaped with NO timer
+  retry; the piece-creation hook fires once; `unstampedSealRefusals`
+  stays ZERO throughout — the P7 symptom's own counter) plus the
+  MID-COMPILE PARK step (a park while the compile is in flight resolves
+  on re-activation — the fresh runtime re-fires; the pending-based-hit
+  mutant reproduces the wedge signature). The OFF arm is byte-identical
+  (the port is a distinct `on` branch; the OFF path is the
+  extracted-verbatim `compileAndRunOff`). Self-review (adversarial
+  subagent, full diff): 1 MAJOR / 3 MINOR / 3 NIT, all addressed —
+  resolutions in the PR body.
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
   the space-scoped piece root supplies NO identity to the run supply,

@@ -428,14 +428,19 @@ Tasks:
       pending), `navigateTo` stays enactable (reversible),
       `compile-and-run` is gated at the BUILTIN (its floating compile
       launch cannot be intercepted at the destination), and that gate's
-      true interim scope is wider than "not speculable": it suppresses
+      true interim scope was wider than "not speculable": it suppressed
       fresh compiles for EVERY flag-ON non-wave run — client
       derivation, F10 handler runs, imperative flows — and the serving
-      side refuses the writebacks until the compile-and-run serving
-      port (stage G's out-of-scope note) lands, so fresh
-      compile-and-run is INERT in the ON arm everywhere until that
-      port (memo'd results still read through; the gate's both-arms
-      pins live in `packages/runner/test/compile-and-run.test.ts`);
+      side refused the writebacks until the compile-and-run serving
+      port. THE PORT LANDED (OW28, stage C 2026-08-17): the client now
+      READS THROUGH to the served result (no fresh compile client-side,
+      no speculative write) and the SERVER serves the compile as an
+      outbox effect with the instantiation an ordinary consequence of
+      the served graph run (verification-coverage.md OW28; builtins.md
+      §3); the both-arms pins live in
+      `packages/runner/test/compile-and-run.test.ts` and the end-to-end
+      piece-creation flow in
+      `packages/runner/test/executor-compile-and-run.test.ts`;
       result-as-pattern children ride the derivation run's overlay
       writes.
 - [x] UI bindings untouched: authored writes under existing ACL + CAS
@@ -885,7 +890,10 @@ Tasks:
       and OW29 CLOSED, OW32 CLOSED as a cause, OW34 CLOSED); STAGE C =
       closeout (the lunch gate's residual, the honest benchmark)*; (3)
       OW28 — compile-and-run as an outbox effect kind + completion-class
-      writeback; (4) the HONEST propagation benchmark (criterion below)
+      re-arm writeback, the instantiation an ordinary consequence of the
+      served graph run — LANDED (`claude/server-exec-v2-stage-c-ow28`,
+      2026-08-17; verification-coverage.md OW28); (4) the HONEST
+      propagation benchmark (criterion below)
       once the two-user family works; (5) the ON skip list EMPTY and the
       deployed-topology binaries the presets flip
       (`background-piece-service`, the CLI, cf-harness, every
