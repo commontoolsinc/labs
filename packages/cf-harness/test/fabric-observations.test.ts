@@ -112,4 +112,33 @@ describe("fabric-observations", () => {
     expect(observations.errorsSince(start, "fid1:abc").map((e) => e.message))
       .toEqual(["after"]);
   });
+
+  it("returns the same observer for the same runtime", () => {
+    const { runtime } = stubRuntime();
+    expect(fabricRuntimeObservations(runtime)).toBe(
+      fabricRuntimeObservations(runtime),
+    );
+  });
+
+  it("drops oldest records once the ring buffer is full", () => {
+    const { runtime, emitError } = stubRuntime();
+    const observations = fabricRuntimeObservations(runtime);
+    const start = observations.sequence();
+    // One past the 128-record bound: the first record falls off the ring.
+    for (let i = 0; i < 129; i++) {
+      emitError({ pieceId: "of:fid1:abc", message: `error-${i}` });
+    }
+    const seen = observations.errorsSince(start, "fid1:abc");
+    expect(seen.length).toBe(128);
+    expect(seen[0]!.message).toBe("error-1");
+    expect(seen.at(-1)!.message).toBe("error-128");
+  });
+
+  it("ignores a telemetry event that is not a runtime telemetry event", () => {
+    const { runtime, telemetry } = stubRuntime();
+    const observations = fabricRuntimeObservations(runtime);
+    const start = observations.sequence();
+    telemetry.dispatchEvent(new Event("telemetry"));
+    expect(observations.episodesSince(start)).toEqual([]);
+  });
 });
