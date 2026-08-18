@@ -117,8 +117,13 @@ export function transformActionCall(
   // For action, event parameter is optional:
   // - action(() => ...) → event schema is `false` (never type)
   // - action((e) => ...) → event schema is inferred from the parameter
+  // `action<Event, Result>`'s first type argument is the authored event —
+  // the contract the served schema must carry (docs/plans/verb-input-contract.md)
+  // — so it is preferred over inference from the parameter, which loses the
+  // authored node for annotation-free callbacks.
+  const authoredEventTypeNode = actionCall.typeArguments?.[0];
   const eventTypeNode = callback.parameters.length > 0
-    ? createHandlerEventSchema(callback, context)
+    ? authoredEventTypeNode ?? createHandlerEventSchema(callback, context)
     : createActionEventSchema(context);
 
   // State schema is based on captures

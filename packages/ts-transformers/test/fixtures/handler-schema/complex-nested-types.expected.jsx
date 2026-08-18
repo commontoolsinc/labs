@@ -41,6 +41,9 @@ const userHandler = handler({
                 },
                 email: {
                     type: "string"
+                },
+                age: {
+                    type: "number"
                 }
             },
             required: ["name", "email"]

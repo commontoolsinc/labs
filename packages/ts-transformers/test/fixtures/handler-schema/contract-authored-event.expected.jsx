@@ -47,7 +47,7 @@ const __cfHandler_1 = __cfHelpers.handler({
         },
         peer: {
             $ref: "#/$defs/PeerNode",
-            asCell: ["readonly"]
+            asCell: ["opaque"]
         }
     },
     required: ["title", "done", "peer"],

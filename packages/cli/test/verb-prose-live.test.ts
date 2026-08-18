@@ -329,16 +329,19 @@ describe("an author's verb prose reaching a caller", () => {
       const live = await runLivePiece("verb-prose-listing-nested-array");
       try {
         const row = verbRow(await verbsJson(live), "add");
-        // `details` is a `$ref` to `Details` on the declared side and an inline
-        // object on the served one, so `tags` sits at a position the two
-        // documents do not share key-for-key. An overlay that recurses through
-        // `properties` without following a `$ref` finds the declared `details`
-        // has no `properties` of its own and stops, leaving this bare — which
-        // is the defect this case exists for.
+        // `details` is a `$ref` to `Details` on the served side too — the
+        // contract serves the authored shape (verb-input-contract.md) — so
+        // `tags` and its prose live in the shared definition, one reference
+        // in, and the position itself carries the field's own sentence.
         expect(row.inputSchema).toMatchObject({
           properties: {
             details: {
+              $ref: "#/$defs/Details",
               description: "Anything else worth recording.",
+            },
+          },
+          $defs: {
+            Details: {
               properties: {
                 tags: { type: "array", description: NESTED_ARRAY_PROSE },
               },
@@ -353,14 +356,16 @@ describe("an author's verb prose reaching a caller", () => {
     it("carries an object field's prose from behind a declared reference", async () => {
       const live = await runLivePiece("verb-prose-listing-nested-object");
       try {
-        // `annotate` reads `details.note` and nothing else, so its served
-        // `details` is an inline object holding one undocumented scalar. The
-        // same declared reference has to be followed to reach it, at a
-        // different position and on a different verb.
+        // `annotate` reads `details.note` and nothing else; the served
+        // schema is the authored contract regardless, so the note's prose
+        // sits in the shared `Details` definition the position references.
         const row = verbRow(await verbsJson(live), "annotate");
         expect(row.inputSchema).toMatchObject({
           properties: {
-            details: {
+            details: { $ref: "#/$defs/Details" },
+          },
+          $defs: {
+            Details: {
               properties: {
                 note: { type: "string", description: NESTED_PROSE },
               },
@@ -375,22 +380,27 @@ describe("an author's verb prose reaching a caller", () => {
     it("terminates on a self-referential event type and annotates it", async () => {
       const live = await runLivePiece("verb-prose-listing-cycle");
       try {
-        // `Node.children` is `Node[]`, which compiles to a genuine cycle in the
-        // SERVED document: `$defs.AnonymousType_1.items` references
-        // `$defs.Node`, whose `children` references `AnonymousType_1` again.
-        // Following references without refusing a definition already visited
-        // does not fail this assertion — it never reaches it, exhausting the
-        // stack first. Reaching the assertion at all is half of what this pins.
+        // `Node.children` is `Node[]`, a genuine cycle in the served
+        // document: `$defs.Node.children.items` references `$defs.Node`
+        // again. Reaching the assertion at all — no exhausted stack — is
+        // half of what this pins.
         const row = verbRow(await verbsJson(live), "graft");
-        // The other half: the cycle is walked far enough to be useful. The
-        // served `children` is a bare reference with no prose of its own, and
-        // its description comes from the declared `Node`, one reference in.
+        // The other half: the recursion serves as the authored reference,
+        // and the prose rides both the position and the definition.
         expect(row.inputSchema).toMatchObject({
           properties: {
             node: {
+              $ref: "#/$defs/Node",
               description: "The subtree to graft.",
+            },
+          },
+          $defs: {
+            Node: {
               properties: {
-                children: { description: "Nodes filed under this one." },
+                children: {
+                  description: "Nodes filed under this one.",
+                  items: { $ref: "#/$defs/Node" },
+                },
               },
             },
           },
@@ -400,28 +410,20 @@ describe("an author's verb prose reaching a caller", () => {
       }
     });
 
-    it("carries prose out of the arms of a union the served side flattened", async () => {
+    it("carries prose in the arms of a union the served side keeps", async () => {
       const live = await runLivePiece("verb-prose-listing-union");
       try {
-        // `pet: Cat | Dog` is `anyOf` on the declared side and a single merged
-        // object on the served one — the handler reads both arms' fields, so
-        // the read carries `meow` and `woof` side by side with no combinator
-        // at all. Neither field's prose is reachable from the position: it
-        // lives inside whichever arm declares it, one reference further in.
-        //
-        // This is the case a walk that only pairs `properties` key-for-key
-        // cannot reach even with reference following, because there is no
-        // matching key to follow from.
+        // `pet: Cat | Dog` is `anyOf` on the served side too — the contract
+        // keeps the authored arms — and each arm's prose rides its own
+        // definition, exactly where the author wrote it.
         const row = verbRow(await verbsJson(live), "classify");
         expect(row.inputSchema).toMatchObject({
           properties: {
-            pet: {
-              description: "The animal to file.",
-              properties: {
-                meow: { description: "How loud it is." },
-                woof: { description: "How deep it is." },
-              },
-            },
+            pet: { description: "The animal to file." },
+          },
+          $defs: {
+            Cat: { properties: { meow: { description: "How loud it is." } } },
+            Dog: { properties: { woof: { description: "How deep it is." } } },
           },
         });
       } finally {
@@ -435,13 +437,14 @@ describe("an author's verb prose reaching a caller", () => {
         const inputSchema = verbRow(await verbsJson(live), "add")
           .inputSchema as Record<string, unknown>;
         const properties = inputSchema.properties as Record<string, any>;
-        // `Tag` is reached twice — through `details.tags.items` and through
+        // `Tag` is reached twice — through `Details.tags.items` and through
         // `primary` — and both are served as references that must stay
         // references, byte for byte. An implementation that inlined a target to
         // annotate it would satisfy every description assertion in this file
         // and silently change the shape a caller's tooling reads, so these are
         // equalities rather than subsets.
-        expect(properties.details.properties.tags.items).toEqual({
+        const defs = inputSchema.$defs as Record<string, any>;
+        expect(defs.Details.properties.tags.items).toEqual({
           $ref: "#/$defs/Tag",
         });
         expect(properties.primary).toEqual({
@@ -453,7 +456,7 @@ describe("an author's verb prose reaching a caller", () => {
         // names: `primary` is "The tag that leads.", and a `Tag` carrying that
         // sentence would tell every OTHER holder of a tag the same thing —
         // including `details.tags`, which leads nothing.
-        expect((inputSchema.$defs as Record<string, any>).Tag).toEqual({
+        expect(defs.Tag).toEqual({
           type: "object",
           properties: {
             label: { type: "string", description: ELEMENT_PROSE },
@@ -512,7 +515,10 @@ describe("an author's verb prose reaching a caller", () => {
         // nested shapes are asserted on both surfaces for that reason.
         expect((await callHelpJson(live, "add")).inputSchema).toMatchObject({
           properties: {
-            details: {
+            details: { $ref: "#/$defs/Details" },
+          },
+          $defs: {
+            Details: {
               properties: { tags: { description: NESTED_ARRAY_PROSE } },
             },
           },
@@ -528,7 +534,12 @@ describe("an author's verb prose reaching a caller", () => {
         expect((await callHelpJson(live, "annotate")).inputSchema)
           .toMatchObject({
             properties: {
-              details: { properties: { note: { description: NESTED_PROSE } } },
+              details: { $ref: "#/$defs/Details" },
+            },
+            $defs: {
+              Details: {
+                properties: { note: { description: NESTED_PROSE } },
+              },
             },
           });
       } finally {
@@ -536,17 +547,17 @@ describe("an author's verb prose reaching a caller", () => {
       }
     });
 
-    it("carries prose out of the arms of a union the served side flattened", async () => {
+    it("carries prose in the arms of a union the served side keeps", async () => {
       const live = await runLivePiece("verb-prose-help-json-union");
       try {
         expect((await callHelpJson(live, "classify")).inputSchema)
           .toMatchObject({
-            properties: {
-              pet: {
-                properties: {
-                  meow: { description: "How loud it is." },
-                  woof: { description: "How deep it is." },
-                },
+            $defs: {
+              Cat: {
+                properties: { meow: { description: "How loud it is." } },
+              },
+              Dog: {
+                properties: { woof: { description: "How deep it is." } },
               },
             },
           });
@@ -560,7 +571,7 @@ describe("an author's verb prose reaching a caller", () => {
       try {
         const inputSchema = (await callHelpJson(live, "add"))
           .inputSchema as Record<string, any>;
-        expect(inputSchema.properties.details.properties.tags.items).toEqual({
+        expect(inputSchema.$defs.Details.properties.tags.items).toEqual({
           $ref: "#/$defs/Tag",
         });
         expect(inputSchema.$defs.Tag).toEqual({
