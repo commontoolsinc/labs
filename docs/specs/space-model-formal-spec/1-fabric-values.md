@@ -68,7 +68,7 @@ wrapper classes (Section 1.4).
 > abstract base that carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
 > `FabricCodec`, `LiveEnvironment`) lives in `codec-interface/` (Section 2),
 > and the machinery that acts on it in `codec-common/` -- including
-> `EncodeContext` and `DecodeContext`, which are classes the walk carries
+> `EncodeAct` and `DecodeAct`, which are classes the walk carries
 > rather than contracts a caller implements. The conversion functions are in
 > `native-conversion.ts` (Section 8).
 >
@@ -2520,8 +2520,8 @@ Every engine exposes `encode()` and `decode()`, parameterized by the boundary
 type — `string` for JSON, `Uint8Array` for a binary format — and an engine may
 add a pair for a second boundary type, as `JsonCodecEngine` does for bytes.
 Both are supplied by the base class and are not overridden: they mint the
-act's context, run the walk, and hand off to the format at each end. What a
-format supplies is those two ends and the context factories, all `protected`
+act, run the walk, and hand off to the format at each end. What a format
+supplies is those two ends and the act factories, all `protected`
 — the surface a second engine extends rather than one a caller reaches.
 
 ```typescript
@@ -2529,26 +2529,25 @@ format supplies is those two ends and the context factories, all `protected`
 // file: packages/data-model/codec-common/BaseCodecEngine.ts
 
 abstract class ExampleEngine {
-  protected abstract newEncodeContext(
+  protected abstract newEncodeAct(
     env: LiveEnvironment,
-  ): EncodeContext;
-  protected abstract newDecodeContext(
+  ): EncodeAct;
+  protected abstract newDecodeAct(
     env: LiveEnvironment,
     data: string,
-  ): DecodeContext;
+  ): DecodeAct;
 
   protected abstract serializedFromEncoded(
     encoded: JsonCodecValue,
-    ctx: EncodeContext,
+    act: EncodeAct,
   ): string;
   protected abstract encodedFromSerializedForm(
     data: string,
-    ctx: DecodeContext,
   ): JsonCodecValue;
 }
 ```
 
-Minting the context in the base rather than in each engine is what makes
+Minting the act in the base rather than in each engine is what makes
 *per act* structural: an engine cannot hold one across calls, because it
 never gets to decide when one is made.
 
@@ -2557,18 +2556,18 @@ handed is its own. What arrives there is data off a channel like anything
 else, so a form that is not this format's is refused by throwing, and
 `decode()` settles that against the engine's `lenient` setting — a lenient
 decode answers a syntactic fault with a `ProblematicValue`, exactly as it
-does a fault found further in. `newDecodeContext()` sees the same form and
+does a fault found further in. `newDecodeAct()` sees the same form and
 may read something out of it for the act, but it *sniffs rather than
 validates*: it runs before anything has established that the form is this
 format's at all.
 
-The context is what the walk threads from node to node: the caller's
+The act is what the walk threads from node to node: the caller's
 `LiveEnvironment`, and the values whose encoding or decoding is in
 progress. Holding it per call rather than on the engine is what lets
 a codec reach back through a public entry point while a walk is already
 running — the inner act gets its own bookkeeping instead of corrupting the
 outer one's. A format needing more than the base class knows about, such as a
-wire marker minted per call, subclasses the context and carries it there.
+wire marker minted per call, subclasses the act and carries it there.
 
 `JsonCodecEngine` supplies both directions at both of its boundary types:
 

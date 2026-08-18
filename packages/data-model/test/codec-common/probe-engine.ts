@@ -19,8 +19,8 @@ import type {
   WireFormat,
 } from "@/codec-interface/interface.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
-import { DecodeContext } from "@/codec-common/DecodeContext.ts";
-import { EncodeContext } from "@/codec-common/EncodeContext.ts";
+import { DecodeAct } from "@/codec-common/DecodeAct.ts";
+import { EncodeAct } from "@/codec-common/EncodeAct.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
@@ -299,7 +299,7 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
    */
   protected override serializedFromEncoded(
     encoded: ProbeValue,
-    _ctx: EncodeContext,
+    _act: EncodeAct,
   ): ProbeValue {
     return encoded;
   }
@@ -315,8 +315,8 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
   }
 
   /** @inheritDoc */
-  protected override newEncodeContext(env: LiveEnvironment): EncodeContext {
-    return new EncodeContext(env);
+  protected override newEncodeAct(env: LiveEnvironment): EncodeAct {
+    return new EncodeAct(env);
   }
 
   /**
@@ -326,52 +326,52 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
    * the tree itself, so a caller can hand `decode()` a graph with a cycle in
    * it, and the base's guard is what refuses one.
    */
-  protected override newDecodeContext(
+  protected override newDecodeAct(
     env: LiveEnvironment,
     _data: ProbeValue,
-  ): DecodeContext {
-    return new DecodeContext(env);
+  ): DecodeAct {
+    return new DecodeAct(env);
   }
 
   protected override wrapTag(
     tag: string,
     state: ProbeValue,
-    _ctx: EncodeContext,
+    _act: EncodeAct,
   ): ProbeValue {
     return new Tagged(tag, state);
   }
 
   protected override encodeArray(
     value: readonly FabricValue[],
-    ctx: EncodeContext,
+    act: EncodeAct,
   ): ProbeValue {
-    ctx.enter(value);
+    act.enter(value);
     try {
-      return value.map((v) => this.encodeValue(v, ctx));
+      return value.map((v) => this.encodeValue(v, act));
     } finally {
-      ctx.leave(value);
+      act.leave(value);
     }
   }
 
   protected override encodePlainObject(
     value: Record<string, FabricValue>,
-    ctx: EncodeContext,
+    act: EncodeAct,
   ): ProbeValue {
-    ctx.enter(value);
+    act.enter(value);
     try {
       const result: Record<string, ProbeValue> = {};
       for (const [k, v] of Object.entries(value)) {
-        result[k] = this.encodeValue(v, ctx);
+        result[k] = this.encodeValue(v, act);
       }
       return result;
     } finally {
-      ctx.leave(value);
+      act.leave(value);
     }
   }
 
   protected override decodeValue(
     data: ProbeValue,
-    ctx: DecodeContext,
+    act: DecodeAct,
   ): FabricValue {
     if ((data === null) || (typeof data !== "object")) {
       return data as FabricValue;
@@ -380,25 +380,25 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
     // Every object node goes through the guard, the tagged form included: this
     // format's transport is the tree itself, so a `Tagged` can hold a
     // reference back to a node above it with no container in between.
-    const cycle = this.enterOrReport(ctx, data);
+    const cycle = this.enterOrReport(act, data);
     if (cycle !== null) {
       return cycle;
     }
 
     try {
       if (data instanceof Tagged) {
-        return this.decodeTagged(data.tag, data.state, ctx);
+        return this.decodeTagged(data.tag, data.state, act);
       } else if (Array.isArray(data)) {
-        return data.map((d) => this.decodeValue(d, ctx));
+        return data.map((d) => this.decodeValue(d, act));
       }
 
       const result: Record<string, FabricValue> = {};
       for (const [k, v] of Object.entries(data)) {
-        result[k] = this.decodeValue(v as ProbeValue, ctx);
+        result[k] = this.decodeValue(v as ProbeValue, act);
       }
       return result;
     } finally {
-      ctx.leave(data);
+      act.leave(data);
     }
   }
 }

@@ -33,8 +33,8 @@ export { codecOf } from "./codecOf.ts";
 export { isCodecTypeTag } from "./isCodecTypeTag.ts";
 export { CodecRegistry } from "./CodecRegistry.ts";
 export { BaseCodecEngine } from "./BaseCodecEngine.ts";
-export { DecodeContext } from "./DecodeContext.ts";
-export { EncodeContext } from "./EncodeContext.ts";
+export { DecodeAct } from "./DecodeAct.ts";
+export { EncodeAct } from "./EncodeAct.ts";
 
 export { ProblematicStateError } from "./ProblematicStateError.ts";
 export { ProblematicValue } from "./ProblematicValue.ts";
