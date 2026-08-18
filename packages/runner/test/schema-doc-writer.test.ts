@@ -196,7 +196,7 @@ describe("schema-doc-writer", () => {
     }
   });
 
-  it("externalizes a schema whose only external refs are embedded", async () => {
+  it("externalizes a schema whose only external refs are embedded", () => {
     const vnodeRef = "https://commonfabric.org/schemas/vnode.json";
     const schema: JSONSchemaObj = {
       type: "object",
