@@ -845,6 +845,25 @@ export default pattern(() => {
     directTopic.lastActivityAt === directTopic.titleUpdatedAt
   );
 
+  // What the HEADER RENDERS, not just what `editingTitle` holds. The two are
+  // different claims: a conditional that tested the cell object rather than
+  // its value would leave `editingTitle` correct and still render the edit
+  // form permanently, and no assertion on the output value can see that.
+  // The title input exists only in the edit branch, and the two link drafts
+  // are the only other `cf-input`s on the page, so the count discriminates:
+  // two while reading, three while renaming.
+  // These assert what RENDERS and nothing else; `editingTitle`'s own value is
+  // covered by the lifecycle assertions below. Keeping them apart matters
+  // here: a session cell's initial value is not observable through the result
+  // until something writes it, so an unwritten `editingTitle` reads back
+  // undefined while the header correctly renders its read branch.
+  const assert_header_reads = assert(() =>
+    findAllByTag(directTopic[UI], "cf-input").length === 2
+  );
+  const assert_header_edits = assert(() =>
+    findAllByTag(directTopic[UI], "cf-input").length === 3
+  );
+
   // The rename editor's session lifecycle: Edit seeds the draft from the
   // durable title, Cancel discards without touching it.
   const action_start_rename_editor = action(() => {
@@ -1007,10 +1026,16 @@ export default pattern(() => {
       { assertion: assert_survivor_still_an_edge },
       { action: action_rename_direct_topic },
       { assertion: assert_renamed_with_attribution },
+      { render: directTopic[UI] },
+      { assertion: assert_header_reads },
       { action: action_start_rename_editor },
       { assertion: assert_rename_editor_seeded },
+      { render: directTopic[UI] },
+      { assertion: assert_header_edits },
       { action: action_cancel_rename_editor },
       { assertion: assert_rename_editor_closed },
+      { render: directTopic[UI] },
+      { assertion: assert_header_reads },
       { action: action_browser_rename },
       { assertion: assert_browser_rename_attributed },
       { action: action_browser_rename_blank },
