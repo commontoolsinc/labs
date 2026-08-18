@@ -161,7 +161,7 @@ export interface ParticipantIdentityCardInput {
   profileName: string;
 
   /** The viewer's resolved avatar, from the parent's `#profileAvatar` wish. */
-  profileAvatar: string;
+  profileAvatar?: string;
 
   /**
    * The `#profile` wish's built-in create/pick surface (`profileWish[UI]`),

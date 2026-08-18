@@ -42,15 +42,15 @@ export default pattern(() => {
   const participantProfiles = Writable.of<ParticipantProfileDirectoryValue>(
     DEFAULT_PARTICIPANT_PROFILES,
   );
-  // No profile resolved: name/avatar are empty strings (as the parent's
-  // top-level wishes read before resolving), so the card shows the setup path.
+  // No profile resolved: the name is empty and the avatar is absent, as in
+  // stored invocations from before the avatar input existed. The card still
+  // shows the setup path.
   const participantIdentity = ParticipantIdentityCard({
     users,
     myName,
     adminName,
     participantProfiles,
     profileName: "",
-    profileAvatar: "",
   });
 
   // The profile-backed path is injected explicitly so lane-2 tests exercise
