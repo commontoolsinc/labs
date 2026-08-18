@@ -41,22 +41,46 @@ function tileRun(run: Run, repo: string): Run {
 
 async function fetchRuns(repo: string, workflow: string): Promise<Run[]> {
   const cutoff = Date.now() - CI_RUNS_MAX_AGE_DAYS * 86_400_000;
-  const out: Run[] = [];
+  const collected = new Map<number, Run>();
   const pages = Math.ceil(CI_RUNS_MAX / 100);
+  let anchor: Run | undefined;
+  walk:
   for (let page = 1; page <= pages; page++) {
+    // A page after the first asks for the runs created at or before the one the
+    // page before it ended on, rather than for an offset into a list that shifts
+    // as runs land and that each request can be answered from a different moment
+    // of. The anchor is a run the window already holds, so the page has to carry
+    // it: a page that does not was cut from a moment that never held that run,
+    // and joining the two would leave a hole in the window. Anchoring costs the
+    // one run each page repeats, which is why the window is up to CI_RUNS_MAX.
+    const anchored = anchor
+      ? `&created=${encodeURIComponent(`<=${anchor.created_at}`)}`
+      : "";
     const r = await github<{ workflow_runs: Run[] }>(
-      `repos/${repo}/actions/workflows/${workflow}/runs?branch=main&per_page=100&page=${page}`,
+      `repos/${repo}/actions/workflows/${workflow}/runs?branch=main&per_page=100${anchored}`,
     );
     const batch = r.workflow_runs ?? [];
     if (!batch.length) break;
+    if (anchor && !batch.some((run) => run.id === anchor!.id)) {
+      throw new Error(
+        `GitHub ${repo} ${workflow} runs at or before ${anchor.created_at} came ` +
+          `back without run ${anchor.id}, opening on ${batch[0].id} of ` +
+          `${batch[0].created_at}`,
+      );
+    }
+    anchor = batch[batch.length - 1];
     for (const run of batch) {
       const t = Date.parse(run.run_started_at);
-      if (Number.isFinite(t) && t < cutoff) return out; // newest-first, so the rest are older too
-      out.push(tileRun(run, repo));
-      if (out.length >= CI_RUNS_MAX) return out;
+      if (Number.isFinite(t) && t < cutoff) break walk; // newest-first, so the rest are older too
+      collected.set(run.id, tileRun(run, repo));
+      if (collected.size >= CI_RUNS_MAX) break walk;
     }
   }
-  return out;
+  // The walk decides which runs are in the window; the sort decides their order,
+  // so a page served out of turn cannot leave an old run at the head.
+  return [...collected.values()].sort((a, b) =>
+    Date.parse(b.created_at) - Date.parse(a.created_at)
+  );
 }
 
 export function makeCtx(): Ctx {
