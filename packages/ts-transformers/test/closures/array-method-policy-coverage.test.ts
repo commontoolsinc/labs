@@ -125,4 +125,52 @@ describe("array-method-policy", () => {
 
     expect(shouldTransformArrayMethod(mapCall, context)).toBe(false);
   });
+
+  // The inline lift-applied receiver: `computed(() => …)` lowers to
+  // `__cfHelpers.lift(cb)(inputs)`, so a map chained straight onto the call —
+  // no local in between — takes this branch. Its transform-or-not turns on
+  // the surrounding context alone. `__cfHelpers` stays undeclared on
+  // purpose: emitted code's helper identifier resolves to no symbol, which
+  // is what routes recognition through the synthetic-helper path — declaring
+  // it here would instead match the shadowed-local refusal.
+  const INLINE_LIFT_APPLIED_MAP = `
+    const mapped = __cfHelpers.lift(() => [])({}).map((v) => v);
+  `;
+
+  function findInlineLiftAppliedMapCall(
+    sourceFile: ts.SourceFile,
+  ): ts.CallExpression {
+    let found: ts.CallExpression | undefined;
+    const visit = (node: ts.Node): void => {
+      if (
+        !found &&
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "map"
+      ) {
+        found = node;
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    if (!found) throw new Error("Expected a .map(...) call in the source");
+    return found;
+  }
+
+  it("transforms a map chained onto an inline lift-applied call in pattern context", () => {
+    const { sourceFile, checker } = createProgram(INLINE_LIFT_APPLIED_MAP);
+    const mapCall = findInlineLiftAppliedMapCall(sourceFile);
+    const context = testContext(checker, () => "pattern");
+
+    expect(shouldTransformArrayMethod(mapCall, context)).toBe(true);
+  });
+
+  it("leaves a map chained onto an inline lift-applied call alone in compute context", () => {
+    const { sourceFile, checker } = createProgram(INLINE_LIFT_APPLIED_MAP);
+    const mapCall = findInlineLiftAppliedMapCall(sourceFile);
+    const context = testContext(checker, () => "compute");
+
+    expect(shouldTransformArrayMethod(mapCall, context)).toBe(false);
+  });
 });
