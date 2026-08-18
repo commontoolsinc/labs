@@ -96,8 +96,8 @@ at the handoff.
 The three stage-C siblings share the base `fb2292a24` and are meant to
 be STACKED (in an order the stacker chooses; all three append a delta at
 the end of the register's §3, so that spot conflicts trivially) — never
-merged into each other by hand. This record itself rides a docs branch
-off the tuning tip (`claude/server-exec-v2-stage-c-docs`).
+merged into each other by hand. This record itself rides the docs PR
+#6009 (`claude/server-exec-v2-stage-c-docs`) off the tuning tip.
 
 Ledgers: #5968 carries the coordinator-round independent review as its
 one comment (MAJOR-A supersession wedge, MAJOR-B fan-out cardinality 2,

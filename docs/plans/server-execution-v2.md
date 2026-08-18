@@ -55,8 +55,8 @@ E #5374 → F #5439 → G #5461 → Phase 2 #5522 → P2-F #5789 → Phase 3
 siblings off fan-out B, to be STACKED (order the stacker's; all three
 append at the end of the register's §3): OW28 #5968
 (`463ea3887`), lunch #5969 (`eb64d8694`), the tuning trio #5991
-(`b54bf5215`); this docs branch rides the tuning tip. The full per-PR
-table is the closeout's §1.
+(`b54bf5215`); this docs PR #6009 (`claude/server-exec-v2-stage-c-docs`)
+rides the tuning tip. The full per-PR table is the closeout's §1.
 
 **The owner's landing posture (2026-08-18, verbatim intent):** *"get
 confidence that we're on the right track, then merge everything to main
