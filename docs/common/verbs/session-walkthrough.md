@@ -28,19 +28,28 @@ transcript is the artifact. `verb-session-gaps.sh` asserts the same surface as
 pass/fail and is what keeps the demo honest.
 
 The demo counts in **acts**; this document counts in **steps**, and the two do
-not run one-for-one — a step is a theme, and an act is a beat. Read the demo's
-transcript beside this table:
+not run one-for-one — a step is a theme, an act is a beat, and a theme can
+take several beats to show. Watching the transcript and wanting the reasoning
+behind a particular act, read across:
 
-| Step here | Demo acts |
+| Demo act | Explained here in |
 | --- | --- |
-| 1. Arrive with a slug | act 1 |
-| 2. Ask what it is | act 2 |
-| 3. Ask what a verb wants | act 3 |
-| 4. Complete against the live piece | — completion needs a terminal, so no act runs it |
-| 5. Create, and carry the address forward | acts 4–9 |
-| 6. Read the tree back, bounded | act 10 |
-| 7. Refuse what the surface does not accept | act 11 |
-| 8. Relate two items | acts 12–13 |
+| 1 · Arrive by name | step 1 |
+| 2 · Ask what it is, and what it can do | step 2 |
+| 3 · Ask what a verb wants | step 3 |
+| 4 · Create, and act on what you were handed | step 5 |
+| 5 · Read addresses instead of contents | step 6, and "Why this pattern" on what an unshaped read costs |
+| 6 · Ask the same question twice | step 6, on why a read may be asked twice and a call may not |
+| 7 · A verb returns what only the pattern could compute | the verb-shapes table under "Why this pattern" |
+| 8 · Finishing reports what the caller could not know | the verb-shapes table under "Why this pattern" |
+| 9 · A verb that declares no result | the verb-shapes table, and step 5's closing read |
+| 10 · Step back and read the board | step 6 |
+| 11 · Ask for something that is not there | step 7 |
+| 12 · Relate two items | step 8 |
+| 13 · One item, two paths, one address | step 8 |
+
+Step 4 is the one with no act behind it: completion needs a terminal, so the
+demo cannot run it.
 
 A verb added to the fixture wants a row in the verb table below, an act in the
 demo, and a step in the harness; a shape demonstrated in none of the three is a
@@ -513,8 +522,18 @@ a filesystem mount, and on a direct read: one read layer, four arrivals.
 belongs to the callable's own interface; the other three take them wherever
 their own options go.
 
-The demo's act 10 is this step run against the session's own tree: the whole
-board first, then only what is open, then the refusal.
+**A read may be asked twice; a call may not.** A projection is a question, so
+running one again returns the same answer and changes nothing — which is what
+makes every read in this session safe to put in a script, and why the demo
+takes the addresses its later acts drive out of a read the reader already
+watched rather than from a hidden second one. A call is the opposite: it runs
+the handler body, so asking twice does the work twice. That asymmetry is why
+calls carry an idempotency id and reads need nothing —
+[verbs over the CLI](over-the-cli.md) has the id's contract.
+
+The demo's acts 5, 6 and 10 are this step: an address-only read, the same read
+run a second time to show it answers the same, and then the whole board, what
+is open, and the refusal.
 
 ## 7. Refuse what the surface does not accept
 
