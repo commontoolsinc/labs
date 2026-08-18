@@ -1,6 +1,6 @@
 /**
  * Fixture for the verb-result walkthrough (`verbs-over-the-cli.sh`, documented
- * in `docs/common/verbs-over-the-cli.md`).
+ * in `docs/common/verbs/over-the-cli.md`).
  *
  * It exists so the walkthrough owns its subject: the shipped patterns are used
  * elsewhere, and a change to one of them should never break a demonstration of

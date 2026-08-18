@@ -9,7 +9,7 @@
 # many are open is tallied as they run and printed on the last line, so no
 # prose here can fall out of step with the assertions below.
 #
-# Documented in docs/common/verb-session-walkthrough.md.
+# Documented in docs/common/verbs/session-walkthrough.md.
 #
 # It deploys pattern/tracker.tsx and nothing else. That fixture belongs to this
 # session alone, so a change to a pattern the product ships can never break a
@@ -56,6 +56,12 @@ if [ -z "${CF_IDENTITY:-}" ]; then
   $CF id new >"$CF_IDENTITY" 2>/dev/null
 fi
 ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
+# An id alone does not name an invocation — the session it was chosen within is
+# the other half, and `--invocation` is refused without one.
+if [ -z "${CF_INVOCATION_SESSION:-}" ]; then
+  CF_INVOCATION_SESSION=$($CF invocation-session new 2>/dev/null)
+fi
+export CF_INVOCATION_SESSION
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
 
@@ -296,6 +302,43 @@ check "1" "$(echo "$N" | jq -r '.result.noteCount // empty')" \
 AT=$(echo "$N" | jq -r '.result.note.at // 0')
 [ "$AT" -gt 0 ] && ok "and a timestamp the caller never supplied ($AT)" ||
   bad "no pattern-stamped time on the note"
+# Both recovery routes are asserted against the LIVE piece, not against what
+# the envelope reports. A receipt is a frozen snapshot of the outcome its
+# handling committed, and a replay is defined to hand that same snapshot back —
+# so an envelope shows the original count and body whether or not a second
+# append actually landed. Only reading the item's own `notes` afterwards can
+# tell those apart, which makes the live length the discriminator for both.
+notes_len() { $CF get --quiet --piece "$EPIC" $ARGS notes 2>/dev/null | jq 'length'; }
+LIVE0=$(notes_len)
+RCPT=$(echo "$N" | jq -r '.receipt // empty')
+if [ -z "$RCPT" ]; then
+  bad "the settled envelope named no receipt to read back"
+else
+  RB=$($CF get --quiet --piece "$RCPT" $ARGS --select note,noteCount 2>/dev/null)
+  check "blocked on the cookie spec" "$(echo "$RB" | jq -r '.note.body // empty')" \
+    "the receipt address holds the outcome that handling committed"
+  check "1" "$(echo "$RB" | jq -r '.noteCount // empty')" \
+    "and reading it hands that outcome back without calling anything again"
+  check "$LIVE0" "$(notes_len)" \
+    "and the piece is untouched by the read — no note was appended"
+fi
+
+# The other route: no address kept, so the id is the handle. The replay carries
+# a DIFFERENT payload on purpose, so a returned body of the FIRST text is
+# evidence the second call's event never became an outcome.
+R1=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
+  recordNote '{"body":"first attempt"}' 2>/dev/null)
+LIVE1=$(notes_len)
+R2=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
+  recordNote '{"body":"a different body entirely"}' 2>/dev/null)
+check "first attempt" "$(echo "$R2" | jq -r '.result.note.body // empty')" \
+  "replaying a settled id hands back the original result, not the new payload"
+check "$(echo "$R1" | jq -r '.receipt // empty')" "$(echo "$R2" | jq -r '.receipt // empty')" \
+  "and names the same receipt the first call did"
+check "true" "$(echo "$R2" | jq -r '.deduplicated // false')" \
+  "and says so itself, rather than leaving a caller to infer it"
+check "$LIVE1" "$(notes_len)" \
+  "and the piece is unchanged — the replay committed no second note"
 
 step "8. Finishing reports what the caller could not know"
 # Exit code checked for the same reason as step 4's creates.

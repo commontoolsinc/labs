@@ -53,7 +53,7 @@ work-item tracker driven entirely through `cf`, shown twice. Once as it reads
 today, once as it reads with declared results. Nothing separates the two
 except one field.
 
-[A verb session, end to end](../../common/verb-session-walkthrough.md) walks that
+[A verb session, end to end](../../common/verbs/session-walkthrough.md) walks that
 session in full, marking each step for whether it works today, is built and
 merging, or is blocked. This document takes the one step the decision turns on.
 
@@ -460,5 +460,5 @@ one.
 
 Declared results make an **output** self-describing. This is about what an
 **input** accepts, and it stays open whichever way the timing question is
-settled. [A verb session, end to end](../../common/verb-session-walkthrough.md)
+settled. [A verb session, end to end](../../common/verbs/session-walkthrough.md)
 works the case through.

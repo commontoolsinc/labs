@@ -621,7 +621,7 @@ and inflates the answer with whatever the examples happen to read.
 Eighteen occurrences carry a parseable JSON Schema argument — in
 `packages/cli/integration/*.sh`, `packages/cli/README.md`,
 `packages/cli/commands/piece.ts` help examples, `skills/cf/SKILL.md`,
-`docs/common/verbs-over-the-cli.md`, and two plan documents. The rest are prose
+`docs/common/verbs/over-the-cli.md`, and two plan documents. The rest are prose
 about the flag, error-message text naming it, or the concise field-path
 spelling. One doc example passes `@shape.json`, a file the tree does not
 contain. Two arguments did not parse and neither is a command: a display string
