@@ -13,7 +13,7 @@ migration notes live under `docs/history/` at the repository root.
 - [CURRENT_STATE.md](CURRENT_STATE.md) — concise current architecture,
   integrations, and known gaps.
 - [IMPLEMENTATION_PROFILE.md](IMPLEMENTATION_PROFILE.md) — conformance statement
-  against the cross-repository Agent Harness specification.
+  against the Agent Harness specification.
 - [ROADMAP.md](ROADMAP.md) — remaining work only; shipped milestones are not
   repeated as a plan.
 - [SKILLS_SUPPORT_SPEC.md](SKILLS_SUPPORT_SPEC.md) — live
@@ -21,10 +21,10 @@ migration notes live under `docs/history/` at the repository root.
 
 ## Normative boundary
 
-The implementation-independent runtime and CFC contracts live in the sibling
-`specs` repository under `agent-harness/`. This package owns exact CLI flags,
-tools, profiles, schemas, defaults, artifacts, and deviations. Loom and Pattern
-Factory own their adapter and rollout behavior.
+The implementation-independent runtime and CFC contracts live in
+[`docs/specs/agent-harness/`](../../../docs/specs/agent-harness/README.md). This
+package owns exact CLI flags, tools, profiles, schemas, defaults, artifacts, and
+deviations. Loom and Pattern Factory own their adapter and rollout behavior.
 
 ## Historical records
 
