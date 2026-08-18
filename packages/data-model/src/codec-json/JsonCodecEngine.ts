@@ -76,12 +76,6 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   /**
    * @inheritDoc
    *
-   * Walks the value into the `/<Type>@<Version>` tagged tree, stringifies it,
-   * and prefixes the format tag.
-   */
-  /**
-   * @inheritDoc
-   *
    * Stringifies the walked tree and prefixes the format tag.
    */
   protected override serializedFromEncoded(
@@ -99,10 +93,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * than walked -- and settles against `lenient` like any other malformation
    * off a channel.
    */
-  protected override encodedFromSerializedForm(
-    data: string,
-    _ctx: DecodeContext,
-  ): JsonCodecValue {
+  protected override encodedFromSerializedForm(data: string): JsonCodecValue {
     if (!JsonCodecEngine.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new ProblematicStateError(
@@ -138,8 +129,15 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   ): FabricValue {
     const text = JsonCodecEngine.#textDecoder.decode(bytes);
     const ctx = this.newDecodeContext(env, text);
+    let tree: JsonCodecValue;
 
-    return this.decodeValue(JsonCodecEngine.#parseWireText(text), ctx);
+    try {
+      tree = JsonCodecEngine.#parseWireText(text);
+    } catch (e) {
+      return this.settleSyntacticRefusal(e);
+    }
+
+    return this.decodeValue(tree, ctx);
   }
 
   /**
@@ -685,6 +683,25 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
   /** Parses the JSON-text wire form, _without_ a tag prefix. */
   static #parseWireText(jsonText: string): JsonCodecValue {
-    return deepFreeze(JSON.parse(jsonText) as JsonCodecValue);
+    try {
+      return deepFreeze(JSON.parse(jsonText) as JsonCodecValue);
+    } catch (e) {
+      // The tag said this was ours and the text under it is not JSON, which
+      // is a refusal of the serialized form and settles against `lenient`
+      // like the tag check above it. Raised as this class's own refusal
+      // rather than passing `JSON.parse()`'s `SyntaxError` along, which
+      // nothing downstream recognizes.
+      const excerpt = (jsonText.length <= 50)
+        ? jsonText
+        : `${jsonText.slice(0, 50)}...`;
+      throw new ProblematicStateError(
+        "",
+        excerpt,
+        `Malformed JSON in an encoded \`FabricValue\` string: ${
+          backtickQuote(excerpt)
+        }`,
+        { cause: e },
+      );
+    }
   }
 }

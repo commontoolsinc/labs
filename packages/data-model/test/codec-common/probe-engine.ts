@@ -310,10 +310,7 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
    * The tree is what arrives, so there is nothing to convert and nothing this
    * format can tell is not its own: any value at all is a candidate.
    */
-  protected override encodedFromSerializedForm(
-    data: ProbeValue,
-    _ctx: DecodeContext,
-  ): ProbeValue {
+  protected override encodedFromSerializedForm(data: ProbeValue): ProbeValue {
     return data;
   }
 

@@ -151,25 +151,12 @@ export abstract class BaseCodecEngine<
     env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
   ): FabricValue {
     const ctx = this.newDecodeContext(env, data);
-    let encoded: Encoded;
 
     try {
-      encoded = this.encodedFromSerializedForm(data, ctx);
+      return this.decodeValue(this.encodedFromSerializedForm(data), ctx);
     } catch (e) {
-      // A serialized form is data off a channel like any other, so being the
-      // wrong shape for this format settles against `lenient` exactly as a
-      // malformation inside a well-formed one does. Only this class's own
-      // refusal is caught: anything else a format's conversion throws is its
-      // own business and is left alone.
-      if (this.lenient && (e instanceof ProblematicStateError)) {
-        return deepFreeze(
-          new ProblematicValue(e.wireTypeTag, e.state, e.message),
-        );
-      }
-      throw e;
+      return this.settleSyntacticRefusal(e);
     }
-
-    return this.decodeValue(encoded, ctx);
   }
 
   /**
@@ -196,13 +183,12 @@ export abstract class BaseCodecEngine<
    * {@link #lenient} -- so a lenient decode answers a syntactic fault with a
    * `ProblematicValue`, exactly as it does a fault found further in.
    *
-   * `ctx` is the act being decoded, already built from this same data, so a
-   * format that reads something out of the form for its context has it there
-   * rather than reading it twice.
+   * Takes no context. What a format needs out of the form for the act it is
+   * about to run, it takes in {@link #newDecodeContext}, which sees the same
+   * form; this step is the conversion and nothing else.
    */
   protected abstract encodedFromSerializedForm(
     data: SerializedForm,
-    ctx: DecCtx,
   ): Encoded;
 
   /**
@@ -360,6 +346,35 @@ export abstract class BaseCodecEngine<
         }: no applicable codec.`,
       );
     }
+  }
+
+  /**
+   * Settles a refusal of the serialized form itself against {@link #lenient}:
+   * strictly it raises, and leniently it becomes a `ProblematicValue`.
+   *
+   * A serialized form is data off a channel like any other, so being the wrong
+   * shape for this format -- or the right shape around a payload that will not
+   * parse -- is a malformation of the same kind as a bad state inside a
+   * well-formed one, and settles the same way.
+   *
+   * Only this class's own refusal is settled. Anything else thrown while
+   * converting a form is the format's own business and is re-raised untouched,
+   * so a bug in a conversion does not come back as a `ProblematicValue`.
+   *
+   * Available to a format's own entry points, which reach a conversion without
+   * passing through {@link #decode} -- `JsonCodecEngine`'s byte pair, for one.
+   *
+   * @throws Whatever it was given, if this engine is not lenient or the throw
+   *   was not a refusal.
+   */
+  protected settleSyntacticRefusal(e: unknown): FabricValue {
+    if (this.lenient && (e instanceof ProblematicStateError)) {
+      return deepFreeze(
+        new ProblematicValue(e.wireTypeTag, e.state, e.message),
+      );
+    }
+
+    throw e;
   }
 
   /**

@@ -418,6 +418,27 @@ describe("JsonCodecEngine", () => {
       expect((decoded as ProblematicValue).error)
         .toMatch(/Not a JSON-encoded `FabricValue` string/);
     });
+    it("throws for a well-tagged but unparseable payload when strict", () => {
+      const bad = "fvj1:{not json";
+
+      expect(() =>
+        newDefaultJsonCodecEngine().decode(bad, new TestLiveEnvironment())
+      )
+        .toThrow(/Malformed JSON in an encoded `FabricValue` string/);
+    });
+
+    it("returns a `ProblematicValue` for an unparseable payload when lenient", () => {
+      // The tag says the form is ours and the text under it is not JSON. That
+      // is a refusal of the serialized form just as an absent tag is, so it
+      // settles the same way -- otherwise `lenient` would contain one half of
+      // "is this well-formed?" and not the other.
+      const decoded = newDefaultJsonCodecEngine({ lenient: true })
+        .decode("fvj1:{not json", new TestLiveEnvironment());
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect((decoded as ProblematicValue).error)
+        .toMatch(/Malformed JSON in an encoded `FabricValue` string/);
+    });
   });
 
   describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
