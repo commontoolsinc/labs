@@ -438,6 +438,53 @@ cf call "$EPIC" recordNote -- --body "blocked on the cookie spec"
 cf get "$EPIC/status"
 ```
 
+The create answers with the address that `EPIC` then holds, and every command
+after it takes that same string:
+
+```text
+{
+  "invocation": "a733f7d4-f238-46fa-9f89-30d7d228763c",
+  "status": "settled",
+  "receipt": "/of:fid1:GKtk39YEc7WOB6_d3iX6fkK7gEjgeoP5fw1dkirzb-E",
+  "result": {
+    "item": {
+      "$link": "/of:fid1:4qFMKSZxAkTVIPBykdyTQGK5YYr_sjUmez3gARxKUkE"
+    }
+  }
+}
+```
+
+`addChild` hands back the child whole, and `parent` — the position where the
+type re-enters itself — answers with an address rather than recursing:
+
+```text
+"result": {
+  "item": {
+    "title": "Session cookies",
+    "status": "open",
+    "notes": [],
+    "parent": {
+      "$link": "/of:fid1:nC0C0km4taIIWtgziU841Ka94i9igKvzEIG-OuoLuNw/parent"
+    },
+    "children": [],
+    "blockedOn": [],
+    "$NAME": "Session cookies"
+  }
+}
+```
+
+`recordNote` returns a stamp the caller never supplied, and the closing read
+answers with one scalar, because the address carried the path:
+
+```text
+"result": {
+  "note": { "at": 1787075135000, "body": "blocked on the cookie spec" },
+  "noteCount": 1
+}
+
+"open"
+```
+
 **This is the composition the surface exists for.** A create hands back the
 piece it made, the address renders in place as one canonical reference, and the
 next command takes that same string — bare, in its first position. An address
@@ -499,6 +546,30 @@ shows the full exchange.
 cf get --piece board items --select 'title,status,children@'
 
 cf get "$EPIC" children --select title --filter '.status == "open"'
+```
+
+Between step 5's reads and these, the session ran the verbs step 5 listed but
+did not print: the epic was finished and one child archived (the demo's acts 8
+and 9), which is why the statuses below have moved. The first read names three
+fields and marks one, so the children come back as addresses rather than being
+followed. The second names one field and selects on another, so only the child
+still open survives the filter:
+
+```text
+[
+  {
+    "status": "done",
+    "title": "Login rewrite",
+    "children": [
+      { "$link": "/of:fid1:nC0C0km4taIIWtgziU841Ka94i9igKvzEIG-OuoLuNw" },
+      { "$link": "/of:fid1:1kF-PJw_VqqjEcSQi-3KObKU_uNgtbewvIHUbKTWDns" }
+    ]
+  }
+]
+
+[
+  { "title": "CSRF tokens" }
+]
 ```
 
 Two commands rather than one, because **an `@` suffix and `--filter` are
@@ -583,13 +654,41 @@ cf call --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
 cf get "$EPIC" children --select @,title,blockedOn@
 ```
 
+```text
+"result": {
+  "blocked": { "$link": "/of:fid1:OGJ2ADfbRIhmZ-Z4Of4u3QK9mKGWBMKdUTKiUpuFsVQ" },
+  "blockedOnCount": 1,
+  "on": { "$link": "/of:fid1:1kF-PJw_VqqjEcSQi-3KObKU_uNgtbewvIHUbKTWDns" }
+}
+
+[
+  {
+    "$link": "/of:fid1:nC0C0km4taIIWtgziU841Ka94i9igKvzEIG-OuoLuNw",
+    "title": "Session cookies",
+    "blockedOn": [
+      { "$link": "/of:fid1:1kF-PJw_VqqjEcSQi-3KObKU_uNgtbewvIHUbKTWDns" }
+    ]
+  },
+  {
+    "$link": "/of:fid1:1kF-PJw_VqqjEcSQi-3KObKU_uNgtbewvIHUbKTWDns",
+    "title": "CSRF tokens",
+    "blockedOn": []
+  }
+]
+```
+
+**The address that went in is the address that came back**, and the graph read
+is the proof: `1kF-PJw…` is the second row's own address AND the entry in the
+first row's `blockedOn`. One item, two positions — an edge, not a copy. Had
+the tracker stored contents, those would be two objects that merely look
+alike, and nothing in the output could tell one item from two.
+
 That spelling — the address exactly as a read printed it — dispatches where
 the verb declares a reference, and the edge that lands is the target rather
-than a copy: the graph read shows one item under two paths. The dispatch gate
-reads the DECLARED contract ([verb input
-contract](../../history/plans/verb-input-contract.md)) to know which positions declare
-references, and the same contract refuses the two payloads that could only
-ever be mistakes at one:
+than a copy. The dispatch gate reads the DECLARED contract
+([verb input contract](../../history/plans/verb-input-contract.md)) to know
+which positions declare references, and the same contract refuses the two
+payloads that could only ever be mistakes at one:
 
 ```bash
 cf call "$KID" blockOn -- --on "not-an-address"
@@ -624,9 +723,9 @@ reference (#5880), and converts the canonical string a read prints — the one
 spelling a caller is actually holding, since every `$link` and `receipt` in
 this session emits exactly that form. The positions it converts at come from
 the DECLARED contract read off the compiled pattern, because the schema a
-dispatch cell carries keeps only stream markers; the [verb input
-contract](../../history/plans/verb-input-contract.md) is what makes that declaration
-authoritative.
+dispatch cell carries keeps only stream markers; the
+[verb input contract](../../history/plans/verb-input-contract.md) is what
+makes that declaration authoritative.
 
 A tree mostly hides the argument half, because the natural shape is to call
 the verb *on* the parent — the receiver carries the relationship, so no
