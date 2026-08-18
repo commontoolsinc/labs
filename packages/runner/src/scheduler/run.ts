@@ -590,6 +590,19 @@ export async function runSchedulerAction(
     let ran = false;
     const deferred = new Set<ScopeKey>();
     for (;;) {
+      // Stage C tuning T3: the per-demander walk is where a serving wave
+      // spends its settle (20–250 ms per instance run × demanders ×
+      // roots — the attribution's dominant server term), and this loop
+      // had no macrotask boundary between instances. Yield once the
+      // slice is spent, so the flush deadline, the lease renew and the
+      // push flush can fire between one demander's run and the next.
+      // BEFORE the instance-set snapshot below: a demander can depart (or
+      // the ratchet move) during the turn, and the run must act on the
+      // set as it stands after it.
+      if (ran && state.yieldBetweenRuns !== undefined) {
+        const turn = state.yieldBetweenRuns();
+        if (turn !== undefined) await turn;
+      }
       const currentDemanders = state.runtime.serverRunDemandersFor(
         demandRootIds!,
       ) ?? [];
@@ -599,16 +612,6 @@ export async function runSchedulerAction(
         (instance) => !deferred.has(instance.key),
       );
       if (toRun.length === 0) break;
-      // Stage C tuning T3: the per-demander walk is where a serving wave
-      // spends its settle (20–250 ms per instance run × demanders ×
-      // roots — the attribution's dominant server term), and this loop
-      // had no macrotask boundary between instances. Yield once the
-      // slice is spent, so the flush deadline, the lease renew and the
-      // push flush can fire between one demander's run and the next.
-      if (ran && state.yieldBetweenRuns !== undefined) {
-        const turn = state.yieldBetweenRuns();
-        if (turn !== undefined) await turn;
-      }
       const instance = toRun[0];
       const startGen = fanOutRunStarted(fanOut, instance);
       const causes = invalidCauses === undefined

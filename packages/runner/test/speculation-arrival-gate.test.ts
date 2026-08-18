@@ -861,12 +861,61 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     expect(sealed.length).toBe(1);
     expect(destination.entryCount(space)).toBe(1);
     expect(destination.lateEchoDropCount).toBe(1);
-    // An untracked eventId (a client cascade's minted id) is never
-    // terminal: it registers too.
+    // An untracked eventId (a client cascade's minted id) with no
+    // terminal parent is never jobless: it registers too.
     expect((await destination.seal(echoOf("evt-cascade-minted"))).ok)
       .toBeDefined();
     expect(sealed.length).toBe(2);
     expect(destination.entryCount(space)).toBe(2);
+    // The late echo's CASCADE (self-review finding 2): a child echo whose
+    // `parentEventId` is the terminal intent is dropped too, and so is
+    // ITS child (the dropped run's minted id joins the jobless set) —
+    // while a child of a live intent still registers.
+    const cascadeOf = (eventId: string, parentEventId: string) => {
+      const tx = echoOf(eventId);
+      stampSpeculationRunContext(tx, {
+        actionId: "handler",
+        kind: "event-handler",
+        eventId,
+        parentEventId,
+      });
+      return tx;
+    };
+    expect(
+      (await destination.seal(cascadeOf("evt-late-child", "evt-late")))
+        .ok,
+    ).toBeDefined();
+    expect(
+      (await destination.seal(
+        cascadeOf("evt-late-grandchild", "evt-late-child"),
+      )).ok,
+    ).toBeDefined();
+    expect(sealed.length).toBe(2);
+    expect(destination.entryCount(space)).toBe(2);
+    expect(destination.lateEchoDropCount).toBe(3);
+    expect(
+      (await destination.seal(cascadeOf("evt-fresh-child", "evt-fresh")))
+        .ok,
+    ).toBeDefined();
+    expect(sealed.length).toBe(3);
+    expect(destination.entryCount(space)).toBe(3);
+    // A dropped late echo's enactable effects are OWNED and not enacted
+    // (the closed arm's shape): deferSealedEffects returns true without
+    // flushing.
+    let flushed = 0;
+    const dropped = echoOf("evt-late");
+    expect((await destination.seal(dropped)).ok).toBeDefined();
+    expect(
+      destination.deferSealedEffects(dropped, [{
+        id: "nav:late",
+        kind: "navigateTo",
+        flush: () => {
+          flushed += 1;
+        },
+      }]),
+    ).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(flushed).toBe(0);
     destination.close();
   });
 });

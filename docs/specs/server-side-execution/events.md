@@ -236,17 +236,24 @@ ambient-state one.
   mechanisms MUST NOT be active for the same event
   (runtime-mapping.md N26).
 - **The drain's own re-scan (stage C tuning, 2026-08-18):** the drain
-  queues a pending entry into the serving scheduler AT MOST ONCE while
-  that copy is still queued, held, or running — an entry whose earlier
-  drain copy has not yet reached its final commit callback is skipped
-  on a re-drain (`events.drainInFlightSkips`), and re-drains as before
-  once the copy completes, defers, or fails (a withdrawn wave, a
-  deferral, a requeue leave the entry pending and it re-queues). This
-  is the mark path's own exactly-once, made robust to the honest flush
-  deadline (serving-loop.md §3): a cycle that ends before its drained
-  event ran re-arms the scan, and the next cycle's drain used to queue
-  a second copy — a per-cut-cycle multiplier on a NON-IDEMPOTENT
-  handler. Stated narrowly: it dedupes the drain against ITSELF only.
+  queues a pending entry into the serving scheduler AT MOST ONCE until
+  the store has spoken for it — a re-drain skips an entry whose earlier
+  drain copy is still queued, held, or running, OR whose consequence
+  mark is sealed into a wave the store has not yet committed
+  (`events.drainInFlightSkips`); the copy is released by the wave
+  outcome (committed or requeued — every abort arm reports its
+  event-handler contributions as requeued), by a deferral (no mark; the
+  rescan retries), by its final callback when nothing of it reached a
+  wave (an aborted run, a name-resolution drop), or by a notice that
+  failed to stage — a still-pending entry then re-drains exactly as
+  before. Releasing at the copy's SEAL would not do: the mark rides an
+  uncommitted wave while the entry is still pending, and a re-drain in
+  that window would queue the second copy. This is the mark path's
+  at-most-one-copy discipline, made robust to the honest flush deadline
+  (serving-loop.md §3): a cycle that ends before its drained event ran
+  re-arms the scan, and the next cycle's drain used to queue a second
+  copy — a per-cut-cycle multiplier on a NON-IDEMPOTENT handler. Stated
+  narrowly: it dedupes the drain against ITSELF only.
   The LT1 same-space in-process cascade copy (a `streamEntry`-less
   emit queued in-process alongside the durable append — #5969's (α))
   and the general "one durable entry = one COMPLETED delivery"

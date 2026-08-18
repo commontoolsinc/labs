@@ -50,14 +50,20 @@
 // derived doc and the covering watermark advance rode ONE frame; an
 // EXHAUSTED wave carries no watermark movement (its derivedThrough is
 // frozen — serving-loop.md §3), so its derived values arrive DECOUPLED
-// from W and the echo stood until the next unrelated commit lifted W (the
-// attribution's 48-s lockdown-chip stall). The gate itself is unchanged —
-// the arrival is a second, earlier TRIGGER, never a relaxation of the
-// coverage or arrival predicates. Its soundness argument: the sweep's
-// predicates are evaluated afresh on replica state at every trigger, so
-// an extra trigger can only retire an entry the gate would have retired
-// at the next watermark event anyway; the arrival of the authoritative
-// value IS the landing the gate waits for.
+// from W and an entry whose floor W already covered stood until the next
+// watermark event. With the honest flush deadline (T3) that is the
+// ROUTINE shape of a busy wave, which is what the wake closes. The gate
+// itself is unchanged — the arrival is a second, earlier TRIGGER, never a
+// relaxation of the coverage or arrival predicates. Its soundness
+// argument: the sweep's predicates are evaluated afresh on replica state
+// at every trigger, so an extra trigger can only retire an entry the gate
+// would have retired at the next watermark event anyway; the arrival of
+// the authoritative value IS the landing the gate waits for. (The
+// attribution's 48-s lockdown-chip stall itself is a DIFFERENT entry —
+// a late event echo whose floor sits ABOVE every reachable W; see the
+// late-echo rule at `#sealSpeculative`. Its mechanism is inferred from
+// the red runs' evidence — no prompt echo, a worker busy for 8.7–12 s —
+// not witnessed by a client trace.)
 //
 // Post-commit effects of a speculative run follow the egress rule
 // (README §1): "speculate on anything you can throw away; never on
@@ -241,6 +247,11 @@ export class SpeculationOverlayDestination
    * (speculation.md §4 step 2) — and is not registered. */
   readonly #terminalIntents = new Set<string>();
   static readonly #MAX_TERMINAL_INTENTS = 4096;
+  /** Transactions dropped as late echoes: `deferSealedEffects` owns and
+   * DROPS their enactable effects too (the closed-overlay arm's shape) —
+   * an optimistic navigation for a run whose writes were discarded must
+   * not enact. */
+  readonly #droppedLateEchoTxs = new WeakSet<object>();
   /** DIAGNOSTIC counters (tests). */
   #arrivalSweeps = 0;
   #lateEchoDrops = 0;
@@ -379,14 +390,28 @@ export class SpeculationOverlayDestination
     // run completes normally. Same-tick soundness: an intent is terminal
     // only through a store signal or an admission refusal, both of which
     // this overlay recorded before this seal ran.
+    // The rule reaches the late echo's CASCADE too (self-review finding
+    // 2): a send from inside the late run queues a client cascade child
+    // under a MINTED id (never an intent, never terminal) whose echo
+    // would seal over served state, register, and stand with the same
+    // floor-above-W shape — the parent's `parentEventId` names the
+    // jobless intent, and the dropped run's own id joins the set so
+    // grandchildren fold in. The server's authoritative run of the intent
+    // produced (or produces, in later waves) the durable cascade; the
+    // client's late copies have no job at any depth.
     if (
       context?.kind === "event-handler" && context.eventId !== undefined &&
-      this.#terminalIntents.has(context.eventId)
+      (this.#terminalIntents.has(context.eventId) ||
+        (context.parentEventId !== undefined &&
+          this.#terminalIntents.has(context.parentEventId)))
     ) {
+      this.#noteJoblessIntent(context.eventId);
+      this.#droppedLateEchoTxs.add(tx);
       this.#lateEchoDrops += 1;
       logger.debug("late-echo-dropped", () => [
         `late event echo ${context.eventId} dropped at seal: its intent ` +
-        "already reached a terminal consequence (speculation.md §4 step 2)",
+        "(or its cascade parent's) already reached a terminal " +
+        "consequence (speculation.md §4 step 2)",
       ]);
       return { ok: {} };
     }
@@ -557,6 +582,32 @@ export class SpeculationOverlayDestination
       }
       return { ok: {} };
     }
+    if (
+      context?.kind === "event-handler" && context.eventId !== undefined &&
+      (this.#terminalIntents.has(context.eventId) ||
+        (context.parentEventId !== undefined &&
+          this.#terminalIntents.has(context.parentEventId)))
+    ) {
+      // The late-echo rule's post-await re-check (self-review finding 5,
+      // the closed arm's shape): the terminal signal landed while
+      // `sealInto` was in flight — `retireIntent` ran before this entry
+      // existed, so registering now would strand exactly the echo the
+      // rule closes. Withdraw the collected entries; the seal reports ok.
+      this.#noteJoblessIntent(context.eventId);
+      this.#droppedLateEchoTxs.add(tx);
+      this.#lateEchoDrops += 1;
+      for (const { entry } of sealedSpaces) {
+        entry.resolveVerdict({
+          withdrawn: {
+            message: "late event echo withdrawn at seal: its intent " +
+              "reached a terminal consequence while sealing " +
+              "(speculation.md §4 step 2)",
+            superseded: true,
+          },
+        });
+      }
+      return { ok: {} };
+    }
     for (const { space, entry } of sealedSpaces) {
       let entries = this.#entries.get(space);
       if (entries === undefined) {
@@ -604,6 +655,13 @@ export class SpeculationOverlayDestination
       // optimistic navigation for a commit that was never accepted.
       // Still OWNED (true): a derivation's effects never take the
       // ordinary inline flush.
+      return true;
+    }
+    if (this.#droppedLateEchoTxs.has(tx)) {
+      // A late echo's effects (stage C tuning T2): its writes were
+      // dropped at seal, so its reversible kinds must not enact either
+      // — the authoritative intent already rode (or rides) the effects
+      // channel. Owned, not enacted: the closed arm's shape.
       return true;
     }
     const enactable = effects.filter((effect) =>
@@ -783,15 +841,8 @@ export class SpeculationOverlayDestination
     const key = `${space}\0${eventId}`;
     // The late-echo rule's memory (stage C tuning T2): every terminal
     // signal — consequenced, errored, dropped, refused — makes a later
-    // echo of this intent jobless. Bounded like the replica's ack record.
-    this.#terminalIntents.add(eventId);
-    if (
-      this.#terminalIntents.size >
-        SpeculationOverlayDestination.#MAX_TERMINAL_INTENTS
-    ) {
-      const oldest = this.#terminalIntents.values().next();
-      if (!oldest.done) this.#terminalIntents.delete(oldest.value);
-    }
+    // echo of this intent jobless.
+    this.#noteJoblessIntent(eventId);
     const waiters = this.#intentConsequenceWaiters.get(key);
     if (waiters !== undefined && waiters.length > 0) {
       this.#intentConsequenceWaiters.delete(key);
@@ -802,6 +853,20 @@ export class SpeculationOverlayDestination
     // in-flight fires; consumed by the next waiter).
     if (!this.#intentConsequenceMemo.has(key)) {
       this.#intentConsequenceMemo.set(key, outcome);
+    }
+  }
+
+  /** Record an intent whose echo has no job (a terminal consequence
+   * arrived, or its late echo was dropped — its cascade is jobless too).
+   * Bounded like the replica's ack record (oldest pruned). */
+  #noteJoblessIntent(eventId: string): void {
+    this.#terminalIntents.add(eventId);
+    if (
+      this.#terminalIntents.size >
+        SpeculationOverlayDestination.#MAX_TERMINAL_INTENTS
+    ) {
+      const oldest = this.#terminalIntents.values().next();
+      if (!oldest.done) this.#terminalIntents.delete(oldest.value);
     }
   }
 
@@ -1017,10 +1082,11 @@ export class SpeculationOverlayDestination
    * frame that moves the confirmed seq of a doc some live entry WROTE
    * re-sweeps the space off the freshest observed W. Filtered to written
    * docs — the ack observer and the watermark sink already cover the
-   * read-side triggers — so a busy space's unrelated frames cost one set
-   * lookup per upsert. Sweeps synchronously: the replica fires it AFTER
-   * the frame's own notifications, on a consistent replica (the ack
-   * observer's precedent). */
+   * read-side triggers — so an unrelated frame costs one Set of the
+   * arrived keys plus O(live entries × their written docs) lookups, no
+   * sweep. Sweeps synchronously: the replica fires it AFTER the frame's
+   * own notifications, on a consistent replica (the ack observer's
+   * precedent). */
   #ensureArrivalObserver(space: MemorySpace): void {
     if (this.#arrivalObserverReleases.has(space)) return;
     try {
@@ -1063,8 +1129,14 @@ export class SpeculationOverlayDestination
         ]);
         this.#sweep(space, this.#watermarks.get(space) ?? 0);
       };
+      const installed = observable.speculationArrivalObserver;
       this.#arrivalObserverReleases.set(space, () => {
-        observable.speculationArrivalObserver = undefined;
+        // Release only our own wake: two overlays on one replica (two
+        // runtimes over one manager — a test shape) must not clobber
+        // each other's install.
+        if (observable.speculationArrivalObserver === installed) {
+          observable.speculationArrivalObserver = undefined;
+        }
       });
     } catch (error) {
       logger.warn("arrival-observer-failed", () => [
@@ -1099,8 +1171,11 @@ export class SpeculationOverlayDestination
         if (this.#closed) return;
         this.#sweep(space, this.#watermarks.get(space) ?? 0);
       };
+      const installed = observable.speculationAckObserver;
       this.#ackObserverReleases.set(space, () => {
-        observable.speculationAckObserver = undefined;
+        if (observable.speculationAckObserver === installed) {
+          observable.speculationAckObserver = undefined;
+        }
       });
     } catch (error) {
       logger.warn("ack-observer-failed", () => [

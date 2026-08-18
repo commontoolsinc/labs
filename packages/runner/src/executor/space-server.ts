@@ -297,17 +297,30 @@ export class SpaceServer implements TransactionSealDestination {
    * `now − lastRenewAt ≥ TTL/3`, i.e. exactly when the interval timer
    * would have fired had the wave's settle let it. */
   #lastRenewAt = 0;
-  /** EventIds the drain has queued into the serving scheduler whose
-   * dispatch has not yet reached its final commit callback (stage C
-   * tuning, T3's companion guard — see `events.drainInFlightSkips`): a
-   * re-drain must not queue a SECOND copy of an entry whose first copy
-   * is still queued, shaper-held, or running. Every id here was queued
-   * WITH its `streamEntry` (the mark path), which is #5969's stated
-   * safety condition for skipping a re-drain on the strength of another
-   * copy; the LT1 in-process cascade copy (no streamEntry) is a
-   * different producer and is deliberately NOT tracked here. Cleared at
-   * park (the scheduler queue dies with the runtime). */
-  readonly #drainInFlight = new Set<string>();
+  /** The drain's IN-FLIGHT copies (stage C tuning, T3's companion guard
+   * — see `events.drainInFlightSkips`): eventId → phase. A re-drain must
+   * not queue a SECOND copy of an entry whose first copy is still queued,
+   * shaper-held, running, OR whose consequence mark is sealed into a wave
+   * the store has not yet committed. Phases: `queued` — the copy sits in
+   * the scheduler (queued/held/running) and nothing of it has reached a
+   * wave; `marked` — a consequence (the handler tx's mark, or the
+   * drain's error/drop notice) is sealed into, or being staged for, an
+   * OPEN wave. Release points, each a store-visible or provably-markless
+   * end of the copy: the WAVE OUTCOME (`committedEventIds` ∪
+   * `requeuedEventIds` after `commitWave` — every abort arm reports its
+   * event-handler contributions as requeued), a DEFERRED dispatch (no
+   * mark, `#armDeferredRescan` retries), the queued copy's final callback
+   * while still `queued` (a name-resolution drop, an aborted run — no
+   * mark), a notice that failed to stage/seal, and park (the queue dies
+   * with the runtime). Releasing at the copy's SEAL was not enough (self-
+   * review finding 1): the mark rides an uncommitted wave while the entry
+   * is still pending in the store, and a re-drain that hit a real await
+   * in that window queued the second copy. Every id here was queued WITH
+   * its `streamEntry` (the mark path), which is #5969's stated safety
+   * condition for skipping a re-drain on the strength of another copy;
+   * the LT1 in-process cascade copy (no streamEntry) is a different
+   * producer and is deliberately NOT tracked here. */
+  readonly #drainInFlight = new Map<string, "queued" | "marked">();
   #currentWave: WaveAccumulator | undefined;
   #sealChain: Promise<unknown> = Promise.resolve();
   #feed: AdmittedCommitNotice[] = [];
@@ -922,6 +935,20 @@ export class SpaceServer implements TransactionSealDestination {
           // the mark precedes commitWave. Non-event contexts note
           // nothing (noteSealFailure filters).
           wave.noteSealFailure(waveRunContextOf(tx));
+        } else {
+          // The drain's in-flight guard: an ACCEPTED event-handler seal
+          // for a drained copy means its consequence mark now rides an
+          // open wave — the copy stays in flight until the wave outcome
+          // says the store committed or requeued it (never released at
+          // seal; see #drainInFlight).
+          const context = waveRunContextOf(tx);
+          if (
+            context?.kind === "event-handler" &&
+            context.eventId !== undefined &&
+            this.#drainInFlight.has(context.eventId)
+          ) {
+            this.#drainInFlight.set(context.eventId, "marked");
+          }
         }
         return result;
       },
@@ -1984,8 +2011,9 @@ export class SpaceServer implements TransactionSealDestination {
           if (entry.rendererTrusted === true) {
             markRendererTrustedEvent(entry.payload);
           }
-          this.#drainInFlight.add(entry.eventId);
+          this.#drainInFlight.set(entry.eventId, "queued");
           const eventId = entry.eventId;
+          const tenure = runtime;
           runtime.scheduler.queueEvent(
             link,
             entry.payload,
@@ -1995,9 +2023,17 @@ export class SpaceServer implements TransactionSealDestination {
             false,
             // The queued copy's FINAL callback (every terminal path of the
             // dispatch — commit result, drop, deferral, name-resolution
-            // drop, error): the in-flight guard releases the id here.
+            // drop, error): releases the guard ONLY while the copy is
+            // still `queued`, i.e. nothing of it reached a wave (an
+            // aborted run, a name-resolution drop). A `marked` copy is
+            // released by the wave outcome. Tenure-checked: a callback
+            // from a parked runtime's last pass must not release the next
+            // tenure's copy.
             () => {
-              this.#drainInFlight.delete(eventId);
+              if (this.#runtime !== tenure) return;
+              if (this.#drainInFlight.get(eventId) === "queued") {
+                this.#drainInFlight.delete(eventId);
+              }
             },
             false,
             {
@@ -2047,9 +2083,7 @@ export class SpaceServer implements TransactionSealDestination {
                   : {}),
                 streamEntry,
                 onFailure: (outcome) => {
-                  // Belt: a failed/deferred/dropped copy is no longer in
-                  // flight (its commit callback releases too).
-                  this.#drainInFlight.delete(eventId);
+                  if (this.#runtime !== tenure) return;
                   if (outcome.kind === "deferred") {
                     const deferrals =
                       (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
@@ -2059,14 +2093,21 @@ export class SpaceServer implements TransactionSealDestination {
                       // re-drain waits for input or the backstop tick
                       // (the cold-view creation race — OW19's
                       // conflation caution), NEVER a synchronous spin.
+                      // The copy left no mark: release the guard so the
+                      // rescan can queue it again.
+                      this.#drainInFlight.delete(eventId);
                       this.#armDeferredRescan();
                       return;
                     }
                     // The race window is long past: no runnable handler
                     // exists — events.md §5's drop predicate. The
                     // notice un-renders the echo and un-wedges the
-                    // stream (and the park criterion).
+                    // stream (and the park criterion). Its mark is
+                    // being STAGED for a wave: the copy is `marked`
+                    // until the wave outcome (or the notice's own
+                    // failure) releases it.
                     this.#eventDeferrals.delete(entry.eventId);
+                    this.#drainInFlight.set(eventId, "marked");
                     this.#sealEventConsequenceNotice(
                       runtime,
                       entry,
@@ -2080,7 +2121,9 @@ export class SpaceServer implements TransactionSealDestination {
                     );
                     return;
                   }
+                  // The error/drop notice is a mark on its way to a wave.
                   this.#eventDeferrals.delete(entry.eventId);
+                  this.#drainInFlight.set(eventId, "marked");
                   this.#sealEventConsequenceNotice(
                     runtime,
                     entry,
@@ -2093,6 +2136,9 @@ export class SpaceServer implements TransactionSealDestination {
           );
           queued += 1;
         } catch (drainError) {
+          // Nothing was queued: release the guard (a throw between the
+          // add and the queue must not strand the entry until park).
+          this.#drainInFlight.delete(entry.eventId);
           logger.warn("drain-debug", () => ["per-entry threw", drainError]);
           this.#armDeferredRescan();
         }
@@ -2151,6 +2197,9 @@ export class SpaceServer implements TransactionSealDestination {
         }
       }
       const sealed = tx.commit().catch((error) => {
+        // The mark never reached a wave: the drain's guard releases so
+        // the re-drain can queue the entry again.
+        this.#drainInFlight.delete(entry.eventId);
         logger.warn("event-notice-seal-failed", () => [
           `consequence notice for ${entry.eventId} failed to seal; the ` +
           "entry stays pending and the next wave re-drains it",
@@ -2162,6 +2211,7 @@ export class SpaceServer implements TransactionSealDestination {
         this.#eventNoticeWork.delete(sealed as Promise<unknown>);
       });
     } catch (error) {
+      this.#drainInFlight.delete(entry.eventId);
       logger.warn("event-notice-failed", () => [
         `consequence notice for ${entry.eventId} could not be staged; ` +
         "the entry stays pending and the next wave re-drains it",
@@ -3001,6 +3051,18 @@ export class SpaceServer implements TransactionSealDestination {
       : this.#watermark;
     const outcome = await closing.commitWave(this.#sink!, { derivedThrough });
     await closing.settled();
+    // The drain's in-flight guard: the store has now spoken for every
+    // event this wave carried — committed (its mark landed) or requeued
+    // (its contributions withdrawn: lease-lost, rejected, foreign-failed,
+    // raced — every abort arm reports its event-handler contributions as
+    // requeued). Either way a later drain may queue the entry again if it
+    // is still pending.
+    for (const eventId of outcome.committedEventIds) {
+      this.#drainInFlight.delete(eventId);
+    }
+    for (const eventId of outcome.requeuedEventIds) {
+      this.#drainInFlight.delete(eventId);
+    }
     // The effect handoff (stage G, serving-loop.md §3): external effects
     // go to the outbox POST-commit. Taken off the map here either way;
     // the lease-lost branch below parks, so its batches are simply

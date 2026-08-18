@@ -181,7 +181,7 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
    * effects, each burning STEP_MS synchronously and sealing one write.
    * They run in the next execute pass — one settle of ~1.2 s inside the
    * wave that their first seal opens. Returns the out-doc ids. */
-  const registerWalk = (): string[] => {
+  const registerWalk = (steps: number = WALK_STEPS): string[] => {
     const runtime = servingRuntime!;
     const trigger = runtime.getCell<{ value: number }>(
       space,
@@ -189,7 +189,7 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
       undefined,
     );
     const outIds: string[] = [];
-    for (let step = 0; step < WALK_STEPS; step++) {
+    for (let step = 0; step < steps; step++) {
       const out = runtime.getCell<{ step: number; n: number }>(
         space,
         `yield-walk-out-${step}`,
@@ -257,14 +257,19 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
     expect(host.stats().lease.lost).toBe(0);
   });
 
-  it("(ii) a wave longer than TTL/3 renews the lease MID-WAVE from the yield observer, with the renew timer inert: the 1.2-s walk outlives a 600-ms TTL twice over and still commits under a live lease; lease.lost stays 0 (mutation: renew-on-yield removed → the lease lapses and the wave's commit is refused)", async () => {
+  it("(ii) a wave longer than TTL/3 renews the lease MID-WAVE from the yield observer, with the renew timer inert: a 1.8-s walk outlives a 900-ms TTL twice over and still commits under a live lease; lease.lost stays 0 (mutation: renew-on-yield removed → the lease lapses and the wave's commit is refused)", async () => {
+    // The TTL clock starts at acquire (activation), so the headroom for
+    // activation + boot settle + walk registration is the TTL itself:
+    // 900 ms against a measured 30–100 ms; a slower box has ~9× slack.
+    const ttlMs = 900;
+    const walkSteps = 45;
     host = newHost({
       flushDeadlineMs: 5_000,
       idleParkMs: 600_000,
       // The interval timer never fires within the test: every renewal
       // that lands is the mid-wave belt.
       renewIntervalMs: 600_000,
-      leaseTtlMs: 600,
+      leaseTtlMs: ttlMs,
     });
     const engine = await activate();
     const spaceServer = host.spaceServer(space)!;
@@ -273,12 +278,12 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
     const seqBefore = Engine.serverSeq(engine);
     const derivedBefore = host.stats().derivedCommits;
 
-    const outIds = registerWalk();
-    // The wave commits — under a lease that would have EXPIRED 600 ms in
-    // without the mid-wave renew (the walk is 1 200 ms; the deadline 5 s,
+    const outIds = registerWalk(walkSteps);
+    // The wave commits — under a lease that would have EXPIRED 900 ms in
+    // without the mid-wave renew (the walk is 1 800 ms; the deadline 5 s,
     // so it is ONE wave).
     await waitUntil(
-      () => storedOutCount(engine, outIds) === WALK_STEPS,
+      () => storedOutCount(engine, outIds) === walkSteps,
       "the walk's single wave to commit every step",
       20_000,
     );
@@ -343,8 +348,10 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
       if (t !== undefined) await t;
     }
     expect(firedAt).toBeGreaterThanOrEqual(0);
-    // Fired within about one slice + one step of its due time.
-    expect(firedAt).toBeLessThan(10 + 20 + 5 + 30);
+    // Fired before the loop's own work ended: without the yields the
+    // 20 × 5-ms burns run to completion (~100 ms) before any timer can
+    // fire; with them the due timer lands within a slice or two.
+    expect(firedAt).toBeLessThan(90);
     // An observer throw is contained.
     yielder.onYield = () => {
       throw new Error("boom");
