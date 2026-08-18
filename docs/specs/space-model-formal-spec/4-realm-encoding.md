@@ -438,9 +438,9 @@ coerced instead would satisfy every other claim in this document while
 producing values a sender never sent.
 
 **Do not guard against shapes the transport cannot deliver.** `structuredClone()`
-normalizes what it carries: an object arrives with `Object.prototype` however
-its original was made, an `Array` subclass arrives as a plain `Array`, and an
-accessor arrives as a data property. A check for a null-prototype record, an
+normalizes what it carries: a plain object arrives with `Object.prototype`
+however its original was made, an `Array` subclass arrives as a plain `Array`,
+and an accessor arrives as a data property. A check for a null-prototype record, an
 exotic array, or a getter-backed index is therefore unreachable, and reads to a
 later maintainer as though the boundary defended against something it does not.
 
