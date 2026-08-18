@@ -45,6 +45,7 @@ import {
   RuntimeModuleIdentifiers,
   SESRuntime,
 } from "../sandbox/mod.ts";
+import { freezeSandboxValue } from "../sandbox/hardening.ts";
 import {
   buildRecordsFromCompiled,
   type CachedCompiledModule,
@@ -52,6 +53,7 @@ import {
   type CompiledModuleGraph,
   compileSourcesToRecords,
   computeFabricModuleIdentities,
+  dataFileSpecifier,
   FABRIC_MOUNT_ROOT,
   type FabricMount,
   sourceRootSpecifier,
@@ -201,6 +203,57 @@ function canonicalSourceRoots(
   return [...new Set(roots ?? [])]
     .filter((root) => root !== main)
     .sort();
+}
+
+function canonicalDataFiles(
+  main: string,
+  dataFiles: readonly string[] | undefined,
+): string[] {
+  const paths = [...new Set(dataFiles ?? [])].sort();
+  // Unlike a source root, which the entry trivially is, an entry named as data
+  // is a contradiction: it is the module the program executes. Dropping it
+  // would silently compile a file the caller asked to store uninterpreted.
+  if (paths.includes(main)) {
+    throw new Error(`The program entry '${main}' cannot be a data file.`);
+  }
+  return paths;
+}
+
+/**
+ * Split a program's files into the code the compiler sees and the data files it
+ * must not. A data file named by the program but absent from its files is a
+ * caller error, and stops the compile rather than deploying a package whose
+ * identity claims data that is not there. `idPrefix` names the per-load path
+ * prefix to drop when reporting such a file, so the report spells the path the
+ * caller wrote.
+ */
+function partitionDataFiles(
+  program: RuntimeProgram,
+  idPrefix?: string,
+): { dataPaths: string[]; codeFiles: Source[]; dataSources: Source[] } {
+  const dataPaths = canonicalDataFiles(program.main, program.dataFiles);
+  if (dataPaths.length === 0) {
+    return { dataPaths, codeFiles: [...program.files], dataSources: [] };
+  }
+  const wanted = new Set(dataPaths);
+  const codeFiles: Source[] = [];
+  const dataSources: Source[] = [];
+  for (const file of program.files) {
+    (wanted.has(file.name) ? dataSources : codeFiles).push(file);
+  }
+  if (dataSources.length !== wanted.size) {
+    const present = new Set(dataSources.map((file) => file.name));
+    const absent = dataPaths
+      .filter((path) => !present.has(path))
+      .map((path) =>
+        idPrefix !== undefined && path.startsWith(`${idPrefix}/`)
+          ? path.slice(idPrefix.length)
+          : path
+      )
+      .join(", ");
+    throw new Error(`Program names data files it does not carry: ${absent}`);
+  }
+  return { dataPaths, codeFiles, dataSources };
 }
 
 function persistableSourceFiles(files: readonly Source[]): Source[] {
@@ -354,9 +407,17 @@ export class Engine extends EventTarget {
         mappedProgram.main,
         mappedProgram.sourceRoots,
       );
-      assertFabricImportsHaveSpace(mappedProgram.files, options);
-      const engineResolver = new EngineProgramResolver(
+      // Data files leave the program before anything that reads TypeScript
+      // touches it: they are neither scanned for imports nor offered to the
+      // resolver, so an import can never land on one. They rejoin the pristine
+      // set below, which is what identity and the source store are built from.
+      const { dataPaths, codeFiles, dataSources } = partitionDataFiles(
         mappedProgram,
+        `/${id}`,
+      );
+      assertFabricImportsHaveSpace(codeFiles, options);
+      const engineResolver = new EngineProgramResolver(
+        { ...mappedProgram, files: codeFiles },
         this.ctRuntime.staticCache,
       );
       const fabricResolver = options.fabricImports
@@ -396,24 +457,30 @@ export class Engine extends EventTarget {
       const authoredByStoredName = new Map(
         program.files.map((f) => [f.name, f.contents]),
       );
+      const authoredDataFiles = new Set(program.dataFiles ?? []);
       const patternCoverage = patternCoverageOptionsForCompile(
         options.patternCoverage,
         {
           id,
           mounts,
           sourceFiles: [
-            ...program.files,
+            ...program.files.filter((file) =>
+              !authoredDataFiles.has(file.name)
+            ),
             ...resolvedFiles.filter((file) =>
               file.name.startsWith(FABRIC_MOUNT_ROOT)
             ),
           ],
         },
       );
-      const pristineSourceFiles = pristineModuleSources(
-        persistableSourceFiles(resolvedFiles),
-        authoredByStoredName,
-        (name) => storedFilenameFor(name, id, mounts),
-      );
+      const pristineSourceFiles = [
+        ...pristineModuleSources(
+          persistableSourceFiles(resolvedFiles),
+          authoredByStoredName,
+          (name) => storedFilenameFor(name, id, mounts),
+        ),
+        ...dataSources,
+      ];
 
       // Prefix-free content identity per resolved module path. Computed here
       // (cheap, no TS compile) so the cache-hit check and the write-back
@@ -423,11 +490,12 @@ export class Engine extends EventTarget {
         mounts,
         {
           idPrefix: `/${id}`,
-          ...(sourceRoots.length
+          ...(sourceRoots.length || dataPaths.length
             ? {
               sourcePackage: {
                 entryPath: mappedProgram.main,
                 rootPaths: sourceRoots,
+                dataPaths,
               },
             }
             : {}),
@@ -565,6 +633,11 @@ export class Engine extends EventTarget {
         precompiledSourceMaps,
         runtimeModules: runtimeModulesOption,
         specifierAliases,
+        // Carried onto the graph under their stored (prefix-free) names, the
+        // same spelling the warm path recovers from the compiled set.
+        dataFiles: dataSources.map((file) =>
+          [storedFilenameFor(file.name, id, mounts), file.contents] as const
+        ),
         // Strip the whole-program `/<id>` prefix from per-module identities so
         // `cf:module/<hash>` is entry-point independent and dedupes across
         // programs (the content-addressed cache keys off these identities).
@@ -586,7 +659,9 @@ export class Engine extends EventTarget {
         >;
       }
       for (
-        const [spec, record] of runtimeModuleRecords(runtimeRecordExports)
+        const [spec, record] of runtimeModuleRecords(
+          bindDataFileReader(runtimeRecordExports, graph.dataByPath),
+        )
       ) {
         graph.records.set(spec, record as VirtualModuleRecord);
       }
@@ -651,10 +726,11 @@ export class Engine extends EventTarget {
       // and the internal import edges as specifier → dependency-identity links.
       // On a cache hit these mirror the artifacts just loaded. Built over the
       // pristine module set so `source` and the edges are over authored bytes.
+      const dataFileSet = new Set(dataPaths);
       const importEdges = resolveModuleImports({
         main: "",
         files: pristineSourceFiles,
-      });
+      }, { dataFiles: dataFileSet });
       const modules: CacheableModule[] = pristineSourceFiles.map((file) => {
         const identity = identityByPath.get(file.name)!;
         const sourceMap = precompiledSourceMaps.get(file.name);
@@ -686,6 +762,17 @@ export class Engine extends EventTarget {
               targetIdentity: rootIdentity,
             });
           }
+          for (const dataPath of dataPaths) {
+            // Every data path is in the pristine set the identities were
+            // computed over, the same guarantee the module lookup above relies
+            // on.
+            imports.push({
+              specifier: dataFileSpecifier(
+                storedFilenameFor(dataPath, id, mounts),
+              ),
+              targetIdentity: identityByPath.get(dataPath)!,
+            });
+          }
         }
         const policyManifests = emittedBody === undefined
           ? undefined
@@ -693,11 +780,16 @@ export class Engine extends EventTarget {
             identity,
             precompiledPolicyManifests.get(file.name),
           );
+        // A data entry's compiled form is its own bytes: the compiled set is
+        // what a warm load reads, and it must carry everything the runtime
+        // needs to run the pattern.
+        const isData = dataFileSet.has(file.name);
         return {
           identity,
           filename: storedFilenameFor(file.name, id, mounts),
           source: file.contents,
-          js: emittedBody ?? "",
+          js: isData ? file.contents : (emittedBody ?? ""),
+          ...(isData ? { isData: true } : {}),
           ...(sourceMap === undefined ? {} : { sourceMap }),
           ...(patternCoverageSpans === undefined
             ? {}
@@ -766,7 +858,7 @@ export class Engine extends EventTarget {
       batchIds.push(id);
       const mapped = pretransformProgramForModules(program, id);
       const resolver = new EngineProgramResolver(
-        mapped,
+        { ...mapped, files: partitionDataFiles(mapped).codeFiles },
         this.ctRuntime.staticCache,
       );
       const resolved = await this.resolveWithSourceRoots(
@@ -869,11 +961,21 @@ export class Engine extends EventTarget {
       fabricImports?: TypeScriptHarnessProcessOptions["fabricImports"];
       patternCoverage?: PatternCoverageCollector;
       sourceRoots?: readonly string[];
+      dataFiles?: readonly string[];
     } = {},
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }> {
     const { compiler } = await this.getCompilerInternals();
     assertNoReservedFabricPaths(resolvedFiles);
-    assertFabricImportsHaveSpace(resolvedFiles, options);
+    // Data files carry arbitrary bytes; keep them away from every scan, parse
+    // and compile step, and rejoin them at the pristine set below.
+    const { dataPaths, codeFiles, dataSources } = partitionDataFiles({
+      main: entryFilename,
+      files: resolvedFiles,
+      ...(options.dataFiles === undefined
+        ? {}
+        : { dataFiles: [...options.dataFiles] }),
+    });
+    assertFabricImportsHaveSpace(codeFiles, options);
     // The stored source set holds prefix-free AUTHORED TS (the helper import is
     // NOT baked in — identity is over authored source, module-loading.md).
     // Inject the helper BEFORE resolve so the resolver pulls the `commonfabric`
@@ -890,7 +992,7 @@ export class Engine extends EventTarget {
     // writes back under the current runtimeVersion (self-heal on load).
     const injectedInput = transformInjectHelperModule({
       main: entryFilename,
-      files: resolvedFiles,
+      files: codeFiles,
       ...(options.sourceRoots === undefined
         ? {}
         : { sourceRoots: [...options.sourceRoots] }),
@@ -933,21 +1035,25 @@ export class Engine extends EventTarget {
     // the authored closure — they match the stored identities the source docs
     // were keyed by.
     const authoredByStoredName = new Map(
-      resolvedFiles.map((f) => [f.name, f.contents]),
+      codeFiles.map((f) => [f.name, f.contents]),
     );
-    const pristineSourceFiles = pristineModuleSources(
-      persistableSourceFiles(resolvedProgramFiles),
-      authoredByStoredName,
-      (name) => storedFilenameFor(name, undefined, mounts),
-    );
+    const pristineSourceFiles = [
+      ...pristineModuleSources(
+        persistableSourceFiles(resolvedProgramFiles),
+        authoredByStoredName,
+        (name) => storedFilenameFor(name, undefined, mounts),
+      ),
+      ...dataSources,
+    ];
     const identityByPath = computeFabricModuleIdentities(
       pristineSourceFiles,
       mounts,
-      sourceRoots.length
+      sourceRoots.length || dataPaths.length
         ? {
           sourcePackage: {
             entryPath: entryFilename,
             rootPaths: sourceRoots,
+            dataPaths,
           },
         }
         : {},
@@ -997,10 +1103,11 @@ export class Engine extends EventTarget {
       }
     }
 
+    const dataFileSet = new Set(dataPaths);
     const importEdges = resolveModuleImports({
       main: "",
       files: pristineSourceFiles,
-    });
+    }, { dataFiles: dataFileSet });
     const modules: CacheableModule[] = pristineSourceFiles.map((file) => {
       const out = emitted.get(file.name);
       const identity = identityByPath.get(file.name)!;
@@ -1031,15 +1138,25 @@ export class Engine extends EventTarget {
             targetIdentity: rootIdentity,
           });
         }
+        for (const dataPath of dataPaths) {
+          imports.push({
+            specifier: dataFileSpecifier(
+              storedFilenameFor(dataPath, undefined, mounts),
+            ),
+            targetIdentity: identityByPath.get(dataPath)!,
+          });
+        }
       }
       const policyManifests = out === undefined
         ? undefined
         : validatePolicyManifestsForModule(identity, out.policyManifests);
+      const isData = dataFileSet.has(file.name);
       return {
         identity,
         filename: storedFilenameFor(file.name, undefined, mounts),
         source: file.contents,
-        js: out?.js ?? "",
+        js: isData ? file.contents : (out?.js ?? ""),
+        ...(isData ? { isData: true } : {}),
         ...(out?.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
         ...(patternCoverageSpans === undefined ? {} : { patternCoverageSpans }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
@@ -1078,7 +1195,13 @@ export class Engine extends EventTarget {
       program,
       options,
     );
-    return this.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
+    return this.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+      program.dataFiles,
+    );
   }
 
   /**
@@ -1087,12 +1210,15 @@ export class Engine extends EventTarget {
    * {@link evaluateGraph} with the source-compile registration strategy: module
    * identities are recomputed from `files`, paths carry the `/<id>` prefix, and
    * `files` flow into the export map for sub-pattern re-instantiation.
+   * `dataFiles` names the members of `files` that are data, so a sub-pattern
+   * re-instantiated from the export map keeps the same source package.
    */
   evaluateRecordGraph(
     id: string,
     graph: CompiledModuleGraph,
     mainSpecifier: string,
     files: Source[],
+    dataFiles?: readonly string[],
   ): EvaluateResult {
     const prefix = `/${id}`;
     // Register module hashes up front so the canonical `cf:module/<hash>/<path>`
@@ -1115,6 +1241,9 @@ export class Engine extends EventTarget {
       fileNameForPath: (path) =>
         path.startsWith(prefix) ? path.slice(prefix.length) : path,
       filesForExports: files,
+      ...(dataFiles === undefined
+        ? {}
+        : { dataFilesForExports: [...dataFiles] }),
     });
   }
 
@@ -1138,6 +1267,7 @@ export class Engine extends EventTarget {
       registerHashes(): void;
       fileNameForPath(path: string): string;
       filesForExports: Source[];
+      dataFilesForExports?: string[];
     },
   ): EvaluateResult {
     logger.timeStart("evaluateRecordGraph");
@@ -1339,6 +1469,9 @@ export class Engine extends EventTarget {
             main: fileName,
             mainExport: exportName,
             files: ctx.filesForExports,
+            ...(ctx.dataFilesForExports === undefined
+              ? {}
+              : { dataFiles: ctx.dataFilesForExports }),
           });
         }
       }
@@ -1447,12 +1580,14 @@ export class Engine extends EventTarget {
    * (`cf:module/<entryIdentity>`). Optional `sourceFiles` (the cached source
    * closure) flow into the export map so sub-pattern re-instantiation keeps a
    * program to recompile from; omit them and sub-patterns fall back to identity.
+   * `dataFiles` names the members of `sourceFiles` that are data.
    */
   async evaluateCachedModules(
     modules: readonly CachedCompiledModule[],
     entryIdentity: string,
     options: {
       sourceFiles?: Source[];
+      dataFiles?: readonly string[];
       trustedBodies?: boolean;
       patternCoverage?: PatternCoverageCollector;
     } = {},
@@ -1474,10 +1609,13 @@ export class Engine extends EventTarget {
     // — load the deferred compiler stack first. The warm-cache boot path
     // always carries the surface (runtimeVersion fingerprints the extractor),
     // so the steady boot stays compiler-free.
+    // A data entry has no record surface and is never parsed, so it must not
+    // drag the compiler onto the warm boot path.
     if (
       modules.some((m) =>
-        m.exportNames === undefined || m.starTargetSpecs === undefined ||
-        m.importSpecs === undefined
+        !m.isData &&
+        (m.exportNames === undefined || m.starTargetSpecs === undefined ||
+          m.importSpecs === undefined)
       )
     ) {
       await ensureCompilerStack();
@@ -1509,7 +1647,11 @@ export class Engine extends EventTarget {
         unknown
       >;
     }
-    for (const [spec, record] of runtimeModuleRecords(runtimeRecordExports)) {
+    for (
+      const [spec, record] of runtimeModuleRecords(
+        bindDataFileReader(runtimeRecordExports, graph.dataByPath),
+      )
+    ) {
       graph.records.set(spec, record as VirtualModuleRecord);
     }
 
@@ -1578,6 +1720,9 @@ export class Engine extends EventTarget {
       },
       fileNameForPath: (path) => path, // already normalized
       filesForExports: options.sourceFiles ?? [],
+      ...(options.dataFiles === undefined
+        ? {}
+        : { dataFilesForExports: [...options.dataFiles] }),
     });
   }
 
@@ -1757,11 +1902,50 @@ function validatePolicyManifestsForModule(
   });
 }
 
+/**
+ * Bind this load's attached data files into the runtime-module namespaces that
+ * expose `dataFile`.
+ *
+ * The shared namespaces are process-global and carry only a placeholder, since
+ * which data files exist is a property of the program being loaded rather than
+ * of the runtime. Each load therefore hands its own graph's data to the records
+ * it registers, so a module's `dataFile` reads the bytes that travelled in the
+ * same content-addressed closure as its code.
+ *
+ * The read is a plain map lookup: the closure is fully loaded before any module
+ * executes, so this needs no storage access and cannot be asynchronous.
+ */
+function bindDataFileReader(
+  runtimeRecordExports: Record<string, Record<string, unknown>>,
+  dataByPath: ReadonlyMap<string, string>,
+): Record<string, Record<string, unknown>> {
+  const read = (path: string): string => {
+    const bytes = dataByPath.get(path);
+    if (bytes !== undefined) return bytes;
+    const attached = [...dataByPath.keys()].sort();
+    throw new Error(
+      `No attached data file "${path}". ` +
+        (attached.length === 0
+          ? "This pattern has none; attach one with --datafile."
+          : `Attached: ${attached.join(", ")}.`),
+    );
+  };
+  const bound: Record<string, Record<string, unknown>> = {};
+  for (const [name, namespace] of Object.entries(runtimeRecordExports)) {
+    bound[name] = namespace !== undefined && "dataFile" in namespace
+      ? freezeSandboxValue({ ...namespace, dataFile: read })
+      : namespace;
+  }
+  return bound;
+}
+
 function computeId(program: RuntimeProgram): string {
   const sourceRoots = canonicalSourceRoots(program.main, program.sourceRoots);
+  const dataFiles = canonicalDataFiles(program.main, program.dataFiles);
   const source = [
     program.main,
     ...(sourceRoots.length === 0 ? [] : [{ sourceRoots }]),
+    ...(dataFiles.length === 0 ? [] : [{ dataFiles }]),
     ...persistableSourceFiles(program.files),
   ];
   return hashOf(source).toString();

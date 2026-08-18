@@ -6,6 +6,10 @@ import {
   type CfcStreamObservation,
   evaluateHarnessWriteFileAuthorization,
 } from "@commonfabric/runner/cfc";
+import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
 
 import { isHarnessModelProviderId } from "./config.ts";
 import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
@@ -228,7 +232,7 @@ const parseToolArguments = (
       },
     };
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  if (!isObjectNotArray(parsed)) {
     return {
       invalid: {
         reason: "arguments-not-an-object",
@@ -628,7 +632,7 @@ const summarizeToolInput = async (
             sourceTextDigest: sourceTextSummary.digest,
           }
           : {}),
-        ...(isObjectRecord(input.inputs)
+        ...(isObjectNotArray(input.inputs)
           ? { inputCount: Object.keys(input.inputs).length }
           : {}),
         ...(resultSchemaSummary !== undefined
@@ -1079,12 +1083,11 @@ const summarizeSubagentRunState = (
  * sanitizer substitutes for a position it seals.
  */
 const isSealedOpaqueLinkObject = (value: unknown): boolean => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return false;
   }
-  const record = value as Record<string, unknown>;
-  const target = record["@link"];
-  return Object.keys(record).length === 1 &&
+  const target = value["@link"];
+  return Object.keys(value).length === 1 &&
     typeof target === "string" &&
     target.startsWith("opaque:");
 };
@@ -1131,18 +1134,14 @@ const swapSealedAddressStringsForTokens = async (
     }
     return { table, value: items, replaced };
   }
-  if (
-    typeof sanitized === "object" && sanitized !== null &&
-    !Array.isArray(sanitized) &&
-    typeof raw === "object" && raw !== null && !Array.isArray(raw)
-  ) {
+  if (isObjectNotArray(sanitized) && isObjectNotArray(raw)) {
     let replaced = 0;
     const entries: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(sanitized)) {
       const result = await swapSealedAddressStringsForTokens(
         table,
         child,
-        (raw as Record<string, unknown>)[key],
+        raw[key],
       );
       table = result.table;
       replaced += result.replaced;
@@ -1368,21 +1367,18 @@ interface CfcSandboxResultCarrier {
   cfcResult?: CfcSandboxResult;
 }
 
-const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const cfcResultFromOutput = (
   output: unknown,
 ): CfcSandboxResult | undefined =>
-  isObjectRecord(output) &&
+  isObjectNotArray(output) &&
     "cfcResult" in output &&
-    isObjectRecord(output.cfcResult) &&
+    isObjectNotArray(output.cfcResult) &&
     output.cfcResult.version === 1
     ? output.cfcResult as CfcSandboxResult
     : undefined;
 
 const stripInternalCfcFields = (output: unknown): unknown => {
-  if (!isObjectRecord(output)) {
+  if (!isObjectNotArray(output)) {
     return output;
   }
   const { cfcResult: _cfcResult, ...publicOutput } = output as
@@ -1546,7 +1542,7 @@ const truncateModelFacingBashOutput = (
   output: unknown,
   resultRef: ToolResultRef,
 ): unknown => {
-  if (!isObjectRecord(output)) {
+  if (!isObjectNotArray(output)) {
     return output;
   }
   const stdout = truncateModelFacingBashStream(
@@ -1582,7 +1578,7 @@ const truncateModelFacingReadFileOutput = (
   output: unknown,
   resultRef: ToolResultRef,
 ): unknown => {
-  if (!isObjectRecord(output)) {
+  if (!isObjectNotArray(output)) {
     return output;
   }
   const content = truncateModelFacingBashStream(
@@ -1728,7 +1724,7 @@ const modelContextObservationForExitCode = (
 };
 
 const renderMediatedBashOutput = (
-  output: Record<string, unknown>,
+  output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
   toolCallId: string,
@@ -1862,7 +1858,7 @@ const renderMediatedRunSkillScriptOutput = (
 };
 
 const renderMediatedReadFileOutput = (
-  output: Record<string, unknown>,
+  output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
   toolCallId: string,
@@ -1898,7 +1894,7 @@ const renderMediatedReadFileOutput = (
 };
 
 const renderMediatedEditFileOutput = (
-  output: Record<string, unknown>,
+  output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
   toolCallId: string,
@@ -3196,7 +3192,7 @@ export class CfHarnessPromptLoop {
         output: toModelFacingWebFetchOutput(output as WebFetchToolOutput),
       };
     }
-    if (toolId === "run_pattern" && isObjectRecord(output)) {
+    if (toolId === "run_pattern" && isObjectNotArray(output)) {
       // The persisted artifact keeps the raw result value and the piece id
       // — a bare fabric identifier the handle boundary never swaps, and
       // redundant with `resultRef` since the piece cell is the result cell.
@@ -3279,7 +3275,7 @@ export class CfHarnessPromptLoop {
       });
       return { output: denial };
     }
-    if (toolId === "bash" && isObjectRecord(output)) {
+    if (toolId === "bash" && isObjectNotArray(output)) {
       return renderMediatedBashOutput(output, cfcResult, resultRef, toolCallId);
     }
     if (
@@ -3292,7 +3288,7 @@ export class CfHarnessPromptLoop {
         toolCallId,
       );
     }
-    if (toolId === "read_file" && isObjectRecord(output)) {
+    if (toolId === "read_file" && isObjectNotArray(output)) {
       return renderMediatedReadFileOutput(
         output,
         cfcResult,
@@ -3300,7 +3296,7 @@ export class CfHarnessPromptLoop {
         toolCallId,
       );
     }
-    if (toolId === "edit_file" && isObjectRecord(output)) {
+    if (toolId === "edit_file" && isObjectNotArray(output)) {
       return renderMediatedEditFileOutput(
         output,
         cfcResult,

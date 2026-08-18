@@ -8,6 +8,7 @@ import {
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
 import { PieceController } from "@commonfabric/piece/ops";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
@@ -187,9 +188,6 @@ const asSerializableValue = (value: unknown): unknown => {
   }
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /**
  * Awaits `work` unless `signal` aborts first. Resolution (not rejection)
  * signals the abort so the losing promise never surfaces as an unhandled
@@ -330,8 +328,8 @@ export const runPatternTool: HarnessToolDefinition<
     // A live-cell input's current value must match the compiled pattern's
     // argument schema for its key before any piece exists, so a mismatch is
     // a model-correctable error rather than a persisted broken piece.
-    const argumentProperties = isRecord(pattern.argumentSchema) &&
-        isRecord(pattern.argumentSchema.properties)
+    const argumentProperties = isObjectNotArray(pattern.argumentSchema) &&
+        isObjectNotArray(pattern.argumentSchema.properties)
       ? pattern.argumentSchema.properties
       : undefined;
     if (argumentProperties !== undefined) {

@@ -34,7 +34,10 @@ import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
 import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
 import { pattern } from "../src/builder/pattern.ts";
-import { sourceRootSpecifier } from "../src/sandbox/module-record-compiler.ts";
+import {
+  dataFileSpecifier,
+  sourceRootSpecifier,
+} from "../src/sandbox/module-record-compiler.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
@@ -286,6 +289,109 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
     const verification = verifySourceDocs(entryIdentity, tampered);
     expect(verification.ok).toBe(false);
     expect(verification.mismatches).toContain(entryIdentity);
+  });
+
+  it("rejects removing a source-package data-file edge", () => {
+    // The data file's bytes parse as an import in TypeScript. Verification must
+    // hash it as a leaf, or its identity will not reproduce.
+    const files = [
+      { name: "/main.tsx", contents: "export default 1;" },
+      { name: "/notes.txt", contents: 'import x from "./main.tsx";' },
+    ];
+    const dataSpecifier = dataFileSpecifier("/notes.txt");
+    const identities = computeModuleHashes(
+      { main: "/main.tsx", files },
+      {
+        additionalInternalDeps: new Map([
+          ["/main.tsx", [{ specifier: dataSpecifier, target: "/notes.txt" }]],
+        ]),
+        dataFiles: new Set(["/notes.txt"]),
+      },
+    );
+    const entryIdentity = identities.get("/main.tsx")!;
+    const dataIdentity = identities.get("/notes.txt")!;
+    const docs = buildSourceDocs(
+      [
+        {
+          identity: entryIdentity,
+          filename: "/main.tsx",
+          source: files[0].contents,
+          js: "",
+          imports: [{
+            specifier: dataSpecifier,
+            targetIdentity: dataIdentity,
+          }],
+        },
+        {
+          identity: dataIdentity,
+          filename: "/notes.txt",
+          source: files[1].contents,
+          js: "",
+          imports: [],
+        },
+      ],
+      entryIdentity,
+    );
+    expect(verifySourceDocs(entryIdentity, docs).ok).toBe(true);
+
+    const tampered = new Map(docs);
+    tampered.set(entryIdentity, {
+      ...docs.get(entryIdentity)!,
+      imports: [],
+    });
+    const verification = verifySourceDocs(entryIdentity, tampered);
+    expect(verification.ok).toBe(false);
+    expect(verification.mismatches).toContain(entryIdentity);
+  });
+
+  it("rejects tampering with an attached data file's bytes", () => {
+    const files = [
+      { name: "/main.tsx", contents: "export default 1;" },
+      { name: "/data.json", contents: '{"a": 1}' },
+    ];
+    const dataSpecifier = dataFileSpecifier("/data.json");
+    const identities = computeModuleHashes(
+      { main: "/main.tsx", files },
+      {
+        additionalInternalDeps: new Map([
+          ["/main.tsx", [{ specifier: dataSpecifier, target: "/data.json" }]],
+        ]),
+        dataFiles: new Set(["/data.json"]),
+      },
+    );
+    const entryIdentity = identities.get("/main.tsx")!;
+    const dataIdentity = identities.get("/data.json")!;
+    const docs = buildSourceDocs(
+      [
+        {
+          identity: entryIdentity,
+          filename: "/main.tsx",
+          source: files[0].contents,
+          js: "",
+          imports: [{
+            specifier: dataSpecifier,
+            targetIdentity: dataIdentity,
+          }],
+        },
+        {
+          identity: dataIdentity,
+          filename: "/data.json",
+          source: files[1].contents,
+          js: "",
+          imports: [],
+        },
+      ],
+      entryIdentity,
+    );
+
+    const tampered = new Map(docs);
+    tampered.set(dataIdentity, {
+      ...docs.get(dataIdentity)!,
+      code: '{"a": 2}',
+    });
+    const verification = verifySourceDocs(entryIdentity, tampered);
+    expect(verification.ok).toBe(false);
+    expect(verification.mismatches).toContain(dataIdentity);
   });
 
   it("is entry-point independent (util identity is stable across entries)", () => {

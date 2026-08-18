@@ -85,6 +85,33 @@ describe("cli fabric deps", () => {
     ]);
   });
 
+  it("leaves an attached data file's bytes alone while pinning", async () => {
+    await writePatternSlug("dep");
+    // The data file's text reads as a mutable fabric import. Storing it
+    // verbatim is the whole point of attaching it, so pinning must not touch
+    // it — a rewrite here would be silent data corruption.
+    const dataContents = `import dep from "cf:dep";\nnot code at all`;
+    const result = await pinProgramFabricImports(runtime, space, {
+      main: "/main.tsx",
+      dataFiles: ["/data/notes.txt"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: `import dep from "cf:dep";\nexport default dep;`,
+        },
+        { name: "/data/notes.txt", contents: dataContents },
+      ],
+    });
+
+    expect(
+      result.program.files.find((file) => file.name === "/data/notes.txt")
+        ?.contents,
+    ).toBe(dataContents);
+    expect(result.rewrites.map((rewrite) => rewrite.file)).toEqual([
+      "/main.tsx",
+    ]);
+  });
+
   it("pins fabric imports across every file of a program", async () => {
     await writePatternSlug("dep");
     const result = await pinProgramFabricImports(runtime, space, {

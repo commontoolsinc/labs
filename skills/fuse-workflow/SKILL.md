@@ -377,8 +377,13 @@ understand how a piece works; write to modify it live.
 MOUNT/SPACE/pieces/My Piece/
   .src/
     main.tsx       ← pattern source — readable and writable
+    data/
+      cities.json  ← an attached data file — readable and writable
     error.log      ← synthetic, read-only — pattern execution errors
 ```
+
+Every file of the deployed source package appears here at its stored path: the
+entry, its imports, any attached test entries, and any attached data files.
 
 **Read source:**
 
@@ -397,11 +402,13 @@ open(path, "w").write(modified_src)
 # Write triggers setsrc automatically — no cf piece setsrc needed
 ```
 
-FUSE preserves the existing attached test roots during this write, but it does
-not run them and cannot change which entries are attached. Treat the live edit
-as a diagnostic experiment. Before completing the change, make it in the
-repository checkout, run every test against that changed source, and deploy it
-with explicit `cf piece setsrc` plus the complete set of `--test` flags.
+FUSE preserves the existing attached test roots and data files during this
+write, but it does not run the tests and cannot change which entries are
+attached or which files are data. Editing a data file this way replaces its
+bytes and leaves it a data file. Treat the live edit as a diagnostic experiment.
+Before completing the change, make it in the repository checkout, run every test
+against that changed source, and deploy it with explicit `cf piece setsrc` plus
+the complete set of `--test` and `--datafile` flags.
 
 **Check for errors after modifying:**
 

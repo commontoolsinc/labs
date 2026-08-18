@@ -6,6 +6,14 @@ split, rebalance, or otherwise optimize CI jobs.
 
 ## Current Posture
 
+GitHub's Team plan allows the organization
+[60 parallel hosted runners](https://docs.github.com/en/actions/reference/limits#job-concurrency-limits-for-github-hosted-runners).
+That capacity is shared by every workflow and repository in the organization.
+Keep the first dependency-free wave of this workflow below half the limit so
+two overlapping runs do not queue behind one another and later jobs can start
+as soon as their dependencies finish. Prefer combining short jobs when their
+combined work stays below the existing critical path.
+
 Stop active CI-splitting work when the required test jobs are already in the
 same rough band. As a default, stop when:
 
@@ -208,15 +216,16 @@ missing marker is easy to find and fix.
 ## Step And Job Timeouts
 
 Every work step in `.github/workflows/deno.yml` carries its own
-`timeout-minutes`, and the `timeout-minutes` on the job around it is ten minutes
-larger. The two bounds do different things when they are reached. GitHub ends a
-job that runs past the bound on the job by cancelling it, so the job's
-conclusion is `cancelled` — the conclusion that a run stopped by hand or
+`timeout-minutes`, and the `timeout-minutes` on the job around it is at least ten
+minutes larger. The two bounds do different things when they are reached.
+GitHub ends a job that runs past the bound on the job by cancelling it, so the
+job's conclusion is `cancelled` — the conclusion that a run stopped by hand or
 superseded by a newer push also carries, and one that reads as nobody's fault. A
 step that runs past the bound on the step fails, and its job fails with it. The
-ten minutes between the two bounds are what the setup and upload steps around
-the work need, and they mean a wedged test reaches the bound on its step first
-and is reported as a failure.
+headroom between the bounds is what the setup and upload steps around the work
+normally need. An individual wedged step can therefore reach its step bound and
+report a failure before the outer job bound. The outer bound remains the final
+limit when several steps in one job consume unusual amounts of time.
 
 The minutes are written once. The top of the workflow declares them as YAML
 anchors, which GitHub Actions has accepted since September 2025:
@@ -235,10 +244,10 @@ cannot carry a block that a job then overrides.
 
 The CLI integration suites take a second set of anchors, `cli-work-timeout` at
 ten minutes, `cli-fuse-work-timeout` at fifteen, and `cli-job-timeout` at
-twenty-five. Those suites were bounded against a wedge in the FUSE work when
-they were first split up, and the tighter numbers are what that sizing produced.
-A job needing its own bound adds a pair of anchors alongside these rather than a
-number next to the step.
+twenty-five. The combined suite's observed runtime remains comfortably inside
+that outer bound, while the individual work bounds identify an isolated wedged
+suite before the outer bound in normal runs. A job needing its own bound adds a
+pair of anchors alongside these rather than a number next to the step.
 
 The deploy jobs carry no bound at all. A deploy hands the work to a script that
 lives outside this repository, and a bound here would cancel a deploy this

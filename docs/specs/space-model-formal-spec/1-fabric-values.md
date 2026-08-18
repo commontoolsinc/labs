@@ -65,11 +65,12 @@ wrapper classes (Section 1.4).
 > (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`) are declared in
 > `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
 > `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
-> carries them (Section 8.6). The codec vocabulary (the `CODEC`
-> symbol, `FabricCodec`, `LiveEnvironment`, `EncodeContext`)
-> lives in `codec-interface/` (Section 2), the machinery that acts on it in
-> `codec-common/`, and the conversion functions in `native-conversion.ts`
-> (Section 8).
+> carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
+> `FabricCodec`, `LiveEnvironment`) lives in `codec-interface/` (Section 2),
+> and the machinery that acts on it in `codec-common/` -- including
+> `EncodeContext` and `DecodeContext`, which are classes the walk carries
+> rather than contracts a caller implements. The conversion functions are in
+> `native-conversion.ts` (Section 8).
 >
 > **Where a thing is declared is not where it is imported from**, and the
 > modules named here divide on that point. `interface.ts` and
@@ -2512,45 +2513,56 @@ export type JsonCodecValue =
   | { readonly [key: string]: JsonCodecValue };
 ```
 
-### 4.3 Public Boundary Interface
+### 4.3 Public Boundary
 
-The public interface for encoding is parameterized by the boundary type —
-`string` for JSON contexts, `Uint8Array` for binary contexts. External callers
-use only `encode()` and the engine's `decode()`; all internal machinery (tag
-wrapping, tree walking, codec dispatch) is private to the engine
-implementation.
+Every engine exposes `encode()` and `decode()`, parameterized by the boundary
+type — `string` for JSON, `Uint8Array` for a binary format — and an engine may
+add a pair for a second boundary type, as `JsonCodecEngine` does for bytes.
+The machinery beneath (tag wrapping, tree walking, codec dispatch) is not
+public. Much of it is `protected` rather than private, that being the surface
+a second engine extends — including the two factories below.
+
+Each act of encoding or decoding carries a context, minted per call by a
+factory the engine's subclass supplies:
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/codec-interface/interface.ts
+// file: packages/data-model/codec-common/BaseCodecEngine.ts
 
-/**
- * Public boundary interface for encoding a fabric value into a serialized
- * form, ready to cross whatever boundary the format exists for. The type
- * parameter `SerializedForm` is the boundary type: `string` for JSON
- * contexts, `Uint8Array` for binary contexts.
- *
- * Internal tree-walking machinery is private to the implementation.
- */
-export interface EncodeContext<SerializedForm = unknown> {
-  /** Encodes a fabric value into serialized form for boundary crossing. */
-  encode(value: FabricValue): SerializedForm;
+abstract class ExampleEngine {
+  protected abstract newEncodeContext(
+    env: LiveEnvironment,
+  ): EncodeContext;
+  protected abstract newDecodeContext(
+    env: LiveEnvironment,
+  ): DecodeContext;
 }
 ```
 
-`JsonCodecEngine` implements `EncodeContext<string>`, and supplies the matching
-decode direction:
+The context is what the walk threads from node to node: the caller's
+`LiveEnvironment`, and the values whose encoding or decoding is in
+progress. Holding it per call rather than on the engine is what lets
+a codec reach back through a public entry point while a walk is already
+running — the inner act gets its own bookkeeping instead of corrupting the
+outer one's. A format needing more than the base class knows about, such as a
+wire marker minted per call, subclasses the context and carries it there.
 
-- `encode(value)` encodes a `FabricValue` into the `/<Type>@<Version>`
+`JsonCodecEngine` supplies both directions at both of its boundary types:
+
+- `encode(value, env?)` encodes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
 - `decode(data, env)` parses a JSON string, then decodes tagged
   forms back into runtime types.
+- `encodeToBytes(value, env?)` and `decodeFromBytes(bytes, env)` are the same
+  two walks against UTF-8 bytes rather than a string.
 
 > **Why the boundary is this narrow.** Tag wrapping and unwrapping are
-> machinery internal to the engine, leaving only the
-> `encode(value) -> SerializedForm` / `decode(data, env) -> FabricValue`
-> pair as public API. The engine owns the full pipeline rather than the tag
-> step alone, and its public surface says so by exposing nothing else.
+> machinery internal to the engine, leaving only
+> `encode(value, env?) -> SerializedForm` and
+> `decode(data, env) -> FabricValue` — one such pair per boundary type the
+> engine offers — as public API. The engine owns the full pipeline rather than
+> the tag step alone, and its public surface says so by exposing no step of
+> it.
 
 ### 4.4 Encode and Decode Flow
 
@@ -3312,7 +3324,7 @@ boundary-only encoding and the three-layer architecture:
    (Section 8).
 5. Remove early conversion points (e.g., `convertCellsToLinks()`,
    legacy `Error` wrapping as `{ "@Error": ... }`).
-6. Introduce `EncodeContext` at each boundary (Section 4.7).
+6. Introduce a codec engine at each boundary (Section 4.7).
 7. Update internal code to work with `FabricValue` types rather than JSON
    shapes or raw native objects.
 

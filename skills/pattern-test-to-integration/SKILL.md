@@ -1,6 +1,6 @@
 ---
 name: pattern-test-to-integration
-description: Convert Common Fabric pattern unit tests (`*.test.tsx` driven by actions and computed assertions) into browser integration tests (`packages/patterns/integration/*.test.ts`) that exercise the rendered UI and can be recorded with `deno task demo`. Use when asked to promote, mirror, spot-check, browser-test, or make a video demo from an existing pattern test, including multi-user pattern tests.
+description: Convert Common Fabric pattern unit tests (`*.test.tsx` driven by actions and assertions) into browser integration tests (`packages/patterns/integration/*.test.ts`) that exercise the rendered UI and can be recorded with `deno task demo`. Use when asked to promote, mirror, spot-check, browser-test, or make a video demo from an existing pattern test, including multi-user pattern tests.
 ---
 
 # Pattern Test to Integration
@@ -69,7 +69,7 @@ Use this map as a starting point, then follow the actual UI:
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `Pattern({ inputs })`                        | Compile the source with `FileSystemProgramResolver`, then create a piece with `PiecesController.create(..., { input, start: true })` |
 | `instance.action.send(value)`                | Fill, select, or click the rendered control that a user uses to cause that action                                                    |
-| `computed(() => instance.field === value)`   | Wait for the corresponding rendered text, control state, list contents, or other observable DOM effect                               |
+| `assert(() => instance.field === value)`     | Wait for the corresponding rendered text, control state, list contents, or other observable DOM effect                               |
 | `{ label }` / `{ await }` in `multiUserTest` | Coordinate real participant pages with event-driven waits on shared visible state                                                    |
 | participant runtime                          | A `ShellIntegration` connected to the shared piece, with identity reuse or separation matching the unit test's user/session topology |
 

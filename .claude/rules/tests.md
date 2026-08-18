@@ -36,8 +36,8 @@ First check which kind of file you are in. A `*.test.tsx` under
 driving another with `action()` and asserting with `assert()` from
 `commonfabric`, run by `deno task cf test`. Nothing in this section applies
 to one.
-`docs/common/workflows/pattern-testing.md` governs those; its "Prefer
-`assert()` over `computed()`" and "Use `assert()` only for assertions"
+`docs/common/workflows/pattern-testing.md` governs those; its "Write
+assertions with `assert()`" and "Use `assert()` only for assertions"
 sections carry the two rules easiest to get wrong.
 
 For everything else, `docs/development/unit-test-coding-style.md` is the

@@ -1,3 +1,5 @@
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 // Space grouping — "a user's whole world" from a pile of space DBs.
 //
 // A user's state is spread across SEVERAL spaces; understanding it means
@@ -63,7 +65,7 @@ function didFromPath(path: string): string {
 
 /** A home piece's result value carries both `profiles` and `createProfile`. */
 function isHomeResultValue(v: unknown): boolean {
-  return typeof v === "object" && v !== null && !Array.isArray(v) &&
+  return isObjectNotArray(v) &&
     "profiles" in v && "createProfile" in v;
 }
 

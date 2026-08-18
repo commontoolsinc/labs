@@ -2939,6 +2939,22 @@ export type CompileAndRunFunction = <T = any, S = any>(
   params: FactoryInput<BuiltInCompileAndRunParams<T>>,
 ) => Reactive<BuiltInCompileAndRunState<S>>;
 
+/**
+ * Read an attached data file's text.
+ *
+ * `path` is the file's root-relative path within the deployed source package —
+ * the same spelling `cf piece getsrc` writes it at, and the same one passed to
+ * `--datafile`. A data file belongs to the package rather than to any one
+ * module, so the path is absolute within the package and does not resolve
+ * relative to the caller.
+ *
+ * The bytes travel with the pattern's code in the same content-addressed
+ * closure, so this reads memory rather than storage: it is synchronous, it
+ * cannot fail part-way, and it returns the same bytes on every load of a given
+ * source revision. A path naming no attached data file throws.
+ */
+export type DataFileFunction = (path: string) => string;
+
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
 declare const __sqliteDb: unique symbol;
@@ -3513,6 +3529,7 @@ export declare const fetchJsonUnchecked: FetchJsonUncheckedFunction;
 export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
+export declare const dataFile: DataFileFunction;
 export declare const sqliteDatabase: SqliteDatabaseFunction;
 export declare const sqliteQuery: SqliteQueryFunction;
 export declare const table: SqliteTableFunction;

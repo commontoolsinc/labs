@@ -1,4 +1,9 @@
 import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
+
+import {
   HARNESS_MODEL_USAGE_NUMERIC_FIELDS,
   type HarnessCostEstimateWithheldReason,
   type HarnessModelUsage,
@@ -9,15 +14,11 @@ const finiteNonNegativeNumber = (value: unknown): number | undefined =>
     ? value
     : undefined;
 
-const recordValue = (
-  value: unknown,
-): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+const recordValue = (value: unknown): ReadonlyRecord | undefined =>
+  isObjectNotArray(value) ? value : undefined;
 
 const firstNumber = (
-  record: Record<string, unknown>,
+  record: ReadonlyRecord,
   names: readonly string[],
 ): number | undefined => {
   for (const name of names) {
@@ -31,7 +32,7 @@ const firstNumber = (
  * Normalizes usage returned by either the Responses API or Chat Completions.
  */
 export const normalizeOpenAIUsage = (
-  usage: Record<string, unknown> | undefined,
+  usage: ReadonlyRecord | undefined,
 ): HarnessModelUsage | undefined => {
   if (usage === undefined) return undefined;
   const inputDetails = recordValue(
