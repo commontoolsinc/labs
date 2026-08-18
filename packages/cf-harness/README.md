@@ -108,8 +108,7 @@ network confinement model.
   - `observe`
   - `enforce-explicit`
   - `enforce-strict`
-- default CFC mode aligned with the runner's permissive-if-absent
-  `enforce-explicit` rollout behavior
+- default CFC mode aligned with the runner's `enforce-strict` behavior
 - spec-aligned `PromptSlotBound` prompt-slot evidence
 - Loom run manifest intake through `--run-manifest`
 - first-pass policy events and deny/recovery behavior
