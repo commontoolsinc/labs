@@ -1,11 +1,9 @@
 import { backtickQuote } from "@commonfabric/utils/markdown";
 
-import type { FabricValue } from "@/interface.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { JsonDecodeAct } from "./JsonDecodeAct.ts";
 import { JsonEncodeAct } from "./JsonEncodeAct.ts";
-import { parseWireText, seemsLikeEncoded } from "./wire-text.ts";
-import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
+import { seemsLikeEncoded } from "./wire-text.ts";
 import { CODEC, type LiveEnvironment } from "@/codec-interface/interface.ts";
 import { NullLiveEnvironment } from "@/codec-interface/NullLiveEnvironment.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
@@ -18,20 +16,17 @@ import type { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
  * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from
  * the formal spec (Section 5).
  *
- * Public instance surface, two directions and two boundary types:
+ * Public instance surface, one boundary type and two directions:
  * - `encode(value, env?)` -- full pipeline: tree-encode + stringify
  * - `decode(data, env)` -- full pipeline: parse + tree-decode
- * - `encodeToBytes(value, env?)` -- as `encode()`, to UTF-8 bytes
- * - `decodeFromBytes(bytes, env)` -- as `decode()`, from UTF-8 bytes
  *
  * The machinery beneath belongs elsewhere. The walks and this format's account
  * of how a container is written down are `JsonEncodeAct`'s and
  * `JsonDecodeAct`'s, which this class mints through the two `protected`
  * factories -- that pair being the surface a second engine extends. What both
  * an engine and an act need of the wire text is in `wire-text.ts`, so that
- * neither imports the other. Byte conversion is this class's own and stays
- * `#`-private. Per-type encoding and decoding is delegated to the
- * `FabricCodec`s in the `CodecRegistry`.
+ * neither imports the other. Per-type encoding and decoding is delegated to
+ * the `FabricCodec`s in the `CodecRegistry`.
  *
  * Three statics are public besides: `seemsLikeEncoded()`, and the
  * `wrapEncodedValueForTesting()` / `unwrapEncodedValueForTesting()` pair
@@ -69,45 +64,9 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     return new JsonDecodeAct(this, env);
   }
 
-  /** Encodes a fabric value to UTF-8 JSON bytes. */
-  encodeToBytes(
-    value: FabricValue,
-    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
-  ): Uint8Array {
-    return JsonCodecEngine.#toBytes(this.newEncodeAct(env).encodeValue(value));
-  }
-
-  /**
-   * Decodes UTF-8 JSON bytes back into a fabric value. Carries no cycle
-   * guard, for the reason {@link #decode} gives: this walk too gets its tree
-   * from a parse.
-   */
-  decodeFromBytes(
-    bytes: Uint8Array,
-    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
-  ): FabricValue {
-    const text = JsonCodecEngine.#textDecoder.decode(bytes);
-    const act = this.newDecodeAct(env, text);
-    let tree: JsonCodecValue;
-
-    try {
-      tree = parseWireText(text);
-    } catch (e) {
-      return act.settleThrown(e);
-    }
-
-    return act.decodeValue(tree);
-  }
-
   //
   // Static members
   //
-
-  /** Shared text encoder, created once. */
-  static readonly #textEncoder = new TextEncoder();
-
-  /** Shared text decoder, created once. */
-  static readonly #textDecoder = new TextDecoder();
 
   /**
    * Registry for the throwaway checks in the testing helpers below: this
@@ -263,10 +222,5 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     }
 
     return encoded;
-  }
-
-  /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
-  static #toBytes(data: JsonCodecValue): Uint8Array {
-    return JsonCodecEngine.#textEncoder.encode(JSON.stringify(data));
   }
 }

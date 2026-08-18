@@ -312,7 +312,7 @@ Deno.test("ci spend: no Actions budget in GitHub -> the projection stands, uncom
   });
   assertEquals(none.value, "~$310/mo");
   assertEquals(none.sub, undefined);
-  assertStringIncludes(none.extra ?? "", "Budget $???");
+  assertEquals((none.extra ?? "").includes("Budget"), false);
   assertEquals(none.status, "good"); // an absent budget never alarms
   // The org budgets Actions' neighbors but not Actions.
   const other = await view("2026-01-20T09:00:00Z", {
@@ -322,7 +322,7 @@ Deno.test("ci spend: no Actions budget in GitHub -> the projection stands, uncom
     },
   });
   assertEquals(other.sub, undefined);
-  assertStringIncludes(other.extra ?? "", "Budget $???");
+  assertEquals((other.extra ?? "").includes("Budget"), false);
   assertEquals(other.status, "good");
 });
 
@@ -469,9 +469,9 @@ Deno.test("ci spend: both billing endpoints unreachable -> gray with a calm reas
     v.href,
     "https://github.com/organizations/acme/settings/billing",
   );
-  assertStringIncludes(
-    v.extra ?? "",
-    `${themedSwatch("#58a6ff")} GitHub $??? • Budget $???`,
+  assertEquals(
+    v.extra,
+    `<p class="sub">${themedSwatch("#58a6ff")} GitHub $???</p>`,
   );
 });
 
@@ -727,7 +727,7 @@ Deno.test("ci spend: a null threshold field is an unknown provider budget", asyn
   const result = await view(now, routes, BLACKSMITH_ENV);
   assertEquals(result.status, "good");
   assertEquals(result.value, "~$16/mo");
-  assertStringIncludes(result.extra ?? "", "Budget $???");
+  assertEquals((result.extra ?? "").includes("Budget"), false);
 });
 
 Deno.test("ci spend: Blacksmith token errors say how to restore the source", async () => {
@@ -931,7 +931,7 @@ Deno.test("ci spend: a partial provider budget is not treated as the combined bu
   );
 
   assertEquals(v.sub, undefined);
-  assertStringIncludes(v.extra ?? "", "Budget $???");
+  assertEquals((v.extra ?? "").includes("Budget"), false);
   assertEquals(v.status, "good");
 });
 

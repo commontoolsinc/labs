@@ -313,10 +313,11 @@ one per agent run and carry it on every call of that run:
 export CF_INVOCATION_SESSION=$(cf invocation-session new)
 ```
 
-The environment is where a session belongs, because it is closer to a secret
-than a setting: it is what keeps an outcome's address out of reach of a
-stranger, and a command's arguments are readable in a process listing where its
-environment is not. `--invocation-session <id>` overrides it for one call.
+The environment is where a session belongs: it is what keeps an outcome's
+address out of reach of a stranger, and keeping it out of argv keeps it out of
+shell history and of the process listing anyone gets by default. That is a
+reduction in casual exposure rather than secret storage — `ps -E` prints the
+environment too, so treat the session as a credential either way. `--invocation-session <id>` overrides it for one call.
 
 The pair is what names an invocation. Replaying a settled id **from the session
 that chose it** hands back the **original** result, and nothing is written a

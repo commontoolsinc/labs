@@ -41,9 +41,13 @@ export type BudgetOutput = {
  */
 const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
   ({ topic, context, maxAmount }) => {
+    // An empty prompt holds the request back: `generateObject` clears its
+    // state and makes no call until one arrives. A budget with no topic has
+    // nothing to break down, so the model is asked only once a caller names
+    // what the money is for.
     const prompt = computed(() => {
-      const t = topic || "a general budget";
-      return `Create a budget breakdown for: ${t}. Suggest 4-8 spending categories with dollar amounts that sum to exactly $${maxAmount}.`;
+      if (!topic) return "";
+      return `Create a budget breakdown for: ${topic}. Suggest 4-8 spending categories with dollar amounts that sum to exactly $${maxAmount}.`;
     });
 
     const response = generateObject<{ items: BudgetItem[] }>({

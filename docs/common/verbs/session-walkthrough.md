@@ -860,9 +860,10 @@ position shifts under concurrent writes.
 
 [CLI surface shape](../../plans/cli-surface-shape.md) states the property for
 commands — an address printed by one command is accepted by the next. The
-argument half is the same property one level in, on arguments. A second
-instance sits on `cf piece set-slug`, whose source positional resolves
-through its own path rather than the one `--piece` uses.
+argument half is the same property one level in, on arguments, and it holds
+now at both. `cf piece set-slug` resolves its source positional through its
+own path rather than the one `--piece` uses, and takes the emitted address
+there too.
 
 ## What the session is waiting on
 

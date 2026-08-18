@@ -72,12 +72,26 @@ seconds.
 |------|---------|
 | `0` | Both servers started and became ready. |
 | `3` | A server could not bind because its port is already in use; retry on a different port offset. |
+| `4` | A requested port is one clients refuse to connect to; change the port offset. |
 | other non-zero | Any other startup failure (build error, crash, readiness timeout). |
 
 Code `3` is reported only when a server's actual bind fails, not from a port
 pre-check, so it carries no check-then-bind race. The toolshed and the shell dev
 server exit with the same code, and `deno task integration` relies on it to
 retry a generated offset on a collision while aborting on any other failure.
+
+Code `4` is a pre-check, and binding is not what it is about. Browsers and
+Deno's `fetch` both implement the WHATWG bad-port list, and reject a request to
+a port on it before opening a connection. A server binds such a port normally:
+it starts, logs that it is listening, and answers the `curl` health check the
+script uses. Every client that matters then refuses it — the browser cannot load
+the page, and toolshed's proxy hop to the shell dev server fails, so toolshed
+serves its "Failed to proxy" text in place of the app. `ports.json` records the
+list; `start-local-dev.sh` checks the shell and toolshed ports against it always
+and the inspector port when `--inspect` is passed, and `deno task integration`
+leaves every offset that reaches one out of the range it generates from. Within
+the offsets that command generates, `827` puts the shell dev server on `6000`
+and `851` puts the inspector on `10080`.
 
 **URLs:**
 | What | URL |

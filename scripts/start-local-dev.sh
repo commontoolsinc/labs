@@ -41,6 +41,10 @@ export COMMIT_SHA
 # use. Callers can retry on a different port.
 PORT_IN_USE_EXIT=3
 
+# Exit code emitted when a requested port is one clients refuse to connect to.
+# The offset has to change; retrying it reaches the same port.
+PORT_UNREACHABLE_EXIT=4
+
 # Parse command line arguments
 FORCE=false
 WATCH=false
@@ -112,6 +116,31 @@ done
 SHELL_PORT=${SHELL_PORT:-$((BASE_SHELL_PORT + PORT_OFFSET))}
 TOOLSHED_PORT=${TOOLSHED_PORT:-$((BASE_TOOLSHED_PORT + PORT_OFFSET))}
 INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
+
+# Refuse a port that clients will not talk to. Such a port binds, so the server
+# starts and answers the curl health check below, and then the browser cannot
+# load the page and toolshed's proxy hop to the shell dev server fails. Checked
+# here rather than left to fail later, because the later failure surfaces as a
+# test waiting on state that never arrives.
+require_reachable_port() {
+    local name=$1
+    local port=$2
+
+    port_is_blocked "$port" || return 0
+
+    echo "Error: $name port $port is one clients refuse to connect to." >&2
+    echo "       Browsers and Deno's fetch reject a request to it before" >&2
+    echo "       opening a connection, so a server here binds but nothing" >&2
+    echo "       reaches it. Choose a port offset that moves $name elsewhere." >&2
+    exit "$PORT_UNREACHABLE_EXIT"
+}
+
+read_blocked_ports
+require_reachable_port "shell" "$SHELL_PORT"
+require_reachable_port "toolshed" "$TOOLSHED_PORT"
+if [[ "$INSPECT" == "true" ]]; then
+    require_reachable_port "inspector" "$INSPECT_PORT"
+fi
 
 # Export for child processes
 export SHELL_PORT
