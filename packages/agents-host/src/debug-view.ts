@@ -5,7 +5,6 @@ import type {
   FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { pieceId } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
 import {
@@ -15,6 +14,7 @@ import {
   compileAndSavePattern,
   type Pattern,
 } from "@commonfabric/runner";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import type { AgentsHostTargetDescription } from "./host.ts";
 
@@ -664,8 +664,9 @@ async function deployAgentSessionsDebugViewNow(
     }
   }
   signal?.throwIfAborted();
-  const program = await manager.runtime.harness.resolve(
-    new FileSystemProgramResolver(location.mainPath, location.rootPath),
+  const program = await resolveLocalProgram(
+    (resolver) => manager.runtime.harness.resolve(resolver),
+    { main: location.mainPath, root: location.rootPath },
   );
   signal?.throwIfAborted();
   const pattern = await compileAndSavePattern(manager.runtime, program, {
