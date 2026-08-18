@@ -1,4 +1,4 @@
-import { computed, NAME, pattern, UI } from "commonfabric";
+import { computed, NAME, pattern, UI, type VNode } from "commonfabric";
 import ConfirmationReleaseExamples from "./confirmation-release-examples.tsx";
 import DisclaimerExamples from "./disclaimer-examples.tsx";
 import ProcessExamples from "./process-examples.tsx";
@@ -8,7 +8,7 @@ const TOTAL_EXAMPLES = 52;
 
 export interface TrustedComponentExamplesOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   totalExamples: number;
 }
 

@@ -50,20 +50,21 @@ pattern result is placed in JSX, the runtime renders it through `[UI]`, so under
 automatic JSX the type system treats it as `UIRenderable`, whose `[UI]` must be a
 `VNode`; `unknown` is not one. `VNode` is the correct type — at runtime the value
 is always a `VNode`, the generated `$UI` schema becomes a proper vnode reference,
-and nothing about how the pattern runs changes. It is nonetheless left as
-`unknown` for now, blocked not by anything wrong with the type but by the
-pattern-update compatibility gate. The demo's module defines the handler that
-authorizes a trusted write (`revealSensitive`); the result schema records that
-authorization as the module's content-addressed identity
-(`ifc.writeAuthorizedBy.__ctWriterIdentityOf.moduleIdentity`), and the gate
-compares the whole `ifc` for exact equality. Any edit to the module — this type
-annotation, a comment, whitespace — rehashes it, so the identity changes and the
-gate reads a recompile as a narrowed contract. A comment-only edit reproduces the
-same "result.revealSensitive: ifc changed" failure, and a schema diff confirms
-`moduleIdentity` is the only field that moves. Making the gate absorb a
-recompile-only identity change is a separate piece of work; once it lands the
-demo (and the nine other patterns carrying a CFC write) can take their correct
-types. Until then the demo keeps `unknown`.
+and nothing about how the pattern runs changes. Typing it that way surfaced a
+second bug, though, in the pattern-update compatibility gate. The demo's module
+defines the handler that authorizes a trusted write (`revealSensitive`); the
+result schema records that authorization as the module's content-addressed
+identity (`ifc.writeAuthorizedBy.__ctWriterIdentityOf.moduleIdentity`), and the
+gate compared the whole `ifc` for exact equality. Any edit to the module — a
+type annotation, a comment, whitespace — rehashes it, so the identity changed
+and the gate read a recompile as a narrowed contract; a comment-only edit
+reproduced the same "result.revealSensitive: ifc changed" failure, and a schema
+diff confirmed `moduleIdentity` was the only field that moved. That froze every
+pattern carrying a CFC write. The gate was fixed to accept a recompile-only
+identity change while still comparing the binding and the UI contract
+(`fix(piece): a recompile-only writeAuthorizedBy change stays compatible`,
+#5976), which unblocked the correct type here and on the nine other CFC-write
+patterns. The demo now carries `[UI]: VNode`.
 
 **Bare pattern factory as a JSX child (12 errors, cfc-trusted-component-
 examples).** The galleries embedded each sub-gallery as `<div>{SendPublishExamples}
@@ -74,11 +75,11 @@ rejects this (a `PatternFactory` is not a `RenderNode`); classic JSX's looser `h
 typing lets it through. This is a real defect the standalone check caught and the
 compile environment missed. Fixed by instantiating each sub-gallery at the render
 site, which then exposed the same `[UI]: unknown` under-specification in the
-sub-patterns whose result is rendered without a cast; those are typed `VNode`,
-since they are inner patterns the update gate does not track. One gallery had to
-be made renderable a different way — its default export gained the empty input
-parameter its siblings carry — which changed its own contract compatibly, and its
-new baseline was recorded.
+sub-patterns whose result is rendered; those are typed `VNode`. Two galleries'
+own contracts changed compatibly as a result — one gallery's `[UI]` became a
+vnode reference, and the disclaimer gallery gained the empty input parameter its
+siblings carry so its result is renderable — and their new baselines were
+recorded.
 
 **Writable scoped inputs with defaults (6 errors, scoped-group-chat/
 main-with-writable-inputs).** This pattern types its inputs as
@@ -103,10 +104,10 @@ compile under. A `deno check` over pattern source is a second, mismatched lens.
 It is worth keeping — it caught the bare-factory defect above that the compile
 environment's looser JSX typing missed — but its extra errors are not all real.
 The writable-scoped-inputs case is a false positive on correct code. The
-`[UI]: unknown` case is a genuine under-specification the correct type would fix,
-held back only by the update-gate limitation above, not by anything about the
-type. Where the standalone lens disagrees with the compile environment,
-`cfcheck` is authoritative.
+`[UI]: unknown` case was a genuine under-specification, now typed `VNode` — and
+tightening it is what surfaced the compatibility-gate bug, since fixed. Where the
+standalone lens disagrees with the compile environment, `cfcheck` is
+authoritative.
 
 ## The `deno task check` coverage gap
 
@@ -123,23 +124,25 @@ returns a `Timeout` object rather than a `number`; a dashboard test that stored
 an interval id in a `number` was corrected to `ReturnType<typeof setInterval>`,
 which holds whatever the ambient library returns.
 
-## Follow-up left open
+## What the [UI] fix uncovered, and its fix
 
-The pattern-update compatibility gate freezes every pattern carrying a CFC
-write. `assertPatternSchemasBackwardCompatible`
-(`packages/piece/src/schema-compatibility.ts`) compares the result schema's
+Tightening the render-policy demo's `[UI]` to `VNode` surfaced a gate bug worth
+recording. The pattern-update compatibility gate had frozen every pattern
+carrying a CFC write. `assertPatternSchemasBackwardCompatible`
+(`packages/piece/src/schema-compatibility.ts`) compared the result schema's
 `ifc` for exact equality, and a `TrustedActionWrite` records its authorization
 as the authoring module's content-addressed `moduleIdentity`. Any edit rehashes
-the module, so the gate rejects it as a narrowed contract. Ten baselined
-patterns are affected (`system/home`, `system/profile-*`, `lobby`, and the
-`cfc-*` demos). The fix is to make the comparison tolerate a recompile-only
+the module, so the gate rejected it as a narrowed contract, and ten baselined
+patterns (`system/home`, `system/profile-*`, `lobby`, and the `cfc-*` demos)
+could not be touched. #5976 made the comparison tolerate a recompile-only
 identity change while still comparing the binding (`file`, `path`) and the
-`uiContract`; it is being done separately, and it is what unblocks the correct
-`[UI]: VNode` type on the render-policy demo. The runtime write-verification
-that consumes the real `moduleIdentity` at execution time is a different
-mechanism and is not what this touches.
+`uiContract`, which unblocked the correct type here and everywhere else. The
+runtime write-verification that consumes the real `moduleIdentity` at execution
+time is a different mechanism and was not touched.
 
-Separately, `packages/cf-harness/integration/engine.integration.test.ts` bounds
-a subprocess with `setTimeout`. The type of the timer id was corrected here, but
-the timeout itself is the kind of construct the repository's engineering
-guidance says to remove rather than keep; that removal is a separate change.
+## Follow-up left open
+
+`packages/cf-harness/integration/engine.integration.test.ts` bounds a subprocess
+with `setTimeout`. The type of the timer id was corrected here, but the timeout
+itself is the kind of construct the repository's engineering guidance says to
+remove rather than keep; that removal is a separate change.
