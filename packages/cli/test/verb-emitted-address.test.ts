@@ -199,6 +199,37 @@ describe("verb-emitted-address", () => {
       ).toEqual({ value: { pair: ["label", ENVELOPE, ADDRESS] } });
     });
 
+    // A record schema names no key at all: its values are declared on
+    // `additionalProperties`, which is where a map of references puts its
+    // marker. Reading only `properties` skips every one of them.
+    it("walks a record schema's values through `additionalProperties`", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        additionalProperties: { type: "object", asCell: ["cell"] },
+      };
+      expect(resolveEmittedAddressArguments({ anything: ADDRESS }, schema))
+        .toEqual({ value: { anything: ENVELOPE } });
+      expect(
+        resolveEmittedAddressArguments({ anything: "nope" }, schema).refusal,
+      ).toContain('"nope" at <event>.anything is not an address');
+    });
+
+    // A named key keeps its own account; `additionalProperties` covers only
+    // what `properties` does not name.
+    it("prefers a named property over `additionalProperties`", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { plain: { type: "string" } },
+        additionalProperties: { type: "object", asCell: ["cell"] },
+      };
+      expect(
+        resolveEmittedAddressArguments(
+          { plain: ADDRESS, other: ADDRESS },
+          schema,
+        ),
+      ).toEqual({ value: { plain: ADDRESS, other: ENVELOPE } });
+    });
+
     it("walks a conjunction member-wise, refusals included", () => {
       const schema: JSONSchema = {
         allOf: [{
@@ -480,8 +511,10 @@ describe("verb-emitted-address", () => {
           linkCount: () =>
             ((root.key("links").get() ?? []) as unknown[]).length,
           storedRaw: () => root.key("links").key(0).getRaw(),
-          linkedLabel: () =>
-            root.key("links").key(0).key("label").get() as string | undefined,
+          linkedLabel: () => {
+            const label: unknown = root.key("links").key(0).key("label").get();
+            return typeof label === "string" ? label : undefined;
+          },
           notes: () => (root.key("notes").get() ?? []) as unknown as string[],
           patternLoads: () => patternLoads,
           call: async (verb, payload) => {
@@ -538,6 +571,31 @@ describe("verb-emitted-address", () => {
       });
     });
 
+    // #5560 in its sharpest form, and the one the published schema alone
+    // cannot catch: a copy carrying every field the target declares, which
+    // validates precisely BECAUSE it matches the shape. Refusing the
+    // incomplete copy above while accepting this one would leave the
+    // corruption exactly where it was found — silent, and shaped like
+    // success.
+    it("refuses a copy that satisfies the published shape in full", async () => {
+      await withProbe("emitted-address-refuses-full-copy", async (probe) => {
+        const complete = {
+          "$NAME": "complete",
+          label: "a complete copy",
+          links: [],
+          notes: [],
+          relate: { on: { "/": { "link@1": { id: probe.address.slice(1) } } } },
+          note: { body: "x" },
+        };
+        await expect(probe.call("relate", { on: complete }))
+          .rejects.toThrow(
+            "<event>.on declares a reference, and an inline copy would " +
+              "store a detached document",
+          );
+        expect(probe.linkCount()).toBe(0);
+      });
+    });
+
     it("still accepts the hand-assembled link envelope", async () => {
       await withProbe("emitted-address-envelope", async (probe) => {
         const id = probe.address.replace(/^\//, "");
@@ -553,13 +611,23 @@ describe("verb-emitted-address", () => {
       });
     });
 
-    // The dispatch-cost contract: a payload the published shape accepts goes
-    // out without loading the compiled pattern; only the repair path — the
-    // conversion or one of its refusals — pays that load, and pays it once.
-    it("loads the pattern on the conversion path alone", async () => {
+    // The dispatch-cost contract, and the bound on the copy check above.
+    // Sanitization strips the reference MARKER and keeps the SHAPE, so a
+    // string at a declared reference is refused by the published schema
+    // before the gate asks, and only two payloads can have their reading
+    // changed by the contract: one the shape refused, and one it accepted
+    // carrying an inline object. A flat payload of scalars is neither, and
+    // dispatches without loading the compiled pattern.
+    it("loads the pattern only where the contract can change the answer", async () => {
       await withProbe("emitted-address-load-cost", async (probe) => {
         await probe.call("note", { body: "no load" });
         expect(probe.patternLoads()).toBe(0);
+        // An envelope is a reference already, not a copy, so it does not
+        // pull the contract either.
+        const id = probe.address.slice(1);
+        await probe.call("relate", { on: { "/": { "link@1": { id } } } });
+        expect(probe.patternLoads()).toBe(0);
+        // The address string: refused by the shape, so the contract decides.
         await probe.call("relate", { on: probe.address });
         expect(probe.patternLoads()).toBe(1);
       });

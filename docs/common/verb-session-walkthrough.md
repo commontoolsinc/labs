@@ -345,18 +345,24 @@ The structural half needs nothing authored per pattern:
 `--title <string> Required.`
 falls out of the type. That is why the page exists at all.
 
-**The prose half is not on the wire with it**, and knowing why is what keeps a
-reader from looking for it in the wrong place. A verb dispatches through a
+**Part of the prose is not on the wire with it**, and knowing which part keeps
+a reader from looking for it in the wrong place. A verb dispatches through a
 callable cell, and that cell takes its schema from the link chain it resolves
 through (`cell.ts:asSchemaFromLinks`). For a verb that link is the handler
-node's `$event` input, and that schema is not the author's event type at all —
-it is the handler's **read** of the event, narrowed to the fields its
-implementation touches. A declared field the body never mentions is absent from
-it whether or not the type marks it optional. So the served schema is not the
-declared one with the prose taken out; it is a query, generated from usage,
-which never carried an author's words in the first place.
+node's `$event` input — which, since the [verb input
+contract](../history/plans/verb-input-contract.md), is the author's event type
+rather than a summary of what the body reads, so a declared field the body
+never mentions is served like any other, and the field comments beside those
+fields travel with it.
 
-So the prose is read from the **pattern**, which is the only place it survives
+Two things still do not. A comment on the **verb** describes the verb, not its
+event, so it lives on the pattern's result schema and never rides the event
+schema at all. And link sanitization strips every capability marker but
+`stream`, which is why a declared reference position arrives shape-intact and
+marker-less — the fact the dispatch gate reads the compiled pattern to
+recover (step 7).
+
+So the pattern is loaded for those, and it is where each level survives
 compilation:
 
 | An author writes… | Where the compiled pattern keeps it |
@@ -371,13 +377,15 @@ verb's own comment becomes the listing row's `description` and the help page's
 summary line. The event fields' comments are folded into the input schema the
 page renders flags from, at the positions that schema already has.
 
-**Which means walking two documents that agree about almost nothing
-structurally.** The same field can be a `$ref` in one and an inline object in
-the other, and a union the declared side spells as `anyOf` can arrive as one
-merged object — which of these happens depends on what the handler body reads.
-So a walk that steps through `properties` key-for-key finds a bare `$ref` on one
-side with no `properties` under it, or a field whose prose is inside an arm that
-no longer exists on the other side, and stops short of the words in both cases.
+**Which means walking two documents that need not agree structurally.** A
+handler with an authored event type serves that type, so the two now line up
+by construction; a handler written without one has only the inferred summary,
+and there the old divergence stands. The same field can be a `$ref` in one and
+an inline object in the other, and a union the declared side spells as `anyOf`
+can arrive as one merged object. So a walk that steps through `properties`
+key-for-key finds a bare `$ref` on one side with no `properties` under it, or a
+field whose prose is inside an arm that no longer exists on the other side, and
+stops short of the words in both cases.
 
 Both sides' references are followed for that reason, and a declared combinator
 is read through to its members. A served reference is followed *without* being
@@ -389,17 +397,17 @@ every other holder of the same type. The precise list of positions the fold
 walks is on `withDeclaredFieldProse` (`packages/cli/lib/piece.ts`), enumerated
 rather than summarized, along with the keywords it leaves alone.
 
-**Folded in, never substituted.** The two documents disagree about shape, by
-construction: the declared type is what a caller may send, the read schema is
-what the implementation looks at. Only `description` annotations cross between
-them, so the served schema stays the authority on shape and takes only the
-words. Substituting the declared type instead would offer a caller flags for
-fields the running handler does not read — a page describing the source rather
-than the piece being talked to.
+**Folded in, never substituted.** Only `description` annotations cross between
+the two documents, so the served schema stays the authority on shape and takes
+only the words. Substituting one document for the other would describe the
+source rather than the piece being talked to — which stays the rule even now
+that an authored event makes the two agree, because the piece in front of a
+caller may be running an older pattern than the source in the checkout.
 
-Which leaves a real question this does not settle: a field an author declares
-and the body never reads is a field a caller cannot discover. Whether the two
-schemas should be reconciled, and in which direction, is open.
+The question this section used to leave open — whether a field an author
+declares and the body never reads is discoverable — is settled: it is. The
+authored event is the contract, so the field is served, flagged, and
+documented like any other.
 
 ### Three levels of documentation **[today]**
 

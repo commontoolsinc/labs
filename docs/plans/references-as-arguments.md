@@ -78,11 +78,12 @@ Two spellings of an address are already in use:
 | `{"$link": "/[@did/]<id>[@scope][/path]"}` | shaped reads ([shaped reads](shaped-reads-and-verb-results.md)) | out only |
 
 Both carry the canonical reference string, so the address a caller reads is one
-`--piece` already accepts. What remains is the verb argument: a reference
-handed to a handler is still refused at the dispatch gate, so a caller can
-address a piece but cannot pass one in. Accepting the form a read emits is what
-makes the capability compose, and it is the property
-[CLI surface shape](cli-surface-shape.md) already states for commands.
+`--piece` already accepts. The CLI's dispatch gate now accepts it as a verb
+argument too, converting it against the declared contract — which is what makes
+the capability compose, and is the property
+[CLI surface shape](cli-surface-shape.md) already states for commands. The
+callers that still cannot pass one in are the webhook and ingest paths, which
+reach the same handler through no gate at all.
 
 ## What this cost when it was measured, and where that cost remains
 

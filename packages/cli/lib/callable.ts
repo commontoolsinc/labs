@@ -916,13 +916,6 @@ export function verbInputSchemaError(
 }
 
 /**
- * The shared pre-dispatch gate. Returns the input to dispatch — the caller's
- * own payload, or `{}` when an absent payload was normalized against an
- * object schema — and throws `VerbInputValidationError` when that input
- * cannot satisfy the schema. The absent-payload refusal says so explicitly:
- * "send a payload" has to read differently from "fix your payload".
- */
-/**
  * The round-trip spelling, resolved where the contract declares a reference:
  * at a position whose schema carries a cell marker — which the DECLARED
  * event schema keeps and a link-derived dispatch schema does not, see
@@ -1027,11 +1020,18 @@ export function resolveEmittedAddressArguments(
     const properties = isObjectNotArray(node.properties)
       ? node.properties as Record<string, JSONSchema>
       : undefined;
-    if (!properties) return { value };
+    // A record schema declares its values on `additionalProperties` and names
+    // no key at all, so a key absent from `properties` falls back to it — the
+    // same fallback the undeclared-field walk makes. Without it a map of
+    // references (`{additionalProperties: {asCell: […]}}`) converts nothing.
+    const additional = isObjectNotArray(node.additionalProperties)
+      ? node.additionalProperties as JSONSchema
+      : undefined;
+    if (!properties && !additional) return { value };
     let changed = false;
     const next: Record<string, unknown> = { ...value };
     for (const [key, child] of Object.entries(value)) {
-      const childSchema = properties[key];
+      const childSchema = properties?.[key] ?? additional;
       if (childSchema === undefined) continue;
       const resolved = resolveEmittedAddressArguments(
         child,
@@ -1082,51 +1082,98 @@ export function resolveEmittedAddressArguments(
   return { value };
 }
 
+/**
+ * The shared pre-dispatch gate. Returns the input to dispatch — the caller's
+ * own payload, or `{}` when an absent payload was normalized against an
+ * object schema, or a payload whose emitted addresses were converted to link
+ * envelopes — and throws `VerbInputValidationError` when that input cannot
+ * satisfy the schema. The absent-payload refusal says so explicitly: "send a
+ * payload" has to read differently from "fix your payload".
+ */
 async function assertVerbInputSatisfiesSchema(
   verb: string,
   input: unknown,
   schema: JSONSchema | undefined,
   declaredEvent?: () => Promise<JSONSchema | undefined>,
 ): Promise<unknown> {
-  const normalized0 = normalizeAbsentVerbPayload(input, schema);
-  const detail0 = verbInputSchemaError(normalized0, schema);
-  if (detail0 === undefined) return normalized0;
+  const normalized = normalizeAbsentVerbPayload(input, schema);
+  const shapeError = verbInputSchemaError(normalized, schema);
 
-  // The published shape refused. Before that stands, the DECLARED contract
-  // gets the last word, because the published schema cannot state the one
-  // thing that would change the answer: which positions declare references.
-  // Link sanitization keeps only stream markers, so `asCell: ["cell"]` on a
-  // declared reference position never reaches the dispatch cell — only the
-  // compiled pattern still carries it (`declaredEvent`). Consulted here and
-  // only here, the pattern load rides the refusal path alone: a payload the
-  // published shape accepts dispatches without loading anything, which is
-  // the dispatch-cost contract `piece-call-help-live.test.ts` pins.
+  // The published schema cannot state the one thing that decides a reference
+  // position: link sanitization keeps only stream markers, so `asCell` on a
+  // declared reference never reaches the dispatch cell. Only the compiled
+  // pattern still carries it (`declaredEvent`), and reaching it costs a
+  // pattern load — so the question is when a load can change the answer.
   //
-  // Against that contract, an emitted address string at a reference position
+  // Sanitization strips the MARKER and keeps the SHAPE. A declared reference
+  // is a `$ref` to the target's object schema, so it stays an object-shaped
+  // position, and a string there is refused by the published schema before
+  // this gate ever asks the contract. Two payloads therefore need the
+  // contract and no others: one the published shape REFUSED (a string where
+  // an object is declared — the emitted address, the case conversion exists
+  // for), and one it ACCEPTED that carries an inline object below its root
+  // (a shape-valid copy — the #5560 corruption, which validates precisely
+  // because it matches the target's shape). Everything else — a flat payload
+  // of scalars, an envelope the walk passes through — has no position whose
+  // reading a contract could change, so it dispatches without a load.
+  //
+  // The residue this leaves is a reference whose target itself admits a
+  // string, where the published schema accepts a bare string and no consult
+  // happens. Converting there would be a guess about whether the caller
+  // meant an address or a value, and declining is the safe half of it.
+  if (shapeError === undefined && !carriesInlineObject(normalized)) {
+    return normalized;
+  }
+
+  // Against the contract, an emitted address string at a reference position
   // converts to the link envelope dispatch already accepts, and the two
   // payloads that could only ever be mistakes there are refused naming the
   // position: a string that is no address, and an inline copy that would
-  // store a detached document (#5560). A conversion is then re-judged by the
-  // published shape, so what goes out is still what the gate accepted.
-  const contract = isObjectOrArray(normalized0)
+  // store a detached document rather than an edge (#5560).
+  const contract = isObjectOrArray(normalized)
     ? await declaredEvent?.()
     : undefined;
-  const addressed = resolveEmittedAddressArguments(normalized0, contract);
+  const addressed = resolveEmittedAddressArguments(normalized, contract);
   if (addressed.refusal !== undefined) {
     throw new VerbInputValidationError(verb, addressed.refusal);
   }
-  let detail = detail0;
-  if (addressed.value !== normalized0) {
+  // A conversion is re-judged by the published shape, so what goes out is
+  // still what the gate accepted.
+  let detail = shapeError;
+  if (addressed.value !== normalized) {
     const converted = verbInputSchemaError(addressed.value, schema);
     if (converted === undefined) return addressed.value;
     detail = converted;
   }
+  if (detail === undefined) return normalized;
   throw new VerbInputValidationError(
     verb,
     input === undefined
       ? `no payload was supplied, and this verb cannot run without one ` +
         `(${detail}) — send a payload`
       : detail,
+  );
+}
+
+/**
+ * Whether `value` carries a plain object BELOW its root — the payload shape
+ * that can still hold a detached copy at a declared reference position after
+ * the published schema has accepted it.
+ *
+ * A link envelope is a reference already, not a copy, so it stops the descent
+ * rather than triggering a contract consult on every well-formed reference
+ * argument. The root itself is excluded because the event object always is
+ * one; what matters is what sits inside it, at any depth, through arrays.
+ */
+function carriesInlineObject(value: unknown, atRoot = true): boolean {
+  if (Array.isArray(value)) {
+    return value.some((element) => carriesInlineObject(element, false));
+  }
+  if (!isObjectNotArray(value)) return false;
+  if (isOpaqueReference(value)) return false;
+  if (!atRoot) return true;
+  return Object.values(value).some((child) =>
+    carriesInlineObject(child, false)
   );
 }
 
