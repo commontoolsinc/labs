@@ -13,7 +13,7 @@ here rather than restating them.
 ## What the served schema carries
 
 A verb dispatches through a callable cell, and that cell takes its schema from
-the link chain it resolves through (`cell.ts:asSchemaFromLinks`). For a verb
+the link chain it resolves through ([`cell.ts:asSchemaFromLinks`][cell]). For a verb
 that link is the handler node's `$event` input — which, under the
 [verb input contract](../../history/plans/verb-input-contract.md), is the author's
 event type rather than a summary of what the handler body reads. So a declared
@@ -65,7 +65,7 @@ that shape, and a definition several positions share is not one position's to
 rewrite. A field's own prose is therefore written where the field is, never
 into the definition it points at — which would attribute one position's
 sentence to every other holder of the same type. The precise list of positions
-the fold walks is on `withDeclaredFieldProse` (`packages/cli/lib/piece.ts`),
+the fold walks is on `withDeclaredFieldProse` ([`packages/cli/lib/piece.ts`][piece-lib]),
 enumerated rather than summarized, along with the keywords it leaves alone.
 
 ## Folded in, never substituted
@@ -77,3 +77,9 @@ Substituting one document for the other would describe the source rather than
 the piece being talked to — which is the rule even where an authored event
 makes the two agree, because the piece in front of a caller may be running an
 older pattern than the source in the checkout.
+
+<!-- Source links resolve against the repository's default branch, so they
+     follow head rather than pinning a revision this document would outlive. -->
+
+[cell]: https://github.com/commontoolsinc/labs/blob/main/packages/runner/src/cell.ts
+[piece-lib]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/lib/piece.ts

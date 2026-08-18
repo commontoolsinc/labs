@@ -7,14 +7,22 @@ from one call into the next.
 [Verbs over the CLI](over-the-cli.md) explains what a verb hands back.
 This walks a whole session using it.
 
+**Not met a pattern or a piece before?** [The Verb Session][overview] is an
+illustrated tour of this same session that defines the vocabulary this
+document assumes — pattern, piece, space, verb, handler, invocation — and
+reads start to finish. Come back here for the measurements, the caveats, and
+what the surface still owes. Note which copy is authoritative: this one is
+gated by CI against the scripts it describes, while that page is a snapshot
+kept by hand.
+
 The subject is a work-item tracker — items in a tree, plus typed cross-links.
-It is a real pattern: `packages/cli/integration/pattern/tracker.tsx`, which
+It is a real pattern: [`packages/cli/integration/pattern/tracker.tsx`][tracker], which
 belongs to this document and the two scripts beside it, so a change to a
 pattern the product ships can never break a demonstration of the verb surface.
 Every measurement below was taken against that pattern on a local toolshed.
 
 **Every step here works against a current build.** That is not a claim this
-document makes on its own: `packages/cli/integration/verb-session-gaps.sh`
+document makes on its own: [`packages/cli/integration/verb-session-gaps.sh`][gaps]
 asserts the same surface as pass/fail and CI runs it, so a step that stopped
 working would fail there rather than going stale here. A step needing
 something decided or built would say so; none does today.
@@ -22,9 +30,9 @@ something decided or built would say so; none does today.
 ## The two scripts, and how they line up with this
 
 Two scripts sit beside this document.
-`packages/cli/integration/verb-session-demo.sh` is the session as it is meant
+[`packages/cli/integration/verb-session-demo.sh`][demo] is the session as it is meant
 to read: it narrates each command, runs it, and prints the result, so the
-transcript is the artifact. `verb-session-gaps.sh` asserts the same surface as
+transcript is the artifact. [`verb-session-gaps.sh`][gaps] asserts the same surface as
 pass/fail and is what keeps the demo honest.
 
 The demo counts in **acts**; this document counts in **steps**, and the two do
@@ -63,7 +71,7 @@ cannot be wrong in a way the demo would have caught, and an act reference
 cannot go stale under renumbering.
 
 Section headers inside the help output below are the literal strings
-`renderPieceCallHelp` emits (`packages/cli/lib/exec-schema.ts`). Their contents
+`renderPieceCallHelp` emits ([`packages/cli/lib/exec-schema.ts`][exec-schema]). Their contents
 are illustrative.
 
 ## Why this pattern
@@ -240,7 +248,7 @@ of root items and `$NAME` is its display name; both are data, and data is not
 callable, so neither is offered to a caller as something to call.
 
 Slug resolution sits on the shared path (`resolvePieceConfigWithPieces`,
-`packages/cli/lib/piece.ts`), so every command below takes `board` too. And
+[`packages/cli/lib/piece.ts`][piece-lib]), so every command below takes `board` too. And
 the name is discoverable as well as resolvable: `cf piece slugs` lists the
 space's slug index, so a session in a space someone else populated starts
 from a listing rather than from folklore. The demo's act 1 runs it beside the
@@ -382,7 +390,7 @@ recover.
 ### Three levels of documentation
 
 Every line of prose on the page above exists as a doc comment in
-`tracker.tsx`. Nothing is invented for the illustration — it is that file's
+[`tracker.tsx`][tracker]. Nothing is invented for the illustration — it is that file's
 own words, reaching a caller. An author writes each where the thing it
 describes is declared — the verb says what it does, and each parameter
 describes itself:
@@ -417,7 +425,7 @@ addItem
 
 Verb names and piece addresses complete against the space
 (`shapeVerbCandidates` / `liveCandidates`,
-`packages/cli/lib/completion/providers.ts`), in bash and zsh. The candidates
+[`packages/cli/lib/completion/providers.ts`][completion]), in bash and zsh. The candidates
 map one-for-one over the listing in step 1, so completion offers what that
 command names and nothing besides.
 
@@ -753,7 +761,7 @@ form a read prints. An inline copy is refused outright, because a
 shape-matching payload at a reference position stores a detached document
 inside the caller's own item and reports success. The link envelope #5880
 landed stays accepted beside the emitted spelling —
-`verb-session-gaps.sh` step 10 asserts every spelling apart.
+[`verb-session-gaps.sh`][gaps] step 10 asserts every spelling apart.
 
 The demo's acts 12 and 13 run all of it: the conversion, both refusals, and
 the two-paths read as the payoff addresses exist for.
@@ -804,3 +812,14 @@ intends: the served input schema now carries every declared event field —
 the [verb input contract](../../history/plans/verb-input-contract.md) ruled the
 authored event authoritative — and the address a read emits dispatches as an
 argument, with the detached-copy refusal standing guard beside it (step 8).
+
+<!-- Source links resolve against the repository's default branch, so they
+     follow head rather than pinning a revision this document would outlive. -->
+
+[tracker]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/integration/pattern/tracker.tsx
+[demo]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/integration/verb-session-demo.sh
+[gaps]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/integration/verb-session-gaps.sh
+[exec-schema]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/lib/exec-schema.ts
+[piece-lib]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/lib/piece.ts
+[completion]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/lib/completion/providers.ts
+[overview]: https://claude.ai/code/artifact/74bd43c3-4672-4e6c-9af4-34513e5bedaa
