@@ -3,6 +3,7 @@ import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
+import { assert } from "@std/assert";
 import { join } from "@std/path";
 import {
   initializePiecesController,
@@ -25,7 +26,9 @@ describe("parking coordinator admin view integration test", () => {
   let identity: Identity;
   let cc: PiecesController;
   let pieceId: string;
-  let pieceSinkCancel: (() => void) | undefined;
+  let resultCell: ReturnType<PiecesController["getResult"]>;
+  let adminChangeIntegrity: readonly unknown[] = [];
+  const sinkCancels: (() => void)[] = [];
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -63,16 +66,23 @@ describe("parking coordinator admin view integration test", () => {
       },
     });
     pieceId = piece.id;
-    const resultCell = cc.getResult(piece.getCell());
-    pieceSinkCancel = resultCell.sink(() => {});
+    resultCell = cc.getResult(piece.getCell());
+    sinkCancels.push(resultCell.sink(() => {}));
+    sinkCancels.push(
+      resultCell.key("adminChanges").resolveAsCell().sink((_value, label) => {
+        adminChangeIntegrity = (label?.entries ?? []).flatMap(
+          (entry) => entry.label.integrity ?? [],
+        );
+      }, { includeCfcLabel: true }),
+    );
   });
 
   afterAll(async () => {
-    pieceSinkCancel?.();
+    for (const cancel of sinkCancels) cancel();
     await cc?.dispose();
   });
 
-  it("renders manager and admin controls with the expected enabled states", async () => {
+  it("grants and revokes endorsed parking administrator access", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -113,6 +123,18 @@ describe("parking coordinator admin view integration test", () => {
       "Admin",
     );
     await waitForRuntimeIdle(page);
+    await cc.synced();
+    await resultCell.pull();
+    assert(
+      adminChangeIntegrity.includes("parking-admin"),
+      `the trusted grant must carry the parking administrator endorsement: ${
+        JSON.stringify(adminChangeIntegrity)
+      }`,
+    );
+    assert(
+      adminChangeIntegrity.includes("parking-admin-manager"),
+      "the trusted grant must carry the administrator-manager endorsement",
+    );
     await waitForText(
       page,
       '[data-parking-admin-toggle="Alice"]',
