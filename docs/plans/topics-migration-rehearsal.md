@@ -160,6 +160,21 @@ deno task cf space fingerprint $CLONE/pristine/<did>.sqlite --json > /tmp/before
 jq '[.perEntity[] | .kind] | group_by(.) | map({(.[0]): length}) | add' /tmp/before.json
 ```
 
+Take the **content export** here too — every topic's authored content as one
+portable JSON file, read offline from the pristine snapshot:
+
+```bash
+scripts/topics-export.ts $CLONE/pristine/<did>.sqlite --out topics-export.json
+```
+
+The export prints the topic count, comment and link totals, and the selected
+pattern identities — cross-check them against the migration manifest before
+trusting anything downstream of it. It is the restore payload for the drill
+below and the recourse for a live incident, and it survives even the space
+becoming unusable. Keep the snapshot's filename `<did>.sqlite`: the export
+records the space DID from it, and `topics-restore.ts` defaults its `--space`
+to that record.
+
 ### Migrate — children first, board last, serially
 
 The order is not stylistic. The board's result recomputation is what storms,
@@ -250,6 +265,47 @@ not — and a schema update rewrites every piece's result — so `content unchan
 after this migration would mean the migration did not land, not that it landed
 cleanly.
 
+### The restore drill — part of a clean pass
+
+A restore mechanism that has never been exercised is not a mechanism, so each
+rehearsal pass ends by proving it: deliberately clobber one topic on the
+clone, restore it from the baseline export, and re-run the authored-content
+check.
+
+```bash
+# Damage one topic the worst way a bad migration would.
+echo '{"title":"CLOBBERED","body":"","comments":[]}' | \
+  deno task cf piece apply --piece <topic-fid> --api-url http://localhost:8010 …
+# Restore it, and read every field back against the export.
+scripts/topics-restore.ts topics-export.json --piece <topic-fid> \
+  --api-url http://localhost:8010
+```
+
+The restore writes content, never verbs — a verb would stamp its own write
+time and author over the history being restored — and lands in the same
+piece, so identity and crossref edges survive. Three measured facts shape how
+it works, none guessable from the command names:
+
+- **`cf piece apply` replaces the whole input document.** A partial document
+  zeroes every field it omits, structural links included. The clobber above
+  is realistic for exactly this reason, and the restore therefore always
+  writes the complete content and then re-establishes the board link with
+  `cf piece link` — the pre-apply state of that link is irrelevant, because
+  the apply just destroyed it.
+- **`cf set` cannot write any field of a deployed topic.** Both of its sides
+  validate the untouched remainder of the document and refuse it: the input
+  side judges the stored `mentionable` link against its declared array type
+  without resolving it, and the result side demands session-scoped fields no
+  other session can see.
+- **No CLI write path carries a `$link` value**, so comment and link elements
+  restore as plain values: content, order, timestamps, and attribution are
+  exact, and the element entities are minted fresh. A stored reference to an
+  individual old element is the one thing a restore does not preserve.
+
+A pass is clean only if the drilled topic reads back byte-identical to the
+export — body Markdown included — and its `mentionable` resolves through the
+re-established link.
+
 ### Reset and repeat
 
 ```bash
@@ -286,12 +342,19 @@ piece — a pass whose midpoint is unknown is not one of the two clean passes.
 ## Going live
 
 Only after two clean passes, and with a rollback manifest written down first:
-the pristine snapshot path, the exact reset command, and the prior source ids
+the pristine snapshot path, the exact reset command, the prior source ids
 for every piece (`cf inspect piece <space> <fid>` records the current pattern
-identity — capture all 74 before starting).
+identity — capture all 74 before starting), and a **fresh content export**
+taken from a snapshot of production at the start of the quiet window, so the
+per-topic restore has current data rather than rehearsal-age data.
 
 There is no `cf space reset` for production. The rollback is a `setsrc` back to
 the recorded source ids, which is why capturing them beforehand is not optional.
+Above it sit two content tiers: `topics-restore.ts` repairs an individual
+damaged topic in place from the export, and the last resort is the operator
+swapping the store file back to the snapshot — which loses everything written
+after it, so whether and when that tier may be used is agreed with whoever
+operates the deployment before the attempt, not negotiated during an incident.
 
 Repeat the migrate and verify steps against production, in the same order,
 serially, board last.
