@@ -268,18 +268,23 @@ because the whole input batch commits once at the batch's derived
 closure. With it, a consequence is visible within roughly
 2·T_flush + push even while the wave behind it keeps deriving.
 **The deadline is HONEST only if the settle yields (stage C tuning T3,
-2026-08-18):** the scheduler's settle loop and per-demander fan-out
-loop ran a whole wave's runs on one microtask chain, so the deadline
-timer could fire only after the last run — the stage-C attribution
-measured chat event waves late by 2.5–8.3 s with `wavesBudgetExhausted`
-a symptom, not a bound. A SERVING runtime's scheduler now yields one
-macrotask between runs whenever its slice of continuous work (16 ms)
-is spent (`scheduler/cooperative-yield.ts`; the OFF arm and clients
-construct no yielder and keep their exact microtask shape), so the
-deadline fires within one run + a slice of its time (measured live:
-lateness p50 25 ms, p90 152 ms, max 399 ms — a single long walk
-instance or a resubscribe still runs to its end; the WORK is the
-design half's). Its companion, the DRAIN'S IN-FLIGHT GUARD: with cycles
+2026-08-18):** the scheduler's settle loop ran a whole wave's actions
+on one microtask chain, so the deadline timer could fire only after the
+last one — the stage-C attribution measured chat event waves late by
+2.5–8.3 s with `wavesBudgetExhausted` a symptom, not a bound. A SERVING
+runtime's scheduler now yields one macrotask between ACTIONS in the
+settle loop whenever its slice of continuous work (16 ms) is spent
+(`scheduler/cooperative-yield.ts`; the OFF arm and clients construct no
+yielder and keep their exact microtask shape), so the deadline fires
+within one action + a slice of its time (measured live: lateness p50
+25 ms, p90 152 ms, max 399 ms — one action's instance runs and its
+resubscribe still run to their end; the WORK is the design half's).
+NOT inside the per-demander fan-out loop (considered and rejected): a
+macrotask there let a run's own asynchronous seal refusal land mid-pass,
+and the loop re-ran the dirtied instance in the same pass while the
+refusal's queued retry ran it again — two durable emissions of one
+served event; the retry machinery's contract is that a failed run's
+retry lands on the QUEUED pass, never the current one. Its companion, the DRAIN'S IN-FLIGHT GUARD: with cycles
 routinely cut before a just-drained event has run, the post-commit
 re-arm re-drains the still-pending entry every cycle and used to queue
 a SECOND copy each time (4× dispatch of the lockdown toggle on the

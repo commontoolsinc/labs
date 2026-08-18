@@ -3319,9 +3319,12 @@ supply; OW29/OW32/OW34 closed):
   - **T3 — the honest deadline and the mid-wave renew** (attribution
     §2b/§3: deadline late by 2.5–8.3 s; renew gaps to 10 s vs a 15-s TTL;
     t2's `lease-lost` on all spaces at once). A SERVING runtime's
-    scheduler yields one macrotask between settle-loop runs and between a
-    fanned-out node's instance runs once its 16-ms slice of continuous
-    work is spent (`scheduler/cooperative-yield.ts` — `setTimeout(0)`,
+    scheduler yields one macrotask between settle-loop ACTIONS once its
+    16-ms slice of continuous work is spent — not inside the per-demander
+    fan-out loop, where a yield let a run's own async seal refusal land
+    mid-pass and double a served emission (the LT6 early-emit arm caught
+    it; the retry lands on the queued pass by contract)
+    (`scheduler/cooperative-yield.ts` — `setTimeout(0)`,
     the one primitive that lets due timers fire in deadline order;
     MessageChannel and setImmediate measured to starve them); the OFF arm
     and clients construct no yielder (posture-gated at construction).

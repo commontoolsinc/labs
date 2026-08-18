@@ -1002,9 +1002,9 @@ export class Scheduler {
     };
   }
 
-  /** The bound yield hook handed to the settle loop and the fan-out loop
-   * (stage C tuning T3): a promise to await when the slice is spent, else
-   * undefined. Defined only when `cooperativeYield` exists. */
+  /** The bound yield hook handed to the settle loop (stage C tuning T3):
+   * a promise to await when the slice is spent, else undefined. Defined
+   * only when `cooperativeYield` exists. */
   private readonly cooperativeYieldBetweenRuns = ():
     | Promise<void>
     | undefined => this.cooperativeYield?.maybeYield();
@@ -2328,11 +2328,6 @@ export class Scheduler {
         this.executingAction = null;
         this.currentActionId = undefined;
       },
-      // Stage C tuning T3: only a serving runtime yields between a fanned-out
-      // node's instance runs.
-      ...(this.cooperativeYield !== undefined
-        ? { yieldBetweenRuns: this.cooperativeYieldBetweenRuns }
-        : {}),
     };
   }
 

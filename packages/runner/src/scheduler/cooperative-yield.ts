@@ -1,10 +1,10 @@
 // The serving scheduler's cooperative macrotask yield (server-execution v2
 // stage C tuning, T3; serving-loop.md §2/§3).
 //
-// Why: the settle loop (`settle.ts`) and the per-demander fan-out loop
-// (`run.ts`) run every action of a pass on one microtask chain — no
-// macrotask boundary from the first run to the last. On a serving
-// runtime that is the wave's whole settle: the stage-C attribution
+// Why: the settle loop (`settle.ts`) runs every action of a pass on one
+// microtask chain — no macrotask boundary from the first run to the
+// last. On a serving runtime that is the wave's whole settle: the
+// stage-C attribution
 // measured chat event waves of 2.6–3.6 s in which the 100-ms flush
 // deadline fired 2.5–8.3 s LATE (`wavesBudgetExhausted` was a symptom,
 // not a bound), the lease-renew `setInterval` starved for up to 10 s
@@ -27,10 +27,13 @@
 // under `runtime.servingPosture`), so their settle loops keep the exact
 // microtask shape they had.
 //
-// Bound, stated honestly: the deadline becomes honest to within ONE run
-// plus a slice — a single 250-ms demand walk or a 1.6-s union-log
-// resubscribe still runs to its end; nothing here shortens the WORK
-// (that is the design half of stage C, the per-demander walk).
+// Bound, stated honestly: the deadline becomes honest to within ONE
+// action plus a slice — an action's per-demander instance runs (a
+// 250-ms demand walk × its demanders) and its union-log resubscribe
+// still run to their end; nothing here shortens the WORK (that is the
+// design half of stage C, the per-demander walk). The yield is NOT
+// placed inside the fan-out loop (see run.ts's note): a macrotask there
+// let a run's own async seal refusal re-enter the pass.
 
 import { getLogger } from "@commonfabric/utils/logger";
 

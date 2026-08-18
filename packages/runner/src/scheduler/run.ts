@@ -368,13 +368,6 @@ export interface SchedulerActionRunState {
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
-  /** The serving posture's cooperative macrotask yield between a
-   * fanned-out node's INSTANCE runs (server-execution v2 stage C tuning
-   * T3, cooperative-yield.ts; same seam the settle loop uses between
-   * actions). Installed only on a serving runtime; the fan-out loop
-   * itself is reachable only there (demanders exist only under the
-   * SpaceServer's resolver), so this is inert everywhere else. */
-  readonly yieldBetweenRuns?: () => Promise<void> | undefined;
 }
 
 export async function runSchedulerAction(
@@ -589,20 +582,19 @@ export async function runSchedulerAction(
     let lastResult: unknown;
     let ran = false;
     const deferred = new Set<ScopeKey>();
+    // Deliberately NO cooperative macrotask yield between instance runs
+    // (stage C tuning T3 considered and REJECTED it here): the settle
+    // loop yields between ACTIONS (settle.ts); a yield inside this loop
+    // let a run's own asynchronous seal refusal land mid-pass and dirty
+    // its instance, which the next iteration's snapshot then re-ran in
+    // THIS pass while the refusal's queued retry re-ran it again — two
+    // durable emissions of one served event (executor-space-server's
+    // LT6 early-emit arm caught it). The retry machinery's contract is
+    // that a failed run's retry lands on the QUEUED pass, never this one;
+    // the loop keeps its microtask shape so that holds. Cost: the flush
+    // deadline is honest to within one action (all of its instance runs),
+    // not one instance.
     for (;;) {
-      // Stage C tuning T3: the per-demander walk is where a serving wave
-      // spends its settle (20–250 ms per instance run × demanders ×
-      // roots — the attribution's dominant server term), and this loop
-      // had no macrotask boundary between instances. Yield once the
-      // slice is spent, so the flush deadline, the lease renew and the
-      // push flush can fire between one demander's run and the next.
-      // BEFORE the instance-set snapshot below: a demander can depart (or
-      // the ratchet move) during the turn, and the run must act on the
-      // set as it stands after it.
-      if (ran && state.yieldBetweenRuns !== undefined) {
-        const turn = state.yieldBetweenRuns();
-        if (turn !== undefined) await turn;
-      }
       const currentDemanders = state.runtime.serverRunDemandersFor(
         demandRootIds!,
       ) ?? [];
