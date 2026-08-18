@@ -58,7 +58,6 @@ import type { Cell } from "../cell.ts";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
 import {
   acquireSchemaRegistryLease,
-  lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
 import { isSubschema } from "../schema-walk.ts";
