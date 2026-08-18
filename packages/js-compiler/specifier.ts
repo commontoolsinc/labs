@@ -43,6 +43,23 @@ export function resolveImportSpecifier(
  * compile path accepted, so refusing an escape is the graph resolver's call,
  * not this module's.
  */
+export function importEscapesProgramRoot(
+  specifier: string,
+  from: Source,
+): boolean {
+  if (
+    specifier.substring(0, 2) !== "./" && specifier.substring(0, 3) !== "../"
+  ) {
+    return false;
+  }
+  if (from.name.substring(0, 1) !== "/") return false;
+  // Every leading slash: an HTTP-derived name preserves its URL pathname,
+  // which may begin "//...", and a base left absolute would clamp again.
+  const relativeDir = dirname(from.name).replace(/^\/+/, "");
+  const joined = join(relativeDir, specifier);
+  return joined === ".." || joined.substring(0, 3) === "../";
+}
+
 /**
  * Refuse an import that climbs above the program root, naming the import and
  * the importer. Every graph walk that resolves raw sources calls this before
@@ -59,21 +76,4 @@ export function assertImportInsideProgramRoot(
       `Import "${specifier}" in "${from.name}" escapes the program root.`,
     );
   }
-}
-
-export function importEscapesProgramRoot(
-  specifier: string,
-  from: Source,
-): boolean {
-  if (
-    specifier.substring(0, 2) !== "./" && specifier.substring(0, 3) !== "../"
-  ) {
-    return false;
-  }
-  if (from.name.substring(0, 1) !== "/") return false;
-  // Every leading slash: an HTTP-derived name preserves its URL pathname,
-  // which may begin "//...", and a base left absolute would clamp again.
-  const relativeDir = dirname(from.name).replace(/^\/+/, "");
-  const joined = join(relativeDir, specifier);
-  return joined === ".." || joined.substring(0, 3) === "../";
 }
