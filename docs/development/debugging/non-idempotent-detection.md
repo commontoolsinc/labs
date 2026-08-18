@@ -27,7 +27,13 @@ Common causes:
 Scheduler-v2 reports a bounded non-convergence episode as a warning instead of
 throwing an action error. The warning names the deferred actions and the
 scheduler continues retrying them behind an escalating backoff, so use the
-diagnosis below to distinguish a true cycle from a slow convergence wave.
+diagnosis below to distinguish a true cycle from a slow convergence wave. The
+warning is emitted at most once per run of settle passes; the
+`scheduler.non-settling` telemetry marker fires for every pass that defers work,
+carrying the deferred actions' labels and their count, so `runtime.telemetry` is
+where a second episode shows up. A marker reports a pass that exhausted its
+convergence budget, which a wave taking several passes to converge also does, so
+one marker is not on its own evidence of a cycle.
 
 `cf check` compiles the pattern and evaluates its factory graph, but it does
 not instantiate a piece or drive the runtime scheduler to idle. Scheduler
