@@ -341,4 +341,32 @@ describe("Runtime.hostForSpace", () => {
       await runtime.dispose();
     }
   });
+
+  it("healthCheck forwards cancellation to its requests", async () => {
+    const realFetch = globalThis.fetch;
+    let receivedSignal: AbortSignal | null = null;
+    globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal ?? null;
+      receivedSignal = signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => reject(signal.reason),
+          { once: true },
+        );
+      });
+    }) as typeof fetch;
+    const runtime = makeRuntime();
+    const controller = new AbortController();
+    const reason = new Error("health check canceled");
+    try {
+      const check = runtime.healthCheck(controller.signal);
+      expect(receivedSignal).toBe(controller.signal);
+      controller.abort(reason);
+      await expect(check).rejects.toBe(reason);
+    } finally {
+      globalThis.fetch = realFetch;
+      await runtime.dispose();
+    }
+  });
 });
