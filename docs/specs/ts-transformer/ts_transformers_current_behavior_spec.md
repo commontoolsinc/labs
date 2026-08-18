@@ -312,6 +312,29 @@ gone.
 Same-named local helpers are not treated as reactive origins unless the call
 itself resolves through the Common Fabric provenance rules in §5.
 
+### 6.3a The event parameter serves the authored contract
+
+A verb's event parameter (handler/action first parameter) is applied in
+`contract` mode (`CapabilitySummaryApplicationMode` in `type-shrinking.ts`):
+before shrinking, every top-level field the declared event type names joins
+the summary as a read (`augmentSummaryWithDeclaredFields` in
+`schema-injection.ts`), so the served schema retains the authored structure,
+required-ness included, while capability values stay usage-derived — a
+declared, never-read reference field emits with the read-only marker its
+cell-like type earns as a plain read. Only object-shaped, non-wildcard,
+non-array event types augment, and only data properties join (methods and
+apparent prototype members do not). Reactive reads (`lift`, lift-applied,
+computed) stay in `full` mode: there, shrinking is subscription semantics.
+The ruling this implements is
+[the verb input contract](../../plans/verb-input-contract.md).
+
+The type-driven shrink guards its descent on (type, requested-paths): a pair
+already on the path falls back to the named type reference — no structural
+fallback — which schema generation resolves through `$defs` exactly as it
+does for an authored node. Reachable since `contract` mode retains declared
+fields whose types are self-referential. The
+`handler-schema/contract-authored-event` fixture pins the whole shape.
+
 ### 6.4 Schema shrink validation
 
 Validates that property paths detected by capability analysis can actually

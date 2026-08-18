@@ -301,24 +301,22 @@ describe("an author's verb prose reaching a caller", () => {
       }
     });
 
-    it("adds no property the dispatch schema does not carry", async () => {
+    it("carries every declared field, read by the body or not", async () => {
       const live = await runLivePiece("verb-prose-listing-shape");
       try {
         const inputSchema = verbRow(await verbsJson(live), "add")
           .inputSchema as Record<string, unknown>;
-        // `AddEvent.urgent` is declared and documented, and the schema the verb
-        // dispatches through does not carry it: that schema is the handler's
-        // read of the event, and this handler's body reads only `title`. The
-        // pattern's prose must not paper over that — a caller offered
-        // `--urgent` would be offered a flag the running handler ignores.
-        //
-        // This is what fails against the obvious implementation — merging the
-        // declared event schema over the served one, or serving the declared
-        // one in its place. Both would list `urgent`, and both would make this
-        // listing a claim about the pattern's source rather than about the
-        // piece a caller is talking to.
+        // `AddEvent.urgent` is declared and documented, and this handler's
+        // body reads only `title`. The listing carries `urgent` anyway,
+        // because the served schema is the verb's input contract — the
+        // authored event — per docs/plans/verb-input-contract.md: a contract
+        // is edited deliberately, and a field the body ignores today is
+        // still one the author asked callers to send. Dispatch delivers it
+        // like any interface delivers an unused parameter; what the handler
+        // may DO stays usage-derived.
         expect(Object.keys(inputSchema.properties as object)).toEqual([
           "title",
+          "urgent",
           "details",
           "primary",
         ]);

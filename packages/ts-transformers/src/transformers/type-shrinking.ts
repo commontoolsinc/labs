@@ -28,7 +28,20 @@ import { getCellKind } from "./cell-type.ts";
 // Types
 // ---------------------------------------------------------------------------
 
-export type CapabilitySummaryApplicationMode = "full" | "defaults_only";
+/**
+ * How a capability summary is applied to a parameter's schema. `full` shrinks
+ * to what the body uses; `defaults_only` keeps defaults and treats the rest
+ * as opaque; `contract` serves the authored structure — every declared
+ * top-level field is retained, with the summary's usage-derived capability
+ * values where the body reads — per the ruling in
+ * docs/plans/verb-input-contract.md. Only a verb's event parameter uses
+ * `contract`: for reactive reads, shrinking is subscription semantics and
+ * stays `full`.
+ */
+export type CapabilitySummaryApplicationMode =
+  | "full"
+  | "defaults_only"
+  | "contract";
 
 interface CapabilityShrinkPlan {
   readonly retainedPaths: readonly (readonly string[])[];
@@ -411,7 +424,10 @@ function getRequestedPropertyNameText(
   return getPropertyNameText(name, checker);
 }
 
-function isArrayShapeType(type: ts.Type, checker: ts.TypeChecker): boolean {
+export function isArrayShapeType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
   const typeChecker = checker as ts.TypeChecker & {
     isArrayType?: (type: ts.Type) => boolean;
     isTupleType?: (type: ts.Type) => boolean;
@@ -772,6 +788,7 @@ function buildShrunkTypeNodeFromType(
   factory: ts.NodeFactory,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   fullShapePaths: readonly (readonly string[])[] = [],
+  visiting: ReadonlySet<string> = new Set(),
 ): ts.TypeNode | undefined {
   const typeToNodeFlags = ts.NodeBuilderFlags.NoTruncation |
     ts.NodeBuilderFlags.UseStructuralFallback;
@@ -780,6 +797,27 @@ function buildShrunkTypeNodeFromType(
   if (normalized.length === 0) {
     return undefined;
   }
+  // A (type, requested-paths) pair already on the descent path cannot be
+  // materialized as a literal — the recursion would never bottom out. The
+  // paths are part of the key because revisiting the same type with narrower
+  // paths terminates on its own. Fall back to the NAMED reference (no
+  // structural fallback: expanding structure here is the very recursion
+  // being cut), which schema generation resolves through `$defs` exactly as
+  // it does for an authored node. Reachable since `contract` mode retains
+  // declared fields whose types are self-referential.
+  const visitKey = `${(type as ts.Type & { id?: number }).id ?? "?"}|${
+    JSON.stringify(normalized)
+  }`;
+  if (visiting.has(visitKey)) {
+    return typeToTypeNodeWithRegistry(
+      type,
+      { checker, factory, sourceFile },
+      typeRegistry,
+      ts.NodeBuilderFlags.NoTruncation,
+    );
+  }
+  const guarded = new Set(visiting);
+  guarded.add(visitKey);
   if (normalizedFullShapePaths.some((path) => path.length === 0)) {
     return typeToTypeNodeWithRegistry(
       type,
@@ -815,6 +853,7 @@ function buildShrunkTypeNodeFromType(
           factory,
           typeRegistry,
           fullShapeItemPaths,
+          guarded,
         ) ??
           typeToTypeNodeWithRegistry(
             elementType,
@@ -861,6 +900,7 @@ function buildShrunkTypeNodeFromType(
         factory,
         typeRegistry,
         normalizedFullShapePaths,
+        guarded,
       );
       if (!shrunkInner) return undefined;
       // Collect the nullish members to re-append
@@ -971,6 +1011,7 @@ function buildShrunkTypeNodeFromType(
       factory,
       typeRegistry,
       fullShapeChildPaths,
+      guarded,
     );
     if (!shrunkChild && !hasDirectAccess) {
       // We failed to materialize a deeper path; let caller fall back to

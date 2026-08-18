@@ -37,6 +37,23 @@ const __cfHandler_1 = __cfHelpers.handler({
                 }
             },
             required: ["value", "items"]
+        },
+        provenance: {
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "object",
+                    properties: {
+                        origin: {
+                            type: "string",
+                            "enum": ["dom"]
+                        },
+                        trusted: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["origin", "trusted"]
+                }]
         }
     },
     required: ["detail"]

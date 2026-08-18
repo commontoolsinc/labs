@@ -50,6 +50,7 @@ import {
   applyShrinkAndWrap,
   type CapabilitySummaryApplicationMode,
   containsAnyOrUnknownTypeNode,
+  isArrayShapeType,
   isCellLikeTypeNode,
   preservedWrapperFor,
   printTypeNode,
@@ -284,6 +285,65 @@ function findCapabilitySummaryForParameter(
   return summary.params.find((param) => param.name === paramName);
 }
 
+/**
+ * The `contract` mode's augmentation: every top-level field the declared
+ * event type names joins the summary as a read, so the shrink retains the
+ * authored structure while its usage-derived capability values stay where
+ * the body reads. A declared reference field the body never touches emits
+ * with the read-only marker its cell-like type earns as a plain read — the
+ * least authority that still treats it as a reference — which is the
+ * contract/grant split docs/plans/verb-input-contract.md rules.
+ */
+function augmentSummaryWithDeclaredFields(
+  paramSummary: CapabilityParamSummary,
+  baseType: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): CapabilityParamSummary {
+  if (!baseType) return paramSummary;
+  // Only an object-shaped event has declared fields to retain. A primitive
+  // or an array reaches here with its prototype members as "properties" —
+  // string alone would contribute every String method as a field — and a
+  // wildcard summary already keeps the whole type.
+  if (
+    (baseType.flags & ts.TypeFlags.Object) === 0 ||
+    paramSummary.wildcard ||
+    isArrayShapeType(baseType, checker)
+  ) {
+    return paramSummary;
+  }
+  const represented = new Set<string>();
+  for (
+    const set of [
+      paramSummary.readPaths,
+      paramSummary.writePaths,
+      paramSummary.fullShapePaths ?? [],
+      paramSummary.opaquePaths ?? [],
+      paramSummary.identityPaths ?? [],
+      paramSummary.identityCellPaths ?? [],
+      paramSummary.comparablePaths ?? [],
+      paramSummary.comparableCellPaths ?? [],
+    ]
+  ) {
+    for (const path of set) {
+      if (path.length > 0) represented.add(path[0]!);
+    }
+  }
+  const missing: string[][] = [];
+  for (const property of checker.getPropertiesOfType(baseType)) {
+    // Data fields only: a method is not a payload position, and a property
+    // with no declaration is an apparent (prototype) member, not authored.
+    if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
+    if (!property.valueDeclaration && !property.declarations?.length) continue;
+    const name = property.getName();
+    if (!represented.has(name)) missing.push([name]);
+  }
+  if (missing.length === 0) return paramSummary;
+  return {
+    ...paramSummary,
+    readPaths: [...paramSummary.readPaths, ...missing],
+  };
+}
+
 function applyCapabilitySummaryToArgument(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   argumentNode: ts.TypeNode | undefined,
@@ -337,8 +397,12 @@ function applyCapabilitySummaryToArgument(
     );
   }
 
+  const effectiveSummary = mode === "contract"
+    ? augmentSummaryWithDeclaredFields(paramSummary, baseType, checker)
+    : paramSummary;
+
   return applyShrinkAndWrap(
-    paramSummary,
+    effectiveSummary,
     baseTypeNode,
     baseType,
     shouldWrap,
@@ -346,7 +410,7 @@ function applyCapabilitySummaryToArgument(
     sourceFile,
     factory,
     mode,
-    mode === "defaults_only" ? "opaque" : paramSummary.capability,
+    mode === "defaults_only" ? "opaque" : effectiveSummary.capability,
     context,
     fnNode ?? fn,
     preservedWrapper,
@@ -363,6 +427,7 @@ function applyCapabilitySummaryToParameter(
   factory: ts.NodeFactory,
   context?: TransformationContext,
   fnNode?: ts.Node,
+  mode: CapabilitySummaryApplicationMode = "full",
 ): ts.TypeNode | undefined {
   if (!parameterNode) return parameterNode;
 
@@ -397,16 +462,20 @@ function applyCapabilitySummaryToParameter(
     );
   }
 
+  const effectiveSummary = mode === "contract"
+    ? augmentSummaryWithDeclaredFields(paramSummary, baseType, checker)
+    : paramSummary;
+
   return applyShrinkAndWrap(
-    paramSummary,
+    effectiveSummary,
     baseTypeNode,
     baseType,
     shouldWrap,
     checker,
     sourceFile,
     factory,
-    "full",
-    paramSummary.capability,
+    mode,
+    effectiveSummary.capability,
     context,
     fnNode ?? fn,
     preservedWrapper,
@@ -1228,6 +1297,7 @@ function applyCallbackBuilderArgumentCapabilitySummary(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   context: TransformationContext,
+  mode: CapabilitySummaryApplicationMode = "full",
 ): {
   argumentTypeNode: ts.TypeNode;
   argumentTypeValue: ts.Type | undefined;
@@ -1243,7 +1313,7 @@ function applyCallbackBuilderArgumentCapabilitySummary(
     checker,
     sourceFile,
     factory,
-    "full",
+    mode,
     context,
     callback,
   );
@@ -1300,6 +1370,7 @@ function resolveDualSchemaBuilderTypes(
       sourceFile,
       factory,
       context,
+      options?.capabilityMode ?? "full",
     ));
   }
 
@@ -3338,6 +3409,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               typeRegistry,
             );
 
+            // The event is a verb's input contract: authored structure,
+            // usage-derived capability values (docs/plans/verb-input-contract.md).
             eventTypeNode = applyCapabilitySummaryToParameter(
               handlerFn,
               0,
@@ -3348,6 +3421,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               factory,
               context,
               handlerFn,
+              "contract",
             ) ?? eventType;
 
             stateTypeNode = applyCapabilitySummaryToParameter(
@@ -3415,7 +3489,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
           );
           if (handlerCandidate && handlerFn) {
-            // Infer types from the handler function for both parameters
+            // Infer types from the handler function for both parameters. The
+            // event is a verb's input contract, so it is served in `contract`
+            // mode: authored structure, usage-derived capability values.
             const inferred = collectFunctionSchemaTypeNodes(
               handlerFn,
               checker,
@@ -3423,7 +3499,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               factory,
               undefined,
               typeRegistry,
-              "full",
+              "contract",
               context,
             );
 
@@ -3445,6 +3521,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 factory,
                 undefined,
                 handlerFn,
+                "contract",
               ) ?? eventTypeBase;
 
             // State type: use helper for second parameter
