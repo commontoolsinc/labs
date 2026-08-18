@@ -360,6 +360,66 @@ describe("prompt-loop address handles", () => {
     expect(childUserPrompt).not.toContain(HASH_A);
   });
 
+  it("passes a token in a `delegate_task` return-schema property NAME to the child verbatim", async () => {
+    // The exclusion covers the whole `delegate_task` input, keys included: a
+    // child holds its own handle table, so a parent token resolved into an
+    // address on the way past would hand the child a raw address to key its
+    // return by.
+    const runId = "run-handles-delegate-key";
+    const minted = await mintAddressHandle(
+      createHarnessHandleTable(runId),
+      URI_A,
+    );
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    });
+    await engine.recordHandleTable(minted.table);
+    const requestBodies: Array<{
+      messages: Array<{ role: string; content: string }>;
+    }> = [];
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      fetchFn: scriptedFetch([
+        {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-delegate",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Inspect and report.",
+                    returnSchema: {
+                      type: "object",
+                      properties: { [minted.token]: { type: "string" } },
+                    },
+                  }),
+                },
+              }],
+            },
+          }],
+        },
+        finalTurn('{"' + minted.token + '": "done"}'),
+        finalTurn("Parent done."),
+      ], requestBodies as unknown[]),
+    });
+
+    await loop.runPrompt({ prompt: "Delegate the inspection." });
+
+    const childUserPrompt =
+      chatViewOfRequest(requestBodies[1]).messages[1]?.content ?? "";
+    expect(childUserPrompt).toContain(minted.token);
+    expect(childUserPrompt).not.toContain(HASH_A);
+  });
+
   it("keeps a raw address out of the view_image tool and followup messages when a token resolves inside the path", async () => {
     const runId = "run-handles-view-image";
     const workspace = await Deno.realPath(await Deno.makeTempDir());

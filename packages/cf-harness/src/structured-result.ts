@@ -45,6 +45,27 @@ const sha256Digest = async (input: Uint8Array): Promise<string> => {
 export const digestJsonValue = async (input: unknown): Promise<string> =>
   await sha256Digest(textBytes(JSON.stringify(input)));
 
+/**
+ * Tells whether `value` is a sealed opaque-link object: the single-key
+ * `@link` object the sanitizer substitutes for a position it seals, whose
+ * target carries the `opaque:` scheme.
+ *
+ * A seal is a REDACTION rather than an address. It marks a position a
+ * structured result withheld, and it names nothing that can be read — the
+ * handle boundary deliberately leaves it alone, and no reader resolves it. Any
+ * code that receives a sanitized value back from a model, and would treat it
+ * as data, asks this first.
+ */
+export const isSealedOpaqueLinkObject = (value: unknown): boolean => {
+  if (!isObjectNotArray(value)) {
+    return false;
+  }
+  const target = value["@link"];
+  return Object.keys(value).length === 1 &&
+    typeof target === "string" &&
+    target.startsWith("opaque:");
+};
+
 export const parseStructuredResultSchema = (
   input: unknown,
   options: ParseStructuredResultSchemaOptions = {},
