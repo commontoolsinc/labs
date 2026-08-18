@@ -7,6 +7,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import "../cf-chip/index.ts";
 
 import type { DID } from "@commonfabric/identity";
+import { navigate, openInNewTab } from "@commonfabric/navigation";
 import {
   type CellHandle,
   CellRef,
@@ -15,7 +16,6 @@ import {
   parseLLMFriendlyLink,
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
-import { navigate, openInNewTab } from "@commonfabric/shell/shared";
 
 import {
   createDragPreview,

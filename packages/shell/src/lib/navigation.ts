@@ -1,93 +1,20 @@
+import {
+  appViewToUrlPath,
+  NAVIGATE_EVENT,
+  type NavigationCommand,
+  preserveAppViewMode,
+  REPLACE_NAVIGATION_EVENT,
+  UPDATE_PAGE_TITLE_EVENT,
+  urlToAppView,
+} from "@commonfabric/navigation";
 import { getLogger } from "@commonfabric/utils/logger";
 
-import {
-  AppView,
-  appViewToUrlPath,
-  preserveAppViewMode,
-  ShellApp,
-  urlToAppView,
-} from "./app/mod.ts";
+import type { ShellApp } from "./app-state.ts";
 
 const logger = getLogger("shell.navigation", {
   enabled: false,
   level: "debug",
 });
-
-export type NavigationCommand = AppView;
-
-const NavigationEventName = "cf-navigate";
-const ReplaceNavigationEventName = "cf-replace-navigation";
-
-class NavigationEvent extends CustomEvent<NavigationCommand> {
-  command: NavigationCommand;
-  constructor(command: NavigationCommand) {
-    super(NavigationEventName, { detail: command });
-    this.command = command;
-  }
-}
-
-export function navigate(command: NavigationCommand) {
-  globalThis.dispatchEvent(new NavigationEvent(command));
-}
-
-const OpenExternalEventName = "cf-open-external";
-
-// Cancellable event dispatched before a modifier-click ("open in new tab")
-// builds a shell URL. An embedder (e.g. Loom) can host `cf-open-external` and
-// call `preventDefault()` to apply its own URL scheme; if the event is not
-// cancelled, the shell default runs (`appViewToUrlPath` + `globalThis.open`).
-// Mirrors the `cf-navigate` idiom so plain and modifier clicks are both
-// interceptable from a single, well-known event surface.
-class OpenExternalEvent extends CustomEvent<NavigationCommand> {
-  command: NavigationCommand;
-  constructor(command: NavigationCommand) {
-    super(OpenExternalEventName, { detail: command, cancelable: true });
-    this.command = command;
-  }
-}
-
-// Open a navigation target in a new tab. Dispatches a cancellable
-// `cf-open-external` event first; if a host cancels it via `preventDefault()`,
-// the host owns the new-tab navigation. Otherwise the shell default builds a
-// URL from the current location and calls `globalThis.open`.
-export function openInNewTab(command: NavigationCommand) {
-  const event = new OpenExternalEvent(command);
-  const proceed = globalThis.dispatchEvent(event);
-  if (!proceed) return;
-  const url = appViewToUrlPath(
-    preserveAppViewMode(
-      urlToAppView(new URL(globalThis.location.href)),
-      command,
-    ),
-  );
-  globalThis.open(url, "_blank", "noopener");
-}
-
-class ReplaceNavigationEvent extends CustomEvent<NavigationCommand> {
-  command: NavigationCommand;
-  constructor(command: NavigationCommand) {
-    super(ReplaceNavigationEventName, { detail: command });
-    this.command = command;
-  }
-}
-
-export function replaceNavigation(command: NavigationCommand) {
-  globalThis.dispatchEvent(new ReplaceNavigationEvent(command));
-}
-
-const UpdatePageTitleEventName = "cf-update-page-title";
-
-class UpdatePageTitleEvent extends CustomEvent<string> {
-  title: string;
-  constructor(title: string) {
-    super(UpdatePageTitleEventName, { detail: title });
-    this.title = title;
-  }
-}
-
-export function updatePageTitle(title: string) {
-  globalThis.dispatchEvent(new UpdatePageTitleEvent(title));
-}
 
 // Handles synchronizing of browser history state and application state.
 //
@@ -101,13 +28,13 @@ export class Navigation {
   constructor(app: ShellApp) {
     this.#app = app;
 
-    globalThis.addEventListener(NavigationEventName, this.onNavigate);
+    globalThis.addEventListener(NAVIGATE_EVENT, this.onNavigate);
     globalThis.addEventListener(
-      ReplaceNavigationEventName,
+      REPLACE_NAVIGATION_EVENT,
       this.onReplaceNavigate,
     );
     globalThis.addEventListener(
-      UpdatePageTitleEventName,
+      UPDATE_PAGE_TITLE_EVENT,
       this.onUpdatePageTitle,
     );
     globalThis.addEventListener("popstate", this.onPopState);
@@ -120,8 +47,24 @@ export class Navigation {
     this.apply(init);
   }
 
+  // Stop listening. The shell's own `Navigation` lives as long as the page, so
+  // nothing in the application calls this; a caller that builds one around a
+  // fixture needs the four global listeners back.
+  dispose() {
+    globalThis.removeEventListener(NAVIGATE_EVENT, this.onNavigate);
+    globalThis.removeEventListener(
+      REPLACE_NAVIGATION_EVENT,
+      this.onReplaceNavigate,
+    );
+    globalThis.removeEventListener(
+      UPDATE_PAGE_TITLE_EVENT,
+      this.onUpdatePageTitle,
+    );
+    globalThis.removeEventListener("popstate", this.onPopState);
+  }
+
   private onUpdatePageTitle = (e: Event) => {
-    const title = (e as UpdatePageTitleEvent).title;
+    const title = (e as CustomEvent<string>).detail;
     logger.log("SetTitle", title);
     // Thought this needed to interact with the history.
     // Maybe it doesn't.
@@ -139,7 +82,7 @@ export class Navigation {
   };
 
   private onNavigate = (e: Event) => {
-    let command = (e as NavigationEvent).command;
+    let command = (e as CustomEvent<NavigationCommand>).detail;
     logger.log("Navigate", command);
     command = mapNavigationView(this.#app, command);
     this.push(command);
@@ -147,7 +90,7 @@ export class Navigation {
   };
 
   private onReplaceNavigate = (e: Event) => {
-    let command = (e as ReplaceNavigationEvent).command;
+    let command = (e as CustomEvent<NavigationCommand>).detail;
     logger.log("ReplaceNavigate", command);
     command = mapNavigationView(this.#app, command);
     this.replace(command);

@@ -984,7 +984,7 @@ global, and a `waitForCondition` predicate runs in the page, so it could call
 
 First, the predicate is serialized into the page and closes over nothing from the
 test module, so everything it needs has to be inlined. `waitForState` compares
-views through `isAppViewEqual` from `@commonfabric/shell/shared`, and it compares
+views through `isAppViewEqual` from `@commonfabric/navigation`, and it compares
 identities by DID — which the serialized state does not carry. `serialize()`
 writes the identity out as a raw key pair, and `deserialize()` recovers the DID by
 importing that private key through `Identity.fromRaw`. An in-page predicate can

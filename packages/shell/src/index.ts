@@ -3,9 +3,10 @@ import "core-js/proposals/async-explicit-resource-management";
 import "@commonfabric/ui";
 
 // Statically imported, deliberately. A dynamic `await import()` here pushes
-// `shared/app/*` into esbuild's lazy `__esm` wrappers, and esbuild then emits
-// one of those wrappers as a NON-async function containing a top-level await —
-// a bundle that is a SyntaxError, so the whole shell fails to load.
+// the navigation and app-state modules into esbuild's lazy `__esm` wrappers,
+// and esbuild then emits one of those wrappers as a NON-async function
+// containing a top-level await — a bundle that is a SyntaxError, so the whole
+// shell fails to load.
 // (`node --check dist/scripts/index.js` catches it; the type checker and the
 // unit tests do not.) There was nothing to gain either way: the shell's
 // `index` entry sets `splitting: false`, so esbuild inlines dynamic imports
@@ -20,7 +21,7 @@ import "./views/index.ts";
 
 import { KeyStore } from "@commonfabric/identity";
 
-import { Navigation } from "../shared/mod.ts";
+import { Navigation } from "./lib/navigation.ts";
 import { ROOT_KEY } from "./lib/root-key.ts";
 import type { XRootView } from "./views/RootView.ts";
 

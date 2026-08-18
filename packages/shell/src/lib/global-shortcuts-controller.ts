@@ -1,7 +1,8 @@
+import { navigate, type NavigationCommand } from "@commonfabric/navigation";
 import type { ReactiveController, ReactiveControllerHost } from "lit";
+
 import type { BaseView } from "../views/BaseView.ts";
-import { navigate, type NavigationCommand } from "../../shared/navigate.ts";
-import type { AppState } from "../../shared/mod.ts";
+import type { AppState } from "./app-state.ts";
 
 // Reactive controller host is XAppView, define some interfaces
 // to avoid a recursive dependency.
