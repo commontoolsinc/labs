@@ -17,9 +17,10 @@ import { markerOf } from "./marker.ts";
  * One act of decoding for the realm boundary, and the marker read off the
  * envelope that arrived.
  *
- * The marker is the sender's, taken in the constructor, and what every tagged
- * form in that envelope is checked against: a form carrying anything else is
- * data rather than structure.
+ * The marker is the sender's, taken off the envelope by
+ * {@link #encodedFromSerializedForm}, and what every tagged form beneath that
+ * envelope is checked against: a form carrying anything else is data rather
+ * than structure.
  */
 export class RealmDecodeAct
   extends BaseDecodeAct<RealmCodecValue, RealmEncodedValue> {
