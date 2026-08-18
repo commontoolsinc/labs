@@ -42,6 +42,12 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
    * `ProblematicStateError`, which the engine's `decode()` settles through
    * {@link #settleThrown} -- so a lenient decode returns a `ProblematicValue`
    * for a syntactic fault, exactly as it does for a fault found further in.
+   *
+   * **Called exactly once per act, and before any of the walk.** An act may
+   * therefore take what it needs of the serialized form here -- a marker read
+   * off an envelope, say -- and {@link #decodeValue} will see it. An engine
+   * adding an entry point of its own owes the same order rather than reaching
+   * a conversion around this one.
    */
   abstract encodedFromSerializedForm(data: SerializedForm): Encoded;
 

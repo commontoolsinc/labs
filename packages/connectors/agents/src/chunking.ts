@@ -10,9 +10,16 @@ export interface EventChunk<T> {
 }
 
 const fabricJsonCodec = newDefaultJsonCodecEngine();
+const textEncoder = new TextEncoder();
 
+/**
+ * The size a value takes on the wire, which is what a chunk budget is spent
+ * on: the UTF-8 length of this format's serialized form.
+ */
 export function encodedJsonBytes(value: unknown): number {
-  return fabricJsonCodec.encodeToBytes(stableFabricValue(value)).byteLength;
+  return textEncoder.encode(
+    fabricJsonCodec.encode(stableFabricValue(value)),
+  ).byteLength;
 }
 
 const EMPTY_ARRAY_BYTES = encodedJsonBytes([]);
