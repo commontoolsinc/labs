@@ -1,3 +1,9 @@
+/**
+ * The per-runtime observer behind run_pattern's settle-window reads: piece
+ * attribution through the canonical entity hash, the guard against errors
+ * that arrive without a pattern frame, the exclusion of busy-window markers
+ * that defer nothing, and sequence-scoped windows.
+ */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type Runtime, RuntimeTelemetry } from "@commonfabric/runner";

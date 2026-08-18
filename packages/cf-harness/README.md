@@ -954,10 +954,12 @@ during that invocation's settle window. An action error attributed to the
 created piece names the failing computation; a convergence-budget episode whose
 deferred-action labels name this pattern's module identity names the other
 observed shape, which a reactive cycle, a non-idempotent computation, and a
-policy-refused commit all produce. The refusal reason itself has no channel yet
-(CT-2037), so the message names the shapes rather than claiming to know which
-one happened — and an empty result with no observed cause still reports ok,
-since silence is not evidence of failure.
+policy-refused commit all produce. The refusal reason itself has no channel of
+its own, so the message names the shapes rather than claiming to know which one
+happened, and the failing computation's own text is withheld from model context
+— a computation over data the model cannot read may carry that data in what it
+throws — while the run artifact keeps it. An empty result with no observed cause
+still reports ok, since silence is not evidence of failure.
 
 A registered run adds `registration` to that output: `{ slug }`, plus `url` when
 the harness can compose one honestly. The URL is the session's API URL, the

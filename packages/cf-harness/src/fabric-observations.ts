@@ -6,8 +6,8 @@
  * when a piece it created settles to an empty or schema-failing result — the
  * two silent shapes observed live were a computation that throws on every
  * rerun, and a commit the CFC boundary refuses, which the scheduler retries
- * and which surfaces nowhere else (CT-2037 tracks giving the refusal a
- * reason channel of its own).
+ * and which surfaces nowhere else — the refusal reason has no channel of
+ * its own yet.
  *
  * One observer is installed per runtime, memoized, because the scheduler's
  * `onError` registry has no removal — a per-invocation subscription would

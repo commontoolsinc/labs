@@ -443,8 +443,12 @@ describe("run-pattern", () => {
       });
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("error");
-      expect(output.message).toContain("computation failed while settling");
-      expect(output.message).toContain("boom in lift");
+      expect(output.message).toContain("failed on every rerun while settling");
+      // The thrown text is a data channel: it stays in the artifact field the
+      // prompt loop strips from model context, never in the message.
+      expect(output.message).not.toContain("boom in lift");
+      expect(output.rawCauseMessage).toContain("boom in lift");
+      expect(output.pieceId).toBeDefined();
       expect(result.runState.status).toBe("completed");
     });
 
@@ -526,8 +530,9 @@ describe("run-pattern", () => {
         });
         const output = result.output as RunPatternToolErrorOutput;
         expect(output.status).toBe("error");
-        expect(output.message).toContain("writes never landed");
+        expect(output.message).toContain("result never landed");
         expect(output.message).toContain("convergence budget");
+        expect(output.pieceId).toBeDefined();
       } finally {
         await strictRuntime.dispose();
         await strictStorage.close();
