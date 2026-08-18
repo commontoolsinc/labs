@@ -1,10 +1,10 @@
 /**
  * This directory holds the codec system's active machinery: the registry that
- * indexes codecs, the lookup that finds a class's codec, the abstract bases
- * described below, and the two classes a fault produces. It is also the package's
- * public face for the codec system as a whole, re-exporting the declarations
- * in `codec-interface/` so that an outside caller has one entry point rather
- * than two.
+ * indexes codecs, the lookup that finds a class's codec, the engine base, the
+ * per-act contexts, and the two classes a fault produces. It is also the
+ * package's public face for the codec system as a whole, re-exporting the
+ * declarations in `codec-interface/` so that an outside caller has one entry
+ * point rather than two.
  *
  * That convenience is for this barrel alone. A module inside the package
  * imports the file it wants directly -- nothing here imports this barrel --
@@ -16,14 +16,12 @@
  * format cannot carry some type belongs with that format instead:
  * `codec-json/` holds the four that JSON needs.
  *
- * Two kinds of abstract base live here, and counting them together is a
- * mistake: nothing extends one kind and the other. `BaseFabricInstance` and
- * `BaseFabricPrimitive` are what a VALUE extends in order to participate in a
- * wire format at all, one per branch of the fabric type hierarchy.
- * `BaseCodecEngine` is what an ENGINE extends, one per wire format -- the
- * thing that walks such values and drives their codecs.
+ * The one abstract base here is `BaseCodecEngine`, what an ENGINE extends, one
+ * per wire format -- the thing that walks fabric values and drives their
+ * codecs. What such a value itself extends is a different question with a
+ * different answer, and lives in `fabric-bases/`.
  *
- * Besides those, the classes here are `UnknownValue` and `ProblematicValue`,
+ * Besides it, the classes here are `UnknownValue` and `ProblematicValue`,
  * which exist only because a decode found a tag no codec claimed or went
  * wrong outright. A class a caller models data with belongs in `fabric-instances/`
  * or `fabric-primitives/` instead.
@@ -40,8 +38,6 @@ export type { CodecEngineConfig } from "./CodecEngineConfig.ts";
 export { DecodeAct } from "./DecodeAct.ts";
 export { EncodeAct } from "./EncodeAct.ts";
 
-export { BaseFabricInstance } from "./BaseFabricInstance.ts";
-export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 export { ProblematicStateError } from "./ProblematicStateError.ts";
 export { ProblematicValue } from "./ProblematicValue.ts";
 export { SymbolCodec } from "./SymbolCodec.ts";

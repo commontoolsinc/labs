@@ -4,7 +4,7 @@ import {
   entityRefFromString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { BaseFabricPrimitive } from "@commonfabric/data-model/codec-common";
+import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-bases";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { isObjectOrArray } from "@commonfabric/utils/types";
