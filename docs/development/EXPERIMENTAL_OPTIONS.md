@@ -76,11 +76,10 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Seven flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`eagerSourceAnnotation`, `plainResultReceipts`, `systemPatternAutoUpdate`,
-`computedCellIds`, `lazyMaterialization`); `commitPreconditions` is deliberately
-mapped to `null` there, which records "not env-reachable" as a decision rather
-than an omission. The mapping accepts exactly `"true"` and `"false"`; any other
+`EXPERIMENTAL_ENV_VARS` itself is the authority on which flags are
+env-reachable — a flag that deliberately is not, `commitPreconditions` today,
+is mapped to `null` there, which records the decision rather than leaving an
+omission. The mapping accepts exactly `"true"` and `"false"`; any other
 value is ignored with a warning rather than coerced. See
 [How flags propagate](#how-flags-propagate).
 
