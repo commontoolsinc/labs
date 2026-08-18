@@ -26,7 +26,7 @@ import { ProblematicValue } from "./ProblematicValue.ts";
  * settle is a property of the act: they run while a walk is in progress, and
  * every one of them is reached with the act already in hand.
  */
-export abstract class DecodeAct<Encoded, SerializedForm = Encoded>
+export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
   extends BaseCodecAct<Encoded> {
   //
   // Subclass contract

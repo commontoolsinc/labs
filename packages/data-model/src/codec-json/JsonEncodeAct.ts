@@ -1,7 +1,7 @@
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import type { FabricValue } from "@/interface.ts";
-import { EncodeAct } from "@/codec-common/EncodeAct.ts";
+import { BaseEncodeAct } from "@/codec-common/BaseEncodeAct.ts";
 import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
 import { isEncodedInstance } from "./wire-text.ts";
@@ -15,7 +15,7 @@ import { isEncodedInstance } from "./wire-text.ts";
  * array is the other place the format expresses something JSON cannot, a hole
  * being neither `null` nor absent.
  */
-export class JsonEncodeAct extends EncodeAct<JsonCodecValue, string> {
+export class JsonEncodeAct extends BaseEncodeAct<JsonCodecValue, string> {
   /**
    * @inheritDoc
    *
@@ -102,6 +102,14 @@ export class JsonEncodeAct extends EncodeAct<JsonCodecValue, string> {
   ): JsonCodecValue {
     this.enter(value);
 
+    // TODO(danfuzz): The UTF-8 order computed here does not survive the
+    // assignment below. JavaScript enumerates integer-index-like keys first
+    // and in numeric order, so an object carrying `"10"` and `"2"` is written
+    // in the wrong order however this walk sorted them, and `JSON.stringify()`
+    // never sees the order this loop chose. Section 10 of the formal spec
+    // requires the UTF-8 order, so serializing the members directly -- rather
+    // than by way of an object whose enumeration reorders them -- is what
+    // would actually deliver it.
     const result: Record<string, JsonCodecValue> = {};
     let anySlashKey = false;
     try {

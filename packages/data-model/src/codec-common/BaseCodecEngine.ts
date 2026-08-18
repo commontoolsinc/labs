@@ -1,8 +1,8 @@
 import { type FabricValue } from "@/interface.ts";
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { type CodecRegistry } from "./CodecRegistry.ts";
-import { DecodeAct } from "./DecodeAct.ts";
-import { EncodeAct } from "./EncodeAct.ts";
+import { BaseDecodeAct } from "./BaseDecodeAct.ts";
+import { BaseEncodeAct } from "./BaseEncodeAct.ts";
 import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
@@ -56,11 +56,11 @@ import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts"
 export abstract class BaseCodecEngine<
   Encoded,
   SerializedForm = Encoded,
-  EncAct extends EncodeAct<Encoded, SerializedForm> = EncodeAct<
+  EncAct extends BaseEncodeAct<Encoded, SerializedForm> = BaseEncodeAct<
     Encoded,
     SerializedForm
   >,
-  DecAct extends DecodeAct<Encoded, SerializedForm> = DecodeAct<
+  DecAct extends BaseDecodeAct<Encoded, SerializedForm> = BaseDecodeAct<
     Encoded,
     SerializedForm
   >,
