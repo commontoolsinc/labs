@@ -24,7 +24,7 @@ import {
   CellSelectionError,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
-import { cliText } from "../lib/cli-name.ts";
+import { cliCommand, cliText } from "../lib/cli-name.ts";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
 import { renderPiece } from "../lib/piece-render.ts";
@@ -937,7 +937,7 @@ export function renderPieceCallOutcome(
       const ref = addressArgument(result.resultRef);
       hintOut(
         `Tool result cell: ${ref} (read it back with ` +
-          `\`cf piece get --piece ${ref}\`)`,
+          `\`cf get --piece ${ref}\`)`,
         false,
       );
     }
@@ -969,20 +969,20 @@ export function renderPieceCallOutcome(
             // the replay as a recovery would be offering a duplicate.
             ? `NEXT STEPS:
   → Nothing to collect: this handling wrote no receipt, so the outcome has no address and a call naming the same pair executes and commits AGAIN rather than deduplicating.
-  → Verify state:     cf piece get --piece ${piece} <path> ...`
+  → Verify state:     cf get --piece ${piece} <path> ...`
             // The replay names its session through the environment rather
             // than `--invocation-session`, because a session is what keeps an
             // outcome's address out of reach of anyone who can guess a piece,
             // a verb and an id — and an argument is readable in a process
             // listing where an environment variable is not.
             : `NEXT STEPS:
-  → Read the outcome: cf piece get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
+  → Read the outcome: cf get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
   → Or replay it:     CF_INVOCATION_SESSION=${
               opts.invocation?.session ?? "<session>"
             } cf piece call --piece ${piece} --invocation ${
               opts.invocation?.id ?? "<id>"
             } ${callableName} ... (the commit is durable and the replay loses the race for the receipt, so nothing commits twice — but the handler body RUNS AGAIN, repeating effects outside its transaction, and any write it made into another space)
-  → Verify state:     cf piece get --piece ${piece} <path> ...`,
+  → Verify state:     cf get --piece ${piece} <path> ...`,
         )
         : nextSteps,
     );
@@ -1281,7 +1281,7 @@ TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
   • After 'set', run 'step' to trigger computed value updates
   • Path format: forward slashes only (items/0/name, not items[0].name)
-  • JSON values: strings need quotes: echo '"hello"' | cf piece set ...`);
+  • JSON values: strings need quotes: echo '"hello"' | cf set ...`);
 
 /**
  * The target-selection surface every piece data command carries: quiet, the
@@ -1671,7 +1671,7 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
       "--no-wait",
       "Exit once this handling's commit is acknowledged (before the callable " +
         "name), skipping only the receipt readback: stdout reports status " +
-        '"committed" plus the receipt address, so `cf piece get --piece <that ' +
+        '"committed" plus the receipt address, so `cf get --piece <that ' +
         "address>` collects the outcome later without re-running the handler; " +
         "a call naming the same session and --invocation recovers it too, but " +
         "runs the handler body again. The handler still executes here and its " +
@@ -1778,6 +1778,13 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
             invocation.rawArgs,
             {
               invocation: identity,
+              // The verb help page names the mount that was invoked, so the
+              // blessed spelling never renders usage lines teaching the
+              // deprecated one — and the deprecated mount names itself,
+              // beside its own notice.
+              helpCommandPrefix: cliCommand(
+                [...spelling.split(" "), "...", callableName],
+              ),
               skipReadback: waitControl.mode === "commit",
               showLinks: !!options.showLinks,
               ...(selection === undefined ? {} : { selection }),
@@ -2569,7 +2576,7 @@ updated effective label view.`),
     if (shown.length === 0) return;
     hint(
       cliText(
-        `TIP: --json includes each verb's input schema; 'cf piece call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,
+        `TIP: --json includes each verb's input schema; 'cf call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,
       ),
     );
   })
@@ -2963,7 +2970,7 @@ export async function describePieceFromCommand(
   }
   hint(
     cliText(
-      `TIP: 'cf piece verbs --piece ${pieceConfig.piece} --json' has each verb's schemas; 'cf piece call --piece ${pieceConfig.piece} <verb> -- --help' documents one verb.`,
+      `TIP: 'cf piece verbs --piece ${pieceConfig.piece} --json' has each verb's schemas; 'cf call --piece ${pieceConfig.piece} <verb> -- --help' documents one verb.`,
     ),
   );
 }

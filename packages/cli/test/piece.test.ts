@@ -1696,13 +1696,13 @@ describe("cli piece parsing", () => {
       piece: PIECE,
     };
 
-    it("refuses a root verb path, pointing at cf piece call", async () => {
+    it("refuses a root verb path, pointing at cf call", async () => {
       const deps = guardDeps(guardPiece(RESULT_VALUE));
       const error = await getCellValue(config, ["addItem"], {}, deps)
         .catch((error) => error);
       expect(error).toBeInstanceOf(PieceVerbReadError);
       expect((error as Error).message).toBe(
-        `Path resolves to a verb; use 'cf piece call --piece ${PIECE} addItem' instead.`,
+        `Path resolves to a verb; use 'cf call --piece ${PIECE} addItem' instead.`,
       );
 
       // A root verb on the input cell redirects the same way: the dispatcher
@@ -1712,7 +1712,7 @@ describe("cli piece parsing", () => {
       );
       await expect(
         getCellValue(config, ["setup"], { input: true }, inputDeps),
-      ).rejects.toThrow(/use 'cf piece call/);
+      ).rejects.toThrow(/use 'cf call/);
     });
 
     it("refuses on the stored schema marker even when the value reads empty", async () => {
@@ -1736,7 +1736,7 @@ describe("cli piece parsing", () => {
         },
       };
       await expect(getCellValue(config, ["notify"], {}, guardDeps(piece)))
-        .rejects.toThrow(/use 'cf piece call/);
+        .rejects.toThrow(/use 'cf call/);
     });
 
     it("refuses a nested verb path without suggesting an uncallable command", async () => {
@@ -1757,7 +1757,7 @@ describe("cli piece parsing", () => {
           "instead, or list the callable verbs with " +
           `'cf piece verbs --piece ${PIECE}'.`,
       );
-      expect((error as Error).message).not.toContain("cf piece call");
+      expect((error as Error).message).not.toContain("cf call");
     });
 
     it("reads a probe-classifiable but marker-less output (fails open)", async () => {
@@ -1817,7 +1817,7 @@ describe("cli piece parsing", () => {
       )
         .catch((error) => error);
       expect(error).toBeInstanceOf(PieceVerbReadError);
-      expect((error as Error).message).toContain("cf piece call");
+      expect((error as Error).message).toContain("cf call");
       expect((error as Error).message).not.toContain("--step");
     });
 
@@ -1860,7 +1860,7 @@ describe("cli piece parsing", () => {
           ),
       }).catch((error) => error);
       expect(thrown).toBeInstanceOf(PieceVerbReadError);
-      expect((thrown as Error).message).toContain("cf piece call");
+      expect((thrown as Error).message).toContain("cf call");
 
       // And the same when the selection simply yields nothing.
       const empty = await getCellValue(config, ["addTopic"], options, {

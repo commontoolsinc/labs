@@ -71,7 +71,7 @@ export function renderExecOutcome(
     if (result.resultRef) {
       const address = canonicalAddress(result.resultRef);
       writeError(
-        `Tool result cell: ${address} (read it back with \`cf piece get ` +
+        `Tool result cell: ${address} (read it back with \`cf get ` +
           `--piece ${address}\`)`,
       );
     }

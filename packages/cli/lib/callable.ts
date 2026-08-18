@@ -1344,7 +1344,7 @@ async function boundCyclicResult(
       " Collect the outcome with a shape that bounds it: " +
       (receiptId === undefined
         ? "read the receipt with --select or --schema."
-        : `cf piece get --piece ${receiptId} ` +
+        : `cf get --piece ${receiptId} ` +
           `--schema '{"properties":{"<field>":{"$link":true}}}'.`) +
       " Calling the verb again under --select or --schema shapes it at the " +
       "call, but runs the handler body a second time.",

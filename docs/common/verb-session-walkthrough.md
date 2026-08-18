@@ -307,9 +307,9 @@ cf call --piece board addItem -- --help
 
 ```text
 Usage:
-  cf piece call --piece board addItem -- --help
-  cf piece call --piece board addItem <json>
-  cf piece call --piece board addItem -- --title <string>
+  cf call --piece board addItem -- --help
+  cf call --piece board addItem <json>
+  cf call --piece board addItem -- --title <string>
 
 File a new root item on the board.
 

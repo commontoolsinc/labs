@@ -20,7 +20,7 @@ export const invocationSession = new Command()
   .name("invocation-session")
   .description(
     "Mint an invocation session: the caller identity that an invocation id " +
-      "passed to `cf piece call` is chosen within. One per agent run.",
+      "passed to `cf call` is chosen within. One per agent run.",
   )
   .default("help")
   /* invocation-session new */
