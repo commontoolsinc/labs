@@ -189,6 +189,7 @@ export interface ParkingCoordinatorOutput {
   currentUserCanManageAdmins: boolean;
   enableAdminManager: Stream<void>;
   togglePersonAdmin: Stream<{ name: string }>;
+  trustedTogglePersonAdmin: Stream<ParkingAdminToggleEvent>;
   toggleAdminMode: Stream<void>;
   submitRequest: Stream<{ personName: string; date: string }>;
   cancelRequest: Stream<{ requestId: string }>;
@@ -384,7 +385,7 @@ const prepareParkingAdminToggle = (
   };
 };
 
-interface ParkingAdminToggleEvent {
+export interface ParkingAdminToggleEvent {
   name?: string;
   target?: {
     name?: string;
@@ -490,7 +491,10 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // Pattern
 // ============================================================
 
-export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
+const ParkingCoordinator = pattern<
+  ParkingCoordinatorInput,
+  ParkingCoordinatorOutput
+>(
   (
     {
       spots: inputSpots,
@@ -3033,6 +3037,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       // Exposed actions
       enableAdminManager,
       togglePersonAdmin,
+      trustedTogglePersonAdmin,
       toggleAdminMode,
       submitRequest,
       cancelRequest,
@@ -3048,3 +3053,5 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     };
   },
 );
+
+export default ParkingCoordinator;
