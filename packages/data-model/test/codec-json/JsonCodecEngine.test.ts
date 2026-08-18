@@ -396,7 +396,77 @@ describe("JsonCodecEngine", () => {
     });
   });
 
+  describe("a string that is not this format's serialized form", () => {
+    const NOT_OURS = '{"a":1}';
+
+    it("throws when strict", () => {
+      expect(() =>
+        newDefaultJsonCodecEngine().decode(NOT_OURS, new TestLiveEnvironment())
+      )
+        .toThrow(/Not a JSON-encoded `FabricValue` string/);
+    });
+
+    it("returns a `ProblematicValue` when lenient", () => {
+      // A serialized form is data off a channel like any other, so being the
+      // wrong shape for this format settles against `lenient` exactly as a
+      // malformation inside a well-formed one does. Anything else would make
+      // the outermost check the one refusal `lenient` could not contain.
+      const decoded = newDefaultJsonCodecEngine({ lenient: true })
+        .decode(NOT_OURS, new TestLiveEnvironment());
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect((decoded as ProblematicValue).error)
+        .toMatch(/Not a JSON-encoded `FabricValue` string/);
+    });
+    it("throws for a well-tagged but unparseable payload when strict", () => {
+      const bad = "fvj1:{not json";
+
+      expect(() =>
+        newDefaultJsonCodecEngine().decode(bad, new TestLiveEnvironment())
+      )
+        .toThrow(/Malformed JSON in an encoded `FabricValue` string/);
+    });
+
+    it("returns a `ProblematicValue` for an unparseable payload when lenient", () => {
+      // The tag says the form is ours and the text under it is not JSON. That
+      // is a refusal of the serialized form just as an absent tag is, so it
+      // settles the same way -- otherwise `lenient` would contain one half of
+      // "is this well-formed?" and not the other.
+      const decoded = newDefaultJsonCodecEngine({ lenient: true })
+        .decode("fvj1:{not json", new TestLiveEnvironment());
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect((decoded as ProblematicValue).error)
+        .toMatch(/Malformed JSON in an encoded `FabricValue` string/);
+    });
+  });
+
   describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
+    it("throws for unparseable bytes when strict", () => {
+      const bytes = new TextEncoder().encode("{not json");
+
+      expect(() =>
+        newDefaultJsonCodecEngine().decodeFromBytes(
+          bytes,
+          new TestLiveEnvironment(),
+        )
+      ).toThrow(/Malformed JSON in an encoded `FabricValue` string/);
+    });
+
+    it("returns a `ProblematicValue` for unparseable bytes when lenient", () => {
+      // This entry point reaches a conversion without passing through
+      // `decode()`, so it settles the refusal itself. Were it not to, the
+      // byte boundary would answer a malformed payload differently from the
+      // string boundary for no reason a caller could name.
+      const bytes = new TextEncoder().encode("{not json");
+      const decoded = newDefaultJsonCodecEngine({ lenient: true })
+        .decodeFromBytes(bytes, new TestLiveEnvironment());
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect((decoded as ProblematicValue).error)
+        .toMatch(/Malformed JSON in an encoded `FabricValue` string/);
+    });
+
     it("returns `Uint8Array` from `encodeToBytes()`", () => {
       const { jsonCodecEngine } = makeTestCodec();
       const result = jsonCodecEngine.encodeToBytes(42);

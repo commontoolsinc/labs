@@ -2518,12 +2518,10 @@ export type JsonCodecValue =
 Every engine exposes `encode()` and `decode()`, parameterized by the boundary
 type — `string` for JSON, `Uint8Array` for a binary format — and an engine may
 add a pair for a second boundary type, as `JsonCodecEngine` does for bytes.
-The machinery beneath (tag wrapping, tree walking, codec dispatch) is not
-public. Much of it is `protected` rather than private, that being the surface
-a second engine extends — including the two factories below.
-
-Each act of encoding or decoding carries a context, minted per call by a
-factory the engine's subclass supplies:
+Both are supplied by the base class and are not overridden: they mint the
+act's context, run the walk, and hand off to the format at each end. What a
+format supplies is those two ends and the context factories, all `protected`
+— the surface a second engine extends rather than one a caller reaches.
 
 ```typescript
 // Shown at module scope.
@@ -2535,9 +2533,33 @@ abstract class ExampleEngine {
   ): EncodeContext;
   protected abstract newDecodeContext(
     env: LiveEnvironment,
+    data: string,
   ): DecodeContext;
+
+  protected abstract serializedFromEncoded(
+    encoded: JsonCodecValue,
+    ctx: EncodeContext,
+  ): string;
+  protected abstract encodedFromSerializedForm(
+    data: string,
+    ctx: DecodeContext,
+  ): JsonCodecValue;
 }
 ```
+
+Minting the context in the base rather than in each engine is what makes
+*per act* structural: an engine cannot hold one across calls, because it
+never gets to decide when one is made.
+
+`encodedFromSerializedForm()` is where a format checks that what it was
+handed is its own. What arrives there is data off a channel like anything
+else, so a form that is not this format's is refused by throwing, and
+`decode()` settles that against the engine's `lenient` setting — a lenient
+decode answers a syntactic fault with a `ProblematicValue`, exactly as it
+does a fault found further in. `newDecodeContext()` sees the same form and
+may read something out of it for the act, but it *sniffs rather than
+validates*: it runs before anything has established that the form is this
+format's at all.
 
 The context is what the walk threads from node to node: the caller's
 `LiveEnvironment`, and the values whose encoding or decoding is in
