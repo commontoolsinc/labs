@@ -4,6 +4,7 @@ import {
   FUNCTION_HARDENING_HELPER_NAME,
   VERIFIED_BINDING_METADATA_FIELD,
 } from "@commonfabric/utils/sandbox-contract";
+import { detectCallKind } from "../ast/call-kind.ts";
 import { recoverAuthoredPosition } from "../ast/utils.ts";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -32,6 +33,7 @@ export class ModuleScopeFunctionHardeningTransformer extends Transformer {
         bindingHelperName: bindingHelperName.text,
         trustedBindingNames,
         sourceFileName,
+        checker: context.checker,
         authoredSourceFile: context.program.getSourceFile(sourceFile.fileName),
         useHelper: () => {
           helperNeeded = true;
@@ -68,6 +70,7 @@ interface HardeningState {
   readonly bindingHelperName: string;
   readonly trustedBindingNames: ReadonlySet<string>;
   readonly sourceFileName: string;
+  readonly checker: ts.TypeChecker;
   /**
    * The parsed AUTHORED file. Recovered lineage ranges index into its text, so
    * it is what resolves them to a line/column and to the authored binding name
@@ -83,20 +86,35 @@ function transformTopLevelStatement(
   context: TransformationContext,
   state: HardeningState,
 ): ts.Statement[] {
-  const { factory, sourceFile } = context;
+  const { factory } = context;
 
   if (ts.isFunctionDeclaration(statement)) {
-    return transformFunctionDeclaration(statement, sourceFile, factory, state);
+    return transformFunctionDeclaration(statement, factory, state);
   }
 
   if (ts.isVariableStatement(statement)) {
-    return transformVariableStatement(statement, sourceFile, factory, state);
+    return transformVariableStatement(statement, factory, state);
   }
 
-  if (
-    ts.isExportAssignment(statement) &&
-    isDirectFunctionExpression(statement.expression)
-  ) {
+  if (ts.isExportAssignment(statement)) {
+    return transformExportAssignment(statement, factory, state);
+  }
+
+  return [statement];
+}
+
+/**
+ * `export default <expression>`: hardened when the expression is a function,
+ * binding-annotated when it is a function-bearing builder call. The exported
+ * expression is annotated in place — a default export has no local binding a
+ * trailing annotation statement could name.
+ */
+function transformExportAssignment(
+  statement: ts.ExportAssignment,
+  factory: ts.NodeFactory,
+  state: HardeningState,
+): ts.Statement[] {
+  if (isDirectFunctionExpression(statement.expression)) {
     state.useHelper();
     return [
       factory.updateExportAssignment(
@@ -111,12 +129,32 @@ function transformTopLevelStatement(
     ];
   }
 
-  return [statement];
+  if (statement.isExportEquals) {
+    return [statement];
+  }
+
+  const artifact = resolveBuilderArtifact(statement.expression, state.checker);
+  if (!artifact) {
+    return [statement];
+  }
+
+  state.useBindingHelper();
+  return [
+    factory.updateExportAssignment(
+      statement,
+      statement.modifiers,
+      annotateBindingIdentifier(
+        statement.expression,
+        { artifact },
+        factory,
+        state,
+      ),
+    ),
+  ];
 }
 
 function transformFunctionDeclaration(
   statement: ts.FunctionDeclaration,
-  _sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   state: HardeningState,
 ): ts.Statement[] {
@@ -182,7 +220,6 @@ function transformFunctionDeclaration(
 
 function transformVariableStatement(
   statement: ts.VariableStatement,
-  _sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   state: HardeningState,
 ): ts.Statement[] {
@@ -204,19 +241,28 @@ function transformVariableStatement(
       const isDirectFunction = isDirectFunctionExpression(initializer);
       const isTrustedCallable = isTrustedBinding &&
         (ts.isCallExpression(initializer) || isDirectFunction);
+      const artifact = resolveBuilderArtifact(
+        declaration.initializer,
+        state.checker,
+      );
 
-      if (!isTrustedCallable && !isDirectFunction) {
+      if (!isTrustedCallable && !isDirectFunction && !artifact) {
         return declaration;
       }
 
       changed = true;
-      const inlineBindingAnnotation = isTrustedCallable && exported;
+      // A binding that is both trusted and a builder artifact takes ONE
+      // annotation carrying both sets of metadata.
+      const annotateBinding = isTrustedCallable || artifact !== undefined;
+      const inlineBindingAnnotation = annotateBinding && exported;
       let rewritten = declaration.initializer;
-      if (isTrustedCallable) {
+      if (annotateBinding) {
         state.useBindingHelper();
         const metadata: BindingIdentityMetadataInput = {
-          trustedBindingName: declaration.name.text,
-          site: initializer,
+          ...(isTrustedCallable
+            ? { trustedBindingName: declaration.name.text }
+            : {}),
+          ...(artifact ? { artifact } : { site: initializer }),
         };
         if (inlineBindingAnnotation) {
           rewritten = annotateBindingIdentifier(
@@ -301,6 +347,44 @@ function wrapWithFunctionHardener(
   );
 }
 
+/**
+ * A top-level builder artifact that carries an authored function: the builder
+ * call itself, plus the function-valued argument whose authored site the
+ * annotation reports. `pattern`, `handler`, `lift`, `computed`, `action` and
+ * the rest of the builder family qualify; a builder call with no function
+ * argument carries no authored function to name and is left alone.
+ */
+interface BuilderArtifact {
+  readonly call: ts.CallExpression;
+  readonly fn: ts.ArrowFunction | ts.FunctionExpression;
+}
+
+/**
+ * The function-bearing builder artifact an expression denotes, if any. Type
+ * wrappers are stripped first, so a cast-typed artifact
+ * (`const x = handler(...) as XFactory`) resolves like a bare one — the same
+ * unwrap `__cfReg` registration performs, and for the same reason.
+ *
+ * This runs on the fully lowered tree, where synthetic hoists
+ * (`__cfLift_N`, `__cfHandler_N`, `__cfPattern_N`) and authored builder consts
+ * both present as builder calls: `detectCallKind` recognizes the pipeline's
+ * `__cfHelpers.*` spelling as well as the authored imports, so one predicate
+ * covers both.
+ */
+function resolveBuilderArtifact(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): BuilderArtifact | undefined {
+  const call = unwrapExpression(expression);
+  if (!ts.isCallExpression(call)) return undefined;
+  if (detectCallKind(call, checker)?.kind !== "builder") return undefined;
+  const fn = call.arguments.find(
+    (argument): argument is ts.ArrowFunction | ts.FunctionExpression =>
+      ts.isArrowFunction(argument) || ts.isFunctionExpression(argument),
+  );
+  return fn ? { call, fn } : undefined;
+}
+
 /** What a binding-identity annotation describes. */
 interface BindingIdentityMetadataInput {
   /**
@@ -308,7 +392,9 @@ interface BindingIdentityMetadataInput {
    * (`WriteAuthorizedBy`) scope. It is what becomes `bindingPath`.
    */
   readonly trustedBindingName?: string;
-  /** The annotated node, whose authored site the metadata reports. */
+  /** The builder artifact being annotated, when the value is one. */
+  readonly artifact?: BuilderArtifact;
+  /** The annotated node, for values that are not builder artifacts. */
   readonly site?: ts.Node;
 }
 
@@ -350,6 +436,10 @@ function annotateBindingIdentifier(
  * - `bindingName` — the authored name the function was declared under, for
  *   debug display. Absent when it was authored as an inline expression under no
  *   declaration, such as a lifted JSX expression or a `.map` callback.
+ *
+ * The position describes the artifact's FUNCTION — the callback a builder was
+ * given — falling back to the builder call as a whole when the callback's
+ * lineage was dropped.
  */
 function createBindingIdentityMetadata(
   input: BindingIdentityMetadataInput,
@@ -415,7 +505,9 @@ interface AuthoredSite {
 
 /**
  * Resolve the authored line/column — and the authored binding name enclosing
- * it — for the value an annotation describes.
+ * it — for the value an annotation describes. The candidates are tried in
+ * order, so a builder artifact reports its callback's site and falls back to
+ * the whole call only when the callback arrived with no lineage.
  */
 function resolveAuthoredSite(
   input: BindingIdentityMetadataInput,
@@ -424,7 +516,11 @@ function resolveAuthoredSite(
   const authoredSourceFile = state.authoredSourceFile;
   if (!authoredSourceFile) return undefined;
 
-  const candidates = input.site ? [input.site] : [];
+  const candidates = input.artifact
+    ? [input.artifact.fn, input.artifact.call]
+    : input.site
+    ? [input.site]
+    : [];
 
   for (const candidate of candidates) {
     const range = recoverAuthoredPosition(candidate);
