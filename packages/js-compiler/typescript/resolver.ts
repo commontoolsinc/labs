@@ -33,11 +33,7 @@ export async function resolveProgram(
       // Refused here rather than resolved: past this point the `..` segments
       // are clamped away and every later error names a path that appears in
       // no source file.
-      if (importEscapesRoot(specifier, current)) {
-        throw new Error(
-          `Import "${specifier}" in "${current.name}" escapes the program root.`,
-        );
-      }
+      assertInsideRoot(specifier, current);
       const identifier = resolveSpecifier(specifier, current);
       if (sources.has(identifier)) {
         continue;
@@ -94,7 +90,7 @@ function isUnresolvedModuleOk(
 // existing compile-path importers.
 export { resolveImportSpecifier } from "../specifier.ts";
 import {
-  importEscapesProgramRoot as importEscapesRoot,
+  assertImportInsideProgramRoot as assertInsideRoot,
   resolveImportSpecifier as resolveSpecifier,
 } from "../specifier.ts";
 

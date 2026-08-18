@@ -43,6 +43,24 @@ export function resolveImportSpecifier(
  * compile path accepted, so refusing an escape is the graph resolver's call,
  * not this module's.
  */
+/**
+ * Refuse an import that climbs above the program root, naming the import and
+ * the importer. Every graph walk that resolves raw sources calls this before
+ * {@link resolveImportSpecifier}, so the refusal reads the same wherever the
+ * escape surfaces; walks over already-compiled programs do not, because their
+ * inputs passed a walk that did.
+ */
+export function assertImportInsideProgramRoot(
+  specifier: string,
+  from: Source,
+): void {
+  if (importEscapesProgramRoot(specifier, from)) {
+    throw new Error(
+      `Import "${specifier}" in "${from.name}" escapes the program root.`,
+    );
+  }
+}
+
 export function importEscapesProgramRoot(
   specifier: string,
   from: Source,
