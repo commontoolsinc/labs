@@ -1,9 +1,11 @@
 /**
- * A query-result proxy is a live, transaction-backed view. Structural
- * mutations (freeze/seal/defineProperty/delete) cannot be honored without
- * either corrupting the backing store or defeating live read-resolution, so
- * the proxy refuses them outright -- callers must snapshot to a plain value
- * first. These tests lock in that refusal.
+ * A query-result proxy is a live, transaction-backed READ view. It carries no
+ * write capability, so property assignment and the in-place array mutators
+ * refuse; structural mutations (freeze/seal/defineProperty/delete) refuse for
+ * a second reason, that they cannot be honored without either corrupting the
+ * backing store or defeating live read-resolution. Writes reach a cell through
+ * the `asCell` handle a `Writable<..>` field mints. These tests lock in both
+ * refusals.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -16,7 +18,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test proxy mutation guard");
 const space = signer.did();
 
-describe("query-result proxy structural-mutation guard", () => {
+describe("query-result proxy mutation guard", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -41,6 +43,46 @@ describe("query-result proxy structural-mutation guard", () => {
     cell.set({ a: 1, b: { c: 2 } });
     return cell.getAsQueryResult() as Record<string, unknown>;
   }
+
+  function makeArrayProxy(): number[] {
+    const cell = runtime.getCell<{ items: number[] }>(
+      space,
+      "guarded-array",
+      undefined,
+      tx,
+    );
+    cell.set({ items: [1, 2, 3] });
+    return (cell.getAsQueryResult() as { items: number[] }).items;
+  }
+
+  it("refuses a property assignment", () => {
+    const proxy = makeProxy();
+    expect(() => {
+      proxy.a = 2;
+    }).toThrow("read-only");
+  });
+
+  it("refuses `push`", () => {
+    const items = makeArrayProxy();
+    expect(() => items.push(4)).toThrow("read-only");
+  });
+
+  it("refuses `splice`", () => {
+    const items = makeArrayProxy();
+    expect(() => items.splice(0, 1)).toThrow("read-only");
+  });
+
+  it("refuses `sort`", () => {
+    const items = makeArrayProxy();
+    expect(() => items.sort()).toThrow("read-only");
+  });
+
+  it("still allows the read-only array methods", () => {
+    const items = makeArrayProxy();
+    expect(items.map((n) => n * 2)).toEqual([2, 4, 6]);
+    expect(items.filter((n) => n > 1)).toEqual([2, 3]);
+    expect(items.length).toBe(3);
+  });
 
   it("refuses Object.freeze", () => {
     const proxy = makeProxy();

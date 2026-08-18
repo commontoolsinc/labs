@@ -15,7 +15,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { isPrimitiveCellLink } from "../src/link-utils.ts";
-import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -66,18 +65,10 @@ describe("CT-1173: array push via query-result-proxy", () => {
     try {
       // Get a query result proxy (this is what patterns use when they access
       // writable arrays via their input/output bindings)
-      const proxy = createQueryResultProxy<{ name: string }[]>(
-        runtime,
-        tx,
-        arrayCell.getAsNormalizedFullLink(),
-        0,
-        true, // writable
-      );
-
       // Push objects without any explicit identity.
       // The bug was that they should be anchored automatically but weren't.
-      proxy.push({ name: "Alice" });
-      proxy.push({ name: "Bob" });
+      arrayCell.push({ name: "Alice" });
+      arrayCell.push({ name: "Bob" });
     } finally {
       popFrame();
     }
@@ -128,20 +119,10 @@ describe("CT-1173: array push via query-result-proxy", () => {
     pushFrame(frame);
 
     try {
-      const proxy = createQueryResultProxy<
-        { name: string; priority: number; createdAt: number }[]
-      >(
-        runtime,
-        tx,
-        arrayCell.getAsNormalizedFullLink(),
-        0,
-        true,
-      );
-
       // Push multiple items with all fields populated
-      proxy.push({ name: "Alice", priority: 1, createdAt: 1000 });
-      proxy.push({ name: "Bob", priority: 2, createdAt: 2000 });
-      proxy.push({ name: "Charlie", priority: 3, createdAt: 3000 });
+      arrayCell.push({ name: "Alice", priority: 1, createdAt: 1000 });
+      arrayCell.push({ name: "Bob", priority: 2, createdAt: 2000 });
+      arrayCell.push({ name: "Charlie", priority: 3, createdAt: 3000 });
     } finally {
       popFrame();
     }

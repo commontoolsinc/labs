@@ -24,10 +24,8 @@ describe("Pattern Runner - Handlers", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
-  let Writable: ReturnType<typeof createBuilder>["commonfabric"]["Writable"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -39,12 +37,7 @@ describe("Pattern Runner - Handlers", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({
-      lift,
-      pattern,
-      handler,
-      Writable,
-    } = commonfabric);
+    ({ pattern, handler } = commonfabric);
   });
 
   afterEach(async () => {

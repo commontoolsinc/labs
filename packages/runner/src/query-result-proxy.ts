@@ -1,24 +1,17 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
-import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLinkTracingDereferences } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import { type Cell, createCell, frameAnchorIds } from "./cell.ts";
+import { type Cell, createCell } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
 import {
   type IExtendedStorageTransaction,
   type IReadOptions,
 } from "./storage/interface.ts";
-import {
-  ignoreReadForScheduling,
-  mergeableOpRead,
-} from "./storage/reactivity-log.ts";
-import { toURI } from "./uri-utils.ts";
+import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereferenceTraces,
@@ -40,16 +33,11 @@ const SHAPE_READ: IReadOptions = { nonRecursive: true };
 
 // Cache of target objects to their proxies, scoped by ReactivityLog.
 //
-// `byValue` holds one proxy per value per writability. A writable proxy
-// carries write traps a read-only one refuses, so the two are different
-// objects and each gets its own slot; a view built for one writability is
-// never handed to a caller asking for the other. Within a writability the two
-// share, which is what this index sits behind `byLink` for: two links that
-// resolve to one stored object are one object to a consumer comparing by
-// identity.
+// `byValue` sits behind `byLink` so that two links resolving to one stored
+// object are one object to a consumer comparing by identity.
 type ProxyCache = {
   byLink: Map<string, any>;
-  byValue: WeakMap<object, { readOnly?: any; writable?: any }>;
+  byValue: WeakMap<object, any>;
 };
 
 const proxyCacheByTx = new WeakMap<
@@ -85,7 +73,7 @@ const getProxyCache = (
   if (!txCache) {
     txCache = {
       byLink: new Map<string, any>(),
-      byValue: new WeakMap<object, { readOnly?: any; writable?: any }>(),
+      byValue: new WeakMap<object, any>(),
     };
     proxyCacheByTx.set(cacheIndex, txCache);
   }
@@ -94,11 +82,9 @@ const getProxyCache = (
 
 const proxyCacheKey = (
   link: NormalizedFullLink,
-  writable: boolean,
   cfcLabelView: CfcLabelView | undefined,
 ): string =>
   JSON.stringify([
-    writable,
     link.space,
     link.id,
     link.path,
@@ -168,34 +154,26 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
 };
 
 /**
- * Builds a JS proxy view over a stored cell. Read traps resolve links
- * and wrap nested values; write-side array mutators (`push`, `splice`,
- * `unshift`, etc.) route through the same write-boundary normalization
- * as `Cell.set()` / `Cell.push()`.
+ * Builds a read-only JS proxy view over a stored cell. Read traps resolve
+ * links and wrap nested values; every write refuses.
  *
- * **Frozenness contract:** Values handed to the write-side array mutators are
- * normalized (and frozen) level by level inside the write's diff; the caller's
- * input objects are never mutated, and already-deep-frozen valid `FabricValue`
- * inputs are accepted identity-preservingly.
+ * **A view carries no write capability.** Property assignment and the in-place
+ * array mutators (`push`, `splice`, `unshift`, …) throw, naming `Writable<..>`
+ * as the way to ask for write access. Writes reach a cell through the `asCell`
+ * handle a `Writable<..>` field mints, whose `Cell.set`/`Cell.push` carry the
+ * merge intent and the write-boundary normalization.
  *
- * **Writability is a capability, not authoring guidance.** The refusal a
- * read-only view gives — "declare type as `Writable<..>`" — names the way to
- * ask for write access, but the refusal itself is enforcement that the builder
- * depends on: `collectWritablyBoundRoots` in `builder/pattern.ts` takes a plain
- * (non-`asCell`) binding in a handler to be unwritable, and a cell written only
- * through such a binding would be classified `computed` — replayable from its
- * inputs — if that held and the refusal did not. So a view built for one
- * writability must never answer a request for the other. Write capability
- * reaches a pattern through an `asCell` handle minted from a `Writable<..>`
- * field; every proxy a pattern is handed is read-only, and a writable one is
- * reached only by asking `Cell.getAsQueryResult` for one directly.
+ * The builder depends on the refusal rather than merely documenting it:
+ * `collectWritablyBoundRoots` in `builder/pattern.ts` takes a plain
+ * (non-`asCell`) binding in a handler to be unwritable, and a cell written
+ * only through such a binding would be classified `computed` — replayable from
+ * its inputs — if that held and the refusal did not.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   depth: number = 0,
-  writable: boolean = false,
   cfcLabelView?: CfcLabelView,
 ): T {
   // The transaction decides which of the two this is. Marked for lazy
@@ -220,7 +198,6 @@ export function createQueryResultProxy<T>(
     tx,
     link,
     depth,
-    writable,
     cfcLabelView,
     pinned,
   );
@@ -243,7 +220,6 @@ function createViewProxy<T>(
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   depth: number,
-  writable: boolean,
   cfcLabelView: CfcLabelView | undefined,
   pinned: boolean,
 ): T {
@@ -282,10 +258,9 @@ function createViewProxy<T>(
   //
   // The key names no more than the caches below it already distinguish, so
   // this index can never be the reason two things that differ share a view.
-  // `writable` is there because a writable proxy carries write traps a
-  // read-only one refuses; `depth` and `pinned` are not, because `byLink`
-  // conflates the first and the second changes nothing about what a view of
-  // this link against this transaction is.
+  // `depth` and `pinned` are not in it, because `byLink` conflates the first
+  // and the second changes nothing about what a view of this link against this
+  // transaction is.
   //
   // A caller-supplied label view would have to be part of the key, and
   // serializing one costs more than the read it saves. Those reads take the
@@ -294,9 +269,7 @@ function createViewProxy<T>(
   const viewMemo = cfcLabelView === undefined && resolved.memoKey !== undefined
     ? viewTx.getSnapshotMemo?.()
     : undefined;
-  const viewKey = viewMemo === undefined
-    ? ""
-    : `view:${writable ? 1 : 0}|${resolved.memoKey}`;
+  const viewKey = viewMemo === undefined ? "" : `view:${resolved.memoKey}`;
   const cached = viewMemo?.get(viewKey) as { view: unknown } | undefined;
   if (cached !== undefined) return cached.view as T;
   const remember = <V>(view: V): V => {
@@ -407,18 +380,15 @@ function createViewProxy<T>(
   // one cache per transaction — which is right, because it describes the instant
   // that transaction saw.
   const txCache = getProxyCache(tx, runtime);
-  const cacheKey = proxyCacheKey(link, writable, cfcLabelView);
+  const cacheKey = proxyCacheKey(link, cfcLabelView);
 
   // Check if we already have a proxy for this target in the cache.
   // The cache key is the original `value` (not the stub), ensuring that
   // the same frozen object always maps to the same proxy instance -- and the
   // value index is consulted for the writability actually asked for, so a view
   // built for one never answers a request for the other.
-  let existingProxy = txCache.byLink.get(cacheKey);
-  if (existingProxy === undefined && cfcLabelView === undefined) {
-    const entry = txCache.byValue.get(value);
-    existingProxy = writable ? entry?.writable : entry?.readOnly;
-  }
+  const existingProxy = txCache.byLink.get(cacheKey) ??
+    (cfcLabelView === undefined ? txCache.byValue.get(value) : undefined);
   if (existingProxy) return remember(existingProxy);
 
   const proxy = new Proxy(proxyTarget as object, {
@@ -465,7 +435,6 @@ function createViewProxy<T>(
                         path: [...link.path, String(index)],
                       },
                       depth + 1,
-                      writable,
                       childLabelView(cfcLabelView, String(index)),
                       pinned,
                     ),
@@ -522,7 +491,6 @@ function createViewProxy<T>(
                 tx,
                 { ...link, path: [...link.path, String(i)] },
                 depth + 1,
-                writable,
                 childLabelView(cfcLabelView, String(i)),
                 pinned,
               );
@@ -530,156 +498,14 @@ function createViewProxy<T>(
 
             return method.apply(copy, args);
           }
-          : (...args: any[]) => {
-            if (!writable) {
-              throw new Error(
-                "This value is read-only, declare type as Writable<..> instead to get a writable version",
-              );
-            }
-
-            if (!tx) {
-              throw new Error(
-                "Transaction required for mutation\n" +
-                  "help: move mutations to handlers, or use computed() for read-only operations",
-              );
-            }
-
-            // Operate on a copy so we can diff. For write-only methods like
-            // push, don't proxy the other members so we don't log reads.
-            // Wraps values in a proxy that remembers the original index and
-            // creates cell value proxies on demand.
-            let copy: any;
-            // The base array a mutator operates on. Read fresh from the
-            // transaction, not the proxy-creation-time `value`, which is stale
-            // after an earlier write in this transaction (CT-1173). Without this a
-            // `push("b")` then `sort()` sorts the stale pre-push array and drops
-            // "b" from the local result. WriteOnly and ReadWrite both read fresh;
-            // ReadWrite also unwraps against this array below.
-            // For `push`, this base-array read is the op's own incidental read:
-            // mark it `mergeableOpRead` so the commit drops it from conflict
-            // detection and the tail append merges, matching `Cell.push`. The
-            // handler's own explicit `.get()` of the list stays in the conflict
-            // set. Other mutators (fill, unshift, sort, splice, ...) are not
-            // mergeable tail appends and keep their read.
-            const currentValue = readTx().readValueOrThrow(
-              link,
-              prop === "push" ? { meta: mergeableOpRead } : undefined,
-            ) as any[];
-            const base = Array.isArray(currentValue) ? currentValue : [];
-            if (isReadWrite === ArrayMethodType.WriteOnly) {
-              copy = [...base];
-            } else {
-              copy = base.map((_, index) =>
-                createProxyForArrayValue(
-                  runtime,
-                  childViewTx(),
-                  tx,
-                  index,
-                  { ...link, path: [...link.path, String(index)] },
-                  writable,
-                  childLabelView(cfcLabelView, String(index)),
-                  pinned,
-                )
-              );
-            }
-
-            let result = method.apply(copy, args);
-
-            // Unwrap results and return as value proxies
-            if (isProxyForArrayValue(result)) result = result.valueOf();
-            else if (Array.isArray(result)) {
-              result = result.map((value) =>
-                isProxyForArrayValue(value) ? value.valueOf() : value
-              );
-            }
-
-            if (isReadWrite === ArrayMethodType.ReadWrite) {
-              // Undo the proxy wrapping and assign original items.
-              copy = copy.map((item: any) =>
-                isProxyForArrayValue(item) ? base[item[originalIndex]] : item
-              );
-            }
-
-            // The anchor id source turns any newly added objects into entity
-            // documents of their own rather than inline data, which is
-            // critical for persistence.
-            const frame = getTopFrame();
-
-            // And if there was a change at all, update the cell.
-            diffAndUpdate(
-              runtime,
-              tx,
-              link,
-              copy,
-              {
-                parent: { id: link.id, space: link.space },
-                method: prop,
-                call: new Error().stack,
-                context: frame?.cause ?? "unknown",
-              },
-              undefined,
-              frameAnchorIds(frame),
+          : () => {
+            // A view is read-only, so the in-place mutators have nothing to
+            // route to. Mutate through the `asCell` handle a `Writable<..>`
+            // field mints, whose `Cell.push`/`Cell.set` carry the merge intent
+            // these methods never could.
+            throw new Error(
+              "This value is read-only, declare type as Writable<..> instead to get a writable version",
             );
-
-            // A tail append records its intent so the commit emits a
-            // tail-relative, mergeable operation rather than a position diffed
-            // against a possibly-stale base. Any other in-place mutator (splice,
-            // unshift, sort, reverse, fill, ...) reshapes the array: for any
-            // mergeable op recorded earlier in the transaction on this array —
-            // or on an array nested inside it, which this reshape rewrites just
-            // as surely — the recorded tail no longer identifies the appended
-            // elements, so abandon those intents and let the whole-array diff
-            // carry the reshaped result.
-            if (prop === "push") {
-              tx.recordMergeableOp?.(link, {
-                op: "append",
-                count: args.length,
-              });
-            } else {
-              tx.poisonMergeableOp?.(link);
-            }
-
-            // CT-1173 FIX: Don't mutate proxy target (value) after writes.
-            // The old code did `value.splice(0, value.length, ...newValue)` which
-            // mutated the heap's stored array because `value` shares a reference
-            // with heap state. This caused StorageTransactionInconsistent errors
-            // because read invariants would see the written values before commit.
-            //
-            // The proxy still works correctly without this sync because:
-            // 1. Reads go through the transaction which returns fresh values
-            // 2. The diffAndUpdate above has already written the changes
-            // 3. Subsequent reads via the proxy will see the updated values
-
-            if (Array.isArray(result)) {
-              const cause = {
-                parent: { id: link.id, path: link.path },
-                resultOf: prop,
-                call: new Error().stack,
-                context: getTopFrame()?.cause ?? "unknown",
-              };
-
-              const resultLink: NormalizedFullLink = {
-                id: toURI(hashOf(cause)),
-                space: link.space,
-                scope: link.scope,
-                path: [],
-              };
-
-              diffAndUpdate(runtime, tx, resultLink, result, cause);
-
-              result = createViewProxy(
-                runtime,
-                childViewTx(),
-                tx,
-                resultLink,
-                0,
-                writable,
-                undefined,
-                pinned,
-              );
-            }
-
-            return result;
           };
       }
 
@@ -709,45 +535,15 @@ function createViewProxy<T>(
         tx,
         { ...link, path: [...link.path, prop] },
         depth + 1,
-        writable,
         childLabelView(cfcLabelView, String(prop)),
         pinned,
       );
     },
-    set: (_, prop, value) => {
+    set: (_, prop) => {
       if (typeof prop === "symbol") return false;
-
-      if (!writable) {
-        throw new Error(
-          "This value is read-only, declare type as Writable<..> instead to get a writable version",
-        );
-      }
-
-      if (isCellResult(value)) value = value[toCell]();
-
-      if (!tx) {
-        throw new Error(
-          "Transaction required for mutation\n" +
-            "help: move mutations to handlers, or use computed() for read-only operations",
-        );
-      }
-
-      const writeLink = { ...link, path: [...link.path, String(prop)] };
-      diffAndUpdate(
-        runtime,
-        tx,
-        writeLink,
-        value,
+      throw new Error(
+        "This value is read-only, declare type as Writable<..> instead to get a writable version",
       );
-
-      // Assigning over a property is a whole-value write, the same reshape
-      // `Cell.set` performs — and it reaches this trap instead of that method.
-      // Any mergeable op recorded at or beneath the assigned property refers to
-      // a value this write just replaced, so abandon it and let the whole-value
-      // diff carry the result.
-      tx.poisonMergeableOp?.(writeLink);
-
-      return true;
     },
     ownKeys: () => {
       const current = readTx().readValueOrThrow(link, SHAPE_READ);
@@ -840,14 +636,13 @@ function createViewProxy<T>(
         return {
           configurable: true,
           enumerable: true,
-          writable: writable,
+          writable: false,
           value: createViewProxy(
             runtime,
             childViewTx(),
             tx,
             { ...link, path: [...link.path, prop as string] },
             depth + 1,
-            writable,
             childLabelView(cfcLabelView, String(prop)),
             pinned,
           ),
@@ -906,68 +701,9 @@ function createViewProxy<T>(
   // Cache the proxy in the appropriate cache before returning
   txCache.byLink.set(cacheKey, proxy);
   if (cfcLabelView === undefined) {
-    const entry = txCache.byValue.get(value) ?? {};
-    if (writable) entry.writable = proxy;
-    else entry.readOnly = proxy;
-    txCache.byValue.set(value, entry);
+    txCache.byValue.set(value, proxy);
   }
   return remember(proxy);
-}
-
-// Wraps a value on an array so that it can be read as literal or object,
-// yet when copied will remember the original array index.
-type ProxyForArrayValue = {
-  valueOf: () => any;
-  toString: () => string;
-  [originalIndex]: number;
-};
-const originalIndex = Symbol("original index");
-
-const createProxyForArrayValue = (
-  runtime: Runtime,
-  viewTx: IExtendedStorageTransaction,
-  tx: IExtendedStorageTransaction | undefined,
-  source: number,
-  link: NormalizedFullLink,
-  writable: boolean = false,
-  cfcLabelView?: CfcLabelView,
-  pinned: boolean = false,
-): { [originalIndex]: number } => {
-  const target = {
-    valueOf: function () {
-      return createViewProxy(
-        runtime,
-        viewTx,
-        tx,
-        link,
-        0,
-        writable,
-        cfcLabelView,
-        pinned,
-      );
-    },
-    toString: function () {
-      return String(
-        createViewProxy(
-          runtime,
-          viewTx,
-          tx,
-          link,
-          0,
-          writable,
-          cfcLabelView,
-          pinned,
-        ),
-      );
-    },
-    [originalIndex]: source,
-  };
-
-  return target;
-};
-
-function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
-  return isObjectOrArray(value) && originalIndex in value;
 }
 
 /**

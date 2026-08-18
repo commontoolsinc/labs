@@ -292,10 +292,8 @@ first, since the op carries only the delta.
   hold is the list of commit-time checks below, each of which had to be found.
   The rule is that every whole-value write poisons the ops it
   covers, so the sites to keep in step are every path that performs one:
-  `Cell.set`, `Cell.setRawUntyped`, the query-result proxy's in-place mutators,
-  and the proxy's property-assignment trap — the last two being separate code
-  paths for the same reshape. Plus `recordMergeableOp` itself, on a second,
-  different op kind at one path. `poisonMergeableOp` is what they all call, and
+  `Cell.set` and `Cell.setRawUntyped`. Plus `recordMergeableOp` itself, on a
+  second, different op kind at one path. `poisonMergeableOp` is what they all call, and
   it acts on every intent at *or beneath* the path written — a
   write to an enclosing object (`doc.set({rows})`) reshapes the array inside it
   just as surely as a write to the array itself — and on nothing above it. So a
@@ -442,8 +440,8 @@ retry.
 The implemented drop is narrower than that. It removes only the reads the op
 *itself* issues — the list value it reads to build the write (marked
 `mergeableOpRead`), the link-resolution and element sub-reads strictly beneath
-the array path, the query-result proxy's shape-only container read of the array,
-and the `["cfc"]` policy label — and keeps a *recursive* read at the array path
+the array path, and the `["cfc"]` policy label — and keeps a *recursive* read
+at the array path
 that the op did not make, which is the handler's own explicit `.get()`/`.some()`.
 So a handler that reads the list and then `push`es still records that read: two
 concurrent conditional appends conflict, the loser retries, sees the winner's
