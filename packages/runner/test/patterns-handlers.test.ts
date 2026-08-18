@@ -302,12 +302,22 @@ describe("Pattern Runner - Handlers", () => {
       return tuple;
     });
 
+    // `latest` boxes the node's output, and the handler writes it through
+    // `.key("output")`, because the second event has to RE-POINT that slot at
+    // a second node. An unboxed `latest` cannot be re-pointed: an `asCell`
+    // handle resolves the write-redirect chain and then one step past the
+    // first non-redirect link (`schema-links.test.ts`, "returns Cell pointing
+    // one step past first non-redirect"), so once `latest` holds a reference
+    // to the first node's output document the handle addresses THAT document
+    // and a second `.set()` writes into it. Boxing, and naming the slot with
+    // `.key()`, is the documented shape for a stored reference —
+    // `docs/development/debugging/gotchas/cell-reference-overwrite.md`.
     const incHandler = handler<
       { amount: number },
       {
         counter: Cell<{ value: number }>;
         nested: { a: { b: { c: number } } };
-        latest: Cell<number[] | undefined>;
+        latest: Cell<{ output?: number[] }>;
       }
     >(
       true,
@@ -316,13 +326,17 @@ describe("Pattern Runner - Handlers", () => {
         properties: {
           counter: { type: "object", asCell: ["cell"] },
           nested: true,
-          latest: { type: "array", asCell: ["cell"] },
+          latest: {
+            type: "object",
+            properties: { output: { type: "array" } },
+            asCell: ["cell"],
+          },
         },
       },
       (event, state) => {
         const value = state.counter.key("value");
         value.set(value.get() + event.amount);
-        state.latest.set(incLogger({
+        state.latest.key("output").set(incLogger({
           counter: state.counter,
           amount: event.amount,
           nested: state.nested.a.b,
@@ -334,12 +348,14 @@ describe("Pattern Runner - Handlers", () => {
       counter: { value: number };
       nested: { a: { b: { c: number } } };
     }>(({ counter, nested }) => {
-      const latest = Writable.of<number[] | undefined>(undefined);
+      const latest = Writable.of<{ output?: number[] }>({});
       const stream = incHandler({ counter, nested, latest });
       return { stream, latest };
     });
 
-    const resultCell = runtime.getCell<{ stream: any; latest?: number[] }>(
+    const resultCell = runtime.getCell<
+      { stream: any; latest: { output?: number[] } }
+    >(
       space,
       "demand handler-written pattern results",
       undefined,
@@ -350,19 +366,27 @@ describe("Pattern Runner - Handlers", () => {
 
     await result.pull();
 
+    const output = result.key("latest").key("output");
+
+    // The node the handler built is reached by pulling its cell: dispatching
+    // the event and letting the scheduler settle runs nothing, and the pull is
+    // what evaluates it.
     result.key("stream").send({ amount: 1 });
     await runtime.idle();
     expect(values).toEqual([]);
-    expect(await result.key("latest").pull()).toEqual([1, 1, 0]);
+    expect(await output.pull()).toEqual([1, 1, 0]);
     expect(values).toEqual([[1, 1, 0]]);
 
-    // The node the handler built is reached by pulling its cell, not by a
-    // scheduler node minted for the handler's result.
-    const graph = runtime.scheduler.getGraphSnapshot();
-    expect(graph.nodes.some((node) => node.id.startsWith("readResult:")))
-      .toBe(false);
-    expect(graph.nodes.some((node) => node.id.startsWith("handlerResult:")))
-      .toBe(false);
+    // A second event builds a second node and re-points `latest.output` at it.
+    // The first node's output document is no longer reachable from anything
+    // pulled, so it loses demand: it must not re-run against the newer counter
+    // and must not be what `latest.output` resolves to.
+    result.key("stream").send({ amount: 2 });
+    await runtime.idle();
+    expect(await output.pull()).toEqual([3, 2, 0]);
+    expect(values).toContainEqual([1, 1, 0]);
+    expect(values).toContainEqual([3, 2, 0]);
+    expect(values.some((tuple) => tuple.join(",") === "3,1,0")).toBe(false);
   });
 
   it("should execute handlers with schemas", async () => {
