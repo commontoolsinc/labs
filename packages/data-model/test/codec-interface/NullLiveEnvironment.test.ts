@@ -22,6 +22,9 @@ describe("NullLiveEnvironment", () => {
   describe("NULL_LIVE_ENVIRONMENT", () => {
     it("is a singleton (re-import yields the same instance)", async () => {
       const reimported =
+        // Loading the module a second time and getting the same instance back
+        // is the assertion.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         (await import("@/codec-interface/NullLiveEnvironment.ts"))
           .NULL_LIVE_ENVIRONMENT;
       expect(reimported).toBe(NULL_LIVE_ENVIRONMENT);

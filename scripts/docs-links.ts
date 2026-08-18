@@ -502,6 +502,8 @@ const renderDocsHtml = async (
   graph: DocsGraph,
   dot: string,
 ): Promise<string> => {
+  // The graph renderer is needed only for HTML output.
+  // deno-lint-ignore cf-imports/no-inline-module-import
   const { instance } = await import("@viz-js/viz");
   const viz = await instance();
   const edgeIdPrefix = "docs-edge-";

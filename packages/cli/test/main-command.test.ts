@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- each test drives
+// its own copy of the command tree, which reads the environment as it is built;
+// the query string is what makes the copy.
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";

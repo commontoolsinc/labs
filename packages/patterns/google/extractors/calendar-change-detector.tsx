@@ -24,6 +24,7 @@ import {
   type PatternFactory,
   TILE_UI,
   UI,
+  type VNode,
   wish,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -270,7 +271,7 @@ export interface PatternOutput {
   urgentChanges: ScheduleChange[];
   normalChanges: ScheduleChange[];
   hasChanges: boolean;
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {

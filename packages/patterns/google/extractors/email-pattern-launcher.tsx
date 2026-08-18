@@ -29,6 +29,7 @@ import {
   toIndentedDebugString,
   UI,
   uiVariant,
+  type VNode,
   when,
 } from "commonfabric";
 import GmailExtractor, {
@@ -122,7 +123,7 @@ export interface PatternOutput {
   matchedPatterns: LaunchedPatternInfo[];
   emailCount: number;
   matchCount: number;
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 type LaunchablePattern = (

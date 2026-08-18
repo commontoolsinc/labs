@@ -100,6 +100,9 @@ Deno.test({
     }
 
     // Import the platform-linux values to compare
+    // The Linux bindings cannot load anywhere else, and this test runs only on
+    // Linux.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const linux = await import("./platform-linux.ts");
     const p = linux.default;
 

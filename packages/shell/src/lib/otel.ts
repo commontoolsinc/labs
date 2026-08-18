@@ -1,3 +1,6 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the OpenTelemetry
+// web SDK enters the shell's bundle only along this path, which runs when the
+// operator has switched telemetry on.
 /**
  * Browser-side OpenTelemetry setup for the shell (Phase 3).
  *

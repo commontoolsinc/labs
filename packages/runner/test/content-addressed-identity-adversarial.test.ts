@@ -9,6 +9,7 @@ import {
   brandTrustedBuilderArtifact,
   isTrustedBuilderArtifact,
 } from "../src/builder/pattern-metadata.ts";
+import { moduleToEncodableForm } from "../src/builder/to-encodable-form.ts";
 import type { JSONSchema, Module, Pattern } from "../src/builder/types.ts";
 import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
 import { ExecutableRegistry } from "../src/harness/executable-registry.ts";
@@ -811,11 +812,8 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         implementationRef: "dyn-ref",
         toEncodableForm: undefined as unknown,
       };
-      // moduleToEncodableForm is reached via the builder; call the same path the real
-      // module uses. We re-import it lazily to avoid widening the import surface.
-      const { moduleToEncodableForm } = await import(
-        "../src/builder/to-encodable-form.ts"
-      );
+      // moduleToEncodableForm is reached via the builder; call the same path
+      // the real module uses.
       const encodable = moduleToEncodableForm(
         dynModule as unknown as Module,
       ) as Record<

@@ -1687,6 +1687,9 @@ describe("capture-deno-inspector-profile helpers", () => {
   });
 
   it("loads the capture entry point without running it as main", async () => {
+    // That evaluating the entry point does not run it as main is the assertion,
+    // so the evaluation belongs here.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     await import("./capture-deno-inspector-profile.ts?entrypoint-coverage");
   });
 

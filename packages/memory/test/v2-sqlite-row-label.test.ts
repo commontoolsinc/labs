@@ -5,6 +5,7 @@
 // surface, serialized spec + evaluator, fail-closed rules).
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import { dbNeedsColumnProvenance, tableDeclaresRowLabel } from "../v2.ts";
 import { table } from "../v2/sqlite/schema.ts";
 import {
   all,
@@ -793,10 +794,7 @@ Deno.test("zero matches in an integrity position mints no claim", () => {
 // Provenance gate predicates (shared server/runner — v2.ts)
 // ---------------------------------------------------------------------------
 
-Deno.test("dbNeedsColumnProvenance: rowLabel-only tables need origin capture too", async () => {
-  const { dbNeedsColumnProvenance, tableDeclaresRowLabel } = await import(
-    "../v2.ts"
-  );
+Deno.test("dbNeedsColumnProvenance: rowLabel-only tables need origin capture too", () => {
   const ruleOnly = {
     emails: table(
       { from: "text" },

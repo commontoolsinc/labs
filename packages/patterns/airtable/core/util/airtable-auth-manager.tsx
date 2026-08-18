@@ -26,7 +26,10 @@
  */
 
 import { action, navigateTo, pattern, UI, Writable } from "commonfabric";
-import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
+import {
+  AuthManagerBase,
+  type AuthManagerInput,
+} from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import { authIsReady } from "../../../auth/auth-types.ts";
 import type { AuthManagerOutput } from "../../../auth/create-auth-manager.tsx";
@@ -89,7 +92,7 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
 };
 
 export const AirtableAuthManager = pattern<
-  import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
+  AuthManagerInput,
   AirtableAuthManagerOutput
 >(({ requiredScopes, accountType, debugMode }) => {
   const createAuth = action(() => {

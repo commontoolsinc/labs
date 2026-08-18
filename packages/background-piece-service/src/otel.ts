@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the OpenTelemetry
+// SDK probes the environment as it loads, which needs --allow-sys; it loads
+// only when telemetry is switched on.
+
 import {
   context,
   type Meter,
@@ -5,6 +9,8 @@ import {
   trace,
   type Tracer,
 } from "@opentelemetry/api";
+import type { MeterProvider } from "@opentelemetry/sdk-metrics";
+import type { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { env, type EnvVars } from "./env.ts";
 
 /** The subset of env the tracer setup needs (injectable for tests). */
@@ -16,15 +22,11 @@ export type OtelConfig = Pick<
 // The single registered provider, or undefined when telemetry is off or has been
 // shut down. init/shutdown guard on this so they stay idempotent and re-init-safe
 // (e.g. across a hot-reload or an init -> shutdown -> init cycle in tests).
-let _provider:
-  | import("@opentelemetry/sdk-trace-base").BasicTracerProvider
-  | undefined;
+let _provider: BasicTracerProvider | undefined;
 
 // The registered metrics provider, mirroring `_provider` for traces. Undefined
 // when telemetry is off or has been shut down, so init/shutdown stay idempotent.
-let _meterProvider:
-  | import("@opentelemetry/sdk-metrics").MeterProvider
-  | undefined;
+let _meterProvider: MeterProvider | undefined;
 
 export function getTracerProvider() {
   return _provider;
@@ -113,8 +115,9 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
     // Import the OTel SDK lazily, only when telemetry is enabled. The SDK probes
     // the environment at import time (e.g. os.hostname()), which requires Deno's
     // --allow-sys; static imports would force that on every consumer/test that
-    // imports this module even with telemetry disabled. Only @opentelemetry/api
-    // (side-effect free) is imported statically above.
+    // imports this module even with telemetry disabled. @opentelemetry/api
+    // (side-effect free) is the only runtime import at the top of this file;
+    // the SDK appears there as `import type`, which is erased.
     const { BasicTracerProvider, BatchSpanProcessor } = await import(
       "@opentelemetry/sdk-trace-base"
     );

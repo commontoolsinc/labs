@@ -28,6 +28,7 @@ import {
   Stream,
   TILE_UI,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -451,7 +452,7 @@ export interface PatternOutput {
   taskEmails: TaskEmail[];
   taskCount: number;
   analyses: TaskAnalysis[];
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 /** Email task engine for processing actionable emails. #emailTaskEngine */

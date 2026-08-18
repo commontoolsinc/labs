@@ -5,9 +5,14 @@ import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+import {
+  resetCommitPreconditionsConfig,
+  setCommitPreconditionsConfig,
+} from "@commonfabric/memory/v2";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { JSONSchema } from "../src/builder/types.ts";
+import { preparedDigestFor } from "../src/cfc/canonical.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
 import type { CfcGrantResolverQuery } from "../src/cfc/exchange-eval.ts";
 import {
@@ -754,14 +759,12 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       });
     });
 
-    it("fails closed when the storage cannot enforce create-only (no markCreateOnly)", async () => {
+    it("fails closed when the storage cannot enforce create-only (no markCreateOnly)", () => {
       // A hand-built transaction without markCreateOnly (the optional
       // interface member): the claim's exactly-once witness cannot be
       // enforced, so staging must fail closed with a reason — never a
       // silently unguarded receipt write. The ambient flag is forced on so
       // the resolver reaches the claim path at all.
-      const { setCommitPreconditionsConfig, resetCommitPreconditionsConfig } =
-        await import("@commonfabric/memory/v2");
       setCommitPreconditionsConfig(true);
       try {
         const writes: unknown[] = [];
@@ -1300,8 +1303,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       });
     });
 
-    it("present vs absent receipt state digests differently (pure)", async () => {
-      const { preparedDigestFor } = await import("../src/cfc/canonical.ts");
+    it("present vs absent receipt state digests differently (pure)", () => {
       const base = {
         consumedReads: [],
         attemptedWrites: [],

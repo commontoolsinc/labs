@@ -14,6 +14,7 @@ import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   entityIdFrom,
@@ -3067,9 +3068,8 @@ describe("browserWorkerParamsFromInitializationData", () => {
 describe("RuntimeProcessor per-space piece contexts", () => {
   const getSpaceCtx = (RuntimeProcessor.prototype as any).getSpaceCtx;
 
-  async function makeProcessorState() {
+  function makeProcessorState() {
     const { runtime } = createRuntime();
-    const { PiecesController } = await import("@commonfabric/piece/ops");
     const homeSpace = cfcSigner.did();
     const cc = new PiecesController(
       { as: cfcSigner, space: homeSpace },
@@ -3087,7 +3087,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
   }
 
   it("resolves the home space to the initialize-time context and rejects a missing space", async () => {
-    const { processor, runtime, homeSpace } = await makeProcessorState();
+    const { processor, runtime, homeSpace } = makeProcessorState();
     try {
       expect(processor.getSpaceCtx(homeSpace)).toBe(
         processor.spaces.get(homeSpace),
@@ -3103,7 +3103,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
   });
 
   it("lazily builds a distinct, cached context for a foreign space", async () => {
-    const { processor, runtime, homeSpace } = await makeProcessorState();
+    const { processor, runtime, homeSpace } = makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(
       "runtime-processor-space-b",
     )).did();
@@ -3120,7 +3120,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
   });
 
   it("handlePageGet with a space resolves the page in that space", async () => {
-    const { processor, runtime, homeSpace } = await makeProcessorState();
+    const { processor, runtime, homeSpace } = makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(
       "runtime-processor-space-b",
     )).did();
@@ -3146,7 +3146,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
   });
 
   it("handleRuntimeSynced awaits every opened space, naming none", async () => {
-    const { processor, runtime } = await makeProcessorState();
+    const { processor, runtime } = makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(
       "runtime-processor-space-b",
     )).did();
@@ -3186,9 +3186,6 @@ describe("RuntimeProcessor per-space piece contexts", () => {
 
   it("watchSiteTable uses the last usable entry per space without replacing an accepted route", async () => {
     const { runtime } = createRuntime();
-    const { siteTableCause, siteTableSchema } = await import(
-      "@commonfabric/home-schemas"
-    );
     const registered: Array<[string, string]> = [];
     let resolveRegistered = () => {};
     const entriesRegistered = new Promise<void>((resolve) => {
@@ -3302,7 +3299,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
   });
 
   it("piecesFor returns only existing contexts (no lazy create)", async () => {
-    const { processor, runtime, homeSpace } = await makeProcessorState();
+    const { processor, runtime, homeSpace } = makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(
       "runtime-processor-space-b",
     )).did();

@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the patterns must
+// load inside the coverage run, which is what this child process exists to
+// measure.
+
 import {
   clearGenerateTextResult,
   clearWishResults,

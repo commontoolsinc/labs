@@ -130,6 +130,9 @@ export const main = new Command()
           this.showHelp();
           return;
         }
+        // The FUSE module graph is large and only the mount subcommands
+        // reach it, so every other `cf` invocation skips loading it.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         const { main } = await import("@commonfabric/fuse");
         await main(daemonArgs);
       }),
@@ -147,6 +150,9 @@ export const main = new Command()
       .useRawArgs()
       .action(async (_options: unknown, ...rawArgs: unknown[]) => {
         const supervisorArgs = rawArgs.map((arg) => String(arg));
+        // The flag parser sits in the FUSE module graph, which the other
+        // subcommands do not load.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         const { parseSupervisorArgs, supervisorHelp } = await import(
           "../lib/fuse-mount-flags.ts"
         );
@@ -162,6 +168,9 @@ export const main = new Command()
           console.log(supervisorHelp());
           return;
         }
+        // The supervisor sits in the FUSE module graph, which the other
+        // subcommands do not load.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         const { runFuseSupervisor } = await import(
           "../lib/fuse-supervisor.ts"
         );
