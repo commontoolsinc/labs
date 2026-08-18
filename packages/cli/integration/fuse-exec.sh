@@ -329,7 +329,7 @@ wait_for_piece_value() {
   local actual
 
   while true; do
-    actual=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
+    actual=$(cf get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
     if [ "$actual" = "$expected" ]; then
       return 0
     fi
@@ -472,7 +472,7 @@ read_piece_value_or_default() {
   local fallback="$2"
   local actual
 
-  actual=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
+  actual=$(cf get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
   if [ -z "$actual" ]; then
     printf '%s\n' "$fallback"
     return 0
@@ -682,7 +682,7 @@ echo "Stepped piece: $PIECE_ID"
 ENTITY_PAYLOAD_MARKER="FUSE_ENTITY_LIST_PAYLOAD_50c21a1f"
 printf '{"lastMessage":"%s","messageCount":0,"legacyCount":0,"messages":[]}\n' \
   "$ENTITY_PAYLOAD_MARKER" |
-  cf piece set $SPACE_ARGS --piece "$PIECE_ID" "" --input
+  cf set $SPACE_ARGS --piece "$PIECE_ID" "" --input
 
 MEMORY_PROXY_STATE=$(mktemp -d)
 MEMORY_TRACE="$MEMORY_PROXY_STATE/frames"

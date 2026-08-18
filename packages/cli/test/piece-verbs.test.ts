@@ -213,7 +213,7 @@ describe("listPieceCallables", () => {
       },
     );
     // `addTopic` also present input-side: the result-side entry must win,
-    // matching `cf piece call`'s result-then-input resolution order.
+    // matching `cf call`'s result-then-input resolution order.
     const inputRoot = cell(
       {
         addTopic: { $stream: true },
@@ -766,7 +766,7 @@ describe("listPieceCallables", () => {
     // The generator emits `tier: "wrapper"` (session-scope inference) and
     // `deprecated: true` (@deprecated JSDoc) onto stream properties; the
     // listing surfaces them so the verbs command can hide marked rows by
-    // default. `cf piece call` never consults them — everything stays
+    // default. `cf call` never consults them — everything stays
     // callable, which is why the marks ride the LISTING rather than the
     // dispatcher.
     const resultRoot = cell(

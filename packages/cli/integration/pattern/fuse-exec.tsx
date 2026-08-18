@@ -73,7 +73,7 @@ const recordMessage = handler(
 
 // The event schema sits behind a top-level local $ref, deliberately: the
 // deployed stream schema then has no top-level `properties`, so a bare
-// `cf piece call <piece> recordNote` parses to an absent (`undefined`)
+// `cf call <piece> recordNote` parses to an absent (`undefined`)
 // payload instead of schema-derived flags — the deployed shape the
 // absent-payload gate (verb contract D5) exists for. `recordMessage` keeps
 // the inline form so the fixture carries one verb of each shape.

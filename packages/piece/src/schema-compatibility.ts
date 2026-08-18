@@ -98,7 +98,7 @@ export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   // Listing-tier extension (`tier: "wrapper"`): a UI affordance outside the
   // headless contract, inferred from session-scoped handler bindings.
   // Validation-neutral by construction — it shapes only what `cf piece
-  // verbs` shows by default; `cf piece call` never consults it.
+  // verbs` shows by default; `cf call` never consults it.
   "tier",
   "title",
 ]);

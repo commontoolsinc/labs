@@ -59,7 +59,7 @@ describe("main command", () => {
     );
     const commands = [main];
     const mismatchedUsage: string[] = [];
-    const customUsageCommands = new Set(["cf piece call", "cf call"]);
+    const customUsageCommands = new Set(["cf call", "cf call"]);
 
     for (const command of commands) {
       commands.push(...command.getCommands());
@@ -93,7 +93,7 @@ describe("main command", () => {
     // the handling committed. The two sit adjacent in `--help`, so a caveat
     // on one and silence on the other reads as a real difference between
     // them.
-    const { code, stdout, stderr } = await cf("piece call --help");
+    const { code, stdout, stderr } = await cf("call --help");
     checkStderr(stderr);
     const help = stripAnsi(stdout.join("\n")).replaceAll(/\s+/g, " ");
     expect(help).toContain(
@@ -107,10 +107,10 @@ describe("main command", () => {
   });
 
   it("describes and parses piece call's accepted input forms", async () => {
-    const { piece } = await import(
+    const { pieceDataCommand } = await import(
       "../commands/piece.ts?piece-call-usage-test"
     );
-    const call = piece.getCommand("call")!;
+    const call = pieceDataCommand("call");
     const expectedUsage =
       "--identity <identity> --url <url> --api-url <api-url> --space <space> " +
       "--piece <piece> [address] <callable> [input]";
@@ -119,14 +119,14 @@ describe("main command", () => {
       "<callable:string> [tail...:string]",
     );
     expect(call.getUsage()).toBe(expectedUsage);
-    const { code, stdout, stderr } = await cf("piece call --help");
+    const { code, stdout, stderr } = await cf("call --help");
     checkStderr(stderr);
     const help = stripAnsi(stdout.join("\n"));
     const renderedUsage = help.split("\n").find((line) =>
       line.trimStart().startsWith("Usage:")
     );
     expect(renderedUsage?.replaceAll(/\s+/g, " ").trim()).toBe(
-      `Usage: cf piece call ${expectedUsage}`,
+      `Usage: cf call ${expectedUsage}`,
     );
     const normalizedHelp = help.replaceAll(/\s+/g, " ");
     expect(normalizedHelp).toContain(
@@ -144,10 +144,10 @@ describe("main command", () => {
         literalArguments: this.getLiteralArgs(),
       });
     });
-    await piece.parse(["call", "search", '{"query":"tea"}']);
-    await piece.parse(["call", "search", "--help"]);
-    await piece.parse(["call", "search", "-"]);
-    await piece.parse(["call", "search", "--", "--json"]);
+    await call.parse(["search", '{"query":"tea"}']);
+    await call.parse(["search", "--help"]);
+    await call.parse(["search", "-"]);
+    await call.parse(["search", "--", "--json"]);
     expect(parsedCalls).toEqual([
       {
         positionals: ["search", '{"query":"tea"}'],
@@ -160,26 +160,25 @@ describe("main command", () => {
   });
 
   it("reads piece call's invocation session from `CF_INVOCATION_SESSION`, behind `--invocation-session`", async () => {
-    const { piece } = await import(
+    const { pieceDataCommand } = await import(
       "../commands/piece.ts?piece-call-session-test"
     );
-    const call = piece.getCommand("call")!;
+    const call = pieceDataCommand("call");
     const sessions: Array<string | undefined> = [];
-    call.action((options) => {
+    call.action((options: { invocationSession?: string }) => {
       sessions.push(options.invocationSession);
     });
 
     await withEnv("CF_INVOCATION_SESSION", "from-env", async () => {
-      await piece.parse([
-        "call",
+      await call.parse([
         "--invocation-session",
         "from-flag",
         "increment",
       ]);
-      await piece.parse(["call", "increment"]);
+      await call.parse(["increment"]);
     });
     await withEnv("CF_INVOCATION_SESSION", undefined, async () => {
-      await piece.parse(["call", "increment"]);
+      await call.parse(["increment"]);
     });
 
     // The environment is the standing default for a shell or an agent run,
@@ -202,14 +201,13 @@ describe("main command", () => {
     );
     await expect(
       main.parse([
-        "piece",
+        "call",
         "--identity",
         "./identity.key",
         "--api-url",
         "https://cf.dev",
         "--space",
         "common-knowledge",
-        "call",
         "--piece",
         "abcdefghijklmnopqrstuvwxyz",
         "search",

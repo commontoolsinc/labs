@@ -41,7 +41,7 @@ describe("JSON command contracts", () => {
         "--pattern-json",
       ]),
     ).toBe(true);
-    expect(reservesStdoutForCommandOutput(["piece", "get", "path"]))
+    expect(reservesStdoutForCommandOutput(["get", "path"]))
       .toBe(true);
     // The top-level spellings reserve stdout exactly as their piece
     // counterparts: get and call do, set does not.
@@ -116,7 +116,7 @@ describe("JSON command contracts", () => {
     for (
       const command of [
         "check --pattern-json --bogus fixtures/pow-5.tsx",
-        "piece get --bogus",
+        "get --bogus",
         "piece get-label --bogus",
         "piece set-label --bogus",
         "piece --bogus get",
@@ -192,7 +192,7 @@ describe("JSON command contracts", () => {
   });
 
   it("documents redundant --json options on JSON-only reads", async () => {
-    const pieceGet = await cf("piece get --help");
+    const pieceGet = await cf("get --help");
     const wish = await cf("wish --help");
 
     expect(pieceGet.code).toBe(0);
@@ -219,7 +219,7 @@ describe("JSON command contracts", () => {
   });
 });
 
-describe("piece call JSON arguments", () => {
+describe("call JSON arguments", () => {
   it("passes explicit JSON input through like cf exec", () => {
     expect(pieceCallRawArgs(["--json"], [])).toEqual(["--json"]);
     expect(pieceCallRawArgs(["--json", '{"query":"milk"}'], [])).toEqual([
@@ -247,7 +247,7 @@ describe("piece call JSON arguments", () => {
 
   it("reports mixed callable argument modes as a validation error", async () => {
     const { code, stdout, stderr } = await cf(
-      "piece call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search --json -- --query milk",
+      "call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search --json -- --query milk",
     );
 
     expect(code).toBe(2);

@@ -2811,7 +2811,7 @@ export async function deriveSelectedValue(
 
   const { commonfabric } = createBuilder({
     unsafeHostTrust: runtime.createUnsafeHostTrust({
-      reason: "cf piece get filter/schema computed projection",
+      reason: "cf get filter/schema computed projection",
     }),
   });
   const { lift, pattern } = commonfabric;
@@ -2997,7 +2997,7 @@ export async function deriveSelectedValue(
     const committed = await tx.commit();
     if (committed.error !== undefined) {
       throw new CellSelectionError(
-        `Could not apply piece get transform: ${committed.error}`,
+        `Could not apply get transform: ${committed.error}`,
       );
     }
     // This wait is GLOBAL: idle() drains the whole reactive graph and
@@ -3044,7 +3044,7 @@ export async function deriveSelectedValue(
       }
       const lastError = recorded.at(-1)!;
       throw new CellSelectionError(
-        `Could not apply piece get transform: ${lastError.message}`,
+        `Could not apply get transform: ${lastError.message}`,
       );
     }
     deps.onOutputCell?.(outputCell);

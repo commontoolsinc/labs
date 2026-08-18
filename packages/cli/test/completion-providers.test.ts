@@ -158,8 +158,8 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
   await withEnv({}, async () => {
     for (
       const text of [
-        "cf piece call --piece x ",
-        "cf piece get --piece x ",
+        "cf call --piece x ",
+        "cf get --piece x ",
         "cf piece get-label --piece x ",
         "cf piece set-label --piece x ",
         "cf piece link ",

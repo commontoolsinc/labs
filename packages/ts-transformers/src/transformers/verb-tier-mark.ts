@@ -8,7 +8,7 @@ import { visitEachChildWithJsx } from "../ast/utils.ts";
  * binds session-scoped state is wrapper-tier — a UI affordance outside the
  * headless contract — so its RESULT-schema property gains the annotation-class
  * mark `tier: "wrapper"`. `cf piece verbs` hides marked verbs by default;
- * everything stays callable and `cf piece call` never consults the mark.
+ * everything stays callable and `cf call` never consults the mark.
  *
  * Runs AFTER SchemaGeneratorTransformer and BEFORE ReactiveVariableFor, on
  * purpose: at this point builder hoisting has already lifted every handler

@@ -161,7 +161,7 @@ export interface CallableExecutionDeps {
    * readback, which is why it cannot combine with `--no-wait`. */
   showLinks?: boolean;
   /** `--filter`/`--select`/`--schema`: the shape the caller asked the result
-   * to arrive in. Answered by the same selection step `cf piece get` reads
+   * to arrive in. Answered by the same selection step `cf get` reads
    * through, so one grammar covers reads and calls.
    *
    * It shapes a result that exists rather than deciding what is fetched: the
@@ -1409,7 +1409,7 @@ export function collectInvocationResultLinks(
 
 /**
  * Shape a call's result the way the caller asked for it, through the same step
- * `cf piece get` reads through — the one place a `--filter`/`--select`/
+ * `cf get` reads through — the one place a `--filter`/`--select`/
  * `--schema` grammar is interpreted, so a caller learns it once.
  *
  * `resultCell` is the cell the value was produced from: a handling's receipt,
@@ -1420,7 +1420,7 @@ export function collectInvocationResultLinks(
  * A selection that materializes nothing over a result that exists is refused
  * rather than reported as an absent result: an omitted `result` key means the
  * verb returned nothing, and a projection that kept nothing is a different
- * fact. `cf piece get` refuses the same condition on the same grounds.
+ * fact. `cf get` refuses the same condition on the same grounds.
  */
 async function selectCallResult(
   resolved: CallableResolution,

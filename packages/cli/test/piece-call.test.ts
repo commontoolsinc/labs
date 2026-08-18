@@ -1906,7 +1906,7 @@ describe("forced-stream fallback dispatch", () => {
   });
 });
 
-describe("piece call stdin payloads", () => {
+describe("call stdin payloads", () => {
   it("identifies JSON output without treating delimited fields as selectors", () => {
     expect(
       pieceCallInvocation(["--json", '{"query":"milk"}'], []),
@@ -2383,7 +2383,7 @@ describe("piece call stdin payloads", () => {
   });
 
   it("forwards explicit two-token stdin sentinels instead of rejecting them", () => {
-    // `cf piece call h --json-file -` (and the --value-file / --json variants)
+    // `cf call h --json-file -` (and the --value-file / --json variants)
     // should read stdin, matching `cf exec` and the bare "-" form, rather than
     // hitting the multi-argument rejection.
     expect(pieceCallRawArgs(["--json-file", "-"], [])).toEqual([
@@ -2402,7 +2402,7 @@ describe("piece call stdin payloads", () => {
   });
 
   it("rejects a payload token combined with post-`--` flags instead of dropping it", () => {
-    // `cf piece call h - -- --query milk` → tail=["-"], literalArgs=["--query",
+    // `cf call h - -- --query milk` → tail=["-"], literalArgs=["--query",
     // "milk"]. The "-" used to be silently ignored (post-`--` flags win); now
     // the conflict is loud.
     expect(() => pieceCallRawArgs(["-"], ["--query", "milk"])).toThrow(
@@ -2530,7 +2530,7 @@ describe("piece call stdin payloads", () => {
   });
 });
 
-describe("piece call wait control", () => {
+describe("call wait control", () => {
   const config = {
     apiUrl: "http://localhost:8000",
     identity: "/tmp/test-identity.pem",
@@ -3389,7 +3389,7 @@ describe("collectInvocationResultLinks", () => {
   });
 });
 
-describe("piece call --show-links", () => {
+describe("call --show-links", () => {
   const config = {
     apiUrl: "http://localhost:8000",
     identity: "/tmp/test-identity.pem",
@@ -3605,7 +3605,7 @@ function recordingSelector(answer: unknown) {
   return { calls, derive };
 }
 
-describe("piece call selection", () => {
+describe("call selection", () => {
   const config = {
     apiUrl: "http://localhost:8000",
     identity: "/tmp/test-identity.pem",
@@ -3626,7 +3626,7 @@ describe("piece call selection", () => {
   };
 
   it("points the shared selection step at the receipt the result came from", async () => {
-    // The whole of C2: a call reaches the same step `cf piece get` reads
+    // The whole of C2: a call reaches the same step `cf get` reads
     // through, pointed at the cell the value was read from — so the shaped
     // answer carries the source's own links rather than a copy of a copy.
     const receiptCell = {
@@ -3887,7 +3887,7 @@ describe("piece call selection", () => {
       ).toBeDefined();
     });
 
-    it("parses through the same grammar `cf piece get` reads", async () => {
+    it("parses through the same grammar `cf get` reads", async () => {
       expect(await parsePieceCallSelection({})).toBeUndefined();
       const selection = await parsePieceCallSelection({
         filter: ".done == false",
@@ -3903,7 +3903,7 @@ describe("piece call selection", () => {
 
     it("reports a malformed selection without naming an invocation to retry", async () => {
       const { code, stderr } = await cf(
-        "piece call " +
+        "call " +
           "--identity ./definitely-missing-piece-call-review.key " +
           "--api-url https://cf.dev --space common-knowledge " +
           "--piece fid1:piece-123 --select a..b addTopic",
@@ -3925,7 +3925,7 @@ const selectionSigner = await Identity.fromPassphrase(
   "cf-piece-call-selection",
 );
 
-describe("piece call over a live runtime", () => {
+describe("call over a live runtime", () => {
   const signer = selectionSigner;
   const space = signer.did();
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -4052,7 +4052,7 @@ describe("piece call over a live runtime", () => {
 
   it("returns the address of what a verb returned, in place of its contents", async () => {
     // The `$link` marker reaches a call through the same step, which is what
-    // makes `cf piece call --schema '{"properties":{"topic":{"$link":true}}}'`
+    // makes `cf call --schema '{"properties":{"topic":{"$link":true}}}'`
     // — the command's own example — an address a later call can use.
     const tx = runtime.edit();
     const topic = runtime.getCell(space, "created-topic", undefined, tx);
@@ -4129,7 +4129,7 @@ describe("piece call over a live runtime", () => {
     // Resolve the published address through the reference intake `--piece`
     // runs it through — the published form IS that intake's form — and read
     // the cell it names. This covers the address and the intake; it stops
-    // short of the whole `cf piece get` route, which also runs slug
+    // short of the whole `cf get` route, which also runs slug
     // resolution and the read-path guards before reaching the same cell.
     const published = parseLink(executed.invocation!.receipt!, { space });
     const collected = runtime.getCellFromEntityId(
@@ -4143,7 +4143,7 @@ describe("piece call over a live runtime", () => {
   });
 });
 
-describe("piece get data errors", () => {
+describe("get data errors", () => {
   it("classifies unresolved-path failures as data errors, not usage errors", () => {
     expect(
       isPieceGetDataError(
@@ -4292,7 +4292,7 @@ describe("piece link data errors", () => {
   });
 });
 
-describe("piece call input errors", () => {
+describe("call input errors", () => {
   it("reports the rejection with a pointer at the verb listing", () => {
     const report = verbInputErrorReport(
       new VerbInputValidationError(

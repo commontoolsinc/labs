@@ -431,7 +431,7 @@
             }
           },
           "fid": {
-            "description": "The topic's canonical address in tagged form (`fid1:…`); \"\" until known.\nThe row's `topic` is the reference itself, but no `cf piece get` flag\nrenders a reference's backing address, so a survey carrying only the\nreference could not say where a row lives — and addressing a topic is the\nwhole point of surveying the board. Derived from runtime-only cell surface,\nso it reads \"\" for a topic whose own entity has not resolved yet.",
+            "description": "The topic's canonical address in tagged form (`fid1:…`); \"\" until known.\nThe row's `topic` is the reference itself, but no `cf get` flag\nrenders a reference's backing address, so a survey carrying only the\nreference could not say where a row lives — and addressing a topic is the\nwhole point of surveying the board. Derived from runtime-only cell surface,\nso it reads \"\" for a topic whose own entity has not resolved yet.",
             "type": "string"
           },
           "lastActivityAt": {

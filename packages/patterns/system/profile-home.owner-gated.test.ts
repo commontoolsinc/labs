@@ -10,7 +10,7 @@ import { expect } from "@std/expect";
 // on `TrustedProfileLink` — creating a profile is correctly gesture-gated.
 //
 // This asymmetry is deliberate and load-bearing: because pinning is owner-gated,
-// headless (`cf piece call` into `addPiece`) and cross-pattern pin flows are
+// headless (`cf call` into `addPiece`) and cross-pattern pin flows are
 // SANCTIONED. A future change that "hardens" pinning by adding a `uiContract`
 // to the profile-home write path would silently break those flows — this test
 // goes red on that change.

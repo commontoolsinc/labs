@@ -90,22 +90,17 @@ Commands that take a piece accept two textual reference forms:
 New reference-syntax capabilities land in the canonical form first; the alias
 does not grow a capability the canonical form lacks.
 
-On `piece get`, `piece set`, and `piece call`, a canonical reference can sit in
-the first positional instead of riding `--piece`: an address begins with `/` and
-a relative path never does, so the two positions cannot collide. The bare and
-slug spellings stay on `--piece`, where no path competes for the position.
-Naming the target twice — `--piece` beside a positional address — is refused
-rather than resolved.
+On `cf get`, `cf set`, and `cf call`, a canonical reference can sit in the first
+positional instead of riding `--piece`: an address begins with `/` and a
+relative path never does, so the two positions cannot collide. The bare and slug
+spellings stay on `--piece`, where no path competes for the position. Naming the
+target twice — `--piece` beside a positional address — is refused rather than
+resolved.
 
-Those three commands are also mounted at top level as `cf get`, `cf set`, and
-`cf call`: reading and writing cells is not a piece-management concern, and the
-spelling says so. Each pair is one definition mounted twice, so the two
-spellings take the same flags, behave identically, and complete identically. The
-piece-mounted spellings are deprecated: each invocation prints a stderr notice
-naming the top-level spelling and the literal date the old spelling stops
-working (`PIECE_DATA_SPELLING_END_DATE` in `commands/piece.ts`, the one source
-of that date). Until then both keep working, and the notice never touches stdout
-— `get` and `call` reserve it for machine output.
+Those three are top-level commands: reading and writing cells is not a
+piece-management concern, and the spelling says so. They were once mounted under
+`cf piece` as well; those spellings are removed
+(docs/plans/cli-surface-shape.md, step 6b).
 
 A canonical reference may also end in `#argument`, which selects the piece's
 arguments cell the way `--input` does. Only commands that take `--input` accept
