@@ -65,27 +65,25 @@ export interface SetBodyEvent extends AgentAuthoredEvent {
 export interface MentionEvent {
   /** The piece to reference — the piece itself, not an address. Identity here
    * is the cell, so this is what a caller passes and what gets stored.
-   * Required: a mention with nothing to point at is not a mention.
    *
-   * What it points at is declared `unknown`, which names NO property of the
-   * referenced piece, deliberately. This field's schema reaches every topic in
-   * `mentionable`, so naming one would demand it of pieces deployed before this
-   * verb existed and refuse their update (`deno task pattern-vintage` catches
-   * exactly that). Nothing reads through it anyway: it is stored and compared.
+   * Declared through the ONE field every topic has rather than `unknown`, and
+   * the narrowness is the point twice over. It is the least that still makes
+   * this a reference: a schema naming a property refuses a bare string, so an
+   * address sent as text — which an inline CLI call argument produces, being
+   * parsed as plain JSON — is rejected at the boundary instead of stored as an
+   * entry that resolves to no piece. And it is the most this can safely name:
+   * this schema reaches every topic in `mentionable`, so a property without a
+   * default would be demanded of topics written before it existed and refuse
+   * their update. `title` carries one, which is what makes it nameable here;
+   * `deno task pattern-vintage` is what proves that by replaying a real board.
    *
-   * A NON-REFERENCE IS STORED INERT, and the verb does not currently catch it.
-   * `mention` rejects a missing payload and nothing else, so a caller that
-   * sends an address as text — which an inline CLI call argument produces,
-   * being parsed as plain JSON — stores that text. It resolves to no piece, so
-   * it forms no edge and appears in no topic's `referencedBy`: a dead entry
-   * rather than a wrong one. Reaching a mention through the References card's
-   * picker is what avoids it, because the picker hands over the piece. */
-  topic: Writable<unknown>;
+   * Nothing reads through it regardless — the value is stored and compared. */
+  topic: Writable<{ title: string | Default<""> }>;
 }
 
 /** Stop referencing a piece. */
 export interface UnmentionEvent {
-  topic: Writable<unknown>;
+  topic: Writable<{ title: string | Default<""> }>;
 }
 
 // ===== Verb results =====

@@ -69,6 +69,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260814T233350Z-jHoJZsDa5eUdWU-B",
       "20260817T051200Z-NIE10ssgY89CXloq",
       "20260817T212730Z-3FUPLp4oeb7gwpch",
+      "20260817T231646Z-3OsO1miQLNSxm34N",
     ],
     // `argument.topics[]` is every change to `TopicPiece` seen from the board's
     // list: each stored topic's defaults moved, which the proof cannot show is
@@ -81,8 +82,15 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // what a piece holding older topics is updated against, so every field a
     // card renders has to carry a default for that update to be accepted —
     // `deno task pattern-vintage` refuses it otherwise, naming the field.
+    //
+    // `mention` moves for the opposite reason: its payload stopped being
+    // `unknown` and now names `title`, so the verb refuses an address sent as
+    // text instead of storing it as an entry that resolves to no piece. A
+    // narrowed payload is a real tightening of what the verb accepts, which is
+    // the decision being recorded here rather than worked around.
     paths: [
       "argument.topics[]",
+      "result.mentionable[].mention",
       "result.crossrefs",
       "result.crossrefs[].fid",
       "result.crossrefs[].commentCount",
@@ -111,11 +119,13 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260812T003521Z-XWPlA9Dl3OHXlHEH",
       "20260814T233350Z-ignmxWvAy2vygaDl",
       "20260817T212731Z-S2Y3ePoq7Zj_7fLa",
+      "20260817T231646Z-bBfPByCuBScHp-Ou",
     ],
     paths: [
       "argument.boardCrossrefs",
       "argument.boardCrossrefs[].referencedBy",
       "argument.mentionable[]",
+      "result.mention",
       "result.crossrefs",
     ],
     reason:
@@ -123,6 +133,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "A topic no longer derives an edge row and no longer publishes " +
       "`crossrefs`; it publishes `referencedBy`, read out of the board's pivot, " +
       "whose row shape the `boardCrossrefs` input changed to match. " +
-      "`mentionable[]` moves because `TopicPiece` gained the reference fields.",
+      "`mentionable[]` moves because `TopicPiece` gained the reference fields, " +
+      "and `mention` because its payload now names `title` rather than being " +
+      "`unknown` — the least that makes it a reference, so a bare string is " +
+      "refused at the boundary rather than stored inert.",
   },
 ];
