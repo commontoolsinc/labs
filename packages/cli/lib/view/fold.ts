@@ -82,8 +82,9 @@ interface SummaryInput {
   readonly binary: boolean;
 }
 
-/** Build the collapsed summary line: `▸ path  +A −D`, with a `(new)` /
- * `(deleted)` / `(binary)` tag and `old → new` for a rename. */
+/** Build the collapsed summary line: `▸ path  +A −D`, with new and deleted
+ * files showing only their applicable count and status. Binary files carry a
+ * `(binary)` tag, and renames show `old → new`. */
 function summaryLine(f: SummaryInput): Line {
   const spans: Span[] = [];
   let text = "";
@@ -101,16 +102,15 @@ function summaryLine(f: SummaryInput): Line {
     add(f.newPath ?? f.oldPath ?? "(unknown file)", "sectionHeader");
   }
 
-  const tag = f.binary
-    ? "binary"
-    : f.newPath === undefined
-    ? "deleted"
-    : f.oldPath === undefined
-    ? "new"
-    : "";
-  if (tag) add(`  (${tag})`, "diffMeta");
-
-  if (!f.binary) {
+  if (f.binary) {
+    add("  (binary)", "diffMeta");
+  } else if (f.newPath === undefined) {
+    add("  ", "whitespace");
+    add(`−${f.dels} (deleted)`, "diffDel");
+  } else if (f.oldPath === undefined) {
+    add("  ", "whitespace");
+    add(`+${f.adds} (new)`, "diffAdd");
+  } else {
     add("  ", "whitespace");
     add(`+${f.adds}`, "diffAdd");
     add(" ", "whitespace");
