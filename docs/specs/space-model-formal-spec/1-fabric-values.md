@@ -2587,8 +2587,8 @@ wire marker minted per call, subclasses the act and carries it there.
 - `encodeToBytes(value, env?)` and `decodeFromBytes(bytes, env)` are the same
   two walks against UTF-8 bytes rather than a string.
 
-> **Why the boundary is this narrow.** Tag wrapping and unwrapping are
-> machinery internal to the engine, leaving only
+> **Why the boundary is this narrow.** Tag wrapping and unwrapping belong to
+> the acts rather than to an engine's public surface, leaving only
 > `encode(value, env?) -> SerializedForm` and
 > `decode(data, env) -> FabricValue` — one such pair per boundary type the
 > engine offers — as public API. The engine owns the full pipeline rather than
@@ -2602,21 +2602,21 @@ Encode:  value -> codec.encode(value) -> serialized form (e.g., JSON string)
 Decode:  serialized form -> codec.decode(data, env) -> FabricValue
 ```
 
-Internally, `JsonCodecEngine`'s `encode()` method calls its internal encode
-walker (`encodeValue()`) to walk the `FabricValue` tree and produce a
-`JsonCodecValue` tree, then stringifies it. The `decode()` method parses
-the JSON string, then calls its internal decode walker (`decodeValue()`) to
-walk the `JsonCodecValue` tree and decode runtime types. The
-recursive descent and codec dispatch are entirely internal to `JsonCodecEngine`.
+Internally, `JsonCodecEngine`'s `encode()` method mints an encoding act and
+has it walk (`encodeValue()`) the `FabricValue` tree into a `JsonCodecValue`
+tree, which the same act then stringifies. The `decode()` method mints a
+decoding act, which parses the JSON string and walks (`decodeValue()`) the
+`JsonCodecValue` tree back into runtime types. The recursive descent and codec
+dispatch belong to the acts, and neither is public.
 
 ### 4.5 Codecs, the Registry, and Internal Tree Walking
 
-The encoding and decoding logic is implemented as private
-methods on `JsonCodecEngine`. It dispatches per-type logic to the **codecs**
-(Section 2.4) held in a **`CodecRegistry<Encoded>`** — an index of which codec
-handles which class (for encoding) and which tag (for decoding), built over one
-wire format. Codecs are shallow: `JsonCodecEngine` owns recursion and
-tag-wrapping, and each codec translates exactly one layer.
+The encoding and decoding logic belongs to the acts an engine mints. It
+dispatches per-type logic to the **codecs** (Section 2.4) held in a
+**`CodecRegistry<Encoded>`** — an index of which codec handles which class (for
+encoding) and which tag (for decoding), built over one wire format, which an
+act reads through its engine's configuration. Codecs are shallow: the act owns
+recursion and tag-wrapping, and each codec translates exactly one layer.
 
 A registry is built over a `WireFormat<Encoded>` descriptor, which names both
 the type its encoded states live in and the symbol a class binds its codec for
@@ -2811,9 +2811,9 @@ The encoding act's walk processes the `FabricValue` tree:
 
 Circular references are detected via a `Set<object>` tracked during the walk.
 
-#### Internal decode walker (`decodeValue()`)
+#### The decode walk (`decodeValue()`)
 
-`JsonCodecEngine`'s internal decode walker processes the `JsonCodecValue` tree:
+The decoding act's walk processes the `JsonCodecValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed
    keys.

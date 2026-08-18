@@ -215,8 +215,8 @@ export abstract class DecodeAct<Encoded, SerializedForm = Encoded>
    * produced what it was handed.
    *
    * Three of the arms below walk the state again -- a nonterminal codec's, an
-   * unknown tag's, and a malformed tag's -- and each carries `act` into that
-   * walk. Entering the state is not this method's business: it is
+   * unknown tag's, and a malformed tag's -- and each runs that walk on this
+   * act. Entering the state is not this method's business: it is
    * {@link #decodeValue} that visits every node of the tree, the tagged form
    * included, and entering there is what keeps one node from being entered
    * twice.

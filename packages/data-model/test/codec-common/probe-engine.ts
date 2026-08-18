@@ -284,12 +284,10 @@ export class MarkerCodec extends BaseTerminalCodec<ProbeValue> {
 }
 
 /**
- * The engine. Its containers do the least a container can do, so that what a
- * test observes is the base class and not this.
- */
-/**
  * One act of encoding in the probe format, whose transport tree is what
- * crosses: there is nothing to convert on the way out.
+ * crosses: there is nothing to convert on the way out. Its containers do the
+ * least a container can do, so that what a test observes is the base class and
+ * not this.
  */
 export class ProbeEncodeAct extends EncodeAct<ProbeValue> {
   /** @inheritDoc */
@@ -379,6 +377,10 @@ export class ProbeDecodeAct extends DecodeAct<ProbeValue> {
   }
 }
 
+/**
+ * The engine, which is its configuration and the two act factories: everything
+ * a test observes about a walk belongs to the acts above.
+ */
 export class ProbeEngine extends BaseCodecEngine<
   ProbeValue,
   ProbeValue,

@@ -24,13 +24,14 @@ import type { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
  * - `encodeToBytes(value, env?)` -- as `encode()`, to UTF-8 bytes
  * - `decodeFromBytes(bytes, env)` -- as `decode()`, from UTF-8 bytes
  *
- * The machinery beneath is not public, and divides in two. The tree
- * walkers, the tag wrapper and the act factories are `protected`:
- * that is the surface a second engine extends, whether or not this one
- * overrides any given member of it. This class's own helpers -- byte
- * conversion, wire-text parsing, tag unwrapping and the container decode
- * arms -- are `#`-private. Per-type encoding and decoding is delegated to
- * the `FabricCodec`s in the `CodecRegistry`.
+ * The machinery beneath belongs elsewhere. The walks and this format's account
+ * of how a container is written down are `JsonEncodeAct`'s and
+ * `JsonDecodeAct`'s, which this class mints through the two `protected`
+ * factories -- that pair being the surface a second engine extends. What both
+ * an engine and an act need of the wire text is in `wire-text.ts`, so that
+ * neither imports the other. Byte conversion is this class's own and stays
+ * `#`-private. Per-type encoding and decoding is delegated to the
+ * `FabricCodec`s in the `CodecRegistry`.
  *
  * Three statics are public besides: `seemsLikeEncoded()`, and the
  * `wrapEncodedValueForTesting()` / `unwrapEncodedValueForTesting()` pair
