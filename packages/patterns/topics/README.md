@@ -44,9 +44,12 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   blank value) remains accepted for old callers; topic/comment attribution then
   falls back to their hidden legacy `myName`.
 - **Mergeable writes everywhere users collide**: comments, links, and topics are
-  `push` appends; concurrent writers all land. The body is a large string
-  (whole-value conflict semantics), so body edits go through an explicit
-  Edit→Save toggle rather than a live-bound textarea.
+  `push` appends; concurrent writers all land. The body and the title are single
+  strings (whole-value conflict semantics), so both edit through an explicit
+  Edit→Save flow rather than a live binding — and both saves stamp attribution
+  and move the activity clock through the same core the headless verb uses, so a
+  browser edit can never leave `bodyUpdatedBy` or `titleUpdatedBy` describing an
+  earlier write.
 - **Fabric owns history and concurrency.** Topics adds neither an activity-log
   duplicate nor an application-level revision/CAS protocol. If Fabric cannot
   preserve history or safely arbitrate concurrent body writes, this dogfood
@@ -235,20 +238,22 @@ Every agent-authored mutation carries `agentName`; there is no preceding “set
 current name” call. Fabric's operation history retains the authenticated human
 principal, while the stored snapshot disambiguates which agent acted.
 
-**Every mutating verb returns what it recorded.** `addTopic` returns the topic
-it created — the piece itself, reaching the caller as a link the CLI renders as
-an address, so the caller addresses the new topic straight from the create
-instead of filing it and then searching the board for it. The result is declared
-through the index's row schema rather than the full topic: the declared schema
-bounds the default readback, and every name a verb's result publishes is
-permanent, so the create hands back the survey row plus the write-time facts
-only the pattern could resolve (`createdAt`, `createdBy`). `addComment` and
-`addLink` return the appended record, `setBody` the persisted body plus the
-attribution it wrote, `setTitle` the persisted title plus its attribution; each
-carries fields the pattern resolved that a caller cannot compute for itself.
-Counts are deliberately not returned: these appends are mergeable ops, so a
-length observed inside one handling is not a fact about the resulting list —
-read `commentCount` when you want the count.
+**Every content verb returns what it recorded** — `mention` and `unmention` sit
+outside the claim: they record an edge, a reference with nothing resolved about
+it, and return nothing. `addTopic` returns the topic it created — the piece
+itself, reaching the caller as a link the CLI renders as an address, so the
+caller addresses the new topic straight from the create instead of filing it and
+then searching the board for it. The result is declared through the index's row
+schema rather than the full topic: the declared schema bounds the default
+readback, and every name a verb's result publishes is permanent, so the create
+hands back the survey row plus the write-time facts only the pattern could
+resolve (`createdAt`, `createdBy`). `addComment` and `addLink` return the
+appended record, `setBody` the persisted body plus the attribution it wrote,
+`setTitle` the persisted title plus its attribution; each carries fields the
+pattern resolved that a caller cannot compute for itself. Counts are
+deliberately not returned: these appends are mergeable ops, so a length observed
+inside one handling is not a fact about the resulting list — read `commentCount`
+when you want the count.
 
 A returned value reaches the caller through the handling's receipt. A result
 carrying a piece (`addTopic`) travels the result-pattern projection path; the

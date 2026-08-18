@@ -411,9 +411,9 @@ export interface TopicPiece extends TopicSummary {
    * complete; the body is one value with whole-value conflict semantics.
    * Returns the persisted body and any attribution written. */
   setBody: Stream<SetBodyEvent, SetBodyResult>;
-  /** Reference another piece from this topic, and stop referencing it. The
-   * browser equivalent is picking a completion in the body editor, which writes
-   * the same map.
+  /** Reference another piece from this topic — the payload is the piece
+   * itself, stored as a reference. The browser equivalent is picking a
+   * completion in the body editor, which writes the same map.
    *
    * OPTIONAL, unlike the verbs beside them, and for the reason every added path
    * on this projection is: a topic deployed before these existed carries
@@ -421,6 +421,9 @@ export interface TopicPiece extends TopicSummary {
    * outright. The older verbs predate every deployed generation, so they can
    * stay required; these cannot. */
   mention?: Stream<MentionEvent>;
+  /** Stop referencing a piece: removes every `mention`-made entry naming it.
+   * References made in the prose are retracted by editing the prose, not by
+   * this. Optional on the projection for the same reason as `mention`. */
   unmention?: Stream<UnmentionEvent>;
 }
 
@@ -447,6 +450,8 @@ export interface TopicOutput extends TopicPiece {
   commentDraft: PerSession<Writable<string>>;
   bodyDraft: PerSession<Writable<string>>;
   editingBody: PerSession<boolean>;
+  titleDraft: PerSession<Writable<string>>;
+  editingTitle: PerSession<boolean>;
   linkUrlDraft: PerSession<Writable<string>>;
   linkLabelDraft: PerSession<Writable<string>>;
   linkKindDraft: PerSession<Writable<TopicLinkKind>>;
@@ -476,6 +481,16 @@ export interface TopicOutput extends TopicPiece {
    * Beside `setTitle` rather than on the projection, for the same reason. */
   titleUpdatedBy?: TopicAuthor | undefined;
   titleUpdatedAt?: number | undefined;
+  /** UI wrapper: open the rename editor, seeding the session draft from the
+   * durable title. */
+  startEditTitle: Stream<void>;
+  /** UI wrapper: save the session title draft under the viewer's Profile —
+   * the contract verb is `setTitle`, and both land through the same core, so
+   * a browser rename stamps the same attribution and moves the same activity
+   * clock. */
+  saveTitle: Stream<void>;
+  /** UI wrapper: close the rename editor; the session draft is the discard. */
+  cancelEditTitle: Stream<void>;
   /** UI wrapper: append the session comment draft under the viewer's
    * Profile. Reads session-local state, so it is a silent no-op headless —
    * the contract verb is `addComment`. */
@@ -661,6 +676,63 @@ export const submitProfileComment = handler<void, {
   if (!text.trim() || !author) return;
   appendComment(comments, text, author, topicAuthorLabel(author));
   commentDraft.set("");
+});
+
+/** The one place a rename lands. The contract verb and the browser save both
+ * ride it, so the trim rule, the attribution stamp, and the activity clock
+ * move together — a title write without its attribution pair is exactly the
+ * stale-metadata state this rules out, since `titleUpdatedBy` would keep
+ * describing an earlier rename. Callers guard emptiness and resolve their
+ * author first. */
+export const persistTitle = (
+  title: Writable<string | Default<"">>,
+  titleUpdatedBy: Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >,
+  titleUpdatedAt: Writable<number | Default<0>>,
+  text: string,
+  author: TopicAuthor,
+): SetTitleResult => {
+  const trimmed = text.trim();
+  title.set(trimmed);
+  const at = Date.now();
+  titleUpdatedBy.set(author);
+  titleUpdatedAt.set(at);
+  return { title: trimmed, titleUpdatedBy: author, titleUpdatedAt: at };
+};
+
+/** Browser title save under the current Profile snapshot. The header binds a
+ * session draft, never the durable title: a live-bound shared string would
+ * conflict per keystroke, and a title write outside `persistTitle` would
+ * leave `titleUpdatedBy` and the activity clock describing an earlier
+ * rename. */
+export const saveProfileTitle = handler<void, {
+  title: Writable<string | Default<"">>;
+  titleDraft: Writable<string>;
+  editingTitle: Writable<boolean>;
+  titleUpdatedBy: Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >;
+  titleUpdatedAt: Writable<number | Default<0>>;
+  profileName: string;
+  profileAvatar: string;
+}>((
+  _,
+  {
+    title,
+    titleDraft,
+    editingTitle,
+    titleUpdatedBy,
+    titleUpdatedAt,
+    profileName,
+    profileAvatar,
+  },
+) => {
+  const text = titleDraft.get();
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!text.trim() || !author) return;
+  persistTitle(title, titleUpdatedBy, titleUpdatedAt, text, author);
+  editingTitle.set(false);
 });
 
 /** Browser body save under the current Profile snapshot. */
@@ -889,6 +961,8 @@ export default pattern<TopicInput, TopicOutput>(
     const commentDraft = new Writable.perSession("");
     const editingBody = new Writable.perSession(false);
     const bodyDraft = new Writable.perSession("");
+    const editingTitle = new Writable.perSession(false);
+    const titleDraft = new Writable.perSession("");
     const linkUrlDraft = new Writable.perSession("");
     const linkLabelDraft = new Writable.perSession("");
     const linkKindDraft = new Writable.perSession<TopicLinkKind>("web");
@@ -976,15 +1050,13 @@ export default pattern<TopicInput, TopicOutput>(
         const author = topicAuthorFromAgent(agentName ?? "") ??
           rejectMutation("setTitle", "agentName must be non-blank");
         if (!trimmed) rejectMutation("setTitle", "title must be non-empty");
-        title.set(trimmed);
-        const titleUpdatedAtValue = Date.now();
-        titleUpdatedBy.set(author);
-        titleUpdatedAt.set(titleUpdatedAtValue);
-        return {
-          title: trimmed,
-          titleUpdatedBy: author,
-          titleUpdatedAt: titleUpdatedAtValue,
-        };
+        return persistTitle(
+          title,
+          titleUpdatedBy,
+          titleUpdatedAt,
+          trimmed,
+          author,
+        );
       },
     );
 
@@ -1038,6 +1110,27 @@ export default pattern<TopicInput, TopicOutput>(
       commentDraft,
       profileName,
       profileAvatar,
+    });
+
+    const startEditTitle = action(() => {
+      titleDraft.set(title.get());
+      editingTitle.set(true);
+    });
+
+    const saveTitle = saveProfileTitle({
+      title,
+      titleDraft,
+      editingTitle,
+      titleUpdatedBy,
+      titleUpdatedAt,
+      profileName,
+      profileAvatar,
+    });
+
+    // Nothing to undo: the draft is session-local, so leaving it behind IS
+    // the discard.
+    const cancelEditTitle = action(() => {
+      editingTitle.set(false);
     });
 
     const startEditBody = action(() => {
@@ -1127,11 +1220,43 @@ export default pattern<TopicInput, TopicOutput>(
       <cf-theme theme={TOPICS_THEME}>
         <cf-screen>
           <cf-vstack slot="header" gap="1" padding="4">
-            <cf-input
-              $value={title}
-              placeholder="Topic title…"
-              style="font-size: 1.25rem; font-weight: 600;"
-            />
+            {editingTitle
+              ? (
+                <cf-hstack gap="2" align="center">
+                  <cf-input
+                    $value={titleDraft}
+                    placeholder="Topic title…"
+                    style="font-size: 1.25rem; font-weight: 600; flex: 1;"
+                  />
+                  <cf-button
+                    variant="primary"
+                    disabled={!hasProfile}
+                    onClick={saveTitle}
+                  >
+                    Save
+                  </cf-button>
+                  <cf-button variant="ghost" onClick={cancelEditTitle}>
+                    Cancel
+                  </cf-button>
+                </cf-hstack>
+              )
+              : (
+                <cf-hstack gap="2" justify="between" align="center">
+                  <cf-text
+                    block
+                    style="font-size: 1.25rem; font-weight: 600;"
+                  >
+                    {topicName}
+                  </cf-text>
+                  <cf-button
+                    variant="ghost"
+                    disabled={!hasProfile}
+                    onClick={startEditTitle}
+                  >
+                    Rename
+                  </cf-button>
+                </cf-hstack>
+              )}
             <cf-hstack justify="between" align="center">
               <cf-text variant="caption" tone="muted">
                 started by {topicAuthorLabel(createdByView, createdByName)}
@@ -1444,10 +1569,15 @@ export default pattern<TopicInput, TopicOutput>(
       commentDraft,
       bodyDraft,
       editingBody,
+      titleDraft,
+      editingTitle,
       linkUrlDraft,
       linkLabelDraft,
       linkKindDraft,
       referencesDraft,
+      startEditTitle,
+      saveTitle,
+      cancelEditTitle,
       submitComment,
       startEditBody,
       saveBody,

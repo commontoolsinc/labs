@@ -33,6 +33,7 @@ import Topic, {
   isSafeLinkUrl,
   type MentionEvent,
   saveProfileBody,
+  saveProfileTitle,
   type SetBodyResult,
   snippet,
   submitProfileComment,
@@ -844,6 +845,71 @@ export default pattern(() => {
     directTopic.lastActivityAt === directTopic.titleUpdatedAt
   );
 
+  // The rename editor's session lifecycle: Edit seeds the draft from the
+  // durable title, Cancel discards without touching it.
+  const action_start_rename_editor = action(() => {
+    directTopic.startEditTitle.send();
+  });
+  const assert_rename_editor_seeded = assert(() =>
+    directTopic.editingTitle === true &&
+    directTopic.titleDraft.get() === "Direct topic, renamed"
+  );
+  const action_cancel_rename_editor = action(() => {
+    directTopic.titleDraft.set("abandoned rename");
+    directTopic.cancelEditTitle.send();
+  });
+  const assert_rename_editor_closed = assert(() =>
+    directTopic.editingTitle === false &&
+    directTopic.title === "Direct topic, renamed"
+  );
+
+  // --- saveProfileTitle: the browser rename, deterministic Profile ---
+  //
+  // Bound to standalone cells like the other Profile handlers, so the
+  // mutation is testable without a wish. The property under test: a browser
+  // rename lands through the same core as the verb, so the title can never
+  // change while titleUpdatedBy keeps describing an earlier rename.
+  const renameTitle = new Writable<string | Default<"">>("Before rename");
+  const renameTitleDraft = new Writable("");
+  const renameEditingTitle = new Writable(false);
+  const renameUpdatedBy = new Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >({ kind: "person", name: "" });
+  const renameUpdatedAt = new Writable<number | Default<0>>(0);
+  const profileSaveTitle = saveProfileTitle({
+    title: renameTitle,
+    titleDraft: renameTitleDraft,
+    editingTitle: renameEditingTitle,
+    titleUpdatedBy: renameUpdatedBy,
+    titleUpdatedAt: renameUpdatedAt,
+    profileName: "Ada",
+    profileAvatar: "🦊",
+  });
+
+  const action_browser_rename = action(() => {
+    renameTitleDraft.set("  After rename  ");
+    renameEditingTitle.set(true);
+    profileSaveTitle.send();
+  });
+  const assert_browser_rename_attributed = assert(() =>
+    renameTitle.get() === "After rename" &&
+    renameUpdatedBy.get()?.kind === "person" &&
+    renameUpdatedBy.get()?.name === "Ada" &&
+    (renameUpdatedAt.get() ?? 0) > 0 &&
+    renameEditingTitle.get() === false
+  );
+
+  // A blank draft is a non-event: nothing lands and the editor stays open.
+  const action_browser_rename_blank = action(() => {
+    renameTitleDraft.set("   ");
+    renameEditingTitle.set(true);
+    profileSaveTitle.send();
+  });
+  const assert_blank_rename_declined = assert(() =>
+    renameTitle.get() === "After rename" &&
+    renameEditingTitle.get() === true
+  );
+
   return {
     // UI demand (#4715) over the board: its card list renders through the real
     // reconciler while the suite runs. The cards bind navigation to index-row
@@ -941,6 +1007,14 @@ export default pattern(() => {
       { assertion: assert_survivor_still_an_edge },
       { action: action_rename_direct_topic },
       { assertion: assert_renamed_with_attribution },
+      { action: action_start_rename_editor },
+      { assertion: assert_rename_editor_seeded },
+      { action: action_cancel_rename_editor },
+      { assertion: assert_rename_editor_closed },
+      { action: action_browser_rename },
+      { assertion: assert_browser_rename_attributed },
+      { action: action_browser_rename_blank },
+      { assertion: assert_blank_rename_declined },
     ],
   };
 });

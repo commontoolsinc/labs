@@ -105,8 +105,10 @@ export interface AddTopicResult {
 export interface TopicIndexRow {
   title: string;
   createdAt: number;
-  /** Authorship has no honest zero, so absence stays declared rather than
-   * being coalesced to an empty author. */
+  /** Who filed the topic. A topic written without structured authorship
+   * materializes the declared default — the inert legacy sentinel
+   * `{ kind: "person", name: "" }` — so a blank name here means "unsigned";
+   * the display string then comes from the topic's own `createdByName`. */
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
   /** Coalesced to 0 for a cold or older topic whose derived path is absent,
    * so the row itself never carries the mixed-version undefined. */
