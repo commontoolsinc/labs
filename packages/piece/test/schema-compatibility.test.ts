@@ -46,12 +46,11 @@ describe("piece schema compatibility", () => {
   // content-addressed hash of the authoring module. Editing that module at all
   // — a type annotation, a comment, whitespace — rehashes it, so `moduleIdentity`
   // changes while `file`, `path`, and the `uiContract` stay identical. That is a
-  // recompile of the same authorization, not a narrowed contract, so a pattern
-  // update must be allowed to carry it. Today the whole `ifc` is compared for
-  // exact equality, so every edit to a pattern with a CFC write is rejected as
-  // "ifc changed" and the pattern is effectively frozen; ten baselined patterns
-  // (system/home, system/profile-*, lobby, and the cfc-* demos) are in that
-  // state. This test states the required behavior and currently fails.
+  // recompile of the same authorization, not a narrowed contract, so the
+  // backward-compatibility check accepts it: the content-addressed identity is
+  // normalized out of the `ifc` comparison. The ten baselined patterns that
+  // carry a CFC write (system/home, system/profile-*, lobby, and the cfc-*
+  // demos) depend on this to stay editable.
   it("accepts a recompile that only changes writeAuthorizedBy moduleIdentity", () => {
     const resultSchema = (moduleIdentity: string): JSONSchema => ({
       type: "object",
