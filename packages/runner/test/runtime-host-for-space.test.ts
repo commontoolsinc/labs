@@ -344,29 +344,39 @@ describe("Runtime.hostForSpace", () => {
 
   it("healthCheck forwards cancellation to its requests", async () => {
     const realFetch = globalThis.fetch;
-    let receivedSignal: AbortSignal | null = null;
-    globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
-      const signal = init?.signal ?? null;
-      receivedSignal = signal;
-      return new Promise<Response>((_resolve, reject) => {
-        signal?.addEventListener(
-          "abort",
-          () => reject(signal.reason),
-          { once: true },
-        );
-      });
-    }) as typeof fetch;
-    const runtime = makeRuntime();
     const controller = new AbortController();
     const reason = new Error("health check canceled");
+    let receivedSignal: AbortSignal | null = null;
+    let requestEntered!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      requestEntered = resolve;
+    });
+    let runtime: ReturnType<typeof makeRuntime> | undefined;
+    let check: Promise<boolean> | undefined;
     try {
-      const check = runtime.healthCheck(controller.signal);
+      globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+        const signal = init?.signal ?? null;
+        receivedSignal = signal;
+        requestEntered();
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(signal.reason),
+            { once: true },
+          );
+        });
+      }) as typeof fetch;
+      runtime = makeRuntime();
+      check = runtime.healthCheck(controller.signal);
+      await requestStarted;
       expect(receivedSignal).toBe(controller.signal);
       controller.abort(reason);
       await expect(check).rejects.toBe(reason);
     } finally {
+      controller.abort(reason);
+      await check?.catch(() => {});
       globalThis.fetch = realFetch;
-      await runtime.dispose();
+      await runtime?.dispose();
     }
   });
 });
