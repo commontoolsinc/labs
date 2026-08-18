@@ -668,13 +668,44 @@ outcome rather than a freshly computed one. The harness asserts both, with
 That is the whole asymmetry: reads repeat freely, calls do not repeat but
 their outcomes stay readable.
 
-**A retry is not free, even with an idempotency id.** Where a caller does need
-to retry — a dropped connection, an unknown outcome — naming the same
-invocation id makes the retry collide with the original receipt, so nothing
-commits twice. The guarantee is at-most-once **commit**, not at-most-once
-**execution**: the redelivered event re-runs the handler body and then loses
-the race for the receipt. A verb whose body reaches outside its transaction —
-an LLM call, a fetch, a message sent — repeats those effects on every retry.
+**The receipt route needs the address.** Where a caller never got one — a
+dropped connection, a response nobody saw — the invocation id is the handle
+instead. Name a call with `--invocation`, and replaying that id hands back
+the original outcome:
+
+```bash
+cf call --invocation note-retry "$EPIC" recordNote -- --body "first attempt"
+
+cf call --invocation note-retry "$EPIC" recordNote -- --body "a different body entirely"
+```
+
+```text
+{
+  "invocation": "note-retry",
+  "status": "settled",
+  "deduplicated": true,
+  "receipt": "/of:fid1:tdSLj9QyZFgmSQ53SFqN31lZz2yieuP1pWTW7nCeum0",
+  "result": {
+    "note": { "at": 1787082752000, "body": "first attempt" },
+    "noteCount": 2
+  }
+}
+```
+
+The second payload is deliberately different text, and it does not take: the
+body, the stamp, the count and the receipt are all the first call's, and the
+envelope says `deduplicated` rather than leaving a caller to infer it. An id
+is only half the handle — it is scoped to an **invocation session**, so one
+agent's `note-retry` is not another's. Mint one per run and keep it in
+`CF_INVOCATION_SESSION`, where the environment is closer to the secret it is
+than a command line would be.
+
+**A retry is still not free.** The guarantee is at-most-once **commit**, not
+at-most-once **execution**: the redelivered event re-runs the handler body and
+then loses the race for the receipt. A verb whose body reaches outside its
+transaction — an LLM call, a fetch, a message sent — repeats those effects on
+every retry. So retry freely for a verb that only writes its own space, and
+prefer the receipt for one that reaches beyond it.
 [Verbs over the CLI](over-the-cli.md) has the full contract.
 
 The demo's acts 5, 6, 7 and 10 are this step: an address-only read, the same

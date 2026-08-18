@@ -14,7 +14,7 @@
 # There is no second, prettier spelling of it anywhere in this file: `run` and
 # `broken` display `"$@"` and execute `"$@"`, so a line that reads well and a
 # line that ran cannot drift apart. What a reader sees is what they can retype,
-# given the two environment variables the header names.
+# given the environment variables the header names.
 #
 # Every act carries a claim, and the script checks all three kinds: an
 # unmarked act says the command works, a REFUSED one says the surface turns
@@ -51,6 +51,14 @@ if [ -z "${CF_IDENTITY:-}" ]; then
   cf id new >"$CF_IDENTITY" 2>/dev/null
 fi
 export CF_IDENTITY
+# An invocation session scopes the ids act 7 replays under. It belongs in the
+# environment rather than on a command line: it is closer to a secret than a
+# setting — it is what keeps an outcome's address out of a stranger's reach,
+# and arguments are readable in a process listing where the environment is not.
+if [ -z "${CF_INVOCATION_SESSION:-}" ]; then
+  CF_INVOCATION_SESSION=$(cf invocation-session new 2>/dev/null)
+fi
+export CF_INVOCATION_SESSION
 SPACE="${SPACE:-$(mktemp -u demoXXXXXXXX)}"
 
 B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; Y=$'\033[33m'; N=$'\033[0m'
@@ -187,7 +195,8 @@ say "and verbs. Deploying one makes a piece — a running instance. Both live in
 say "a space, the shared durable place every command below names with -s."
 say ""
 say "space $SPACE · nothing here was written for this pattern"
-say "CF_API_URL=$CF_API_URL and CF_IDENTITY are exported; everything else you see"
+say "CF_API_URL=$CF_API_URL, CF_IDENTITY and CF_INVOCATION_SESSION are exported;"
+say "everything else you see"
 say "is the whole command."
 
 act "1 · Arrive by name"
@@ -303,6 +312,23 @@ say "The stamp cannot carry that proof — the sandbox clock is coarsened to one
 say "second, so a re-execution here would land in the same second and agree."
 say "That it agrees says the receipt returned the ORIGINAL outcome, which is"
 say "the other thing worth knowing."
+say ""
+say "That route needs the address. The other one is for when you never got it"
+say "— a dropped connection, a response nobody saw. Name the call with an"
+say "--invocation id and the id itself becomes the handle."
+run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote -- --body "first attempt"
+say "Replaying that id hands back the original. The payload below is"
+say "deliberately different text, and it does not take:"
+run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote -- --body "a different body entirely"
+say "Same body, same stamp, same count, and the same receipt — the second"
+say "call wrote nothing. The envelope says so itself: deduplicated: true, a"
+say "field the first call did not carry. An id"
+say "is only half the handle: it is scoped to an invocation session, so one"
+say "agent's note-retry is not another's, which is why the session is exported"
+say "above rather than typed here."
+say "The caveat that keeps this honest: the replay DOES run the handler body"
+say "again, and then loses the race for the receipt. Nothing commits twice,"
+say "but a verb that sends mail or spends a model call has already done it."
 
 act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."

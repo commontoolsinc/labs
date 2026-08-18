@@ -56,6 +56,12 @@ if [ -z "${CF_IDENTITY:-}" ]; then
   $CF id new >"$CF_IDENTITY" 2>/dev/null
 fi
 ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
+# An id alone does not name an invocation — the session it was chosen within is
+# the other half, and `--invocation` is refused without one.
+if [ -z "${CF_INVOCATION_SESSION:-}" ]; then
+  CF_INVOCATION_SESSION=$($CF invocation-session new 2>/dev/null)
+fi
+export CF_INVOCATION_SESSION
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
 
@@ -315,6 +321,25 @@ else
   check "$AT" "$(echo "$RB" | jq -r '.note.at // 0')" \
     "and the outcome it returns is the original one, stamp and all"
 fi
+# The other recovery route: no address kept, so the id is the handle. The
+# replay carries a DIFFERENT payload on purpose — if it took, the body would
+# come back as the second text and the count would climb, so the assertions
+# below distinguish a genuine replay from a second append rather than trusting
+# that the two calls looked alike.
+R1=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
+  recordNote '{"body":"first attempt"}' 2>/dev/null)
+R1_AT=$(echo "$R1" | jq -r '.result.note.at // 0')
+R1_COUNT=$(echo "$R1" | jq -r '.result.noteCount // empty')
+R2=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
+  recordNote '{"body":"a different body entirely"}' 2>/dev/null)
+check "first attempt" "$(echo "$R2" | jq -r '.result.note.body // empty')" \
+  "replaying a settled id hands back the original result, not the new payload"
+check "$R1_COUNT" "$(echo "$R2" | jq -r '.result.noteCount // empty')" \
+  "and appends nothing — the count is the one the first call reported"
+check "$R1_AT" "$(echo "$R2" | jq -r '.result.note.at // 0')" \
+  "and the stamp is the first call's"
+check "true" "$(echo "$R2" | jq -r '.deduplicated // false')" \
+  "and the envelope says so itself, rather than leaving a caller to infer it"
 
 step "8. Finishing reports what the caller could not know"
 # Exit code checked for the same reason as step 4's creates.
