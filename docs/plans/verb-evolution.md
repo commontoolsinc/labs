@@ -374,7 +374,7 @@ deprecated or retired. `cf piece verbs` therefore draws its candidates from
 the piece's stored surface and its compiled graph rather than from the
 pattern's declared result type, and a verb the type omits is listed on the
 same terms as one it names. Two residual gaps are the probing caller's to
-know about, and [the CLI verb guide](../common/verbs-over-the-cli.md) states
+know about, and [the CLI verb guide](../common/verbs/over-the-cli.md) states
 both: a listing reporting `incomplete` is a lower bound, and a handler whose
 stored schema carries no stream marker is callable without ever being listed.
 Absence is evidence of retirement only on a listing that reports neither.

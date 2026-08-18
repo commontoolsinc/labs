@@ -1,9 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type {
+  CHIP_UI as CHIP_UI_TYPE,
   FactoryInput,
+  FS as FS_TYPE,
   FsProjection,
+  NAME as NAME_TYPE,
   PatternFunction,
+  TILE_UI as TILE_UI_TYPE,
+  UI as UI_TYPE,
   VNode,
 } from "@commonfabric/api";
 
@@ -17,11 +22,11 @@ import type {
 // the enforcement regresses, the directive becomes unused and `deno check`
 // fails on it.
 declare const pattern: PatternFunction;
-declare const UI: typeof import("@commonfabric/api").UI;
-declare const NAME: typeof import("@commonfabric/api").NAME;
-declare const TILE_UI: typeof import("@commonfabric/api").TILE_UI;
-declare const CHIP_UI: typeof import("@commonfabric/api").CHIP_UI;
-declare const FS: typeof import("@commonfabric/api").FS;
+declare const UI: typeof UI_TYPE;
+declare const NAME: typeof NAME_TYPE;
+declare const TILE_UI: typeof TILE_UI_TYPE;
+declare const CHIP_UI: typeof CHIP_UI_TYPE;
+declare const FS: typeof FS_TYPE;
 
 declare const reactiveUi: FactoryInput<VNode>;
 declare const reactiveName: FactoryInput<string>;

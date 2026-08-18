@@ -21,6 +21,8 @@ type ImageChatInput = {
 };
 
 export type ImageChatOutput = {
+  [NAME]: string;
+  [UI]: VNode;
   images: Writable<ImageData[]>;
   prompt: Writable<string>;
   response: string | undefined;

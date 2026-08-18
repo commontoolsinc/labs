@@ -126,6 +126,31 @@ describe("cli check", () => {
     expect(code).toBe(0);
   });
 
+  it("evaluates a pattern that reads a data file attached with --datafile", async () => {
+    const { code, stdout, stderr } = await cf(
+      "check --root fixtures fixtures/reads-data-file.tsx " +
+        "--datafile fixtures/data/cities.json --pattern-json",
+    );
+    checkStderr(stderr);
+    // The printed value is the file's contents, so this fails if the bytes
+    // never reached the pattern rather than merely if the compile broke.
+    expect(JSON.parse(stdout.join("\n"))).toEqual(["Oslo", "Lima"]);
+    expect(code).toBe(0);
+  });
+
+  it("names --datafile when a pattern reads a file that is not attached", async () => {
+    const { code, stderr } = await cf(
+      "check --root fixtures fixtures/reads-data-file.tsx",
+    );
+    // The refusal has to name the flag that fixes it, since the pattern
+    // compiles and type-checks either way.
+    expect(stripAnsi(stderr.join("\n"))).toContain(
+      'No attached data file "/data/cities.json"',
+    );
+    expect(stripAnsi(stderr.join("\n"))).toContain("--datafile");
+    expect(code).not.toBe(0);
+  });
+
   it("prints compiled module bodies as a structured JSON result", async () => {
     const { code, stdout, stderr } = await cf(
       "check fixtures/check-json-no-evaluate.ts --json",

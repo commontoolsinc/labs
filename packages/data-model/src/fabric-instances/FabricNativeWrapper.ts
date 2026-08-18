@@ -3,7 +3,7 @@ import type { FabricInstance } from "@/interface.ts";
 import {
   BaseFabricInstance,
   DEEP_CLONE_CORE,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 
 /**
  * Abstract base class for `FabricInstance` wrappers that bridge native JS

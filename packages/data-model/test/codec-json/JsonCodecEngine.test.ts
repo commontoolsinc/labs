@@ -28,6 +28,7 @@ import { expect } from "@std/expect";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import {
   createDefaultJsonRegistry,
+  jsonFromFabricValue,
   newDefaultJsonCodecEngine,
 } from "@/codecs.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
@@ -41,7 +42,7 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -52,6 +53,7 @@ import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 /**
  * Shared test `LiveEnvironment`: `getCell()` always throws (no test
@@ -436,8 +438,20 @@ describe("JsonCodecEngine", () => {
         .decode("fvj1:{not json", new TestLiveEnvironment());
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
-      expect((decoded as ProblematicValue).error)
+
+      const problem = decoded as ProblematicValue;
+
+      // All three facts, not just the message: the tag and state are what
+      // carry the refusal's account of what arrived, and a settlement that
+      // dropped them would still match on the message alone.
+      expect(problem.error)
         .toMatch(/Malformed JSON in an encoded `FabricValue` string/);
+      expect(problem.wireTypeTag).toBe("");
+      expect(problem.state).toBe("{not json");
+
+      // Deep-frozen like any other decoded result, so a caller cannot alter
+      // the account it was handed.
+      expect(Object.isFrozen(problem)).toBe(true);
     });
   });
 
@@ -456,7 +470,7 @@ describe("JsonCodecEngine", () => {
     it("returns a `ProblematicValue` for unparseable bytes when lenient", () => {
       // This entry point reaches a conversion without passing through
       // `decode()`, so it settles the refusal itself. Were it not to, the
-      // byte boundary would answer a malformed payload differently from the
+      // byte boundary would treat a malformed payload differently from the
       // string boundary for no reason a caller could name.
       const bytes = new TextEncoder().encode("{not json");
       const decoded = newDefaultJsonCodecEngine({ lenient: true })
@@ -1067,12 +1081,9 @@ describe("JsonCodecEngine", () => {
         expect(Object.keys(encoded)).toEqual(["", "\u{10000}"]);
       });
 
-      it("matches the key order used by `value-hash.ts`", async () => {
+      it("matches the key order used by `value-hash.ts`", () => {
         // Both subsystems must agree on the canonical sort order. Cross-check
         // via `utf8SortedKeysOf`, which is the function value-hash.ts uses.
-        const { utf8SortedKeysOf } = await import(
-          "@commonfabric/utils/utf8"
-        );
         const obj = {
           ["\u{1F600}"]: 1,
           b: 2,
@@ -1734,14 +1745,50 @@ describe("JsonCodecEngine", () => {
       >;
       expect(Object.isFrozen(result)).toBe(true);
     });
+
+    // Every arm of the dispatch, so that the guarantee does not depend on
+    // which one produced the value. `isDeepFrozen()` rather than
+    // `Object.isFrozen()`: an arm that froze only the value it built, and not
+    // what it wrapped, would pass the shallow check.
+
+    it("an `UnknownValue` from an unrecognized tag is deep-frozen", () => {
+      const result = fromEncodedFormat(
+        { "/Nope@1": { a: 1 } } as JsonCodecValue,
+      );
+
+      expect(result).toBeInstanceOf(UnknownValue);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
+    it("an `UnknownValue` is deep-frozen through its state", () => {
+      const result = fromEncodedFormat(
+        { "/Nope@1": { inner: { deep: [1, 2] } } } as JsonCodecValue,
+      ) as UnknownValue;
+      const state = result.state as { inner: { deep: unknown[] } };
+
+      expect(isDeepFrozen(result)).toBe(true);
+      expect(Object.isFrozen(state.inner)).toBe(true);
+      expect(Object.isFrozen(state.inner.deep)).toBe(true);
+    });
+
+    it("a `ProblematicValue` from a malformed tag is deep-frozen", () => {
+      // `malformed`, because the wrap helper validates with a strict decode
+      // and would otherwise reject the very payload this case is made of.
+      const result = fromEncodedFormat(
+        { "/": { a: 1 } } as JsonCodecValue,
+        true,
+      );
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
   });
 
   describe("`FabricCodec.decode()` deep-frozen contract", () => {
-    // The contract is scoped to the codec dispatch arm: anything returned via
-    // a registered `FabricCodec` is guaranteed deep-frozen at the `decode()`
-    // boundary, so callers do not each have to freeze. The unknown-tag
-    // fallback (`UnknownValue`) is a separate arm and is intentionally NOT
-    // covered by this contract.
+    // Anything returned via a registered `FabricCodec` is guaranteed
+    // deep-frozen at the `decode()` boundary, so callers do not each have to
+    // freeze. That holds of every other arm too, the unknown-tag fallback
+    // included; the cases just above cover those.
 
     it("codec-produced value is deep-frozen at the boundary", () => {
       // `/EpochNsec@1` dispatches through a registered codec; the
@@ -2057,6 +2104,60 @@ describe("JsonCodecEngine", () => {
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe(null); // null = same as type (common case)
       expect(state.message).toBe("compat test");
+    });
+  });
+
+  describe("`seemsLikeEncoded()`", () => {
+    // Decides on the prefix alone and never parses, so these cases are about
+    // where that suffices and where it would be too eager: the bare prefix
+    // counts, a prefix that is partial or not at the front does not, and plain
+    // JSON that happens to look similar does not. One case feeds it real
+    // encoder output, so the shape recognized here cannot drift from the shape
+    // produced.
+    it("recognizes a string with the encoding prefix", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded('fvj1:{"a":1}')).toBe(true);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1:null")).toBe(true);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1:42")).toBe(true);
+    });
+
+    it("recognizes the bare prefix", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1:")).toBe(true);
+    });
+
+    it("recognizes the actual output of `jsonFromFabricValue()` (round-trip check)", () => {
+      const encoded = jsonFromFabricValue({ a: 1, b: 42n });
+      expect(JsonCodecEngine.seemsLikeEncoded(encoded)).toBe(true);
+    });
+
+    it("returns `false` for an empty string", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("")).toBe(false);
+    });
+
+    it("returns `false` for plain JSON without the prefix", () => {
+      // These are plain JSON without the prefix, so the dispatch must reject
+      // them.
+      expect(JsonCodecEngine.seemsLikeEncoded("true")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("false")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("null")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded('"hello"')).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("[1,2,3]")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded('{"a":1}')).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("42")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("-1")).toBe(false);
+    });
+
+    it("returns `false` for a partial or misplaced prefix", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("FVJ1:")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj2:")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded(" fvj1:")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("xfvj1:")).toBe(false);
+    });
+
+    it("returns `false` for a bare identifier or other non-JSON-looking string", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("hello")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("undefined")).toBe(false);
     });
   });
 

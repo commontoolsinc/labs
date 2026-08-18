@@ -26,6 +26,7 @@ import {
   pattern,
   toIndentedDebugString,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -453,6 +454,8 @@ interface PatternInput {
 
 /** Flight calendar bridge - generates travel events from flights. #flightCalendar */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   flightCount: number;
   events: CalendarEvent[];
   flightEvents: CalendarEvent[];

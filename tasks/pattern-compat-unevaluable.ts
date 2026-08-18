@@ -27,10 +27,4 @@ export const UNEVALUABLE_PATTERNS: ReadonlySet<string> = new Set([
   "google/core/util/google-docs-markdown.ts",
   // "Cell.of() only accepts static data, but found a reactive value"
   "google/core/imported-calendar.tsx",
-  // "Reactive.map(fn) is no longer supported: an inline pattern has no stable
-  // identity" — the authored `.map(...)` lowering.
-  "google/extractors/email-pattern-dreamer.tsx",
-  "google/extractors/email-pattern-launcher.tsx",
-  "google/extractors/hotel-membership-gmail-agent.tsx",
-  "google/extractors/usps-informed-delivery.tsx",
 ]);

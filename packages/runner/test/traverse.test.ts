@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
+import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
@@ -23,6 +24,7 @@ import {
   combineSchema,
   CompoundCycleTracker,
   createDefaultTraversalContext,
+  createSchemaMemo,
   createTraversalContext,
   getAtPath,
   IMemorySpaceValueAttestation,
@@ -32,6 +34,7 @@ import {
   mergeAnyOfBranchSchemas,
   mergeAnyOfMatches,
   PointerCycleTracker,
+  type SchemaMemo,
   SchemaObjectTraverser,
   schemaTrackerCoversSelector,
   setTraverseDiagnostics,
@@ -43,11 +46,18 @@ function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
   context: TraversalContext = createDefaultTraversalContext(),
+  sharedSchemaMemo?: SchemaMemo,
 ): SchemaObjectTraverser<FabricValue> {
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector, context);
+  return new SchemaObjectTraverser(
+    tx,
+    selector,
+    context,
+    undefined,
+    sharedSchemaMemo,
+  );
 }
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
@@ -4478,5 +4488,102 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
   it("collects nothing when diagnostics are off", () => {
     // The default, and what every job that measures coverage runs under.
     expect(traverseWithElapsed(150).warnings[0]).toContain("uniqueDocs=0");
+  });
+});
+
+describe("SchemaObjectTraverser schema memo keys", () => {
+  const SPACE = "did:null:null";
+  const TYPE = "application/json" as const;
+
+  // An inline document: one whose id is a data URI carrying the document's
+  // whole content, which is what a pattern's UI produces for a component
+  // holding a list of labelled entries — the emoji list an autocomplete
+  // offers, say. The traversal walks every node under that one id, so the id
+  // is the same on thousands of visits while only the path differs.
+  function inlineDocument(groupCount: number): {
+    id: URI;
+    value: FabricValue;
+    schema: JSONSchema;
+  } {
+    const entries = (group: number) =>
+      Object.fromEntries(
+        Array.from(
+          { length: groupCount },
+          (_, i) => [`entry${i}`, `label for entry ${i} of group ${group}`],
+        ),
+      );
+    const value = {
+      items: Object.fromEntries(
+        Array.from(
+          { length: groupCount },
+          (_, group) => [`group${group}`, entries(group)],
+        ),
+      ),
+    };
+    const schema = {
+      type: "object",
+      properties: {
+        items: {
+          type: "object",
+          additionalProperties: {
+            type: "object",
+            additionalProperties: { type: "string" },
+          },
+        },
+      },
+    } as JSONSchema;
+    return { id: dataUriFromValue(value) as URI, value, schema };
+  }
+
+  // Traverses one inline document and hands back the memo it filled.
+  function traverseInlineDocument(groupCount: number): {
+    memo: SchemaMemo;
+    idLength: number;
+  } {
+    const { id, value, schema } = inlineDocument(groupCount);
+    const memo = createSchemaMemo();
+    const traverser = getTraverser(
+      new Map<string, Revision<State>>(),
+      { path: ["value"], schema },
+      createDefaultTraversalContext(),
+      memo,
+    );
+    traverser.traverse({
+      address: { space: SPACE, id, type: TYPE, path: ["value"] },
+      value,
+    });
+    return { memo, idLength: id.length };
+  }
+
+  it("holds one bounded key per visit, whatever the id costs", () => {
+    const { memo, idLength } = traverseInlineDocument(20);
+
+    // The traversal reached every entry, so the memo speaks for hundreds of
+    // visits rather than for a single node.
+    expect(memo.size).toBeGreaterThan(400);
+    // The id runs to tens of thousands of characters, so a key that carried
+    // it would cost a copy and a hash of that much on every one of those
+    // visits.
+    expect(idLength).toBeGreaterThan(10_000);
+
+    const longestKey = Math.max(...[...memo.keys()].map((key) => key.length));
+    expect(longestKey).toBeLessThan(1000);
+  });
+
+  it("grows its key material with the visit count, not the id length", () => {
+    // Doubling the fan-out quadruples the visit count, and quadruples the
+    // length of the id along with it. Key material that carried the id would
+    // grow with the product of the two; carrying a fixed-size stand-in
+    // instead, it grows with the visit count alone, so the share per visit
+    // holds steady.
+    const small = traverseInlineDocument(10);
+    const large = traverseInlineDocument(20);
+
+    const perVisit = ({ memo }: { memo: SchemaMemo }) =>
+      [...memo.keys()].reduce((total, key) => total + key.length, 0) /
+      memo.size;
+
+    expect(large.idLength).toBeGreaterThan(small.idLength * 3);
+    expect(perVisit(large)).toBeLessThan(perVisit(small) * 1.1);
   });
 });

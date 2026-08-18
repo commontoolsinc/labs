@@ -1,0 +1,73 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "activeTab": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "tab1",
+        "type": "string"
+      },
+      "category": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Other",
+        "type": "string"
+      },
+      "numericChoice": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 1,
+        "type": "number"
+      },
+      "selected": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "opt_1",
+        "type": "string"
+      }
+    },
+    "required": [
+      "selected",
+      "numericChoice",
+      "category",
+      "activeTab"
+    ],
+    "type": "object"
+  },
+  "pattern": "examples/multi-option-selection.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "activeTab": {
+        "type": "string"
+      },
+      "category": {
+        "type": "string"
+      },
+      "numericChoice": {
+        "type": "number"
+      },
+      "selected": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "selected",
+      "numericChoice",
+      "category",
+      "activeTab",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

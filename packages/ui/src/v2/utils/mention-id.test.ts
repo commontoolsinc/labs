@@ -1,4 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import { CFCodeEditor } from "../components/cf-code-editor/cf-code-editor.ts";
 import { mentionIdFromCellId } from "./mention-id.ts";
 
 Deno.test("mentionIdFromCellId strips of: and passes bare ids through", () => {
@@ -16,10 +17,7 @@ Deno.test("mentionIdFromCellId rejects computed: ids", () => {
   );
 });
 
-Deno.test("cf-code-editor derives mention pieceIds in the bare embed form", async () => {
-  const { CFCodeEditor } = await import(
-    "../components/cf-code-editor/cf-code-editor.ts"
-  );
+Deno.test("cf-code-editor derives mention pieceIds in the bare embed form", () => {
   const proto = CFCodeEditor.prototype as unknown as {
     _getPieceId(index: number): string;
   };

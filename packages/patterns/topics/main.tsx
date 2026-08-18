@@ -1,6 +1,5 @@
 import {
   action,
-  computed,
   Default,
   equals,
   handler,
@@ -315,9 +314,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   // the fields once here would pin the composer to the empty profile the board
   // started with: the Start button never enables, and a topic filed through it
   // carries blank attribution.
-  const profileName = computed(() => profileWish.result?.name ?? "");
-  const profileAvatar = computed(() => profileWish.result?.avatar ?? "");
-  const hasProfile = computed(() => profileName.trim().length > 0);
+  const profileName = profileWish.result?.name ?? "";
+  const profileAvatar = profileWish.result?.avatar ?? "";
+  const hasProfile = profileName.trim().length > 0;
 
   const addTopic = action<AddTopicEvent, AddTopicResult>((
     { title, body, agentName },

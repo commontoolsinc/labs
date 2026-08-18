@@ -2,7 +2,7 @@
 # The verb-result walkthrough: deploy a pattern, introspect its verbs, call
 # them, and read what they return.
 #
-# Documented in docs/common/verbs-over-the-cli.md, which explains the model
+# Documented in docs/common/verbs/over-the-cli.md, which explains the model
 # this exercises. Keep the two in step: the doc is the explanation, this is the
 # proof, and each names the other.
 #
@@ -257,12 +257,12 @@ C=$($CF call --quiet --piece "$BOARD" $ARGS --invocation reuse-1 \
 check "Corrected" "$(echo "$C" | jq -r '.result.note["$NAME"] // empty')" \
   "the SAME id then executes, because the refusal never consumed it"
 
-step "11. Reading a verb redirects to cf piece call"
+step "11. Reading a verb redirects to cf call"
 OUT=$($CF get --piece "$BOARD" $ARGS createNote 2>&1)
 rc=$?
 check "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "a verb read exits nonzero"
-echo "$OUT" | grep -qi "piece call" &&
-  ok "the refusal names cf piece call" ||
+echo "$OUT" | grep -qi "cf call" &&
+  ok "the refusal names cf call" ||
   bad "the refusal does not name the right command"
 
 step "12. --verbose times the phases on stderr; stdout stays JSON"

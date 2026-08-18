@@ -412,7 +412,7 @@ run_piece_links() {
   # The slug index: both names just assigned are enumerable, and each resolves
   # to a piece. Names are compared exactly; the resolved ids are only checked
   # non-null, because an address is something to read next, not an identifier
-  # to compare (docs/common/verb-session-walkthrough.md, "An address is not an
+  # to compare (docs/common/verbs/session-walkthrough.md, "An address is not an
   # identifier to compare").
   SLUGS_JSON=$(cf piece slugs $SPACE_ARGS --json)
   echo "$SLUGS_JSON" | jq -e '[.[].slug] == ["counter-alias", "resolved-counter"]' > /dev/null ||
@@ -549,14 +549,13 @@ run_piece_call() {
   echo "Created callable piece: $CALLABLE_PIECE_ID"
 
   CALL_HELP=$(cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help)
-  # The expected strings keep the `piece call` spelling: the help page names
-  # it in its usage lines whichever mount was invoked — these greps assert
-  # cf's output, not this script's own spelling.
-  echo "$CALL_HELP" | grep -q "cf piece call ... search --help" ||
+  # These greps assert cf's output: the help page names the mount that was
+  # invoked, and the invocation above is the top-level spelling.
+  echo "$CALL_HELP" | grep -q "cf call ... search --help" ||
     error "Top-level callable help should work without the delimiter"
-  echo "$CALL_HELP" | grep -q "cf piece call ... search <json>" ||
+  echo "$CALL_HELP" | grep -q "cf call ... search <json>" ||
     error "Piece-call help should describe JSON input without --json"
-  echo "$CALL_HELP" | grep -q "cf piece call ... search --json \[<json>\]" ||
+  echo "$CALL_HELP" | grep -q "cf call ... search --json \[<json>\]" ||
     error "Piece-call help should describe explicit --json input"
 
   CALL_HELP_JSON=$(cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help --json)
@@ -1037,7 +1036,7 @@ run_three_topic_fixture() {
 
 # The verb-result walkthrough. Delegates to the standalone script rather than
 # restating its assertions here: that script is what
-# docs/common/verbs-over-the-cli.md tells a reader to run, so the documented
+# docs/common/verbs/over-the-cli.md tells a reader to run, so the documented
 # artifact is the tested one and the two cannot drift. It deploys its own
 # fixture and takes its own space.
 #
@@ -1110,6 +1109,17 @@ run_spelling_parity() {
   RESULT=$(cf piece get $SPACE_ARGS --piece $PARITY_CALLABLE_ID legacyCount)
   [ "$RESULT" = "$((LEGACY_BEFORE + 1))" ] ||
     error "A handler dispatched via cf call should commit once, got legacyCount=$RESULT"
+
+  # The one place the two mounts deliberately differ: each verb help page
+  # names the mount that was invoked. Asserted from both ends here, in the
+  # section that dies with the piece-mounted spellings, so "the page names
+  # what you typed" cannot regress on either branch while both exist.
+  cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search --help |
+    grep -q "cf call ... search --help" ||
+    error "cf call's verb help should name the top-level mount"
+  cf piece call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search --help |
+    grep -q "cf piece call ... search --help" ||
+    error "cf piece call's verb help should name the piece mount"
 
   echo "Successfully ran CLI spelling parity tests for ${API_URL}/${SPACE}."
 }

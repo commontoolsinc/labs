@@ -3,13 +3,13 @@
 # not work yet. Its companion `verb-session-demo.sh` shows the session as it is
 # meant to read; this one is the thing that keeps that honest.
 #
-# Some steps assert a GAP rather than a capability. Each fails loudly the day
-# the gap closes, so this script is how we find out that a capability arrived
-# rather than discovering it months later in a stale document. How many are
-# open is tallied as they run and printed on the last line, so no prose here
-# can fall out of step with the assertions below.
+# A step may assert a GAP rather than a capability. Such a step fails loudly
+# the day its gap closes, so this script is how we find out that a capability
+# arrived rather than discovering it months later in a stale document. How
+# many are open is tallied as they run and printed on the last line, so no
+# prose here can fall out of step with the assertions below.
 #
-# Documented in docs/common/verb-session-walkthrough.md.
+# Documented in docs/common/verbs/session-walkthrough.md.
 #
 # It deploys pattern/tracker.tsx and nothing else. That fixture belongs to this
 # session alone, so a change to a pattern the product ships can never break a
@@ -56,6 +56,12 @@ if [ -z "${CF_IDENTITY:-}" ]; then
   $CF id new >"$CF_IDENTITY" 2>/dev/null
 fi
 ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
+# An id alone does not name an invocation — the session it was chosen within is
+# the other half, and `--invocation` is refused without one.
+if [ -z "${CF_INVOCATION_SESSION:-}" ]; then
+  CF_INVOCATION_SESSION=$($CF invocation-session new 2>/dev/null)
+fi
+export CF_INVOCATION_SESSION
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
 
@@ -296,6 +302,43 @@ check "1" "$(echo "$N" | jq -r '.result.noteCount // empty')" \
 AT=$(echo "$N" | jq -r '.result.note.at // 0')
 [ "$AT" -gt 0 ] && ok "and a timestamp the caller never supplied ($AT)" ||
   bad "no pattern-stamped time on the note"
+# Both recovery routes are asserted against the LIVE piece, not against what
+# the envelope reports. A receipt is a frozen snapshot of the outcome its
+# handling committed, and a replay is defined to hand that same snapshot back —
+# so an envelope shows the original count and body whether or not a second
+# append actually landed. Only reading the item's own `notes` afterwards can
+# tell those apart, which makes the live length the discriminator for both.
+notes_len() { $CF get --quiet --piece "$EPIC" $ARGS notes 2>/dev/null | jq 'length'; }
+LIVE0=$(notes_len)
+RCPT=$(echo "$N" | jq -r '.receipt // empty')
+if [ -z "$RCPT" ]; then
+  bad "the settled envelope named no receipt to read back"
+else
+  RB=$($CF get --quiet --piece "$RCPT" $ARGS --select note,noteCount 2>/dev/null)
+  check "blocked on the cookie spec" "$(echo "$RB" | jq -r '.note.body // empty')" \
+    "the receipt address holds the outcome that handling committed"
+  check "1" "$(echo "$RB" | jq -r '.noteCount // empty')" \
+    "and reading it hands that outcome back without calling anything again"
+  check "$LIVE0" "$(notes_len)" \
+    "and the piece is untouched by the read — no note was appended"
+fi
+
+# The other route: no address kept, so the id is the handle. The replay carries
+# a DIFFERENT payload on purpose, so a returned body of the FIRST text is
+# evidence the second call's event never became an outcome.
+R1=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
+  recordNote '{"body":"first attempt"}' 2>/dev/null)
+LIVE1=$(notes_len)
+R2=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
+  recordNote '{"body":"a different body entirely"}' 2>/dev/null)
+check "first attempt" "$(echo "$R2" | jq -r '.result.note.body // empty')" \
+  "replaying a settled id hands back the original result, not the new payload"
+check "$(echo "$R1" | jq -r '.receipt // empty')" "$(echo "$R2" | jq -r '.receipt // empty')" \
+  "and names the same receipt the first call did"
+check "true" "$(echo "$R2" | jq -r '.deduplicated // false')" \
+  "and says so itself, rather than leaving a caller to infer it"
+check "$LIVE1" "$(notes_len)" \
+  "and the piece is unchanged — the replay committed no second note"
 
 step "8. Finishing reports what the caller could not know"
 # Exit code checked for the same reason as step 4's creates.
@@ -322,21 +365,24 @@ V=$($CF call --quiet --piece "$KID" $ARGS archive '{}' 2>/dev/null)
 check "settled" "$(echo "$V" | jq -r '.status')" "archive settled"
 check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witness"
 
-step "10. A reference argument dispatches; the emitted spelling is the GAP"
-# blockOn declares `on: Writable<ItemOutput>` — a reference. The capability
-# landed with #5880: a link ENVELOPE in that position passes the gate and the
-# edge that comes back is the target, not a copy. What has not landed is the
-# round-trip spelling docs/plans/references-as-arguments.md holds out for —
-# the address exactly as a read emits it. The two halves are asserted apart,
-# so neither can hide behind the other.
+step "10. A reference argument dispatches — the envelope, and the address as emitted"
+# blockOn declares `on: Writable<ItemOutput>` — a reference. #5880 landed the
+# ENVELOPE spelling: a link envelope in that position passes the gate and the
+# edge that comes back is the target, not a copy. The round-trip spelling
+# docs/plans/references-as-arguments.md held out for — the address exactly as
+# a read emits it — landed with the dispatch gate reading the declared
+# contract (docs/history/plans/verb-input-contract.md), and the same contract is what
+# refuses the two payloads that could only ever be mistakes at a reference
+# position. Every spelling is asserted apart, so none can hide behind
+# another.
 OTHER=$($CF get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
   jq -r '.[0]["$link"] // empty')
 if [ -z "$OTHER" ] || [ -z "${KID:-}" ]; then
   bad "no address to probe blockOn with (item=$OTHER target=${KID:-})"
 else
-  # The capability half: the envelope is assembled from the very address the
-  # read above emitted, so the target is one the session was handed.
+  # The envelope: assembled from the very address the read above emitted, so
+  # the target is one the session was handed.
   SIGIL="{\"on\":{\"/\":{\"link@1\":{\"id\":\"${OTHER#/}\"}}}}"
   BLOCKED=$($CF call --quiet --piece "$KID" $ARGS \
     blockOn "$SIGIL" 2>/dev/null)
@@ -348,19 +394,34 @@ else
     --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
     jq -r '.[0]["$link"] // empty')
   check "$OTHER" "$EDGE" "the edge reads back as the address that was named"
-  # The gap half. Guarded, and matched against the SPECIFIC refusal: an empty
-  # address, a renamed verb, or a server hiccup would also exit nonzero, and a
-  # probe that reads any failure as "gap still open" is a probe that cannot
+  # The emitted spelling: the same address, fed back exactly as printed.
+  BLOCKED2=$($CF call --quiet --piece "$KID" $ARGS \
+    blockOn "{\"on\":\"$OTHER\"}" 2>/dev/null)
+  check "2" "$(echo "$BLOCKED2" | jq -r '.result.blockedOnCount // empty')" \
+    "the address a read emits, fed back as written, dispatches"
+  EDGE2=$($CF get --quiet --piece "$KID" blockedOn $ARGS \
+    --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
+    jq -r '.[1]["$link"] // empty')
+  check "$OTHER" "$EDGE2" "and its edge is the target, not a copy"
+  # The refusals guarding the same position, each matched against its
+  # SPECIFIC message: a renamed verb or a server hiccup also exits nonzero,
+  # and a probe that reads any failure as the refusal is a probe that cannot
   # fail.
-  BLOCK_ERR=$($CF call --quiet --piece "$KID" $ARGS \
-    blockOn "{\"on\":\"$OTHER\"}" 2>&1 >/dev/null)
-  BLOCK_RC=$?
-  if [ "$BLOCK_RC" = "0" ]; then
-    gap 0 "blockOn with the address a read emits"
-  elif printf '%s' "$BLOCK_ERR" | grep -q "does not match type object"; then
-    gap 1 "blockOn with the address a read emits (the gate still refuses the string)"
+  NOT_ERR=$($CF call --quiet --piece "$KID" $ARGS \
+    blockOn '{"on":"not-an-address"}' 2>&1 >/dev/null)
+  NOT_RC=$?
+  if [ "$NOT_RC" != "0" ] && printf '%s' "$NOT_ERR" | grep -q "is not an address"; then
+    ok "a string that is no address is refused naming the reference position"
   else
-    bad "blockOn failed for a reason that is not the known refusal: $BLOCK_ERR"
+    bad "the not-an-address refusal did not fire (rc=$NOT_RC): $NOT_ERR"
+  fi
+  COPY_ERR=$($CF call --quiet --piece "$KID" $ARGS \
+    blockOn '{"on":{"title":"a copy"}}' 2>&1 >/dev/null)
+  COPY_RC=$?
+  if [ "$COPY_RC" != "0" ] && printf '%s' "$COPY_ERR" | grep -q "detached document"; then
+    ok "an inline copy is refused as a detached document"
+  else
+    bad "the detached-copy refusal did not fire (rc=$COPY_RC): $COPY_ERR"
   fi
 fi
 

@@ -899,6 +899,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return isLazyMaterializationTx(this);
   }
 
+  hasWrites(): boolean {
+    return this.tx.hasWrites?.() ?? false;
+  }
+
+  issueReadEpoch(): number | undefined {
+    return this.tx.issueReadEpoch?.();
+  }
+
+  enterReadEpoch(epoch: number | undefined): number | undefined {
+    const previous = this.#readEpoch;
+    this.#readEpoch = epoch;
+    this.tx.enterReadEpoch?.(epoch);
+    return previous;
+  }
+
+  exitReadEpoch(previous: number | undefined): void {
+    this.#readEpoch = previous;
+    this.tx.exitReadEpoch?.(previous);
+  }
+
+  // Mirrors the epoch pushed down to the storage transaction, so the caches
+  // this class owns can tell whether the value they are about to keep, or
+  // hand out, describes the current state or an earlier one.
+  #readEpoch: number | undefined;
+
   noteSchemaRefusal(refusal: unknown): void {
     noteSchemaRefusalTx(this, refusal);
   }
@@ -929,6 +954,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     key: string,
     variant: string,
   ): { value: unknown } | undefined {
+    // Both caches key on path and schema, not on which instant is being read,
+    // and they are dropped on write to stay level with current state. A read
+    // resolving against an earlier epoch is describing a different instant, so
+    // it neither takes from them nor adds to them — serving one across that
+    // boundary would hand a materialized read's value to a current one, or the
+    // reverse.
+    if (this.#readEpoch !== undefined) return undefined;
     const cached = this.readResultCache.get(key)?.get(variant);
     if (cached === undefined) {
       this.readResultCacheMisses++;
@@ -943,6 +975,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     variant: string,
     value: unknown,
   ): void {
+    if (this.#readEpoch !== undefined) return;
     let byVariant = this.readResultCache.get(key);
     if (byVariant === undefined) {
       byVariant = new Map();
@@ -956,6 +989,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // A finished transaction answers no reads, so nothing it memoized earlier
     // may be handed out as if it had.
     if (this.status().status !== "ready") return undefined;
+    // A read resolving against an earlier epoch describes a different instant
+    // than the memo does; see `getCachedReadResult`.
+    if (this.#readEpoch !== undefined) return undefined;
     // Once CFC is prepared, the read path's `read-after-prepare` invalidation
     // is load-bearing: a memoized resolution issues no reads and would leave a
     // prepared digest standing over a read it never made.
@@ -990,25 +1026,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       sets: this.readResultCacheSets,
       entries,
     };
-  }
-
-  hasWrites(): boolean {
-    return this.#hasWrites;
-  }
-
-  #hasWrites = false;
-
-  /**
-   * Record that this transaction has written.
-   *
-   * Called from every write path rather than inferred from one of their side
-   * effects: a mergeable op and a folded SQLite write are both writes, and
-   * neither drops the read-result cache — the value write a mergeable op
-   * annotates has already done that, and a SQLite op changes no cell value
-   * locally. Deriving "has written" from cache invalidation would miss both.
-   */
-  private noteWrite(): void {
-    this.#hasWrites = true;
   }
 
   private invalidateReadResultCache(): void {
@@ -1619,7 +1636,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
     this.assertWritable("recordMergeableOp");
-    this.noteWrite();
     const address = toMemorySpaceAddress(link);
     // Same S18 chokepoint as write()/writeOrThrow(): a mergeable op IS a
     // write. The ["cfc"]-path arm is structurally unreachable here (a
@@ -1646,7 +1662,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // A folded SQLite write is a write — honor the wrapper's read-only mode the
     // same way cell writes do, instead of silently recording it.
     this.assertWritable("recordSqliteWrite");
-    this.noteWrite();
     if (!this.tx.recordSqliteWrite) {
       throw new Error(
         "storage transaction does not support recordSqliteWrite()",
@@ -1745,7 +1760,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
-    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1761,7 +1775,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.assertWritable("writeOrThrow()");
-    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1880,18 +1893,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
       const noteSystemWrite = (address: IMemorySpaceAddress) =>
         this.noteSystemWrite(address);
-      // Note the write per yielded write (not once up front): an empty batch
-      // must not mark the tx as written-to, for the identity or for the
-      // has-written flag lazy materialization reads.
+      // Capture the identity per yielded write, not once up front: an empty
+      // batch authored nothing, so it must not record a write for the
+      // transaction's write-identity summary.
       const noteWriteIdentity = () => this.noteWriteIdentity();
-      const noteWrite = () => this.noteWrite();
       const result = this.tx.writeBatch(
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address);
             noteWriteIdentity();
-            noteWrite();
             yield { address, value: write.value, delete: write.delete };
           }
         })(),
@@ -2324,6 +2335,18 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   hasWrites(): boolean {
     return this.wrapped.hasWrites();
+  }
+
+  issueReadEpoch(): number | undefined {
+    return this.wrapped.issueReadEpoch();
+  }
+
+  enterReadEpoch(epoch: number | undefined): number | undefined {
+    return this.wrapped.enterReadEpoch(epoch);
+  }
+
+  exitReadEpoch(previous: number | undefined): void {
+    this.wrapped.exitReadEpoch(previous);
   }
 
   noteSchemaRefusal(refusal: unknown): void {

@@ -70,7 +70,7 @@ const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 // ============================================================
 // A contract-complete ImageData: captureSighting's authored event demands
 // the full type, and under the served authored contract
-// (docs/plans/verb-input-contract.md) a caller owes every required field —
+// (docs/history/plans/verb-input-contract.md) a caller owes every required field —
 // dispatch delivers nothing to a payload that skips them. The verb still
 // persists only the light `url` + `name` reference.
 const fakeImage = {

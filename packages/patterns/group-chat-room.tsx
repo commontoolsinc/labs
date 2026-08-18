@@ -8,6 +8,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -70,6 +71,8 @@ interface RoomInput {
 }
 
 export interface RoomOutput {
+  [NAME]: string;
+  [UI]: VNode;
   myName: string | Default<"">;
 }
 

@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import env from "@/env.ts";
+import { generateObject } from "./generateObject.ts";
 import { findModel, MODELS } from "./models.ts";
 
 if (env.ENV !== "test") {
@@ -34,9 +35,6 @@ describe("generateObject server-side", () => {
 
   describe("generateObject function", () => {
     it("throws when model is not found", async () => {
-      // Import the actual generateObject function
-      const { generateObject } = await import("./generateObject.ts");
-
       await assertRejects(
         () =>
           generateObject({
@@ -52,8 +50,6 @@ describe("generateObject server-side", () => {
     });
 
     it("throws when no model specified and default model not registered", async () => {
-      const { generateObject } = await import("./generateObject.ts");
-
       await assertRejects(
         () =>
           generateObject({

@@ -193,7 +193,7 @@ describe("cf piece call --help against a live piece", () => {
 
     expect(patternLoads).toBe(1);
     expect(outputSection(helpText)).toBeUndefined();
-    expect(helpText).toContain("cf piece call ... add --help");
+    expect(helpText).toContain("cf call ... add --help");
     expect(helpText).toContain("--title <string>");
   });
 

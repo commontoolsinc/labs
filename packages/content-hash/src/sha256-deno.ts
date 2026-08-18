@@ -11,6 +11,7 @@ let crypto: { createHash: (algorithm: string) => any } | null = null;
 
 if (isDeno()) {
   try {
+    // deno-lint-ignore cf-imports/no-inline-module-import
     crypto = await import("node:crypto");
   } catch {
     // We're not in a Deno environment.

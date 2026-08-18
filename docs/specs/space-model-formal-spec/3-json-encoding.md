@@ -37,8 +37,8 @@ a string is sufficient to tell whether it carries a fabric-value payload.
   the number `42` encodes as the seven-character string `fvj1:42`).
 - A conforming **decoder** verifies the prefix is present before parsing the
   remainder as JSON, and strips the prefix before processing.
-- A short detection helper (`seemsLikeJsonEncodedFabricValue`) tests for the
-  prefix without parsing — useful for routing arbitrary input through the
+- A short detection helper (`JsonCodecEngine.seemsLikeEncoded()`) tests for
+  the prefix without parsing — useful for routing arbitrary input through the
   right decode path.
 
 **Forward compatibility.** The trailing `1` is a version digit, reserving the

@@ -85,6 +85,10 @@ about one aspect of the runtime, are indexed in
   outside the aliased tree has no `@/` form at all, and stays as it is — a
   `bench/` or `test/` file reaching a fixture in its own tree, in a package
   whose alias covers `src/`.
+- These rules govern the declaration list. What may not be written outside it
+  at all — a type spelled `import("./mod.ts").Thing`, and a module loaded by an
+  `import("./mod.ts")` expression under some function — is
+  [`imports.md`](imports.md), which two lint rules enforce.
 
 ### Classes
 

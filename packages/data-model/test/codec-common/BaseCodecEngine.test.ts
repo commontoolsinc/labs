@@ -8,20 +8,24 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
-import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/index.ts";
+import {
+  type LiveEnvironment,
+  NULL_LIVE_ENVIRONMENT,
+} from "@/codec-interface/index.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
-import { EncodeContext } from "@/codec-common/EncodeContext.ts";
-import { DecodeContext } from "@/codec-common/DecodeContext.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import {
   Marker,
   NESTED,
   newProbeEngine,
   NONTERMINAL_HOST,
+  ProbeDecodeAct,
+  ProbeEncodeAct,
   ProbeEngine,
   type ProbeValue,
   Tagged,
@@ -131,6 +135,42 @@ describe("BaseCodecEngine", () => {
       value.self = value;
 
       expect(() => engine.encode(value)).toThrow(/Circular reference/);
+    });
+
+    it("throws given a cycle that closes through a tagged value", () => {
+      // The cycle guard on the codec-matched path, which no container arm
+      // reaches: a nonterminal codec's state can name the very value being
+      // encoded, and the walk expands that state. Without the enter/leave
+      // around the tagged form, this recurses until the stack gives out
+      // instead of being refused.
+      class SelfNaming {}
+
+      const selfNaming = new SelfNaming() as unknown as FabricValue;
+      const codec = new (class SelfNamingCodec extends BaseNonterminalCodec {
+        constructor() {
+          super(
+            "SelfNaming@1",
+            SelfNaming as unknown as new (...args: never[]) => object,
+          );
+        }
+
+        override canEncode(value: FabricValue): boolean {
+          return value === selfNaming;
+        }
+
+        encode(value: FabricValue): FabricValue {
+          // The state names the value it came from, closing the cycle.
+          return { self: value };
+        }
+
+        decode(): FabricValue {
+          return selfNaming;
+        }
+      })();
+
+      const { engine } = newProbeEngine({ extraCodecs: [codec] });
+
+      expect(() => engine.encode(selfNaming)).toThrow(/Circular reference/);
     });
 
     it("does not mistake a repeated value for a circular one", () => {
@@ -267,21 +307,27 @@ describe("BaseCodecEngine", () => {
     });
   });
 
-  describe("per-act contexts", () => {
-    it("mints a fresh encode context for each `encode()` call", () => {
+  describe("per-call acts", () => {
+    it("mints a fresh encode act for each `encode()` call", () => {
       // Driven through `encode()` rather than by calling the factory twice:
       // what needs pinning is that the entry point consults the factory per
       // call, and a test that only calls the factory stays green even if
-      // `encode()` starts memoizing one context for the engine's lifetime.
+      // `encode()` starts memoizing one act for the engine's lifetime.
       const seen: unknown[] = [];
       const { registry } = newProbeEngine();
+      // The spy sits on the act rather than the engine, and records `this`:
+      // what needs proving is that the act the walk runs on is a fresh one per
+      // call, not merely that the factory was consulted.
       const engine = new (class extends ProbeEngine {
-        protected override encodeArray(
-          value: readonly FabricValue[],
-          ctx: EncodeContext,
-        ): ProbeValue {
-          seen.push(ctx);
-          return super.encodeArray(value, ctx);
+        protected override newEncodeAct(env: LiveEnvironment): ProbeEncodeAct {
+          return new (class extends ProbeEncodeAct {
+            protected override encodeArray(
+              value: readonly FabricValue[],
+            ): ProbeValue {
+              seen.push(this);
+              return super.encodeArray(value);
+            }
+          })(this, env);
         }
       })({ registry });
 
@@ -292,16 +338,20 @@ describe("BaseCodecEngine", () => {
       expect(seen[0]).not.toBe(seen[1]);
     });
 
-    it("mints a fresh decode context for each `decode()` call", () => {
+    it("mints a fresh decode act for each `decode()` call", () => {
       const seen: unknown[] = [];
       const { registry } = newProbeEngine();
       const engine = new (class extends ProbeEngine {
-        protected override decodeValue(
-          data: ProbeValue,
-          ctx: DecodeContext,
-        ): FabricValue {
-          seen.push(ctx);
-          return super.decodeValue(data, ctx);
+        protected override newDecodeAct(
+          env: LiveEnvironment,
+          _data: ProbeValue,
+        ): ProbeDecodeAct {
+          return new (class extends ProbeDecodeAct {
+            override decodeValue(data: ProbeValue): FabricValue {
+              seen.push(this);
+              return super.decodeValue(data);
+            }
+          })(this, env);
         }
       })({ registry });
 
@@ -313,7 +363,7 @@ describe("BaseCodecEngine", () => {
     });
 
     it("gives a re-entrant encode its own in-progress set", () => {
-      // The property the per-act context exists for, and it needs a genuinely
+      // The property the per-call act exists for, and it needs a genuinely
       // nested call to show: sequential calls prove nothing, since the set is
       // empty again by the time the second one starts. With walk state on the
       // engine rather than per act, an encode reached from INSIDE another one
@@ -356,8 +406,8 @@ describe("BaseCodecEngine", () => {
     });
 
     it("leaves a value even when its codec throws", () => {
-      // The context outlives a throw, being the act's rather than the node's,
-      // so a value left entered would make a later visit report a cycle that
+      // The act outlives a throw, belonging to the call rather than to the
+      // node, so a value left entered would make a later visit report a cycle that
       // is not there. The differential is the message: with the leave in a
       // `finally` the second visit fails the same way the first did; without
       // it, the second fails as a circular reference instead.
@@ -379,20 +429,19 @@ describe("BaseCodecEngine", () => {
 
       const { engine } = newProbeEngine({ extraCodecs: [codec] });
       const boom = new Boom() as unknown as FabricValue;
-      const ctx = new EncodeContext(ENV);
-      const probe = engine as unknown as {
-        encodeValue(value: FabricValue, ctx: EncodeContext): unknown;
-      };
+      // One act, driven twice: the second call is what would report a cycle
+      // that is not there, had the first left `boom` entered.
+      const act = new ProbeEncodeAct(engine, ENV);
 
-      expect(() => probe.encodeValue(boom, ctx)).toThrow("codec refused");
-      expect(() => probe.encodeValue(boom, ctx)).toThrow("codec refused");
+      expect(() => act.encodeValue(boom)).toThrow("codec refused");
+      expect(() => act.encodeValue(boom)).toThrow("codec refused");
     });
 
     it("gives a re-entrant decode its own in-progress set", () => {
       // The decode-side twin of the encode re-entrancy test, and the reason
-      // the decode context is per act too. The probe format's transport is the
-      // tree itself, so its walk guards cycles; with one context shared across
-      // acts, an inner decode entering a node the outer walk is inside would
+      // the decode act is per call too. The probe format's transport is the
+      // tree itself, so its walk guards cycles; with one act shared across
+      // calls, an inner decode entering a node the outer walk is inside would
       // report a cycle that is not there.
       let reentered = false;
       let innerResult: unknown;
@@ -426,22 +475,22 @@ describe("BaseCodecEngine", () => {
       expect(innerResult).toEqual([1]);
     });
 
-    it("carries the live environment on the encode context", () => {
+    it("carries the live environment on the encode act", () => {
       const { engine } = newProbeEngine();
       const probe = engine as unknown as {
-        newEncodeContext(env: unknown): { env: unknown };
+        newEncodeAct(env: unknown): { env: unknown };
       };
 
-      expect(probe.newEncodeContext(ENV).env).toBe(ENV);
+      expect(probe.newEncodeAct(ENV).env).toBe(ENV);
     });
 
-    it("carries the live environment on the decode context", () => {
+    it("carries the live environment on the decode act", () => {
       const { engine } = newProbeEngine();
       const probe = engine as unknown as {
-        newDecodeContext(env: unknown): { env: unknown };
+        newDecodeAct(env: unknown): { env: unknown };
       };
 
-      expect(probe.newDecodeContext(ENV).env).toBe(ENV);
+      expect(probe.newDecodeAct(ENV).env).toBe(ENV);
     });
   });
 

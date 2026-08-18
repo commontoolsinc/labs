@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the view's module
+// graph reaches @commonfabric/ui, whose components extend a bare HTMLElement as
+// they load, so it can only load once the test has installed one.
+
 import { assert, assertEquals, assertFalse } from "@std/assert";
 
 // Exercises the lazy favorites-subscription paths in HeaderView. The header

@@ -157,10 +157,10 @@ const isFullNormalizedLinkShape = (
 // Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
 // otherwise. The `await import` stays here (not in the shared utils module): a
 // top-level await in widely-imported utils stalls Deno module evaluation.
-const WriteDebugContextStorage =
-  (isDeno()
-    ? (await import("node:async_hooks")).AsyncLocalStorage
-    : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
+const WriteDebugContextStorage = (isDeno()
+  // deno-lint-ignore cf-imports/no-inline-module-import
+  ? (await import("node:async_hooks")).AsyncLocalStorage
+  : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;

@@ -11,6 +11,10 @@ import {
 import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
+  type NormalizedLLMFriendlyRef,
+  normalizeLLMFriendlyRef,
+} from "./llm-friendly-ref.ts";
+import {
   localRefTarget,
   relaxDefaultedRequired,
   validateSchemaValue,
@@ -18,6 +22,7 @@ import {
 import {
   isInstance,
   isObjectNotArray,
+  isObjectOrArray,
   type ReadonlyRecord,
 } from "@commonfabric/utils/types";
 
@@ -64,6 +69,23 @@ export interface CallableResolution {
    * to consult — which says this resolution cannot describe a result rather
    * than promising there is none. */
   declaredResult?: () => Promise<JSONSchema | undefined>;
+  /** The verb's declared event schema — the input contract as the handler
+   * module in the compiled pattern states it, reference markers intact.
+   *
+   * The dispatch schemas below cannot serve this purpose: a link-recorded
+   * schema keeps only stream markers (`sanitizeSchemaForLinks`,
+   * `KeepAsCell.OnlyStream`), so by the time a schema reaches a callable
+   * cell, `asCell: ["cell"]` on a declared reference position is gone. This
+   * thunk reads the compiled pattern's handler node instead, where the
+   * marker survives — the authored declaration the contract ruling made
+   * authoritative (docs/history/plans/verb-input-contract.md). The gate consults it
+   * ONLY to decide which positions declare references; the payload's shape
+   * is still judged against the published schema.
+   *
+   * A thunk costing a pattern load, like `declaredResult`, and absent under
+   * the same conditions. Only a dispatch the published shape refuses pulls
+   * it — the load rides the refusal path, never a clean dispatch. */
+  declaredEvent?: () => Promise<JSONSchema | undefined>;
   /** The verb's published event schema, when the resolution knows a richer
    * one than the dispatch cell carries.
    *
@@ -181,7 +203,7 @@ export interface InvocationOutcome {
    * callback carries, so the address is known BEFORE the outcome is read.
    * That is what makes it available under `--no-wait`: a caller that chose
    * not to wait still holds the address to collect from, and reads it back
-   * with `cf piece get --piece <receipt>` rather than re-invoking the verb.
+   * with `cf get --piece <receipt>` rather than re-invoking the verb.
    * The receipt is a COMMIT witness, not an execution witness — a same-id
    * replay
    * runs the handler body again and then loses the race, so effects outside
@@ -894,29 +916,265 @@ export function verbInputSchemaError(
 }
 
 /**
+ * The round-trip spelling, resolved where the contract declares a reference:
+ * at a position whose schema carries a cell marker — which the DECLARED
+ * event schema keeps and a link-derived dispatch schema does not, see
+ * `CallableResolution.declaredEvent` — a string holding the address a read
+ * emits (`/of:…`, the canonical fabric reference) converts to the link
+ * envelope dispatch already accepts.
+ * An address printed by one command is now a verb argument in the next,
+ * which is the property the CLI surface states for commands, one level in.
+ *
+ * The same positions refuse the two payloads that could only ever be
+ * mistakes there. A string that is NOT an address is refused naming what
+ * the position takes — silence would leave it to schema validation, whose
+ * "does not match type object" says nothing about references. And a plain
+ * object is refused outright: a shape-matching copy at a reference position
+ * stores a DETACHED DOCUMENT inside the caller's own piece and reports
+ * success (#5560), which no caller has ever meant. Both refusals spend
+ * nothing; the corruption they prevent is durable.
+ *
+ * The walk descends the payload beside the schema exactly as the
+ * undeclared-field gate does — objects by `properties`, arrays by `items`
+ * and `prefixItems`, conjunctions member-wise, local `$ref`s through
+ * `localRefTarget` with the CFC child root threaded beside — and passes
+ * over disjunction interiors, where choosing a branch is the caller's.
+ * Everything it does not recognize flows through untouched.
+ */
+export function resolveEmittedAddressArguments(
+  value: unknown,
+  schema: JSONSchema | undefined,
+  scopeRoot?: JSONSchema,
+  path = "<event>",
+  atRoot = true,
+): { value: unknown; refusal?: string } {
+  if (!isSchemaObject(schema)) return { value };
+  const root = scopeRoot ?? schema;
+  const node = localRefTarget(schema, root);
+  if (!isSchemaObject(node)) return { value };
+  const nodeRoot = cfcSchemaChildRoot(node, root);
+
+  // The marker rides the `$ref` SITE (`{$ref: …, asCell: […]}`), where the
+  // authored cell wrapper was declared, so the pre-resolution node is
+  // checked as well as the target.
+  if (!atRoot && (carriesCellMarker(schema) || carriesCellMarker(node))) {
+    if (typeof value === "string") {
+      let parsed: NormalizedLLMFriendlyRef | undefined;
+      try {
+        parsed = normalizeLLMFriendlyRef(value);
+      } catch {
+        parsed = undefined;
+      }
+      if (parsed === undefined || parsed.input) {
+        return {
+          value,
+          refusal: `${JSON.stringify(value)} at ${path} is not an address — ` +
+            `the position declares a reference, and takes the /of:… form ` +
+            `a read prints`,
+        };
+      }
+      return {
+        value: {
+          "/": {
+            "link@1": {
+              id: parsed.pieceId,
+              ...(parsed.embeddedSpace !== undefined &&
+                { space: parsed.embeddedSpace }),
+              ...(parsed.scope !== undefined && { scope: parsed.scope }),
+              ...(parsed.path.length > 0 && { path: parsed.path }),
+            },
+          },
+        },
+      };
+    }
+    if (isObjectNotArray(value) && !isOpaqueReference(value)) {
+      return {
+        value,
+        refusal: `${path} declares a reference, and an inline copy would ` +
+          `store a detached document rather than an edge — send the ` +
+          `address a read printed`,
+      };
+    }
+    return { value };
+  }
+
+  if (node.anyOf !== undefined || node.oneOf !== undefined) return { value };
+
+  if (Array.isArray(node.allOf)) {
+    let current = value;
+    for (const member of node.allOf) {
+      const resolved = resolveEmittedAddressArguments(
+        current,
+        member as JSONSchema,
+        nodeRoot,
+        path,
+        atRoot,
+      );
+      if (resolved.refusal !== undefined) return resolved;
+      current = resolved.value;
+    }
+    return { value: current };
+  }
+
+  if (isObjectNotArray(value)) {
+    const properties = isObjectNotArray(node.properties)
+      ? node.properties as Record<string, JSONSchema>
+      : undefined;
+    // A record schema declares its values on `additionalProperties` and names
+    // no key at all, so a key absent from `properties` falls back to it — the
+    // same fallback the undeclared-field walk makes. Without it a map of
+    // references (`{additionalProperties: {asCell: […]}}`) converts nothing.
+    const additional = isObjectNotArray(node.additionalProperties)
+      ? node.additionalProperties as JSONSchema
+      : undefined;
+    if (!properties && !additional) return { value };
+    let changed = false;
+    const next: Record<string, unknown> = { ...value };
+    for (const [key, child] of Object.entries(value)) {
+      const childSchema = properties?.[key] ?? additional;
+      if (childSchema === undefined) continue;
+      const resolved = resolveEmittedAddressArguments(
+        child,
+        childSchema,
+        nodeRoot,
+        `${path}.${key}`,
+        false,
+      );
+      if (resolved.refusal !== undefined) return resolved;
+      if (resolved.value !== child) {
+        next[key] = resolved.value;
+        changed = true;
+      }
+    }
+    return { value: changed ? next : value };
+  }
+
+  if (Array.isArray(value)) {
+    const prefix = Array.isArray(node.prefixItems)
+      ? node.prefixItems as JSONSchema[]
+      : undefined;
+    const items = isSchemaObject(node.items as JSONSchema | undefined)
+      ? node.items as JSONSchema
+      : undefined;
+    let changed = false;
+    const next: unknown[] = [];
+    for (let index = 0; index < value.length; index++) {
+      const element = value[index];
+      const childSchema = prefix?.[index] ?? items;
+      if (childSchema === undefined) {
+        next.push(element);
+        continue;
+      }
+      const resolved = resolveEmittedAddressArguments(
+        element,
+        childSchema,
+        nodeRoot,
+        `${path}[${index}]`,
+        false,
+      );
+      if (resolved.refusal !== undefined) return resolved;
+      if (resolved.value !== element) changed = true;
+      next.push(resolved.value);
+    }
+    return { value: changed ? next : value };
+  }
+
+  return { value };
+}
+
+/**
  * The shared pre-dispatch gate. Returns the input to dispatch — the caller's
  * own payload, or `{}` when an absent payload was normalized against an
- * object schema — and throws `VerbInputValidationError` when that input
- * cannot satisfy the schema. The absent-payload refusal says so explicitly:
- * "send a payload" has to read differently from "fix your payload".
+ * object schema, or a payload whose emitted addresses were converted to link
+ * envelopes — and throws `VerbInputValidationError` when that input cannot
+ * satisfy the schema. The absent-payload refusal says so explicitly: "send a
+ * payload" has to read differently from "fix your payload".
  */
-function assertVerbInputSatisfiesSchema(
+async function assertVerbInputSatisfiesSchema(
   verb: string,
   input: unknown,
   schema: JSONSchema | undefined,
-): unknown {
+  declaredEvent?: () => Promise<JSONSchema | undefined>,
+): Promise<unknown> {
   const normalized = normalizeAbsentVerbPayload(input, schema);
-  const detail = verbInputSchemaError(normalized, schema);
-  if (detail !== undefined) {
-    throw new VerbInputValidationError(
-      verb,
-      input === undefined
-        ? `no payload was supplied, and this verb cannot run without one ` +
-          `(${detail}) — send a payload`
-        : detail,
-    );
+  const shapeError = verbInputSchemaError(normalized, schema);
+
+  // The published schema cannot state the one thing that decides a reference
+  // position: link sanitization keeps only stream markers, so `asCell` on a
+  // declared reference never reaches the dispatch cell. Only the compiled
+  // pattern still carries it (`declaredEvent`), and reaching it costs a
+  // pattern load — so the question is when a load can change the answer.
+  //
+  // Sanitization strips the MARKER and keeps the SHAPE. A declared reference
+  // is a `$ref` to the target's object schema, so it stays an object-shaped
+  // position, and a string there is refused by the published schema before
+  // this gate ever asks the contract. Two payloads therefore need the
+  // contract and no others: one the published shape REFUSED (a string where
+  // an object is declared — the emitted address, the case conversion exists
+  // for), and one it ACCEPTED that carries an inline object below its root
+  // (a shape-valid copy — the #5560 corruption, which validates precisely
+  // because it matches the target's shape). Everything else — a flat payload
+  // of scalars, an envelope the walk passes through — has no position whose
+  // reading a contract could change, so it dispatches without a load.
+  //
+  // The residue this leaves is a reference whose target itself admits a
+  // string, where the published schema accepts a bare string and no consult
+  // happens. Converting there would be a guess about whether the caller
+  // meant an address or a value, and declining is the safe half of it.
+  if (shapeError === undefined && !carriesInlineObject(normalized)) {
+    return normalized;
   }
-  return normalized;
+
+  // Against the contract, an emitted address string at a reference position
+  // converts to the link envelope dispatch already accepts, and the two
+  // payloads that could only ever be mistakes there are refused naming the
+  // position: a string that is no address, and an inline copy that would
+  // store a detached document rather than an edge (#5560).
+  const contract = isObjectOrArray(normalized)
+    ? await declaredEvent?.()
+    : undefined;
+  const addressed = resolveEmittedAddressArguments(normalized, contract);
+  if (addressed.refusal !== undefined) {
+    throw new VerbInputValidationError(verb, addressed.refusal);
+  }
+  // A conversion is re-judged by the published shape, so what goes out is
+  // still what the gate accepted.
+  let detail = shapeError;
+  if (addressed.value !== normalized) {
+    const converted = verbInputSchemaError(addressed.value, schema);
+    if (converted === undefined) return addressed.value;
+    detail = converted;
+  }
+  if (detail === undefined) return normalized;
+  throw new VerbInputValidationError(
+    verb,
+    input === undefined
+      ? `no payload was supplied, and this verb cannot run without one ` +
+        `(${detail}) — send a payload`
+      : detail,
+  );
+}
+
+/**
+ * Whether `value` carries a plain object BELOW its root — the payload shape
+ * that can still hold a detached copy at a declared reference position after
+ * the published schema has accepted it.
+ *
+ * A link envelope is a reference already, not a copy, so it stops the descent
+ * rather than triggering a contract consult on every well-formed reference
+ * argument. The root itself is excluded because the event object always is
+ * one; what matters is what sits inside it, at any depth, through arrays.
+ */
+function carriesInlineObject(value: unknown, atRoot = true): boolean {
+  if (Array.isArray(value)) {
+    return value.some((element) => carriesInlineObject(element, false));
+  }
+  if (!isObjectNotArray(value)) return false;
+  if (isOpaqueReference(value)) return false;
+  if (!atRoot) return true;
+  return Object.values(value).some((child) =>
+    carriesInlineObject(child, false)
+  );
 }
 
 function cloneWithoutBoundToolKeys(
@@ -1344,7 +1602,7 @@ async function boundCyclicResult(
       " Collect the outcome with a shape that bounds it: " +
       (receiptId === undefined
         ? "read the receipt with --select or --schema."
-        : `cf piece get --piece ${receiptId} ` +
+        : `cf get --piece ${receiptId} ` +
           `--schema '{"properties":{"<field>":{"$link":true}}}'.`) +
       " Calling the verb again under --select or --schema shapes it at the " +
       "call, but runs the handler body a second time.",
@@ -1363,10 +1621,11 @@ export async function executeResolvedCallable(
     // is what the gate judged. A resolution carrying a richer published
     // schema than its dispatch cell (the forced-stream fallback) is judged
     // against that one.
-    const dispatchInput = assertVerbInputSatisfiesSchema(
+    const dispatchInput = await assertVerbInputSatisfiesSchema(
       resolved.cellKey,
       input,
       resolved.inputSchema ?? resolved.callableCell.schema,
+      resolved.declaredEvent,
     );
     const runtimeErrors = runtimeErrorLog(resolved.pieces.runtime);
     const errorCountBefore = runtimeErrors.length;

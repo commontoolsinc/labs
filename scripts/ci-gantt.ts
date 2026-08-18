@@ -1100,6 +1100,8 @@ if (OUT.toLowerCase().endsWith(".svg")) {
     `Wrote ${OUT} (${totalW}×${totalH} SVG, ${aggregates.length} jobs)`,
   );
 } else {
+  // The SVG renderer is needed only for PNG output.
+  // deno-lint-ignore cf-imports/no-inline-module-import
   const { Resvg } = await import("npm:@resvg/resvg-js@2.6.2");
   const resvg = new Resvg(svg, {
     fitTo: { mode: "zoom", value: SCALE },

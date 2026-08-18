@@ -10,9 +10,9 @@ sequence of "mutate, then go looking for what happened" into a single
 exchange — and the thing a verb hands back can be a **piece**, so a create tells
 you where the thing it created lives.
 
-For the authoring side, see [concepts/action.md](concepts/action.md) and
-[concepts/handler.md](concepts/handler.md); for the general CLI loop, see
-[workflows/development.md](workflows/development.md).
+For the authoring side, see [concepts/action.md](../concepts/action.md) and
+[concepts/handler.md](../concepts/handler.md); for the general CLI loop, see
+[workflows/development.md](../workflows/development.md).
 
 ## Declaring a result
 
@@ -254,7 +254,7 @@ space.
 
 A verb that hands back the piece it created returns a value you can reach from
 inside itself, whenever that piece carries a back-reference — `parent` beside
-`children`, the shape [self-reference](concepts/self-reference.md) documents.
+`children`, the shape [self-reference](../concepts/self-reference.md) documents.
 A circle has no JSON rendering, so there is nothing to write for a readback
 that follows one.
 
@@ -422,7 +422,7 @@ never spent, and the corrected retry can reuse it.
 ### Reading is not calling
 
 `cf get` reads data. A path that lands on a verb is refused and redirected
-to `cf piece call` — the spelling the diagnostic literally prints — because
+to `cf call` — the spelling the diagnostic literally prints — because
 reading a verb would return the stream's serialization — never what a
 caller wanted.
 
@@ -468,7 +468,7 @@ Two paths deliver a result, and both arrive by default:
   made — travels the result-pattern projection path.
 - A result that is **plain JSON** — a record of what was written — projects into
   the receipt under the `plainResultReceipts` runtime option, which is on by
-  default ([EXPERIMENTAL_OPTIONS.md](../development/EXPERIMENTAL_OPTIONS.md)).
+  default ([EXPERIMENTAL_OPTIONS.md](../../development/EXPERIMENTAL_OPTIONS.md)).
   `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` restores the discard, which is a
   rollback switch rather than something a caller opts into.
 
@@ -522,7 +522,7 @@ Each step demonstrates one use case:
 | 8 | A piece result survives `plainResultReceipts=false`; a plain record does not — and the write lands either way |
 | 9 | A value-less verb settles with the empty witness |
 | 10 | A refused call does not spend its invocation id |
-| 11 | Reading a verb redirects to `cf piece call` |
+| 11 | Reading a verb redirects to `cf call` |
 | 12 | Timings on stderr, Invocation JSON still clean on stdout |
 | 13 | An invocation id without a session is refused, and the refusal says how to mint one |
 | 14 | A detached (`--no-wait`) call's `receipt` address reads back the outcome, and a settled call's receipt reads back exactly its `result` |

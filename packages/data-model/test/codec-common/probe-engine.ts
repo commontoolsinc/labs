@@ -14,13 +14,13 @@ import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
-  FabricCodec,
+  CodecForFormat,
   LiveEnvironment,
   WireFormat,
 } from "@/codec-interface/interface.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
-import { DecodeContext } from "@/codec-common/DecodeContext.ts";
-import { EncodeContext } from "@/codec-common/EncodeContext.ts";
+import { DecodeAct } from "@/codec-common/DecodeAct.ts";
+import { EncodeAct } from "@/codec-common/EncodeAct.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
@@ -284,95 +284,69 @@ export class MarkerCodec extends BaseTerminalCodec<ProbeValue> {
 }
 
 /**
- * The engine. Its containers do the least a container can do, so that what a
- * test observes is the base class and not this.
+ * One act of encoding in the probe format, whose transport tree is what
+ * crosses: there is nothing to convert on the way out. Its containers do the
+ * least a container can do, so that what a test observes is the base class and
+ * not this.
  */
-export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
-  //
-  // Instance members
-  //
-
-  /**
-   * @inheritDoc
-   *
-   * The tree is what crosses, so there is nothing to convert.
-   */
-  protected override serializedFromEncoded(
-    encoded: ProbeValue,
-    _ctx: EncodeContext,
-  ): ProbeValue {
+export class ProbeEncodeAct extends EncodeAct<ProbeValue> {
+  /** @inheritDoc */
+  override serializedFromEncoded(encoded: ProbeValue): ProbeValue {
     return encoded;
   }
 
+  /** @inheritDoc */
+  protected override wrapTag(tag: string, state: ProbeValue): ProbeValue {
+    return new Tagged(tag, state);
+  }
+
+  /** @inheritDoc */
+  protected override encodeArray(value: readonly FabricValue[]): ProbeValue {
+    this.enter(value);
+    try {
+      return value.map((v) => this.encodeValue(v));
+    } finally {
+      this.leave(value);
+    }
+  }
+
+  /** @inheritDoc */
+  protected override encodePlainObject(
+    value: Record<string, FabricValue>,
+  ): ProbeValue {
+    this.enter(value);
+    try {
+      const result: Record<string, ProbeValue> = {};
+      for (const [k, v] of Object.entries(value)) {
+        result[k] = this.encodeValue(v);
+      }
+      return result;
+    } finally {
+      this.leave(value);
+    }
+  }
+}
+
+/**
+ * One act of decoding in the probe format.
+ *
+ * Cycles are guarded, unlike the JSON format's: this format's transport is the
+ * tree itself, so a caller can hand `decode()` a graph with a cycle in it, and
+ * the guard is what refuses one.
+ */
+export class ProbeDecodeAct extends DecodeAct<ProbeValue> {
   /**
    * @inheritDoc
    *
    * The tree is what arrives, so there is nothing to convert and nothing this
    * format can tell is not its own: any value at all is a candidate.
    */
-  protected override encodedFromSerializedForm(data: ProbeValue): ProbeValue {
+  override encodedFromSerializedForm(data: ProbeValue): ProbeValue {
     return data;
   }
 
   /** @inheritDoc */
-  protected override newEncodeContext(env: LiveEnvironment): EncodeContext {
-    return new EncodeContext(env);
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Cycles are guarded, unlike `JsonCodecEngine`: this format's transport is
-   * the tree itself, so a caller can hand `decode()` a graph with a cycle in
-   * it, and the base's guard is what refuses one.
-   */
-  protected override newDecodeContext(
-    env: LiveEnvironment,
-    _data: ProbeValue,
-  ): DecodeContext {
-    return new DecodeContext(env);
-  }
-
-  protected override wrapTag(
-    tag: string,
-    state: ProbeValue,
-    _ctx: EncodeContext,
-  ): ProbeValue {
-    return new Tagged(tag, state);
-  }
-
-  protected override encodeArray(
-    value: readonly FabricValue[],
-    ctx: EncodeContext,
-  ): ProbeValue {
-    ctx.enter(value);
-    try {
-      return value.map((v) => this.encodeValue(v, ctx));
-    } finally {
-      ctx.leave(value);
-    }
-  }
-
-  protected override encodePlainObject(
-    value: Record<string, FabricValue>,
-    ctx: EncodeContext,
-  ): ProbeValue {
-    ctx.enter(value);
-    try {
-      const result: Record<string, ProbeValue> = {};
-      for (const [k, v] of Object.entries(value)) {
-        result[k] = this.encodeValue(v, ctx);
-      }
-      return result;
-    } finally {
-      ctx.leave(value);
-    }
-  }
-
-  protected override decodeValue(
-    data: ProbeValue,
-    ctx: DecodeContext,
-  ): FabricValue {
+  override decodeValue(data: ProbeValue): FabricValue {
     if ((data === null) || (typeof data !== "object")) {
       return data as FabricValue;
     }
@@ -380,26 +354,50 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
     // Every object node goes through the guard, the tagged form included: this
     // format's transport is the tree itself, so a `Tagged` can hold a
     // reference back to a node above it with no container in between.
-    const cycle = this.enterOrReport(ctx, data);
+    const cycle = this.enterOrReport(data);
     if (cycle !== null) {
       return cycle;
     }
 
     try {
       if (data instanceof Tagged) {
-        return this.decodeTagged(data.tag, data.state, ctx);
+        return this.decodeTagged(data.tag, data.state);
       } else if (Array.isArray(data)) {
-        return data.map((d) => this.decodeValue(d, ctx));
+        return data.map((d) => this.decodeValue(d));
       }
 
       const result: Record<string, FabricValue> = {};
       for (const [k, v] of Object.entries(data)) {
-        result[k] = this.decodeValue(v as ProbeValue, ctx);
+        result[k] = this.decodeValue(v as ProbeValue);
       }
       return result;
     } finally {
-      ctx.leave(data);
+      this.leave(data);
     }
+  }
+}
+
+/**
+ * The engine, which is its configuration and the two act factories: everything
+ * a test observes about a walk belongs to the acts above.
+ */
+export class ProbeEngine extends BaseCodecEngine<
+  ProbeValue,
+  ProbeValue,
+  ProbeEncodeAct,
+  ProbeDecodeAct
+> {
+  /** @inheritDoc */
+  protected override newEncodeAct(env: LiveEnvironment): ProbeEncodeAct {
+    return new ProbeEncodeAct(this, env);
+  }
+
+  /** @inheritDoc */
+  protected override newDecodeAct(
+    env: LiveEnvironment,
+    _data: ProbeValue,
+  ): ProbeDecodeAct {
+    return new ProbeDecodeAct(this, env);
   }
 }
 
@@ -419,7 +417,7 @@ export function newProbeEngine(
   options?: {
     lenient?: boolean;
     record?: HostRecord;
-    extraCodecs?: readonly FabricCodec<ProbeValue>[];
+    extraCodecs?: readonly CodecForFormat<ProbeValue>[];
   },
 ): {
   engine: ProbeEngine;

@@ -214,11 +214,12 @@ revision, so omitting the flags drops those test roots from that revision.
 table, a list of names — so it ships and is recovered with the source. Its bytes
 are stored verbatim: never parsed, type-checked, compiled, or importable, and
 the pattern reads one with `dataFile("/data/cities.json")` from `commonfabric`.
-It must be UTF-8 text and sit inside the deployment root, which the CLI infers
-to cover the main entry, every test entry, and every data file unless `--root`
-says otherwise. Like `--test`, it is repeatable and defines part of the
-revision, so repeat the complete set on every `setsrc`. Changing a data file
-alone still produces a new source revision.
+`cf check` and `cf test` take the same flag, so a pattern that reads a data file
+can be checked and tested before deploying. It must be UTF-8 text and sit inside
+the deployment root, which the CLI infers to cover the main entry, every test
+entry, and every data file unless `--root` says otherwise. Like `--test`, it is
+repeatable and defines part of the revision, so repeat the complete set on every
+`setsrc`. Changing a data file alone still produces a new source revision.
 
 `setsrc` normally rejects incompatible argument/result schema changes and
 retained links whose durable contracts no longer fit. For an intentional
@@ -465,7 +466,7 @@ mounts; auto-discovered spaces may appear writable but silently drop writes.
 
 ## References
 
-- `docs/common/verbs-over-the-cli.md` - The verb walkthrough: invocation ids and
+- `docs/common/verbs/over-the-cli.md` - The verb walkthrough: invocation ids and
   sessions, receipts, retries, and shaped reads, each step runnable
 - `packages/patterns/system/default-app.tsx` - System pieces (pieceRegistry
   lives here)

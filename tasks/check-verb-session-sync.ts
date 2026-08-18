@@ -2,7 +2,7 @@
 /**
  * Fails when the verb-session walkthrough drifts from the demo that runs it.
  *
- * The walkthrough (`docs/common/verb-session-walkthrough.md`) may QUOTE
+ * The walkthrough (`docs/common/verbs/session-walkthrough.md`) may QUOTE
  * commands but never compose them: every `cf` line in one of its bash blocks
  * must be a command `packages/cli/integration/verb-session-demo.sh` actually
  * runs, or sit under a `# not in the demo` comment saying why it cannot be.
@@ -29,7 +29,7 @@ import { dirname, fromFileUrl, join } from "@std/path";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 export const DEMO_PATH = "packages/cli/integration/verb-session-demo.sh";
-export const WALKTHROUGH_PATH = "docs/common/verb-session-walkthrough.md";
+export const WALKTHROUGH_PATH = "docs/common/verbs/session-walkthrough.md";
 
 /** The comment that exempts the next `cf` line in a walkthrough bash block.
  * The marker alone is not enough: an exemption without a reason is one

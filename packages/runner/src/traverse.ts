@@ -30,6 +30,7 @@ import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { getLogger } from "../../utils/src/logger.ts";
@@ -195,19 +196,66 @@ function pathKey(path: readonly string[]): string {
 const keyComponent = (value: string): string => `${value.length}:${value}`;
 
 /**
+ * Longest document id a memo key spells out in full.
+ *
+ * An entity id runs to about fifty characters and a space DID to about sixty,
+ * so every id that names a stored document stays well under this and reaches
+ * a key directly.
+ */
+const MAX_SPELLED_OUT_ID_LENGTH = 128;
+
+/**
+ * Digests of the ids too long to spell out. See `memoIdComponent()`.
+ *
+ * Every key held here is one of those long ids, so the bound that matters is
+ * a budget in characters rather than a count of entries.
+ */
+const _memoIdDigests = new LRUCache<string, string>({
+  capacity: INTERN_CACHE_MAX,
+  weigh: (id, digest) => id.length * 2 + digest.length + 64,
+  maxWeight: 8 * 1024 * 1024,
+});
+
+/**
+ * Fixed-size stand-in for a document id that carries its own content.
+ *
+ * A data URI names the value it holds, so an inline document's id is as long
+ * as the document — tens of thousands of characters for a component that
+ * holds a list. A key built from that id costs a copy and a hash of every one
+ * of those characters, and the traversal builds one key per node it visits
+ * inside that same document, so the work becomes the node count multiplied by
+ * the document size. Digesting the id keeps the key a fixed size. The digest
+ * is computed once per id: the cache is keyed by the id, and every one of
+ * those visits arrives holding the same string.
+ */
+function memoIdComponent(id: string): string {
+  const cached = _memoIdDigests.get(id);
+  if (cached !== undefined) return cached;
+  const digest = `d${keyComponent(hashStringOf(id))}`;
+  _memoIdDigests.put(id, digest);
+  return digest;
+}
+
+/**
  * Full address identity for the shared schema-result memo.
  *
  * A document id is only unique within its space and scope. Omitting those
  * fields let a shared query memo return another partition's result when the
  * same id/path/schema appeared in both. Length prefixes keep the key
- * injective without paying for JSON serialization on every schema visit.
+ * injective without paying for JSON serialization on every schema visit. A
+ * spelled-out id and a digested one carry different tags, `i` and `d`, so an
+ * id that reads like a digest still gets a key of its own.
  */
 function schemaMemoAddressKey(address: IMemorySpaceAddress): string {
   return `s${keyComponent(address.space)}c${
     keyComponent(address.scope ?? "space")
-  }i${keyComponent(address.id)}t${
-    keyComponent(address.type ?? "application/json")
-  }p${pathKey(address.path)}`;
+  }${
+    address.id.length > MAX_SPELLED_OUT_ID_LENGTH
+      ? memoIdComponent(address.id)
+      : `i${keyComponent(address.id)}`
+  }t${keyComponent(address.type ?? "application/json")}p${
+    pathKey(address.path)
+  }`;
 }
 
 /**
@@ -2413,7 +2461,7 @@ function loadMetaLinkedDoc(
   valueEntry: IMemorySpaceAttestation,
   meta: "cfc" | "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
-): MetaLinkedDoc[] {
+): IMemorySpaceAttestation[] {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
   if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return [];
   const loaded = [];
@@ -2489,15 +2537,19 @@ function loadMetaLinkedDocFromLink(
   if (address === undefined) {
     return undefined;
   }
-  // This read only loads the linked metadata doc so traversal can inspect it.
-  // The schema-guided traversal below records the real scheduling reads.
+  // Track the target before reading it: the tracker entry is what makes
+  // the graph reactive to this document — a change or a later arrival
+  // dirties a tracked key — so an absent-at-evaluation target must be
+  // tracked too, or nothing would re-run this load when it arrives. The
+  // read itself is deliberately not a scheduling read: delivery
+  // reactivity rides the tracker, not the runner scheduler.
+  const docKey = getTrackerKey(address);
+  schemaTracker.add(docKey, REJECTING_SELECTOR);
   const result = tx.read(address, { meta: ignoreReadForScheduling });
   if (result.error) {
     return undefined;
   }
-  const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, REJECTING_SELECTOR);
-  return { address, value: result.ok.value, selector: REJECTING_SELECTOR };
+  return { address, value: result.ok.value };
 }
 
 /**
@@ -2628,53 +2680,10 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
   return undefined;
 }
 
-type MetaLinkedDoc = IMemorySpaceAttestation & {
-  selector: SchemaPathSelector;
-};
-
-function traverseMetaLinkedDoc(
-  tx: IExtendedStorageTransaction,
-  doc: MetaLinkedDoc,
-  context: TraversalContext,
-) {
-  if (
-    doc.selector.schema === undefined ||
-    ContextualFlowControl.isFalseSchema(doc.selector.schema)
-  ) {
-    return;
-  }
-  if (!isObjectOrArray(doc.value) || !("value" in doc.value)) {
-    return;
-  }
-
-  const docContext = createTraversalContext(
-    new CompoundCycleTracker<
-      FabricValue,
-      JSONSchema | undefined
-    >(),
-    context.schemaTracker,
-    context.includeMeta,
-    context.metaDocsVisited,
-    context.onMissingLinkTarget,
-    context.schemaDocsLoaded,
-    context.schemaDocsAvailable,
-  );
-  const traverser = new SchemaObjectTraverser(
-    tx,
-    doc.selector,
-    docContext,
-  );
-  const fullDoc = doc.value as Immutable<JSONObject>;
-  traverser.traverse({
-    address: {
-      ...doc.address,
-      path: ["value"],
-    },
-    value: fullDoc.value,
-  });
-}
-
-// Recursively load the meta linked docs from the doc
+// Recursively load the meta linked docs from the doc. Every loaded doc is
+// delivered whole — tracked under the rejecting selector — and never
+// schema-traversed; narrowing a meta document by schema is not a policy
+// this traversal has.
 export function loadMetaLinkedDocs(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
@@ -2712,7 +2721,6 @@ export function loadMetaLinkedDocs(
         const linkedDocKey = getTrackerKey(linkedDoc.address);
         if (context.metaDocsVisited.has(linkedDocKey)) continue;
         context.metaDocsVisited.add(linkedDocKey);
-        traverseMetaLinkedDoc(tx, linkedDoc, context);
         pendingDocs.push(linkedDoc);
       }
     }

@@ -242,6 +242,20 @@ Remaining fallback behavior is intentionally narrow:
   classify as builders in type-only environments
 - shadowed local helpers and object methods with Common Fabric-like names are not
   classified
+- a **synthetic** property call spelled `mapWithPattern` /
+  `filterWithPattern` / `flatMapWithPattern` whose method resolves to **no
+  symbol** classifies as the array-method family by spelling alone. The
+  closure stage emits these calls against receivers whose static type is
+  still the plain array type (a site-lifted collection local, for example),
+  so the method never resolves and the emitted spelling is the only
+  remaining evidence of the family — this is what keeps post-closure stages
+  from wrapping an already-rewritten call in a second lift. The
+  synthetic-node requirement scopes that testimony to calls the transformer
+  actually produced: an **authored** `*WithPattern` spelling keeps its
+  author's semantics whether its method resolves (their own declaration) or
+  not (an untyped receiver classifies as no call kind). Authored spellings
+  of every family that fail symbol resolution still require a reactive
+  receiver to classify
 
 Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
 functions returned by builders are not reclassified as direct `lift()` or
@@ -339,7 +353,7 @@ no event type information at all: for those, the usage summary is the only
 contract there is. Reactive reads (`lift`, lift-applied, computed) stay in
 `full` mode always: there, shrinking is subscription semantics. The ruling
 this implements is
-[the verb input contract](../../plans/verb-input-contract.md); the
+[the verb input contract](../../history/plans/verb-input-contract.md); the
 `handler-schema/contract-authored-event`,
 `contract-nested-unread-reference`, and `contract-authored-shapes` fixtures
 pin the shapes.
@@ -487,7 +501,9 @@ Diagnostics emitted in all modes:
     spelling of the read (`layout["get"]()`) do not change the decision, and
     neither does optionality — `layout?.get()` and `layout?.get?.()` on a cell
     lower like their non-optional spellings, per the 2026-07-23
-    optionality-orthogonality resolution. Each lift's input schema shrinks to
+    optionality-orthogonality resolution. The bare/parenthesized spelling
+    pairs across site kinds are pinned by the `test/validation.test.ts`
+    "Paren-Invariance Twins" battery. Each lift's input schema shrinks to
     what its body reads (`test/validation.test.ts:3179`; goldens
     `cell-get-binding-autowrap`, `cell-get-terminal-binding-autowrap`,
     `with-reactive`). This is the ratified has-a-lowerable-site rule —
@@ -528,6 +544,9 @@ Diagnostics emitted in all modes:
   - in standalone functions (except inline first arg to `patternTool`):
     `computed(...)`, `lift(...)`, or reactive collection methods on reactive
     receivers
+  - what counts as a standalone definition is read through transparent
+    parentheses: `const helper = (() => ...)` is validated (and context-
+    classified) like its bare spelling
   - collection-method diagnostics currently use `.map(...)`-style guidance and
     suggest eager `<cell>.get().map(...)` when explicit eager mapping is
     acceptable
@@ -585,7 +604,8 @@ Diagnostics emitted in all modes:
     `computed(() => ...)`, module-scope `lift()`, or a helper.
 - **Error** `pattern-context:patterntool-requires-pattern`
   - `patternTool(fn, ...)` where the first argument is a bare callback (arrow /
-    function expression) rather than a `pattern(...)`. The runtime/transformer
+    function expression, read through transparent parentheses) rather than a
+    `pattern(...)`. The runtime/transformer
     auto-wrapping (`pattern(fn)`) and auto-capture were removed in CT-1655;
     authors now wrap explicitly: `patternTool(pattern(fn), extraParams?)`. The
     diagnostic is reported on the bare-callback argument.
@@ -864,6 +884,12 @@ Key rewrite rules:
 - `a || b`: lowers to `unless(condition, fallback)` only in pattern context
 - ternary `cond ? x : y`:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
+- array-method family calls are never wrapped as a unit: the analysis marks
+  them `skip-call-rewrite`, so only the receiver chain before the method is
+  processed. Via §5's spelling fallback this equally covers an
+  already-rewritten symbol-less `*WithPattern` call encountered inside a
+  processed branch — it stays in place rather than acquiring a lift around
+  the rewritten call
 - non-compute contexts:
   - complex reactive expressions are wrapped via `computed(() => expr)` (later
     lowered to the lift-applied form)
@@ -974,6 +1000,15 @@ Transform eligibility:
 
 - decision is context/receiver-policy driven:
   - pattern context + reactive receiver origin -> transform
+  - pattern context + receiver identifier bound, directly in a `pattern` /
+    `render` builder callback body, to an initializer the shared
+    expression-site policy classifies as a lowerable `variable-initializer`
+    site (`const view = rows.get().filter(...)`, which §6.5's autowrap turns
+    into a lift) -> transform, and the receiver symbol is registered in
+    `syntheticReactiveCollectionRegistry` so post-closure consumers of the
+    provenance walk agree with the decision. A local inside a JSX IIFE or any
+    other callback is not admitted here — it belongs to that callback's own
+    lowering
   - compute context + `celllike_requires_rewrite` receiver kind -> transform
   - compute context + `opaque_autounwrapped` receiver kind -> do not transform
   - compute context + local alias in the same callback whose initializer
@@ -981,6 +1016,15 @@ Transform eligibility:
     `wish`, already-rewritten collection calls, or other reactive cell-like
     receivers) -> transform
 - plain array `.map()` is not transformed
+- an inline cell-read receiver (`rows.get().filter(...)` used directly as a
+  `.map` receiver, or standing alone) is NOT transformed by this strategy —
+  the read itself is the thing being lowered, and the expression-site
+  machinery owns it (§6.5); inside standalone hardened functions the eager
+  `<cell>.get().filter(...)` spelling stays untouched plain JavaScript
+- the inline callback argument is read through transparent parentheses:
+  `receiver.map(((r) => ...))` lowers exactly like the bare spelling
+  (target-language spec §5.7 paren-invariance; fixture
+  `map-paren-wrapped-callback` pins the emission)
 - transformed callbacks are marked in `mapCallbackRegistry` and become
   pattern-callback contexts for downstream classification
 - synthetic compute-owned array-method nodes assert that stale pattern ownership

@@ -171,6 +171,9 @@ Deno.test("dashboard browser tests disable the Chromium sandbox in CI", async ()
   const previous = Deno.env.get("CI");
   try {
     Deno.env.set("CI", "1");
+    // The config module reads CI as it loads, so the assertion needs a fresh
+    // evaluation under the value just set.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const config = (await import("./deno-web-test.config.ts?ci-test")).default;
     assertEquals(config.args, ["--no-sandbox"]);
   } finally {

@@ -178,6 +178,9 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
 const openSessionStore = async (
   sessionDbPath: string,
 ): Promise<HarnessChatSessionStore> => {
+  // The SQLite session store opens its native library as it loads, and only a
+  // session-backed run needs it.
+  // deno-lint-ignore cf-imports/no-inline-module-import
   const { openSqliteHarnessChatSessionStore } = await import(
     "./sqlite-session-store.ts"
   );

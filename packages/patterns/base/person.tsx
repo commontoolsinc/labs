@@ -17,6 +17,7 @@ import {
   handler,
   NAME,
   pattern,
+  type Stream,
   UI,
   type VNode,
   Writable,
@@ -117,7 +118,7 @@ const togglePicker = handler<unknown, { showPicker: Writable<boolean> }>(
   },
 );
 
-const toggle = handler<unknown, { section: Writable<boolean> }>(
+const toggle = handler<Record<string, never>, { section: Writable<boolean> }>(
   (_event, { section }) => {
     section.set(!section.get());
   },
@@ -226,7 +227,10 @@ function buildSectionHeaderLabel(
   return `${arrow} ${label}${suffix}`;
 }
 
-function header(labelContent: any, onClick: any) {
+function header(
+  labelContent: string,
+  onClick: Stream<Record<string, never>>,
+) {
   return (
     <cf-hstack
       style={{
@@ -307,6 +311,16 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
   const notesHeader = computed(() =>
     buildSectionHeaderLabel("Notes", showNotes.get())
   );
+
+  // Each section's toggle is bound here rather than inside the rendered tree.
+  // A handler bound inside a JSX expression that also calls a helper is
+  // compiled as part of that expression, and the binding is not available
+  // there.
+  const toggleNameDetails = toggle({ section: showNameDetails });
+  const toggleContactInfo = toggle({ section: showContactInfo });
+  const toggleAddresses = toggle({ section: showAddresses });
+  const toggleSocial = toggle({ section: showSocial });
+  const toggleNotes = toggle({ section: showNotes });
 
   // Computed: autocomplete items from reactive sibling source, filtering self
   const sameAsItems = computed(() => {
@@ -390,7 +404,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Name Details Section */}
           <div>
-            {header(nameHeader, toggle({ section: showNameDetails }))}
+            {header(nameHeader, toggleNameDetails)}
             {computed(() => {
               if (!showNameDetails.get()) return null;
               return (
@@ -495,7 +509,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
            */
           }
           <div>
-            {header(contactHeader, toggle({ section: showContactInfo }))}
+            {header(contactHeader, toggleContactInfo)}
             {computed(() => {
               if (!showContactInfo.get()) return null;
               return (
@@ -527,7 +541,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Addresses Section */}
           <div>
-            {header(addressesHeader, toggle({ section: showAddresses }))}
+            {header(addressesHeader, toggleAddresses)}
             {computed(() => {
               if (!showAddresses.get()) return null;
               const addresses = person.key("addresses").get() || [];
@@ -611,7 +625,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Social Profiles Section */}
           <div>
-            {header(socialHeader, toggle({ section: showSocial }))}
+            {header(socialHeader, toggleSocial)}
             {computed(() => {
               if (!showSocial.get()) return null;
               const profiles = person.key("socialProfiles").get() || [];
@@ -657,7 +671,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
 
           {/* Notes Section */}
           <div>
-            {header(notesHeader, toggle({ section: showNotes }))}
+            {header(notesHeader, toggleNotes)}
             {computed(() => {
               if (!showNotes.get()) return null;
               return (

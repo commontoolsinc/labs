@@ -64,11 +64,11 @@ wrapper classes (Section 1.4).
 > `packages/data-model/`. The fabric-value types and the base classes
 > (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`) are declared in
 > `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
-> `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
-> carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
+> `IS_DEEP_FROZEN`) in `fabric-bases/`, on `BaseFabricInstance` alongside the
+> abstract base that carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
 > `FabricCodec`, `LiveEnvironment`) lives in `codec-interface/` (Section 2),
 > and the machinery that acts on it in `codec-common/` -- including
-> `EncodeContext` and `DecodeContext`, which are classes the walk carries
+> `EncodeAct` and `DecodeAct`, which are classes the walk carries
 > rather than contracts a caller implements. The conversion functions are in
 > `native-conversion.ts` (Section 8).
 >
@@ -78,8 +78,9 @@ wrapper classes (Section 1.4).
 > their contents are reached through `@commonfabric/data-model/fabric-value`,
 > which re-exports them. `codec-interface/` is internal in the same way: it
 > is reached through `@commonfabric/data-model/codec-common`, which
-> re-exports it. `codec-common/` and `fabric-instances/` are exported subpaths
-> in their own right and are imported directly under those names;
+> re-exports it. `codec-common/`, `fabric-bases/` and `fabric-instances/` are
+> exported subpaths in their own right and are imported directly under those
+> names;
 > `fabric-value` does *not* re-export the codec vocabulary, so
 > `LiveEnvironment` and its siblings come from
 > `@commonfabric/data-model/codec-common`. Cite a module to say where
@@ -1479,7 +1480,7 @@ export const JSON_CODEC: unique symbol =
 ```
 
 ```typescript
-// file: packages/data-model/codec-common/BaseFabricInstance.ts
+// file: packages/data-model/fabric-bases/BaseFabricInstance.ts
 
 /**
  * Well-known symbol for deeply freezing a fabric instance in place. The
@@ -1624,7 +1625,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/codec-common/BaseFabricInstance.ts
+// file: packages/data-model/fabric-bases/BaseFabricInstance.ts
 
 /**
  * Abstract base class providing shared scaffolding for `FabricInstance`
@@ -2518,36 +2519,44 @@ export type JsonCodecValue =
 Every engine exposes `encode()` and `decode()`, parameterized by the boundary
 type — `string` for JSON, `Uint8Array` for a binary format — and an engine may
 add a pair for a second boundary type, as `JsonCodecEngine` does for bytes.
-Both are supplied by the base class and are not overridden: they mint the
-act's context, run the walk, and hand off to the format at each end. What a
-format supplies is those two ends and the context factories, all `protected`
-— the surface a second engine extends rather than one a caller reaches.
+Both are supplied by the base class and are not overridden: they mint the act
+and hand the work to it. An engine is otherwise its configuration — the codec
+registry and the leniency setting — and the two factories that say which act
+classes this format uses.
+
+The walk itself, and the format's account of how a container is written down,
+belong to the acts. That is what lets the walk be written without a threaded
+parameter: the state one call carries and the methods that consult it are the
+same object.
 
 ```typescript
 // Shown at module scope.
 // file: packages/data-model/codec-common/BaseCodecEngine.ts
 
 abstract class ExampleEngine {
-  protected abstract newEncodeContext(
-    env: LiveEnvironment,
-  ): EncodeContext;
-  protected abstract newDecodeContext(
+  protected abstract newEncodeAct(env: LiveEnvironment): ExampleEncodeAct;
+  protected abstract newDecodeAct(
     env: LiveEnvironment,
     data: string,
-  ): DecodeContext;
+  ): ExampleDecodeAct;
+}
 
-  protected abstract serializedFromEncoded(
-    encoded: JsonCodecValue,
-    ctx: EncodeContext,
-  ): string;
-  protected abstract encodedFromSerializedForm(
-    data: string,
-    ctx: DecodeContext,
+abstract class ExampleEncodeAct {
+  abstract serializedFromEncoded(encoded: JsonCodecValue): string;
+  protected abstract encodeArray(value: readonly FabricValue[]): JsonCodecValue;
+  protected abstract encodePlainObject(
+    value: Record<string, FabricValue>,
   ): JsonCodecValue;
+  protected abstract wrapTag(tag: string, state: JsonCodecValue): JsonCodecValue;
+}
+
+abstract class ExampleDecodeAct {
+  abstract encodedFromSerializedForm(data: string): JsonCodecValue;
+  abstract decodeValue(data: JsonCodecValue): FabricValue;
 }
 ```
 
-Minting the context in the base rather than in each engine is what makes
+Minting the act in the base rather than in each engine is what makes
 *per act* structural: an engine cannot hold one across calls, because it
 never gets to decide when one is made.
 
@@ -2555,19 +2564,19 @@ never gets to decide when one is made.
 handed is its own. What arrives there is data off a channel like anything
 else, so a form that is not this format's is refused by throwing, and
 `decode()` settles that against the engine's `lenient` setting — a lenient
-decode answers a syntactic fault with a `ProblematicValue`, exactly as it
-does a fault found further in. `newDecodeContext()` sees the same form and
+decode returns a `ProblematicValue` for a syntactic fault, exactly as it
+does for a fault found further in. `newDecodeAct()` sees the same form and
 may read something out of it for the act, but it *sniffs rather than
 validates*: it runs before anything has established that the form is this
 format's at all.
 
-The context is what the walk threads from node to node: the caller's
+The act is what the walk threads from node to node: the caller's
 `LiveEnvironment`, and the values whose encoding or decoding is in
 progress. Holding it per call rather than on the engine is what lets
 a codec reach back through a public entry point while a walk is already
 running — the inner act gets its own bookkeeping instead of corrupting the
 outer one's. A format needing more than the base class knows about, such as a
-wire marker minted per call, subclasses the context and carries it there.
+wire marker minted per call, subclasses the act and carries it there.
 
 `JsonCodecEngine` supplies both directions at both of its boundary types:
 
@@ -2578,8 +2587,8 @@ wire marker minted per call, subclasses the context and carries it there.
 - `encodeToBytes(value, env?)` and `decodeFromBytes(bytes, env)` are the same
   two walks against UTF-8 bytes rather than a string.
 
-> **Why the boundary is this narrow.** Tag wrapping and unwrapping are
-> machinery internal to the engine, leaving only
+> **Why the boundary is this narrow.** Tag wrapping and unwrapping belong to
+> the acts rather than to an engine's public surface, leaving only
 > `encode(value, env?) -> SerializedForm` and
 > `decode(data, env) -> FabricValue` — one such pair per boundary type the
 > engine offers — as public API. The engine owns the full pipeline rather than
@@ -2593,21 +2602,21 @@ Encode:  value -> codec.encode(value) -> serialized form (e.g., JSON string)
 Decode:  serialized form -> codec.decode(data, env) -> FabricValue
 ```
 
-Internally, `JsonCodecEngine`'s `encode()` method calls its internal encode
-walker (`encodeValue()`) to walk the `FabricValue` tree and produce a
-`JsonCodecValue` tree, then stringifies it. The `decode()` method parses
-the JSON string, then calls its internal decode walker (`decodeValue()`) to
-walk the `JsonCodecValue` tree and decode runtime types. The
-recursive descent and codec dispatch are entirely internal to `JsonCodecEngine`.
+Internally, `JsonCodecEngine`'s `encode()` method mints an encoding act and
+has it walk (`encodeValue()`) the `FabricValue` tree into a `JsonCodecValue`
+tree, which the same act then stringifies. The `decode()` method mints a
+decoding act, which parses the JSON string and walks (`decodeValue()`) the
+`JsonCodecValue` tree back into runtime types. The recursive descent and codec
+dispatch belong to the acts, and neither is public.
 
 ### 4.5 Codecs, the Registry, and Internal Tree Walking
 
-The encoding and decoding logic is implemented as private
-methods on `JsonCodecEngine`. It dispatches per-type logic to the **codecs**
-(Section 2.4) held in a **`CodecRegistry<Encoded>`** — an index of which codec
-handles which class (for encoding) and which tag (for decoding), built over one
-wire format. Codecs are shallow: `JsonCodecEngine` owns recursion and
-tag-wrapping, and each codec translates exactly one layer.
+The encoding and decoding logic belongs to the acts an engine mints. It
+dispatches per-type logic to the **codecs** (Section 2.4) held in a
+**`CodecRegistry<Encoded>`** — an index of which codec handles which class (for
+encoding) and which tag (for decoding), built over one wire format, which an
+act reads through its engine's configuration. Codecs are shallow: the act owns
+recursion and tag-wrapping, and each codec translates exactly one layer.
 
 A registry is built over a `WireFormat<Encoded>` descriptor, which names both
 the type its encoded states live in and the symbol a class binds its codec for
@@ -2777,9 +2786,9 @@ error** — every wire form is explicitly represented; there is no implicit
 fallback for fabric classes. Arrays and plain objects (the structural
 types) are handled by the walker itself after no codec matches.
 
-#### Internal encode walker (`encodeValue()`)
+#### The encode walk (`encodeValue()`)
 
-`JsonCodecEngine`'s internal encode walker processes the `FabricValue` tree:
+The encoding act's walk processes the `FabricValue` tree:
 
 1. **Codec dispatch** — `codecFromValue()` finds how to encode the value.
    A `SELF_REP` result means the value is its own wire form (emitted
@@ -2802,9 +2811,9 @@ types) are handled by the walker itself after no codec matches.
 
 Circular references are detected via a `Set<object>` tracked during the walk.
 
-#### Internal decode walker (`decodeValue()`)
+#### The decode walk (`decodeValue()`)
 
-`JsonCodecEngine`'s internal decode walker processes the `JsonCodecValue` tree:
+The decoding act's walk processes the `JsonCodecValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed
    keys.
@@ -2827,10 +2836,10 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    from this arm
    are guaranteed deep-frozen at the walker boundary (the contract holds
    for both the codec-produced value and the lenient-mode
-   `ProblematicValue`), so callers need not each freeze. This contract is
-   scoped to this arm only; the unknown-tag arm (step 5) is intentionally
-   not covered. See Section 8.6 for the full deep-freeze protocol and the
-   egress-freezing call sites.
+   `ProblematicValue`), so callers need not each freeze. Every other arm
+   guarantees the same, the unknown-tag arm (step 5) included, so a caller
+   need not ask which arm produced what it was handed. See Section 8.6 for
+   the full deep-freeze protocol and the egress-freezing call sites.
 5. **Unknown tags** — a syntactically valid tag with no registered codec
    produces an `UnknownValue` wrapping the tag and (already-decoded) state,
    preserving the form for round-tripping (Section 3). Syntax is what
@@ -2855,11 +2864,11 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 > and carries the preserved one as data, that tag being possibly no tag at all
 > (Section 3.2).
 
-> **Why the walkers are internal.** `encodeValue()` and `decodeValue()` are
-> internal to the engine, which keeps the public API to
-> `encode()`/`decode()` and lets the engine hold its own state — registry,
-> codec view, lenient mode — instead of threading it through every recursive
-> call.
+> **Why the walks belong to an act.** `encodeValue()` and `decodeValue()` are
+> the act's rather than the engine's, which keeps an engine's public API to
+> `encode()`/`decode()` and puts the state one call carries on the same object
+> as the methods that consult it — so no recursive call threads it. What an act
+> needs of its engine, it reads through `CodecEngineConfig`.
 
 ### 4.6 Separation of Concerns
 
@@ -2935,13 +2944,15 @@ export function plainObjectFromJson<T extends object = object>(
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/src/codec-json/impl.ts
+// file: packages/data-model/src/codec-json/JsonCodecEngine.ts
 
-/**
- * Indicates if the given text has a "first-blush" appearance as text in the
- * JSON-embedded encoding (i.e., carries the `fvj1:` prefix).
- */
-export function seemsLikeJsonEncodedFabricValue(value: string): boolean;
+declare class ExampleJsonCodecEngine {
+  /**
+   * Indicates if the given text has a "first-blush" appearance as text in the
+   * JSON-embedded encoding (i.e., carries the `fvj1:` prefix).
+   */
+  static seemsLikeEncoded(value: string): boolean;
+}
 ```
 
 `codecs.ts` creates a single stateless `JsonCodecEngine` instance at module load
@@ -3010,8 +3021,9 @@ The implementation is split across several files for separation of concerns:
 |------|---------|
 | `fabric-value.ts` | Public surface: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), and the clone helpers (from `value-clone.ts`); defines `valueEqual()` |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isFabricCompatible` |
-| `fabric-instances/` | `FabricInstance` subclasses, each in its own file: `BaseFabricInstance.ts`, `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricMap.ts`, `FabricSet.ts`, `UnknownValue.ts`, `ProblematicValue.ts` (plus an `index.ts` barrel). |
-| `fabric-primitives/` | `FabricPrimitive` subclasses, each in its own file: `BaseFabricPrimitive.ts`, `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDays.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
+| `fabric-bases/` | The abstract bases a concrete fabric value extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
+| `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |
+| `fabric-primitives/` | Concrete `FabricPrimitive` subclasses, each in its own file: `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDays.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
 
 ---
 
@@ -3978,14 +3990,21 @@ Visited objects are tracked in a per-call `Set` for cycle safety.
 The deep-freeze contract is enforced at the points where decoded
 values cross from internal codec machinery to callers:
 
-- **The decode walker's codec dispatch arm.**
-  Every value returned from this arm passes through `deepFreeze()` before
-  returning. This covers the codec-produced value (often a
-  `FabricPrimitive` subclass, already frozen — the cache hit makes this
-  O(1)) and the lenient-mode `ProblematicValue` fallback. The
-  unknown-tag arm (`UnknownValue`) is a separate sibling branch and is
-  intentionally NOT covered by this contract; broadening the contract
-  there is a separate follow-on. See Section 4.5 step 4.
+- **Every value the decode walker returns is deep-frozen at the boundary**,
+  whichever arm produced it. The arms reach that by two routes. A leaf arm
+  calls `deepFreeze()`: the codec-produced value (often a `FabricPrimitive`
+  subclass, already frozen — the cache hit makes this O(1)), the lenient-mode
+  `ProblematicValue` fallback, and the unknown-tag arm's `UnknownValue`. A
+  container arm calls `Object.freeze()` on the array or object it has just
+  built, whose children the leaf arms have already deep-frozen, so the
+  guarantee holds without walking them a second time. Which arm produced a
+  value is therefore not something a caller has to know. See Section 4.5
+  step 4.
+
+- **`ProblematicStateError.asProblematicValue()`.** The rendering of a thrown
+  refusal as a returned value is deep-frozen where it is built, rather than at
+  each call site, so a caller reaching it outside the walker gets the same
+  guarantee.
 
 - **`JsonCodecValue` parse boundary.** The `#parseWireText()` helper
   (invoked by `decode()` and `#fromBytes()`) deep-freezes the parsed tree

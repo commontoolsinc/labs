@@ -1,0 +1,40 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "tags": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "tags"
+    ],
+    "type": "object"
+  },
+  "pattern": "examples/cf-tags.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "tags": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "tags",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -5,7 +5,7 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import {
   CODEC,
   type LiveEnvironment,
@@ -56,7 +56,7 @@ export class UnknownValue extends BaseFabricInstance {
     }
 
     this.#wireTypeTag = wireTypeTag;
-    this.#state = state; // TODO(danfuzz): Should be guaranteed deep-frozen.
+    this.#state = state;
   }
 
   /** Arbitrary raw instance state. */

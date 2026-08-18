@@ -5,7 +5,7 @@ import type {
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";

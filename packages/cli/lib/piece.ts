@@ -9,10 +9,8 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { createSession, isDID, Session } from "@commonfabric/identity";
-import {
-  FileSystemProgramResolver,
-  readDataFileSource,
-} from "@commonfabric/js-compiler";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { attachDataFiles } from "./data-files.ts";
 import { setLLMUrl } from "@commonfabric/llm";
 import {
   assignSlug,
@@ -279,7 +277,7 @@ export class PieceVerbReadError extends Error {
   constructor(verb: string, piece: string, callable: boolean) {
     super(
       callable
-        ? `Path resolves to a verb; use 'cf piece call --piece ${piece} ${verb}' instead.`
+        ? `Path resolves to a verb; use 'cf call --piece ${piece} ${verb}' instead.`
         : `Path resolves to a verb that is not directly callable: verbs are ` +
           `invoked at the piece's root surface. Read the parent object ` +
           `instead, or list the callable verbs with ` +
@@ -634,30 +632,17 @@ export async function getProgramFromFile(
       files.set(file.name, file);
     }
   }
-  // Data files are read directly rather than resolved: nothing imports them, so
-  // there is no closure to follow, and their bytes are never parsed.
-  const dataFiles: string[] = [];
-  for (const path of dataPaths) {
-    const source = readDataFileSource(path, rootPath);
-    if (dataFiles.includes(source.name)) continue;
-    // The entry or one of its tests reaches this name through an import, so the
-    // package would have to both compile it and store it uninterpreted.
-    if (files.has(source.name)) {
-      throw new Error(
-        `Data file "${source.name}" is also a source module of this package.`,
-      );
-    }
-    files.set(source.name, source);
-    dataFiles.push(source.name);
-  }
-  const program: RuntimeProgram = {
-    main: mainProgram.main,
-    files: [...files.values()],
-    ...(testPrograms.length === 0
-      ? {}
-      : { sourceRoots: testPrograms.map((test) => test.main) }),
-    ...(dataFiles.length === 0 ? {} : { dataFiles }),
-  };
+  const program = attachDataFiles(
+    {
+      main: mainProgram.main,
+      files: [...files.values()],
+      ...(testPrograms.length === 0
+        ? {}
+        : { sourceRoots: testPrograms.map((test) => test.main) }),
+    },
+    dataPaths,
+    rootPath,
+  );
   if (entry.mainExport) {
     program.mainExport = entry.mainExport;
   }
@@ -1869,6 +1854,7 @@ async function resolvePieceCallable(
     return {
       ...resolved,
       declaredResult: () => declaredVerbResult(loadPattern, callableName),
+      declaredEvent: () => declaredVerbEventFor(loadPattern, callableName),
       declaredProse: () => declaredVerbProseFor(loadPattern, callableName),
     };
   }
@@ -2074,6 +2060,63 @@ function handlerVerbResults(
   return verbs;
 }
 
+/** The declared event contract of each verb a compiled pattern drives from a
+ * result property, keyed by that property — matched to its handler node by
+ * the same `$event`-input comparison `handlerVerbResults` makes, so the two
+ * can never attribute one stream to different verbs.
+ *
+ * This reads the handler MODULE's argument schema, not the pattern's result
+ * schema, because the module is the only serialized surface that keeps
+ * reference markers: the builder sanitizes `Pattern.resultSchema` to stream
+ * markers only (`sanitizeSchemaForLinks`, `KeepAsCell.OnlyStream`,
+ * builder/pattern.ts), while a module's schemas ride through
+ * `moduleToEncodableForm` verbatim. The `$event` property inside it is the
+ * authored event as the transformer emitted it — the input contract of
+ * docs/history/plans/verb-input-contract.md, `asCell` markers intact.
+ *
+ * The returned schema is self-contained: a `$ref` event is resolved against
+ * the module schema's own root, and an inline one carries that root's
+ * `$defs` along, so a consumer can follow interior references without the
+ * pattern in hand. A stream two handler nodes share names no single
+ * contract and maps to `undefined`, exactly as its result does.
+ *
+ * Exported for the direct tests in `test/verb-emitted-address.test.ts`: a
+ * shared stream, a module with no schema, and an inline event are all
+ * reachable by construction and awkward to reach by compiling a pattern. */
+export function handlerVerbEvents(
+  pattern: { result?: unknown; nodes?: unknown } | null | undefined,
+): Map<string, JSONSchema | undefined> {
+  const verbs = new Map<string, JSONSchema | undefined>();
+  const result = pattern?.result;
+  if (!isObjectOrArray(result)) return verbs;
+  const nodes = Array.isArray(pattern?.nodes) ? pattern.nodes : [];
+  for (const [name, link] of Object.entries(result)) {
+    let eventSchema: JSONSchema | undefined;
+    let matched = 0;
+    for (const node of nodes) {
+      if (!isObjectOrArray(node) || !isObjectOrArray(node.inputs)) continue;
+      if (!samePatternLink(link, node.inputs.$event)) continue;
+      matched++;
+      const argumentSchema = isObjectOrArray(node.module)
+        ? node.module.argumentSchema
+        : undefined;
+      if (!isObjectOrArray(argumentSchema)) continue;
+      const event = isObjectOrArray(argumentSchema.properties)
+        ? argumentSchema.properties.$event
+        : undefined;
+      if (!isObjectOrArray(event)) continue;
+      eventSchema = typeof event.$ref === "string"
+        ? resolveCfcSchemaRefs(event, argumentSchema as JSONSchema)
+        : isObjectOrArray(argumentSchema.$defs) && event.$defs === undefined
+        ? { ...event, $defs: argumentSchema.$defs } as JSONSchema
+        : event as JSONSchema;
+    }
+    if (matched === 0) continue;
+    verbs.set(name, matched === 1 ? eventSchema : undefined);
+  }
+  return verbs;
+}
+
 /**
  * What a pattern's own result schema says a verb is for, and what its event
  * fields mean — the author's doc comments, as the compiler lowered them.
@@ -2090,7 +2133,9 @@ export interface DeclaredVerbProse {
    * The verb's declared event schema with its `$ref` followed against the
    * result schema's own root, so the field descriptions inside the `$defs`
    * target are reachable. Read for annotations ONLY — never to decide a shape;
-   * see `withDeclaredFieldProse`.
+   * see `withDeclaredFieldProse`. (Reference markers are absent here too —
+   * the builder sanitizes the result schema — so the dispatch gate reads the
+   * handler module instead: `handlerVerbEvents`.)
    */
   eventSchema?: JSONSchema;
 }
@@ -2749,6 +2794,29 @@ async function declaredVerbProseFor(
 }
 
 /**
+ * One verb's declared event contract, read through the piece's compiled
+ * pattern — `handlerVerbEvents` narrowed to a single name, on the same terms
+ * `declaredVerbResult` states: one matcher, so nothing can attribute the
+ * stream differently here than in a listing.
+ *
+ * This is the surface that keeps reference markers: the schema a dispatch
+ * cell carries went through link sanitization, which strips every `asCell`
+ * entry but `stream` — see `CallableResolution.declaredEvent` for the full
+ * statement. A pattern that will not load costs the call its address
+ * conversion, not the call.
+ */
+async function declaredVerbEventFor(
+  loadPattern: () => Promise<any>,
+  callableName: string,
+): Promise<JSONSchema | undefined> {
+  try {
+    return handlerVerbEvents(await loadPattern()).get(callableName);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Enumerate every callable a piece exposes (verb contract: Verb discovery,
  * docs/plans/pattern-verb-contract.md). Nothing listed is hidden from a
  * caller — hiding is a display default driven by the listing marks
@@ -3143,8 +3211,12 @@ export async function executePieceCallable(
       return parsed.showHelpJson
         ? renderExecHelpJson(spec)
         : renderPieceCallHelp(
+          // Each mount passes its own spelling, so the page names the
+          // command that was typed. The fallback is the canonical top-level
+          // spelling: a page minted with no mount to name must not teach
+          // the deprecated one.
           deps.helpCommandPrefix ??
-            cliCommand(["piece", "call", "...", callableName]),
+            cliCommand(["call", "...", callableName]),
           spec,
         );
     },

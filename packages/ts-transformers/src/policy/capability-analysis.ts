@@ -2625,7 +2625,8 @@ export function analyzeFunctionCapabilities(
         return;
       }
 
-      const callbackArg = call.arguments[0];
+      const callbackArg = call.arguments[0] &&
+        unwrapExpression(call.arguments[0]);
       if (!callbackArg || !isCapabilityAnalyzableFunction(callbackArg)) {
         return;
       }

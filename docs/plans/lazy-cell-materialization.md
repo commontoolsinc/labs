@@ -1,8 +1,8 @@
 # Lazy, schema-observing cell materialization
 
 Status: built end to end and on by default behind `lazyMaterialization`. What
-remains is removing the flag and the eager path for lift arguments, plus the two
-pieces listed under Stages 3 and 5.
+remains is removing the flag and the eager path for lift arguments, plus the
+handler materialization listed under Stage 5.
 
 `Cell.get()` materializes everything its schema selects, in one pass, before the
 reader touches any of it. A lift declaring a list of a thousand entries gets a
@@ -165,43 +165,43 @@ container-shaped read, not a descent.
 
 A lazy view reads the state as of the `.get()` that created it, not the live
 transaction state. A reader that materializes a list and then writes into it
-iterates what it was handed, which is what eager materialization gives today.
+iterates what it was handed, which is what eager materialization gives.
 
-This is close to free, for a reason that falls out of how writes work. A write
-descends through `cloneForMutation` with `force: false`
-([`mutable-path-write.ts`](../../packages/runner/src/storage/transaction/mutable-path-write.ts),
-[`value-clone.ts`](../../packages/data-model/src/value-clone.ts)), which thaws a
-frozen container by shallow-cloning it and leaves an already-mutable one alone.
-So a **deep-frozen document root is stable against every later write in the
-transaction**: each write rebuilds the spine it descends and never reaches into
-the frozen tree. Pinning a snapshot is therefore one `deepFreeze` of the current
-root — and `deepFreeze` short-circuits on already-deep-frozen values through its
-cache ([`deep-freeze.ts`](../../packages/data-model/src/deep-freeze.ts)), so it
-costs only what this transaction has already thawed by writing. Nothing is
-copied, and there is no per-write cost afterwards.
+Read-your-own-writes is preserved by re-reading rather than by reading live: a
+fresh `.get()` fixes a fresh instant, and `.get()` on a handle the argument
+carried does too, so a lift that writes into a `Writable` input and reads it
+back gets what it wrote.
 
-For the case this plan exists to serve, the cost is zero. The scheduler opens a
-transaction and hands it straight to the action
-([`run.ts`](../../packages/runner/src/scheduler/run.ts)), whose first act is to
-read its argument. No write precedes it, so the snapshot for every document is
-its `initial` attestation — which the transaction already retains, unmodified,
-for the whole of its life.
+The transaction carries a write epoch, bumped each time it replaces a document
+root, and a view records the epoch it was taken at. Reading a document at epoch
+E resolves to the root standing at E: the current one where nothing has
+displaced it, and otherwise the one a write set aside.
 
-The general shape, for a `.get()` that happens after writes:
+A write sets a root aside only where a reader holds an instant that root answers
+for, so a transaction nobody reads this way costs its write path nothing, and a
+run of writes with no read between them keeps one root rather than one per
+write. Setting one aside means deep-freezing it first, because a write thaws a
+frozen container by cloning and edits an already-mutable one in place —
+so without the freeze the next write would edit the value a reader is
+describing. `deepFreeze` short-circuits on what is already deep-frozen, so this
+costs only what the transaction has thawed by writing.
 
-- The transaction carries a write epoch, bumped on each write.
-- A lazy view records the epoch at creation.
-- Reading a document at epoch E resolves to its `initial` attestation when its
-  first write is later than E (the common case — nothing needs pinning), and
-  otherwise to the root pinned for E.
-- Pins are taken at materialization, for the documents the transaction has
-  already written. That set is small and known: it is the transaction's writable
-  document entries.
+Before the first write every document still stands at its `initial` attestation,
+so every epoch names the same state and reads skip epoch resolution on that
+check alone. That is the shape the plan exists to serve: the scheduler opens a
+transaction and hands it straight to the action, whose first act is to read its
+argument.
 
-Reads still register their activity on the live transaction, so reactivity and
-commit preconditions are unchanged; only the _value_ comes from the pin. The
-preconditions describe committed state, which is what the pin holds, so the two
-stay consistent.
+Reads register their activity on the live transaction, so reactivity and commit
+preconditions are unchanged; only the _value_ comes from the epoch. The
+preconditions describe committed state, which is what an untouched root holds,
+so the two stay consistent.
+
+Caches that key on path rather than on instant — the transaction's read-result
+cache, its link-resolution memo, the frozen-reads cache, and the proxy cache —
+are not consulted or filled while a read resolves against an earlier epoch. A
+value kept under one instant and served under another is the failure this
+avoids.
 
 ### The mismatch signal
 
@@ -379,31 +379,36 @@ registers no read for its siblings, nor for array elements never reached.
 
 ### Stage 3 — Snapshot semantics
 
-**Closed for every read, by falling back rather than by pinning.** A view keeps
-the transaction it was created with (Stage 1), so two views taken together
-agree, and a view sees writes made through the handles it was passed — a lift
-that writes into a `Writable` input and reads back through it gets what it
-wrote, in either mode.
+**Done, by the write epoch.** A view describes the instant its `.get()` fixed,
+containers and values alike, and a reader sees its own writes by re-reading.
+"Snapshot semantics" above states the design.
 
-What a view cannot do is describe an instant that has already moved. It resolves
-each path when the reader touches it, so a read taken after a write would report
-the new value where an eager read hands back one detached when it was taken. So
-a read is materialized eagerly once the transaction has written
-(`tx.hasWrites()`). Nothing is lost where the win is: a lift reads its argument
-before it writes anything, so that read is still lazy.
-
-- [x] `hasWrites()` on the transaction, set at the one point every write funnels
-      through.
-- [x] `validateAndTransform` takes the lazy route only on a transaction that has
-      not written.
-- [x] Tested against an eager read, both for a read taken after a write and for
-      a lift writing through a handle and reading back.
-
-- [ ] One case is still open, and it needs the write epoch rather than the
-      fallback: a view handed out BEFORE a write still tracks that write, where
-      an eager read would have detached. The fallback cannot fix it after the
-      fact — recovering the pre-write value is exactly what an epoch buys. The
-      design and its cost analysis are under "Snapshot semantics" above.
+- [x] A write epoch on the transaction, bumped at the one chokepoint every root
+      replacement funnels through.
+- [x] A read resolves against the epoch its view was taken at, decided at the
+      single site where a read chooses its root.
+- [x] A write sets aside the root it displaces, deep-frozen, only where a reader
+      holds an instant that root answers for.
+- [x] Caches keyed on path rather than instant stand aside while a read resolves
+      against an earlier epoch.
+- [x] A nested materialization inherits the instant it is being read at rather
+      than fixing a later one.
+- [x] `validateAndTransform` takes the lazy route on every marked transaction,
+      whether or not it has written.
+- [x] Both readings on a marked transaction pin: the schema view and the
+      schema-less proxy. Unmarked reads are untouched, and the standing handle
+      keeps tracking current state.
+- [x] Benchmarked in `test/lazy-view-epoch.bench.ts`, with one runtime for the
+      file and every iteration aborting, so no iteration pays for a runtime or a
+      seeded document. A single walk of a thousand elements is not slower under
+      an epoch — it comes out ahead, because an epoch read neither fills nor
+      consults the per-path caches, which a walk that touches each path once
+      pays for and never collects on. Fifty writes after one view is taken cost
+      no more than fifty writes after a raw read: one preserve covers the run
+      and deep-freezing an already-frozen root is a cache hit. Fifty
+      write/read rounds, where every write finds an instant to preserve, cost
+      about 1.6x — seven runs spread between 1.5x and 2.0x, which is the figure
+      to quote rather than any single run's.
 
 ### Stage 4 — The transaction mode
 
@@ -483,8 +488,13 @@ Four properties carry most of the confidence:
   refusal, absent key, declared default — registers the read it stands in for.
   The cheapest assertion is on the registered read set; the honest one writes
   the value afterwards and observes the reader run.
-- **Snapshot.** A view taken before a write reads pre-write state; the pin does
-  not disturb later writes.
+- **Snapshot.** A view iterates the list it was handed while the reader writes
+  into that list, whichever side of a write the view was taken on, and a value
+  below the container reads as what stood at the instant the view was taken.
+  Taking the read again reads what the transaction now holds. Test it over a
+  list of primitives: an inline object element is rebased onto a `data:`
+  identity derived from its own value, so a read of one never reaches the
+  document and holds still whether or not the instant does any work.
 
 Mutation-test each new test: break the behavior it claims to guard and confirm
 it fails. A test over a proxy is unusually easy to write in a form that cannot
@@ -525,19 +535,17 @@ One carve-out, and it is deliberate: a finished view answers a `then` probe with
 it receives and a lift's result crosses a promise boundary by construction, so a
 view that refuses the probe cannot be returned at all.
 
-**Handles disagreeing across a write.** Not yet closed, and it needs the write
-epoch Stage 3 leaves unbuilt. Inside a marked transaction every read pins
-together, so two views agree; what they do not yet do is ignore writes the
-reader made after taking them. `getRaw()` is not a party to this — it returns a
-detached value at call time, so it has no lifetime to drift.
+**What an instant costs a transaction that keeps taking them.** A read between
+every write is the shape where every write preserves a root, and it is the one
+to watch: such a run costs around 1.6x the same run reading raw, spread between
+1.5x and 2.0x across runs. A run of writes under a single view costs nothing
+measurable, because one preserve covers it. Neither is the lift path, which reads its argument and writes nothing.
 
-Nothing catches such a disagreement, which is why it wants the epoch rather than
-a test. `StorageTransactionInconsistent` is a different check: `validate()`
-claims each read document's `initial` attestation against the live replica, so
-it fires when the replica moved under the transaction. Commit preconditions do
-not catch it either — `buildReads` emits address, path and version basis, never
-the value read — so a pinned read produces exactly the precondition a live one
-would.
+Retention rides on the same thing. `displaced` grows one root per document per
+read-then-write round and is never pruned, and `documentAtEpoch` scans it
+oldest-first, so a long-lived transaction alternating reads and writes pays in
+both memory and lookup. Deliberately left: the transactions this runs on are one
+action long.
 
 **CFC label timing.** Labels join the flow as paths are touched rather than at
 materialization, so a run's label set can be narrower — more precise, and a

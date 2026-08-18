@@ -11,7 +11,7 @@ import { action, type Default, NAME, pattern, type Stream, Writable, } from "com
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-// The verb input contract (docs/plans/verb-input-contract.md): the served
+// The verb input contract (docs/history/plans/verb-input-contract.md): the served
 // event schema is the authored interface, whether or not the body reads a
 // field. `title` is read; `done` is declared and never read; `peer` is a
 // declared, never-read reference and keeps a reference marker at the least

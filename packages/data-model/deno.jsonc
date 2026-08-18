@@ -5,7 +5,8 @@
   },
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
-    "@/": "./src/"
+    "@/": "./src/",
+    "@node/crypto": "node:crypto"
   },
   "tasks": {
     "check": "deno check .",
@@ -40,6 +41,7 @@
   "exports": {
     "./cell-rep": "./src/cell-rep.ts",
     "./deep-freeze": "./src/deep-freeze.ts",
+    "./fabric-bases": "./src/fabric-bases/index.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
     "./fabric-value": "./src/fabric-value.ts",

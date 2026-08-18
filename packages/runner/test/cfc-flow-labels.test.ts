@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 import type { Action } from "../src/scheduler.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-labels");
@@ -901,9 +902,6 @@ describe("CFC flow labels (default transition)", () => {
   // the retry's writes are under-tainted (the run still exists only because
   // the labeled dep changed).
   it("keeps trigger-read labels across a RetryImmediately rerun", async () => {
-    const { RetryImmediately } = await import(
-      "../src/scheduler/retry-immediately.ts"
-    );
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),

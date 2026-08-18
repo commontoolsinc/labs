@@ -261,6 +261,32 @@ The same bytes are read by whatever reads the source package: `cf piece
 getsrc`, the FUSE `.src/` view, and any tool working from a recovered
 checkout.
 
+`cf check` and `cf test` take the same repeatable `--datafile` flag, so a
+pattern that reads a data file can be checked and tested before it is deployed.
+Without it such a pattern still compiles and type-checks, because `dataFile` is
+declared whether or not a file is attached; the absence surfaces when the
+pattern runs.
+
+### What a data file costs a load
+
+A data file's bytes are in the compiled set, so they travel with every warm
+load. That is what makes the read work after a restart, and it prices the
+feature in closure size rather than in time.
+
+Closure size grows by the size of the attached files, one byte for one byte.
+Warm-load time does not move with it: measured over a pattern whose only
+difference was an attached file of 0, 64 KiB, 512 KiB and 2 MiB, the median
+by-identity load stayed flat at about a millisecond across the range. That is
+the design working — a data document is filtered out before anything parses a
+body, verifies it, or builds it into a record, so its size reaches no per-byte
+work.
+
+Those figures come from an emulated storage manager, which holds the closure in
+memory. They therefore measure the runtime's own cost and say nothing about
+moving the bytes to a client over a real connection, which is where a large
+attached file would actually be felt. Treat closure size as the number that
+matters when deciding how much data belongs in a package.
+
 ## Specifier syntax
 
 ### One grammar, no type tag

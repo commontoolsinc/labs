@@ -6,7 +6,7 @@
 # the transcript is the artifact. Its companion `verb-session-gaps.sh` asserts
 # the same surface as pass/fail and is what keeps this one honest.
 #
-# docs/common/verb-session-walkthrough.md is the prose half: why the fixture
+# docs/common/verbs/session-walkthrough.md is the prose half: why the fixture
 # declares the verbs it does, and which shape of the surface each act is here
 # to show. An act added here without a row there is an act nobody can place.
 #
@@ -14,18 +14,15 @@
 # There is no second, prettier spelling of it anywhere in this file: `run` and
 # `broken` display `"$@"` and execute `"$@"`, so a line that reads well and a
 # line that ran cannot drift apart. What a reader sees is what they can retype,
-# given the two environment variables the header names.
+# given the environment variables the header names.
 #
-# No act is marked PENDING today. `pending` stays for the next capability
-# that is sequenced but unbuilt: it prints the command and the result it will
-# produce, without running it, so what does not work yet stays deliberately
-# visible — a demo that quietly omits what does not work teaches a surface
-# that does not exist.
-#
-# No act is marked BROKEN today. `broken` stays for the next one that is: it
-# checks that the defect an act claims still answers to its own signature, so
-# an act cannot go on asserting a defect that has been fixed. Deriving that
-# again from scratch is how it acquires the same hole twice.
+# Every act carries a claim, and the script checks all three kinds: an
+# unmarked act says the command works, a REFUSED one says the surface turns
+# this down, and a BROKEN one says a named defect is still there. Two further
+# helpers, `pending` and `broken`, are defined and unused today — they are how
+# an unbuilt or defective capability stays deliberately visible rather than
+# being quietly omitted. Each carries its full contract at its definition
+# below; a reader who never sees one fire does not need them here.
 #
 #   API_URL=http://localhost:8000 packages/cli/integration/verb-session-demo.sh
 set -uo pipefail
@@ -54,6 +51,15 @@ if [ -z "${CF_IDENTITY:-}" ]; then
   cf id new >"$CF_IDENTITY" 2>/dev/null
 fi
 export CF_IDENTITY
+# An invocation session scopes the ids act 7 replays under. It belongs in the
+# environment rather than on a command line: it is what keeps an outcome's
+# address out of a stranger's reach, and keeping it out of argv keeps it out of
+# shell history and the default process listing. That is a reduction in casual
+# exposure, not secret storage — `ps -E` prints the environment too.
+if [ -z "${CF_INVOCATION_SESSION:-}" ]; then
+  CF_INVOCATION_SESSION=$(cf invocation-session new 2>/dev/null)
+fi
+export CF_INVOCATION_SESSION
 SPACE="${SPACE:-$(mktemp -u demoXXXXXXXX)}"
 
 B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; Y=$'\033[33m'; N=$'\033[0m'
@@ -190,7 +196,8 @@ say "and verbs. Deploying one makes a piece — a running instance. Both live in
 say "a space, the shared durable place every command below names with -s."
 say ""
 say "space $SPACE · nothing here was written for this pattern"
-say "CF_API_URL=$CF_API_URL and CF_IDENTITY are exported; everything else you see"
+say "CF_API_URL=$CF_API_URL, CF_IDENTITY and CF_INVOCATION_SESSION are exported;"
+say "everything else you see"
 say "is the whole command."
 
 act "1 · Arrive by name"
@@ -220,7 +227,22 @@ run cf call -s "$SPACE" --piece board addItem -- --help
 
 act "4 · Create, and act on what you were handed"
 say "The create returns the piece it made. Its address is the next command's target."
+say ""
+say "--select names the shape of the answer, and this is its first use, so:"
+say "a comma-separated list of fields, a dot to walk into one, and a trailing"
+say "@ meaning 'the address of this position, not the contents behind it'."
+say "So item@ says hand back where the new item lives rather than a copy of"
+say "it — and an address is what the rest of the session is built on."
 run cf call -s "$SPACE" --piece board --select item@ addItem -- --title "Login rewrite"
+say "The @ renders under the key \$link, which is the spelling every address"
+say "in this transcript arrives in. Capturing one in your own shell is a single"
+say "jq hop — and the quotes around \$link are load-bearing, since jq reads a"
+say "bare \$link as one of its own variables:"
+say ""
+say "    jq -r '.result.item.\"\$link\"'"
+say ""
+say "That is the exact expression the next line of this script runs against the"
+say "output you just saw — not a second call."
 # The address the reader can see in the output above, carried whole. Taken
 # from that run, not from a second one: `run` leaves the output it displayed
 # in $OUT. It is one reference string, used exactly as printed: `get` and
@@ -250,13 +272,21 @@ say "re-enters answers with an address, so the whole result is still one value."
 # callable's own command line, so a flag after it belongs to the verb.
 run cf call -s "$SPACE" --select item.title "$EPIC" addChild -- --title "CSRF tokens"
 say "And a caller who names one field is given one field, circle or no circle."
+say "item.title is the dotted form: it walks into item and keeps title. Note it"
+say "prunes rather than flattens — the answer is still shaped like the result,"
+say "with everything the caller did not ask for gone."
 
 act "5 · Read addresses instead of contents"
-say "An unshaped read follows every link. A bare @ stops at the address."
+say "The same two spellings, now on a read of a collection. An unshaped read"
+say "follows every link and copies what it finds; @ on its own names the"
+say "position being read rather than its contents, and applies to each element"
+say "when it crosses an array — so this asks for every child's address, with"
+say "its title beside it."
 run cf get -s "$SPACE" "$EPIC" children --select @,title
 
 act "6 · Ask the same question twice"
-say "The first thing anyone watching says is 'show me that again'."
+say "The same command as act 5, deliberately — because the first thing anyone"
+say "watching a live system says is 'show me that again'."
 run cf get -s "$SPACE" "$EPIC" children --select @,title
 say "The same answer. A projection is a question you may ask twice, which is"
 say "what makes any of the reads above safe to put in a script — as here: the"
@@ -270,6 +300,42 @@ CSRF=$(printf '%s' "$OUT" | jq -r '.[] | select(.title=="CSRF tokens")."$link"')
 act "7 · A verb returns what only the pattern could compute"
 say "The note's timestamp is the pattern's; the caller never supplied one."
 run cf call -s "$SPACE" "$EPIC" recordNote -- --body "blocked on the cookie spec"
+# The receipt out of the run just shown, not a second call. Every invocation
+# envelope carries one, and it is an address like any other.
+RECEIPT=$(printf '%s' "$OUT" | jq -r '.receipt')
+say "Act 6 asked a read twice. A call cannot be asked twice — it would run the"
+say "handler again — but it does not need to be: the outcome is durable at an"
+say "address, and every envelope above has carried it as 'receipt'."
+run cf get -s "$SPACE" "$RECEIPT" --select note,noteCount
+say "The same outcome, without calling anything again. Note what this does"
+say "NOT prove on its own: a receipt is a frozen snapshot of what its handling"
+say "committed, so it reports that outcome whether or not anything else has"
+say "happened since. The board is the only place that can settle it, and this"
+say "act reads it at the end."
+say ""
+say "That route needs the address. The other one is for when you never got it"
+say "— a dropped connection, a response nobody saw. Name the call with an"
+say "--invocation id and the id itself becomes the handle."
+run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote -- --body "first attempt"
+say "Replaying that id hands back the original. The payload below is"
+say "deliberately different text, and it does not take:"
+run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote -- --body "a different body entirely"
+say "Same body, same receipt — and deduplicated: true, a field the first call"
+say "did not carry. The same caution applies: a replay is DEFINED to hand the"
+say "original snapshot back, so the envelope would look like this whether or"
+say "not a second note actually landed. An id"
+say "is only half the handle: it is scoped to an invocation session, so one"
+say "agent's note-retry is not another's, which is why the session is exported"
+say "above rather than typed here."
+say "So read the board, which is where a second note would show up. Two"
+say "entries, from the two calls that committed — and the replay's text is"
+say "not among them:"
+run cf get -s "$SPACE" "$EPIC" notes --select body
+say "That is the proof, and it is the only one that holds: the envelopes"
+say "above could not have told you."
+say "The caveat that keeps this honest: the replay DOES run the handler body"
+say "again, and then loses the race for the receipt. Nothing commits twice,"
+say "but a verb that sends mail or spends a model call has already done it."
 
 act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
@@ -325,16 +391,20 @@ say "call was turned down before an invocation was spent."
 
 act "12 · Relate two items"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
-say "The spelling this session taught throughout — the address as printed — is"
-say "the one thing still refused here (references-as-arguments.md)."
-refused "the address a read emits, as a verb argument" \
-  "value does not match type object" \
-  cf call -s "$SPACE" "$KID" blockOn -- --on "$CSRF"
-say "The capability itself landed: wrap the same address in the link envelope"
-say "by hand, and the edge that lands is the target rather than a copy. The"
-say "assembly is the workaround; the refusal above is this act's claim that it"
-say "is still needed, and the day it stops being refused, this act says so."
-run cf call -s "$SPACE" --select blocked@,on@,blockedOnCount "$KID" blockOn "{\"on\":{\"/\":{\"link@1\":{\"id\":\"${CSRF#/}\"}}}}"
+say "The spelling this session taught throughout — the address as printed —"
+say "stands where the verb declares a reference, and the edge that lands is"
+say "the target itself rather than a copy."
+run cf call -s "$SPACE" --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
+say "The two payloads that could only ever be mistakes at a reference"
+say "position are refused naming it: a string that is no address, and an"
+say "inline copy — which would store a detached document inside this item"
+say "and report success."
+refused "a string that is not an address, where a reference is declared" \
+  "is not an address" \
+  cf call -s "$SPACE" "$KID" blockOn -- --on "not-an-address"
+refused "an inline copy at a reference position" \
+  "detached document" \
+  cf call -s "$SPACE" "$KID" blockOn '{"on":{"title":"a copy"}}'
 
 act "13 · One item, two paths, one address"
 say "This is what addresses are for: the same item under a parent AND as a"
@@ -354,11 +424,10 @@ say "is the composition the verb surface exists for. On those lines the flags"
 say "that remain name the space and shape the answer; the slug keeps --piece,"
 say "and a verb's own flags stay the verb's."
 say ""
-say "Acts 12 and 13 are the graph half, live minus one spelling: the printed"
-say "address is still refused as an argument, and the envelope assembly beside"
-say "that refusal retires the day it stops being refused — act 12 and"
-say "verb-session-gaps.sh both report that day, so this demo cannot quietly"
-say "go stale."
+say "Acts 12 and 13 are the graph half: the printed address stands as a verb"
+say "argument where the pattern declares a reference, and one address read"
+say "back from two positions is what proves the board holds an edge rather"
+say "than a copy."
 
 if [ "$UNEXPECTED" != "0" ]; then
   printf '\n%s━━ %d act(s) failed that this demo says work%s\n' \
