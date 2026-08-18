@@ -156,22 +156,6 @@ export function externalResolutionMissCount(): number {
 }
 
 /**
- * Whether every external ref `schema` carries has a fully registered
- * closure. Trivially true for a schema with no external refs. Note the
- * first call for a schema identity walks the whole schema, dormant
- * `$defs` bodies included — derived caches guard their memoization with
- * the miss counter above instead.
- */
-export function isExternalClosureComplete(
-  schema: JSONSchema | undefined,
-): boolean {
-  for (const hash of collectExternalSchemaRefHashes(schema)) {
-    if (!isSchemaDocumentClosureComplete(hash)) return false;
-  }
-  return true;
-}
-
-/**
  * Whether `taggedHash`'s document and every document transitively reachable
  * from its external refs are registered. Resolution treats an incomplete
  * closure as a miss

@@ -1516,65 +1516,6 @@ export class StorageManager implements IStorageManager {
     }
   }
 
-  /**
-   * Syncs the schema document behind `taggedHash` and, transitively, every
-   * document its external refs reach, so a subsequent resolution of
-   * `cid:<taggedHash>` finds a complete closure. Registration happens as
-   * each document's frame is validated, before any of it applies
-   * (`#validateArrivedSchemaDocuments`); this helper drives the pulls and
-   * checks between them.
-   *
-   * Success promises PER-SPACE VERIFIED PRESENCE: every document in the
-   * closure is stored in `space` and its stored content hashes to its id.
-   * A realm-verified copy from another space never stands in for this
-   * space's — a forged local copy fails with "did not verify" even when
-   * the realm registry could resolve the hash. Returns the failure when a
-   * document cannot be pulled, is absent here, or does not verify — the
-   * closure then stays incomplete for this space, which is the intended
-   * fail state, not a retry condition.
-   */
-  async syncSchemaDocumentClosure(
-    space: MemorySpace,
-    taggedHash: string,
-  ): Promise<Error | undefined> {
-    const provider = this.open(space);
-    const visited = new Set<string>();
-    const pending = [taggedHash];
-    while (pending.length > 0) {
-      const hash = pending.pop()!;
-      if (visited.has(hash)) continue;
-      visited.add(hash);
-      // Sync unconditionally: realm-registry presence proves verified
-      // content exists SOMEWHERE, not that this space holds it, and the
-      // caller is asking about this space (the space-boundary rule).
-      const uri = `cid:${hash}` as URI;
-      const result = await provider.sync(uri, { path: [], schema: false });
-      if (result.error !== undefined) return result.error;
-      const stored = (provider as {
-        get?: (uri: URI, scope?: CellScope) => EntityDocument | undefined;
-      }).get?.(uri);
-      if (stored === undefined) {
-        return new Error(`Schema document is absent in this space: ${uri}`);
-      }
-      // Verify THIS SPACE's copy, not merely realm resolvability: a forged
-      // local document with a valid twin elsewhere must fail here.
-      const storedSchema = isObjectNotArray(stored) ? stored.value : undefined;
-      if (
-        internSchemaAsTaggedHashString(storedSchema as JSONSchema) !== hash
-      ) {
-        return new Error(
-          `Schema document did not verify in this space: ${uri}`,
-        );
-      }
-      const document = lookupSchemaDocument(hash);
-      if (document === undefined) {
-        return new Error(`Schema document did not verify: ${uri}`);
-      }
-      pending.push(...collectExternalSchemaRefHashes(document));
-    }
-    return undefined;
-  }
-
   private async syncCfcSchemaDocument(
     space: MemorySpace,
     document: EntityDocument | undefined,
@@ -4250,8 +4191,7 @@ class SpaceReplica implements ISpaceReplica {
    * VERIFIED schema document delivered by this frame (the prospective
    * overlay) or already stored. A broken ref throws with the replica
    * untouched, because it is a delivery consistency bug to surface, never
-   * a hole to quietly repair; the asynchronous closure pull for callers
-   * who ask for a closure by hash lives in `syncSchemaDocumentClosure`.
+   * a hole to quietly repair.
    * Direct refs suffice: a stored verified dependency was itself validated
    * when it arrived, and a locally written one carried its closure in its
    * own transaction. Registration is safe pre-apply — it is hash-verified

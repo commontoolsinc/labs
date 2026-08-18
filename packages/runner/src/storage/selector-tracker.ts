@@ -9,7 +9,7 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import {
-  isExternalClosureComplete,
+  externalResolutionMissCount,
   onSchemaRegistryClear,
 } from "../schema-registry.ts";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
@@ -291,6 +291,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       }
     }
     const hashes: string[] = [];
+    const missesBefore = externalResolutionMissCount();
     let current = SelectorTracker.getStandardSchema(item);
     hashes.push(hashSchema(current));
     if (schema.$defs !== undefined) {
@@ -302,9 +303,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (isObjectOrArray(current) && current.$ref !== undefined) {
       // An unresolvable ref contributes no resolved-form hash. For an
       // external ref that is a recoverable miss — the schema document can
-      // arrive later — which is also why the populate below is gated on
-      // closure completeness: a hash list computed over the hole must not
-      // outlive the arrival.
+      // arrive later — which is why the populate below is gated on the
+      // miss counter.
       const resolved = ContextualFlowControl.resolveSchemaRefs(
         current,
         schema,
@@ -315,10 +315,10 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         );
       }
     }
-    if (
-      cacheable && isExternalClosureComplete(item) &&
-      isExternalClosureComplete(schema)
-    ) {
+    // Populate only when no `cid:` resolution missed while computing: a
+    // hash list computed over a hole must not outlive the document's
+    // arrival. The miss counter is exact and walk-free.
+    if (cacheable && externalResolutionMissCount() === missesBefore) {
       if (byItem === undefined) {
         byItem = new Map();
         SelectorTracker.#anyOfItemHashesCache.set(schema, byItem);
