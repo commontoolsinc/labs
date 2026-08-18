@@ -4,7 +4,7 @@ import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
-import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
+import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { RealmDecodeContext } from "./RealmDecodeContext.ts";
 import { RealmEncodeContext } from "./RealmEncodeContext.ts";
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
@@ -70,14 +70,20 @@ export class RealmCodecEngine extends BaseCodecEngine<
   /**
    * @inheritDoc
    *
-   * Cycles are guarded: this format's transport is the tree itself, so a peer
-   * can hand one over with a cycle in it. The marker is adopted separately,
-   * by {@link #decode}, once the envelope it comes from has been checked.
+   * Takes the sender's marker off the envelope, which is what every tagged
+   * form beneath it is then recognized by.
+   *
+   * Sniffs rather than validates, as the contract says: this runs before
+   * anything has established that `data` is this format's, so a form
+   * carrying no recognizable marker yields a context holding none -- one
+   * that recognizes nothing -- and {@link #encodedFromSerializedForm} does
+   * the refusing.
    */
   protected override newDecodeContext(
     env: LiveEnvironment,
+    data: RealmEncodedValue,
   ): RealmDecodeContext {
-    return new RealmDecodeContext(env);
+    return new RealmDecodeContext(env, RealmCodecEngine.#markerOf(data));
   }
 
   /**
@@ -93,54 +99,43 @@ export class RealmCodecEngine extends BaseCodecEngine<
    * The marker is minted here, after `value` exists, which is what Section 2.2
    * requires of it and why it cannot be forged from within a payload.
    */
-  override encode(
-    value: FabricValue,
-    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  /**
+   * @inheritDoc
+   *
+   * Wraps the walked tree in this act's outer envelope. The marker is the
+   * act's own, minted when its context was, which is what Section 2.2
+   * requires: created after the value exists, so nothing already assembled can
+   * hold a reference to it.
+   */
+  protected override serializedFromEncoded(
+    encoded: RealmCodecValue,
+    ctx: RealmEncodeContext,
   ): RealmEncodedValue {
-    const ctx = this.newEncodeContext(env);
-
-    return [ctx.marker, this.encodeValue(value, ctx)];
+    return [ctx.marker, encoded];
   }
 
   /**
    * @inheritDoc
    *
-   * Adopts the marker from the outer envelope and walks what it wraps. This
-   * envelope is the one place this method takes instruction from the data, so
-   * it is checked in full before anything is read from it: two elements, and a
-   * one-element array in slot zero holding this format's version. Adopting the
-   * sender's own marker rather than comparing against one minted here is what
-   * makes recognition work across the boundary, per Section 2.1.
-   *
-   * **`data` is ceded to this method**, and no tree is guaranteed to survive a
-   * decode -- Section 5.2, which is worth reading before calling this twice.
-   * `FabricBytes` and `FabricHash` are the classes whose take-over spends a
-   * tree outright, directly or nested anywhere beneath.
-   *
-   * Same-realm the ceding is visible in a way it is not across a boundary,
-   * because `encode()` shares structure too: `decode(encode(value))` can hand
-   * back the very objects that went in, leaving `value` frozen as deeply as
-   * the walk reached.
+   * Checks the outer envelope in full before anything is read from it -- two
+   * elements, headed by a one-element array holding this format's version --
+   * and returns what it wraps. Refusing by throwing lets the base settle it
+   * against `lenient`, so a peer's malformed envelope degrades to a
+   * `ProblematicValue` where a lenient caller asked for that.
    */
-  override decode(
+  protected override encodedFromSerializedForm(
     data: RealmEncodedValue,
-    env: LiveEnvironment,
-  ): FabricValue {
+  ): RealmCodecValue {
     if (!Array.isArray(data) || (data.length !== 2)) {
-      return this.reportMalformed(
+      throw new ProblematicStateError(
         "",
         toCompactDebugString(data, 50),
         "not a value this format emits: expected a two-element outer envelope",
       );
     }
 
-    const marker = data[0];
-
-    if (
-      !Array.isArray(marker) || (marker.length !== 1) ||
-      (marker[0] !== REALM_FORMAT_VERSION)
-    ) {
-      return this.reportMalformed(
+    if (!RealmCodecEngine.#markerOf(data)) {
+      throw new ProblematicStateError(
         "",
         toCompactDebugString(data, 50),
         `not a value this format emits: expected an outer envelope headed by a ${
@@ -149,11 +144,7 @@ export class RealmCodecEngine extends BaseCodecEngine<
       );
     }
 
-    const ctx = this.newDecodeContext(env);
-
-    ctx.adoptMarker(marker as RealmFormatMarker);
-
-    return this.decodeValue(data[1] as RealmCodecValue, ctx);
+    return data[1] as RealmCodecValue;
   }
 
   /**
@@ -452,5 +443,26 @@ export class RealmCodecEngine extends BaseCodecEngine<
     }
 
     return { tag: data[1], state: data[2] as RealmCodecValue };
+  }
+
+  /**
+   * The marker at slot zero of an outer envelope, or `undefined` if what is
+   * there is not one this build implements.
+   *
+   * The one place the envelope's shape is decided, so that the context's
+   * sniffing and the conversion's refusal cannot come to disagree about what
+   * counts as a marker.
+   */
+  static #markerOf(data: unknown): RealmFormatMarker | undefined {
+    if (!Array.isArray(data) || (data.length !== 2)) {
+      return undefined;
+    }
+
+    const marker = data[0];
+
+    return (Array.isArray(marker) && (marker.length === 1) &&
+        (marker[0] === REALM_FORMAT_VERSION))
+      ? marker as unknown as RealmFormatMarker
+      : undefined;
   }
 }
