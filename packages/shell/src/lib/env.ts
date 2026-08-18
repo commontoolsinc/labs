@@ -7,6 +7,7 @@ declare global {
   var $EXPERIMENTAL_COMPUTED_CELL_IDS: string | undefined;
   var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
+  var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -35,6 +36,10 @@ const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
 const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE =
   typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE === "string"
     ? $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE
+    : undefined;
+const EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE =
+  typeof $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS === "string"
+    ? $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -73,4 +78,11 @@ export const EXPERIMENTAL = {
   // home-golden-replay.test.ts, so the home root no longer needs a second flag.
   systemPatternAutoUpdate:
     flagValue(EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE) ?? true,
+  // Content-addressed schemas Phase 1: link writers emit cid: references.
+  // Off by default, and deliberately so for now — clients read references
+  // before any client writes them, so the writer turns on only once every
+  // deployed client is a reader.
+  contentAddressedSchemas: flagValue(
+    EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE,
+  ),
 };
