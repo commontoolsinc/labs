@@ -245,15 +245,14 @@ describe("schema-doc-writer", () => {
 
   it("skips a reference the registry cannot supply; the commit boundary rejects it", async () => {
     // Only a hand-crafted value carries a reference its writer never
-    // registered: the materializer logs and skips it, and the server's
-    // commit-time closure validation rejects the commit outright. The
-    // module logger is constructed disabled; the log IS the skip's only
-    // client-side signal, so the test speaks it.
+    // registered: the materializer skips it, and the server's commit-time
+    // closure validation rejects the commit outright. The rejection alone
+    // would also stand had the scan never met the reference, so the skip's
+    // one client-side signal — a warning under its own message key, counted
+    // even on a disabled logger — is what separates the two.
     const materializeLogger = getLogger("extended-storage-transaction");
-    const previousDisabled = materializeLogger.disabled;
-    const previousLevel = materializeLogger.level;
-    materializeLogger.disabled = false;
-    materializeLogger.level = "warn";
+    const skipKey = "schema-doc-materialize";
+    const skipsBefore = materializeLogger.countsByKey[skipKey]?.warn ?? 0;
     const absentHash = internSchemaAsTaggedHashString({
       type: "string",
       title: "never-registered-writer-ref",
@@ -272,16 +271,14 @@ describe("schema-doc-writer", () => {
       { space, id: "of:unsupplied-root" as URI, scope: "space", path: [] },
       { crafted: handCrafted },
     );
-    try {
-      const result = await tx.commit();
-      expect(result.ok).toBeUndefined();
-      expect(String(result.error?.message)).toContain(
-        "neither included in the commit nor stored in the space",
-      );
-    } finally {
-      materializeLogger.disabled = previousDisabled;
-      materializeLogger.level = previousLevel;
-    }
+    const result = await tx.commit();
+    expect(materializeLogger.countsByKey[skipKey]?.warn ?? 0).toBe(
+      skipsBefore + 1,
+    );
+    expect(result.ok).toBeUndefined();
+    expect(String(result.error?.message)).toContain(
+      "neither included in the commit nor stored in the space",
+    );
   });
 
   it("materializes a schema document once for two links that share it", async () => {
