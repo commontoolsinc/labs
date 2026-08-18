@@ -120,8 +120,18 @@ export function transformActionCall(
   // `action<Event, Result>`'s first type argument is the authored event —
   // the contract the served schema must carry (docs/plans/verb-input-contract.md)
   // — so it is preferred over inference from the parameter, which loses the
-  // authored node for annotation-free callbacks.
+  // authored node for annotation-free callbacks. The node is registered with
+  // its resolved type: it travels into a synthesized handler call, and an
+  // unregistered node degrades schema generation to nothing at all.
   const authoredEventTypeNode = actionCall.typeArguments?.[0];
+  if (authoredEventTypeNode) {
+    const authoredEventType = checker.getTypeFromTypeNode(
+      authoredEventTypeNode,
+    );
+    if ((authoredEventType.flags & ts.TypeFlags.Any) === 0) {
+      context.state.typeRegistry.set(authoredEventTypeNode, authoredEventType);
+    }
+  }
   const eventTypeNode = callback.parameters.length > 0
     ? authoredEventTypeNode ?? createHandlerEventSchema(callback, context)
     : createActionEventSchema(context);

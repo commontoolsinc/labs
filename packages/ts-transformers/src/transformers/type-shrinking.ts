@@ -2030,7 +2030,14 @@ function typeSubtreeContainsCellLike(
 ): boolean {
   if (visited.has(type)) return false;
   visited.add(type);
-  if (isCellLikeType(type, checker)) return true;
+  if (isCellLikeType(type, checker)) {
+    // A stream or sqlite brand is authoritative and never rewritten, so it
+    // is not a reason to expand the reference that holds it — every piece
+    // output type carries its verb streams, and expanding those would trade
+    // a named `$defs` identity for an anonymous literal.
+    const kind = getCellKind(type, checker);
+    return kind !== "stream" && kind !== "sqlite";
+  }
   if ((type.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) !== 0) {
     return (type as ts.UnionOrIntersectionType).types.some((member) =>
       typeSubtreeContainsCellLike(member, checker, visited)
@@ -2157,12 +2164,11 @@ export function overlayContractCapabilities(
       if (preservedWrapperFor(current, currentType, checker)) return current;
       const innerNode = current.typeArguments?.[0];
       if (!innerNode) return current;
-      const innerType = currentType
-        ? unwrapCellLikeType(currentType, checker) ?? undefined
-        : undefined;
-      const walkedInner = walk(innerNode, innerType, path);
+      // The wrapper's capability is this position's to overlay; the target's
+      // own schema is not — a referenced value serves as authored, `$defs`
+      // identity intact, and its interior is governed at its own reads.
       return wrapTypeNodeWithCapability(
-        walkedInner,
+        innerNode,
         contractCapabilityAt(observation, path),
         factory,
       );
