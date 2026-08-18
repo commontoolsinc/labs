@@ -247,6 +247,14 @@ export interface TopicMentionSource {
  * One row of the board's mention pivot: a topic, and the topics that mention
  * it.
  *
+ * ONE ROW PER DISTINCT TOPIC. That is the contract, not a property of the
+ * board that happens to hold: a row is addressed by `Writable.for(topic)`, so
+ * a board listing the same topic twice addresses ONE row from both entries and
+ * the second write lands on the first. Set semantics by construction — nothing
+ * downstream dedupes, and a reader finding its row by identity finds exactly
+ * one. The pivot's self-skip is asked of the topic rather than of its position
+ * so that a duplicate entry stays inert here too.
+ *
  * Both sides are declared `unknown`, which is the whole design rather than a
  * shortcut. A row holds cell REFERENCES — `unknown` is the declaration that
  * lets a cell be written into one without a cast, and the one that stops any
