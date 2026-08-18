@@ -21,6 +21,7 @@ import PollOptionCard from "./poll-option-card.tsx";
 import type {
   CastVoteEvent,
   LogVisitEvent,
+  LunchProfile,
   Option,
   RemoveOptionEvent,
   SetOptionImageEvent,
@@ -67,15 +68,13 @@ export const fetchMocks = [
 const GENERATED_IMAGE_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
-const votes: Vote[] = [
-  {
-    optionId: "opt-sushi",
-    voterName: "Alex",
-    voteType: "green",
-  },
-];
-
 export default pattern(() => {
+  // Identity is a profile cell, so the viewer and their vote are built here
+  // rather than seeded as module-level static data.
+  const alex = Writable.of<LunchProfile>({ name: "Alex" });
+  const votes = computed((): Vote[] => [
+    { optionId: "opt-sushi", voter: alex, voteType: "green" },
+  ]);
   const removeConfirmTarget = new Writable<string | null | undefined>(
     undefined,
   );
@@ -95,7 +94,7 @@ export default pattern(() => {
   const card = PollOptionCard({
     option: STORED_OPTION,
     rank: reactiveRank,
-    me: "Alex",
+    me: alex,
     isJoined: true,
     isAdmin: true,
     votes,
@@ -214,7 +213,7 @@ export default pattern(() => {
   const generatingCard = PollOptionCard({
     option: GENERATING_OPTION,
     rank: 2,
-    me: "Alex",
+    me: alex,
     isJoined: true,
     isAdmin: true,
     votes,
