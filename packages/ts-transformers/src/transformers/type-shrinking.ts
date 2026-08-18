@@ -28,7 +28,20 @@ import { getCellKind } from "./cell-type.ts";
 // Types
 // ---------------------------------------------------------------------------
 
-export type CapabilitySummaryApplicationMode = "full" | "defaults_only";
+/**
+ * How a capability summary is applied to a parameter's schema. `full` shrinks
+ * to what the body uses; `defaults_only` keeps defaults and treats the rest
+ * as opaque; `contract` serves the authored structure — every declared
+ * top-level field is retained, with the summary's usage-derived capability
+ * values where the body reads — per the ruling in
+ * docs/plans/verb-input-contract.md. Only a verb's event parameter uses
+ * `contract`: for reactive reads, shrinking is subscription semantics and
+ * stays `full`.
+ */
+export type CapabilitySummaryApplicationMode =
+  | "full"
+  | "defaults_only"
+  | "contract";
 
 interface CapabilityShrinkPlan {
   readonly retainedPaths: readonly (readonly string[])[];
@@ -411,7 +424,10 @@ function getRequestedPropertyNameText(
   return getPropertyNameText(name, checker);
 }
 
-function isArrayShapeType(type: ts.Type, checker: ts.TypeChecker): boolean {
+export function isArrayShapeType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
   const typeChecker = checker as ts.TypeChecker & {
     isArrayType?: (type: ts.Type) => boolean;
     isTupleType?: (type: ts.Type) => boolean;
@@ -772,6 +788,7 @@ function buildShrunkTypeNodeFromType(
   factory: ts.NodeFactory,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   fullShapePaths: readonly (readonly string[])[] = [],
+  visiting: ReadonlySet<string> = new Set(),
 ): ts.TypeNode | undefined {
   const typeToNodeFlags = ts.NodeBuilderFlags.NoTruncation |
     ts.NodeBuilderFlags.UseStructuralFallback;
@@ -780,6 +797,27 @@ function buildShrunkTypeNodeFromType(
   if (normalized.length === 0) {
     return undefined;
   }
+  // A (type, requested-paths) pair already on the descent path cannot be
+  // materialized as a literal — the recursion would never bottom out. The
+  // paths are part of the key because revisiting the same type with narrower
+  // paths terminates on its own. Fall back to the NAMED reference (no
+  // structural fallback: expanding structure here is the very recursion
+  // being cut), which schema generation resolves through `$defs` exactly as
+  // it does for an authored node. Reachable since `contract` mode retains
+  // declared fields whose types are self-referential.
+  const visitKey = `${(type as ts.Type & { id?: number }).id ?? "?"}|${
+    JSON.stringify(normalized)
+  }`;
+  if (visiting.has(visitKey)) {
+    return typeToTypeNodeWithRegistry(
+      type,
+      { checker, factory, sourceFile },
+      typeRegistry,
+      ts.NodeBuilderFlags.NoTruncation,
+    );
+  }
+  const guarded = new Set(visiting);
+  guarded.add(visitKey);
   if (normalizedFullShapePaths.some((path) => path.length === 0)) {
     return typeToTypeNodeWithRegistry(
       type,
@@ -815,6 +853,7 @@ function buildShrunkTypeNodeFromType(
           factory,
           typeRegistry,
           fullShapeItemPaths,
+          guarded,
         ) ??
           typeToTypeNodeWithRegistry(
             elementType,
@@ -861,6 +900,7 @@ function buildShrunkTypeNodeFromType(
         factory,
         typeRegistry,
         normalizedFullShapePaths,
+        guarded,
       );
       if (!shrunkInner) return undefined;
       // Collect the nullish members to re-append
@@ -971,6 +1011,7 @@ function buildShrunkTypeNodeFromType(
       factory,
       typeRegistry,
       fullShapeChildPaths,
+      guarded,
     );
     if (!shrunkChild && !hasDirectAccess) {
       // We failed to materialize a deeper path; let caller fall back to
@@ -1955,6 +1996,310 @@ export function validateShrinkCoverage(
 // ---------------------------------------------------------------------------
 // Wrapping and defaults
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Contract-mode capability overlay
+// ---------------------------------------------------------------------------
+
+/** A serialized path key with numeric segments normalized to `*`, so an
+ * element access observed at one index matches the element position. */
+function contractPathKey(segments: readonly string[]): string {
+  return segments.map((segment) => /^\d+$/.test(segment) ? "*" : segment)
+    .join(" ");
+}
+
+function addPrefixKeys(
+  target: Set<string>,
+  paths: readonly (readonly string[])[] | undefined,
+): void {
+  for (const path of paths ?? []) {
+    for (let i = 1; i <= path.length; i++) {
+      target.add(contractPathKey(path.slice(0, i)));
+    }
+  }
+}
+
+/** Whether any data position in `type`'s subtree is cell-like — the test for
+ * whether a named reference must be expanded to overlay capabilities inside
+ * it. Cycles end the search: a cell beyond a self-reference is not found,
+ * which the caller documents as the accepted residual. */
+function typeSubtreeContainsCellLike(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  visited: Set<ts.Type>,
+): boolean {
+  if (visited.has(type)) return false;
+  visited.add(type);
+  if (isCellLikeType(type, checker)) {
+    // A stream or sqlite brand is authoritative and never rewritten, so it
+    // is not a reason to expand the reference that holds it — every piece
+    // output type carries its verb streams, and expanding those would trade
+    // a named `$defs` identity for an anonymous literal.
+    const kind = getCellKind(type, checker);
+    return kind !== "stream" && kind !== "sqlite";
+  }
+  if ((type.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) !== 0) {
+    return (type as ts.UnionOrIntersectionType).types.some((member) =>
+      typeSubtreeContainsCellLike(member, checker, visited)
+    );
+  }
+  if ((type.flags & ts.TypeFlags.Object) === 0) return false;
+  if (isArrayShapeType(type, checker)) {
+    const element = getArrayElementType(type, checker);
+    return !!element && typeSubtreeContainsCellLike(element, checker, visited);
+  }
+  for (const property of checker.getPropertiesOfType(type)) {
+    if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
+    const declaration = property.valueDeclaration ?? property.declarations?.[0];
+    if (!declaration) continue;
+    const propertyType = checker.getTypeOfSymbolAtLocation(
+      property,
+      declaration,
+    );
+    if (typeSubtreeContainsCellLike(propertyType, checker, visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The observation record the contract overlay consults, built once per
+ * event from the capability summary's path channels. */
+interface ContractObservation {
+  readonly write: ReadonlySet<string>;
+  readonly read: ReadonlySet<string>;
+  readonly comparable: ReadonlySet<string>;
+  /** Exact positions whose observed use needs an identity handle even when
+   * the authored type is plain — `equals`-style comparison materializes
+   * through a comparable cell, not through the value. */
+  readonly exactComparableCell: ReadonlySet<string>;
+}
+
+function contractObservationFrom(
+  summary: CapabilityParamSummary,
+): ContractObservation {
+  const write = new Set<string>();
+  const read = new Set<string>();
+  const comparable = new Set<string>();
+  addPrefixKeys(write, summary.writePaths);
+  addPrefixKeys(read, summary.readPaths);
+  addPrefixKeys(read, summary.fullShapePaths);
+  addPrefixKeys(read, summary.opaquePaths);
+  addPrefixKeys(comparable, summary.comparablePaths);
+  addPrefixKeys(comparable, summary.comparableCellPaths);
+  addPrefixKeys(comparable, summary.identityPaths);
+  addPrefixKeys(comparable, summary.identityCellPaths);
+  const exactComparableCell = new Set<string>();
+  for (const path of summary.comparableCellPaths ?? []) {
+    exactComparableCell.add(contractPathKey(path));
+  }
+  for (const path of summary.identityCellPaths ?? []) {
+    exactComparableCell.add(contractPathKey(path));
+  }
+  return { write, read, comparable, exactComparableCell };
+}
+
+function contractCapabilityAt(
+  observation: ContractObservation,
+  path: readonly string[],
+): ReactiveCapability {
+  const key = contractPathKey(path);
+  if (observation.write.has(key)) return "writable";
+  if (observation.read.has(key)) return "readonly";
+  if (observation.comparable.has(key)) return "comparable";
+  return "opaque";
+}
+
+/**
+ * The contract half of docs/plans/verb-input-contract.md, applied to a verb's
+ * event: the authored TypeNode is served VERBATIM in structure — objects,
+ * unions, intersections, arrays, and primitives alike — and only cell-like
+ * positions are rewritten, to the capability the body's usage earns:
+ * writable where it writes, read-only where it reads, comparable where it
+ * only compares, and OPAQUE where it never touches the position, so a
+ * declared-but-unread reference confers no exercised authority while the
+ * contract still names it.
+ *
+ * A named reference whose subtree holds no cell-like position passes through
+ * untouched, keeping its `$defs` identity and its prose. One expands only
+ * when a capability inside it must change, and a self-referential type ends
+ * that expansion at the cycle with the node kept as authored — the accepted
+ * residual, since a literal cannot spell its own recursion.
+ */
+export function overlayContractCapabilities(
+  node: ts.TypeNode,
+  type: ts.Type | undefined,
+  summary: CapabilityParamSummary,
+  checker: ts.TypeChecker,
+  factory: ts.NodeFactory,
+  sourceFile: ts.SourceFile,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  const observation = contractObservationFrom(summary);
+  const visiting = new Set<ts.Type>();
+
+  const walk = (
+    current: ts.TypeNode,
+    currentType: ts.Type | undefined,
+    path: readonly string[],
+  ): ts.TypeNode => {
+    if (ts.isParenthesizedTypeNode(current)) {
+      const inner = walk(current.type, currentType, path);
+      return inner === current.type
+        ? current
+        : factory.createParenthesizedType(inner);
+    }
+
+    if (
+      !isCellLikeTypeNode(current) &&
+      observation.exactComparableCell.has(contractPathKey(path))
+    ) {
+      // Identity-only use of a plain-declared position: the authored
+      // structure serves, and the observed comparison adds the identity
+      // handle the runtime materializes it through.
+      return wrapTypeNodeWithCapability(current, "comparable", factory);
+    }
+
+    if (isCellLikeTypeNode(current) && ts.isTypeReferenceNode(current)) {
+      if (preservedWrapperFor(current, currentType, checker)) return current;
+      const innerNode = current.typeArguments?.[0];
+      if (!innerNode) return current;
+      // The wrapper's capability is this position's to overlay; the target's
+      // own schema is not — a referenced value serves as authored, `$defs`
+      // identity intact, and its interior is governed at its own reads.
+      return wrapTypeNodeWithCapability(
+        innerNode,
+        contractCapabilityAt(observation, path),
+        factory,
+      );
+    }
+
+    if (ts.isTypeLiteralNode(current)) {
+      let changed = false;
+      const members = current.members.map((member) => {
+        if (!ts.isPropertySignature(member) || !member.type) return member;
+        const name = getPropertyNameText(member.name);
+        if (name === undefined) return member;
+        const memberSymbol = currentType
+          ? checker.getPropertyOfType(currentType, name)
+          : undefined;
+        const memberType = memberSymbol
+          ? checker.getTypeOfSymbolAtLocation(
+            memberSymbol,
+            memberSymbol.valueDeclaration ?? member,
+          )
+          : undefined;
+        const walked = walk(member.type, memberType, [...path, name]);
+        if (walked === member.type) return member;
+        changed = true;
+        return factory.updatePropertySignature(
+          member,
+          member.modifiers,
+          member.name,
+          member.questionToken,
+          walked,
+        );
+      });
+      return changed ? factory.createTypeLiteralNode(members) : current;
+    }
+
+    if (ts.isArrayTypeNode(current)) {
+      const elementType = currentType
+        ? getArrayElementType(currentType, checker)
+        : undefined;
+      const walked = walk(current.elementType, elementType, [...path, "*"]);
+      return walked === current.elementType
+        ? current
+        : factory.createArrayTypeNode(walked);
+    }
+
+    if (ts.isUnionTypeNode(current) || ts.isIntersectionTypeNode(current)) {
+      let changed = false;
+      const constituents = current.types.map((member) => {
+        const memberType = getTypeFromTypeNodeWithFallback(
+          member,
+          checker,
+          typeRegistry,
+        );
+        const walked = walk(member, memberType, path);
+        if (walked !== member) changed = true;
+        return walked;
+      });
+      if (!changed) return current;
+      return ts.isUnionTypeNode(current)
+        ? factory.createUnionTypeNode(constituents)
+        : factory.createIntersectionTypeNode(constituents);
+    }
+
+    if (ts.isTypeReferenceNode(current)) {
+      const referenceName = ts.isIdentifier(current.typeName)
+        ? current.typeName.text
+        : undefined;
+      if (
+        (referenceName === "Array" || referenceName === "ReadonlyArray") &&
+        current.typeArguments?.length === 1
+      ) {
+        const elementType = currentType
+          ? getArrayElementType(currentType, checker)
+          : undefined;
+        const walked = walk(
+          current.typeArguments[0]!,
+          elementType,
+          [...path, "*"],
+        );
+        return walked === current.typeArguments[0]
+          ? current
+          : factory.createTypeReferenceNode(current.typeName, [walked]);
+      }
+      const resolvedType = currentType ??
+        getTypeFromTypeNodeWithFallback(current, checker, typeRegistry);
+      if (!resolvedType) return current;
+      if (visiting.has(resolvedType)) return current;
+      if (
+        !typeSubtreeContainsCellLike(resolvedType, checker, new Set())
+      ) {
+        return current;
+      }
+      visiting.add(resolvedType);
+      try {
+        const members: ts.TypeElement[] = [];
+        for (const property of checker.getPropertiesOfType(resolvedType)) {
+          if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
+          const declaration = property.declarations?.find(
+            ts.isPropertySignature,
+          );
+          const declaredNode = declaration?.type;
+          const propertyType = checker.getTypeOfSymbolAtLocation(
+            property,
+            declaration ?? current,
+          );
+          const memberNode = declaredNode ??
+            typeToTypeNodeWithRegistry(
+              propertyType,
+              { checker, factory, sourceFile },
+              typeRegistry,
+            );
+          if (!memberNode) continue;
+          members.push(factory.createPropertySignature(
+            undefined,
+            createPropertyName(property.getName(), factory),
+            declaration?.questionToken !== undefined
+              ? factory.createToken(ts.SyntaxKind.QuestionToken)
+              : undefined,
+            walk(memberNode, propertyType, [...path, property.getName()]),
+          ));
+        }
+        return factory.createTypeLiteralNode(members);
+      } finally {
+        visiting.delete(resolvedType);
+      }
+    }
+
+    return current;
+  };
+
+  return walk(node, type, []);
+}
 
 export function wrapTypeNodeWithCapability(
   node: ts.TypeNode,
