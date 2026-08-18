@@ -297,19 +297,23 @@ AT=$(echo "$N" | jq -r '.result.note.at // 0')
 [ "$AT" -gt 0 ] && ok "and a timestamp the caller never supplied ($AT)" ||
   bad "no pattern-stamped time on the note"
 # The receipt is an address like any other, and reading it is an ordinary read.
-# The stamp is the discriminator: a readback that re-ran the handler would mint
-# a new one, so an unchanged `at` is what proves the body did not run again.
-# Asserted against the SAME field rather than against the whole envelope, which
-# carries an invocation id that legitimately differs between the two.
+# `noteCount` is the discriminator, NOT the stamp: `notes` is append-only, so a
+# readback that re-ran the handler would leave two notes behind and answer 2.
+# The stamp cannot carry that weight — the sandbox clock is coarsened to one
+# second (see `Note.at` in pattern/tracker.tsx), and a re-execution during a
+# readback lands in the same second as the call it followed, so the two stamps
+# would agree in precisely the case this is meant to catch. Equal stamps show
+# the readback returned the ORIGINAL outcome rather than a freshly computed
+# one, which is worth asserting, but it is corroboration and not the proof.
 RCPT=$(echo "$N" | jq -r '.receipt // empty')
 if [ -z "$RCPT" ]; then
   bad "the settled envelope named no receipt to read back"
 else
   RB=$($CF get --quiet --piece "$RCPT" $ARGS --select note,noteCount 2>/dev/null)
   check "1" "$(echo "$RB" | jq -r '.noteCount // empty')" \
-    "the receipt reads the outcome back without calling anything again"
+    "the receipt reads the outcome back, and appended nothing — the handler did not run again"
   check "$AT" "$(echo "$RB" | jq -r '.note.at // 0')" \
-    "and the stamp is unchanged, so the handler did not run a second time"
+    "and the outcome it returns is the original one, stamp and all"
 fi
 
 step "8. Finishing reports what the caller could not know"

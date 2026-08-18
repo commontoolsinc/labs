@@ -627,12 +627,15 @@ a filesystem mount, and on a direct read: one read layer, four arrivals.
 belongs to the callable's own interface; the other three take them wherever
 their own options go.
 
-**A read may be asked twice; a call may not.** A projection is a question, so
-running one again returns the same answer and changes nothing — which is what
-makes every read in this session safe to put in a script, and why the demo
-takes the addresses its later acts drive out of a read the reader already
-watched rather than from a hidden second one. A call is the opposite: it runs
-the handler body, so asking twice does the work twice.
+**A read may be asked twice; a call may not.** A projection is a question, and
+asking it changes nothing — that is the invariant, and it is what makes every
+read in this session safe to put in a script. It is not a promise that two
+reads agree: a read answers from the state it finds, so anything written in
+between shows up in the second answer. Here the two agree because nothing else
+is writing to this fixture, which is also why the demo can take the addresses
+its later acts drive out of a read the reader already watched rather than from
+a hidden second one. A call is the opposite of side-effect-free: it runs the
+handler body, so asking twice does the work twice.
 
 **But a call need not be asked twice, because its outcome has an address.**
 Every settled envelope names a `receipt` — the cell this handling wrote its
@@ -649,17 +652,30 @@ cf get "$RECEIPT" --select note,noteCount
 }
 ```
 
-**The timestamp is the proof, not the prose.** `recordNote` stamps the clock,
-which the caller cannot supply — so a readback that had re-run the handler
-would carry a later `at` than the call did. It carries the same one, which is
-what says the body did not run again. The harness asserts exactly that
-comparison, so the claim fails loudly if it ever stops holding.
+**`noteCount` is the proof, not the timestamp.** `notes` is append-only, so a
+readback that had re-run the handler would leave a second note behind and
+answer `2`. It answers `1`, which is what says the body did not run again.
+
+The stamp cannot carry that proof, and it is worth saying why, because it
+looks like it should: the sandbox clock is coarsened to one-second resolution
+(`Note.at` in [the fixture][tracker]), and a re-execution during a readback
+lands in the same second as the call it followed — so the two stamps would
+agree in exactly the case the check exists to catch. That they agree says
+something else, still worth having: the receipt returned the **original**
+outcome rather than a freshly computed one. The harness asserts both, with
+`noteCount` carrying the weight.
 
 That is the whole asymmetry: reads repeat freely, calls do not repeat but
-their outcomes stay readable. Where a caller does need to retry a call — a
-dropped connection, an unknown outcome — an idempotency id makes the retry
-collide with the original receipt rather than doing the work twice;
-[verbs over the CLI](over-the-cli.md) has that contract.
+their outcomes stay readable.
+
+**A retry is not free, even with an idempotency id.** Where a caller does need
+to retry — a dropped connection, an unknown outcome — naming the same
+invocation id makes the retry collide with the original receipt, so nothing
+commits twice. The guarantee is at-most-once **commit**, not at-most-once
+**execution**: the redelivered event re-runs the handler body and then loses
+the race for the receipt. A verb whose body reaches outside its transaction —
+an LLM call, a fetch, a message sent — repeats those effects on every retry.
+[Verbs over the CLI](over-the-cli.md) has the full contract.
 
 The demo's acts 5, 6, 7 and 10 are this step: an address-only read, the same
 read run a second time to show it answers the same, a call's receipt read back

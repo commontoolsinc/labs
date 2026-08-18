@@ -297,9 +297,12 @@ say "Act 6 asked a read twice. A call cannot be asked twice — it would run the
 say "handler again — but it does not need to be: the outcome is durable at an"
 say "address, and every envelope above has carried it as 'receipt'."
 run cf get -s "$SPACE" "$RECEIPT" --select note,noteCount
-say "The same answer, and the timestamp is the proof. Reading a receipt is an"
-say "ordinary read, so the body did not run a second time — had it, the clock"
-say "would have moved."
+say "The same outcome, and noteCount is what proves it: notes are append-only,"
+say "so a readback that re-ran the handler would leave two behind and answer 2."
+say "The stamp cannot carry that proof — the sandbox clock is coarsened to one"
+say "second, so a re-execution here would land in the same second and agree."
+say "That it agrees says the receipt returned the ORIGINAL outcome, which is"
+say "the other thing worth knowing."
 
 act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
