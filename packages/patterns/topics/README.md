@@ -170,9 +170,22 @@ cf call --piece <topic> addComment \
   '{"body":"point-in-time progress update","agentName":"Sol"}'
 cf call --piece <topic> setBody \
   '{"body":"latest state plus the topic narrative","agentName":"Sol"}'
+cf call --piece <topic> setTitle \
+  '{"title":"a sharper name for the same attention","agentName":"Sol"}'
 cf call --piece <topic> addLink \
   '{"kind":"pr","url":"https://github.com/org/repo/pull/123","label":"PR #123","agentName":"Sol"}'
 ```
+
+`addLink` still requires `kind` and `label` even though the handler would
+default them (`"web"`, the URL): the compat gate compares a verb's event schema
+in the result direction, where required-to-optional is refused, so the
+relaxation rides the next acknowledged schema break. `setTitle` renames with
+attribution — it stamps `titleUpdatedBy`/`titleUpdatedAt` and moves
+`lastActivityAt`, so a renamed topic surfaces in the board's most-recent sort.
+It lives on the topic's direct interface rather than the shared `TopicPiece`
+projection: a holder's required demands are write-once, so a verb added to the
+projection every board embeds would refuse those boards' updates. Address the
+topic itself and the verb is there.
 
 **A full-board survey is one bounded read of `index`.** Each row IS the topic it
 describes, declared through a schema of scalar summaries (`title`, `createdAt`,
@@ -223,22 +236,27 @@ current name” call. Fabric's operation history retains the authenticated human
 principal, while the stored snapshot disambiguates which agent acted.
 
 **Every mutating verb returns what it recorded.** `addTopic` returns the topic
-it created — the piece itself, so the caller addresses the new topic straight
-from the create instead of filing it and then searching the board for it.
-`addComment` and `addLink` return the appended record, `setBody` the persisted
-body plus the attribution it wrote; each carries fields the pattern resolved
-(the structured author derived from `agentName`, the write-time timestamp) that
-a caller cannot compute for itself. Counts are deliberately not returned: these
-appends are mergeable ops, so a length observed inside one handling is not a
-fact about the resulting list — read `commentCount` when you want the count.
+it created — the piece itself, reaching the caller as a link the CLI renders as
+an address, so the caller addresses the new topic straight from the create
+instead of filing it and then searching the board for it. The result is declared
+through the index's row schema rather than the full topic: the declared schema
+bounds the default readback, and every name a verb's result publishes is
+permanent, so the create hands back the survey row plus the write-time facts
+only the pattern could resolve (`createdAt`, `createdBy`). `addComment` and
+`addLink` return the appended record, `setBody` the persisted body plus the
+attribution it wrote, `setTitle` the persisted title plus its attribution; each
+carries fields the pattern resolved that a caller cannot compute for itself.
+Counts are deliberately not returned: these appends are mergeable ops, so a
+length observed inside one handling is not a fact about the resulting list —
+read `commentCount` when you want the count.
 
 A returned value reaches the caller through the handling's receipt. A result
 carrying a piece (`addTopic`) travels the result-pattern projection path; the
-plain records (`addComment`, `addLink`, `setBody`) project into the receipt
-under `plainResultReceipts`, which is on by default
+plain records (`addComment`, `addLink`, `setBody`, `setTitle`) project into the
+receipt under `plainResultReceipts`, which is on by default
 (`docs/development/EXPERIMENTAL_OPTIONS.md`). Setting
-`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` restores the discard, and those three
-verbs then still perform their write and simply report no result.
+`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` restores the discard, and those verbs
+then still perform their write and simply report no result.
 
 `addTopic` takes the body at create (optional): a topic born with a body appears
 with it atomically — no reader observes a title-only halfway state, and no
@@ -250,5 +268,7 @@ Invalid mutations **throw** instead of silently returning (verb contract rule
 4): an empty title, an empty comment body, a blank or non-http(s) link URL, and
 a blank `agentName` on any verb all surface as a failed call — a nonzero CLI
 exit — never as apparent success. An _omitted_ `agentName` remains the tolerated
-legacy-caller path. The UI composer wrappers keep their silent guards: an empty
-draft is a non-event in a composer, not a headless mutation.
+legacy-caller path on the verbs that predate signing; `setTitle` postdates it,
+so there the field is simply required. The UI composer wrappers keep their
+silent guards: an empty draft is a non-event in a composer, not a headless
+mutation.

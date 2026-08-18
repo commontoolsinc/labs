@@ -39,6 +39,8 @@ export type {
   AgentAuthoredEvent,
   SetBodyEvent,
   SetBodyResult,
+  SetTitleEvent,
+  SetTitleResult,
   TopicAuthor,
   TopicComment,
   TopicCrossrefRow,
@@ -59,6 +61,7 @@ export interface TopicsInput {
 }
 
 export interface AddTopicEvent {
+  /** The topic's title, trimmed before it is stored. Must be non-empty. */
   title: string;
   /** The topic's initial living-document body. A topic born with a body
    * appears with it atomically — no reader observes the title-only halfway
@@ -78,8 +81,16 @@ export interface AddTopicResult {
    * identifier. It reaches the caller as a link to the child, which the CLI
    * renders as an address (`cf piece call --show-links`). A caller therefore
    * addresses the new topic straight from the create, instead of filing it and
-   * then searching the board's index for the topic it just made. */
-  topic: TopicPiece;
+   * then searching the board's index for the topic it just made.
+   *
+   * Declared through the index's row schema rather than the full `TopicPiece`,
+   * and the narrowness is the contract: the declared schema bounds the default
+   * readback — a full piece would expand the body, thread, and every
+   * referenced sibling — and every name a verb's result publishes is permanent
+   * with no gate checking it, so the result publishes the survey row the
+   * caller already knows plus the write-time facts only the pattern could
+   * resolve (`createdAt`, `createdBy`). */
+  topic: TopicIndexRow;
 }
 
 /** One row of the board's compact discovery index: the topic itself, declared
@@ -234,6 +245,10 @@ export interface TopicsOutput {
   /** Session-local draft for the footer composer (exposed for embedding and
    * headless driving, like the chat exemplar's drafts). */
   newTitle?: PerSession<Writable<string>>;
+  /** File a topic. The atomic unit takes the initial body with the title, so
+   * no reader observes a title-only halfway state and no follow-up `setBody`
+   * finishes a create. Returns the created topic as its survey row — the
+   * reference plus the write-time facts the pattern resolved. */
   addTopic: Stream<AddTopicEvent, AddTopicResult>;
   /** @deprecated Compatibility view for callers of the previous board. */
   myName: string;
@@ -349,8 +364,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       boardCrossrefs: crossrefs,
     });
     // Mergeable append: concurrent creates from different users all land.
+    // The session composer draft is `submitTopic`'s to clear; a headless
+    // create has no draft.
     topics.push(piece);
-    newTitle.set("");
     return { topic: piece };
   });
 

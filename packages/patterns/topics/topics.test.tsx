@@ -826,6 +826,24 @@ export default pattern(() => {
     (graphBoard.topics?.[2]?.referencedBy ?? []).length === 1
   );
 
+  // --- setTitle: the rename verb, direct interface only ---
+
+  const action_rename_direct_topic = action(() => {
+    directTopic.setTitle.send({
+      title: "  Direct topic, renamed  ",
+      agentName: " Sol ",
+    });
+  });
+  // Trimmed title, structured attribution, and the rename moves the activity
+  // clock — a renamed topic surfaces in the board's most-recent sort.
+  const assert_renamed_with_attribution = assert(() =>
+    directTopic.title === "Direct topic, renamed" &&
+    directTopic.titleUpdatedBy?.kind === "agent" &&
+    directTopic.titleUpdatedBy?.name === "Sol" &&
+    (directTopic.titleUpdatedAt ?? 0) > 0 &&
+    directTopic.lastActivityAt === directTopic.titleUpdatedAt
+  );
+
   return {
     // UI demand (#4715) over the board: its card list renders through the real
     // reconciler while the suite runs. The cards bind navigation to index-row
@@ -921,6 +939,8 @@ export default pattern(() => {
       { assertion: assert_two_mentions },
       { action: action_retract_one_of_two },
       { assertion: assert_survivor_still_an_edge },
+      { action: action_rename_direct_topic },
+      { assertion: assert_renamed_with_attribution },
     ],
   };
 });
