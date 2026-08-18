@@ -1320,14 +1320,12 @@ export function validateAndTransform(
   // combination — so a view and an eager read start from the same link and the
   // same schema; only the materialization differs.
   //
-  // Not once the transaction has written, though. A view resolves each path
-  // when the reader touches it, so a view taken before a write reports the
-  // value after it, where an eager read hands back a value detached at the
-  // moment it was taken. Falling back keeps every read describing one instant,
-  // which is what a reader iterating a list while writing into it depends on.
-  // Nothing is lost where the win is: a lift reads its argument before it
-  // writes anything, so that read is still lazy.
-  if (tx.isLazyMaterialize() && !tx.hasWrites()) {
+  // A view describes the instant this read fixes, and goes on describing it
+  // however the reader writes afterwards — which is what a reader iterating a
+  // list while writing into it stands on, and what an eager read gives, since
+  // an eager read hands back a value built before the write. Seeing its own
+  // write means taking the read again.
+  if (tx.isLazyMaterialize()) {
     // Crossing the last link is a hop the eager traverser combines schemas
     // across (`linkHopSelector`), because a link's own schema describes the
     // value at its target while the reader's schema describes what the reader

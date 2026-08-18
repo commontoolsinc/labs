@@ -934,7 +934,7 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
-  it("renders piece-call help with the piece-call command prefix", async () => {
+  it("renders help under the canonical spelling when no mount names itself", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "tool",
       cellKey: "search",
@@ -971,18 +971,21 @@ describe("executePieceCallable", () => {
       },
     );
 
+    // The default prefix is the top-level spelling: a page minted with no
+    // mount to name must not teach the deprecated one. Each mount passes its
+    // own spelling as helpCommandPrefix.
     expect(result.helpText).toContain(
-      "cf piece call ... search --help",
+      "cf call ... search --help",
     );
     expect(result.helpText).toContain(
-      "cf piece call ... search -- [run] --query <string>",
+      "cf call ... search -- [run] --query <string>",
     );
     expect(result.helpText).toContain("JSON input:");
     expect(result.helpText).toContain(
       "Pass inline JSON as one positional argument or after `--json`",
     );
     expect(result.helpText).toContain(
-      "cf piece call ... search --json [<json>]",
+      "cf call ... search --json [<json>]",
     );
     expect(result.helpText).toContain("query: string");
     expect(result.helpText).toContain("Flags after `--`:");
@@ -990,7 +993,7 @@ describe("executePieceCallable", () => {
       "Read the full input object from stdin.",
     );
     expect(result.helpText).not.toContain(
-      "cf piece call ... search -- [run] --help",
+      "cf call ... search -- [run] --help",
     );
     expect(result.helpText).not.toContain("cf exec");
   });
@@ -4224,7 +4227,7 @@ describe("piece get data errors", () => {
     // "Path resolves to a handler; use invoke() instead." — so no extra hint
     // rides along (the --input tip would be a wrong remedy for a verb).
     expect(report?.message).toBe(
-      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+      "Path resolves to a verb; use 'cf call --piece fid1:piece-123 addTopic' instead.",
     );
     expect(report?.hint).toBeUndefined();
 
@@ -4239,7 +4242,7 @@ describe("piece get data errors", () => {
     expect(nestedReport?.message).toMatch(
       /cf piece verbs --piece fid1:piece-123/,
     );
-    expect(nestedReport?.message).not.toContain("cf piece call");
+    expect(nestedReport?.message).not.toContain("cf call");
     expect(nestedReport?.hint).toBeUndefined();
 
     // Threaded through the shared data-error exit: stderr message, exit 1.
@@ -4256,7 +4259,7 @@ describe("piece get data errors", () => {
       })
     ).toThrow("exit-sentinel");
     expect(printed).toEqual([
-      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+      "Path resolves to a verb; use 'cf call --piece fid1:piece-123 addTopic' instead.",
     ]);
     expect(exited).toEqual([1]);
   });
@@ -4776,7 +4779,7 @@ describe("renderPieceCallOutcome", () => {
     // bare because the readback runs under the same configured space as the
     // call; `cf exec`, whose space comes from the mount instead, prints the
     // space-carrying canonical form for the same cell.
-    assertStringIncludes(hinted[0], "cf piece get --piece of:x");
+    assertStringIncludes(hinted[0], "cf get --piece of:x");
     expect(hinted[0]).not.toContain("(space did:key:s");
   });
 
@@ -4798,7 +4801,7 @@ describe("renderPieceCallOutcome", () => {
     // space-scoped instance, which is a different cell — so the suffix rides
     // the address rather than sitting in a parenthetical the way the prose
     // form's did.
-    assertStringIncludes(hinted[0], "cf piece get --piece of:x@user");
+    assertStringIncludes(hinted[0], "cf get --piece of:x@user");
   });
 
   it("handler invocations render the Invocation JSON with next steps", () => {
@@ -4844,7 +4847,7 @@ describe("renderPieceCallOutcome", () => {
     // address unguessable, and an argument is readable in a process listing.
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+      "CF_INVOCATION_SESSION=ses-7 cf call",
     );
     assertStringIncludes(hinted[0], "--invocation inv-1");
     // And it says what the replay costs: the receipt witnesses the commit,
@@ -4875,7 +4878,7 @@ describe("renderPieceCallOutcome", () => {
     assertStringIncludes(hinted[0], "executes and commits AGAIN");
     // And no dangling alternative: there is nothing for an "Or" to be or to.
     expect(hinted[0]).not.toContain("Or replay");
-    assertStringIncludes(hinted[0], "cf piece get --piece fid1:piece");
+    assertStringIncludes(hinted[0], "cf get --piece fid1:piece");
   });
 
   it("leads the detached next steps with the address it published", () => {
@@ -4899,12 +4902,12 @@ describe("renderPieceCallOutcome", () => {
     // Collecting the outcome is a read of the address this call published,
     // and it comes first because it does not run the verb again. The replay
     // stays on offer below it, for a caller that lost the address.
-    assertStringIncludes(hinted[0], "cf piece get --piece /of:receipt-1");
+    assertStringIncludes(hinted[0], "cf get --piece /of:receipt-1");
     assertStringIncludes(
       hinted[0],
-      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+      "CF_INVOCATION_SESSION=ses-7 cf call",
     );
-    expect(hinted[0].indexOf("cf piece get --piece /of:receipt-1"))
+    expect(hinted[0].indexOf("cf get --piece /of:receipt-1"))
       .toBeLessThan(hinted[0].indexOf("CF_INVOCATION_SESSION"));
   });
 
@@ -4933,7 +4936,7 @@ describe("renderPieceCallOutcome", () => {
     );
     assertStringIncludes(
       hinted[0],
-      "cf piece get --piece /of:receipt-1@session",
+      "cf get --piece /of:receipt-1@session",
     );
   });
 

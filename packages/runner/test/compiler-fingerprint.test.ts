@@ -11,6 +11,7 @@ import {
   renderVersionModule,
   VERSION_NAMESPACE,
 } from "../src/compilation-cache/compiler-fingerprint.deno.ts";
+import type * as cellCacheModule from "../src/compilation-cache/cell-cache.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
   getCompileCacheRuntimeVersion,
@@ -28,7 +29,7 @@ const denoWorkflowPath = fromFileUrl(
 
 const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
 
-type CellCacheModule = typeof import("../src/compilation-cache/cell-cache.ts");
+type CellCacheModule = typeof cellCacheModule;
 type CompileCacheVersionGlobal = typeof globalThis & {
   __cfCompileCacheRuntimeVersion?: string;
 };

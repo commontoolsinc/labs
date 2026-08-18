@@ -531,72 +531,179 @@ describe("schema-view", () => {
     });
   });
 
-  describe("once the transaction has written", () => {
-    it("stays lazy after a write batch that staged nothing", async () => {
-      const read = await seeded(
-        "empty-batch",
-        { a: 1, untouched: { leaf: 2 } },
-        {
-          type: "object",
-          properties: {
-            a: { type: "number" },
-            untouched: {
-              type: "object",
-              properties: { leaf: { type: "number" } },
-            },
-          },
-        } as const,
-      );
+  describe("a transaction that writes under the view", () => {
+    const LIST = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        // Primitives on purpose. An inline object element is rebased onto a
+        // `data:` identity derived from its own value, and a read of one never
+        // reaches the document — so a list of them would hold its elements
+        // still whether or not the instant did any work.
+        xs: { type: "array", items: { type: "number" } },
+      },
+    } as const;
 
-      const lazy = read(true);
+    /** Seed `cause`, then hand back a cell on a marked transaction. */
+    const opened = async (cause: string, value: unknown) => {
+      const write = runtime.edit();
+      runtime.getCell(space, cause, undefined, write).set(value);
+      await write.commit();
+
+      const tx = runtime.edit();
+      tx.markLazyMaterialize(true);
+      return { tx, cell: runtime.getCell(space, cause, LIST, tx) };
+    };
+
+    it("keeps the value it was taken over when the reader writes it", async () => {
+      const { tx, cell } = await opened("write-under-view", {
+        title: "before",
+        xs: [1],
+      });
       try {
-        // The batch write is optional on the interface, and the behavior under
-        // test is what it does, so a transaction without it has nothing to say.
-        expect(typeof lazy.tx.writeValuesOrThrow).toBe("function");
-        lazy.tx.writeValuesOrThrow!([]);
-        expect((lazy.get() as { a: number }).a).toBe(1);
-        // Eager materialization would have walked the sibling; a view that is
-        // still lazy never looks at it.
-        expect(pathsRead(lazy.tx).some((path) => path.includes("untouched")))
-          .toBe(false);
+        const value = cell.get() as { title: string };
+        cell.withTx(tx).key("title").set("after");
+        expect(value.title).toBe("before");
+        // Taking the read again is how the reader sees what it wrote.
+        expect((cell.get() as { title: string }).title).toBe("after");
       } finally {
-        await lazy.tx.commit();
+        await tx.commit();
       }
     });
 
-    // A view resolves each path when it is touched, so a read taken after a
-    // write would report the new value where an eager read hands back one
-    // detached at the moment it was taken. A read is materialized eagerly once
-    // the transaction has written, so it describes the same instant either way.
-    //
-    // This covers a read taken AFTER a write. A view handed out BEFORE one
-    // still tracks it, which the write epoch in the plan is what fixes.
-    it("materializes eagerly for a read taken after a write", async () => {
-      const readAfterWrite = async (lazy: boolean) => {
-        const cause = `read-after-write-${lazy}`;
-        const write = runtime.edit();
-        runtime.getCell(space, cause, undefined, write).set({ n: 1 });
-        await write.commit();
-
-        const tx = runtime.edit();
-        if (lazy) tx.markLazyMaterialize(true);
-        const schema = {
-          type: "object",
-          properties: { n: { type: "number" } },
-        } as const;
-        const cell = runtime.getCell(space, cause, schema, tx);
-        cell.key("n").set(99);
-        // Taken after the write, so it is detached at this instant and does
-        // not move when the value is written again.
-        const value = cell.get() as { n: number };
-        const seen = value.n;
-        cell.key("n").set(7);
-        const afterSecondWrite = value.n;
+    it("keeps the value it was taken over when the write came first", async () => {
+      const { tx, cell } = await opened("write-under-later-view", {
+        title: "before",
+        xs: [1],
+      });
+      try {
+        cell.withTx(tx).key("title").set("first");
+        // Taken past a write, so the instant it describes is the one after it.
+        const value = cell.get() as { title: string };
+        cell.withTx(tx).key("title").set("second");
+        expect(value.title).toBe("first");
+        expect((cell.get() as { title: string }).title).toBe("second");
+      } finally {
         await tx.commit();
-        return { seen, afterSecondWrite };
-      };
+      }
+    });
 
-      expect(await readAfterWrite(true)).toEqual(await readAfterWrite(false));
+    it("keeps two views taken at different instants apart", async () => {
+      const { tx, cell } = await opened("two-instants", {
+        title: "before",
+        xs: [1],
+      });
+      try {
+        const first = cell.get() as { title: string };
+        cell.withTx(tx).key("title").set("middle");
+        const second = cell.get() as { title: string };
+        cell.withTx(tx).key("title").set("last");
+        expect(first.title).toBe("before");
+        expect(second.title).toBe("middle");
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("keeps an element's value across a write into the list", async () => {
+      const { tx, cell } = await opened("element-under-write", {
+        title: "t",
+        xs: [1, 2],
+      });
+      try {
+        const value = cell.get() as { xs: number[] };
+        cell.withTx(tx).key("xs").key(1).set(99);
+        expect([...value.xs]).toEqual([1, 2]);
+        // The element the write landed on reads as written through a fresh
+        // read, so the pinning above is the instant and not a stale container.
+        expect((cell.get() as { xs: number[] }).xs[1]).toBe(99);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("iterates the length the list had when the view was taken", async () => {
+      // What a reader iterating a list while writing into it stands on. The
+      // view answers for the container it was built over, so appending during
+      // the walk cannot extend the walk.
+      const { tx, cell } = await opened("iterate-while-appending", {
+        title: "t",
+        xs: [1, 2, 3],
+      });
+      try {
+        const value = cell.get() as { xs: number[] };
+        const visited: number[] = [];
+        for (const item of value.xs) {
+          visited.push(item);
+          // Appending only while the walk is within its starting length keeps
+          // a view that re-read the container to a walk that ends and fails
+          // the assertion, rather than one that never ends.
+          if (visited.length > 3) continue;
+          const current = cell.withTx(tx).key("xs").get() as number[];
+          cell.withTx(tx).key("xs").set([...current, 0]);
+        }
+        expect(visited).toEqual([1, 2, 3]);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("iterates the length the list had when the write came first", async () => {
+      const { tx, cell } = await opened("write-first-then-iterate", {
+        title: "t",
+        xs: [1, 2],
+      });
+      try {
+        cell.withTx(tx).key("title").set("written first");
+        const value = cell.get() as { xs: number[] };
+        const visited: number[] = [];
+        for (const item of value.xs) {
+          visited.push(item);
+          if (visited.length > 2) continue;
+          const current = cell.withTx(tx).key("xs").get() as number[];
+          cell.withTx(tx).key("xs").set([...current, 0]);
+        }
+        expect(visited).toEqual([1, 2]);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("holds an array view's length across a write that changes it", async () => {
+      const { tx, cell } = await opened("held-length", {
+        title: "t",
+        xs: [1],
+      });
+      try {
+        const held = (cell.get() as { xs: number[] }).xs;
+        cell.withTx(tx).key("xs").set([7, 8]);
+        expect(held.length).toBe(1);
+        expect(held[0]).toBe(1);
+        // Asking the parent again reads the container afresh, which is how a
+        // reader that wants the new list gets it.
+        const fresh = (cell.get() as { xs: number[] }).xs;
+        expect(fresh.length).toBe(2);
+        expect(fresh[0]).toBe(7);
+      } finally {
+        await tx.commit();
+      }
+    });
+
+    it("reads only the paths the reader touched after a write", async () => {
+      const { tx, cell } = await opened("lazy-after-write", {
+        title: "before",
+        xs: [1, 2, 3],
+      });
+      try {
+        cell.withTx(tx).key("title").set("after");
+        const value = cell.get() as { title: string };
+        expect(value.title).toBe("after");
+        // An eager materialization walks the list to build it; the view never
+        // looks, because the reader never asked.
+        expect(pathsRead(tx).some((path) => path.includes("xs"))).toBe(false);
+      } finally {
+        await tx.commit();
+      }
     });
 
     it("still reads back what a lift wrote through a handle it was passed", async () => {

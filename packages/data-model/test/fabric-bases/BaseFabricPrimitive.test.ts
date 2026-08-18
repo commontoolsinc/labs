@@ -19,7 +19,7 @@ import { FabricPrimitive } from "@/interface.ts";
 import {
   BaseFabricPrimitive,
   EXAMPLE_METHOD,
-} from "@/codec-common/BaseFabricPrimitive.ts";
+} from "@/fabric-bases/BaseFabricPrimitive.ts";
 
 /**
  * Minimal `BaseFabricPrimitive` subclass for exercising the static guard in

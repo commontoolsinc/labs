@@ -17,6 +17,7 @@ let loading: Promise<CompilerStack> | undefined;
 
 type CompilerStackLoader = () => Promise<CompilerStack>;
 const loadCompilerStack: CompilerStackLoader = () =>
+  // deno-lint-ignore cf-imports/no-inline-module-import
   import("./compiler-stack.ts");
 
 /** A worker-global module-fetch failure that requires a fresh module map. */

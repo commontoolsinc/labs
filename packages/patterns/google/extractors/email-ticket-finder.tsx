@@ -22,6 +22,7 @@ import {
   pattern,
   TILE_UI,
   UI,
+  type VNode,
   wish,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -556,7 +557,7 @@ export interface PatternOutput {
   pastTickets: TrackedTicket[];
   todayCount: number;
   upcomingCount: number;
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {

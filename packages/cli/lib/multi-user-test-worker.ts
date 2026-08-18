@@ -33,6 +33,8 @@ import {
   type KeyPairRaw,
 } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { dirname } from "@std/path";
+import { attachDataFiles } from "./data-files.ts";
 import {
   type Cell,
   type ConsoleHandler,
@@ -275,6 +277,9 @@ const handlers: Record<
       spaceName: args.spaceName as string,
     });
     const space = session.space;
+    // The Deno storage cache opens SQLite as it loads, so it waits for the
+    // session it will open against.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const { StorageManager } = await import(
       "@commonfabric/runner/storage/cache.deno"
     );
@@ -332,11 +337,17 @@ const handlers: Record<
       : undefined;
     patternCoverageRoot = typeof args.root === "string" ? args.root : undefined;
 
-    const program = await engine.resolve(
-      new FileSystemProgramResolver(
-        args.testPath as string,
-        args.root as string | undefined,
+    const program = attachDataFiles(
+      await engine.resolve(
+        new FileSystemProgramResolver(
+          args.testPath as string,
+          args.root as string | undefined,
+        ),
       ),
+      Array.isArray(args.dataFilePaths)
+        ? args.dataFilePaths as string[]
+        : undefined,
+      (args.root as string | undefined) ?? dirname(args.testPath as string),
     );
     // `compileAndRegisterModules` seals compile + evaluate + register (see
     // test-runner.ts): map/filter/flatMap ops resolve via their content-addressed

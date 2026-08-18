@@ -12,8 +12,9 @@ import type {
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
-import { DecodeContext } from "./DecodeContext.ts";
-import { EncodeContext } from "./EncodeContext.ts";
+import { DecodeAct } from "./DecodeAct.ts";
+import { EncodeAct } from "./EncodeAct.ts";
+import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 import { ProblematicStateError } from "./ProblematicStateError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
@@ -35,11 +36,11 @@ import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts"
  * reduced to a `string` by a stringify step -- and a format whose tree is
  * what crosses leaves the second to default to the first.
  *
- * The other two are the contexts one act of encoding or decoding carries,
- * and default to the base classes, so a format needing no more than the
- * walk's own bookkeeping names neither. A format that does -- one whose
- * tagged form carries a marker minted per call, say -- subclasses a context
- * and binds it here. Its overrides then receive the narrowed type by
+ * The other two are the acts of encoding and decoding themselves, and
+ * default to the base classes, so a format needing no more than the walk's
+ * own bookkeeping names neither. A format that does -- one whose tagged
+ * form carries a marker minted per call, say -- subclasses an act and binds
+ * it here. Its overrides then receive the narrowed type by
  * construction: the signatures match exactly, so nothing needs a cast.
  *
  * The division is between what a format decides and what it must not:
@@ -70,9 +71,9 @@ import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts"
 export abstract class BaseCodecEngine<
   Encoded,
   SerializedForm = Encoded,
-  EncCtx extends EncodeContext = EncodeContext,
-  DecCtx extends DecodeContext = DecodeContext,
-> {
+  EncAct extends EncodeAct = EncodeAct,
+  DecAct extends DecodeAct = DecodeAct,
+> implements CodecEngineConfig {
   readonly #lenient: boolean;
   readonly #registry: CodecRegistry<Encoded>;
 
@@ -107,7 +108,7 @@ export abstract class BaseCodecEngine<
    * says what it is, and one that does not says why not.
    *
    * `env` is what a codec would reach the running system through, and is
-   * carried on the context this call mints. A caller that names none gets
+   * carried on the act this call mints. A caller that names none gets
    * `NULL_LIVE_ENVIRONMENT`, so a codec asking such an environment for a
    * cell fails by name rather than on `undefined`.
    *
@@ -119,9 +120,9 @@ export abstract class BaseCodecEngine<
     value: FabricValue,
     env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
   ): SerializedForm {
-    const ctx = this.newEncodeContext(env);
+    const act = this.newEncodeAct(env);
 
-    return this.serializedFromEncoded(this.encodeValue(value, ctx), ctx);
+    return this.serializedFromEncoded(this.encodeValue(value, act), act);
   }
 
   /**
@@ -150,12 +151,12 @@ export abstract class BaseCodecEngine<
     data: SerializedForm,
     env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
   ): FabricValue {
-    const ctx = this.newDecodeContext(env, data);
+    const act = this.newDecodeAct(env, data);
 
     try {
-      return this.decodeValue(this.encodedFromSerializedForm(data), ctx);
+      return this.decodeValue(this.encodedFromSerializedForm(data), act);
     } catch (e) {
-      return this.settleSyntacticRefusal(e);
+      return act.settleThrown(e);
     }
   }
 
@@ -164,12 +165,12 @@ export abstract class BaseCodecEngine<
    * a stringify step, an envelope, or nothing at all for a format whose tree
    * is what crosses.
    *
-   * `ctx` is the act the tree was built by, for a format whose serialized form
+   * `act` is the act the tree was built by, for a format whose serialized form
    * carries something minted per call.
    */
   protected abstract serializedFromEncoded(
     encoded: Encoded,
-    ctx: EncCtx,
+    act: EncAct,
   ): SerializedForm;
 
   /**
@@ -180,11 +181,11 @@ export abstract class BaseCodecEngine<
    * What arrives is data off a channel and is not to be assumed well-formed. A
    * form that is not this format's is refused by throwing
    * `ProblematicStateError`, which {@link #decode} settles against
-   * {@link #lenient} -- so a lenient decode answers a syntactic fault with a
-   * `ProblematicValue`, exactly as it does a fault found further in.
+   * {@link #lenient} -- so a lenient decode returns a `ProblematicValue` for
+   * a syntactic fault, exactly as it does for a fault found further in.
    *
-   * Takes no context. What a format needs out of the form for the act it is
-   * about to run, it takes in {@link #newDecodeContext}, which sees the same
+   * Takes no act. What a format needs out of the form for the act it is
+   * about to run, it takes in {@link #newDecodeAct}, which sees the same
    * form; this step is the conversion and nothing else.
    */
   protected abstract encodedFromSerializedForm(
@@ -194,52 +195,52 @@ export abstract class BaseCodecEngine<
   /**
    * Encodes an array, which is this format's business entirely.
    *
-   * An implementation owes `ctx` one thing, the same thing the decode side
-   * owes it: the container goes in through `ctx.enter()` and comes back out
-   * through `ctx.leave()` however the descent ends, a throw included. The
-   * context outlives a throw, being the act's rather than the node's, so an
-   * entry left behind makes a later visit to the same value report a cycle
-   * that is not there.
+   * An implementation owes `act` one thing, the same thing the decode side
+   * owes it: the container goes in through `act.enter()` and comes back out
+   * through `act.leave()` however the descent ends, a throw included. The
+   * act outlives a throw, belonging to the call rather than to the node, so
+   * an entry left behind makes a later visit to the same value report a
+   * cycle that is not there.
    */
   protected abstract encodeArray(
     value: readonly FabricValue[],
-    ctx: EncCtx,
+    act: EncAct,
   ): Encoded;
 
   /**
    * Encodes a plain object, which is this format's business entirely. Owes
-   * `ctx` the same enter/leave discipline {@link #encodeArray} states.
+   * `act` the same enter/leave discipline {@link #encodeArray} states.
    */
   protected abstract encodePlainObject(
     value: Record<string, FabricValue>,
-    ctx: EncCtx,
+    act: EncAct,
   ): Encoded;
 
   /**
    * Wraps a tag and state into this format's tagged wire form.
    *
-   * `ctx` is the act of encoding this form belongs to, for a format whose
+   * `act` is the act of encoding this form belongs to, for a format whose
    * tagged form carries something minted per call.
    */
   protected abstract wrapTag(
     tag: string,
     state: Encoded,
-    ctx: EncCtx,
+    act: EncAct,
   ): Encoded;
 
   /**
    * Decodes a transport tree back into fabric values.
    *
-   * `ctx` carries the live environment and the nodes whose decoding is in
+   * `act` carries the live environment and the nodes whose decoding is in
    * progress, so that a cycle arriving on a channel is caught rather than
    * followed. Whether cycles are guarded at all is the format's decision,
    * made by whether this method enters a node: a format whose input it
    * parses for itself cannot be handed a cycle, so it enters none and its
-   * context allocates no set.
+   * act allocates no set.
    *
-   * An implementation that does guard owes the context one thing: every
+   * An implementation that does guard owes the act one thing: every
    * object it is about to descend through goes through
-   * {@link #enterOrReport} first, and comes back out through `ctx.leave()`
+   * {@link #enterOrReport} first, and comes back out through `act.leave()`
    * however the descent ends. That means the tagged
    * form as much as a container -- a format whose transport can carry a graph
    * can close a cycle through tagged nodes alone. Here rather than in
@@ -249,19 +250,19 @@ export abstract class BaseCodecEngine<
    */
   protected abstract decodeValue(
     data: Encoded,
-    ctx: DecCtx,
+    act: DecAct,
   ): FabricValue;
 
   /**
-   * Constructs the context for one act of encoding, around the live
+   * Constructs one act of encoding, around the live
    * environment the caller gave. Called once per `encode()`, and the hook by
    * which a format carries more through its walk than the base class knows
    * about.
    */
-  protected abstract newEncodeContext(env: LiveEnvironment): EncCtx;
+  protected abstract newEncodeAct(env: LiveEnvironment): EncAct;
 
   /**
-   * Constructs the context for one act of decoding, around the live
+   * Constructs one act of decoding, around the live
    * environment the caller gave and the form about to be decoded. Called
    * once per `decode()`.
    *
@@ -272,10 +273,10 @@ export abstract class BaseCodecEngine<
    * reads defensively and leaves the refusing to
    * {@link #encodedFromSerializedForm}.
    */
-  protected abstract newDecodeContext(
+  protected abstract newDecodeAct(
     env: LiveEnvironment,
     data: SerializedForm,
-  ): DecCtx;
+  ): DecAct;
 
   //
   // Instance members
@@ -298,13 +299,13 @@ export abstract class BaseCodecEngine<
    * Encodes a fabric value into the transport tree, dispatching on what the
    * registry says about it and handing a container to this format's own arms.
    *
-   * `ctx` carries the values whose encoding is in progress, so that a cycle
+   * `act` carries the values whose encoding is in progress, so that a cycle
    * is caught rather than followed. Its set is created on the first value
    * entered rather than up front, so that encoding a lone self-representing
    * value -- much the commonest case, and the one where a fixed cost shows up
-   * most -- allocates nothing beyond the context.
+   * most -- allocates nothing beyond the act.
    */
-  protected encodeValue(value: FabricValue, ctx: EncCtx): Encoded {
+  protected encodeValue(value: FabricValue, act: EncAct): Encoded {
     const matched = this.registry.codecFromValue(value);
 
     if (matched === SELF_REP) {
@@ -313,13 +314,13 @@ export abstract class BaseCodecEngine<
     } else if (matched) {
       // `value` matched from the registry as either a non-self-representing
       // primitive or a `FabricSpecialObject`.
-      return this.#encodeTagged(value, matched, ctx);
+      return this.#encodeTagged(value, matched, act);
     } else if (Array.isArray(value)) {
-      return this.encodeArray(value, ctx);
+      return this.encodeArray(value, act);
     } else if (isPlainObject(value)) {
       // Note: `isPlainObject()` means what it says; notably, it returns `false`
       // for `FabricSpecialObject`s.
-      return this.encodePlainObject(value, ctx);
+      return this.encodePlainObject(value, act);
     }
 
     // At this point, we know `value` can't be encoded. We just need to figure
@@ -349,92 +350,6 @@ export abstract class BaseCodecEngine<
   }
 
   /**
-   * Settles a refusal of the serialized form itself against {@link #lenient}:
-   * strictly it raises, and leniently it becomes a `ProblematicValue`.
-   *
-   * A serialized form is data off a channel like any other, so being the wrong
-   * shape for this format -- or the right shape around a payload that will not
-   * parse -- is a malformation of the same kind as a bad state inside a
-   * well-formed one, and settles the same way.
-   *
-   * Only this class's own refusal is settled. Anything else thrown while
-   * converting a form is the format's own business and is re-raised untouched,
-   * so a bug in a conversion does not come back as a `ProblematicValue`.
-   *
-   * Available to a format's own entry points, which reach a conversion without
-   * passing through {@link #decode} -- `JsonCodecEngine`'s byte pair, for one.
-   *
-   * @throws Whatever it was given, if this engine is not lenient or the throw
-   *   was not a refusal.
-   */
-  protected settleSyntacticRefusal(e: unknown): FabricValue {
-    if (this.lenient && (e instanceof ProblematicStateError)) {
-      return this.reportMalformed(e.wireTypeTag, e.state, e.message);
-    }
-
-    // Rethrown rather than rebuilt, strictly: the refusal already names its
-    // tag and state, and re-raising it keeps whatever `cause` it carries.
-    throw e;
-  }
-
-  /**
-   * Reports wire data this engine itself found malformed, settled against
-   * {@link #lenient}: strictly it raises, and leniently it becomes a
-   * `ProblematicValue` in the result.
-   *
-   * A codec rejecting a state it was handed goes through the same setting, in
-   * {@link #decodeTagged}. Which of the two noticed is an implementation
-   * detail of where a check happens to live, so it does not decide what a
-   * caller sees; `lenient` does.
-   *
-   * @param wireTypeTag The tag the malformed data arrived under, or the
-   *   meta-tag naming the structure at fault. Of any type whatsoever: what
-   *   sits in tag position is wire data like any other, and a tag that is not
-   *   a tag is among the faults reported here. `ProblematicValue` renders what
-   *   it cannot keep.
-   * @param state The data at fault, of any type whatsoever, preserved so that
-   *   a lenient result round-trips. A format whose states are not
-   *   `FabricValue`s hands one over as it stands; `ProblematicValue` renders
-   *   what it cannot keep.
-   * @param error What is wrong with it, phrased to stand on its own -- it is
-   *   the whole of the message when this raises.
-   * @throws If this engine is not lenient.
-   */
-  protected reportMalformed(
-    wireTypeTag: any,
-    state: any,
-    error: string,
-  ): FabricValue {
-    if (!this.lenient) {
-      throw new ProblematicStateError(wireTypeTag, state, error);
-    }
-
-    return deepFreeze(new ProblematicValue(wireTypeTag, state, error));
-  }
-
-  /**
-   * Reports a key this runtime reserves, found in wire data, settled against
-   * {@link #lenient} like any other malformation.
-   *
-   * The names are `__proto__` and `constructor`, and what makes them a
-   * boundary concern is that the walks rebuild an object by assignment: the
-   * first routes through an inherited setter on a host that has one, and both
-   * are refused rather than silently reshaped.
-   *
-   * @param key The reserved key.
-   * @param state The object it was found in, preserved so a lenient result
-   *   round-trips.
-   * @throws If this engine is not lenient.
-   */
-  protected reportReservedKey(key: string, state: any): FabricValue {
-    return this.reportMalformed(
-      key,
-      state,
-      `object contains a key this runtime reserves: "${key}"`,
-    );
-  }
-
-  /**
    * Decodes one tagged value, dispatching on the tag through the registry. A
    * subclass calls this once it has recognized a tagged form and taken off
    * whatever meta-tags this format defines for itself.
@@ -443,12 +358,12 @@ export abstract class BaseCodecEngine<
    * whatever a format found in tag position, of whatever type, and a subclass
    * is not expected to know what a tag may look like.
    *
-   * Frozen-ness contract: a value returned through the codec arm here is
-   * deep-frozen, so callers do not each have to freeze. The unknown-tag
-   * fallback is a separate arm and is intentionally NOT covered by it.
+   * Frozen-ness contract: every value returned from here is deep-frozen, so
+   * callers do not each have to freeze, and a caller need not ask which arm
+   * produced what it was handed.
    *
    * Three of the arms below walk the state again -- a nonterminal codec's, an
-   * unknown tag's, and a malformed tag's -- and each carries `ctx` into that
+   * unknown tag's, and a malformed tag's -- and each carries `act` into that
    * walk. Entering the state is not this method's business: it is
    * {@link #decodeValue} that visits every node of the tree, the tagged form
    * included, and entering there is what keeps one node from being entered
@@ -457,7 +372,7 @@ export abstract class BaseCodecEngine<
   protected decodeTagged(
     tag: any,
     rawState: Encoded,
-    ctx: DecCtx,
+    act: DecAct,
   ): FabricValue {
     if (!isCodecTypeTag(tag)) {
       // Anything that is not a tag syntactically is an encoding error whatever
@@ -465,9 +380,9 @@ export abstract class BaseCodecEngine<
       // than preserved as an `UnknownValue`: that form exists to round-trip a
       // tag no codec claims, which presupposes a tag. Reported over the
       // decoded state, so that a lenient result carries what arrived.
-      return this.reportMalformed(
+      return act.reportMalformed(
         tag,
-        this.decodeValue(rawState, ctx),
+        this.decodeValue(rawState, act),
         `tagged value has a malformed tag: ${
           backtickQuote(toCompactDebugString(tag, 30))
         }`,
@@ -478,26 +393,25 @@ export abstract class BaseCodecEngine<
 
     if (matched === undefined) {
       // A tag this registry does not carry, kept in the unknown form so that
-      // it round-trips. Not covered by the deep-frozen contract the codec arm
-      // below states.
-      return new UnknownValue(tag, this.decodeValue(rawState, ctx));
+      // it round-trips.
+      return deepFreeze(new UnknownValue(tag, this.decodeValue(rawState, act)));
     }
 
     // A terminal codec takes the state exactly as it arrived; a nonterminal
     // one takes it expanded. The casts restate what `instanceof` just
     // established, which TypeScript drops on a generic class.
     const terminal = matched instanceof BaseTerminalCodec;
-    const state = terminal ? rawState : this.decodeValue(rawState, ctx);
+    const state = terminal ? rawState : this.decodeValue(rawState, act);
 
     let decoded: FabricValue;
 
     try {
       decoded = terminal
-        ? (matched as TerminalCodec<Encoded>).decode(tag, rawState, ctx.env)
+        ? (matched as TerminalCodec<Encoded>).decode(tag, rawState, act.env)
         : (matched as NonterminalCodec).decode(
           tag,
           state as FabricValue,
-          ctx.env,
+          act.env,
         );
     } catch (e: any) {
       if (!this.lenient) {
@@ -511,7 +425,7 @@ export abstract class BaseCodecEngine<
 
       // Report over the state the codec was actually handed, so that it says
       // what the codec choked on.
-      return this.reportMalformed(
+      return act.reportMalformed(
         tag,
         state,
         e instanceof Error ? e.message : String(e),
@@ -544,49 +458,16 @@ export abstract class BaseCodecEngine<
     return deepFreeze(decoded);
   }
 
-  /**
-   * Enters a container into the in-progress set, reporting rather than
-   * entering if it is already there.
-   *
-   * Reported rather than raised, unlike the encode side's refusal: a cycle
-   * here arrived from a channel, and every malformation off a channel settles
-   * against {@link #lenient}. Raising unconditionally would also be the one
-   * refusal a lenient decode could not contain.
-   *
-   * The report carries a rendering of the container rather than the container
-   * itself, a cyclic graph being the one thing a `ProblematicValue` cannot
-   * hold onto.
-   *
-   * @param ctx The act of decoding this container belongs to.
-   * @param value The container about to be walked.
-   * @returns The report, or `null` if `value` was entered.
-   * @throws If this engine is not lenient.
-   */
-  protected enterOrReport(
-    ctx: DecCtx,
-    value: object,
-  ): FabricValue | null {
-    if (!ctx.enter(value)) {
-      return this.reportMalformed(
-        "",
-        toCompactDebugString(value, 50),
-        "circular reference in decoded data",
-      );
-    }
-
-    return null;
-  }
-
   /** Encodes one value through the codec the registry matched to it. */
   #encodeTagged(
     value: FabricValue,
     matched: CodecForFormat<Encoded>,
-    ctx: EncCtx,
+    act: EncAct,
   ): Encoded {
     const isObject = (value !== null) && (typeof value === "object");
 
     if (isObject) {
-      ctx.enter(value as object);
+      act.enter(value as object);
     }
 
     // `tagForValue()` rather than any direct property of `value`, because the
@@ -603,18 +484,18 @@ export abstract class BaseCodecEngine<
       tag = matched.tagForValue(value);
       state = (matched instanceof BaseTerminalCodec)
         ? (matched as TerminalCodec<Encoded>).encode(value)
-        : this.encodeValue((matched as NonterminalCodec).encode(value), ctx);
+        : this.encodeValue((matched as NonterminalCodec).encode(value), act);
     } finally {
       // Left in a `finally` because `tagForValue()` and a codec's
-      // `encode()` can both throw. The context outlives a throw -- it is
-      // the act's, not this node's -- so an entry left behind would make a
+      // `encode()` can both throw. The act outlives a throw -- it belongs
+      // to the call, not to this node -- so an entry left behind would make a
       // later visit to the same value report a cycle that is not there.
       if (isObject) {
-        ctx.leave(value as object);
+        act.leave(value as object);
       }
     }
 
-    return this.wrapTag(tag, state, ctx);
+    return this.wrapTag(tag, state, act);
   }
 
   //

@@ -42,6 +42,7 @@
 import ts from "typescript";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import {
   classifyArrayMethodCallSite,
   detectCallKind,
@@ -941,7 +942,7 @@ export class PatternContextValidationTransformer
     if (detectCallKind(node, checker)?.kind !== "pattern-tool") {
       return;
     }
-    const firstArg = node.arguments[0];
+    const firstArg = node.arguments[0] && unwrapExpression(node.arguments[0]);
     if (
       !firstArg ||
       !(ts.isArrowFunction(firstArg) || ts.isFunctionExpression(firstArg))

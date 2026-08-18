@@ -60,7 +60,7 @@ verbs, and they differ in nothing but what the new item is filed under:
 | `recordNote` | returns what only the pattern could compute: the clock is a handler capability, so the stamp cannot come from the caller | act 7 |
 | `finish` | returns a derived fact — `openBelow` takes a walk of the whole subtree, which a caller would pay N reads for | act 8 |
 | `archive` | declares no result: the invocation settles carrying no `result` at all, and what it changed is a separate read | act 9 |
-| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12 — the envelope spelling works, the printed-address spelling is refused |
+| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12 — the address as printed, standing where the verb declares a reference |
 
 Those act numbers are `packages/cli/integration/verb-session-demo.sh`, which
 drives the session and prints each command before running it — the transcript is
@@ -307,9 +307,9 @@ cf call --piece board addItem -- --help
 
 ```text
 Usage:
-  cf piece call --piece board addItem -- --help
-  cf piece call --piece board addItem <json>
-  cf piece call --piece board addItem -- --title <string>
+  cf call --piece board addItem -- --help
+  cf call --piece board addItem <json>
+  cf call --piece board addItem -- --title <string>
 
 File a new root item on the board.
 
@@ -345,18 +345,24 @@ The structural half needs nothing authored per pattern:
 `--title <string> Required.`
 falls out of the type. That is why the page exists at all.
 
-**The prose half is not on the wire with it**, and knowing why is what keeps a
-reader from looking for it in the wrong place. A verb dispatches through a
+**Part of the prose is not on the wire with it**, and knowing which part keeps
+a reader from looking for it in the wrong place. A verb dispatches through a
 callable cell, and that cell takes its schema from the link chain it resolves
 through (`cell.ts:asSchemaFromLinks`). For a verb that link is the handler
-node's `$event` input, and that schema is not the author's event type at all —
-it is the handler's **read** of the event, narrowed to the fields its
-implementation touches. A declared field the body never mentions is absent from
-it whether or not the type marks it optional. So the served schema is not the
-declared one with the prose taken out; it is a query, generated from usage,
-which never carried an author's words in the first place.
+node's `$event` input — which, since the [verb input
+contract](../history/plans/verb-input-contract.md), is the author's event type
+rather than a summary of what the body reads, so a declared field the body
+never mentions is served like any other, and the field comments beside those
+fields travel with it.
 
-So the prose is read from the **pattern**, which is the only place it survives
+Two things still do not. A comment on the **verb** describes the verb, not its
+event, so it lives on the pattern's result schema and never rides the event
+schema at all. And link sanitization strips every capability marker but
+`stream`, which is why a declared reference position arrives shape-intact and
+marker-less — the fact the dispatch gate reads the compiled pattern to
+recover (step 7).
+
+So the pattern is loaded for those, and it is where each level survives
 compilation:
 
 | An author writes… | Where the compiled pattern keeps it |
@@ -365,19 +371,21 @@ compilation:
 | a comment on an **event field** (what `title` means) | `$defs.<Event>.properties.<field>.description` |
 | a comment on the **event interface** | nowhere — this one does not compile ([#5937](https://github.com/commontoolsinc/labs/issues/5937)) |
 
-`cf piece verbs` and `cf piece call <verb> --help` already load that pattern to
+`cf piece verbs` and `cf call <verb> --help` already load that pattern to
 report what a verb hands back, so both read the prose from the same load. The
 verb's own comment becomes the listing row's `description` and the help page's
 summary line. The event fields' comments are folded into the input schema the
 page renders flags from, at the positions that schema already has.
 
-**Which means walking two documents that agree about almost nothing
-structurally.** The same field can be a `$ref` in one and an inline object in
-the other, and a union the declared side spells as `anyOf` can arrive as one
-merged object — which of these happens depends on what the handler body reads.
-So a walk that steps through `properties` key-for-key finds a bare `$ref` on one
-side with no `properties` under it, or a field whose prose is inside an arm that
-no longer exists on the other side, and stops short of the words in both cases.
+**Which means walking two documents that need not agree structurally.** A
+handler with an authored event type serves that type, so the two now line up
+by construction; a handler written without one has only the inferred summary,
+and there the old divergence stands. The same field can be a `$ref` in one and
+an inline object in the other, and a union the declared side spells as `anyOf`
+can arrive as one merged object. So a walk that steps through `properties`
+key-for-key finds a bare `$ref` on one side with no `properties` under it, or a
+field whose prose is inside an arm that no longer exists on the other side, and
+stops short of the words in both cases.
 
 Both sides' references are followed for that reason, and a declared combinator
 is read through to its members. A served reference is followed *without* being
@@ -389,17 +397,17 @@ every other holder of the same type. The precise list of positions the fold
 walks is on `withDeclaredFieldProse` (`packages/cli/lib/piece.ts`), enumerated
 rather than summarized, along with the keywords it leaves alone.
 
-**Folded in, never substituted.** The two documents disagree about shape, by
-construction: the declared type is what a caller may send, the read schema is
-what the implementation looks at. Only `description` annotations cross between
-them, so the served schema stays the authority on shape and takes only the
-words. Substituting the declared type instead would offer a caller flags for
-fields the running handler does not read — a page describing the source rather
-than the piece being talked to.
+**Folded in, never substituted.** Only `description` annotations cross between
+the two documents, so the served schema stays the authority on shape and takes
+only the words. Substituting one document for the other would describe the
+source rather than the piece being talked to — which stays the rule even now
+that an authored event makes the two agree, because the piece in front of a
+caller may be running an older pattern than the source in the checkout.
 
-Which leaves a real question this does not settle: a field an author declares
-and the body never reads is a field a caller cannot discover. Whether the two
-schemas should be reconciled, and in which direction, is open.
+The question this section used to leave open — whether a field an author
+declares and the body never reads is discoverable — is settled: it is. The
+authored event is the contract, so the field is served, flagged, and
+documented like any other.
 
 ### Three levels of documentation **[today]**
 
@@ -547,75 +555,81 @@ their own options go.
 The demo's act 10 is this step run against the session's own tree: the whole
 board first, then only what is open, then the refusal.
 
-## 7. Relate two items **[today]**, minus one spelling
+## 7. Relate two items **[today]**
 
 ```bash
-cf call "$KID" blockOn -- --on "$CSRF"
-```
-
-That spelling — the address exactly as a read printed it — is the one still
-refused (#5880 landed the capability, not the round trip). Wrap the same
-address in the link envelope by hand and the call dispatches, the edge that
-lands is the target rather than a copy, and the graph read below shows one
-item under two paths:
-
-```bash
-cf call --select blocked@,on@,blockedOnCount "$KID" blockOn '{"on":{"/":{"link@1":{"id":"of:fid1:…"}}}}'
+cf call --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
 
 cf get "$EPIC" children --select @,title,blockedOn@
 ```
 
-The demo's acts 12 and 13 run all three: the refusal as a claim that
-self-reports the day the printed address is accepted, the envelope as the
-workaround it is, and the two-paths read as the payoff addresses exist for.
+That spelling — the address exactly as a read printed it — dispatches where
+the verb declares a reference, and the edge that lands is the target rather
+than a copy: the graph read shows one item under two paths. The dispatch gate
+reads the DECLARED contract ([verb input
+contract](../history/plans/verb-input-contract.md)) to know which positions declare
+references, and the same contract refuses the two payloads that could only
+ever be mistakes at one:
+
+```bash
+cf call "$KID" blockOn -- --on "not-an-address"
+
+cf call "$KID" blockOn '{"on":{"title":"a copy"}}'
+```
+
+A string that is no address is refused naming the position and the `/of:…`
+form a read prints. An inline copy is refused outright, because a
+shape-matching payload at a reference position stores a detached document
+inside the caller's own item and reports success. The link envelope #5880
+landed stays accepted beside the emitted spelling —
+`verb-session-gaps.sh` step 10 asserts every spelling apart.
+
+The demo's acts 12 and 13 run all of it: the conversion, both refusals, and
+the two-paths read as the payoff addresses exist for.
 
 ## The composition axis
 
-Steps 5 and 7 are the same move — take an address out of one command and put it
-into the next — and the receiver half works in full while the argument half
-works only under a spelling no read emits.
+Steps 5 and 7 are the same move — take an address out of one command and put
+it into the next — and both halves now hold: the receiver half in full, and
+the argument half under every spelling a caller might be holding.
 
 | Direction | State |
 | --- | --- |
 | address → the receiver (first positional, or `--piece`) | works |
 | a link envelope → an argument field | works (#5880) — the edge that lands is the target, not a copy |
-| the address a read emits → an argument field | refused |
+| the address a read emits → an argument field | works — converted against the declared contract at the dispatch gate |
 
-The pre-dispatch gate now passes a link envelope opaquely where a verb
-declares a reference (#5880), matching the ruling the runtime's own dispatch
-gate had already made. What it still refuses is the canonical string a read
-prints — the one spelling a caller is actually holding, since every `$link`
-and `receipt` in this session emits exactly that form. A caller who wants the
-edge today must assemble the envelope from the string by hand, which is the
-round-trip property failing one level in.
+The pre-dispatch gate passes a link envelope opaquely where a verb declares a
+reference (#5880), and converts the canonical string a read prints — the one
+spelling a caller is actually holding, since every `$link` and `receipt` in
+this session emits exactly that form. The positions it converts at come from
+the DECLARED contract read off the compiled pattern, because the schema a
+dispatch cell carries keeps only stream markers; the [verb input
+contract](../history/plans/verb-input-contract.md) is what makes that declaration
+authoritative.
 
-A tree mostly hides this, because the natural shape is to call the verb *on* the
-parent — the receiver carries the relationship, so no address needs to be an
-argument. It surfaces the moment two items must be related to each other:
-`blockOn`, a `duplicates` edge, a `move`, or a removal that names a child rather than an
-index. Indices are not addresses; a position shifts under concurrent writes.
+A tree mostly hides the argument half, because the natural shape is to call
+the verb *on* the parent — the receiver carries the relationship, so no
+address needs to be an argument. It surfaces the moment two items must be
+related to each other: `blockOn`, a `duplicates` edge, a `move`, or a removal
+that names a child rather than an index. Indices are not addresses; a
+position shifts under concurrent writes.
 
 [CLI surface shape](../plans/cli-surface-shape.md) states the property for
-commands — an address printed by one command is accepted by the next. This is
-the same property one level in, on arguments. A second instance sits on
-`cf piece set-slug`, whose source positional resolves through its own path
-rather than the one `--piece` uses.
-
-This gap is independent of whether a verb's declared result reaches the runtime.
-Declared results make an **output** self-describing; this is about what an
-**input** accepts.
+commands — an address printed by one command is accepted by the next. The
+argument half is the same property one level in, on arguments. A second
+instance sits on `cf piece set-slug`, whose source positional resolves
+through its own path rather than the one `--piece` uses.
 
 ## What the session is waiting on
 
 | Gap | Needs |
 | --- | --- |
 | An event interface's own comment absent everywhere | The one prose level that does not compile ([#5937](https://github.com/commontoolsinc/labs/issues/5937)). Nothing downstream can serve what was never emitted |
-| A declared event field the handler body never reads is absent from the served input schema | A decision, not a patch: the served schema is the handler's read and the declared type is the contract, and which one a caller is owed is open |
 | `--select` completion, and refusal before the call | A provider reading the declared result the help page already resolves |
-| The address a read emits accepted as an argument | The string form beside the envelope #5880 accepts — the round-trip property above. And beside it the protective refusal: a shape-matching payload still stores a detached copy and reports success |
 
-Four rows and four distinct gaps, and the first two are worth reading
-together because they look like one. They are not: the first is a comment
-nothing emits, and the second is a *field* — not prose at all — and an open
-question rather than a defect. Only the first is an author's words going
-missing.
+Two rows, and two that used to sit beside them are gone the way this table
+intends: the served input schema now carries every declared event field —
+the [verb input contract](../history/plans/verb-input-contract.md) ruled the
+authored event authoritative — and the address a read emits dispatches as an
+argument, with the detached-copy refusal standing guard beside it (step 7).

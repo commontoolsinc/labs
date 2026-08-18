@@ -45,6 +45,11 @@ export const test = new Command()
     "Root directory for resolving imports. Enables imports like '../shared/utils.tsx'.",
   )
   .option(
+    "--datafile <path:string>",
+    "Attach a data file the pattern under test reads with dataFile(). Repeatable.",
+    { collect: true },
+  )
+  .option(
     "--stats-threshold <ms:number>",
     "Print logger stats for steps slower than this (ms). 0 = every step. Requires --verbose.",
     { default: 5000 },
@@ -146,6 +151,9 @@ export const test = new Command()
       timeout: options.timeout,
       verbose: options.verbose,
       root,
+      dataFilePaths: options.datafile?.map((path: string) =>
+        resolve(Deno.cwd(), path)
+      ),
       statsThreshold: options.statsThreshold,
       statsInclude,
       statsActionLimit: options.statsActionLimit,

@@ -129,6 +129,7 @@ const completeCommand = new Command()
 
       // Resolved lazily: importing the root command pulls in the whole command
       // tree, and doing it inside the guard keeps a failure silent.
+      // deno-lint-ignore cf-imports/no-inline-module-import
       const { main } = await import("./main.ts");
 
       const lines = await complete(

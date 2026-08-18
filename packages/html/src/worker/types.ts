@@ -13,6 +13,7 @@ import type {
   SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
 import type { CellRef, JSONValue } from "@commonfabric/runtime-client";
+import type { VDomOp } from "../vdom-ops.ts";
 
 /**
  * A render node in the worker VDOM tree.
@@ -253,7 +254,7 @@ export interface ReconcileContext {
 
   /** Function to emit VDOM operations */
   emit: (
-    ops: import("../vdom-ops.ts").VDomOp[],
+    ops: VDomOp[],
   ) => void;
 
   /** Generate a new unique node ID */
@@ -357,7 +358,7 @@ export function normalizeRenderConfidentialityCeiling(
 export interface WorkerReconcilerOptions {
   /** Callback when operations are ready to send to main thread */
   onOps: (
-    ops: import("../vdom-ops.ts").VDomOp[],
+    ops: VDomOp[],
   ) => number | void;
 
   /** Optional: callback when an error occurs */

@@ -440,6 +440,9 @@ export class CellBridge {
       try {
         const loadPieces = this.reconnectPiecesLoader ??
           this.piecesLoader ??
+          // The CLI's loader is the fallback for a caller that injected none,
+          // which keeps the bridge off the CLI's module graph.
+          // deno-lint-ignore cf-imports/no-inline-module-import
           (await import("../cli/lib/piece.ts")).loadPieces;
         const probe = await loadPieces({
           apiUrl: this.apiUrl,
@@ -532,6 +535,9 @@ export class CellBridge {
     spaceName: string,
   ): Promise<PiecesController> {
     const loadPieces = this.piecesLoader ??
+      // The CLI's loader is the fallback for a caller that injected none, which
+      // keeps the bridge off the CLI's module graph.
+      // deno-lint-ignore cf-imports/no-inline-module-import
       (await import("../cli/lib/piece.ts")).loadPieces;
     return await loadPieces({
       apiUrl: this.apiUrl,

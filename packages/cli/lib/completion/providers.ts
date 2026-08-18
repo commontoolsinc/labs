@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- a completion
+// request runs between two keystrokes, so each provider loads only what its own
+// candidates need.
+
 /**
  * Live candidate providers — the half of completion that reads real state.
  *
@@ -17,6 +21,7 @@ import type { CompletionLine } from "./line.ts";
 import { longName } from "./line.ts";
 import { absPath } from "../utils.ts";
 import type { PieceConfig, SpaceConfig } from "../piece.ts";
+import ports from "@commonfabric/ports" with { type: "json" };
 
 /** A directive tells the shell to complete something only it can do well. */
 export type Directive =
@@ -303,10 +308,7 @@ async function spaceCandidates(): Promise<ProviderResult> {
 }
 
 /** API URLs worth offering: the environment's, plus the local dev server. */
-async function apiUrlCandidates(): Promise<ProviderResult> {
-  const ports = (await import("@commonfabric/ports", {
-    with: { type: "json" },
-  })).default;
+function apiUrlCandidates(): ProviderResult {
   const candidates: Candidate[] = [];
   const fromEnv = Deno.env.get("CF_API_URL");
   if (fromEnv) candidates.push({ value: fromEnv, description: "CF_API_URL" });
@@ -331,7 +333,7 @@ const OPTION_VALUE_PROVIDERS: Readonly<
 > = {
   piece: pieceCandidates,
   space: () => spaceCandidates(),
-  "api-url": () => apiUrlCandidates(),
+  "api-url": () => Promise.resolve(apiUrlCandidates()),
   identity: () => Promise.resolve(directive({ kind: "files", glob: "*.key" })),
   root: () => Promise.resolve(directive({ kind: "dirs" })),
   test: patternFiles,

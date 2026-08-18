@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the view's module
+// graph reaches @commonfabric/ui, whose components extend a bare HTMLElement as
+// they load, so it can only load once the test has installed one.
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";

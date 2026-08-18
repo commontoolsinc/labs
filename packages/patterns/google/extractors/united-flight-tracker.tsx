@@ -26,6 +26,7 @@ import {
   TILE_UI,
   toIndentedDebugString,
   UI,
+  type VNode,
   wish,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -518,7 +519,7 @@ export interface Output {
   activeAlerts: TrackedFlight[];
   pastFlights: TrackedFlight[];
   trips: TrackedTrip[];
-  [TILE_UI]: import("commonfabric").VNode;
+  [TILE_UI]: VNode;
 }
 
 export default pattern<Input, Output>(({ overrideAuth }) => {

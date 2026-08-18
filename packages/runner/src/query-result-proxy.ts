@@ -83,12 +83,18 @@ const getProxyCache = (
 const proxyCacheKey = (
   link: NormalizedFullLink,
   cfcLabelView: CfcLabelView | undefined,
+  // Two pinned views over the same link describe different instants when they
+  // were taken either side of a write, so the instant is part of what makes
+  // them the same view. An unpinned handle has none and shares as it always
+  // has.
+  epoch: number | undefined,
 ): string =>
   JSON.stringify([
     link.space,
     link.id,
     link.path,
     cfcLabelView ?? null,
+    epoch ?? null,
   ]);
 
 /** Whether a transaction can still answer a read. */
@@ -180,9 +186,10 @@ export function createQueryResultProxy<T>(
   cfcLabelView?: CfcLabelView,
 ): T {
   // The transaction decides which of the two this is. Marked for lazy
-  // materialization, the proxy is a view: it keeps this transaction, so the
-  // value it describes stays the value that was there when it was taken, and
-  // reading after the transaction finishes throws.
+  // materialization, the proxy is a view: it keeps this transaction and
+  // describes the instant it was taken at, so the value it reports stays the
+  // value that was there however the reader writes afterwards, and reading
+  // after the transaction finishes throws.
   //
   // Unmarked — every caller today — it is a standing handle on a cell that
   // resolves the transaction afresh on every access, so a holder keeps reading
@@ -234,6 +241,29 @@ function createViewProxy<T>(
     pinned ? viewTx : runtime.readTx(tx);
   const childViewTx = (): IExtendedStorageTransaction =>
     pinned ? viewTx : runtime.readTx(tx ?? viewTx);
+  // The instant a pinned view describes. A child built inside a parent's trap
+  // inherits that parent's instant rather than taking a later one, which is
+  // what `issueReadEpoch` hands back while a read is already walking. An
+  // unpinned handle tracks current state and takes none.
+  //
+  // The reads this construction makes need no scope around them: no write can
+  // land between the epoch above and them, so current state IS that instant.
+  // The traps below fire later, and those do.
+  const epoch = pinned ? viewTx.issueReadEpoch() : undefined;
+  // Unlike the schema view, which gates its two read chokepoints by hand, the
+  // traps here read from a dozen branches apiece, so they share one wrapper.
+  // The thunk costs an allocation per trap call on a transaction that has
+  // written; this is the schema-LESS path, which a lift's argument does not
+  // take, and the shape of these traps makes the by-hand form a worse trade.
+  const atEpoch = <T>(body: () => T): T => {
+    if (epoch === undefined || !viewTx.hasWrites()) return body();
+    const previous = viewTx.enterReadEpoch(epoch);
+    try {
+      return body();
+    } finally {
+      viewTx.exitReadEpoch(previous);
+    }
+  };
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
     throw new Error(
@@ -382,294 +412,314 @@ function createViewProxy<T>(
   // one cache per transaction — which is right, because it describes the instant
   // that transaction saw.
   const txCache = getProxyCache(tx, runtime);
-  const cacheKey = proxyCacheKey(link, cfcLabelView);
+  const cacheKey = proxyCacheKey(link, cfcLabelView, epoch);
 
   // Check if we already have a proxy for this target in the cache.
   // The cache key is the original `value` (not the stub), ensuring that
   // the same frozen object always maps to the same proxy instance.
   const existingProxy = txCache.byLink.get(cacheKey) ??
-    (cfcLabelView === undefined ? txCache.byValue.get(value) : undefined);
+    (cfcLabelView === undefined && epoch === undefined
+      ? txCache.byValue.get(value)
+      : undefined);
   if (existingProxy) return remember(existingProxy);
 
   const proxy = new Proxy(proxyTarget as object, {
-    get: (target, prop, receiver) => {
-      // Promise adoption probes `then` on every value it receives, so a view
-      // that refuses the probe cannot cross a promise boundary at all — and a
-      // lift's result crosses one by construction. A finished view returns
-      // `undefined` for it, which is what a live one returns for a value
-      // with no `then`; every other property still refuses.
-      if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
-      if (Array.isArray(value) && prop === "length") {
-        const current = readTx().readValueOrThrow(link) as typeof value;
-        return Array.isArray(current) ? current.length : 0;
-      }
+    get: (target, prop, receiver) =>
+      atEpoch(() => {
+        // Promise adoption probes `then` on every value it receives, so a view
+        // that refuses the probe cannot cross a promise boundary at all — and a
+        // lift's result crosses one by construction. A finished view returns
+        // `undefined` for it, which is what a live one returns for a value
+        // with no `then`; every other property still refuses.
+        if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
+        if (Array.isArray(value) && prop === "length") {
+          const current = readTx().readValueOrThrow(link) as typeof value;
+          return Array.isArray(current) ? current.length : 0;
+        }
 
-      // When encountering a frozen property, we just return the value to
-      // maintain proxy invariants.
-      const descriptor = Object.getOwnPropertyDescriptor(target, prop);
-      if (descriptor?.configurable === false) {
-        return Reflect.get(target, prop, receiver);
-      }
+        // When encountering a frozen property, we just return the value to
+        // maintain proxy invariants.
+        const descriptor = Object.getOwnPropertyDescriptor(target, prop);
+        if (descriptor?.configurable === false) {
+          return Reflect.get(target, prop, receiver);
+        }
 
-      if (typeof prop === "symbol") {
-        if (prop === toCell) {
-          return () =>
-            createCell(runtime, link, tx, false, undefined, cfcLabelView);
-        } else if (prop === Symbol.iterator && Array.isArray(value)) {
-          return function () {
-            let index = 0;
-            return {
-              next() {
+        if (typeof prop === "symbol") {
+          if (prop === toCell) {
+            return () =>
+              createCell(runtime, link, tx, false, undefined, cfcLabelView);
+          } else if (prop === Symbol.iterator && Array.isArray(value)) {
+            return function () {
+              let index = 0;
+              return {
+                // Pulled after the trap returned, so it steps into the
+                // instant itself rather than inheriting the trap's scope.
+                next: () =>
+                  atEpoch(() => {
+                    const length = readTx().readValueOrThrow({
+                      ...link,
+                      path: [...link.path, "length"],
+                    }) as number;
+                    if (index < length) {
+                      const result = {
+                        value: createViewProxy(
+                          runtime,
+                          childViewTx(),
+                          tx,
+                          {
+                            ...link,
+                            path: [...link.path, String(index)],
+                          },
+                          depth + 1,
+                          childLabelView(cfcLabelView, String(index)),
+                          pinned,
+                        ),
+                        done: false,
+                      };
+                      index++;
+                      return result;
+                    }
+                    return { done: true };
+                  }),
+              };
+            };
+          }
+          const current = readTx().readValueOrThrow(link) as typeof value;
+
+          const returnValue = Reflect.get(current, prop, current);
+          if (typeof returnValue === "function") {
+            return returnValue.bind(current);
+          } else return returnValue;
+        }
+
+        if (
+          Array.isArray(value) &&
+          Object.prototype.hasOwnProperty.call(arrayMethods, prop) &&
+          typeof (value[prop as keyof typeof value]) === "function"
+        ) {
+          const method = Array.prototype[prop as keyof typeof Array.prototype];
+          const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods];
+
+          return isReadWrite === ArrayMethodType.ReadOnly
+            // Invoked after the trap returned, so reading the elements steps
+            // into the instant itself; see the iterator above. The caller's
+            // callback runs OUTSIDE it, below — the instant belongs to reading
+            // this array, not to whatever the caller does with what it reads,
+            // and a read the callback takes of anything else (a cell it just
+            // wrote, most of all) describes current state as it would anywhere
+            // else. Mirrors `materialize()` in the schema view.
+            ? (...args: any[]) => {
+              const copy = atEpoch(() => {
+                // This will also mark each element read in the log. Almost all
+                // methods implicitly read all elements. TODO: Deal with
+                // exceptions like at().
                 const length = readTx().readValueOrThrow({
                   ...link,
                   path: [...link.path, "length"],
                 }) as number;
-                if (index < length) {
-                  const result = {
-                    value: createViewProxy(
-                      runtime,
-                      childViewTx(),
-                      tx,
-                      {
-                        ...link,
-                        path: [...link.path, String(index)],
-                      },
-                      depth + 1,
-                      childLabelView(cfcLabelView, String(index)),
-                      pinned,
-                    ),
-                    done: false,
-                  };
-                  index++;
-                  return result;
+
+                if (typeof length !== "number") {
+                  throw new Error(
+                    `Array length is not a number for ${prop} operation`,
+                  );
                 }
-                return { done: true };
-              },
-            };
-          };
-        }
-        const current = readTx().readValueOrThrow(link) as typeof value;
 
-        const returnValue = Reflect.get(current, prop, current);
-        if (typeof returnValue === "function") return returnValue.bind(current);
-        else return returnValue;
-      }
+                const current = readTx().readValueOrThrow(link) as typeof value;
+                const copy = new Array(length);
+                for (let i = 0; i < length; i++) {
+                  if (!(i in current)) {
+                    continue;
+                  }
+                  copy[i] = createViewProxy(
+                    runtime,
+                    childViewTx(),
+                    tx,
+                    { ...link, path: [...link.path, String(i)] },
+                    depth + 1,
+                    childLabelView(cfcLabelView, String(i)),
+                    pinned,
+                  );
+                }
 
-      if (
-        Array.isArray(value) &&
-        Object.prototype.hasOwnProperty.call(arrayMethods, prop) &&
-        typeof (value[prop as keyof typeof value]) === "function"
-      ) {
-        const method = Array.prototype[prop as keyof typeof Array.prototype];
-        const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods];
-
-        return isReadWrite === ArrayMethodType.ReadOnly
-          ? (...args: any[]) => {
-            // This will also mark each element read in the log. Almost all
-            // methods implicitly read all elements. TODO: Deal with
-            // exceptions like at().
-            const length = readTx().readValueOrThrow({
-              ...link,
-              path: [...link.path, "length"],
-            }) as number;
-
-            if (typeof length !== "number") {
+                return copy;
+              });
+              return method.apply(copy, args);
+            }
+            : () => {
+              // A view is read-only, so the in-place mutators have nothing to
+              // route to. Mutate through the `asCell` handle a `Writable<..>`
+              // field mints, whose `Cell.push`/`Cell.set` carry the merge intent
+              // these methods never could.
               throw new Error(
-                `Array length is not a number for ${prop} operation`,
+                "This value is read-only, declare type as Writable<..> instead to get a writable version",
               );
-            }
+            };
+        }
 
-            const current = readTx().readValueOrThrow(link) as typeof value;
-            const copy = new Array(length);
-            for (let i = 0; i < length; i++) {
-              if (!(i in current)) {
-                continue;
-              }
-              copy[i] = createViewProxy(
-                runtime,
-                childViewTx(),
-                tx,
-                { ...link, path: [...link.path, String(i)] },
-                depth + 1,
-                childLabelView(cfcLabelView, String(i)),
-                pinned,
-              );
-            }
+        // Prototype properties are JavaScript behavior, not persisted child
+        // values. Reflect them from the current container instead of issuing a
+        // storage read for an inherited path such as `constructor` or
+        // `toString`. Storage traversal deliberately considers own properties
+        // only; keeping the same boundary here also avoids recording spurious
+        // reactive dependencies for prototype members.
+        //
+        // The receiver is the container, not this proxy: a prototype accessor
+        // has to run against the object that actually holds the state. Every
+        // `FabricInstance` keeps its state in private fields behind accessors,
+        // and a private field is unreachable from a proxy that does not declare
+        // it. (The receiver is immaterial for a data property, which is what
+        // every prototype member of a plain object or array is, so this costs
+        // those nothing.) A `FabricInstance` leafs through storage traversal
+        // whole, so the read of the container already covers what an accessor
+        // returns.
+        if (!Object.hasOwn(value, prop) && prop in value) {
+          return Reflect.get(value, prop);
+        }
 
-            return method.apply(copy, args);
-          }
-          : () => {
-            // A view is read-only, so the in-place mutators have nothing to
-            // route to. Mutate through the `asCell` handle a `Writable<..>`
-            // field mints, whose `Cell.push`/`Cell.set` carry the merge intent
-            // these methods never could.
-            throw new Error(
-              "This value is read-only, declare type as Writable<..> instead to get a writable version",
-            );
-          };
-      }
-
-      // Prototype properties are JavaScript behavior, not persisted child
-      // values. Reflect them from the current container instead of issuing a
-      // storage read for an inherited path such as `constructor` or
-      // `toString`. Storage traversal deliberately considers own properties
-      // only; keeping the same boundary here also avoids recording spurious
-      // reactive dependencies for prototype members.
-      //
-      // The receiver is the container, not this proxy: a prototype accessor
-      // has to run against the object that actually holds the state. Every
-      // `FabricInstance` keeps its state in private fields behind accessors,
-      // and a private field is unreachable from a proxy that does not declare
-      // it. (The receiver is immaterial for a data property, which is what
-      // every prototype member of a plain object or array is, so this costs
-      // those nothing.) A `FabricInstance` leafs through storage traversal
-      // whole, so the read of the container already covers what an accessor
-      // returns.
-      if (!Object.hasOwn(value, prop) && prop in value) {
-        return Reflect.get(value, prop);
-      }
-
-      return createViewProxy(
-        runtime,
-        childViewTx(),
-        tx,
-        { ...link, path: [...link.path, prop] },
-        depth + 1,
-        childLabelView(cfcLabelView, String(prop)),
-        pinned,
-      );
-    },
+        return createViewProxy(
+          runtime,
+          childViewTx(),
+          tx,
+          { ...link, path: [...link.path, prop] },
+          depth + 1,
+          childLabelView(cfcLabelView, String(prop)),
+          pinned,
+        );
+      }),
     set: (_, prop) => {
       if (typeof prop === "symbol") return false;
       throw new Error(
         "This value is read-only, declare type as Writable<..> instead to get a writable version",
       );
     },
-    ownKeys: () => {
-      const current = readTx().readValueOrThrow(link, SHAPE_READ);
-      const keys = isObjectOrArray(current) || Array.isArray(current)
-        ? Reflect.ownKeys(current)
-        : Reflect.ownKeys(value);
-      if (Array.isArray(proxyTarget)) {
-        if (!keys.includes("length")) {
-          // Insert `length` where a real array carries it -- after the index
-          // keys, ahead of any other name -- rather than appending it. Own-key
-          // order is load-bearing: a consumer can tell an index-only array from
-          // one carrying named properties by asking whether `length` comes
-          // last, and appending would make a named property look like an
-          // index-only one. `isInertArray()` reads exactly that, and fabric
-          // membership (`isFabricValue()`) is decided by it for every array,
-          // so the order here is what makes a proxied array carrying a named
-          // property fail membership instead of passing as index-only.
-          const firstNonIndex = keys.findIndex((key) =>
-            !((typeof key === "string") && isArrayIndexPropertyName(key))
-          );
-          keys.splice(
-            (firstNonIndex === -1) ? keys.length : firstNonIndex,
-            0,
-            "length",
-          );
-        }
-        // Enumerating an array's keys (`Object.keys`/`values`/`entries`, a spread,
-        // `for...in`) observes which index keys are present. For a dense array
-        // that is its `length`, but an array here can be sparse (holes below
-        // `length`), and filling or punching a hole changes the present-key set
-        // without changing `length` — a write at `/arr/<i>` with no `/arr/length`
-        // write. The SHAPE_READ above is dropped at commit as the op's incidental
-        // container read, and neither a `length` read nor a nonRecursive shape
-        // read at the array path conflicts with a same-length element-slot write.
-        // Record a recursive (by-value) read of the array — the one read the
-        // mergeable narrowing keeps that a hole edit invalidates — so an
-        // enumeration-derived mergeable write conflicts and retries instead of
-        // merging on a stale key set. It is marked `ignoreReadForScheduling` so it
-        // adds only the conflict dependency; reactivity stays on the SHAPE_READ.
-        readTx().readValueOrThrow(link, { meta: ignoreReadForScheduling });
-      }
-      return keys;
-    },
-    getOwnPropertyDescriptor: (target, prop) => {
-      if (Array.isArray(target) && prop === "length") {
-        // Read the array fully (not SHAPE_READ) so the length descriptor tracks
-        // element add/remove, matching the `length` get trap above. [review: ubik2]
-        const current = readTx().readValueOrThrow(link);
-        return {
-          configurable: false,
-          enumerable: false,
-          writable: true,
-          value: Array.isArray(current) ? current.length : 0,
-        };
-      }
-
-      // For properties that exist on the original target (e.g. array `length`),
-      // delegate to the target to satisfy proxy invariants for non-configurable
-      // properties.
-      const targetDesc = Object.getOwnPropertyDescriptor(target, prop);
-      if (targetDesc && !targetDesc.configurable) {
-        return targetDesc;
-      }
-      if (typeof prop === "symbol") {
-        return Object.getOwnPropertyDescriptor(value, prop);
-      }
-      const current = readTx().readValueOrThrow(
-        link,
-        SHAPE_READ,
-      ) as typeof value;
-      // `Object.hasOwn`, not `in`: this trap reports on OWN properties, and
-      // `in` walks the prototype chain. Because the underlying value is an
-      // ordinary `Object.prototype`-rooted record, `in` reported every member of
-      // `Object.prototype` -- `toString`, `valueOf`, `constructor`, `__proto__`
-      // -- as an own property of the proxy, while `ownKeys` (which uses
-      // `Reflect.ownKeys`) listed none of them. Two traps describing the same
-      // value disagreed by construction, so every consumer that reasons about a
-      // read-back value's shape was being told it carries names it does not.
-      //
-      // That is not academic: `unsafeObjectKeyIn()` refuses a `FabricValue`
-      // carrying own `__proto__`/`constructor` and tests with `Object.hasOwn()`,
-      // so writing a read-back record back to a cell was rejected for a key the
-      // record never had, and every read-modify-write against a cell failed
-      // (loom CT-1949). The `has` trap below keeps `in` -- there it is correct,
-      // being the `in` operator's own trap.
-      if (
-        (isObjectOrArray(current) || Array.isArray(current)) &&
-        Object.hasOwn(current, prop)
-      ) {
-        return {
-          configurable: true,
-          enumerable: true,
-          writable: false,
-          value: createViewProxy(
-            runtime,
-            childViewTx(),
-            tx,
-            { ...link, path: [...link.path, prop as string] },
-            depth + 1,
-            childLabelView(cfcLabelView, String(prop)),
-            pinned,
-          ),
-        };
-      }
-      return undefined;
-    },
-    has: (_target, prop) => {
-      if (typeof prop === "symbol") {
-        return prop in value;
-      }
-      const current = readTx().readValueOrThrow(link, SHAPE_READ);
-      if (isObjectOrArray(current) || Array.isArray(current)) {
-        // Probing whether a numeric index is present (`n in arr`) observes the
-        // array's key set: for a dense array the answer is `n < length`, but a
-        // sparse array has holes, so the answer depends on whether index `n` is
-        // specifically present — which a same-length hole fill or punch changes
-        // with no `length` write. Record a recursive read of the array (marked
-        // conflict-only, like ownKeys above) so an `n in arr`-derived mergeable
-        // write conflicts and retries instead of merging on a stale key set.
-        if (Array.isArray(current) && /^\d+$/.test(prop)) {
+    ownKeys: () =>
+      atEpoch(() => {
+        const current = readTx().readValueOrThrow(link, SHAPE_READ);
+        const keys = isObjectOrArray(current) || Array.isArray(current)
+          ? Reflect.ownKeys(current)
+          : Reflect.ownKeys(value);
+        if (Array.isArray(proxyTarget)) {
+          if (!keys.includes("length")) {
+            // Insert `length` where a real array carries it -- after the index
+            // keys, ahead of any other name -- rather than appending it. Own-key
+            // order is load-bearing: a consumer can tell an index-only array from
+            // one carrying named properties by asking whether `length` comes
+            // last, and appending would make a named property look like an
+            // index-only one. `isInertArray()` reads exactly that, and fabric
+            // membership (`isFabricValue()`) is decided by it for every array,
+            // so the order here is what makes a proxied array carrying a named
+            // property fail membership instead of passing as index-only.
+            const firstNonIndex = keys.findIndex((key) =>
+              !((typeof key === "string") && isArrayIndexPropertyName(key))
+            );
+            keys.splice(
+              (firstNonIndex === -1) ? keys.length : firstNonIndex,
+              0,
+              "length",
+            );
+          }
+          // Enumerating an array's keys (`Object.keys`/`values`/`entries`, a spread,
+          // `for...in`) observes which index keys are present. For a dense array
+          // that is its `length`, but an array here can be sparse (holes below
+          // `length`), and filling or punching a hole changes the present-key set
+          // without changing `length` — a write at `/arr/<i>` with no `/arr/length`
+          // write. The SHAPE_READ above is dropped at commit as the op's incidental
+          // container read, and neither a `length` read nor a nonRecursive shape
+          // read at the array path conflicts with a same-length element-slot write.
+          // Record a recursive (by-value) read of the array — the one read the
+          // mergeable narrowing keeps that a hole edit invalidates — so an
+          // enumeration-derived mergeable write conflicts and retries instead of
+          // merging on a stale key set. It is marked `ignoreReadForScheduling` so it
+          // adds only the conflict dependency; reactivity stays on the SHAPE_READ.
           readTx().readValueOrThrow(link, { meta: ignoreReadForScheduling });
         }
-        return prop in current;
-      }
-      return prop in value;
-    },
+        return keys;
+      }),
+    getOwnPropertyDescriptor: (target, prop) =>
+      atEpoch(() => {
+        if (Array.isArray(target) && prop === "length") {
+          // Read the array fully (not SHAPE_READ) so the length descriptor tracks
+          // element add/remove, matching the `length` get trap above. [review: ubik2]
+          const current = readTx().readValueOrThrow(link);
+          return {
+            configurable: false,
+            enumerable: false,
+            writable: true,
+            value: Array.isArray(current) ? current.length : 0,
+          };
+        }
+
+        // For properties that exist on the original target (e.g. array `length`),
+        // delegate to the target to satisfy proxy invariants for non-configurable
+        // properties.
+        const targetDesc = Object.getOwnPropertyDescriptor(target, prop);
+        if (targetDesc && !targetDesc.configurable) {
+          return targetDesc;
+        }
+        if (typeof prop === "symbol") {
+          return Object.getOwnPropertyDescriptor(value, prop);
+        }
+        const current = readTx().readValueOrThrow(
+          link,
+          SHAPE_READ,
+        ) as typeof value;
+        // `Object.hasOwn`, not `in`: this trap reports on OWN properties, and
+        // `in` walks the prototype chain. Because the underlying value is an
+        // ordinary `Object.prototype`-rooted record, `in` reported every member of
+        // `Object.prototype` -- `toString`, `valueOf`, `constructor`, `__proto__`
+        // -- as an own property of the proxy, while `ownKeys` (which uses
+        // `Reflect.ownKeys`) listed none of them. Two traps describing the same
+        // value disagreed by construction, so every consumer that reasons about a
+        // read-back value's shape was being told it carries names it does not.
+        //
+        // That is not academic: `unsafeObjectKeyIn()` refuses a `FabricValue`
+        // carrying own `__proto__`/`constructor` and tests with `Object.hasOwn()`,
+        // so writing a read-back record back to a cell was rejected for a key the
+        // record never had, and every read-modify-write against a cell failed
+        // (loom CT-1949). The `has` trap below keeps `in` -- there it is correct,
+        // being the `in` operator's own trap.
+        if (
+          (isObjectOrArray(current) || Array.isArray(current)) &&
+          Object.hasOwn(current, prop)
+        ) {
+          return {
+            configurable: true,
+            enumerable: true,
+            writable: false,
+            value: createViewProxy(
+              runtime,
+              childViewTx(),
+              tx,
+              { ...link, path: [...link.path, prop as string] },
+              depth + 1,
+              childLabelView(cfcLabelView, String(prop)),
+              pinned,
+            ),
+          };
+        }
+        return undefined;
+      }),
+    has: (_target, prop) =>
+      atEpoch(() => {
+        if (typeof prop === "symbol") {
+          return prop in value;
+        }
+        const current = readTx().readValueOrThrow(link, SHAPE_READ);
+        if (isObjectOrArray(current) || Array.isArray(current)) {
+          // Probing whether a numeric index is present (`n in arr`) observes the
+          // array's key set: for a dense array the answer is `n < length`, but a
+          // sparse array has holes, so the answer depends on whether index `n` is
+          // specifically present — which a same-length hole fill or punch changes
+          // with no `length` write. Record a recursive read of the array (marked
+          // conflict-only, like ownKeys above) so an `n in arr`-derived mergeable
+          // write conflicts and retries instead of merging on a stale key set.
+          if (Array.isArray(current) && /^\d+$/.test(prop)) {
+            readTx().readValueOrThrow(link, { meta: ignoreReadForScheduling });
+          }
+          return prop in current;
+        }
+        return prop in value;
+      }),
     // A query-result proxy is a live, transaction-backed view: reads resolve
     // through the get trap on every access. Structural mutations (freeze, seal,
     // defineProperty, delete) cannot be honored without either corrupting the
@@ -700,7 +750,10 @@ function createViewProxy<T>(
 
   // Cache the proxy in the appropriate cache before returning
   txCache.byLink.set(cacheKey, proxy);
-  if (cfcLabelView === undefined) {
+  // Not the by-value index for a pinned view: it names a value rather than an
+  // instant, so it would hand a view taken at one epoch to a reader asking at
+  // another.
+  if (cfcLabelView === undefined && epoch === undefined) {
     txCache.byValue.set(value, proxy);
   }
   return remember(proxy);

@@ -64,11 +64,11 @@ wrapper classes (Section 1.4).
 > `packages/data-model/`. The fabric-value types and the base classes
 > (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`) are declared in
 > `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
-> `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
-> carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
+> `IS_DEEP_FROZEN`) in `fabric-bases/`, on `BaseFabricInstance` alongside the
+> abstract base that carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
 > `FabricCodec`, `LiveEnvironment`) lives in `codec-interface/` (Section 2),
 > and the machinery that acts on it in `codec-common/` -- including
-> `EncodeContext` and `DecodeContext`, which are classes the walk carries
+> `EncodeAct` and `DecodeAct`, which are classes the walk carries
 > rather than contracts a caller implements. The conversion functions are in
 > `native-conversion.ts` (Section 8).
 >
@@ -78,8 +78,9 @@ wrapper classes (Section 1.4).
 > their contents are reached through `@commonfabric/data-model/fabric-value`,
 > which re-exports them. `codec-interface/` is internal in the same way: it
 > is reached through `@commonfabric/data-model/codec-common`, which
-> re-exports it. `codec-common/` and `fabric-instances/` are exported subpaths
-> in their own right and are imported directly under those names;
+> re-exports it. `codec-common/`, `fabric-bases/` and `fabric-instances/` are
+> exported subpaths in their own right and are imported directly under those
+> names;
 > `fabric-value` does *not* re-export the codec vocabulary, so
 > `LiveEnvironment` and its siblings come from
 > `@commonfabric/data-model/codec-common`. Cite a module to say where
@@ -1479,7 +1480,7 @@ export const JSON_CODEC: unique symbol =
 ```
 
 ```typescript
-// file: packages/data-model/codec-common/BaseFabricInstance.ts
+// file: packages/data-model/fabric-bases/BaseFabricInstance.ts
 
 /**
  * Well-known symbol for deeply freezing a fabric instance in place. The
@@ -1624,7 +1625,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/codec-common/BaseFabricInstance.ts
+// file: packages/data-model/fabric-bases/BaseFabricInstance.ts
 
 /**
  * Abstract base class providing shared scaffolding for `FabricInstance`
@@ -2519,8 +2520,8 @@ Every engine exposes `encode()` and `decode()`, parameterized by the boundary
 type — `string` for JSON, `Uint8Array` for a binary format — and an engine may
 add a pair for a second boundary type, as `JsonCodecEngine` does for bytes.
 Both are supplied by the base class and are not overridden: they mint the
-act's context, run the walk, and hand off to the format at each end. What a
-format supplies is those two ends and the context factories, all `protected`
+act, run the walk, and hand off to the format at each end. What a format
+supplies is those two ends and the act factories, all `protected`
 — the surface a second engine extends rather than one a caller reaches.
 
 ```typescript
@@ -2528,26 +2529,25 @@ format supplies is those two ends and the context factories, all `protected`
 // file: packages/data-model/codec-common/BaseCodecEngine.ts
 
 abstract class ExampleEngine {
-  protected abstract newEncodeContext(
+  protected abstract newEncodeAct(
     env: LiveEnvironment,
-  ): EncodeContext;
-  protected abstract newDecodeContext(
+  ): EncodeAct;
+  protected abstract newDecodeAct(
     env: LiveEnvironment,
     data: string,
-  ): DecodeContext;
+  ): DecodeAct;
 
   protected abstract serializedFromEncoded(
     encoded: JsonCodecValue,
-    ctx: EncodeContext,
+    act: EncodeAct,
   ): string;
   protected abstract encodedFromSerializedForm(
     data: string,
-    ctx: DecodeContext,
   ): JsonCodecValue;
 }
 ```
 
-Minting the context in the base rather than in each engine is what makes
+Minting the act in the base rather than in each engine is what makes
 *per act* structural: an engine cannot hold one across calls, because it
 never gets to decide when one is made.
 
@@ -2555,19 +2555,19 @@ never gets to decide when one is made.
 handed is its own. What arrives there is data off a channel like anything
 else, so a form that is not this format's is refused by throwing, and
 `decode()` settles that against the engine's `lenient` setting — a lenient
-decode answers a syntactic fault with a `ProblematicValue`, exactly as it
-does a fault found further in. `newDecodeContext()` sees the same form and
+decode returns a `ProblematicValue` for a syntactic fault, exactly as it
+does for a fault found further in. `newDecodeAct()` sees the same form and
 may read something out of it for the act, but it *sniffs rather than
 validates*: it runs before anything has established that the form is this
 format's at all.
 
-The context is what the walk threads from node to node: the caller's
+The act is what the walk threads from node to node: the caller's
 `LiveEnvironment`, and the values whose encoding or decoding is in
 progress. Holding it per call rather than on the engine is what lets
 a codec reach back through a public entry point while a walk is already
 running — the inner act gets its own bookkeeping instead of corrupting the
 outer one's. A format needing more than the base class knows about, such as a
-wire marker minted per call, subclasses the context and carries it there.
+wire marker minted per call, subclasses the act and carries it there.
 
 `JsonCodecEngine` supplies both directions at both of its boundary types:
 
@@ -2827,10 +2827,10 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    from this arm
    are guaranteed deep-frozen at the walker boundary (the contract holds
    for both the codec-produced value and the lenient-mode
-   `ProblematicValue`), so callers need not each freeze. This contract is
-   scoped to this arm only; the unknown-tag arm (step 5) is intentionally
-   not covered. See Section 8.6 for the full deep-freeze protocol and the
-   egress-freezing call sites.
+   `ProblematicValue`), so callers need not each freeze. Every other arm
+   guarantees the same, the unknown-tag arm (step 5) included, so a caller
+   need not ask which arm produced what it was handed. See Section 8.6 for
+   the full deep-freeze protocol and the egress-freezing call sites.
 5. **Unknown tags** — a syntactically valid tag with no registered codec
    produces an `UnknownValue` wrapping the tag and (already-decoded) state,
    preserving the form for round-tripping (Section 3). Syntax is what
@@ -3010,8 +3010,9 @@ The implementation is split across several files for separation of concerns:
 |------|---------|
 | `fabric-value.ts` | Public surface: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), and the clone helpers (from `value-clone.ts`); defines `valueEqual()` |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isFabricCompatible` |
-| `fabric-instances/` | `FabricInstance` subclasses, each in its own file: `BaseFabricInstance.ts`, `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricMap.ts`, `FabricSet.ts`, `UnknownValue.ts`, `ProblematicValue.ts` (plus an `index.ts` barrel). |
-| `fabric-primitives/` | `FabricPrimitive` subclasses, each in its own file: `BaseFabricPrimitive.ts`, `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDays.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
+| `fabric-bases/` | The abstract bases a concrete fabric value extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
+| `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |
+| `fabric-primitives/` | Concrete `FabricPrimitive` subclasses, each in its own file: `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDays.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
 
 ---
 
@@ -3978,14 +3979,21 @@ Visited objects are tracked in a per-call `Set` for cycle safety.
 The deep-freeze contract is enforced at the points where decoded
 values cross from internal codec machinery to callers:
 
-- **The decode walker's codec dispatch arm.**
-  Every value returned from this arm passes through `deepFreeze()` before
-  returning. This covers the codec-produced value (often a
-  `FabricPrimitive` subclass, already frozen — the cache hit makes this
-  O(1)) and the lenient-mode `ProblematicValue` fallback. The
-  unknown-tag arm (`UnknownValue`) is a separate sibling branch and is
-  intentionally NOT covered by this contract; broadening the contract
-  there is a separate follow-on. See Section 4.5 step 4.
+- **Every value the decode walker returns is deep-frozen at the boundary**,
+  whichever arm produced it. The arms reach that by two routes. A leaf arm
+  calls `deepFreeze()`: the codec-produced value (often a `FabricPrimitive`
+  subclass, already frozen — the cache hit makes this O(1)), the lenient-mode
+  `ProblematicValue` fallback, and the unknown-tag arm's `UnknownValue`. A
+  container arm calls `Object.freeze()` on the array or object it has just
+  built, whose children the leaf arms have already deep-frozen, so the
+  guarantee holds without walking them a second time. Which arm produced a
+  value is therefore not something a caller has to know. See Section 4.5
+  step 4.
+
+- **`ProblematicStateError.asProblematicValue()`.** The rendering of a thrown
+  refusal as a returned value is deep-frozen where it is built, rather than at
+  each call site, so a caller reaching it outside the walker gets the same
+  guarantee.
 
 - **`JsonCodecValue` parse boundary.** The `#parseWireText()` helper
   (invoked by `decode()` and `#fromBytes()`) deep-freezes the parsed tree

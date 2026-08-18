@@ -36,9 +36,9 @@ export interface ExecCommandOptions {
  * What `cf exec` writes, and where.
  *
  * **stdout carries the machine surface, and only it.** A tool's is its result
- * — the same bytes `cf piece call` prints for the same tool, now shaped by
+ * — the same bytes `cf call` prints for the same tool, now shaped by
  * whatever the caller selected. A handler's is the Invocation JSON its
- * handling settled to, which is the envelope `cf piece call` already declares:
+ * handling settled to, which is the envelope `cf call` already declares:
  * `cf exec` reaches a verb through a filesystem mount rather than through a
  * piece address, and that is the whole of the difference between them.
  *
@@ -46,7 +46,7 @@ export interface ExecCommandOptions {
  * takes it.** An address has three parts, and `canonicalAddress` renders all
  * three as the one token `--piece` parses, the space embedded as its
  * `/@did:.../` prefix. Naming the space is not decoration — `cf exec` takes
- * its space from the mount, while `cf piece get` falls back to whatever space
+ * its space from the mount, while `cf get` falls back to whatever space
  * the caller has configured, so a token that omitted it would suggest a
  * command that reads a different cell.
  *
@@ -71,7 +71,7 @@ export function renderExecOutcome(
     if (result.resultRef) {
       const address = canonicalAddress(result.resultRef);
       writeError(
-        `Tool result cell: ${address} (read it back with \`cf piece get ` +
+        `Tool result cell: ${address} (read it back with \`cf get ` +
           `--piece ${address}\`)`,
       );
     }

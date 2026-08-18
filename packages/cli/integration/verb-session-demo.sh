@@ -325,16 +325,20 @@ say "call was turned down before an invocation was spent."
 
 act "12 · Relate two items"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
-say "The spelling this session taught throughout — the address as printed — is"
-say "the one thing still refused here (references-as-arguments.md)."
-refused "the address a read emits, as a verb argument" \
-  "value does not match type object" \
-  cf call -s "$SPACE" "$KID" blockOn -- --on "$CSRF"
-say "The capability itself landed: wrap the same address in the link envelope"
-say "by hand, and the edge that lands is the target rather than a copy. The"
-say "assembly is the workaround; the refusal above is this act's claim that it"
-say "is still needed, and the day it stops being refused, this act says so."
-run cf call -s "$SPACE" --select blocked@,on@,blockedOnCount "$KID" blockOn "{\"on\":{\"/\":{\"link@1\":{\"id\":\"${CSRF#/}\"}}}}"
+say "The spelling this session taught throughout — the address as printed —"
+say "stands where the verb declares a reference, and the edge that lands is"
+say "the target itself rather than a copy."
+run cf call -s "$SPACE" --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
+say "The two payloads that could only ever be mistakes at a reference"
+say "position are refused naming it: a string that is no address, and an"
+say "inline copy — which would store a detached document inside this item"
+say "and report success."
+refused "a string that is not an address, where a reference is declared" \
+  "is not an address" \
+  cf call -s "$SPACE" "$KID" blockOn -- --on "not-an-address"
+refused "an inline copy at a reference position" \
+  "detached document" \
+  cf call -s "$SPACE" "$KID" blockOn '{"on":{"title":"a copy"}}'
 
 act "13 · One item, two paths, one address"
 say "This is what addresses are for: the same item under a parent AND as a"
@@ -354,11 +358,10 @@ say "is the composition the verb surface exists for. On those lines the flags"
 say "that remain name the space and shape the answer; the slug keeps --piece,"
 say "and a verb's own flags stay the verb's."
 say ""
-say "Acts 12 and 13 are the graph half, live minus one spelling: the printed"
-say "address is still refused as an argument, and the envelope assembly beside"
-say "that refusal retires the day it stops being refused — act 12 and"
-say "verb-session-gaps.sh both report that day, so this demo cannot quietly"
-say "go stale."
+say "Acts 12 and 13 are the graph half: the printed address stands as a verb"
+say "argument where the pattern declares a reference, and one address read"
+say "back from two positions is what proves the board holds an edge rather"
+say "than a copy."
 
 if [ "$UNEXPECTED" != "0" ]; then
   printf '\n%s━━ %d act(s) failed that this demo says work%s\n' \

@@ -5,8 +5,8 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 import type { FabricValue } from "@/interface.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
-import { DecodeContext } from "@/codec-common/DecodeContext.ts";
-import { EncodeContext } from "@/codec-common/EncodeContext.ts";
+import { DecodeAct } from "@/codec-common/DecodeAct.ts";
+import { EncodeAct } from "@/codec-common/EncodeAct.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { CODEC, type LiveEnvironment } from "@/codec-interface/interface.ts";
@@ -30,7 +30,7 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * - `decodeFromBytes(bytes, env)` -- as `decode()`, from UTF-8 bytes
  *
  * The machinery beneath is not public, and divides in two. The tree
- * walkers, the tag wrapper and the context factories are `protected`:
+ * walkers, the tag wrapper and the act factories are `protected`:
  * that is the surface a second engine extends, whether or not this one
  * overrides any given member of it. This class's own helpers -- byte
  * conversion, wire-text parsing, tag unwrapping and the container decode
@@ -55,22 +55,22 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   //
 
   /** @inheritDoc */
-  protected override newEncodeContext(env: LiveEnvironment): EncodeContext {
-    return new EncodeContext(env);
+  protected override newEncodeAct(env: LiveEnvironment): EncodeAct {
+    return new EncodeAct(this, env);
   }
 
   /**
    * @inheritDoc
    *
    * A plain one: this walk never enters a node, for the reason
-   * {@link #decode} gives, so the context's in-progress set is never
+   * {@link #decode} gives, so the act's in-progress set is never
    * allocated.
    */
-  protected override newDecodeContext(
+  protected override newDecodeAct(
     env: LiveEnvironment,
     _data: string,
-  ): DecodeContext {
-    return new DecodeContext(env);
+  ): DecodeAct {
+    return new DecodeAct(this, env);
   }
 
   /**
@@ -80,7 +80,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override serializedFromEncoded(
     encoded: JsonCodecValue,
-    _ctx: EncodeContext,
+    _act: EncodeAct,
   ): string {
     return ENCODING_PREFIX_TAG + JSON.stringify(encoded);
   }
@@ -114,7 +114,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
   ): Uint8Array {
     return JsonCodecEngine.#toBytes(
-      this.encodeValue(value, this.newEncodeContext(env)),
+      this.encodeValue(value, this.newEncodeAct(env)),
     );
   }
 
@@ -128,16 +128,16 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
   ): FabricValue {
     const text = JsonCodecEngine.#textDecoder.decode(bytes);
-    const ctx = this.newDecodeContext(env, text);
+    const act = this.newDecodeAct(env, text);
     let tree: JsonCodecValue;
 
     try {
       tree = JsonCodecEngine.#parseWireText(text);
     } catch (e) {
-      return this.settleSyntacticRefusal(e);
+      return act.settleThrown(e);
     }
 
-    return this.decodeValue(tree, ctx);
+    return this.decodeValue(tree, act);
   }
 
   /**
@@ -156,7 +156,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   protected override wrapTag(
     tag: string,
     state: JsonCodecValue,
-    _ctx: EncodeContext,
+    _act: EncodeAct,
   ): JsonCodecValue {
     return { [`/${tag}`]: state } as JsonCodecValue;
   }
@@ -169,9 +169,9 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override encodeArray(
     value: readonly FabricValue[],
-    ctx: EncodeContext,
+    act: EncodeAct,
   ): JsonCodecValue {
-    ctx.enter(value);
+    act.enter(value);
 
     const result: JsonCodecValue[] = [];
     try {
@@ -184,15 +184,15 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
             i++;
           }
           result.push(
-            Object.freeze(this.wrapTag(CODEC_META_TAGS.hole, count, ctx)),
+            Object.freeze(this.wrapTag(CODEC_META_TAGS.hole, count, act)),
           );
         } else {
-          result.push(this.encodeValue(value[i]!, ctx));
+          result.push(this.encodeValue(value[i]!, act));
           i++;
         }
       }
     } finally {
-      ctx.leave(value);
+      act.leave(value);
     }
 
     return result as JsonCodecValue;
@@ -214,9 +214,9 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override encodePlainObject(
     value: Record<string, FabricValue>,
-    ctx: EncodeContext,
+    act: EncodeAct,
   ): JsonCodecValue {
-    ctx.enter(value);
+    act.enter(value);
 
     const result: Record<string, JsonCodecValue> = {};
     let anySlashKey = false;
@@ -227,10 +227,10 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
         if (key.startsWith("/")) {
           anySlashKey = true;
         }
-        result[key] = this.encodeValue(value[key]!, ctx);
+        result[key] = this.encodeValue(value[key]!, act);
       }
     } finally {
-      ctx.leave(value);
+      act.leave(value);
     }
 
     if (anySlashKey) {
@@ -243,10 +243,10 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
           ),
         );
         return Object.freeze(
-          this.wrapTag(CODEC_META_TAGS.quote, unquoted, ctx),
+          this.wrapTag(CODEC_META_TAGS.quote, unquoted, act),
         );
       }
-      return Object.freeze(this.wrapTag(CODEC_META_TAGS.object, result, ctx));
+      return Object.freeze(this.wrapTag(CODEC_META_TAGS.object, result, act));
     }
 
     return result as JsonCodecValue;
@@ -263,7 +263,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override decodeValue(
     data: JsonCodecValue,
-    ctx: DecodeContext,
+    act: DecodeAct,
   ): FabricValue {
     const decoded = JsonCodecEngine.#unwrapTag(data);
     if (decoded !== null) {
@@ -282,16 +282,16 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
           // Same reservation as the plain-object arm below: the assignment
           // cannot rebuild these names.
           if (isUnsafeObjectKey(key)) {
-            return this.reportReservedKey(key, inner);
+            return act.reportReservedKey(key, inner);
           }
-          result[key] = this.decodeValue(val, ctx);
+          result[key] = this.decodeValue(val, act);
         }
         return Object.freeze(result);
       }
 
       // `/quote` and `/object` returned above, so no codec ever sees their
       // state, and `/quote` contents alone go undecoded.
-      return this.decodeTagged(tag, rawState, ctx);
+      return this.decodeTagged(tag, rawState, act);
     }
 
     // Primitives pass through.
@@ -303,14 +303,14 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     }
 
     if (Array.isArray(data)) {
-      return this.#decodeArray(data, ctx);
+      return this.#decodeArray(data, act);
     }
 
     // `Array.isArray()` above removed the array arm, but TypeScript keeps it
     // in the union; the remaining member is the record.
     return this.#decodePlainObject(
       data as Record<string, JsonCodecValue>,
-      ctx,
+      act,
     );
   }
 
@@ -336,7 +336,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   #decodeArray(
     data: readonly JsonCodecValue[],
-    ctx: DecodeContext,
+    act: DecodeAct,
   ): FabricValue {
     const result: FabricValue[] = new Array(data.length);
     let targetIndex = 0;
@@ -347,7 +347,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       ) {
         const count = entryDecoded.state;
         if (!JsonCodecEngine.#isHoleCount(count)) {
-          return this.reportMalformed(
+          return act.reportMalformed(
             CODEC_META_TAGS.hole,
             count,
             `hole: expected a positive integer count, got ${
@@ -357,7 +357,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
         }
         targetIndex += count;
       } else {
-        result[targetIndex] = this.decodeValue(entry, ctx);
+        result[targetIndex] = this.decodeValue(entry, act);
         targetIndex++;
       }
     }
@@ -369,7 +369,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     // machinery, which says nothing about the wire that caused it.
     const MAX_ARRAY_LENGTH = 0xffff_ffff;
     if (targetIndex > MAX_ARRAY_LENGTH) {
-      return this.reportMalformed(
+      return act.reportMalformed(
         CODEC_META_TAGS.hole,
         data,
         `hole: runs total ${targetIndex} elements, past the ` +
@@ -388,12 +388,12 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   #decodePlainObject(
     data: Record<string, JsonCodecValue>,
-    ctx: DecodeContext,
+    act: DecodeAct,
   ): FabricValue {
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
       if (key.startsWith("/")) {
-        return this.reportMalformed(
+        return act.reportMalformed(
           key.slice(1),
           data,
           `object contains reserved /-prefixed key: "${key}"`,
@@ -405,9 +405,9 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       // implementation, whose write path refuses it, so report it rather than
       // decoding something the bytes do not say.
       if (isUnsafeObjectKey(key)) {
-        return this.reportReservedKey(key, data);
+        return act.reportReservedKey(key, data);
       }
-      result[key] = this.decodeValue(val, ctx);
+      result[key] = this.decodeValue(val, act);
     }
     return Object.freeze(result);
   }

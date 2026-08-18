@@ -15,7 +15,7 @@ import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";

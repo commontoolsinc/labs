@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the environment
+// is parsed once, as env.ts loads, so the variables this file sets must be set
+// before the router pulls it in.
+
 // Integration tests for the state-inspector remote dump endpoint.
 //
 // env is parsed once at module load, so we set the MEMORY_DUMP_* vars and a

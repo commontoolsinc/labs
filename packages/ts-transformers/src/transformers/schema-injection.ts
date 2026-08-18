@@ -51,8 +51,10 @@ import {
   type CapabilitySummaryApplicationMode,
   containsAnyOrUnknownTypeNode,
   isCellLikeTypeNode,
+  overlayContractCapabilities,
   preservedWrapperFor,
   printTypeNode,
+  validateShrinkCoverage,
 } from "./type-shrinking.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
@@ -312,6 +314,40 @@ function applyCapabilitySummaryToArgument(
   if (!paramSummary) {
     return argumentNode;
   }
+  if (mode === "contract") {
+    // The contract half of docs/history/plans/verb-input-contract.md: the authored
+    // event serves verbatim in structure, with capabilities overlaid from
+    // the body's usage and unobserved cell positions made opaque. The
+    // body's observed paths still validate against the authored type — a
+    // read of an unknown-typed property is an authoring error under either
+    // mode.
+    const overlaid = overlayContractCapabilities(
+      argumentNode,
+      argumentType,
+      paramSummary,
+      checker,
+      factory,
+      sourceFile,
+      context?.state.typeRegistry,
+    );
+    if (context) {
+      validateShrinkCoverage(
+        paramSummary,
+        argumentNode,
+        argumentType,
+        [
+          ...paramSummary.readPaths,
+          ...paramSummary.writePaths,
+          ...paramSummary.fullShapePaths ?? [],
+        ],
+        overlaid,
+        context,
+        fnNode ?? fn,
+        checker,
+      );
+    }
+    return overlaid;
+  }
   const innerTypeNode = extractCellLikeInnerTypeNode(argumentNode) ??
     typeToSchemaTypeNode(
       argumentType && isCellLikeType(argumentType, checker)
@@ -363,6 +399,7 @@ function applyCapabilitySummaryToParameter(
   factory: ts.NodeFactory,
   context?: TransformationContext,
   fnNode?: ts.Node,
+  mode: CapabilitySummaryApplicationMode = "full",
 ): ts.TypeNode | undefined {
   if (!parameterNode) return parameterNode;
 
@@ -377,6 +414,35 @@ function applyCapabilitySummaryToParameter(
   );
   if (!paramSummary) {
     return parameterNode;
+  }
+  if (mode === "contract") {
+    // See the matching branch in applyCapabilitySummaryToArgument.
+    const overlaid = overlayContractCapabilities(
+      parameterNode,
+      parameterType,
+      paramSummary,
+      checker,
+      factory,
+      sourceFile,
+      context?.state.typeRegistry,
+    );
+    if (context) {
+      validateShrinkCoverage(
+        paramSummary,
+        parameterNode,
+        parameterType,
+        [
+          ...paramSummary.readPaths,
+          ...paramSummary.writePaths,
+          ...paramSummary.fullShapePaths ?? [],
+        ],
+        overlaid,
+        context,
+        fnNode ?? fn,
+        checker,
+      );
+    }
+    return overlaid;
   }
 
   const innerTypeNode = extractCellLikeInnerTypeNode(parameterNode);
@@ -405,7 +471,7 @@ function applyCapabilitySummaryToParameter(
     checker,
     sourceFile,
     factory,
-    "full",
+    mode,
     paramSummary.capability,
     context,
     fnNode ?? fn,
@@ -1228,6 +1294,7 @@ function applyCallbackBuilderArgumentCapabilitySummary(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   context: TransformationContext,
+  mode: CapabilitySummaryApplicationMode = "full",
 ): {
   argumentTypeNode: ts.TypeNode;
   argumentTypeValue: ts.Type | undefined;
@@ -1243,7 +1310,7 @@ function applyCallbackBuilderArgumentCapabilitySummary(
     checker,
     sourceFile,
     factory,
-    "full",
+    mode,
     context,
     callback,
   );
@@ -1300,6 +1367,7 @@ function resolveDualSchemaBuilderTypes(
       sourceFile,
       factory,
       context,
+      options?.capabilityMode ?? "full",
     ));
   }
 
@@ -3338,6 +3406,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               typeRegistry,
             );
 
+            // The event is a verb's input contract: authored structure,
+            // usage-derived capability values (docs/history/plans/verb-input-contract.md).
+            // A synthetic event node has no authored structure to serve —
+            // JSX handler events among them — so those keep the usage shrink.
             eventTypeNode = applyCapabilitySummaryToParameter(
               handlerFn,
               0,
@@ -3348,6 +3420,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               factory,
               context,
               handlerFn,
+              isSyntheticNode(eventType) ? "full" : "contract",
             ) ?? eventType;
 
             stateTypeNode = applyCapabilitySummaryToParameter(
@@ -3415,7 +3488,13 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
           );
           if (handlerCandidate && handlerFn) {
-            // Infer types from the handler function for both parameters
+            // Infer types from the handler function for both parameters. The
+            // event is a verb's input contract, so an AUTHORED event type —
+            // an explicit parameter annotation — is served in `contract`
+            // mode: authored structure, usage-derived capability values. An
+            // inferred event keeps the usage shrink, which for a handler with
+            // no authored type is the only contract there is.
+            const eventParameterTypeNode = handlerFn.parameters[0]?.type;
             const inferred = collectFunctionSchemaTypeNodes(
               handlerFn,
               checker,
@@ -3423,7 +3502,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               factory,
               undefined,
               typeRegistry,
-              "full",
+              eventParameterTypeNode && !isSyntheticNode(eventParameterTypeNode)
+                ? "contract"
+                : "full",
               context,
             );
 
@@ -3445,6 +3526,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 factory,
                 undefined,
                 handlerFn,
+                "contract",
               ) ?? eventTypeBase;
 
             // State type: use helper for second parameter
@@ -3669,7 +3751,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "builder" && callKind.builderName === "lift") {
         const factory = transformation.factory;
 
-        const firstArgument = node.arguments[0];
+        const firstArgument = node.arguments[0] &&
+          unwrapExpression(node.arguments[0]);
         if (firstArgument && isToSchemaCall(firstArgument)) {
           const argumentType = firstArgument.typeArguments?.[0];
           const liftCallback = resolveFunctionLikeExpression(

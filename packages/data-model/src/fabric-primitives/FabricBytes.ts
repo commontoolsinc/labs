@@ -5,7 +5,7 @@ import {
 import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";

@@ -15,6 +15,7 @@ import {
   HelpersOnlyTransformer,
   TransformationContext,
 } from "../core/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
@@ -87,7 +88,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           );
         }
 
-        const arg0 = node.arguments[0];
+        const arg0 = node.arguments[0] && unwrapExpression(node.arguments[0]);
         let optionsObj: Record<string, unknown> = {};
         let widenLiterals: boolean | undefined;
         if (arg0 && ts.isObjectLiteralExpression(arg0)) {
