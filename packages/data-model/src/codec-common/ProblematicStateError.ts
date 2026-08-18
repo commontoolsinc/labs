@@ -3,6 +3,7 @@ import { toCompactDebugString } from "@/value-debug.ts";
 import { toReportableState } from "./toReportableState.ts";
 import { toReportableTag } from "./toReportableTag.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
 
 /**
  * Error thrown when a state cannot be decoded and the engine is not lenient.
@@ -62,9 +63,15 @@ export class ProblematicStateError extends Error {
    * of the same failure, in the form that is returned rather than thrown.
    * Both classes normalize a tag and a state the same way, so a value from
    * here is comparable with one built directly.
+   *
+   * Deep-frozen, because a decode returns one of these and every value a
+   * decode returns is deep-frozen. Freezing here rather than at each call
+   * site is what keeps that from depending on a caller remembering.
    */
   asProblematicValue(): ProblematicValue {
-    return new ProblematicValue(this.wireTypeTag, this.state, this.message);
+    return deepFreeze(
+      new ProblematicValue(this.wireTypeTag, this.state, this.message),
+    );
   }
 
   //

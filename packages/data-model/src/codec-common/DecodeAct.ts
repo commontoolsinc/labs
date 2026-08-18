@@ -86,8 +86,8 @@ export class DecodeAct extends BaseCodecAct {
     if (this.config.lenient && (e instanceof ProblematicStateError)) {
       // The error renders itself rather than being taken apart and rebuilt:
       // it already holds the three facts, normalized the way this class would
-      // normalize them.
-      return deepFreeze(e.asProblematicValue());
+      // normalize them, and hands back a deep-frozen value.
+      return e.asProblematicValue();
     }
 
     // Rethrown rather than rebuilt, strictly: the refusal already names its

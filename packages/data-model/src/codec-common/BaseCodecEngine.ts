@@ -358,9 +358,9 @@ export abstract class BaseCodecEngine<
    * whatever a format found in tag position, of whatever type, and a subclass
    * is not expected to know what a tag may look like.
    *
-   * Frozen-ness contract: a value returned through the codec arm here is
-   * deep-frozen, so callers do not each have to freeze. The unknown-tag
-   * fallback is a separate arm and is intentionally NOT covered by it.
+   * Frozen-ness contract: every value returned from here is deep-frozen, so
+   * callers do not each have to freeze, and a caller need not ask which arm
+   * produced what it was handed.
    *
    * Three of the arms below walk the state again -- a nonterminal codec's, an
    * unknown tag's, and a malformed tag's -- and each carries `act` into that
@@ -393,9 +393,8 @@ export abstract class BaseCodecEngine<
 
     if (matched === undefined) {
       // A tag this registry does not carry, kept in the unknown form so that
-      // it round-trips. Not covered by the deep-frozen contract the codec arm
-      // below states.
-      return new UnknownValue(tag, this.decodeValue(rawState, act));
+      // it round-trips.
+      return deepFreeze(new UnknownValue(tag, this.decodeValue(rawState, act)));
     }
 
     // A terminal codec takes the state exactly as it arrived; a nonterminal
