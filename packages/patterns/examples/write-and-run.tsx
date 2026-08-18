@@ -9,6 +9,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -17,6 +18,8 @@ interface Input {
 }
 
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   prompt: string;
 }
 
