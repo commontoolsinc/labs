@@ -43,31 +43,32 @@ async function fetchRuns(repo: string, workflow: string): Promise<Run[]> {
   const cutoff = Date.now() - CI_RUNS_MAX_AGE_DAYS * 86_400_000;
   const collected = new Map<number, Run>();
   const pages = Math.ceil(CI_RUNS_MAX / 100);
-  let previousPageOldest: Run | undefined;
+  let anchor: Run | undefined;
   walk:
   for (let page = 1; page <= pages; page++) {
+    // A page after the first asks for the runs created at or before the one the
+    // page before it ended on, rather than for an offset into a list that shifts
+    // as runs land and that each request can be answered from a different moment
+    // of. The anchor is a run the window already holds, so the page has to carry
+    // it: a page that does not was cut from a moment that never held that run,
+    // and joining the two would leave a hole in the window. Anchoring costs the
+    // one run each page repeats, which is why the window is up to CI_RUNS_MAX.
+    const anchored = anchor
+      ? `&created=${encodeURIComponent(`<=${anchor.created_at}`)}`
+      : "";
     const r = await github<{ workflow_runs: Run[] }>(
-      `repos/${repo}/actions/workflows/${workflow}/runs?branch=main&per_page=100&page=${page}`,
+      `repos/${repo}/actions/workflows/${workflow}/runs?branch=main&per_page=100${anchored}`,
     );
     const batch = r.workflow_runs ?? [];
     if (!batch.length) break;
-    // Each page is the slice of one list that carries on from the page before
-    // it. A page that opens on a run newer than the one the previous page ended
-    // on, and that the previous page did not carry, was cut from a different
-    // moment: joining the two leaves a hole in the window and can put a run from
-    // weeks back at the head, where every tile reads the state of the tree.
-    const first = batch[0];
-    if (
-      previousPageOldest && !collected.has(first.id) &&
-      Date.parse(first.created_at) >
-        Date.parse(previousPageOldest.created_at)
-    ) {
+    if (anchor && !batch.some((run) => run.id === anchor!.id)) {
       throw new Error(
-        `GitHub ${repo} ${workflow} runs page ${page} opens at ${first.created_at}, ` +
-          `after page ${page - 1} ended at ${previousPageOldest.created_at}`,
+        `GitHub ${repo} ${workflow} runs at or before ${anchor.created_at} came ` +
+          `back without run ${anchor.id}, opening on ${batch[0].id} of ` +
+          `${batch[0].created_at}`,
       );
     }
-    previousPageOldest = batch[batch.length - 1];
+    anchor = batch[batch.length - 1];
     for (const run of batch) {
       const t = Date.parse(run.run_started_at);
       if (Number.isFinite(t) && t < cutoff) break walk; // newest-first, so the rest are older too

@@ -48,7 +48,10 @@ function run(over: Partial<Run> = {}): Run {
 const runs = (n: number, from = 1) =>
   Array.from({ length: n }, (_, i) => run({ id: from + i }));
 
-const pageOf = (url: string) => Number(new URL(url).searchParams.get("page"));
+// The first request carries no anchor; every later one asks for the runs at or
+// before the run the page before it ended on.
+const anchorOf = (url: string) => new URL(url).searchParams.get("created");
+const first = (url: string) => anchorOf(url) === null;
 
 // Run `body` against a stubbed GitHub API. `reply` answers each request with the
 // workflow_runs for that url; `urls` collects every url asked for, so a test can
@@ -82,12 +85,12 @@ async function withGithub(
 
 Deno.test("runs(): labs main-branch runs of the CI workflow, each tagged with its repo", async () => {
   await withGithub(
-    (url) => (pageOf(url) === 1 ? runs(2) : []),
+    (url) => (first(url) ? runs(2) : []),
     async (ctx, urls) => {
       const out = await ctx.runs();
       assertEquals(
         urls[0],
-        `https://api.github.com/repos/${REPO}/actions/workflows/${CI_WORKFLOW}/runs?branch=main&per_page=100&page=1`,
+        `https://api.github.com/repos/${REPO}/actions/workflows/${CI_WORKFLOW}/runs?branch=main&per_page=100`,
       );
       assertEquals(out.map((r) => r.id), [1, 2]);
       // A combined stream needs to know which repo a row came from; nothing in the
@@ -99,7 +102,7 @@ Deno.test("runs(): labs main-branch runs of the CI workflow, each tagged with it
 
 Deno.test("runs(): a second read within the TTL is served from the cache, not refetched", async () => {
   await withGithub(
-    (url) => (pageOf(url) === 1 ? runs(2) : []),
+    (url) => (first(url) ? runs(2) : []),
     async (ctx, urls) => {
       const first = await ctx.runs();
       const second = await ctx.runs();
@@ -115,7 +118,7 @@ Deno.test("runs(): a second read within the TTL is served from the cache, not re
 
 Deno.test("runsFor: each repo and workflow is cached separately", async () => {
   await withGithub((url) => {
-    if (pageOf(url) !== 1) return [];
+    if (!first(url)) return [];
     return url.includes(LOOM_REPO) ? [run({ id: 77 })] : [run({ id: 11 })];
   }, async (ctx, urls) => {
     const labs = await ctx.runsFor(REPO, CI_WORKFLOW);
@@ -141,12 +144,13 @@ Deno.test("runsFor: each repo and workflow is cached separately", async () => {
 
 Deno.test("runs(): pages accumulate in order until a page comes back empty", async () => {
   await withGithub(
-    (url) => (pageOf(url) === 1 ? runs(100) : runs(3, 101)),
+    // The anchored page opens on the run page one ended on, then carries on.
+    (url) => (first(url) ? runs(100) : [run({ id: 100 }), ...runs(3, 101)]),
     async (ctx, urls) => {
       const out = await ctx.runs();
       assertEquals(out.length, 103);
       assertEquals(out[100].id, 101); // page 2 follows page 1, newest-first order kept
-      assertEquals(urls.map(pageOf), [1, 2]);
+      assertEquals(urls.map(first), [true, false]);
     },
   );
 });
@@ -161,7 +165,7 @@ Deno.test("runs(): an empty first page stops the walk rather than asking for the
 Deno.test("runs(): the stream is capped at CI_RUNS_MAX, mid-page if need be", async () => {
   // The stub over-serves: one page holds more than the cap.
   await withGithub(
-    (url) => (pageOf(url) === 1 ? runs(CI_RUNS_MAX + 50) : []),
+    (url) => (first(url) ? runs(CI_RUNS_MAX + 50) : []),
     async (ctx, urls) => {
       const out = await ctx.runs();
       assertEquals(out.length, CI_RUNS_MAX);
@@ -180,7 +184,7 @@ Deno.test("runs(): a run past the age cutoff ends the stream", async () => {
     });
   await withGithub(
     (url) =>
-      pageOf(url) === 1
+      first(url)
         ? [
           at(1, 1),
           at(2, CI_RUNS_MAX_AGE_DAYS + 1),
@@ -200,7 +204,7 @@ Deno.test("runs(): a run past the age cutoff ends the stream", async () => {
 Deno.test("runs(): a run with an unreadable start time is kept, not read as ancient", async () => {
   await withGithub(
     (url) =>
-      pageOf(url) === 1
+      first(url)
         ? [run({ id: 1, run_started_at: "" }), run({ id: 2 })]
         : [],
     async (ctx) => {
@@ -254,7 +258,7 @@ Deno.test("runs(): a run keeps only the fields tiles read", async () => {
   };
   await withGithub(
     (url) =>
-      pageOf(url) === 1 ? [{ ...run({ id: 7 }), ...surplus } as Run] : [],
+      first(url) ? [{ ...run({ id: 7 }), ...surplus } as Run] : [],
     async (ctx) => {
       const [only] = await ctx.runs();
       assertEquals(only.id, 7);
@@ -277,37 +281,64 @@ const aged = (id: number, msAgo: number) => {
   return run({ id, created_at: at, run_started_at: at });
 };
 
-Deno.test("runs(): pages cut from different moments are refused, not spliced", async () => {
-  // Page one answers from a month back while page two answers from now. Joined,
-  // they would read as one window with a month-wide hole and a stale run at the
-  // head, which is the state of the tree every CI tile reports.
+Deno.test("runs(): an anchored page that does not carry its anchor is refused", async () => {
+  // Page one is current; the anchored page answers from a month back and has
+  // never heard of the run it was anchored to. Joined, they would read as one
+  // window with a month-wide hole, and the streak the build tile walks would run
+  // off the end of the current runs into the stale ones.
   await withGithub(
     (url) =>
-      pageOf(url) === 1
+      first(url)
+        ? Array.from({ length: 100 }, (_, i) => aged(1 + i, 3 * DAY_MS + i * 60_000))
+        : Array.from({ length: 100 }, (_, i) => aged(1000 + i, 35 * DAY_MS + i * 60_000)),
+    async (ctx) => {
+      const error = await assertRejects(() => ctx.runs(), Error);
+      assertStringIncludes(error.message, "came back without run 100");
+    },
+  );
+});
+
+Deno.test("runs(): a page anchored to a run the source no longer knows is refused", async () => {
+  // The other way round: page one answers from a month back, so the anchor is a
+  // run from then. A page that comes back without it is refused just the same,
+  // whichever side of the join went stale.
+  await withGithub(
+    (url) =>
+      first(url)
         ? Array.from({ length: 100 }, (_, i) => aged(1000 + i, 35 * DAY_MS + i * 60_000))
         : Array.from({ length: 100 }, (_, i) => aged(1 + i, 3 * DAY_MS + i * 60_000)),
     async (ctx) => {
       const error = await assertRejects(() => ctx.runs(), Error);
-      assertStringIncludes(error.message, "runs page 2 opens at");
+      assertStringIncludes(error.message, "came back without run 1099");
     },
   );
 });
 
-Deno.test("runs(): the newest run heads the window whatever order a page arrives in", async () => {
-  await withGithub(
-    (url) => (pageOf(url) === 1 ? [aged(1, 35 * DAY_MS), aged(2, 3_600_000)] : []),
-    async (ctx) => {
-      assertEquals((await ctx.runs()).map((r) => r.id), [2, 1]);
-    },
-  );
+Deno.test("runs(): a page is asked for by anchor, not by offset", async () => {
+  // Built once, so the assertion names the same run the stub served rather than
+  // a run stamped a few milliseconds later.
+  const page = Array.from({ length: 100 }, (_, i) => aged(1 + i, (1 + i) * 60_000));
+  const rest = Array.from({ length: 100 }, (_, i) => aged(100 + i, (100 + i) * 60_000));
+  await withGithub((url) => (first(url) ? page : rest), async (ctx, urls) => {
+    await ctx.runs();
+    assertEquals(urls.length, 2);
+    assert(!urls[0].includes("created="), urls[0]);
+    assert(
+      !urls.some((u) => new URL(u).searchParams.has("page")),
+      urls.join(" "),
+    );
+    // The second request names the run the first one ended on.
+    assertEquals(anchorOf(urls[1]), `<=${page[99].created_at}`);
+  });
 });
 
-Deno.test("runs(): a run repeated across pages is carried once", async () => {
-  // A run landing between the two requests shifts page two back over page one's
-  // last entry. The pages still describe one window; the repeat is not two runs.
+Deno.test("runs(): the run an anchored page repeats is carried once", async () => {
+  // Every anchored page opens on a run the window already holds, so the join
+  // always repeats one run. The repeat is not two runs, and the window is one
+  // short of two full pages because of it.
   await withGithub(
     (url) =>
-      pageOf(url) === 1
+      first(url)
         ? Array.from({ length: 100 }, (_, i) => aged(1 + i, (1 + i) * 60_000))
         : Array.from({ length: 100 }, (_, i) => aged(100 + i, (100 + i) * 60_000)),
     async (ctx) => {
