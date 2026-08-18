@@ -7,12 +7,10 @@ import {
   type UiPromptSlotProps,
   type VNode,
 } from "@commonfabric/api";
-import {
-  getCellOrThrow,
-  isCell,
-  isCellResult,
-  KeepAsCell,
-} from "@commonfabric/runner";
+
+import { isCell } from "../cell.ts";
+import { KeepAsCell } from "../link-utils.ts";
+import { getCellOrThrow, isCellResult } from "../query-result-proxy.ts";
 
 /**
  * Fragment element name used for JSX fragments.

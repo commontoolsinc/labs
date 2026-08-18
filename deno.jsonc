@@ -50,6 +50,7 @@
     "check-unused-deps": "deno run --allow-read --allow-run=git ./tasks/check-unused-deps.ts",
     "check-deno-pins": "deno run --allow-read ./tasks/check-deno-pins.ts",
     "check-single-copy-deps": "deno run --allow-read ./tasks/check-single-copy-deps.ts",
+    "check-package-cycles": "deno run --allow-read --allow-run=git ./tasks/check-package-cycles.ts",
     "cfcheck": "deno run -A ./tasks/cfcheck.ts",
     "pattern-compat": "deno run -A ./tasks/pattern-compat.ts",
     "pattern-vintage": "deno run -A ./tasks/pattern-vintage.ts",
@@ -76,7 +77,7 @@
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@commonfabric/html",
+    "jsxImportSource": "@commonfabric/runner",
     "types": [
       "./packages/html/src/jsx.d.ts"
     ],

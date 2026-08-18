@@ -24,7 +24,6 @@ import {
   toCompactDebugString,
   toIndentedDebugString,
 } from "@commonfabric/data-model/value-debug";
-import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import {
   all as rowLabelAll,
   any as rowLabelAny,
@@ -73,6 +72,7 @@ import {
   wish,
 } from "./built-in.ts";
 import { getPatternEnvironment } from "./env.ts";
+import { h, UiAction, UiDisclosure, UiPromptSlot } from "./h.ts";
 import {
   action,
   assert,
