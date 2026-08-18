@@ -1444,6 +1444,45 @@ describe("renderPieceCallHelp", () => {
     );
   });
 
+  it("prints a result field's own description beside its placeholder", () => {
+    // The description is a ref-site sibling on the property — the shape a
+    // declared result actually arrives in — so no resolution stands between
+    // the wire and the page. Aligned as the flags are, and a multi-line
+    // comment continues under its own first line.
+    const help = renderPieceCallHelp(
+      "cf piece call ... addItem",
+      makeSpec(
+        "handler",
+        { type: "object", properties: { title: { type: "string" } } },
+        {
+          type: "object",
+          properties: {
+            item: {
+              "$ref": "#/$defs/ItemOutput",
+              description: "The root item this call created.",
+            } as never,
+            openBelow: {
+              type: "number",
+              description: "Descendants still open.\nZero means done.",
+            },
+          },
+        },
+      ),
+    );
+
+    expect(help.slice(help.indexOf("\n\nOutput:\n"))).toBe(
+      [
+        "",
+        "",
+        "Output:",
+        "  The invocation's `result`:",
+        "    item <json>         The root item this call created.",
+        "    openBelow <number>  Descendants still open.",
+        "                        Zero means done.",
+      ].join("\n"),
+    );
+  });
+
   it("mentions no file to write JSON to, there being none in this context", () => {
     const help = renderPieceCallHelp(
       "cf piece call ... onAddContact",
