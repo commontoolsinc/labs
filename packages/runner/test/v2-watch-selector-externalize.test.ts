@@ -5,6 +5,7 @@ import type { JSONSchemaObj } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 
 import { decomposeSchema } from "../src/schema-decompose.ts";
+import { registerSchemaDocument } from "../src/schema-registry.ts";
 import { setContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { externalizeSyncSelector } from "../src/storage/v2-watch.ts";
 
@@ -52,19 +53,51 @@ describe("v2-watch", () => {
       ).toBe(selector);
     });
 
-    it("leaves boolean and reference-only selectors alone", () => {
+    it("leaves boolean selectors alone", () => {
       setContentAddressedSchemasConfig(true);
       const permissive = { path: [], schema: true } as const;
       expect(externalizeSyncSelector(permissive, () => true)).toBe(permissive);
-      const hash = internSchemaAsTaggedHashString({
+    });
+
+    it("keeps the reference form while its closure is persisted", () => {
+      setContentAddressedSchemasConfig(true);
+      const doc: JSONSchemaObj = {
         type: "string",
         title: "already-referenced",
-      });
-      const referenced = {
-        path: [],
-        schema: { $ref: `cid:${hash}` },
-      } as const;
-      expect(externalizeSyncSelector(referenced, () => true)).toBe(referenced);
+      };
+      const hash = internSchemaAsTaggedHashString(doc);
+      registerSchemaDocument(hash, doc);
+      const referenced = { path: [], schema: { $ref: `cid:${hash}` } };
+      const emitted = externalizeSyncSelector(referenced, () => true);
+      expect(emitted.schema).toEqual({ $ref: `cid:${hash}` });
+    });
+
+    it("recomposes a ref-bearing schema inline when the space lacks its closure", () => {
+      // Unconditional correctness, not flag preference: a reference the
+      // target space cannot resolve must not reach the wire — the server
+      // answers it loudly — so the schema inlines through the registry.
+      setContentAddressedSchemasConfig(true);
+      const doc: JSONSchemaObj = {
+        type: "string",
+        title: "inline-me-back",
+      };
+      const hash = internSchemaAsTaggedHashString(doc);
+      registerSchemaDocument(hash, doc);
+      const referenced = { path: [], schema: { $ref: `cid:${hash}` } };
+      const emitted = externalizeSyncSelector(referenced, () => false);
+      expect(emitted.schema).toEqual(doc);
+    });
+
+    it("inlines a ref-bearing schema even with the flag off", () => {
+      const doc: JSONSchemaObj = {
+        type: "string",
+        title: "vintage-client-inline",
+      };
+      const hash = internSchemaAsTaggedHashString(doc);
+      registerSchemaDocument(hash, doc);
+      const referenced = { path: [], schema: { $ref: `cid:${hash}` } };
+      const emitted = externalizeSyncSelector(referenced, () => true);
+      expect(emitted.schema).toEqual(doc);
     });
 
     it("keeps a selector whose decomposition refuses inline", () => {

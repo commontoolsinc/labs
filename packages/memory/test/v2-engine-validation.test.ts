@@ -551,3 +551,42 @@ Deno.test("rejects a reference backed by a stored cid: document holding other co
     );
   });
 });
+
+Deno.test("validates the schema closure an $alias binding references", async () => {
+  await withEngine((engine) => {
+    const schema = { type: "string", title: "alias-closure-leaf" } as const;
+    const hash = internSchemaAsTaggedHashString(schema);
+    const carrier = {
+      bound: {
+        $alias: {
+          cell: "argument",
+          path: ["field"],
+          schema: { $ref: `cid:${hash}` },
+        },
+      },
+    };
+    // A reference nothing backs is rejected in alias positions exactly as
+    // in link positions...
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [setOp("of:alias-carrier", carrier)],
+          }),
+        }),
+      ProtocolError,
+      "neither included in the commit nor stored in the space",
+    );
+    // ...and the closure included in the same commit satisfies it.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [
+          setOp("of:alias-carrier", carrier),
+          setOp(`cid:${hash}`, schema),
+        ],
+      }),
+    });
+  });
+});

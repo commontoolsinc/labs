@@ -41,7 +41,10 @@ import {
   toDocumentPath,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
+import {
+  mapAliasBindingSchemas,
+  mapLinkSchemas,
+} from "@commonfabric/memory/v2/schema-table-links";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -4262,14 +4265,16 @@ class SpaceReplica implements ISpaceReplica {
           );
         }
       }
-      mapLinkSchemas(doc as FabricValue, (schema) => {
+      const collect = (schema: FabricValue): FabricValue => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
         ) {
           if (!embedded.has(hash)) embedded.set(hash, id);
         }
         return schema;
-      });
+      };
+      mapLinkSchemas(doc as FabricValue, collect);
+      mapAliasBindingSchemas(doc as FabricValue, collect);
     }
     for (const [id, document] of registered) {
       for (const dep of collectExternalSchemaRefHashes(document)) {
@@ -4300,13 +4305,22 @@ class SpaceReplica implements ISpaceReplica {
    * the identity check, not presence.
    */
   /**
-   * Whether this replica holds verified content for `cid:<hash>` — the
-   * emission gate for selector references: a document present here arrived
-   * by delivery or by this client's own commit, so the space's server
-   * holds it too, and content addressing means it can never change.
+   * Whether this replica holds SERVER-CONFIRMED verified content for
+   * `cid:<hash>` — the emission gate for selector references: a confirmed
+   * document arrived by delivery or by an acknowledged commit, so the
+   * space's server holds it, and content addressing means it can never
+   * change. The confirmed layer specifically: a pending local write is
+   * visible through `getDocument` before the server has it, and a
+   * reference emitted on that evidence races the commit and is answered
+   * with the loud selector error.
    */
   isSchemaDocPersisted(hash: string): boolean {
-    return this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY);
+    const record = this.#docs.get(docKey(`cid:${hash}` as URI, undefined));
+    const doc = record?.confirmed.value;
+    if (!isObjectNotArray(doc)) return false;
+    const value = (doc as { value?: unknown }).value;
+    return isSubschema(value) &&
+      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
   }
 
   #isVerifiedSchemaDocDelivered(

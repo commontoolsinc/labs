@@ -31,7 +31,10 @@ import {
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
-import { mapLinkSchemas } from "./schema-table-links.ts";
+import {
+  mapAliasBindingSchemas,
+  mapLinkSchemas,
+} from "./schema-table-links.ts";
 import {
   type CellScope,
   type EntitySnapshot,
@@ -355,14 +358,16 @@ const scanSnapshotSchemaRefs = (
       }
     }
     if (!isSchemaDocument) {
-      mapLinkSchemas(doc as FabricValue, (schema) => {
+      const collect = (schema: FabricValue): FabricValue => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
         ) {
           refs.add(hash);
         }
         return schema;
-      });
+      };
+      mapLinkSchemas(doc as FabricValue, collect);
+      mapAliasBindingSchemas(doc as FabricValue, collect);
     }
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;

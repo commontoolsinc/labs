@@ -28,13 +28,18 @@ const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
  *
  * `$alias` records are Pattern-binding vocabulary, not links (#4895):
  * their `schema` field is binding metadata, not a link-schema position, so
- * this walk never interns or expands it. Saved patterns keep emitting
- * alias bindings until a sigil binding encoding replaces them, so those
- * schemas travel inline indefinitely (transport compression absorbs most
- * of the byte cost). Clients shipped BEFORE this change do interpret alias
- * schema positions, so the reserved-ref validator keeps refusing refs
- * there — see {@link findSyncSchemaRef} in sync-schema-ref.ts, which
- * deliberately checks a superset of this walk's positions.
+ * this walk never interns or expands it, and the sync schema table leaves
+ * alias schemas alone. Clients shipped BEFORE this change do interpret
+ * alias schema positions, so the reserved-ref validator keeps refusing
+ * TABLE refs there — see {@link findSyncSchemaRef} in sync-schema-ref.ts,
+ * which deliberately checks a superset of this walk's positions.
+ * Content-addressed references are a different story: an alias schema may
+ * carry a `cid:` `$ref` (`docs/specs/content-addressed-schemas.md`,
+ * Phase 2), and the collection walks that enforce closure delivery — the
+ * commit boundary, the materializer, arrival validation, and result
+ * assembly — visit alias schema positions through
+ * {@link mapAliasBindingSchemas}, kept separate so this walk's
+ * compression behavior does not change.
  *
  * Schema VALUES are opaque to this walk: after a schema position is mapped,
  * the traversal does not descend into the schema (or its mapped
@@ -163,4 +168,53 @@ const mapRecordChildren = (
     }
   }
   return mapped;
+};
+
+/**
+ * Maps schemas in `$alias` binding positions — the companion to
+ * {@link mapLinkSchemas} for the collection walks that enforce
+ * closure delivery. Same rules: schema values are opaque (no descent into
+ * a mapped schema), and non-plain records are not walked.
+ */
+export const mapAliasBindingSchemas = (
+  value: FabricValue,
+  mapSchema: (schema: FabricValue) => FabricValue,
+): FabricValue => {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const mapped = value.map((item) => {
+      const next = mapAliasBindingSchemas(item, mapSchema);
+      changed ||= !Object.is(next, item);
+      return next;
+    });
+    return changed ? mapped : value;
+  }
+  if (!isPlainRecord(value)) return value;
+  let changed = false;
+  const mapped: Record<string, FabricValue> = {};
+  for (const [key, child] of Object.entries(value)) {
+    let next: FabricValue;
+    if (
+      key === "$alias" && isPlainRecord(child as FabricValue) &&
+      Object.hasOwn(child as object, "schema")
+    ) {
+      // The binding's schema position maps; its other fields still walk
+      // (a partialCause is arbitrary JSON and may nest further bindings).
+      let aliasChanged = false;
+      const aliasMapped: Record<string, FabricValue> = {};
+      for (const [aliasKey, aliasChild] of Object.entries(child as object)) {
+        const aliasNext = aliasKey === "schema"
+          ? mapSchema(aliasChild as FabricValue)
+          : mapAliasBindingSchemas(aliasChild as FabricValue, mapSchema);
+        aliasChanged ||= !Object.is(aliasNext, aliasChild);
+        aliasMapped[aliasKey] = aliasNext;
+      }
+      next = aliasChanged ? (aliasMapped as FabricValue) : child as FabricValue;
+    } else {
+      next = mapAliasBindingSchemas(child as FabricValue, mapSchema);
+    }
+    changed ||= !Object.is(next, child);
+    mapped[key] = next;
+  }
+  return changed ? (mapped as FabricValue) : value;
 };

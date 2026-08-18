@@ -124,19 +124,21 @@ value is ignored with a warning rather than coerced. See
 - **Added by.** Robin McCollum (PR #5833).
 - **Purpose.** Phases 1 and 2 of
   [content-addressed schemas](../specs/content-addressed-schemas.md), which
-  deploy together: link writers replace inline schemas with
-  `{ "$ref": "cid:<hash>" }` references to content-addressed schema
-  documents, whose closure is installed into the destination space in the
-  same transaction as the reference; and watch/sync selectors externalize
-  opportunistically — a selector emits a reference only when the client
-  verified its whole closure persisted in the target space (local replica
-  presence implies server presence), falling back to the inline form
-  otherwise. Gates emission only — readers and the server accept both
-  forms unconditionally, which is what makes the flag safe to flip in
-  either direction, and the server answers an unresolvable selector
-  reference with a loud QueryError, which a compliant client never
-  provokes; a schema decomposition refuses stays inline exactly as with
-  the flag off.
+  deploy together: link writers and `$alias` bindings replace inline
+  schemas with `{ "$ref": "cid:<hash>" }` references to content-addressed
+  schema documents, whose closure is installed into the destination space
+  in the same transaction as the reference; and watch/sync selectors
+  normalize for the wire — the reference form only when the client
+  confirmed the whole closure persisted in the target space
+  (server-confirmed replica presence implies server presence), and the
+  fully inline form otherwise, recomposed through the realm registry when
+  the schema itself carries references (a live pattern's binding schema
+  reaches selectors before any document holds it). Gates emission only —
+  readers and the server accept both forms unconditionally, which is what
+  makes the flag safe to flip in either direction, and the server answers
+  an unresolvable selector reference with a loud QueryError, which a
+  compliant client never provokes; a schema decomposition refuses stays
+  inline exactly as with the flag off.
 - **Interaction with `syncSchemaTableV2`.** Both mechanisms dedupe the same
   link-schema positions, so a flag-on process disables the sync schema
   table outright (`setSyncSchemaTableConfig(false)` at Runtime

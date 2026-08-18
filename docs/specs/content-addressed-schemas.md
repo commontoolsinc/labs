@@ -12,12 +12,14 @@ document's hash is well-founded.
 Design; the readers-first resolution infrastructure (Phase 0 of
 [the implementation plan](../history/plans/content-addressed-schemas-phase-0.md))
 has landed, and Phases 1 and 2 are landing together behind the
-`contentAddressedSchemas` flag (off by default): links stamp references
-with commits materializing each closure into the destination space, and
-a selector externalizes opportunistically — only when its whole closure
-is verifiably persisted in the target space, with the inline form as
-the permanent fallback and a loud server error for a reference nothing
-backs. `$alias` bindings are still ahead. The connection-scoped
+`contentAddressedSchemas` flag (off by default): links and `$alias`
+bindings stamp references with commits materializing each closure into
+the destination space, and a selector normalizes for the wire — the
+reference form only when its whole closure is confirmed persisted in
+the target space, the fully inline form (recomposed through the realm
+registry when the schema itself carries references) otherwise, and a
+loud server error for a selector reference nothing backs. The
+connection-scoped
 transport experiment (`syncSchemaCasV1`, unmerged) is not being pursued;
 this design is the storage-side successor for link positions, and a
 reference at rest never needs transport compression.

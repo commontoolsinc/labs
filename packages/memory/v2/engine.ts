@@ -6,7 +6,10 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
-import { mapLinkSchemas } from "./schema-table-links.ts";
+import {
+  mapAliasBindingSchemas,
+  mapLinkSchemas,
+} from "./schema-table-links.ts";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatchToDocument,
@@ -5197,14 +5200,16 @@ const applyCommitTransaction = (
   const requiredSchemaRefs = new Set<string>();
   const collectLinkSchemaRefs = (content: unknown): void => {
     if (content === null || typeof content !== "object") return;
-    mapLinkSchemas(content as FabricValue, (schema) => {
+    const collect = (schema: FabricValue): FabricValue => {
       for (
         const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
       ) {
         requiredSchemaRefs.add(hash);
       }
       return schema;
-    });
+    };
+    mapLinkSchemas(content as FabricValue, collect);
+    mapAliasBindingSchemas(content as FabricValue, collect);
   };
   for (const operation of commit.operations) {
     if (operation.op === "sqlite") continue;

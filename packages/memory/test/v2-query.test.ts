@@ -1792,3 +1792,51 @@ Deno.test("memory v2 rejects a selector referencing a schema document the space 
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 delivers the closure behind an $alias binding's schema reference", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-alias-closure";
+  try {
+    const schema = {
+      type: "object",
+      properties: { aliasLeaf: { type: "string" } },
+    } as const;
+    const hash = internSchemaAsTaggedHashString(schema);
+    applyCommit(engine, {
+      sessionId: "session:alias-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: `cid:${hash}`, value: { value: schema } },
+          {
+            op: "set",
+            id: "of:alias-doc",
+            value: {
+              value: {
+                bound: {
+                  $alias: {
+                    cell: "argument",
+                    path: ["field"],
+                    schema: { $ref: `cid:${hash}` },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const tracked = trackGraph(space, engine, {
+      roots: [{ id: "of:alias-doc", selector: { path: [], schema: false } }],
+    });
+    // Result assembly scans alias binding positions like link positions,
+    // so the schema document rides with its referrer.
+    assert(tracked.state.entities.has(`${space}/space/cid:${hash}`));
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
