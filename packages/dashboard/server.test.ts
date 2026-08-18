@@ -1436,7 +1436,7 @@ Deno.test("start: serves the handler on the configured port and keeps collecting
   let collections = 0;
   const log = console.log;
   console.log = (m: string) => logged.push(m);
-  let timer = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
   try {
     timer = start(((opts: Deno.ServeTcpOptions, handler: unknown) => {
       served.push({ opts, handler });
@@ -1466,7 +1466,7 @@ Deno.test("start: the work it schedules on its clock both heartbeats and collect
   const log = console.log;
   console.log = () => {};
   let collections = 0;
-  let timer = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
   let onTick = () => Promise.resolve();
   try {
     ({ timer, onTick } = start(

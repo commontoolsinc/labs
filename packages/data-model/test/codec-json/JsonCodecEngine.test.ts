@@ -28,6 +28,7 @@ import { expect } from "@std/expect";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import {
   createDefaultJsonRegistry,
+  jsonFromFabricValue,
   newDefaultJsonCodecEngine,
 } from "@/codecs.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
@@ -1180,6 +1181,39 @@ describe("JsonCodecEngine", () => {
       });
     });
 
+    describe("`/object` over a state that is not an object", () => {
+      for (
+        const [label, state] of [
+          ["a string", "nope"],
+          ["a number", 42],
+          ["`null`", null],
+          ["an array", [1, 2]],
+        ] as const
+      ) {
+        it(`returns a \`ProblematicValue\` for ${label} when lenient`, () => {
+          const decoded = fromEncodedFormat(
+            { "/object": state } as JsonCodecValue,
+            true,
+          );
+
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+          expect((decoded as ProblematicValue).error)
+            .toMatch(/`\/object` state is not an object/);
+        });
+      }
+
+      it("throws for a state that is not an object when strict", () => {
+        const engine = newDefaultJsonCodecEngine();
+        const text = JsonCodecEngine.wrapEncodedValueForTesting(
+          JSON.stringify({ "/object": "nope" }),
+          true,
+        );
+
+        expect(() => engine.decode(text, new TestLiveEnvironment()))
+          .toThrow(/`\/object` state is not an object/);
+      });
+    });
+
     describe("/object: any value requires encoding", () => {
       it("emits `/quote` for doubly-nested `/`-prefixed literal object (whole subtree is literal)", () => {
         const obj = { "/x": { "/y": 123 } };
@@ -2103,6 +2137,60 @@ describe("JsonCodecEngine", () => {
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe(null); // null = same as type (common case)
       expect(state.message).toBe("compat test");
+    });
+  });
+
+  describe("`seemsLikeEncoded()`", () => {
+    // Decides on the prefix alone and never parses, so these cases are about
+    // where that suffices and where it would be too eager: the bare prefix
+    // counts, a prefix that is partial or not at the front does not, and plain
+    // JSON that happens to look similar does not. One case feeds it real
+    // encoder output, so the shape recognized here cannot drift from the shape
+    // produced.
+    it("recognizes a string with the encoding prefix", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded('fvj1:{"a":1}')).toBe(true);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1:null")).toBe(true);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1:42")).toBe(true);
+    });
+
+    it("recognizes the bare prefix", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1:")).toBe(true);
+    });
+
+    it("recognizes the actual output of `jsonFromFabricValue()` (round-trip check)", () => {
+      const encoded = jsonFromFabricValue({ a: 1, b: 42n });
+      expect(JsonCodecEngine.seemsLikeEncoded(encoded)).toBe(true);
+    });
+
+    it("returns `false` for an empty string", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("")).toBe(false);
+    });
+
+    it("returns `false` for plain JSON without the prefix", () => {
+      // These are plain JSON without the prefix, so the dispatch must reject
+      // them.
+      expect(JsonCodecEngine.seemsLikeEncoded("true")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("false")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("null")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded('"hello"')).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("[1,2,3]")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded('{"a":1}')).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("42")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("-1")).toBe(false);
+    });
+
+    it("returns `false` for a partial or misplaced prefix", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("FVJ1:")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj2:")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded(" fvj1:")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("xfvj1:")).toBe(false);
+    });
+
+    it("returns `false` for a bare identifier or other non-JSON-looking string", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("hello")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("undefined")).toBe(false);
     });
   });
 

@@ -99,19 +99,30 @@ FILES_TO_CHECK=()
 DIRS=(
   "packages/api"
   "packages/background-piece-service"
+  "packages/cf-harness"
   "packages/cli/commands"
   "packages/cli/lib"
   "packages/cli/support"
   "packages/cli/test"
   "packages/connectors/agents"
+  "packages/content-hash"
+  "packages/dashboard"
+  "packages/data-model"
   "packages/deno-web-test"
+  "packages/felt"
+  "packages/fuse"
+  "packages/generated-patterns"
+  "packages/home-schemas"
   "packages/html"
   "packages/identity"
   "packages/iframe-sandbox"
   "packages/integration"
   "packages/js-compiler"
+  "packages/leb128"
+  "packages/lib-shell"
   "packages/llm"
   "packages/memory"
+  "packages/patterns/auth"
   "packages/patterns/battleship"
   "packages/patterns/budget-tracker"
   "packages/patterns/contacts"
@@ -128,11 +139,16 @@ DIRS=(
   "packages/patterns/tools"
   "packages/patterns/weekly-calendar"
   "packages/piece"
+  "packages/pure-json"
   "packages/runner"
   "packages/runtime-client"
+  "packages/schema-generator/src"
   "packages/shell"
+  "packages/spec-model"
+  "packages/state-inspector"
   "packages/static/scripts"
   "packages/static/test"
+  "packages/test-support"
   "packages/toolshed"
   "packages/ts-transformers/src"
   "packages/utils"
@@ -152,6 +168,13 @@ FILES_TO_CHECK+=(packages/patterns/*.tsx)
 while IFS= read -r testFile; do
   FILES_TO_CHECK+=("${testFile}")
 done < <(find packages/ts-transformers/test -type f -name '*.test.ts' -print)
+
+# schema-generator tests, excluding test/fixtures: the `*.input.ts` fixtures
+# name ambient wrappers (Cell, Stream, Writable) without importing them, since
+# the transformer supplies those, so they do not type-check on their own.
+while IFS= read -r testFile; do
+  FILES_TO_CHECK+=("${testFile}")
+done < <(find packages/schema-generator/test -type f -name '*.test.ts' -print)
 
 # Google patterns (previously checked individually to avoid OOM, now included
 # with increased heap limit)

@@ -213,10 +213,19 @@ consider the information in `docs/development/COVERAGE.md`.
 ### Automated gates
 
 `deno task check` type-checks a hand-maintained list of paths in
-`tasks/check.sh`. Several workspace packages are absent from that list — `fuse`,
-`lib-shell`, `schema-generator`, `data-model` and `state-inspector` among them —
-so a green `deno task check` is not evidence that the tree type-checks. Run
-`deno task test` in every package you touched.
+`tasks/check.sh`, which now names every workspace package. Most are covered in
+full; a few are partial by design. The `*.input.ts` transformer fixtures under
+`schema-generator` and `ts-transformers` name ambient wrappers the transformer
+supplies, so they do not compile on their own and are left out. `ui` is checked
+only for its `v2` components, and not the outliner among them.
+
+Patterns are the exception `deno task check` does not own. It lists some pattern
+directories and checks them through the automatic-JSX environment the rest of
+the tree uses, but patterns compile under a different (classic-`h`) JSX runtime,
+and the two disagree on some advanced pattern types. `deno task cfcheck` (the
+"CFC Pattern Check" CI job) type-checks every pattern in the JSX and
+runtime-type environment they actually compile under, and is the authoritative
+pattern type-check. Run `deno task test` in every package you touched.
 
 Each of these gates fails CI on its own, and none of them run as part of
 `deno task check`:

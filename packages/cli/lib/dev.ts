@@ -1,5 +1,6 @@
 import { dirname } from "@std/path";
 import {
+  assertImportInsideProgramRoot,
   collectImportSpecifiers,
   FileSystemProgramResolver,
   type Program,
@@ -214,6 +215,9 @@ export async function collectLocalProgram(
         continue;
       }
 
+      // This walk feeds `cf check` and `cf deps` with no compile behind it,
+      // so an escape unrefused here is a silently collected wrong file.
+      assertImportInsideProgramRoot(specifier, source);
       const identifier = resolveImportSpecifier(specifier, source);
       if (!isFileSystemSourceIdentifier(identifier) || seen.has(identifier)) {
         continue;

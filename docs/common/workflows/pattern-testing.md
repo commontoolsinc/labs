@@ -81,6 +81,20 @@ deno task cf test packages/patterns/my-pattern/main.test.tsx --verbose
 deno task cf test packages/patterns/my-pattern/
 ```
 
+### Import roots
+
+A test pattern's imports resolve within its root directory. Without `--root`,
+`cf test` anchors at the nearest ancestor whose `deno.json(c)` declares a
+package name — `packages/patterns` for this repository's patterns — so imports
+that span the package (shared helpers such as `test/vnode-helpers.ts`, sibling
+patterns, `cfc/` modules) resolve without a flag. A config file with no `name`,
+such as a workspace member stub that only defines tasks, does not anchor the
+root. Pass `--root` to anchor somewhere else; an import that climbs above the
+root fails naming the import and the importing file. The CI "Pattern Unit
+Tests" job (the `pattern-tests` target in `tasks/integration.ts`) passes
+`--root packages/patterns` explicitly, so a bare local run resolves imports
+the same way CI does.
+
 ## Test Step Format
 
 Tests use a **discriminated union** format:
