@@ -94,6 +94,12 @@ const bump = handler<unknown, { count: Writable<number> }>((_, state) => {
   state.count.set(state.count.get() + 1);
 });
 
+// ORIGIN-H: builder whose callback is a REFERENCED authored function
+const onReset = (_: unknown, state: { count: Writable<number> }) => {
+  state.count.set(0);
+};
+const reset = handler<unknown, { count: Writable<number> }>(onReset);
+
 export default pattern<ProbeInput>(({ count, flag, label, items, task }) => {
   // ORIGIN-A: authored computed with a capture
   const doubled = computed(() => count * 2);
@@ -115,6 +121,7 @@ export default pattern<ProbeInput>(({ count, flag, label, items, task }) => {
           {items.map((item) => <li>{item}</li>)}
         </ul>
         <cf-button onClick={bump({ count })}>bump</cf-button>
+        <cf-button onClick={reset({ count })}>reset</cf-button>
         {/* ORIGIN-E: inline captured action */}
         <cf-button onClick={action(() => count * 4)}>quad</cf-button>
       </div>
@@ -184,7 +191,9 @@ function collectBuilderSites(root: ts.SourceFile): BuilderSite[] {
         ) {
           const name = decl.name.text;
           // Hoisted synthetics plus the authored module-scope `bump` handler.
-          if (HOISTED_NAME.test(name) || name === "bump") {
+          if (
+            HOISTED_NAME.test(name) || name === "bump" || name === "reset"
+          ) {
             sites.push({
               tag: name,
               call: decl.initializer,
@@ -409,6 +418,12 @@ const ORIGIN_ANNOTATIONS = new Map<string, {
   ["count * 4", { anchor: "() => count * 4" }], // ORIGIN-E, hoisted handler
   ["(item) =>", { anchor: "(item) => <li>{item}</li>" }], // ORIGIN-D
   ["state.count.set", { anchor: "(_, state) => {", bindingName: "bump" }],
+  // ORIGIN-H: the annotation locates the REFERENCED callback where it was
+  // written, named by its own declaration — not the builder binding.
+  ["state.count.set(0)", {
+    anchor: "(_: unknown, state: { count: Writable<number> }) => {",
+    bindingName: "onReset",
+  }],
   [
     "count, flag, label, items, task",
     { anchor: "({ count, flag, label, items, task }) => {" },
@@ -444,6 +459,10 @@ Deno.test(
       }`,
     );
     assert(tags.includes("bump"), "expected the authored `bump` handler");
+    assert(
+      tags.includes("reset"),
+      "expected the referenced-callback `reset` handler (ORIGIN-H)",
+    );
     assert(
       tags.includes("export-default"),
       "expected the export-default pattern",
@@ -506,7 +525,10 @@ Deno.test(
       const callText = recover(site.tag, "call", site.call);
       recoveredByTag.set(site.tag, callText);
 
-      if (site.tag !== "export-default") {
+      // ORIGIN-H's builder call carries its callback as an IDENTIFIER
+      // (`handler(…, onReset)`), so there is no function argument to recover
+      // here; its authored position is pinned through the annotation check.
+      if (site.tag !== "export-default" && site.tag !== "reset") {
         assert(site.callback, `${site.tag}: expected a callback argument`);
       }
       const callbackText = site.callback
@@ -549,6 +571,13 @@ Deno.test(
           `${site.tag}: expected the ORIGIN-D map callback, got: ${callText}`,
         );
         checkAnnotation(site.tag, "(item) =>");
+      } else if (site.tag === "reset") {
+        assert(
+          callbackText === undefined ||
+            callbackText.includes("state.count.set(0)"),
+          `reset callback recovery: ${callbackText}`,
+        );
+        checkAnnotation(site.tag, "state.count.set(0)");
       } else if (site.tag === "bump") {
         assert(
           callbackText !== undefined &&

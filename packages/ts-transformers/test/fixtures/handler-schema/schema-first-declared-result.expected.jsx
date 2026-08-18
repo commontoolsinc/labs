@@ -97,6 +97,11 @@ const pingNamed = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
+__cfBindVerifiedBinding(pingNamed, {
+    sourceFile: "/test.tsx",
+    position: { line: 46, col: 18 },
+    bindingName: "echoNamed"
+});
 // A callback referenced as a function DECLARATION: no expression resolver can
 // return it, so recognition asks callback-ness instead — without this, the
 // prepend path ran and the trailing-options lowering spread-replaced the

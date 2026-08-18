@@ -4,7 +4,10 @@ import {
   FUNCTION_HARDENING_HELPER_NAME,
   VERIFIED_BINDING_METADATA_FIELD,
 } from "@commonfabric/utils/sandbox-contract";
-import { detectCallKind } from "../ast/call-kind.ts";
+import {
+  detectCallKind,
+  resolveCallbackFunctionExpression,
+} from "../ast/call-kind.ts";
 import { recoverAuthoredPosition } from "../ast/utils.ts";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -378,11 +381,17 @@ function resolveBuilderArtifact(
   const call = unwrapExpression(expression);
   if (!ts.isCallExpression(call)) return undefined;
   if (detectCallKind(call, checker)?.kind !== "builder") return undefined;
-  const fn = call.arguments.find(
-    (argument): argument is ts.ArrowFunction | ts.FunctionExpression =>
-      ts.isArrowFunction(argument) || ts.isFunctionExpression(argument),
-  );
-  return fn ? { call, fn } : undefined;
+  // Resolve the callback through identifiers and type wrappers, not just
+  // direct function syntax: `handler(onReset)` names an authored function the
+  // annotation should locate exactly as `handler((e, s) => …)` does. The
+  // resolved declaration's function is the position anchor, so the metadata
+  // reports where the callback was WRITTEN, and its enclosing declaration
+  // (`onReset`) supplies the binding name.
+  for (const argument of call.arguments) {
+    const fn = resolveCallbackFunctionExpression(argument, checker);
+    if (fn) return { call, fn };
+  }
+  return undefined;
 }
 
 /** What a binding-identity annotation describes. */
