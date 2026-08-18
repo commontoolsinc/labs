@@ -114,6 +114,19 @@ describe("schema", () => {
       expect(parseContextLine(line)).toBeUndefined();
     });
 
+    it("returns undefined for a ci env with no ci block", () => {
+      const line = JSON.stringify({ ...CONTEXT, env: "ci" });
+      expect(parseContextLine(line)).toBeUndefined();
+    });
+
+    it("returns undefined for a local env carrying a ci block", () => {
+      const line = JSON.stringify({
+        ...CONTEXT,
+        ci: { workflowRunId: "123", runAttempt: 1, workflow: "CI", job: "x" },
+      });
+      expect(parseContextLine(line)).toBeUndefined();
+    });
+
     it("returns undefined for a record line", () => {
       expect(parseContextLine(serializeRecordLine(RECORD).trim()))
         .toBeUndefined();

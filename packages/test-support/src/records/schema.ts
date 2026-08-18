@@ -169,6 +169,11 @@ export function parseContextLine(line: string): RunContext | undefined {
   ) {
     return undefined;
   }
+  // The ci block and the env tag assert the same provenance; a line where
+  // they disagree is malformed, not a context with one of them believed.
+  if ((context.env === "ci") !== (context.ci !== undefined)) {
+    return undefined;
+  }
   let ci: CiContext | undefined;
   if (context.ci !== undefined) {
     if (typeof context.ci !== "object" || context.ci === null) {

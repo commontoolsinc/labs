@@ -88,9 +88,11 @@ export async function tokenFromKey(
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw new Error(`token exchange failed: HTTP ${res.status}`);
-  const json = await res.json() as { access_token?: string };
-  if (!json.access_token) {
-    throw new Error("token exchange returned no access_token");
+  const json = await res.json() as { access_token?: unknown };
+  if (
+    typeof json.access_token !== "string" || json.access_token.length === 0
+  ) {
+    throw new Error("token exchange returned no access_token string");
   }
   return json.access_token;
 }

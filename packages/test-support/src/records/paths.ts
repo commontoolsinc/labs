@@ -35,6 +35,25 @@ export function repositoryRelativePath(filePath: string): string {
 }
 
 /**
+ * The enclosing repository's root directory, found by climbing from the
+ * given directory — the working directory by default — to the directory
+ * holding .git. Undefined outside any repository.
+ */
+export function repositoryRoot(from: string = Deno.cwd()): string | undefined {
+  let dir = resolve(from);
+  for (;;) {
+    try {
+      Deno.statSync(join(dir, ".git"));
+      return dir;
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) return undefined;
+      dir = parent;
+    }
+  }
+}
+
+/**
  * Reads an environment variable, treating a denied permission as unset. A
  * producer inside a test process whose --allow-env list does not include the
  * recording variables is simply not recording; it must never throw.

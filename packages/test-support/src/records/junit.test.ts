@@ -81,6 +81,13 @@ describe("junit", () => {
       expect(cases[0]?.classname).toBeUndefined();
     });
 
+    it("drops a negative time rather than record it", () => {
+      const cases = parseJUnit(
+        '<testsuite name="s"><testcase name="t" time="-0.5"/></testsuite>',
+      );
+      expect(cases[0]?.timeSeconds).toBeUndefined();
+    });
+
     it("throws for an unterminated tag", () => {
       expect(() => parseJUnit("<testsuite name=")).toThrow(JUnitParseError);
     });
@@ -123,6 +130,14 @@ describe("junit", () => {
       expect(isRelativeSourcePath("ext:cli/40_test.js")).toBe(false);
       expect(isRelativeSourcePath("../outside/file.ts")).toBe(false);
       expect(isRelativeSourcePath("/absolute/file.ts")).toBe(false);
+    });
+
+    it("returns false for a climb hidden past the first segment", () => {
+      expect(isRelativeSourcePath("./../../outside.ts")).toBe(false);
+      expect(isRelativeSourcePath("test/../../outside.ts")).toBe(false);
+      expect(isRelativeSourcePath("test/./glaze.test.ts")).toBe(false);
+      expect(isRelativeSourcePath("test//glaze.test.ts")).toBe(false);
+      expect(isRelativeSourcePath("./test/glaze.test.ts")).toBe(true);
     });
   });
 

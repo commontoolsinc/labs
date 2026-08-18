@@ -178,7 +178,12 @@ export function parseJUnit(xml: string): JUnitCase[] {
         }
         if (tag.attributes.time !== undefined) {
           const seconds = Number(tag.attributes.time);
-          if (Number.isFinite(seconds)) parsed.timeSeconds = seconds;
+          // A negative duration is not a duration; the record schema
+          // rejects one, so the case falls back to zero here instead of
+          // producing a record every reader drops.
+          if (Number.isFinite(seconds) && seconds >= 0) {
+            parsed.timeSeconds = seconds;
+          }
         }
         if (tag.kind === "selfclose") {
           cases.push(parsed);
@@ -228,12 +233,20 @@ const SOURCE_SUFFIX = /\.(ts|tsx|js|jsx|mts|mjs)$/;
 /**
  * Whether a classname is a plain relative source path — not a URL, not
  * absolute, not climbing out of the working directory — and so can be
- * joined onto a repository prefix.
+ * joined onto a repository prefix. A `..` anywhere in the path climbs, and
+ * a `.` segment past the leading one denormalizes the joined path, so both
+ * disqualify wherever they appear.
  */
 export function isRelativeSourcePath(classname: string): boolean {
   if (classname.includes("://") || classname.startsWith("ext:")) return false;
-  if (classname.startsWith("/") || classname.startsWith("../")) return false;
+  if (classname.startsWith("/")) return false;
   if (classname.includes("\\")) return false;
+  const segments = classname.split("/");
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i] === "..") return false;
+    if (segments[i] === "." && i > 0) return false;
+    if (segments[i] === "") return false;
+  }
   return SOURCE_SUFFIX.test(classname);
 }
 

@@ -50,11 +50,54 @@ export async function listObjects(options: {
   return names.sort();
 }
 
-/** One uploaded object, validated line by line. */
+/** One report inside an object: a context line and the records under it. */
+export interface StoredReportGroup {
+  context: RunContext | undefined;
+  records: TestRecord[];
+}
+
+/**
+ * One uploaded object, validated line by line. A submission object holds
+ * one report; a rollup concatenates a day of them, one context line ahead
+ * of each report's records. `reports` keeps that per-report grouping —
+ * which is what carries provenance such as the fork flag — while `context`
+ * and `records` flatten the object for consumers reading single-report
+ * submissions.
+ */
 export interface StoredReport {
   objectName: string;
   context: RunContext | undefined;
   records: TestRecord[];
+  reports: StoredReportGroup[];
+}
+
+/**
+ * Parses object text into report groups: every context line starts a
+ * report, and record lines belong to the report whose context most
+ * recently preceded them. Record lines ahead of any context form a group
+ * with no context, and lines that parse as neither are dropped.
+ */
+export function parseReportGroups(text: string): StoredReportGroup[] {
+  const groups: StoredReportGroup[] = [];
+  let current: StoredReportGroup | undefined;
+  for (const line of text.split("\n")) {
+    if (line.length === 0) continue;
+    const context = parseContextLine(line);
+    if (context !== undefined) {
+      current = { context, records: [] };
+      groups.push(current);
+      continue;
+    }
+    const record = parseRecordLine(line);
+    if (record !== undefined) {
+      if (current === undefined) {
+        current = { context: undefined, records: [] };
+        groups.push(current);
+      }
+      current.records.push(record);
+    }
+  }
+  return groups;
 }
 
 /** Fetches and validates one object. */
@@ -73,20 +116,11 @@ export async function readObject(options: {
       `reading ${options.objectName} failed: HTTP ${res.status}`,
     );
   }
-  const text = await res.text();
-  let context: RunContext | undefined;
-  const records: TestRecord[] = [];
-  for (const line of text.split("\n")) {
-    if (line.length === 0) continue;
-    if (context === undefined) {
-      const parsed = parseContextLine(line);
-      if (parsed !== undefined) {
-        context = parsed;
-        continue;
-      }
-    }
-    const record = parseRecordLine(line);
-    if (record !== undefined) records.push(record);
-  }
-  return { objectName: options.objectName, context, records };
+  const reports = parseReportGroups(await res.text());
+  return {
+    objectName: options.objectName,
+    context: reports[0]?.context,
+    records: reports.flatMap((report) => report.records),
+    reports,
+  };
 }

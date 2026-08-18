@@ -9,7 +9,9 @@ import {
   deleteSpool,
   type HeldSpool,
   listSpools,
+  listStagingSpools,
   readSpool,
+  SPOOL_STAGING_PREFIX,
   tryAdoptSpool,
 } from "./spool.ts";
 import { FragmentWriter } from "./fragment.ts";
@@ -57,6 +59,12 @@ describe("spool", () => {
       const stamped = await Deno.readTextFile(join(held.dir, CONTEXT_FILE));
       expect(JSON.parse(stamped.trim()).reportId).toBe(CONTEXT.reportId);
       expect(await tryAdoptSpool(held.dir)).toBeUndefined();
+    });
+
+    it("leaves no staging directory behind", async () => {
+      held = await createRunSpool(root, CONTEXT);
+      expect(await listStagingSpools(root)).toEqual([]);
+      expect(await listSpools(root)).toEqual([held.dir]);
     });
   });
 
@@ -107,6 +115,19 @@ describe("spool", () => {
 
     it("returns an empty list for a missing root", async () => {
       expect(await listSpools(join(root, "absent"))).toEqual([]);
+    });
+  });
+
+  describe("listStagingSpools()", () => {
+    it("returns abandoned staging directories and no finished spools", async () => {
+      held = await createRunSpool(root, CONTEXT);
+      const abandoned = join(
+        root,
+        `${SPOOL_STAGING_PREFIX}01DEADOWNER0000000000000`,
+      );
+      await Deno.mkdir(abandoned);
+      expect(await listStagingSpools(root)).toEqual([abandoned]);
+      expect(await listSpools(root)).toEqual([held.dir]);
     });
   });
 

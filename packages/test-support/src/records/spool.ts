@@ -27,6 +27,13 @@ export const LOCK_FILE = "owner.lock";
 /** Spool directories are `run-<reportId>` under the spool root. */
 export const SPOOL_DIR_PREFIX = "run-";
 
+/**
+ * A spool under construction is `staging-<reportId>` until its owner holds
+ * the lock and the context is stamped, so a sweeping process never sees a
+ * spool it could adopt out from under a starting owner.
+ */
+export const SPOOL_STAGING_PREFIX = "staging-";
+
 /** A spool this process owns or has adopted; the lock is held until close. */
 export interface HeldSpool {
   dir: string;
@@ -38,33 +45,48 @@ export interface HeldSpool {
  * Creates and locks a fresh spool directory for a run, stamping the given
  * context into it. The caller sets CF_TEST_RECORDS_DIR to `dir` for its
  * producers and ships the directory when the run ends.
+ *
+ * The directory is built under a staging name and renamed into place only
+ * after the lock is held and the context is written: the advisory lock
+ * lives on the open file handle, so it survives the rename, and a
+ * concurrent sweep can never adopt a spool whose owner has not locked it
+ * yet.
  */
 export async function createRunSpool(
   root: string,
   context: RunContext,
 ): Promise<HeldSpool> {
+  const staging = join(root, `${SPOOL_STAGING_PREFIX}${context.reportId}`);
   const dir = join(root, `${SPOOL_DIR_PREFIX}${context.reportId}`);
-  await Deno.mkdir(dir, { recursive: true });
-  await Deno.writeTextFile(
-    join(dir, CONTEXT_FILE),
-    serializeContextLine(context),
-  );
-  const lock = await Deno.open(join(dir, LOCK_FILE), {
-    create: true,
-    write: true,
-  });
-  const locked = await lock.tryLock(true);
-  if (!locked) {
-    lock.close();
-    throw new Error(
-      `another process holds the lock of freshly created spool ${dir}`,
+  await Deno.mkdir(staging, { recursive: true });
+  let lock: Deno.FsFile | undefined;
+  try {
+    await Deno.writeTextFile(
+      join(staging, CONTEXT_FILE),
+      serializeContextLine(context),
     );
+    lock = await Deno.open(join(staging, LOCK_FILE), {
+      create: true,
+      write: true,
+    });
+    const locked = await lock.tryLock(true);
+    if (!locked) {
+      throw new Error(
+        `another process holds the lock of freshly created spool ${staging}`,
+      );
+    }
+    await Deno.rename(staging, dir);
+  } catch (error) {
+    lock?.close();
+    await Deno.remove(staging, { recursive: true }).catch(() => {});
+    throw error;
   }
+  const held = lock;
   return {
     dir,
     close: () => {
       try {
-        lock.close();
+        held.close();
       } catch {
         // The lock dies with the file handle either way.
       }
@@ -111,7 +133,21 @@ export async function tryAdoptSpool(
 }
 
 /** Lists spool directories under a root, oldest first by name. */
-export async function listSpools(root: string): Promise<string[]> {
+export function listSpools(root: string): Promise<string[]> {
+  return listPrefixed(root, SPOOL_DIR_PREFIX);
+}
+
+/**
+ * Lists staging directories under a root: spools whose owners died between
+ * creating the directory and renaming it into place. Nothing ever ran with
+ * such a directory as its spool, so a sweeper deletes them rather than
+ * shipping them.
+ */
+export function listStagingSpools(root: string): Promise<string[]> {
+  return listPrefixed(root, SPOOL_STAGING_PREFIX);
+}
+
+async function listPrefixed(root: string, prefix: string): Promise<string[]> {
   const dirs: string[] = [];
   let entries: AsyncIterable<Deno.DirEntry>;
   try {
@@ -121,7 +157,7 @@ export async function listSpools(root: string): Promise<string[]> {
   }
   try {
     for await (const entry of entries) {
-      if (entry.isDirectory && entry.name.startsWith(SPOOL_DIR_PREFIX)) {
+      if (entry.isDirectory && entry.name.startsWith(prefix)) {
         dirs.push(join(root, entry.name));
       }
     }

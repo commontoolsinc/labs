@@ -25,9 +25,19 @@ export {
   RECORDS_KEY_FILE_VARIABLE,
   recordsDir,
   repositoryRelativePath,
+  repositoryRoot,
   SPOOL_ROOT_VARIABLE,
 } from "./paths.ts";
 export type { Environment } from "./paths.ts";
+export {
+  ALIAS_FILE,
+  aliasGraphProblems,
+  aliasKeyOf,
+  AliasResolver,
+  loadAliasResolver,
+  parseAliasLine,
+} from "./aliases.ts";
+export type { AliasLine } from "./aliases.ts";
 export {
   FRAGMENT_PREFIX,
   FRAGMENT_SUFFIX,
@@ -39,9 +49,11 @@ export {
   createRunSpool,
   deleteSpool,
   listSpools,
+  listStagingSpools,
   LOCK_FILE,
   readSpool,
   SPOOL_DIR_PREFIX,
+  SPOOL_STAGING_PREFIX,
   tryAdoptSpool,
 } from "./spool.ts";
 export type { HeldSpool, SpoolContents } from "./spool.ts";
@@ -67,5 +79,5 @@ export {
   STORE_WRITE_SCOPE,
 } from "./store.ts";
 export type { CreateObjectOptions, CreateObjectResult } from "./store.ts";
-export { listObjects, readObject } from "./store-reader.ts";
-export type { StoredReport } from "./store-reader.ts";
+export { listObjects, parseReportGroups, readObject } from "./store-reader.ts";
+export type { StoredReport, StoredReportGroup } from "./store-reader.ts";
