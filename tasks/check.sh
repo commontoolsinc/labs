@@ -97,6 +97,7 @@ FILES_TO_CHECK=()
 
 # Directory paths (no glob expansion needed)
 DIRS=(
+  "packages/agents-host"
   "packages/api"
   "packages/background-piece-service"
   "packages/cf-harness"
