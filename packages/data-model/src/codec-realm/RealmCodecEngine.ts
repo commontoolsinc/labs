@@ -75,18 +75,4 @@ export class RealmCodecEngine extends BaseCodecEngine<
   ): RealmDecodeAct {
     return new RealmDecodeAct(this, env, markerOf(data));
   }
-
-  /**
-   * @inheritDoc
-   *
-   * Mints this call's marker and returns `[marker, walkedTree]`.
-   *
-   * **The tree shares structure with `value` and is not frozen**, per Section
-   * 5.1 of the realm spec: a subtree needing no encoding is the caller's own
-   * object rather than a rebuild of it, so mutating `value` afterwards
-   * changes what was encoded.
-   *
-   * The marker is minted here, after `value` exists, which is what Section 2.2
-   * requires of it and why it cannot be forged from within a payload.
-   */
 }
