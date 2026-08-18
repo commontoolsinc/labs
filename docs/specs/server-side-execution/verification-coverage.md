@@ -3285,7 +3285,15 @@ supply; OW29/OW32/OW34 closed):
     admin"; that echo's floor is the served commit's seq (above every W
     until the next authored input) and its mark was consumed before it
     existed, so nothing retires it — until Bob's draft lifts W (the
-    48-s release the report timed). Pinned: `speculation-arrival-gate.test.ts`
+    48-s release the report timed). Stated as INFERRED from that
+    evidence, not witnessed by a client trace (the report's "last
+    inch"): the re-measured runs never reproduced the late dispatch
+    (`overlayLateEchoDrops` 0), so the rule's live firing is unobserved;
+    its unit pin covers the mechanism. The rule reaches the late echo's
+    client CASCADE too (a child echo whose `parentEventId` is the jobless
+    intent, and its children), and a dropped late echo's enactable
+    effects are owned and not enacted (the closed-overlay arm's shape).
+    Pinned: `speculation-arrival-gate.test.ts`
     (the E2 shape end to end — a served value arriving decoupled from a
     watermark advance retires and renders at once, mutation: wake
     removed → the entry stands; the trigger-not-relaxation scripted pin;
@@ -3337,14 +3345,21 @@ supply; OW29/OW32/OW34 closed):
     cycle and queued a second copy each time — G1 (pre-guard) showed
     `events: appended 8 / processed 34` (4.25× dispatch of the lockdown
     toggle; #5969's (β) re-scan variant); the drain now skips an entry
-    whose earlier drain copy has not reached its commit callback
-    (`events.drainInFlightSkips`; events.md §4's new sentence, stated
-    narrowly as the drain deduping against ITSELF — the LT1 (α)
-    in-process copy and the cross-producer invariant stay owed to the
-    owner's ruling). Pinned: `executor-events-down.test.ts` (exactly-once
-    under an honest deadline: one fire mid-settle → processed 1, ONE
-    consequence commit, the counter reads 1; mutation: guard removed →
-    processed 11, red). Every guarded run: `processed == appended`.
+    whose earlier drain copy is still in flight — queued/held/running,
+    or with its mark sealed into a wave the store has not yet committed
+    — and releases it only on a store-visible outcome (the wave's
+    committed/requeued ids) or a provably markless end (deferral, an
+    aborted run's final callback, a notice that failed to stage); the
+    self-review's finding 1 moved the release off the SEAL, where a
+    re-drain hitting a real await between wave-detach and the guard
+    check could still queue a second copy (`events.drainInFlightSkips`;
+    events.md §4's new sentence, stated narrowly as the drain deduping
+    against ITSELF — the LT1 (α) in-process copy and the cross-producer
+    invariant stay owed to the owner's ruling). Pinned:
+    `executor-events-down.test.ts` (exactly-once under an honest
+    deadline: one fire mid-settle → processed 1, ONE consequence commit,
+    the counter reads 1; mutation: guard removed → processed 11, red).
+    Every guarded run: `processed == appended`.
   - OFF witness: T1 is arm-independent by design (verdicts pinned);
     T2 lives in the flag-ON client overlay (constructed only under the
     flag on non-serving runtimes) and the replica seam fires only with an
