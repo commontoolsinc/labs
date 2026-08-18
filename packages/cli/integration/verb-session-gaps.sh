@@ -74,6 +74,13 @@ fi
 $CF piece set-slug board "$BOARD" $ARGS >/dev/null 2>&1
 SLUG_NAME=$($CF get --quiet --piece board $ARGS '$NAME' 2>/dev/null | tr -d '"')
 check "Work tracker" "$SLUG_NAME" "the slug resolves everywhere --piece is taken"
+# The arrival name is discoverable as well as resolvable: the slug index
+# lists what set-slug wrote, which is what lets a session in a space someone
+# else populated start from a listing rather than from folklore.
+$CF piece slugs $ARGS --json 2>/dev/null |
+  jq -e '[.[].slug] | index("board")' >/dev/null 2>&1 &&
+  ok "the slug index lists the arrival name" ||
+  bad "the slug index does not list 'board'"
 
 step "2. Ask what it is, and what it can do"
 VERBS=$($CF piece verbs --piece board $ARGS --json 2>/dev/null)
