@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run=git
+#!/usr/bin/env -S deno run --allow-read --allow-env --allow-run=git
 /**
  * Fails when a `FileSystemProgramResolver` is constructed outside the one
  * operation that builds a program from local files.
@@ -17,30 +17,31 @@
  * that the only route: reaching for the resolver directly is the mistake, and
  * it is caught here rather than in a pattern that reads a file months later.
  *
- * Detection is on the resolver's name anywhere in a file, not on a `new`
+ * Detection is on the resolver's name anywhere in code, not on a `new`
  * expression. Constructing it through an alias or a namespace import spells the
  * construction differently but still names it to import it, so the name is the
  * one spelling every route shares.
  *
- * Usage: deno run --allow-read --allow-run=git ./tasks/check-local-program.ts
+ * Usage: deno run --allow-read --allow-env --allow-run=git \
+ *        ./tasks/check-local-program.ts
  */
 
 import { dirname, fromFileUrl } from "@std/path";
+import ts from "typescript";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
+/** The name every route to the resolver has to spell out. */
+const RESOLVER = "FileSystemProgramResolver";
+
 /**
- * Files permitted to construct the resolver directly, each for a reason that
- * does not end in a compiled program.
+ * Files permitted to name the resolver in code, each for a reason that does not
+ * end in a compiled program.
  */
-const ALLOWLIST = new Map<string, string>([
+export const ALLOWLIST = new Map<string, string>([
   [
     "packages/runner/src/harness/local-program.deno.ts",
     "the operation itself",
-  ],
-  [
-    "tasks/check-local-program.ts",
-    "names the constructor in its own diagnostics",
   ],
   [
     "packages/js-compiler/program.ts",
@@ -61,64 +62,97 @@ const ALLOWLIST = new Map<string, string>([
 ]);
 
 /**
- * Blank out comments, so the scan reads code rather than prose. Documents and
- * doc comments name the resolver when explaining why not to reach for it, and
- * a check that counted those would make writing the explanation an offense.
+ * Returns whether `source` names the resolver in code rather than in prose.
  *
- * Approximate by design: a `//` or `/* *\/` sequence inside a string literal
- * blanks from there to the line or comment end. That can only hide code from
- * the scan, never invent an offender, and no file here puts one in a string.
+ * The answer comes from parsing the file and looking for an identifier, so the
+ * distinction is the language's own. A comment and a string literal are not
+ * identifiers, which is what lets a document, a doc comment, or a diagnostic
+ * message name the resolver while explaining why not to reach for it. An
+ * import, a type reference, a property access, and a `new` expression all bind
+ * the name as an identifier, so all of them count.
  */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/\/\/[^\n]*/g, " ");
+export function namesResolverInCode(source: string, path: string): boolean {
+  const file = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.ESNext,
+    /* setParentNodes */ false,
+    path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isIdentifier(node) && node.text === RESOLVER) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
 }
 
-const tracked = new TextDecoder().decode(
-  (await new Deno.Command("git", {
+/** Returns the tracked TypeScript files under `root`, repo-relative. */
+async function trackedSources(root: string): Promise<string[]> {
+  const listed = await new Deno.Command("git", {
     // The whole repository, not just `packages`: the pattern-compatibility
     // and vintage tasks compile authored source too, and a scope that stopped
     // at `packages` would leave exactly the sites a check like this exists to
     // reach.
     args: ["ls-files", "-z"],
-    cwd: REPO_ROOT,
-  }).output()).stdout,
-).split("\0").filter((path) => /\.tsx?$/.test(path));
+    cwd: root,
+  }).output();
+  return new TextDecoder().decode(listed.stdout)
+    .split("\0")
+    .filter((path) => /\.tsx?$/.test(path));
+}
 
-const offenders: string[] = [];
-for (const path of tracked) {
-  if (ALLOWLIST.has(path)) continue;
-  // A file git still tracks may already be gone from the working tree, which
-  // is what a deletion looks like before it is staged. Nothing to scan.
-  let source: string;
-  try {
-    source = await Deno.readTextFile(`${REPO_ROOT}/${path}`);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) continue;
-    throw error;
+/** Returns the files under `root` that name the resolver without an exemption. */
+export async function scan(root: string = REPO_ROOT): Promise<string[]> {
+  const offenders: string[] = [];
+  for (const path of await trackedSources(root)) {
+    if (ALLOWLIST.has(path)) continue;
+    // A file git still tracks may already be gone from the working tree, which
+    // is what a deletion looks like before it is staged. Nothing to scan.
+    let source: string;
+    try {
+      source = await Deno.readTextFile(`${root}/${path}`);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) continue;
+      throw error;
+    }
+    // Parsing is exact but not free, and the name is absent from all but a
+    // handful of files. Reading the text for it first settles the rest.
+    if (!source.includes(RESOLVER)) continue;
+    if (!namesResolverInCode(source, path)) continue;
+    offenders.push(path);
   }
-  if (!/\bFileSystemProgramResolver\b/.test(stripComments(source))) continue;
-  offenders.push(path);
+  return offenders;
 }
 
-if (offenders.length > 0) {
-  console.error(
-    "These files build a program from local files by hand, so any data file\n" +
-      "the caller attaches is silently dropped:\n",
+/** Runs the check over `root`, reports, and returns a process code. */
+export async function main(root: string = REPO_ROOT): Promise<number> {
+  const offenders = await scan(root);
+  if (offenders.length > 0) {
+    console.error(
+      "These files build a program from local files by hand, so any data file\n" +
+        "the caller attaches is silently dropped:\n",
+    );
+    for (const path of offenders) console.error(`  ${path}`);
+    console.error(
+      "\nUse `resolveLocalProgram` from " +
+        "`@commonfabric/runner/local-program.deno`,\nwhich resolves the entry, " +
+        "its attached test entries, and its data files as one\noperation. If a " +
+        "site genuinely never compiles the program it builds, add it to\n" +
+        "ALLOWLIST in tasks/check-local-program.ts with the reason.",
+    );
+    return 1;
+  }
+  console.log(
+    `Local programs are built through one operation ` +
+      `(${ALLOWLIST.size} allowlisted exception(s)).`,
   );
-  for (const path of offenders) console.error(`  ${path}`);
-  console.error(
-    "\nUse `resolveLocalProgram` from " +
-      "`@commonfabric/runner/local-program.deno`,\nwhich resolves the entry, " +
-      "its attached test entries, and its data files as one\noperation. If a " +
-      "site genuinely never compiles the program it builds, add it to\n" +
-      "ALLOWLIST in tasks/check-local-program.ts with the reason.",
-  );
-  Deno.exit(1);
+  return 0;
 }
 
-console.log(
-  `Local programs are built through one operation ` +
-    `(${ALLOWLIST.size} allowlisted exception(s)).`,
-);
+if (import.meta.main) Deno.exit(await main());

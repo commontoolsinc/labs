@@ -1119,9 +1119,11 @@ meant to attach, and nothing reports that until a pattern reads one. Composing
 the whole operation in one place removes the opportunity to omit the step, and
 `deno task check-local-program` keeps that the only route by failing on any
 file that names the resolver in code, which catches an alias or a namespace
-import as readily as a direct construction. Its allowlist holds only sites that
-never build a program to compile: the operation itself, the check's own
-diagnostics, the package that declares and re-exports the resolver, the tests
-of the resolver's containment rules, and the import walk behind `cf deps`.
+import as readily as a direct construction. The check parses each file and
+looks for an identifier, so a document, a doc comment, or a diagnostic message
+may name the resolver while explaining why not to reach for it. Its allowlist
+holds only sites that never build a program to compile: the operation itself,
+the package that declares and re-exports the resolver, the tests of the
+resolver's containment rules, and the import walk behind `cf deps`.
 Extending it means the same claim — a site that compiles what it builds belongs
 on the route, not beside it.
