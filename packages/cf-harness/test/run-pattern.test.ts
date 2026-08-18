@@ -443,7 +443,7 @@ describe("run-pattern", () => {
       });
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("error");
-      expect(output.message).toContain("failed on every rerun while settling");
+      expect(output.message).toContain("failed while settling");
       // The thrown text is a data channel: it stays in the artifact field the
       // prompt loop strips from model context, never in the message.
       expect(output.message).not.toContain("boom in lift");

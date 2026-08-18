@@ -215,6 +215,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         value: {},
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
+        rawValue: {},
       },
       required: [
         "outputId",
@@ -233,6 +234,8 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           enum: ["compile-error", "error", "cancelled"],
         },
         message: { type: "string" },
+        pieceId: { type: "string" },
+        rawCauseMessage: { type: "string" },
       },
       required: ["outputId", "status", "message"],
       additionalProperties: false,
@@ -968,7 +971,7 @@ export const runPatternTool: HarnessToolDefinition<
         return {
           ...errorOutput(
             "error",
-            `the pattern ran but a computation attributed to the created piece failed on every rerun while settling, so the result never landed; the failure text is retained in the run artifact and withheld here, since a computation's thrown message can carry the data it read${registrationNote}`,
+            `the pattern ran but a computation attributed to the created piece failed while settling and the result never landed; the failure text is retained in the run artifact and withheld here, since a computation's thrown message can carry the data it read${registrationNote}`,
           ),
           pieceId: piece.id,
           rawCauseMessage: pieceErrors[0].message,
