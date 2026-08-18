@@ -2,7 +2,7 @@
 # The verb-result walkthrough: deploy a pattern, introspect its verbs, call
 # them, and read what they return.
 #
-# Documented in docs/common/verbs-over-the-cli.md, which explains the model
+# Documented in docs/common/verbs/over-the-cli.md, which explains the model
 # this exercises. Keep the two in step: the doc is the explanation, this is the
 # proof, and each names the other.
 #

@@ -466,7 +466,7 @@ mounts; auto-discovered spaces may appear writable but silently drop writes.
 
 ## References
 
-- `docs/common/verbs-over-the-cli.md` - The verb walkthrough: invocation ids and
+- `docs/common/verbs/over-the-cli.md` - The verb walkthrough: invocation ids and
   sessions, receipts, retries, and shaped reads, each step runnable
 - `packages/patterns/system/default-app.tsx` - System pieces (pieceRegistry
   lives here)

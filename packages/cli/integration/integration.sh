@@ -412,7 +412,7 @@ run_piece_links() {
   # The slug index: both names just assigned are enumerable, and each resolves
   # to a piece. Names are compared exactly; the resolved ids are only checked
   # non-null, because an address is something to read next, not an identifier
-  # to compare (docs/common/verb-session-walkthrough.md, "An address is not an
+  # to compare (docs/common/verbs/session-walkthrough.md, "An address is not an
   # identifier to compare").
   SLUGS_JSON=$(cf piece slugs $SPACE_ARGS --json)
   echo "$SLUGS_JSON" | jq -e '[.[].slug] == ["counter-alias", "resolved-counter"]' > /dev/null ||
@@ -1036,7 +1036,7 @@ run_three_topic_fixture() {
 
 # The verb-result walkthrough. Delegates to the standalone script rather than
 # restating its assertions here: that script is what
-# docs/common/verbs-over-the-cli.md tells a reader to run, so the documented
+# docs/common/verbs/over-the-cli.md tells a reader to run, so the documented
 # artifact is the tested one and the two cannot drift. It deploys its own
 # fixture and takes its own space.
 #

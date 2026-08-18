@@ -1,5 +1,5 @@
 /**
- * Fixture for the CLI verb-session demo (`docs/common/verb-session-walkthrough.md`).
+ * Fixture for the CLI verb-session demo (`docs/common/verbs/session-walkthrough.md`).
  *
  * It exists so the demo owns its subject: the shipped patterns are used
  * elsewhere, and a change to one of them should never break a demonstration of
