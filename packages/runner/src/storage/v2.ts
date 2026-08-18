@@ -2016,7 +2016,6 @@ type RejectedRepairEpoch = {
 
 type RejectedRepairDocument = {
   epochs: RejectedRepairEpoch[];
-  drained: PromiseWithResolvers<void>;
 };
 
 type RejectedRepairClaim = {
@@ -3987,7 +3986,6 @@ class SpaceReplica implements ISpaceReplica {
       if (document === undefined) {
         document = {
           epochs: [],
-          drained: Promise.withResolvers<void>(),
         };
         this.#rejectedRepairDocuments.set(key, document);
       }
@@ -4017,9 +4015,6 @@ class SpaceReplica implements ISpaceReplica {
     const repairSettled = repairClaims.map(({ epoch }) =>
       epoch.settled.promise
     );
-    const repairDrained = repairClaims.map(({ document }) =>
-      document.drained.promise
-    );
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
     // Mark the layer dead for that window so no new commit is minted and sent
@@ -4033,7 +4028,7 @@ class SpaceReplica implements ISpaceReplica {
       rejection.readyToRetry = async () => {
         await readRepairReadyToRetry?.();
         await dropped.promise;
-        await Promise.all(repairDrained);
+        await Promise.all(repairSettled);
       };
     }
     let releasedRepairDocuments = false;
@@ -4147,11 +4142,8 @@ class SpaceReplica implements ISpaceReplica {
           if (this.#rejectedRepairDocuments.get(key) === document) {
             this.#rejectedRepairDocuments.delete(key);
           }
-          document.drained.resolve();
-          released.push(epoch);
-        } else {
-          document.epochs[0].before.push(...epoch.before);
         }
+        released.push(epoch);
         epoch.settled.resolve();
       }
     }
@@ -4509,9 +4501,9 @@ class SpaceReplica implements ISpaceReplica {
       })),
     ];
 
-    // A rejected document's catch-up is reported by the coordinated revert
-    // after every dead pending layer covering it has been removed. Other
-    // documents in the same ordinary sync still notify immediately.
+    // A rejected document's catch-up is reported by the finite generation's
+    // revert after every dead pending layer in that generation is removed.
+    // Other documents in the same ordinary sync still notify immediately.
     const notificationTouched = type === "conflict-repair"
       ? []
       : touched.filter(({ id, scope }) =>

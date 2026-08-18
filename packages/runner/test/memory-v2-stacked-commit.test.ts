@@ -4139,7 +4139,7 @@ Deno.test("memory v2 stacked commits: overlapping repairs settle and notify as o
   }
 });
 
-Deno.test("memory v2 stacked commits: a post-cutoff repair uses a finite successor epoch", async () => {
+Deno.test("memory v2 stacked commits: a post-cutoff repair does not extend prior readiness", async () => {
   const harness = await createHarness();
   const firstRepair = Promise.withResolvers<void>();
   const secondRepair = Promise.withResolvers<void>();
@@ -4223,31 +4223,34 @@ Deno.test("memory v2 stacked commits: a post-cutoff repair uses a finite success
     const retryReadiness = readyToRetry().then(() => {
       retryReady = true;
     });
-    await Promise.resolve();
+    await retryReadiness;
 
     assertEquals(secondSettled, false);
-    assertEquals(retryReady, false);
+    assertEquals(retryReady, true);
     expectVisible(harness, { A: { left: 0, right: 2 } });
     assertEquals(
       harness.notifications.notifications.filter(
         (notification) => notification.type === "revert",
       ).length,
-      0,
+      1,
     );
 
     secondRepair.resolve();
     await assertConflict(second, "stale confirmed read");
-    await retryReadiness;
-    assertEquals(retryReady, true);
 
     expectVisible(harness, { A: { left: 0, right: 0 } });
     const reverts = harness.notifications.notifications.filter(
       (notification) => notification.type === "revert",
     );
-    assertEquals(reverts.length, 1);
+    assertEquals(reverts.length, 2);
     assertEquals(
-      [...reverts[0].changes].map((change) => change.address.path).sort(),
-      [["value", "left"], ["value", "right"]],
+      reverts.map((notification) =>
+        [...notification.changes].map((change) => change.address.path).sort()
+      ),
+      [
+        [["value", "left"], ["value", "right"]],
+        [["value", "left"], ["value", "right"]],
+      ],
     );
   } finally {
     firstRepair.resolve();

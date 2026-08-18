@@ -70,3 +70,27 @@ compatibility baselines. Keep the Lunch Poll pattern tests and the exact
 two-browser scenario as the end-to-end proof. The two-browser scenario must
 retain both concurrent votes, add a second option, and record its independent
 vote.
+
+## 2. Bound conflict readiness to its repair generation
+
+The document-wide readiness promise introduced above could remain pending
+forever. A later conflict created a successor generation for the same document.
+When the earlier generation closed, it transferred its snapshots to that
+successor and waited for the whole document to drain. A steady stream of
+independent conflicts could always create another successor before the final
+generation closed. The first event would then never become eligible to retry,
+and subscribers would never receive a revert notification for any completed
+generation.
+
+Resolve each conflict's readiness function when the finite generation it joined
+has settled. Later commits cannot join that generation because its local
+sequence cutoff was fixed when the generation was created. Emit a merged revert
+for every completed generation instead of moving its snapshots to a successor.
+An active successor can therefore cause a bounded duplicate invalidation, but
+it cannot extend the earlier generation's readiness or suppress its
+notification. A retry that encounters the successor's optimistic state follows
+the ordinary conflict path again and keeps the original event payload.
+
+Extend the successor-generation test so the later repair remains blocked while
+the earlier commit settles, its readiness resolves, and its revert is emitted.
+Then release the successor and verify that it produces its own final revert.
