@@ -342,7 +342,7 @@ describe("pattern-user-post-bash", () => {
 
     it("keeps the recomputation guidance for state writes", () => {
       expect(
-        suggestionForPatternUserCommand("cf piece set --piece ID title"),
+        suggestionForPatternUserCommand("cf set --piece ID title"),
       ).toContain("Run 'cf piece step'");
     });
 

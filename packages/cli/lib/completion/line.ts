@@ -48,7 +48,7 @@ export type CompletionSlot =
     readonly index: number;
   }
   /**
-   * A word after `--`. `cf piece call` and `cf exec` hand these to the
+   * A word after `--`. `cf call` and `cf exec` hand these to the
    * callable's own schema-derived parser, so the CLI's option tree does not
    * describe them.
    */
@@ -98,7 +98,7 @@ export interface CompletionLine {
   /** Deepest command the words resolved to. */
   readonly command: AnyCommand;
 
-  /** Command path below the program name, e.g. `["piece", "call"]`. */
+  /** Command path below the program name, e.g. `["piece", "ls"]`. */
   readonly path: readonly string[];
   readonly slot: CompletionSlot | null;
 

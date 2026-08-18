@@ -174,7 +174,7 @@ Deno.test("a live slot with no resolvable context yields nothing, not an error",
   const previous = Deno.env.get("CF_IDENTITY");
   Deno.env.delete("CF_IDENTITY");
   try {
-    assertEquals(await completeFor("cf piece call --piece "), []);
+    assertEquals(await completeFor("cf call --piece "), []);
   } finally {
     if (previous !== undefined) Deno.env.set("CF_IDENTITY", previous);
   }

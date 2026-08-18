@@ -692,8 +692,6 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
         "cf exec /tmp/x --select ",
         "cf get --piece x --schema @",
         "cf get --piece x --schema {",
-        "cf piece call --piece x ",
-        "cf piece get --piece x ",
         "cf piece get-label --piece x ",
         "cf piece set-label --piece x ",
         "cf piece link ",

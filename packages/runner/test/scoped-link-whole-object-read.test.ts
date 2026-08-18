@@ -17,7 +17,7 @@ import { decomposeSchema } from "../src/schema-decompose.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
-// Whole-object piece reads void on scoped links (CLI `cf piece get` with no
+// Whole-object piece reads void on scoped links (CLI `cf get` with no
 // path returned undefined while every child path worked).
 //
 // Mechanism: the piece result cell is NOT schema-less — the CLI read path

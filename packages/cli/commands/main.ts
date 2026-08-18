@@ -197,7 +197,7 @@ export const main = new Command()
   .command("wish", wish)
   // The top-level spellings of the piece data commands: the same builders
   // the `piece` chain mounts under the same names, so `cf get` and
-  // `cf piece get` are one definition parsed two ways
+  // `cf get` are one definition parsed two ways
   // (docs/plans/cli-surface-shape.md, step 5).
   // @ts-ignore for the above type issue
   .command("get", pieceDataCommand("get"))

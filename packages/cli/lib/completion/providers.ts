@@ -7,7 +7,7 @@
  *
  * Every provider resolves its fabric context from the half-typed line first and
  * the environment second, which is what lets
- * `cf piece call -s other-space --piece <TAB>` list the pieces of `other-space`
+ * `cf call -s other-space --piece <TAB>` list the pieces of `other-space`
  * rather than whatever `CF_SPACE`-shaped default the shell happens to carry.
  *
  * Failure is always silent and always empty. A completion request runs while

@@ -1527,7 +1527,7 @@ describe("renderExecHelpJson", () => {
 describe("renderPieceCallHelp", () => {
   it("renders piece-call help with top-level help lines and JSON input", () => {
     const help = renderPieceCallHelp(
-      "cf piece call ... search",
+      "cf call ... search",
       makeSpec(
         "tool",
         {
@@ -1547,12 +1547,12 @@ describe("renderPieceCallHelp", () => {
       ),
     );
 
-    expect(help).toContain("cf piece call ... search --help");
-    expect(help).toContain("cf piece call ... search --help --json");
-    expect(help).toContain("cf piece call ... search <json>");
-    expect(help).toContain("cf piece call ... search --json [<json>]");
+    expect(help).toContain("cf call ... search --help");
+    expect(help).toContain("cf call ... search --help --json");
+    expect(help).toContain("cf call ... search <json>");
+    expect(help).toContain("cf call ... search --json [<json>]");
     expect(help).toContain(
-      "cf piece call ... search -- [run] --query <string>",
+      "cf call ... search -- [run] --query <string>",
     );
     expect(help).toContain("JSON input:");
     expect(help).toContain(
@@ -1562,17 +1562,17 @@ describe("renderPieceCallHelp", () => {
     expect(help).toContain("help?: string");
     expect(help).toContain("Flags after `--`:");
     expect(help).not.toContain("Read the full input object from stdin.");
-    expect(help).not.toContain("cf piece call ... search -- [run] --help");
+    expect(help).not.toContain("cf call ... search -- [run] --help");
   });
 
   it("renders bare usage for schema-less handler piece-call help", () => {
     const help = renderPieceCallHelp(
-      "cf piece call ... onAddContact",
+      "cf call ... onAddContact",
       makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
     );
 
-    expect(help).toContain("cf piece call ... onAddContact");
-    expect(help).toContain("cf piece call ... onAddContact -- invoke");
+    expect(help).toContain("cf call ... onAddContact");
+    expect(help).toContain("cf call ... onAddContact -- invoke");
     expect(help).toContain(
       "Invoke alone will call the handler without any inputs.",
     );
@@ -1580,7 +1580,7 @@ describe("renderPieceCallHelp", () => {
 
   it("enumerates a handler's declared result under Output", () => {
     const help = renderPieceCallHelp(
-      "cf piece call ... addItem",
+      "cf call ... addItem",
       makeSpec(
         "handler",
         {
@@ -1615,7 +1615,7 @@ describe("renderPieceCallHelp", () => {
 
   it("names the type of a handler result that is not an object", () => {
     const help = renderPieceCallHelp(
-      "cf piece call ... rename",
+      "cf call ... rename",
       makeSpec(
         "handler",
         { type: "object", properties: { title: { type: "string" } } },
@@ -1640,7 +1640,7 @@ describe("renderPieceCallHelp", () => {
     // the wire and the page. Aligned as the flags are, and a multi-line
     // comment continues under its own first line.
     const help = renderPieceCallHelp(
-      "cf piece call ... addItem",
+      "cf call ... addItem",
       makeSpec(
         "handler",
         { type: "object", properties: { title: { type: "string" } } },
@@ -1675,12 +1675,12 @@ describe("renderPieceCallHelp", () => {
 
   it("mentions no file to write JSON to, there being none in this context", () => {
     const help = renderPieceCallHelp(
-      "cf piece call ... onAddContact",
+      "cf call ... onAddContact",
       makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
     );
 
     // The write-through note belongs to the mounted-file page, which this
-    // renderer shares its body with. `cf piece call` takes its payload as an
+    // renderer shares its body with. `cf call` takes its payload as an
     // argument and mounts nothing, so the sentence would name a file the
     // caller has no way to reach — and it is the last line of the page.
     expect(help).not.toContain("write JSON to this file");
@@ -1693,7 +1693,7 @@ describe("renderPieceCallHelp", () => {
 
   it("carries no Output section for a handler that declares no result", () => {
     const help = renderPieceCallHelp(
-      "cf piece call ... archive",
+      "cf call ... archive",
       makeSpec("handler", { type: "object", properties: {} }),
     );
 
