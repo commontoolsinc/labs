@@ -44,6 +44,7 @@ export interface ItemOutput {
   archive: Stream<void>;
   [NAME]: string;
   title: string;
+  /** "open" until a verb changes it — "done" or "archived". */
   status: string;
   /** Append-only progress record. Each entry carries a time the caller did not
    * supply and could not have supplied — the pattern reads the clock. */
@@ -51,6 +52,7 @@ export interface ItemOutput {
   /** The item this one files under, or null at a root. Carried so a caller can
    * walk up as well as down, per the documented self-reference shape. */
   parent: ItemOutput | null;
+  /** The tree. */
   children: ItemOutput[];
   /** Items this one waits on. These are not descendants — a blocker can live
    * anywhere in the board, which is what turns the tree into a graph and makes
@@ -227,6 +229,10 @@ interface BoardInput {
   items?: Writable<ItemOutput[] | Default<[]>>;
 }
 
+/** A work-item tracker: root items on a board, everything deeper under an
+ * item's `children`. State changes only through verbs — a caller files,
+ * notes, finishes, archives, and relates items; nothing here is written
+ * directly. */
 interface BoardOutput {
   [NAME]: string;
   /** Root items only. The tree hangs off each one's `children`. */

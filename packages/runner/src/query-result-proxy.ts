@@ -6,7 +6,7 @@ import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { resolveLinkTracingDereferences } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell, frameAnchorIds } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
@@ -38,10 +38,18 @@ const MAX_RECURSION_DEPTH = 100;
 // stays recursive.
 const SHAPE_READ: IReadOptions = { nonRecursive: true };
 
-// Cache of target objects to their proxies, scoped by ReactivityLog
+// Cache of target objects to their proxies, scoped by ReactivityLog.
+//
+// `byValue` holds one proxy per value per writability. A writable proxy
+// carries write traps a read-only one refuses, so the two are different
+// objects and each gets its own slot; a view built for one writability is
+// never handed to a caller asking for the other. Within a writability the two
+// share, which is what this index sits behind `byLink` for: two links that
+// resolve to one stored object are one object to a consumer comparing by
+// identity.
 type ProxyCache = {
   byLink: Map<string, any>;
-  byValue: WeakMap<object, any>;
+  byValue: WeakMap<object, { readOnly?: any; writable?: any }>;
 };
 
 const proxyCacheByTx = new WeakMap<
@@ -77,7 +85,7 @@ const getProxyCache = (
   if (!txCache) {
     txCache = {
       byLink: new Map<string, any>(),
-      byValue: new WeakMap<object, any>(),
+      byValue: new WeakMap<object, { readOnly?: any; writable?: any }>(),
     };
     proxyCacheByTx.set(cacheIndex, txCache);
   }
@@ -169,6 +177,18 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
  * normalized (and frozen) level by level inside the write's diff; the caller's
  * input objects are never mutated, and already-deep-frozen valid `FabricValue`
  * inputs are accepted identity-preservingly.
+ *
+ * **Writability is a capability, not authoring guidance.** The refusal a
+ * read-only view gives — "declare type as `Writable<..>`" — names the way to
+ * ask for write access, but the refusal itself is enforcement that the builder
+ * depends on: `collectWritablyBoundRoots` in `builder/pattern.ts` takes a plain
+ * (non-`asCell`) binding in a schema-carrying handler to be unwritable, and a
+ * cell written only through such a binding would be classified `computed` —
+ * replayable from its inputs — if that held and the refusal did not. So a view
+ * built for one writability must never answer a request for the other. Write
+ * capability reaches a pattern two ways: an `asCell` handle minted from a
+ * `Writable<..>` field, or the whole argument of a handler declaring
+ * `{ proxy: true }`, which is the one construction site passing `writable` true.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
@@ -243,15 +263,51 @@ function createViewProxy<T>(
     );
   }
 
-  // Resolve path and follow links to actual value.
-  const traceStart = viewTx.getCfcState().dereferenceTraces.length;
-  link = resolveLink(runtime, viewTx, link);
+  // Resolve path and follow links to actual value. The resolution hands back
+  // the dereference traces it recorded, so the label view below costs no read
+  // of the transaction's CFC state.
+  const resolved = resolveLinkTracingDereferences(runtime, viewTx, link);
+
+  // Everything from here down — the label view, the value read, the stream and
+  // primitive dispatch, the proxy — is a function of this transaction's
+  // snapshot and the link the caller ASKED for. The cache below is keyed on
+  // that link rather than the resolved one, which is the difference between
+  // consulting it and having to resolve and read a value first just to name
+  // the entry. A scan that touches each element more than once pays the walk
+  // and the read once.
+  //
+  // The resolution above still runs on every access: it is what records this
+  // read's dereference traces and fires the sync kicks that belong to it, and
+  // being memoized itself, that is all it does on a repeat.
+  //
+  // The key names no more than the caches below it already distinguish, so
+  // this index can never be the reason two things that differ share a view.
+  // `writable` is there because a writable proxy carries write traps a
+  // read-only one refuses; `depth` and `pinned` are not, because `byLink`
+  // conflates the first and the second changes nothing about what a view of
+  // this link against this transaction is.
+  //
+  // A caller-supplied label view would have to be part of the key, and
+  // serializing one costs more than the read it saves. Those reads take the
+  // long way; a label view arrives only where a document carries stored CFC
+  // labels.
+  const viewMemo = cfcLabelView === undefined && resolved.memoKey !== undefined
+    ? viewTx.getSnapshotMemo?.()
+    : undefined;
+  const viewKey = viewMemo === undefined
+    ? ""
+    : `view:${writable ? 1 : 0}|${resolved.memoKey}`;
+  const cached = viewMemo?.get(viewKey) as { view: unknown } | undefined;
+  if (cached !== undefined) return cached.view as T;
+  const remember = <V>(view: V): V => {
+    viewMemo?.set(viewKey, { view });
+    return view;
+  };
+
+  link = resolved.link;
   cfcLabelView = mergeCfcLabelViews([
     cloneCfcLabelView(cfcLabelView),
-    cfcLabelViewForDereferenceTraces(
-      viewTx,
-      viewTx.getCfcState().dereferenceTraces.slice(traceStart),
-    ),
+    cfcLabelViewForDereferenceTraces(viewTx, resolved.traces),
   ]);
   const value = viewTx.readValueOrThrow(link, SHAPE_READ) as any;
 
@@ -268,7 +324,9 @@ function createViewProxy<T>(
   // pattern's Output type wasn't explicitly specified, causing the capture
   // schema to lose the asCell stream information.
   if (isStreamValue(value)) {
-    return createCell(runtime, link, tx, false, "stream", cfcLabelView) as T;
+    return remember(
+      createCell(runtime, link, tx, false, "stream", cfcLabelView) as T,
+    );
   }
 
   // `FabricPrimitive`s (byte sequences, temporal values, hashes, ...) are
@@ -287,7 +345,7 @@ function createViewProxy<T>(
     if (value instanceof FabricPrimitive) {
       viewTx.readValueOrThrow(link);
     }
-    return value;
+    return remember(value);
   }
 
   // A `FabricInstance` is _not_ exempted here the way a `FabricPrimitive` is
@@ -353,10 +411,15 @@ function createViewProxy<T>(
 
   // Check if we already have a proxy for this target in the cache.
   // The cache key is the original `value` (not the stub), ensuring that
-  // the same frozen object always maps to the same proxy instance.
-  const existingProxy = txCache.byLink.get(cacheKey) ??
-    (cfcLabelView === undefined ? txCache.byValue.get(value) : undefined);
-  if (existingProxy) return existingProxy;
+  // the same frozen object always maps to the same proxy instance -- and the
+  // value index is consulted for the writability actually asked for, so a view
+  // built for one never answers a request for the other.
+  let existingProxy = txCache.byLink.get(cacheKey);
+  if (existingProxy === undefined && cfcLabelView === undefined) {
+    const entry = txCache.byValue.get(value);
+    existingProxy = writable ? entry?.writable : entry?.readOnly;
+  }
+  if (existingProxy) return remember(existingProxy);
 
   const proxy = new Proxy(proxyTarget as object, {
     get: (target, prop, receiver) => {
@@ -843,9 +906,12 @@ function createViewProxy<T>(
   // Cache the proxy in the appropriate cache before returning
   txCache.byLink.set(cacheKey, proxy);
   if (cfcLabelView === undefined) {
-    txCache.byValue.set(value, proxy);
+    const entry = txCache.byValue.get(value) ?? {};
+    if (writable) entry.writable = proxy;
+    else entry.readOnly = proxy;
+    txCache.byValue.set(value, entry);
   }
-  return proxy;
+  return remember(proxy);
 }
 
 // Wraps a value on an array so that it can be read as literal or object,

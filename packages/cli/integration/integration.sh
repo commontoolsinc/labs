@@ -409,6 +409,18 @@ run_piece_links() {
 
   cf piece get $SPACE_ARGS --piece resolved-counter value > /dev/null
 
+  # The slug index: both names just assigned are enumerable, and each resolves
+  # to a piece. Names are compared exactly; the resolved ids are only checked
+  # non-null, because an address is something to read next, not an identifier
+  # to compare (docs/common/verb-session-walkthrough.md, "An address is not an
+  # identifier to compare").
+  SLUGS_JSON=$(cf piece slugs $SPACE_ARGS --json)
+  echo "$SLUGS_JSON" | jq -e '[.[].slug] == ["counter-alias", "resolved-counter"]' > /dev/null ||
+    error "The slug listing should name both assigned slugs, got: $SLUGS_JSON"
+  echo "$SLUGS_JSON" | jq -e 'all(.[]; .piece != null)' > /dev/null ||
+    error "Every listed slug should resolve to a piece, got: $SLUGS_JSON"
+  echo "Successfully listed the slug index."
+
   # Create a second piece from the same pattern
   PIECE_ID2=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
   echo "Created second piece: $PIECE_ID2"
@@ -987,9 +999,8 @@ run_three_topic_fixture() {
      .references == [$u]' > /dev/null ||
     error "Child B's returned reference should open the dropped create's canonical child, got: $CHILD_B_FINAL"
 
-  # The reciprocal derived references (this fixture's crossrefs analog):
-  # children point up at the umbrella, the revised umbrella points down at
-  # both children, derived — never persisted.
+  # The reciprocal derived references: children point up at the umbrella, the
+  # revised umbrella points down at both children, derived — never persisted.
   RECIPROCAL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" referencedBy)
   echo "$RECIPROCAL" | jq -e \
     --arg u "$UMBRELLA_ID" --arg a "$CHILD_A_ID" --arg b "$CHILD_B_ID" \
@@ -1049,6 +1060,57 @@ run_verb_session_gaps() {
   echo "Successfully ran the verb-session gap harness for ${API_URL}."
 }
 
+# The top-level spellings are the same commands as their `cf piece`
+# counterparts (docs/plans/cli-surface-shape.md, step 5). The unit guard
+# (test/piece-data-spellings.test.ts) proves the two mounts share one
+# surface and refuse identically; what it cannot do is complete an
+# operation. This section is the successful-path half: each spelling
+# performs a real write, read, and dispatch against a live space, and every
+# assertion crosses spellings, so "identical surface" is backed by
+# "identical outcome" rather than by two green paths that never met.
+run_spelling_parity() {
+  setup_space
+
+  # Reads and writes: the stepped counter fixture, whose result cell exists
+  # and accepts a value write.
+  create_stepped_counter_piece 7
+
+  # Write through the new spelling, read back through the old.
+  echo '5' | cf set $SPACE_ARGS --piece $PIECE_ID value
+  RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID value)
+  [ "$RESULT" = '5' ] ||
+    error "cf piece get should read what cf set wrote, got: $RESULT"
+
+  # Write through the old spelling, read back through the new — once by
+  # flag, once through the positional canonical address, the composed form
+  # the surface arc exists for.
+  echo '9' | cf piece set $SPACE_ARGS --piece $PIECE_ID value
+  RESULT=$(cf get $SPACE_ARGS --piece $PIECE_ID value)
+  [ "$RESULT" = '9' ] ||
+    error "cf get should read what cf piece set wrote, got: $RESULT"
+  RESULT=$(cf get $SPACE_ARGS "/of:$PIECE_ID/value")
+  [ "$RESULT" = '9' ] ||
+    error "cf get with a positional address should read the same cell, got: $RESULT"
+
+  # Dispatch: the callable fixture. The same tool through both spellings
+  # answers identically.
+  PARITY_CALLABLE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  echo "Created parity callable piece: $PARITY_CALLABLE_ID"
+  OLD_CALL=$(cf piece call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search -- --query parity)
+  NEW_CALL=$(cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID search -- --query parity)
+  assert_json_eq "$NEW_CALL" "$OLD_CALL" \
+    "cf call and cf piece call should return the same tool result"
+
+  # A handler dispatched through the new spelling commits like the old one.
+  LEGACY_BEFORE=$(read_piece_value_or_default "$PARITY_CALLABLE_ID" "legacyCount" "0")
+  cf call $SPACE_ARGS --piece $PARITY_CALLABLE_ID legacyWrite
+  RESULT=$(cf piece get $SPACE_ARGS --piece $PARITY_CALLABLE_ID legacyCount)
+  [ "$RESULT" = "$((LEGACY_BEFORE + 1))" ] ||
+    error "A handler dispatched via cf call should commit once, got legacyCount=$RESULT"
+
+  echo "Successfully ran CLI spelling parity tests for ${API_URL}/${SPACE}."
+}
+
 run_wish() {
   setup_space
 
@@ -1077,13 +1139,70 @@ run_wish() {
   echo "Successfully ran CLI wish integration tests for ${API_URL}."
 }
 
+run_piece_data_files() {
+  setup_space
+
+  local data_pattern="$SCRIPT_DIR/pattern/data-reader.tsx"
+  local data_file="$SCRIPT_DIR/pattern/data/cities.json"
+  local data_dir="$WORK_DIR/datafiles"
+  mkdir -p "$data_dir"
+
+  # Deploy with the data file attached. The pattern reads it while it runs, so
+  # a successful read is what puts the bytes in the result cell below.
+  DATA_PIECE_ID=$(cf piece new $SPACE_ARGS \
+    --root "$SCRIPT_DIR/pattern" \
+    --datafile "$data_file" \
+    "$data_pattern")
+  echo "Created data-file piece: $DATA_PIECE_ID"
+
+  CITIES=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID cities)
+  assert_json_eq "$CITIES" '["Oslo", "Lima"]' \
+    "Pattern should read the attached data file, got: $CITIES"
+
+  # The bytes reaching the runtime must be the authored bytes, not a reserialized
+  # form. The fixture's spacing is deliberately not what a formatter would
+  # produce, so a re-serialization anywhere in the path shows up here.
+  RAW=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID raw)
+  EXPECTED_RAW=$(jq -Rs . < "$data_file")
+  assert_json_eq "$RAW" "$EXPECTED_RAW" \
+    "Attached data file should reach the pattern verbatim, got: $RAW"
+
+  # The data file comes back with the source package.
+  cf piece getsrc $SPACE_ARGS --piece $DATA_PIECE_ID "$data_dir"
+  if [ ! -f "$data_dir/data/cities.json" ]; then
+    error "Data file was not retrieved with the source from $DATA_PIECE_ID"
+  fi
+  if ! diff -u "$data_file" "$data_dir/data/cities.json" > /dev/null; then
+    error "Retrieved data file does not match the deployed bytes"
+  fi
+
+  # Redeploy from the recovered checkout, which `getsrc` laid out with the same
+  # relative paths the piece was built from. A data-only edit is a complete new
+  # source revision, so the pattern must read the new bytes — that is what shows
+  # the runtime is not serving a stale copy.
+  printf '{"cities":["Oslo","Lima","Accra"]}\n' > "$data_dir/data/cities.json"
+  cf piece setsrc $SPACE_ARGS --piece $DATA_PIECE_ID \
+    --root "$data_dir" \
+    --datafile "$data_dir/data/cities.json" \
+    "$data_dir/data-reader.tsx"
+  cf piece step $SPACE_ARGS --piece $DATA_PIECE_ID
+
+  UPDATED=$(cf get $SPACE_ARGS --piece $DATA_PIECE_ID cities)
+  assert_json_eq "$UPDATED" '["Oslo", "Lima", "Accra"]' \
+    "Pattern should read the updated data file, got: $UPDATED"
+
+  echo "Successfully ran CLI data-file integration tests for ${API_URL}."
+}
+
 case "$SECTION" in
   all)
     run_piece_values
+    run_piece_data_files
     run_piece_links
     run_piece_call
     run_piece_call_retry
     run_three_topic_fixture
+    run_spelling_parity
     run_wish
     ;;
   piece-basics)
@@ -1092,6 +1211,11 @@ case "$SECTION" in
     ;;
   piece-values)
     run_piece_values
+    run_piece_data_files
+    run_spelling_parity
+    ;;
+  spelling-parity)
+    run_spelling_parity
     ;;
   piece-links)
     run_piece_links

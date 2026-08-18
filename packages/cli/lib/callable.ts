@@ -15,7 +15,11 @@ import {
   relaxDefaultedRequired,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc/schema-sanitization";
-import { isInstance } from "@commonfabric/utils/types";
+import {
+  isInstance,
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
 
 import {
   type CallableKind,
@@ -262,20 +266,17 @@ export interface ExecutedCallable {
   resultRef?: CallableResultRef;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** Read a tool callable's stored `pattern` slot as the pattern the runner
  * will run. Only the record shape is checked here; a record missing the
  * schemas reaches `runtime.run` the same way any malformed stored pattern
  * does. */
 function asCallablePattern(value: unknown): Pattern | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isObjectNotArray(value)) return undefined;
   return value as Pattern;
 }
 
 function asExtraParams(value: unknown): Record<string, unknown> {
-  return isRecord(value) ? value : {};
+  return isObjectNotArray(value) ? value : {};
 }
 
 export function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
@@ -311,12 +312,10 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-function isSchemaObject(schema: JSONSchema | undefined): schema is Record<
-  string,
-  unknown
-> {
-  return typeof schema === "object" && schema !== null &&
-    !Array.isArray(schema);
+function isSchemaObject(
+  schema: JSONSchema | undefined,
+): schema is ReadonlyRecord {
+  return isObjectNotArray(schema);
 }
 
 /**
@@ -568,8 +567,7 @@ function isOpaqueReference(value: unknown): boolean {
   // nothing to malform. Every link a PAYLOAD can carry is the envelope form,
   // since the primitive spelling is that same sigil.
   if (payload === undefined) return true;
-  return typeof payload === "object" && payload !== null &&
-    !Array.isArray(payload);
+  return isObjectNotArray(payload);
 }
 
 /** Whether a schema node marks its position as a cell or a stream, which is
@@ -929,10 +927,7 @@ function cloneWithoutBoundToolKeys(
   if (schema.type !== "object" && !schema.properties) return schema;
 
   const rawProperties = schema.properties;
-  if (
-    typeof rawProperties !== "object" || rawProperties === null ||
-    Array.isArray(rawProperties)
-  ) {
+  if (!isObjectNotArray(rawProperties)) {
     return schema;
   }
 
@@ -961,12 +956,11 @@ function mergeToolInput(
   input: unknown,
   extraParams: Record<string, unknown>,
 ): Record<string, unknown> {
-  const base =
-    typeof input === "object" && input !== null && !Array.isArray(input)
-      ? input as Record<string, unknown>
-      : input === undefined
-      ? {}
-      : { value: input };
+  const base = isObjectNotArray(input)
+    ? input
+    : input === undefined
+    ? {}
+    : { value: input };
 
   return {
     ...base,
@@ -1475,7 +1469,7 @@ export async function executeResolvedCallable(
       // link a launched or chained-cell result converts to, an instance's
       // codec form, a keyless raw primitive — is a result.
       const raw = receipt.getRaw();
-      const valueLess = isRecord(raw) && !isInstance(raw) &&
+      const valueLess = isObjectNotArray(raw) && !isInstance(raw) &&
         Object.keys(raw).length === 0;
       if (value !== undefined && !valueLess) {
         result = value;

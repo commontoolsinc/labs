@@ -1,5 +1,5 @@
 /**
- * Shared doubles for the fabric-instance tests: a reconstruction context that
+ * Shared doubles for the fabric-instance tests: a live environment that
  * refuses to resolve a cell, and the two recursion callbacks for driving the
  * freeze protocols by hand.
  *
@@ -8,18 +8,18 @@
  * do the walking.
  */
 
-import { BaseReconstructionContext } from "@/codec-interface/BaseReconstructionContext.ts";
+import { BaseLiveEnvironment } from "@/codec-interface/BaseLiveEnvironment.ts";
 import type { FabricValue } from "@/interface.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
-/** Dummy reconstruction context for tests. */
-export class DummyReconstructionContext extends BaseReconstructionContext {
+/** Dummy live environment for tests. */
+export class DummyLiveEnvironment extends BaseLiveEnvironment {
   override getCell(): never {
     throw new Error("getCell not implemented in test");
   }
 }
 
-export const dummyContext = new DummyReconstructionContext(true);
+export const dummyEnv = new DummyLiveEnvironment(true);
 
 /**
  * Recursion-callback helpers for exercising the `[DEEP_FREEZE]` /

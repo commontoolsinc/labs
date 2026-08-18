@@ -15,7 +15,7 @@ import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricCodec } from "@/codec-interface/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 /**
@@ -31,7 +31,7 @@ class TestCodec extends BaseFabricCodec<FabricValue> {
   decode(
     _typeTag: string,
     _state: FabricValue,
-    _context: ReconstructionContext,
+    _env: LiveEnvironment,
   ): FabricValue {
     throw new Error("Unimplemented.");
   }

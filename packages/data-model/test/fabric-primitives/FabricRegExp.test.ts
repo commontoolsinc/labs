@@ -20,7 +20,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -144,7 +144,7 @@ describe("FabricRegExp", () => {
     describe("`[JSON_CODEC]`", () => {
       const codec = FabricRegExp[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.RegExp;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `RegExp` wire type tag", () => {
@@ -172,7 +172,7 @@ describe("FabricRegExp", () => {
 
       describe("decode()", () => {
         it("decodes non-object state to `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, "nope", context);
+          const decoded = codec.decode(expectedTag, "nope", env);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
@@ -195,7 +195,7 @@ describe("FabricRegExp", () => {
               { flavor: undefined, source: "a", flags: "g" },
             ]
           ) {
-            expect(codec.decode(expectedTag, state as never, context))
+            expect(codec.decode(expectedTag, state as never, env))
               .toBeInstanceOf(ProblematicValue);
           }
         });
@@ -206,7 +206,7 @@ describe("FabricRegExp", () => {
           const decoded = codec.decode(
             expectedTag,
             {},
-            context,
+            env,
           ) as FabricRegExp;
 
           expect(decoded).toBeInstanceOf(FabricRegExp);
@@ -218,7 +218,7 @@ describe("FabricRegExp", () => {
           const decoded = codec.decode(
             expectedTag,
             { source: "(", flags: "" },
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -227,7 +227,7 @@ describe("FabricRegExp", () => {
           const decoded = codec.decode(
             expectedTag,
             { source: "a", flags: "zz" },
-            context,
+            env,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
@@ -238,7 +238,7 @@ describe("FabricRegExp", () => {
           const decoded = codec.decode(
             expectedTag,
             { flavor: "other", source: "(", flags: "" },
-            context,
+            env,
           );
           expect(decoded).not.toBeInstanceOf(ProblematicValue);
           expect(decoded).toBeInstanceOf(FabricRegExp);
@@ -251,7 +251,7 @@ describe("FabricRegExp", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(re),
-            context,
+            env,
           ) as unknown as FabricRegExp;
           expect(decoded).toBeInstanceOf(FabricRegExp);
           expect(decoded.source).toBe("ab+c");
@@ -264,7 +264,7 @@ describe("FabricRegExp", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(re),
-            context,
+            env,
           ) as unknown as FabricRegExp;
           expect(decoded).toBeInstanceOf(FabricRegExp);
           expect(decoded.source).toBe("^x*$");

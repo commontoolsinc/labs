@@ -3,6 +3,7 @@ import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
   detectCallKind,
+  getCallArgumentPosition,
   getTypeAtLocationWithFallback,
   hasAuthoredSourceSite,
   isCollectionType,
@@ -464,12 +465,9 @@ function hasEnclosingComputeLikeCallback(
   let current: ts.Node | undefined = callbackContext.call.parent;
   while (current) {
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      const parent: ts.Node | undefined = current.parent;
-      if (
-        parent && ts.isCallExpression(parent) &&
-        parent.arguments.includes(current)
-      ) {
-        const callKind = detectCallKind(parent, context.checker);
+      const position = getCallArgumentPosition(current);
+      if (position) {
+        const callKind = detectCallKind(position.call, context.checker);
         if (callKind?.kind === "lift-applied") {
           return true;
         }
@@ -618,6 +616,12 @@ function isReactiveRuntimeCallTaggedTemplateSpan(
   return isReactiveOriginTaggedTemplate(tagged, context.checker);
 }
 
+/**
+ * Deliberately parent-literal, unlike `getCallArgumentPosition`: visitors
+ * classify a parenthesized expression at its paren node (the inner expression
+ * reports no container), so looking through parens here would classify the
+ * same site at two nesting levels and lower it twice.
+ */
 export function getExpressionContainerKind(
   expression: ts.Expression,
 ): ExpressionContainerKind | undefined {
@@ -1371,6 +1375,51 @@ export function findLowerableExpressionSite(
   }
 
   return deferredArrayMethodReceiverSite;
+}
+
+/**
+ * A carrier site for an expression whose own site walk stops at a callback
+ * boundary: the expression sits inside an inline callback argument, and the
+ * callback's owning call lowers at an expression site of its own. The lift
+ * wrapping that site absorbs the callback, so the expression runs on resolved
+ * values — `rows.get().toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))`
+ * carries the comparator's `?.` inside the lift body.
+ *
+ * Callbacks of the array-method families (`map`/`filter`/`flatMap`) are
+ * excluded: those lower through their `*WithPattern` counterparts, whose
+ * callback-pattern machinery models elements on its own terms.
+ */
+export function findInlineCallbackCarrierSite(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): LowerableExpressionSite | undefined {
+  let current: ts.Node | undefined = expression.parent;
+
+  while (current) {
+    if (ts.isFunctionLike(current)) {
+      const position = getCallArgumentPosition(current);
+      if (!position) {
+        return undefined;
+      }
+
+      if (classifyArrayMethodCall(position.call)) {
+        return undefined;
+      }
+
+      const site = findLowerableExpressionSite(position.call, context, analyze);
+      if (site) {
+        return site;
+      }
+
+      current = position.call.parent;
+      continue;
+    }
+
+    current = current.parent;
+  }
+
+  return undefined;
 }
 
 export function findPreferredNestedLowerableExpressionSite(

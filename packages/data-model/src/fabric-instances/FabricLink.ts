@@ -18,8 +18,8 @@ import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts"
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
@@ -120,7 +120,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
       /** @inheritDoc */
       encode(value: FabricLink): FabricValue {
         // The payload IS the encoded state; its nested values are recursively
-        // encoded by the encoding context.
+        // encoded by the engine.
         return value.#payload;
       }
 
@@ -128,13 +128,13 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
       decode(
         typeTag: string,
         state: FabricValue,
-        context: ReconstructionContext,
+        env: LiveEnvironment,
       ): FabricValue {
         // The constructor validates the shape and throws on any violation, so
         // bad state falls into the `catch`.
         try {
           const result = new FabricLink(state as FabricPlainObject);
-          return context.shouldDeepFreeze ? deepFreeze(result) : result;
+          return env.shouldDeepFreeze ? deepFreeze(result) : result;
         } catch (e) {
           return new ProblematicValue(
             typeTag,

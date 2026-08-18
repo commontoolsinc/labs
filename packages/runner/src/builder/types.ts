@@ -18,6 +18,7 @@ import type {
   CfSqliteHelpers,
   CompileAndRunFunction,
   ComputedFunction,
+  DataFileFunction,
   EntityRefToStringFunction,
   EqualsFunction,
   FabricExecValue,
@@ -64,7 +65,7 @@ import type {
 } from "@commonfabric/api";
 import { toSchema } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import type { EntityKind } from "../entity-kind.ts";
@@ -215,7 +216,8 @@ export type StreamValue = {
 };
 
 export function isStreamValue(value: unknown): value is StreamValue {
-  return isObjectOrArray(value) && "$stream" in value && value.$stream === true;
+  return isObjectNotArray(value) && "$stream" in value &&
+    value.$stream === true;
 }
 
 declare module "@commonfabric/api" {
@@ -415,6 +417,7 @@ export interface BuilderFunctionsAndConstants {
   fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
+  dataFile: DataFileFunction;
   sqliteDatabase: SqliteDatabaseFunction;
   sqliteQuery: SqliteQueryFunction;
   table: SqliteTableFunction;

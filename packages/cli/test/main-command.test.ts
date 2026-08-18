@@ -55,7 +55,7 @@ describe("main command", () => {
     );
     const commands = [main];
     const mismatchedUsage: string[] = [];
-    const customUsageCommands = new Set(["cf piece call"]);
+    const customUsageCommands = new Set(["cf piece call", "cf call"]);
 
     for (const command of commands) {
       commands.push(...command.getCommands());
@@ -108,7 +108,8 @@ describe("main command", () => {
     );
     const call = piece.getCommand("call")!;
     const expectedUsage =
-      "--identity <identity> --url <url> --api-url <api-url> --space <space> --piece <piece> <callable> [input]";
+      "--identity <identity> --url <url> --api-url <api-url> --space <space> " +
+      "--piece <piece> [address] <callable> [input]";
 
     expect(call.getArgsDefinition()).toBe(
       "<callable:string> [tail...:string]",

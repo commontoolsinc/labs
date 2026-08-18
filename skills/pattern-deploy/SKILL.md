@@ -73,6 +73,13 @@ which creates a duplicate piece.
 defines the complete source revision, so repeat all test flags on every update
 or the new revision will omit those test roots.
 
+Repeatable `--datafile <path>` attaches a file that is not code — a fixture, a
+lookup table — so it ships and is recovered with the source. Its bytes are
+stored verbatim and never parsed, compiled, or importable; it must be UTF-8 text
+inside the deployment root. A pattern reads one with `dataFile(path)` from
+`commonfabric`, naming the path it is stored under. The same complete-revision
+rule applies, so repeat every data-file flag on each update too.
+
 **Inspect piece state:**
 
 ```bash
@@ -82,7 +89,7 @@ deno task cf piece inspect --piece <ID> --identity cf.key --api-url $CF_API_URL 
 **Test handler via CLI:**
 
 ```bash
-deno task cf piece call handlerName --piece PIECE_ID
+deno task cf call --piece PIECE_ID handlerName
 deno task cf piece step --piece PIECE_ID    # Required! Triggers recomputation
 deno task cf piece inspect --piece PIECE_ID  # Now shows updated state
 ```

@@ -361,7 +361,7 @@ The CLI uses three declarations that have to remain compatible:
 The two Cliffy packages share internal packages and resolve as a set. They are
 held at the release candidate because Cliffy 1.2.1 changes how a required
 argument followed by a variadic argument is parsed. With that release,
-`cf piece call` stops receiving its first argument.
+`cf call` stops receiving its first argument.
 
 The `@std/fmt/colors` pin has a separate single-copy requirement.
 `setColorEnabled()` stores state in its module instance. If the CLI imports a

@@ -20,7 +20,7 @@ import {
 } from "@/codec-common/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
@@ -127,7 +127,7 @@ describe("FabricMap", () => {
     describe("[CODEC]", () => {
       const codec = FabricMap[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Map;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Map` wire type tag", () => {
@@ -152,7 +152,7 @@ describe("FabricMap", () => {
 
       describe("decode()", () => {
         it("throws (stub)", () => {
-          expect(() => codec.decode(expectedTag, null, context)).toThrow(
+          expect(() => codec.decode(expectedTag, null, env)).toThrow(
             "not yet implemented",
           );
         });

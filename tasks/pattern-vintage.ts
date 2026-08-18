@@ -14,6 +14,15 @@
  * something rather than nothing, AND every value the vintage held is still
  * readable afterwards.
  *
+ * It asserts two things about the exemption list as well, and a clean replay
+ * does not excuse either. Every path in `ACCEPTED_STATE_DROPS` must still
+ * forgive something in a vintage inside its own `capturedThrough` window — an
+ * entry that has stopped removing anything has outlived the removal it was
+ * granted for, and the run exits 1 naming it. And an entry whose pattern no
+ * fixture records is UNJUDGEABLE rather than stale: nothing replays it, so
+ * nothing can say whether it is still needed, and that fails too rather than
+ * sitting unexamined.
+ *
  * That last clause is the one that makes this a state-continuity gate rather
  * than an applies-cleanly gate. An update can materialize perfectly and still
  * lose data: move where a field is stored — `.for("journal")` becomes
@@ -135,6 +144,10 @@ import {
   pinNewestGeneration,
   replayAll,
 } from "./pattern-vintage-run.ts";
+import {
+  ACCEPTED_STATE_DROPS,
+  acceptedDropKey,
+} from "./pattern-vintage-accepted-drops.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
   /\/$/,
@@ -271,12 +284,69 @@ async function main() {
     console.error(`\n${reportFailures(replay.failures)}`);
   }
 
+  if (replay.dropsApplied.size > 0) {
+    console.log(
+      `\nHeld ${replay.dropsApplied.size} path(s) back from their vintage, ` +
+        `by accepted removal (tasks/pattern-vintage-accepted-drops.ts):`,
+    );
+    for (const pair of [...replay.dropsApplied].sort()) {
+      console.log(`  ${pair}`);
+    }
+  }
+
+  // Which patterns this run is in a position to judge: a fixture's manifest
+  // names it, so a replay either used its entries or proved they were not
+  // needed. `replayAll` walks every fixture in the tree whatever else the
+  // invocation was for, so this is a fact about the whole store.
+  const judged = new Set(
+    [...replay.covered, ...replay.coveredBy.keys()],
+  );
+  // An accepted removal that forgave nothing is an exemption outliving what it
+  // was granted for — the same rule Tier 1's accepted breaks carry, asked per
+  // PATH so an entry cannot keep a line nothing needs.
+  const staleDrops = ACCEPTED_STATE_DROPS
+    .filter((drop) => judged.has(drop.pattern))
+    .flatMap((drop) =>
+      drop.paths
+        .map((path) => acceptedDropKey(drop.pattern, path))
+        .filter((pair) => !replay.dropsApplied.has(pair))
+    );
+  if (staleDrops.length > 0) {
+    console.error(
+      `\n${staleDrops.length} accepted removal path(s) in ` +
+        `tasks/pattern-vintage-accepted-drops.ts forgive nothing: ` +
+        `${staleDrops.join(", ")}. No replayed vintage holds them, so the ` +
+        `comparison would pass without them — remove those paths.`,
+    );
+  }
+  // An entry for a pattern no fixture records is not stale, it is UNJUDGEABLE:
+  // nothing replayed could have needed it, so the run has no evidence either
+  // way. Reported separately because the remedy differs — capture a vintage
+  // that covers the pattern, or drop an entry that was never load-bearing.
+  const unjudgeableDrops = ACCEPTED_STATE_DROPS
+    .filter((drop) => !judged.has(drop.pattern))
+    .map((drop) => drop.pattern);
+  if (unjudgeableDrops.length > 0) {
+    console.error(
+      `\n${unjudgeableDrops.length} accepted removal(s) in ` +
+        `tasks/pattern-vintage-accepted-drops.ts name a pattern no fixture ` +
+        `records: ${unjudgeableDrops.join(", ")}. An exemption nothing can ` +
+        `audit is one nobody can retire — capture a vintage covering the ` +
+        `pattern, or remove the entry.`,
+    );
+  }
+
   // CANDIDATES and TARGETS are the soundness floor, not `updated`. A run where
   // nothing changed legitimately updates nothing — that is the common case, and
   // the auto-updater fires on the same condition. But a run with no candidates,
   // or none that today's source could be applied to, examined no update targets
   // at all — the shape that has read as success three separate times here.
-  if (!isClean(replay.failures, uncovered, replay)) Deno.exit(1);
+  if (
+    !isClean(replay.failures, uncovered, replay) || staleDrops.length > 0 ||
+    unjudgeableDrops.length > 0
+  ) {
+    Deno.exit(1);
+  }
   console.log(reportReplaySummary(replay));
 }
 

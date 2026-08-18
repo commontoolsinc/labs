@@ -16,13 +16,30 @@ Common Fabric product.
 1. Foundation: api, data-model, runner, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
 3. Capabilities: piece, html, llm
-4. Operation: background-piece-service, cli, fuse, state-inspector, cf-harness
+4. Operation: background-piece-service, cli, connectors/agents, fuse,
+   state-inspector, cf-harness
 5. Deployed Product: toolshed, shell, lib-shell, runtime-client
 6. User Interface: ui
 7. End-User Programs: home-schemas, patterns
 
 Anything under `packages/` not named above — utilities, build tooling, test
 support, internal dashboards, example code — sits outside the layer stack.
+
+Dependencies run downward: a package imports from its own layer or a lower one.
+That is the direction the stack is designed around, and the one to hold a new
+import to. It does not describe the tree as it stands — a number of imports run
+the other way, `runner` reaching into `js-compiler` and `llm` among them — so an
+existing import upward is not a precedent for the next one. Only the weaker
+property is enforced: `deno task check-package-cycles` fails when two packages
+import each other. Layer direction rests on review.
+
+When a module looks as though it belongs to a higher layer but something lower
+needs it, decide by what the module actually touches rather than by what it is
+named after. The JSX factory is the worked example. `h()` resolves cells to
+links and returns a plain view-node object, which is data construction over
+runtime primitives, so it lives in `runner` alongside the schema that describes
+that object. Turning those view nodes into DOM is rendering, so that lives in
+`html`.
 
 ## Documentation Lifecycle
 
@@ -138,14 +155,16 @@ change a subsystem you have not worked on before.
 
 #### Browser tests in agent sandboxes
 
-On macOS, an agent must request unsandboxed execution before its first attempt
-to run a command that can launch a browser. This includes the root
-`deno task test`; the unfiltered root `deno task integration` command;
-unfiltered integration runs for `shell`, `patterns`, or `patterns-reload`;
-`deno task demo`; `deno-web-test`; and focused or filtered tests whose setup
-launches Chrome through Astral or `ShellIntegration`. Never try the command in
-the agent sandbox first. Deno's `-A` flag does not escape the outer sandbox, and
-a browser startup failure caused by that sandbox is not test evidence. The
+On macOS, a command that can launch a browser needs unsandboxed execution. Which
+side of that you are on is a fact about your own execution state, and your
+harness reports it: if the session already runs unsandboxed, run the command; if
+it runs sandboxed, request unsandboxed execution rather than trying the command
+there first. The browser-launching commands are the root `deno task test`; the
+unfiltered root `deno task integration` command; unfiltered integration runs for
+`shell`, `patterns`, or `patterns-reload`; `deno task demo`; `deno-web-test`;
+and focused or filtered tests whose setup launches Chrome through Astral or
+`ShellIntegration`. Deno's `-A` flag does not escape the outer sandbox, and a
+browser startup failure caused by that sandbox is not test evidence. The
 complete rule is in
 [`docs/development/TESTING.md`](docs/development/TESTING.md#browser-tests-in-agent-sandboxes).
 
@@ -213,8 +232,13 @@ Each of these gates fails CI on its own, and none of them run as part of
   in a file, which `docs/` has no other mechanical gate against
 - `deno task check-skill-facts` — a path or import cited by a skill, an
   `AGENTS.md`, or a rule that stopped resolving
+- `deno task check-verb-session-sync` — a `cf` command or act reference in
+  `docs/common/verb-session-walkthrough.md` that its demo script does not back;
+  the walkthrough quotes commands, never composes them
 - `deno task check-single-copy-deps`, `check-unused-deps`, `check-deno-pins` —
   dependency declarations across the workspace
+- `deno task check-package-cycles` — two packages that import each other, the
+  part of "Dependencies run downward" above that a machine can settle
 - `deno task check-baselines-append-only` — a pattern baseline that was deleted
   rather than added to
 

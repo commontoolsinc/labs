@@ -3271,10 +3271,10 @@ export class PieceController<T = unknown> {
    * The pattern's authored source program, recovered from the content-addressed
    * `pattern:<identity>` source-doc closure in the piece's space. Replaces the
    * deleted meta cell's `program`. `main` is the executable entry filename;
-   * `mainExport` is the pattern pointer's export symbol; and `sourceRoots` names
-   * retained source entry points such as attached tests. Returns undefined when
-   * no verified source closure exists (the source docs are written by every cold
-   * compile).
+   * `mainExport` is the pattern pointer's export symbol; `sourceRoots` names
+   * retained source entry points such as attached tests; and `dataFiles` names
+   * attached data files. Returns undefined when no verified source closure
+   * exists (the source docs are written by every cold compile).
    */
   async getPatternSourceProgram(): Promise<
     | {
@@ -3282,6 +3282,7 @@ export class PieceController<T = unknown> {
       mainExport?: string;
       files: { name: string; contents: string }[];
       sourceRoots?: string[];
+      dataFiles?: string[];
     }
     | undefined
   > {

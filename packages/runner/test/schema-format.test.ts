@@ -569,3 +569,204 @@ Deno.test("schemaToTypeString formats fixture-style PatternToolResult without le
     "extraParams internals should stay hidden",
   );
 });
+
+// A conjunction states its fields across its members. These pin that the
+// rendering merges them the way the CLI's reader does, so a help page's type
+// block and its flag list cannot disagree about the same schema.
+
+Deno.test("schemaToTypeString renders a conjunction's fields alongside its own", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      properties: { note: { type: "string" } },
+      allOf: [{ type: "object", properties: { count: { type: "number" } } }],
+    } as never),
+    "{\n  note?: string,\n  count?: number\n}",
+  );
+});
+
+Deno.test("schemaToTypeString renders fields a schema declares only through allOf", () => {
+  // No `type` and no `properties` of its own, so this reaches the object
+  // branch only because the conjunction was gathered before it was chosen.
+  assertEquals(
+    schemaToTypeString({
+      allOf: [{ type: "object", properties: { count: { type: "number" } } }],
+    } as never),
+    "{\n  count?: number\n}",
+  );
+});
+
+Deno.test("schemaToTypeString requires a field any conjunct requires", () => {
+  // Required is a union across members, not first-wins: every member's
+  // constraint holds at once.
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      properties: { a: { type: "string" } },
+      allOf: [{ properties: { b: { type: "number" } }, required: ["b"] }],
+    } as never),
+    "{\n  a?: string,\n  b: number\n}",
+  );
+});
+
+Deno.test("schemaToTypeString keeps the first declaration of a repeated field", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      properties: { a: { type: "string" } },
+      allOf: [{ properties: { a: { type: "number" } } }],
+    } as never),
+    "{\n  a?: string\n}",
+  );
+});
+
+Deno.test("schemaToTypeString resolves a $defs reference inside a conjunction", () => {
+  assertEquals(
+    schemaToTypeString(
+      {
+        type: "object",
+        properties: { a: { type: "string" } },
+        allOf: [{ $ref: "#/$defs/B" }],
+      } as never,
+      {
+        defs: {
+          B: { type: "object", properties: { b: { type: "number" } } },
+        } as never,
+      },
+    ),
+    "{\n  a?: string,\n  b?: number\n}",
+  );
+});
+
+Deno.test("schemaToTypeString terminates on a conjunction that references itself", () => {
+  assertEquals(
+    schemaToTypeString(
+      {
+        type: "object",
+        properties: { a: { type: "string" } },
+        allOf: [{ $ref: "#/$defs/C" }],
+      } as never,
+      {
+        defs: {
+          C: {
+            type: "object",
+            properties: { c: { type: "number" } },
+            allOf: [{ $ref: "#/$defs/C" }],
+          },
+        } as never,
+      },
+    ),
+    "{\n  a?: string,\n  c?: number\n}",
+  );
+});
+
+Deno.test("schemaToTypeString leaves a disjunction a union", () => {
+  // Only a conjunction states fields that all hold at once; `anyOf` is a
+  // union and keeps rendering as one.
+  assertEquals(
+    schemaToTypeString({
+      anyOf: [{ type: "string" }, { type: "number" }],
+    } as never),
+    "string | number",
+  );
+});
+
+Deno.test("schemaToTypeString does not make an object of a scalar conjunction", () => {
+  // `allOf: [{type: "string"}]` constrains a scalar and contributes no field.
+  // Rendering it as `{}` would invent an object the schema never described.
+  assertEquals(
+    schemaToTypeString({ allOf: [{ type: "string" }] } as never),
+    "unknown",
+  );
+});
+
+Deno.test("schemaToTypeString steps over a conjunct that is not a schema", () => {
+  // `allOf` is caller data and can hold anything. A member that is not an
+  // object contributes no field rather than ending the walk, so the members
+  // beside it are still read.
+  assertEquals(
+    schemaToTypeString({
+      allOf: [null, "nope", { properties: { a: { type: "string" } } }],
+    } as never),
+    "{\n  a?: string\n}",
+  );
+});
+
+Deno.test("schemaToTypeString steps over a conjunct naming a definition that is absent", () => {
+  assertEquals(
+    schemaToTypeString(
+      {
+        type: "object",
+        properties: { a: { type: "string" } },
+        allOf: [{ $ref: "#/$defs/Missing" }],
+      } as never,
+      { defs: {} as never },
+    ),
+    "{\n  a?: string\n}",
+  );
+});
+
+Deno.test("schemaToTypeString stops following a conjunction past its depth bound", () => {
+  // Nested `allOf` is followed 8 levels. The 10th level's field is beyond the
+  // bound and does not appear; the levels within it still do. The bound is
+  // what keeps a pathological schema from walking forever.
+  let deepest: Record<string, unknown> = {
+    properties: { level10: { type: "string" } },
+  };
+  for (let level = 9; level >= 1; level--) {
+    deepest = {
+      properties: { [`level${level}`]: { type: "string" } },
+      allOf: [deepest],
+    };
+  }
+  const rendered = schemaToTypeString(deepest as never, { maxDepth: 99 });
+  assert(rendered.includes("level1"), "the outermost level is read");
+  assert(rendered.includes("level8"), "the level at the bound is read");
+  assert(!rendered.includes("level10"), "the level past the bound is not");
+});
+
+Deno.test("schemaToTypeString follows a definition that aliases another", () => {
+  // A definition may be an alias for a second one. Stopping after a single hop
+  // would collect the alias, which states no field, instead of what it names.
+  assertEquals(
+    schemaToTypeString(
+      {
+        type: "object",
+        properties: { a: { type: "string" } },
+        allOf: [{ $ref: "#/$defs/Alias" }],
+      } as never,
+      {
+        defs: {
+          Alias: { $ref: "#/$defs/Real" },
+          Real: { type: "object", properties: { b: { type: "number" } } },
+        } as never,
+      },
+    ),
+    "{\n  a?: string,\n  b?: number\n}",
+  );
+});
+
+Deno.test("schemaToTypeString terminates on a definition that aliases itself", () => {
+  // The chain above has to end somewhere. A definition naming itself is the
+  // shortest loop there is.
+  assertEquals(
+    schemaToTypeString(
+      {
+        type: "object",
+        properties: { a: { type: "string" } },
+        allOf: [{ $ref: "#/$defs/S" }],
+      } as never,
+      { defs: { S: { $ref: "#/$defs/S" } } as never },
+    ),
+    "{\n  a?: string\n}",
+  );
+});
+
+Deno.test("schemaToTypeString renders an object conjunct that names no field", () => {
+  // `type: "object"` makes the whole an object even with nothing named, and
+  // `{}` is what that is. A scalar conjunct is the contrasting case below.
+  assertEquals(
+    schemaToTypeString({ allOf: [{ type: "object" }] } as never),
+    "{}",
+  );
+});

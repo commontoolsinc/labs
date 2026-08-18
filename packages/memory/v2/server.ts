@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
 import type { FabricPlainObject } from "@commonfabric/api";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 import {
@@ -176,9 +177,6 @@ const recordSlowQueryDuration = (
 
 /** Returns the last N slow query/watch operations (>100ms). */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
@@ -476,7 +474,9 @@ class Connection {
 
   sessionOpenAuthContext(message: SessionOpenRequest): SessionOpenAuthContext {
     const audience = this.server.sessionOpenAudience();
-    const invocation = isRecord(message.invocation) ? message.invocation : null;
+    const invocation = isObjectNotArray(message.invocation)
+      ? message.invocation
+      : null;
     if (invocation === null || typeof invocation.aud !== "string") {
       throw authorizationError("memory session.open requires audience");
     }
@@ -4187,7 +4187,7 @@ const parseSchedulerSnapshotQuery = (
   let cursor: SchedulerActionSnapshotQuery["cursor"];
   if (value.cursor !== undefined) {
     if (
-      !isRecord(value.cursor) ||
+      !isObjectNotArray(value.cursor) ||
       (value.cursor.ownerSpace !== undefined &&
         typeof value.cursor.ownerSpace !== "string") ||
       typeof value.cursor.pieceId !== "string" ||
@@ -4242,7 +4242,7 @@ export const parseClientMessage = (
     return null;
   }
 
-  if (!isRecord(parsed)) {
+  if (!isObjectNotArray(parsed)) {
     return null;
   }
 
@@ -4264,7 +4264,7 @@ export const parseClientMessage = (
     parsed.type === "session.open" &&
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
-    isRecord(parsed.session)
+    isObjectNotArray(parsed.session)
   ) {
     return {
       type: "session.open",
@@ -4281,7 +4281,9 @@ export const parseClientMessage = (
           ? parsed.session.sessionToken
           : undefined,
       },
-      invocation: isRecord(parsed.invocation) ? parsed.invocation : undefined,
+      invocation: isObjectNotArray(parsed.invocation)
+        ? parsed.invocation
+        : undefined,
       authorization: parsed
         .authorization as SessionOpenRequest["authorization"],
     };
@@ -4292,7 +4294,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isRecord(parsed.commit)
+    isObjectNotArray(parsed.commit)
   ) {
     return {
       type: "transact",
@@ -4308,7 +4310,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isRecord(parsed.query) &&
+    isObjectNotArray(parsed.query) &&
     Array.isArray(parsed.query.roots)
   ) {
     return {
@@ -4369,21 +4371,21 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     typeof parsed.sql === "string" &&
     parsed.sql.length <= 100_000 &&
-    isRecord(parsed.db) &&
+    isObjectNotArray(parsed.db) &&
     typeof parsed.db.id === "string" &&
     parsed.db.id.length > 0 && parsed.db.id.length <= 256 &&
     (parsed.db.tables === undefined ||
-      (isRecord(parsed.db.tables) &&
+      (isObjectNotArray(parsed.db.tables) &&
         Object.keys(parsed.db.tables).length <= 256)) &&
     (parsed.db.scope === undefined || parsed.db.scope === "space" ||
       parsed.db.scope === "user" || parsed.db.scope === "session")
   ) {
     const db = {
       id: parsed.db.id,
-      tables: isRecord(parsed.db.tables) ? parsed.db.tables : undefined,
+      tables: isObjectNotArray(parsed.db.tables) ? parsed.db.tables : undefined,
       scope: parsed.db.scope as CellScope | undefined,
     };
-    const params = Array.isArray(parsed.params) || isRecord(parsed.params)
+    const params = isObjectOrArray(parsed.params)
       ? parsed.params as SqliteParamsWire
       : undefined;
     return {
@@ -4454,7 +4456,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isRecord(parsed.query)
+    isObjectNotArray(parsed.query)
   ) {
     const query = parseSchedulerSnapshotQuery(parsed.query);
     if (query === undefined) return null;

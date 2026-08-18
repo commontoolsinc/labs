@@ -273,10 +273,11 @@ const LINK_OCCURRENCE_SOURCE =
 /**
  * Replaces every positively-marked address occurrence in `value` with a
  * minted token, deep-walking arrays, objects, and strings without mutating
- * the input. Two forms are swapped: address substrings in string leaves
- * (LLM-friendly links and standalone schemed entity URIs), and whole
- * single-key `{"@link": "<address>"}` objects, which become the token
- * string. An occurrence the runner cannot parse is left untouched, as is an
+ * the input. Three forms are swapped: address substrings in string leaves
+ * (LLM-friendly links and standalone schemed entity URIs), the same substrings
+ * in object KEYS, and whole single-key `{"@link": "<address>"}` objects, which
+ * become the token string. An occurrence the runner cannot parse is left
+ * untouched, as is an
  * `@link` whose string is not an entity address (an `opaque:` handle among
  * them) — swapping never throws on weird text.
  */
@@ -312,9 +313,17 @@ export const swapLinksForTokens = async (
     }
     const swapped: Record<string, unknown> = {};
     for (const key of keys) {
+      // A property name is text like any other, and a schema's property names
+      // are whoever authored the schema's own text, so an address can occur in
+      // one. It gets the same swap a string leaf gets, through the same
+      // helper: an address the model is shown is a token wherever it sits. Two
+      // keys whose addresses mint one token collapse into one key, which is
+      // the same answer the model would get asking about either.
+      const swappedKey = await swapLinksInString(table, key, hasher);
+      table = swappedKey.table;
       const result = await swapLinksForTokens(table, record[key], hasher);
       table = result.table;
-      defineOwnEntry(swapped, key, result.value);
+      defineOwnEntry(swapped, swappedKey.value, result.value);
     }
     return { table, value: swapped };
   }
@@ -355,19 +364,39 @@ const swapLinksInString = async (
 };
 
 /**
+ * Helper for `swapTokensForRefs()`, which replaces every known handle token
+ * within one string with its entry's canonical `ref`.
+ */
+const swapTokensInString = (
+  table: HarnessHandleTable,
+  text: string,
+): string =>
+  text.replace(
+    new RegExp(HANDLE_TOKEN_PATTERN.source, "g"),
+    (token) => resolveHandleToken(table, token)?.ref ?? token,
+  );
+
+/**
  * Replaces every known handle token in `value` with its entry's canonical
  * `ref` string, deep-walking arrays, objects, and strings without mutating
- * the input. A well-formed token the table does not hold is left untouched.
+ * the input. Tokens are replaced in string leaves, in object VALUES, and in
+ * object KEYS — the inverse of the three places `swapLinksForTokens()` puts
+ * them, so a key the model was shown as a token reaches the tool as the
+ * address it stands for. A well-formed token the table does not hold is left
+ * untouched.
+ *
+ * Restoring a key can collide, in the same way and with the same answer as the
+ * outbound direction: a restored key equal to another key of the same object —
+ * a literal address the model also wrote, or another key restoring to the same
+ * ref — leaves one entry, the last one walked. Both spellings name one address,
+ * so both would have reached the tool as one key regardless.
  */
 export const swapTokensForRefs = (
   table: HarnessHandleTable,
   value: unknown,
 ): unknown => {
   if (typeof value === "string") {
-    return value.replace(
-      new RegExp(HANDLE_TOKEN_PATTERN.source, "g"),
-      (token) => resolveHandleToken(table, token)?.ref ?? token,
-    );
+    return swapTokensInString(table, value);
   }
   if (Array.isArray(value)) {
     return value.map((item) => swapTokensForRefs(table, item));
@@ -375,7 +404,11 @@ export const swapTokensForRefs = (
   if (typeof value === "object" && value !== null) {
     const swapped: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      defineOwnEntry(swapped, key, swapTokensForRefs(table, item));
+      defineOwnEntry(
+        swapped,
+        swapTokensInString(table, key),
+        swapTokensForRefs(table, item),
+      );
     }
     return swapped;
   }

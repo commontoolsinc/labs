@@ -101,6 +101,11 @@ the minimal local shape is intentional duplication: the producer can evolve
 unrelated state, UI, and mutation streams without changing this consumer's
 contract.
 
+A derivation that reads narrowly and hands its elements straight back declares
+that with a type parameter, so the narrow read costs its own callers nothing —
+see
+[Reading a Value Narrowly and Handing It Back Whole](../concepts/computed/computed.md#reading-a-value-narrowly-and-handing-it-back-whole).
+
 An output type must be exported so TypeScript can name the default pattern
 factory's return contract. That visibility requirement is not an invitation for
 external consumers to reuse the whole type as their input schema.

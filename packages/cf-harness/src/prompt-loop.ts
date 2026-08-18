@@ -6,6 +6,10 @@ import {
   type CfcStreamObservation,
   evaluateHarnessWriteFileAuthorization,
 } from "@commonfabric/runner/cfc";
+import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
 
 import { isHarnessModelProviderId } from "./config.ts";
 import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
@@ -110,6 +114,7 @@ import type {
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
+import { isSealedOpaqueLinkObject } from "./structured-result.ts";
 import {
   parseSubagentReturnJson,
   parseSubagentReturnSchema,
@@ -228,7 +233,7 @@ const parseToolArguments = (
       },
     };
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  if (!isObjectNotArray(parsed)) {
     return {
       invalid: {
         reason: "arguments-not-an-object",
@@ -628,7 +633,7 @@ const summarizeToolInput = async (
             sourceTextDigest: sourceTextSummary.digest,
           }
           : {}),
-        ...(isObjectRecord(input.inputs)
+        ...(isObjectNotArray(input.inputs)
           ? { inputCount: Object.keys(input.inputs).length }
           : {}),
         ...(resultSchemaSummary !== undefined
@@ -1074,22 +1079,6 @@ const summarizeSubagentRunState = (
 };
 
 /**
- * Helper for `createStructuredSubagentReturn()`, which tells whether `value`
- * is a sealed opaque-link object — the single-key `@link` object the
- * sanitizer substitutes for a position it seals.
- */
-const isSealedOpaqueLinkObject = (value: unknown): boolean => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  const target = record["@link"];
-  return Object.keys(record).length === 1 &&
-    typeof target === "string" &&
-    target.startsWith("opaque:");
-};
-
-/**
  * Helper for `createStructuredSubagentReturn()`, which walks a sanitized
  * structured return and the raw value it was sanitized from in tandem,
  * replacing each sealed opaque-link object whose raw counterpart is a string
@@ -1131,18 +1120,14 @@ const swapSealedAddressStringsForTokens = async (
     }
     return { table, value: items, replaced };
   }
-  if (
-    typeof sanitized === "object" && sanitized !== null &&
-    !Array.isArray(sanitized) &&
-    typeof raw === "object" && raw !== null && !Array.isArray(raw)
-  ) {
+  if (isObjectNotArray(sanitized) && isObjectNotArray(raw)) {
     let replaced = 0;
     const entries: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(sanitized)) {
       const result = await swapSealedAddressStringsForTokens(
         table,
         child,
-        (raw as Record<string, unknown>)[key],
+        raw[key],
       );
       table = result.table;
       replaced += result.replaced;
@@ -1368,27 +1353,65 @@ interface CfcSandboxResultCarrier {
   cfcResult?: CfcSandboxResult;
 }
 
-const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const cfcResultFromOutput = (
   output: unknown,
 ): CfcSandboxResult | undefined =>
-  isObjectRecord(output) &&
+  isObjectNotArray(output) &&
     "cfcResult" in output &&
-    isObjectRecord(output.cfcResult) &&
+    isObjectNotArray(output.cfcResult) &&
     output.cfcResult.version === 1
     ? output.cfcResult as CfcSandboxResult
     : undefined;
 
 const stripInternalCfcFields = (output: unknown): unknown => {
-  if (!isObjectRecord(output)) {
+  if (!isObjectNotArray(output)) {
     return output;
   }
   const { cfcResult: _cfcResult, ...publicOutput } = output as
     & CfcSandboxResultCarrier
     & Record<string, unknown>;
   return publicOutput;
+};
+
+/**
+ * Applies the model-boundary scrub to every string a value carries at every
+ * depth, its object KEYS included.
+ *
+ * Scrubbing the free-text fields a tool declares is enough only for a tool
+ * whose author-controlled text sits in named fields. It is not enough for one
+ * whose output is a structure whose own shape is author-controlled — a
+ * disclosed JSON Schema most of all, where the property names are the point of
+ * the disclosure and are arbitrary text whoever wrote the schema chose. So the
+ * walk reaches keys as well as values.
+ *
+ * The scrub itself is {@link scrubBareFabricIdentifiers}; this decides only
+ * where it lands. A key that scrubs to the same text as a sibling collapses
+ * into it, which is the honest outcome: two names differing only in an
+ * identifier this boundary refuses to disclose are not distinguishable on the
+ * model's side of it either.
+ */
+const scrubBareFabricIdentifiersDeep = (value: unknown): unknown => {
+  if (typeof value === "string") {
+    return scrubBareFabricIdentifiers(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubBareFabricIdentifiersDeep(entry));
+  }
+  if (isObjectNotArray(value)) {
+    const scrubbed: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      // `defineProperty` rather than assignment, so a scrubbed key of
+      // `__proto__` becomes an own property instead of reaching the prototype.
+      Object.defineProperty(scrubbed, scrubBareFabricIdentifiers(key), {
+        value: scrubBareFabricIdentifiersDeep(entry),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    return scrubbed;
+  }
+  return value;
 };
 
 const toolOutputNeedsSandboxMediation = (
@@ -1546,7 +1569,7 @@ const truncateModelFacingBashOutput = (
   output: unknown,
   resultRef: ToolResultRef,
 ): unknown => {
-  if (!isObjectRecord(output)) {
+  if (!isObjectNotArray(output)) {
     return output;
   }
   const stdout = truncateModelFacingBashStream(
@@ -1582,7 +1605,7 @@ const truncateModelFacingReadFileOutput = (
   output: unknown,
   resultRef: ToolResultRef,
 ): unknown => {
-  if (!isObjectRecord(output)) {
+  if (!isObjectNotArray(output)) {
     return output;
   }
   const content = truncateModelFacingBashStream(
@@ -1728,7 +1751,7 @@ const modelContextObservationForExitCode = (
 };
 
 const renderMediatedBashOutput = (
-  output: Record<string, unknown>,
+  output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
   toolCallId: string,
@@ -1862,7 +1885,7 @@ const renderMediatedRunSkillScriptOutput = (
 };
 
 const renderMediatedReadFileOutput = (
-  output: Record<string, unknown>,
+  output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
   toolCallId: string,
@@ -1898,7 +1921,7 @@ const renderMediatedReadFileOutput = (
 };
 
 const renderMediatedEditFileOutput = (
-  output: Record<string, unknown>,
+  output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
   toolCallId: string,
@@ -3196,13 +3219,16 @@ export class CfHarnessPromptLoop {
         output: toModelFacingWebFetchOutput(output as WebFetchToolOutput),
       };
     }
-    if (toolId === "run_pattern" && isObjectRecord(output)) {
+    if (toolId === "run_pattern" && isObjectNotArray(output)) {
       // The persisted artifact keeps the raw result value and the piece id
       // — a bare fabric identifier the handle boundary never swaps, and
       // redundant with `resultRef` since the piece cell is the result cell.
       // It also keeps the pattern's result schema, which reaches the model
       // through `describe_handle` on the minted token rather than inline.
-      // The model sees only `resultRef` and the schema-sanitized `value`.
+      // The model sees `resultRef`, the schema-sanitized `value`, and — when
+      // registration was asked for — the `registration` block, whose slug is
+      // the model's own word and whose URL is composed from the session's API
+      // URL and space name, so neither is a fabric identifier.
       // Free-text diagnostic fields can embed compiler-generated bare
       // fabric identifiers the handle boundary never swaps, so those fields
       // are scrubbed here; the artifact keeps the raw text.
@@ -3213,13 +3239,24 @@ export class CfHarnessPromptLoop {
         ...publicOutput
       } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };
-      for (const field of ["message", "valueError"]) {
+      for (const field of ["message", "valueError", "registrationError"]) {
         const text = scrubbed[field];
         if (typeof text === "string") {
           scrubbed[field] = scrubBareFabricIdentifiers(text);
         }
       }
       return { output: stripInternalCfcFields(scrubbed) };
+    }
+    if (toolId === "describe_handle") {
+      // A disclosed schema's property names are whoever authored the schema's
+      // own text, and the shape reduction passes them through deliberately —
+      // code cannot be written over data without the names of its fields. That
+      // makes a property name a route for a bare fabric identifier into model
+      // context, at any depth of the schema, so the whole reply is scrubbed
+      // keys and all rather than field by field.
+      return {
+        output: scrubBareFabricIdentifiersDeep(stripInternalCfcFields(output)),
+      };
     }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
       return { output: stripInternalCfcFields(output) };
@@ -3279,7 +3316,7 @@ export class CfHarnessPromptLoop {
       });
       return { output: denial };
     }
-    if (toolId === "bash" && isObjectRecord(output)) {
+    if (toolId === "bash" && isObjectNotArray(output)) {
       return renderMediatedBashOutput(output, cfcResult, resultRef, toolCallId);
     }
     if (
@@ -3292,7 +3329,7 @@ export class CfHarnessPromptLoop {
         toolCallId,
       );
     }
-    if (toolId === "read_file" && isObjectRecord(output)) {
+    if (toolId === "read_file" && isObjectNotArray(output)) {
       return renderMediatedReadFileOutput(
         output,
         cfcResult,
@@ -3300,7 +3337,7 @@ export class CfHarnessPromptLoop {
         toolCallId,
       );
     }
-    if (toolId === "edit_file" && isObjectRecord(output)) {
+    if (toolId === "edit_file" && isObjectNotArray(output)) {
       return renderMediatedEditFileOutput(
         output,
         cfcResult,

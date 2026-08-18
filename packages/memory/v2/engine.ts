@@ -2,6 +2,7 @@ import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
@@ -981,13 +982,8 @@ type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
 };
 
-const isSchedulerRecord = (
-  value: unknown,
-): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
 const isSchedulerObservationAddress = (value: unknown): boolean =>
-  isSchedulerRecord(value) &&
+  isObjectNotArray(value) &&
   !("scopeKey" in value) &&
   !("scope_key" in value) &&
   !("readScopeKey" in value) &&
@@ -1007,7 +1003,7 @@ const isCompleteActionScopeSummary = (
   implementationFingerprint: unknown,
   runtimeFingerprint: unknown,
 ): boolean =>
-  isSchedulerRecord(value) && value.version === 1 && value.complete === true &&
+  isObjectNotArray(value) && value.version === 1 && value.complete === true &&
   value.implementationFingerprint === implementationFingerprint &&
   value.runtimeFingerprint === runtimeFingerprint &&
   isSchedulerObservationAddress(value.piece) &&
@@ -1020,7 +1016,7 @@ export const schedulerObservationFromValue = (
   value: unknown,
 ): SchedulerActionObservation | undefined => {
   if (
-    !isSchedulerRecord(value) ||
+    !isObjectNotArray(value) ||
     "executionContextKey" in value ||
     "execution_context_key" in value ||
     (value.version !== 1 && value.version !== 2) ||
@@ -1059,7 +1055,7 @@ export const schedulerObservationFromValue = (
     (value.ignoredSchedulingWrites !== undefined &&
       !isSchedulerAddressArray(value.ignoredSchedulingWrites)) ||
     (value.actionOptions !== undefined &&
-      (!isSchedulerRecord(value.actionOptions) ||
+      (!isObjectNotArray(value.actionOptions) ||
         (value.actionOptions.debounceMs !== undefined &&
           (typeof value.actionOptions.debounceMs !== "number" ||
             !Number.isFinite(value.actionOptions.debounceMs) ||

@@ -8,9 +8,10 @@
  * materially changing the run's wall-clock time.
  *
  * Each processor has its own colored line, and the headline shows the largest
- * established trend. Orange means at least one processor trends up. Green
- * means every established processor stays flat or falls. Red means the most
- * recent run failed, or finished successfully without readable benchmark data.
+ * established trend among processors measured in the last twelve hours.
+ * Orange means at least one of those processors trends up. Green means every
+ * eligible established processor stays flat or falls. Red means the most recent
+ * run failed, or finished successfully without readable benchmark data.
  * A tile in the failed state drops its benchmark count and window span and
  * names the failure in their place: how long ago the benchmarks last worked,
  * and how many runs have failed since. A run under way puts a "running" badge
@@ -92,6 +93,7 @@ import {
   SPARK_FADE,
 } from "../lib.ts";
 import {
+  BENCH_HEADLINE_MAX_AGE_HOURS,
   BENCH_TREND_BUCKET_MS,
   BENCH_TREND_MAX_AGE_DAYS,
   BENCH_TREND_MIN_RUNS,
@@ -923,6 +925,15 @@ interface BenchmarkCpuIndex {
   trend: ReturnType<typeof benchmarkTrend>;
 }
 
+export function benchmarkHeadlineCandidates<
+  T extends { points: { at: number }[] },
+>(indices: T[], now: number): T[] {
+  const cutoff = now - BENCH_HEADLINE_MAX_AGE_HOURS * 60 * 60_000;
+  return indices.filter((series) =>
+    series.points.some((point) => point.at >= cutoff && point.at <= now)
+  );
+}
+
 type CpuBenchmarkRun = CachedBenchmarkRun & { cpu: string };
 
 // One run per trend bucket on one processor, newest kept, oldest first. The
@@ -1080,11 +1091,12 @@ const RUNNING_BADGE =
 // Each processor has its own index and line. Every index starts at one and
 // changes only between runs on that processor. Hardware changes therefore
 // never become benchmark changes. The headline shows the largest established
-// trend. Orange means any processor trends up. Red means the most recent run
-// failed or produced no readable data. The line under the headline then dates
-// the outage instead of counting the benchmarks measured. `offline` names a
-// fetch failure. The tile then keeps its last-known trends gray, or shows a
-// gray dash when no history is cached.
+// trend among processors measured in the last twelve hours. Orange means any
+// eligible processor trends up. Red means the most recent run failed or
+// produced no readable data. The line under the headline then dates the outage
+// instead of counting the benchmarks measured. `offline` names a fetch failure.
+// The tile then keeps its last-known trends gray, or shows a gray dash when no
+// history is cached.
 function benchmarkIndexView(
   runs: Run[],
   now: number,
@@ -1138,12 +1150,32 @@ function benchmarkIndexView(
       aside,
     );
   }
-  const established = indices.filter((series) => series.trend.label !== "new");
-  const headline = (established.length ? established : indices).reduce((
+  const headlineCandidates = benchmarkHeadlineCandidates(indices, now);
+  if (!headlineCandidates.length && !offline) {
+    if (failed) {
+      return {
+        ...benchmarkDrill,
+        label: "benchmarks",
+        status: "bad",
+        value: "—",
+        sub: failSub,
+        aside,
+      };
+    }
+    return benchmarkUnavailable("no recent benchmark data", aside);
+  }
+  const displayCandidates = headlineCandidates.length
+    ? headlineCandidates
+    : indices;
+  const established = displayCandidates.filter((series) =>
+    series.trend.label !== "new"
+  );
+  const headlinePool = established.length ? established : displayCandidates;
+  const headline = headlinePool.reduce((
     worst,
     series,
   ) => series.trend.pct > worst.trend.pct ? series : worst);
-  const rising = indices.some((series) =>
+  const rising = headlineCandidates.some((series) =>
     series.trend.status === "warn" || series.trend.status === "bad"
   );
   // An offline collection keeps the trend but grays it: the run list it would need

@@ -39,14 +39,14 @@ deno task cf check main.tsx --no-run
 deno task cf test main.test.tsx
 
 # Deploy to toolshed (this is how you "run" it)
-API_URL=<url> deno task cf piece new main.tsx --test main.test.tsx --identity <key_path>
+CF_API_URL=<url> deno task cf piece new main.tsx --test main.test.tsx --identity <key_path>
 
 # Update existing piece
-API_URL=<url> deno task cf piece setsrc main.tsx --test main.test.tsx --piece <piece_id> --identity <key_path>
+CF_API_URL=<url> deno task cf piece setsrc main.tsx --test main.test.tsx --piece <piece_id> --identity <key_path>
 
 # Inspect state / call handler
-API_URL=<url> deno task cf piece inspect --piece <piece_id> --identity <key_path>
-API_URL=<url> deno task cf piece call <handler> --piece <piece_id> --identity <key_path>
+CF_API_URL=<url> deno task cf piece inspect --piece <piece_id> --identity <key_path>
+CF_API_URL=<url> deno task cf call --piece <piece_id> --identity <key_path> <handler>
 ```
 
 ## Deploy Flow
@@ -62,6 +62,12 @@ API_URL=<url> deno task cf piece call <handler> --piece <piece_id> --identity <k
 `--test` packages and type-checks the test; it does not run it. Repeat the
 same test flags on every `setsrc`, because each update defines the complete
 source package for that revision.
+
+Repeatable `--datafile <path>` attaches a file that is not code — a fixture or
+lookup table the pattern is deployed with. Its bytes are stored verbatim and
+never parsed, compiled, or importable; the pattern reads one with
+`dataFile(path)` from `commonfabric`. The complete-revision rule covers it
+too: repeat every data-file flag on each `setsrc`.
 
 ## Done When
 

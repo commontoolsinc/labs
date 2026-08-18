@@ -6,8 +6,8 @@ import {
 } from "@/codec-common/BaseFabricInstance.ts";
 import {
   CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
@@ -99,7 +99,7 @@ export class FabricMap
       decode(
         _typeTag: string,
         _state: FabricValue,
-        _context: ReconstructionContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         throw new Error("`FabricMap`: not yet implemented");
       }

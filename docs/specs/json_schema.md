@@ -37,7 +37,7 @@ The authoritative field inventory is the `JSONSchema` type in
   a UI affordance outside the headless contract, inferred at compile time
   from session-scoped handler bindings plus a void event
   (ts-transformers current-behavior spec §12.1). `cf piece verbs` hides
-  marked verbs by default; everything stays callable, and `cf piece call`
+  marked verbs by default; everything stays callable, and `cf call`
   never consults the mark. Annotation-class in the piece compat checker
   (adds and removes freely). Standard `deprecated: true` is the companion
   mark on the other axis, produced from `@deprecated` JSDoc.
@@ -196,8 +196,12 @@ Deliberate extensions beyond the 2020-12 vocabulary:
 
 - `{ "type": "unknown" }` — emitted for TypeScript `unknown` and for
   unresolved/degraded generics. Distinct from `true` (which is what `any`
-  becomes): `unknown` means "shape not expressible", `any` means "accept
-  anything".
+  becomes): `unknown` declares a REFERENCE, `any` means "accept anything". A
+  read stops at an `unknown` position rather than descending: it yields
+  something truthy that compares by identity and writes back as a link, and
+  that carries none of what it names. A concrete type declared beside it, as in
+  `{ "type": ["unknown", "string"] }`, is a reader asking for the value and
+  gets it.
 - `{ "type": "undefined" }` — preserved as an explicit union member (e.g.
   `string | undefined`) so optionality survives schema round-trips.
 - Fabric-primitive types — `"FabricBytes"`, `"FabricEpochDays"`,

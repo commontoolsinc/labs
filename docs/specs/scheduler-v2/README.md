@@ -867,7 +867,7 @@ only value that document ever holds. A verb's *declared* result type is a
 separate question: lowered onto `module.resultSchema`, it reaches the runtime —
 a launched result pattern carries it as its result schema, which `setupInternal`
 records as that receipt's stored schema, and the CLI serves it from the
-compiled graph (`cf piece verbs`, `cf piece call <verb> --help`). What it never
+compiled graph (`cf piece verbs`, `cf call <verb> --help`). What it never
 enters is the pattern's own durable schema — the shape the update gate compares
 across versions — and whichever source a receipt's stored schema came from, it
 describes one handling and constrains nothing written later.
@@ -1022,10 +1022,15 @@ skipped by `collectWorkSet`, and nothing downstream of them runs early
 
 At pass end, if no work is runnable now but some `invalid ∧ live` node (or
 parked head event) has a future `eligibleAt`, set a single timer for the
-minimum. `idle()` resolves when: no run in flight, no background piece-start
-task, no tick queued, no runnable work now, and no parked event — i.e.
+minimum. `idle()` resolves when: no run in flight, no tracked background task,
+no tick queued, no runnable work now, and no parked event — i.e.
 exactly v1's contract with the special cases collapsed into the gate
-primitive. Dormant invalid computations (not live) never hold `idle()` open,
+primitive. A background task is work the runtime has undertaken off the graph
+and whose result the graph is waiting on: a piece being started so a queued
+event can be delivered, or a system pattern being fetched so a surface a
+builtin has already emitted can be filled in. Work the graph does not depend
+on — an LLM call, a pattern's outbound fetch — is not tracked here; the
+barrier for that is `runtime.settled()`. Dormant invalid computations (not live) never hold `idle()` open,
 and a shared timer belonging only to dormant work does not delay current idle
 waiters.
 

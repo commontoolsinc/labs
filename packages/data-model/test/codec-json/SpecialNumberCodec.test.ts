@@ -17,13 +17,13 @@ import { expect } from "@std/expect";
 
 import { SpecialNumberCodec } from "@/codec-json/SpecialNumberCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("SpecialNumberCodec", () => {
   const codec = new SpecialNumberCodec();
   const expectedTag = CODEC_TYPE_TAGS.SpecialNumber;
-  const context = EMPTY_RECONSTRUCTION_CONTEXT;
+  const env = NULL_LIVE_ENVIRONMENT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {
@@ -75,7 +75,7 @@ describe("SpecialNumberCodec", () => {
         const result = codec.decode(
           expectedTag,
           0,
-          context,
+          env,
         );
         expect(result).toBeInstanceOf(ProblematicValue);
         expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
@@ -85,7 +85,7 @@ describe("SpecialNumberCodec", () => {
 
       it("decodes an unknown literal to `ProblematicValue`", () => {
         // "Infinity" (missing leading +) is not a recognized literal.
-        const result = codec.decode(expectedTag, "Infinity", context);
+        const result = codec.decode(expectedTag, "Infinity", env);
         expect(result).toBeInstanceOf(ProblematicValue);
         expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
           "SpecialNumber@1",
@@ -95,12 +95,12 @@ describe("SpecialNumberCodec", () => {
 
     describe("round trip encode-decode", () => {
       it("round-trips `-0` (preserves sign of zero)", () => {
-        const result = codec.decode(expectedTag, codec.encode(-0), context);
+        const result = codec.decode(expectedTag, codec.encode(-0), env);
         expect(Object.is(result, -0)).toBe(true);
       });
 
       it("round-trips `NaN`", () => {
-        const result = codec.decode(expectedTag, codec.encode(NaN), context);
+        const result = codec.decode(expectedTag, codec.encode(NaN), env);
         expect(Number.isNaN(result)).toBe(true);
       });
 
@@ -108,7 +108,7 @@ describe("SpecialNumberCodec", () => {
         const result = codec.decode(
           expectedTag,
           codec.encode(Infinity),
-          context,
+          env,
         );
         expect(result).toBe(Infinity);
       });
@@ -117,7 +117,7 @@ describe("SpecialNumberCodec", () => {
         const result = codec.decode(
           expectedTag,
           codec.encode(-Infinity),
-          context,
+          env,
         );
         expect(result).toBe(-Infinity);
       });

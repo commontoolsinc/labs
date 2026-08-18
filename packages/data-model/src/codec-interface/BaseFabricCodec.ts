@@ -1,6 +1,6 @@
 import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
-import type { FabricCodec, ReconstructionContext } from "./interface.ts";
+import type { FabricCodec, LiveEnvironment } from "./interface.ts";
 
 /**
  * Base class for `FabricCodec` which provides commonly-needed functionality:
@@ -44,7 +44,7 @@ export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
   abstract decode(
     typeTag: string,
     state: Encoded,
-    context: ReconstructionContext,
+    env: LiveEnvironment,
   ): FabricValue;
 
   /** @inheritDoc */

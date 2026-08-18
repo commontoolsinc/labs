@@ -32,7 +32,7 @@ import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
@@ -181,7 +181,7 @@ describe("FabricLink", () => {
     describe("[CODEC]", () => {
       const codec = FabricLink[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Link;
-      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+      const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
         it("is the `Link` wire type tag", () => {
@@ -210,7 +210,7 @@ describe("FabricLink", () => {
 
       describe("decode()", () => {
         it("decodes non-object state to `ProblematicValue`", () => {
-          expect(codec.decode(expectedTag, "nope", context))
+          expect(codec.decode(expectedTag, "nope", env))
             .toBeInstanceOf(ProblematicValue);
         });
 
@@ -222,7 +222,7 @@ describe("FabricLink", () => {
           const decoded = codec.decode(
             expectedTag,
             codec.encode(link),
-            context,
+            env,
           ) as FabricLink;
           expect(decoded).toBeInstanceOf(FabricLink);
           expect(decoded.payload).toEqual(link.payload);

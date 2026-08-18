@@ -26,9 +26,6 @@ type RewriteState = {
   onSchema?: (schema: JSONSchema) => void;
 };
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  isPlainObject(value);
-
 /**
  * A reference-only schema position: `{ "$ref": "cid:…" }` and nothing else,
  * pointing at a content-addressed schema document
@@ -37,14 +34,14 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
  * as the referenced document itself.
  */
 const isSchemaDocumentRefOnly = (value: unknown): boolean => {
-  if (!isPlainRecord(value)) return false;
+  if (!isPlainObject(value)) return false;
   const keys = Object.keys(value);
   return keys.length === 1 && keys[0] === "$ref" &&
     typeof value.$ref === "string" && value.$ref.startsWith("cid:");
 };
 
 const isCompressibleSchema = (value: unknown): value is JSONSchema =>
-  (value === true || value === false || isPlainRecord(value)) &&
+  (value === true || value === false || isPlainObject(value)) &&
   !isSchemaDocumentRefOnly(value);
 
 const schemaRefFor = (
@@ -199,11 +196,11 @@ const compressResponseSync = (
   if (message.type !== "response" || message.ok === undefined) {
     return message;
   }
-  if (!isPlainRecord(message.ok)) {
+  if (!isPlainObject(message.ok)) {
     return message;
   }
   const sync = message.ok.sync;
-  if (!isPlainRecord(sync) || sync.type !== "sync") {
+  if (!isPlainObject(sync) || sync.type !== "sync") {
     return message;
   }
 
@@ -223,14 +220,14 @@ const expandResponseSync = (
   message: unknown,
   onSchema?: (schema: JSONSchema) => void,
 ): unknown => {
-  if (!isPlainRecord(message) || message.type !== "response") {
+  if (!isPlainObject(message) || message.type !== "response") {
     return message;
   }
-  if (!isPlainRecord(message.ok)) {
+  if (!isPlainObject(message.ok)) {
     return message;
   }
   const sync = message.ok.sync;
-  if (!isPlainRecord(sync) || sync.type !== "sync") {
+  if (!isPlainObject(sync) || sync.type !== "sync") {
     return message;
   }
 
@@ -263,7 +260,7 @@ export const expandServerMessageSchemas = (
   message: unknown,
   onSchema?: (schema: JSONSchema) => void,
 ): unknown => {
-  if (isPlainRecord(message) && message.type === "session/effect") {
+  if (isPlainObject(message) && message.type === "session/effect") {
     return {
       ...message,
       effect: expandSessionSyncSchemas(

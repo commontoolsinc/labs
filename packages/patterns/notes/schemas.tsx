@@ -135,9 +135,9 @@ export interface NotebookInput {
  * destination's name.
  *
  * `destination` is typed `unknown` because a mention may address any piece.
- * A read of the VALUE comes back undefined for that reason, which is why an
- * address is taken from the path to it instead — the path survives where the
- * value does not. The editor writes the same field under a schema that reads
+ * A read of it stops at the reference for that reason, carrying none of the
+ * piece's fields, which is why an address is taken from the path to it
+ * instead — the path survives where the value does not. The editor writes the same field under a schema that reads
  * it back as a cell (`asCell`,
  * `packages/ui/src/v2/core/mention-refs.ts`): one stored link, read the way
  * each side needs it.

@@ -11,6 +11,8 @@ import {
   toResponsesTools,
 } from "./responses-protocol.ts";
 import type { OpenAICodexOAuthCredential } from "../auth/types.ts";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import { HarnessControlError } from "../control-errors.ts";
 import type {
   HarnessModelAttemptDiagnostic,
@@ -520,9 +522,8 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     if (terminalOutputEmpty && streamedItems.length > 0) {
       terminal = { ...terminal, output: streamedItems };
     }
-    const rawUsage = typeof terminal.usage === "object" &&
-        terminal.usage !== null && !Array.isArray(terminal.usage)
-      ? terminal.usage as Record<string, unknown>
+    const rawUsage = isObjectNotArray(terminal.usage)
+      ? terminal.usage
       : undefined;
     const normalizedUsage = normalizeOpenAIUsage(rawUsage);
     const usage = normalizedUsage === undefined ? undefined : {

@@ -1161,9 +1161,8 @@ export class RuntimeProcessor {
     // Always the PiecesController path: ensureDefaultPattern() reconciles the
     // persisted identity and carries the cold-start setup repair that heals an
     // aged home root. Starting the pattern directly here would skip that
-    // repair, and with systemPatternAutoUpdate unset (every default
-    // deployment) nothing else heals the root — so no fast path belongs in
-    // front of the controller.
+    // repair, and with `systemPatternAutoUpdate` unset nothing else heals the
+    // root — so no fast path belongs in front of the controller.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,

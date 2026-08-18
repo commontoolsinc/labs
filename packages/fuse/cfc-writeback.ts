@@ -9,6 +9,7 @@ import {
   type CfcEnforcementMode as RunnerCfcEnforcementMode,
   DEFAULT_CFC_ENFORCEMENT_MODE,
 } from "@commonfabric/runner/cfc";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import {
   canonicalCfcJsonStringify,
@@ -1211,7 +1212,7 @@ export class CfcWritebackStore {
       return;
     }
     if (
-      !isRecord(parsed) || parsed.version !== 1 ||
+      !isObjectNotArray(parsed) || parsed.version !== 1 ||
       !Array.isArray(parsed.records)
     ) {
       this.recordMalformed(0n, this.storagePath, "unsupported recovery store");
@@ -1248,12 +1249,12 @@ function parsePreparedWriteback(value: string): CfcPreparedWriteback | null {
   } catch {
     return null;
   }
-  if (!isRecord(parsed)) return null;
+  if (!isObjectNotArray(parsed)) return null;
   if (parsed.version !== 1) return null;
   if (!isOperation(parsed.operation)) return null;
   if (typeof parsed.expectedGeneration !== "string") return null;
-  if (!isRecord(parsed.target)) return null;
-  if (!isRecord(parsed.labels)) return null;
+  if (!isObjectNotArray(parsed.target)) return null;
+  if (!isObjectNotArray(parsed.labels)) return null;
   return parsed as CfcPreparedWriteback;
 }
 
@@ -1264,7 +1265,7 @@ function parseFinalizedWriteback(value: string): CfcFinalizedWriteback | null {
   } catch {
     return null;
   }
-  if (!isRecord(parsed)) return null;
+  if (!isObjectNotArray(parsed)) return null;
   if (parsed.version !== 1) return null;
   if (!isOperation(parsed.operation)) return null;
   if (typeof parsed.committedGeneration !== "string") return null;
@@ -1396,7 +1397,7 @@ function cloneRecoveryRecord(
 function isRecoveryRecord(
   value: unknown,
 ): value is CfcWritebackRecoveryRecord {
-  if (!isRecord(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   if (value.version !== 1) return false;
   if (typeof value.key !== "string") return false;
   if (!RECOVERY_STATUSES.includes(value.status as CfcPreparedWritebackStatus)) {
@@ -1420,10 +1421,6 @@ function isOperation(value: unknown): value is CfcWritebackOperation {
     value === "unlink" || value === "rmdir" ||
     value === "rename-source" || value === "rename-destination" ||
     value === "symlink" || value === "setattr-metadata";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function preparedGeneration(prepared: CfcPreparedWriteback): string {

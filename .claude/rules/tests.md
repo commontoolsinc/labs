@@ -16,14 +16,17 @@ learn by failing CI, or by shipping a file in the wrong shape.
 
 ## Run browser tests outside the macOS agent sandbox
 
-Before the first command that can launch a browser, request unsandboxed
-execution. Known browser-launching paths include the root `deno task test`,
-`deno task demo`, unfiltered browser targets of `deno task integration`,
-`deno-web-test`, `Browser.launch()`, and a bound `ShellIntegration` lifecycle.
-For a filtered integration run, inspect the selected suite's launch path. An
-Astral import alone is not proof that a test starts Chrome. Never try the
-command in the agent sandbox first. The full rule is in
-`docs/development/TESTING.md#browser-tests-in-agent-sandboxes`.
+A command that can launch a browser runs only outside the sandbox. If this
+session already has unsandboxed execution, just run it — there is nothing to
+request. If it does not, request unsandboxed execution for the command instead
+of attempting it in the sandbox, where Chrome aborts during startup and the
+failure is not test evidence. Known browser-launching paths include the root
+`deno task test`, `deno task demo`, unfiltered browser targets of
+`deno task integration`, `deno-web-test`, `Browser.launch()`, and a bound
+`ShellIntegration` lifecycle. For a filtered integration run, inspect the
+selected suite's launch path. An Astral import alone is not proof that a test
+starts Chrome. Deno's `-A` does not escape the outer sandbox. The full rule is
+in `docs/development/TESTING.md#browser-tests-in-agent-sandboxes`.
 
 ## Shape of a unit test file
 
@@ -33,8 +36,8 @@ First check which kind of file you are in. A `*.test.tsx` under
 driving another with `action()` and asserting with `assert()` from
 `commonfabric`, run by `deno task cf test`. Nothing in this section applies
 to one.
-`docs/common/workflows/pattern-testing.md` governs those; its "Prefer
-`assert()` over `computed()`" and "Use `assert()` only for assertions"
+`docs/common/workflows/pattern-testing.md` governs those; its "Write
+assertions with `assert()`" and "Use `assert()` only for assertions"
 sections carry the two rules easiest to get wrong.
 
 For everything else, `docs/development/unit-test-coding-style.md` is the

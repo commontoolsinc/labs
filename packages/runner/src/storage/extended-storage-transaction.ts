@@ -25,6 +25,7 @@ import {
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
   type CfcDereferenceTrace,
+  cfcDereferenceTracesEqual,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
@@ -101,6 +102,7 @@ import {
   clearSchemaRefusalTx,
   isInternalVerifierRead,
   isLazyMaterializationTx,
+  isUiInputBlindWriteTx,
   markLazyMaterializationTx,
   noteSchemaRefusalTx,
   reactivityLogFromActivities,
@@ -380,6 +382,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private readResultCacheHits = 0;
   private readResultCacheMisses = 0;
   private readResultCacheSets = 0;
+  // Per-transaction memo for derivations that read only this snapshot -- link
+  // resolution and CFC label views, each under its own key prefix. Dropped on
+  // any write alongside the read cache above, and bounded the same way: it
+  // retains only what was derived since this transaction's last write.
+  private snapshotMemo = new Map<string, unknown>();
 
   constructor(
     public tx: IStorageTransaction,
@@ -877,6 +884,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   resetNarrowestReadScope(scope: CellScope = "space"): void {
     this.narrowestReadScope = scope;
+    // The caller is about to re-read to learn the scope of what it reads. A
+    // memoized link resolution issues no reads, so it would contribute nothing
+    // to the scope taken afterwards and the answer would come out too wide.
+    this.snapshotMemo = new Map();
   }
 
   markLazyMaterialize(enabled = true): void {
@@ -941,6 +952,28 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.readResultCacheSets++;
   }
 
+  getSnapshotMemo(): Map<string, unknown> | undefined {
+    // A finished transaction answers no reads, so nothing it memoized earlier
+    // may be handed out as if it had.
+    if (this.status().status !== "ready") return undefined;
+    // Once CFC is prepared, the read path's `read-after-prepare` invalidation
+    // is load-bearing: a memoized resolution issues no reads and would leave a
+    // prepared digest standing over a read it never made.
+    if (this.#cfcState.prepare.status === "prepared") return undefined;
+    // Inside an ambient-read-meta scope the reads a derivation issues carry
+    // metadata that flow-label derivation reads. Serving one across the scope
+    // boundary — either way — would journal the wrong ones, so the scope
+    // neither reads the memo nor writes to it.
+    if (this.#ambientReadMeta !== undefined) return undefined;
+    // Same for the UI-input blind-write mode, which tags every read it sees
+    // `ignoreReadForCommit`. An entry made under it, served after it is
+    // cleared, would stand in for reads that are supposed to carry a
+    // value-equality commit precondition — and the precondition would simply
+    // not be there.
+    if (isUiInputBlindWriteTx(this)) return undefined;
+    return this.snapshotMemo;
+  }
+
   getReadResultCacheStats(): {
     hits: number;
     misses: number;
@@ -979,20 +1012,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private invalidateReadResultCache(): void {
-    // A write may have changed any value a cached read depends on. Drop the
-    // whole cache by replacing the map; this enforces
-    // the "no writes between the last read and this one" invariant the cache
-    // relies on.
+    // A write may have changed any value a cached read depends on — including
+    // the links a resolution walked, which a write can add, retarget or
+    // replace with a plain value. Drop both caches by replacing the maps; this
+    // enforces the "no writes between the last read and this one" invariant
+    // they rely on.
     this.readResultCache = new Map();
+    this.snapshotMemo = new Map();
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
+    const traces = this.#cfcState.dereferenceTraces;
+    // Only a dereference the transaction had not already performed can move
+    // the digest, which binds the trace SET
+    // (`canonicalizePreparedDigestInput`). Invalidating on a repeat would
+    // reject a commit the recheck in `commit()` goes on to accept, so this
+    // guard answers the same question that recheck does.
+    //
+    // The scan is the rare path, not the hot one: it runs only once prepared,
+    // and every resolution that reaches here has already probed its way down
+    // the link — a probe invalidates on its own, before the hop is recorded.
+    const changesDigest = this.#cfcState.prepare.status === "prepared" &&
+      !traces.some((recorded) => cfcDereferenceTracesEqual(recorded, trace));
     // Freeze on entry: from this point on the record is owned by the tx and
     // identity-stable. Mirrors the chokepoint pattern on
     // `recordCfcWritePolicyInput()`; together they ensure every CfcAddress
     // that flows into the digest input lives behind a deep-frozen wrapper.
-    this.#cfcState.dereferenceTraces.push(deepFreeze(trace));
-    if (this.#cfcState.prepare.status === "prepared") {
+    traces.push(deepFreeze(trace));
+    if (changesDigest) {
       this.invalidateCfc("dereference-trace-added");
     }
   }

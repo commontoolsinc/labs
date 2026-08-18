@@ -74,7 +74,7 @@ export interface CoverageCommentPayload {
    * this PR left each one's uncovered-line count. */
   groups?: CoverageResolvedGroup[];
   /** Present when `state` is "resolved": true when the gate passed because a
-   * changed group's debt was accepted with a per-metric override or the reset
+   * changed group's debt was accepted with a per-group acceptance or the reset
    * marker, not because the new code is covered. */
   overridden?: boolean;
 }
@@ -226,7 +226,12 @@ export interface CurrentPRBody {
 }
 
 export interface BaselineOverrides {
-  /** Coverage-debt metric name -> accepted uncovered-line count. */
+  /**
+   * Coverage-debt metric name -> how many uncovered lines above its ratchet
+   * baseline the pull request accepts. When these come from a merged pull
+   * request's body, only which metrics are present carries meaning; the ratchet
+   * reads the number off the current pull request alone.
+   */
   metrics: Map<string, number>;
   /** Reset all coverage-debt metrics at the commit carrying this marker. */
   coverageBaselineReset: boolean;
@@ -754,6 +759,11 @@ export function coverageMetricGroupName(metric: string): string | null {
   return metric.slice(prefix.length, -suffix.length);
 }
 
+/** The metric a source group's uncovered lines are counted in. */
+export function coverageMetricForGroup(group: string): string {
+  return `${COVERAGE_METRIC_PREFIX} ${group} uncovered lines`;
+}
+
 export function coverageGroupForChangedFile(filename: string): string | null {
   const normalized = filename.replaceAll("\\", "/");
   if (!/\.[jt]sx?$/.test(normalized)) return null;
@@ -1066,10 +1076,15 @@ function formatUnattributedFile(file: CoverageUnattributedFile): string {
   return `\`${file.relativePath}\`: ${lines}`;
 }
 
-/** The `ACCEPT_COVERAGE_DEBT:` line that takes one group off the ratchet. */
+/**
+ * The `ACCEPT_COVERAGE_DEBT:` line that takes one group off the ratchet. It
+ * names the rise this run measured rather than the total it reached, so a
+ * rebase onto a different baseline leaves the line saying the same thing.
+ */
 export function coverageOverrideLine(group: CoverageSuggestionGroup): string {
-  return `ACCEPT_COVERAGE_DEBT: ${COVERAGE_METRIC_PREFIX} ${group.group} ` +
-    `uncovered lines = ${uncoveredLineCount(group.current)}`;
+  return `ACCEPT_COVERAGE_DEBT: ${group.group} +${
+    uncoveredLineCount(group.current - group.target)
+  }`;
 }
 
 /**
@@ -1385,31 +1400,68 @@ export async function fetchCurrentPRBody(
 // ---------------------------------------------------------------------------
 
 /**
+ * Each `ACCEPT_COVERAGE_DEBT:` marker that starts a line, and the rest of that
+ * line. An acceptance is written flush against the left margin, which is what
+ * lets a description also talk about the mechanism: the marker named in a
+ * sentence is prose, and an indented example of one is an example. Neither is
+ * read as an acceptance, and neither is reported as a malformed one.
+ */
+const COVERAGE_ACCEPTANCE_MARKER = /^ACCEPT_COVERAGE_DEBT:[^\n]*/gm;
+
+/** The same marker, indented, which is what makes it an example. */
+const COVERAGE_ACCEPTANCE_INDENTED = /^[ \t]+ACCEPT_COVERAGE_DEBT:[^\n]*/gm;
+
+/** The source group and the rise a well-formed acceptance names. */
+const COVERAGE_ACCEPTANCE_TERMS =
+  /^ACCEPT_COVERAGE_DEBT:[ \t]*(\S+)[ \t]*\+[ \t]*(\d+)[ \t]*lines?\b/;
+
+/**
+ * A coverage source group. Metric collection rolls a file up to its top-level
+ * directory, `packages` excepted, where the package directory below it carries
+ * the group. So `workspace` and `tasks` are groups and `packages/runner` is
+ * one, while `tasks/foo` is not — nothing measures a group at that depth.
+ */
+const COVERAGE_GROUP_NAME = /^(?:[A-Za-z0-9._-]+|packages\/[A-Za-z0-9._-]+)$/;
+
+/**
  * Parse a PR body for coverage-debt overrides.
  *
- * Format (visible markdown, one per line):
- *   ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines
+ * Format (visible markdown, each flush against the left margin):
+ *   ACCEPT_COVERAGE_DEBT: packages/runner +12 lines
  *   NEW_COVERAGE_BASELINE
  *
- * `ACCEPT_COVERAGE_DEBT` accepts one metric's uncovered-line count. Its value
- * must use line units and its metric must be a `coverage-debt:` metric.
+ * `ACCEPT_COVERAGE_DEBT` accepts one source group rising a stated number of
+ * lines above whatever baseline the ratchet compares it against. It names the
+ * group — `workspace`, a top-level directory such as `tasks`, or a package as
+ * `packages/runner` — rather than the metric that group's lines are counted in.
+ * The rise is a whole number of lines. Stating a rise rather than a total is
+ * what lets a pull request be rebased: the baseline moves with the rebase and
+ * the accepted rise above it does not, so the same line keeps accepting the
+ * same amount of new debt.
+ *
+ * A group name of the right shape still names no group the run measured, so
+ * the caller checks each accepted metric against the metrics it collected;
+ * `unknownAcceptedMetrics()` is that check.
  * `NEW_COVERAGE_BASELINE` is a whole-coverage ratchet reset marker; it has no
  * value and lets the PR's/main run's coverage metrics become the next baseline.
  *
- * `includeLegacyCoverageAcceptance` additionally reads the marker's former name,
- * `NEW_PERF_BASELINE: <coverage-debt metric> = N lines`. Merged PRs from before
- * the rename accepted coverage debt that way, and their acceptance still has to
- * truncate the baseline timeline — otherwise a previously accepted increase
- * re-gates once its group's recent `main` runs go cold, because the ratchet
- * reaches back past the acceptance to a lower pre-acceptance sample. It is
- * enabled only when rebuilding merged-PR baselines, never for the current PR:
- * new PRs must use `ACCEPT_COVERAGE_DEBT`. The timing forms `NEW_PERF_BASELINE`
- * also carried gate nothing now, so any non-coverage-debt legacy line is
- * ignored rather than rejected.
+ * A merged PR's acceptance truncates the baseline timeline, so that a
+ * previously accepted increase does not re-gate once its group's recent `main`
+ * runs go cold and the ratchet reaches back past the acceptance to a lower
+ * pre-acceptance sample. Only which metrics such a body names is read for that;
+ * the numbers it carries mean nothing to the ratchet. `mergedPullRequestBody`
+ * says a merged PR's description is what is being read, and changes two things.
+ * The marker's former name, `NEW_PERF_BASELINE: <coverage-debt metric> = N
+ * lines`, counts as an acceptance, since the bodies that carry it were written
+ * before the rename; the timing forms it also carried gate nothing now, so a
+ * non-coverage-debt legacy line is ignored rather than rejected. And a marker
+ * this parser cannot read is passed over rather than rejected, because a body
+ * that has already merged cannot be rewritten to suit a later parser.
  */
 export function parseBaselineOverrides(
   body: string,
-  includeLegacyCoverageAcceptance = false,
+  mergedPullRequestBody = false,
+  warn: (message: string) => void = console.warn,
 ): BaselineOverrides {
   const result: BaselineOverrides = {
     metrics: new Map(),
@@ -1419,22 +1471,42 @@ export function parseBaselineOverrides(
     ).test(body),
   };
 
-  const re = /ACCEPT_COVERAGE_DEBT:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*(lines?)/g;
-  let match;
-  while ((match = re.exec(body)) !== null) {
-    const metric = match[1].trim();
-    const value = parseFloat(match[2]);
+  // An indented marker is read as an example, which is silent by design. Say
+  // which lines that reached, so an author who meant one as an acceptance and
+  // indented it can see why the gate carried on without it.
+  if (!mergedPullRequestBody) {
+    for (const example of body.match(COVERAGE_ACCEPTANCE_INDENTED) ?? []) {
+      warn(
+        `  Warning: "${example.trim()}" is indented, so it is read as an ` +
+          "example. An acceptance starts at the left margin.",
+      );
+    }
+  }
 
-    if (!isCoverageDebtMetric(metric)) {
+  for (const marker of body.match(COVERAGE_ACCEPTANCE_MARKER) ?? []) {
+    const terms = COVERAGE_ACCEPTANCE_TERMS.exec(marker);
+    if (terms === null) {
+      if (mergedPullRequestBody) continue;
       throw new Error(
-        `Invalid ACCEPT_COVERAGE_DEBT override for "${metric}": only coverage-debt metrics can be accepted.`,
+        `Invalid ACCEPT_COVERAGE_DEBT acceptance "${marker.trim()}": write it ` +
+          "as `ACCEPT_COVERAGE_DEBT: <source group> +N lines`, where N is how " +
+          "many lines above the baseline to allow the group to rise.",
       );
     }
 
-    result.metrics.set(metric, value);
+    const group = terms[1];
+    if (!COVERAGE_GROUP_NAME.test(group)) {
+      throw new Error(
+        `Invalid ACCEPT_COVERAGE_DEBT acceptance for "${group}": name a ` +
+          "coverage source group, such as `packages/runner`, `tasks`, or " +
+          "`workspace`.",
+      );
+    }
+
+    result.metrics.set(coverageMetricForGroup(group), parseInt(terms[2], 10));
   }
 
-  if (includeLegacyCoverageAcceptance) {
+  if (mergedPullRequestBody) {
     const legacyRe =
       /NEW_PERF_BASELINE:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*lines?\b/g;
     let legacyMatch;
@@ -1451,8 +1523,27 @@ export function parseBaselineOverrides(
 }
 
 /**
- * Format a coverage-debt value as a suggested override string for PR
- * descriptions, rounded up to whole lines.
+ * The accepted metrics this run measured nothing for, in the order they were
+ * written.
+ *
+ * A group name can be well formed and still name no group: a package that does
+ * not exist, a directory that holds no tracked source, a misspelling. Nothing
+ * downstream consults an acceptance whose metric is absent, so left alone it
+ * would read as a line that was written, accepted, and quietly did nothing.
+ * The caller fails the run instead.
+ */
+export function unknownAcceptedMetrics(
+  overrides: BaselineOverrides,
+  measured: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+): string[] {
+  return [...overrides.metrics.keys()].filter((metric) =>
+    !measured.has(metric)
+  );
+}
+
+/**
+ * Format an accepted rise in uncovered lines as the value half of an
+ * `ACCEPT_COVERAGE_DEBT` line, rounded up to whole lines.
  */
 export function formatOverrideSuggestion(value: number): string {
   const rounded = Math.ceil(value);
@@ -1461,7 +1552,7 @@ export function formatOverrideSuggestion(value: number): string {
 
 /**
  * Whether a merged PR's overrides accept the debt one metric carries, either
- * with a per-metric acceptance or with the whole-coverage reset marker.
+ * with a per-group acceptance or with the whole-coverage reset marker.
  */
 export function acceptsCoverageDebt(
   overrides: BaselineOverrides,

@@ -559,6 +559,16 @@ describe("parseExecArgs edge cases", () => {
     // And the help page lists it, which is the half a caller reads first.
     const help = renderExecHelp("/mnt/x.handler", spec, {});
     expect(help).toMatch(/--count/);
+
+    // The type block above the flags shows it too. The two are rendered by
+    // DIFFERENT readers — the flag list by the CLI's own, the type block by
+    // the runner's formatter — so one page could state two answers about one
+    // schema, and did. Sliced out rather than matched against the whole page,
+    // because `--count` in the flag list would satisfy a looser match on its
+    // own and the disagreement is exactly what needs catching.
+    const typeBlock = help.split("Input type:")[1]?.split("Flags:")[0] ?? "";
+    expect(typeBlock).toMatch(/note/);
+    expect(typeBlock).toMatch(/count/);
   });
 
   it("follows a reference into the definition a conjunction names", () => {
@@ -1430,6 +1440,45 @@ describe("renderPieceCallHelp", () => {
         "Output:",
         "  The invocation's `result`:",
         "    string[]",
+      ].join("\n"),
+    );
+  });
+
+  it("prints a result field's own description beside its placeholder", () => {
+    // The description is a ref-site sibling on the property — the shape a
+    // declared result actually arrives in — so no resolution stands between
+    // the wire and the page. Aligned as the flags are, and a multi-line
+    // comment continues under its own first line.
+    const help = renderPieceCallHelp(
+      "cf piece call ... addItem",
+      makeSpec(
+        "handler",
+        { type: "object", properties: { title: { type: "string" } } },
+        {
+          type: "object",
+          properties: {
+            item: {
+              "$ref": "#/$defs/ItemOutput",
+              description: "The root item this call created.",
+            } as never,
+            openBelow: {
+              type: "number",
+              description: "Descendants still open.\nZero means done.",
+            },
+          },
+        },
+      ),
+    );
+
+    expect(help.slice(help.indexOf("\n\nOutput:\n"))).toBe(
+      [
+        "",
+        "",
+        "Output:",
+        "  The invocation's `result`:",
+        "    item <json>         The root item this call created.",
+        "    openBelow <number>  Descendants still open.",
+        "                        Zero means done.",
       ].join("\n"),
     );
   });

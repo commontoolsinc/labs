@@ -4,13 +4,13 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
+import { DecodeContext } from "@/codec-common/DecodeContext.ts";
+import { EncodeContext } from "@/codec-common/EncodeContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
-import {
-  CODEC,
-  type ReconstructionContext,
-} from "@/codec-interface/interface.ts";
+import { CODEC, type LiveEnvironment } from "@/codec-interface/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NullLiveEnvironment } from "@/codec-interface/NullLiveEnvironment.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
@@ -22,13 +22,24 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from
  * the formal spec (Section 5).
  *
- * Public interface: `SerializationContext<string>`
- * - `encode(value)` -- full pipeline: tree-encode + stringify
- * - `decode(data, context)` -- full pipeline: parse + tree-decode
+ * Public instance surface, two directions and two boundary types:
+ * - `encode(value, env?)` -- full pipeline: tree-encode + stringify
+ * - `decode(data, env)` -- full pipeline: parse + tree-decode
+ * - `encodeToBytes(value, env?)` -- as `encode()`, to UTF-8 bytes
+ * - `decodeFromBytes(bytes, env)` -- as `decode()`, from UTF-8 bytes
  *
- * All internal machinery (tag wrapping, tree walking, byte conversion) is
- * private. Per-type encoding/decoding is delegated to the `FabricCodec`s in
- * the `CodecRegistry`.
+ * The machinery beneath is not public, and divides in two. The tree
+ * walkers, the tag wrapper and the context factories are `protected`:
+ * that is the surface a second engine extends, whether or not this one
+ * overrides any given member of it. This class's own helpers -- byte
+ * conversion, wire-text parsing, tag unwrapping and the container decode
+ * arms -- are `#`-private. Per-type encoding and decoding is delegated to
+ * the `FabricCodec`s in the `CodecRegistry`.
+ *
+ * Three statics are public besides: `seemsLikeEncoded()`, and the
+ * `wrapEncodedValueForTesting()` / `unwrapEncodedValueForTesting()` pair
+ * that lets a test build and take apart this format's tagged form without
+ * reaching into the private wrapper.
  *
  * **Cycles are refused** and **shared references are flattened**, per Section
  * 1.6 of the formal spec, which requires an engine to say which of these it
@@ -42,15 +53,34 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   // Instance members
   //
 
+  /** @inheritDoc */
+  protected override newEncodeContext(env: LiveEnvironment): EncodeContext {
+    return new EncodeContext(env);
+  }
+
+  /**
+   * @inheritDoc
+   *
+   * A plain one: this walk never enters a node, for the reason
+   * {@link #decode} gives, so the context's in-progress set is never
+   * allocated.
+   */
+  protected override newDecodeContext(env: LiveEnvironment): DecodeContext {
+    return new DecodeContext(env);
+  }
+
   /**
    * @inheritDoc
    *
    * Walks the value into the `/<Type>@<Version>` tagged tree, stringifies it,
    * and prefixes the format tag.
    */
-  override encode(value: FabricValue): string {
+  override encode(
+    value: FabricValue,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): string {
     return ENCODING_PREFIX_TAG +
-      JSON.stringify(this.encodeValue(value));
+      JSON.stringify(this.encodeValue(value, this.newEncodeContext(env)));
   }
 
   /**
@@ -64,7 +94,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * never receives a tree it did not build itself, which is the condition
    * under which a decode can be handed a cycle at all.
    */
-  override decode(data: string, context: ReconstructionContext): FabricValue {
+  override decode(data: string, env: LiveEnvironment): FabricValue {
     if (!JsonCodecEngine.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
@@ -74,25 +104,30 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
     const parsed = JsonCodecEngine.#parseWireText(json);
-    return this.decodeValue(parsed, context);
+    return this.decodeValue(parsed, this.newDecodeContext(env));
   }
 
-  /** Serializes a fabric value to UTF-8 JSON bytes. */
-  encodeToBytes(value: FabricValue): Uint8Array {
-    return JsonCodecEngine.#toBytes(this.encodeValue(value));
+  /** Encodes a fabric value to UTF-8 JSON bytes. */
+  encodeToBytes(
+    value: FabricValue,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): Uint8Array {
+    return JsonCodecEngine.#toBytes(
+      this.encodeValue(value, this.newEncodeContext(env)),
+    );
   }
 
   /**
-   * Deserializes UTF-8 JSON bytes back into a fabric value. Carries no cycle
+   * Decodes UTF-8 JSON bytes back into a fabric value. Carries no cycle
    * guard, for the reason {@link #decode} gives: this walk too gets its tree
    * from a parse.
    */
   decodeFromBytes(
     bytes: Uint8Array,
-    context: ReconstructionContext,
+    env: LiveEnvironment,
   ): FabricValue {
     const tree = JsonCodecEngine.#fromBytes(bytes);
-    return this.decodeValue(tree, context);
+    return this.decodeValue(tree, this.newDecodeContext(env));
   }
 
   /**
@@ -101,7 +136,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * Prepends `/` to the tag to produce the JSON key. See Section 5.2 of the
    * formal spec.
    *
-   * The result is not frozen. A serialize-side tree is stringified and
+   * The result is not frozen. An encode-side tree is stringified and
    * discarded without ever reaching a caller, so the deep-frozen invariant
    * `JsonCodecValue` states does not cover it, and freezing every tagged node
    * on the way out is measurable on small values. The meta-tag call sites
@@ -111,6 +146,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   protected override wrapTag(
     tag: string,
     state: JsonCodecValue,
+    _ctx: EncodeContext,
   ): JsonCodecValue {
     return { [`/${tag}`]: state } as JsonCodecValue;
   }
@@ -123,27 +159,32 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override encodeArray(
     value: readonly FabricValue[],
-    seen: Set<object>,
+    ctx: EncodeContext,
   ): JsonCodecValue {
-    JsonCodecEngine.enterOrThrow(seen, value);
+    ctx.enter(value);
 
     const result: JsonCodecValue[] = [];
-    let i = 0;
-    while (i < value.length) {
-      if (!(i in value)) {
-        let count = 0;
-        while (i < value.length && !(i in value)) {
-          count++;
+    try {
+      let i = 0;
+      while (i < value.length) {
+        if (!(i in value)) {
+          let count = 0;
+          while (i < value.length && !(i in value)) {
+            count++;
+            i++;
+          }
+          result.push(
+            Object.freeze(this.wrapTag(CODEC_META_TAGS.hole, count, ctx)),
+          );
+        } else {
+          result.push(this.encodeValue(value[i]!, ctx));
           i++;
         }
-        result.push(Object.freeze(this.wrapTag(CODEC_META_TAGS.hole, count)));
-      } else {
-        result.push(this.encodeValue(value[i]!, seen));
-        i++;
       }
+    } finally {
+      ctx.leave(value);
     }
 
-    seen.delete(value);
     return result as JsonCodecValue;
   }
 
@@ -163,21 +204,24 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override encodePlainObject(
     value: Record<string, FabricValue>,
-    seen: Set<object>,
+    ctx: EncodeContext,
   ): JsonCodecValue {
-    JsonCodecEngine.enterOrThrow(seen, value);
+    ctx.enter(value);
 
     const result: Record<string, JsonCodecValue> = {};
     let anySlashKey = false;
-    for (const key of utf8SortedKeysOf(value)) {
-      JsonCodecEngine.assertEncodableKey(key);
+    try {
+      for (const key of utf8SortedKeysOf(value)) {
+        JsonCodecEngine.assertEncodableKey(key);
 
-      if (key.startsWith("/")) {
-        anySlashKey = true;
+        if (key.startsWith("/")) {
+          anySlashKey = true;
+        }
+        result[key] = this.encodeValue(value[key]!, ctx);
       }
-      result[key] = this.encodeValue(value[key]!, seen);
+    } finally {
+      ctx.leave(value);
     }
-    seen.delete(value);
 
     if (anySlashKey) {
       if (Object.values(result).every((v) => JsonCodecEngine.#isQuoteSafe(v))) {
@@ -188,9 +232,11 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
             ) => [k, JsonCodecEngine.#unquote(v)]),
           ),
         );
-        return Object.freeze(this.wrapTag(CODEC_META_TAGS.quote, unquoted));
+        return Object.freeze(
+          this.wrapTag(CODEC_META_TAGS.quote, unquoted, ctx),
+        );
       }
-      return Object.freeze(this.wrapTag(CODEC_META_TAGS.object, result));
+      return Object.freeze(this.wrapTag(CODEC_META_TAGS.object, result, ctx));
     }
 
     return result as JsonCodecValue;
@@ -207,8 +253,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   protected override decodeValue(
     data: JsonCodecValue,
-    context: ReconstructionContext,
-    seen?: Set<object>,
+    ctx: DecodeContext,
   ): FabricValue {
     const decoded = JsonCodecEngine.#unwrapTag(data);
     if (decoded !== null) {
@@ -229,14 +274,14 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
           if (isUnsafeObjectKey(key)) {
             return this.reportReservedKey(key, inner);
           }
-          result[key] = this.decodeValue(val, context, seen);
+          result[key] = this.decodeValue(val, ctx);
         }
         return Object.freeze(result);
       }
 
       // `/quote` and `/object` returned above, so no codec ever sees their
       // state, and `/quote` contents alone go undecoded.
-      return this.decodeTagged(tag, rawState, context, seen);
+      return this.decodeTagged(tag, rawState, ctx);
     }
 
     // Primitives pass through.
@@ -248,20 +293,19 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     }
 
     if (Array.isArray(data)) {
-      return this.#decodeArray(data, context, seen);
+      return this.#decodeArray(data, ctx);
     }
 
     // `Array.isArray()` above removed the array arm, but TypeScript keeps it
     // in the union; the remaining member is the record.
     return this.#decodePlainObject(
       data as Record<string, JsonCodecValue>,
-      context,
-      seen,
+      ctx,
     );
   }
 
   /**
-   * Arrays: recursively deserialize elements.
+   * Arrays: recursively decode elements.
    *
    * One pass. A `/hole` run advances the write index past the indices it
    * stands for, leaving them absent, and the final length is set from that
@@ -282,8 +326,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   #decodeArray(
     data: readonly JsonCodecValue[],
-    context: ReconstructionContext,
-    seen: Set<object> | undefined,
+    ctx: DecodeContext,
   ): FabricValue {
     const result: FabricValue[] = new Array(data.length);
     let targetIndex = 0;
@@ -304,7 +347,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
         }
         targetIndex += count;
       } else {
-        result[targetIndex] = this.decodeValue(entry, context, seen);
+        result[targetIndex] = this.decodeValue(entry, ctx);
         targetIndex++;
       }
     }
@@ -329,14 +372,13 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   }
 
   /**
-   * Plain objects: recursively deserialize values and freeze. Any
+   * Plain objects: recursively decode values and freeze. Any
    * `/`-prefixed key is reserved per spec — return `ProblematicValue` on
    * first occurrence rather than silently round-tripping the object.
    */
   #decodePlainObject(
     data: Record<string, JsonCodecValue>,
-    context: ReconstructionContext,
-    seen: Set<object> | undefined,
+    ctx: DecodeContext,
   ): FabricValue {
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
@@ -355,7 +397,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       if (isUnsafeObjectKey(key)) {
         return this.reportReservedKey(key, data);
       }
-      result[key] = this.decodeValue(val, context, seen);
+      result[key] = this.decodeValue(val, ctx);
     }
     return Object.freeze(result);
   }
@@ -395,15 +437,15 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       .extend(UnknownValue[CODEC], ProblematicValue[CODEC]);
 
   /**
-   * Reconstruction context for the throwaway checks in the testing helpers
+   * Live environment for the throwaway checks in the testing helpers
    * below. Deep-freezes, as the ordinary decode path does. Paired with a
-   * lenient codec context, a cell reference degrades to a `ProblematicValue`
+   * lenient engine, a cell reference degrades to a `ProblematicValue`
    * rather than throwing.
    */
-  static readonly #testingReconstructionContext = Object.freeze(
-    new EmptyReconstructionContext(
+  static readonly #testingLiveEnvironment = Object.freeze(
+    new NullLiveEnvironment(
       true,
-      "no runtime context (validity check in a test-only helper).",
+      "no live environment (validity check in a test-only helper).",
     ),
   );
 
@@ -469,7 +511,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       // the tag first, so the malformed branch above loses nothing.)
       new JsonCodecEngine({ registry }).decode(
         encoded,
-        JsonCodecEngine.#testingReconstructionContext,
+        JsonCodecEngine.#testingLiveEnvironment,
       );
     }
 
@@ -518,7 +560,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       jsonCodecEngine.encode(
         jsonCodecEngine.decode(
           encoded,
-          JsonCodecEngine.#testingReconstructionContext,
+          JsonCodecEngine.#testingLiveEnvironment,
         ),
       );
     }
@@ -587,7 +629,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
   /**
    * Returns true if the already-encoded codec value `v` can be embedded
-   * inside a /quote wrap without inner deserialization: primitives, plain
+   * inside a /quote wrap without inner decoding: primitives, plain
    * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
    * values (which `#unquote()` can collapse).
    */

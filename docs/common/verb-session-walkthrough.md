@@ -1,8 +1,8 @@
 # A verb session, end to end
 
 What driving a pattern entirely through `cf` looks like when the verb surface is
-complete: discovery, help, completion, and carrying an address from one call
-into the next.
+complete: discovery, documentation, help, completion, and carrying an address
+from one call into the next.
 
 [Verbs over the CLI](verbs-over-the-cli.md) explains what a verb hands back.
 This walks a whole session using it, and marks where the surface is still
@@ -12,7 +12,10 @@ The subject is a work-item tracker — items in a tree, plus typed cross-links.
 It is a real pattern: `packages/cli/integration/pattern/tracker.tsx`, which
 belongs to this document and the two scripts beside it, so a change to a
 pattern the product ships can never break a demonstration of the verb surface.
-Every measurement below was taken against it on a local toolshed.
+The scripts are `packages/cli/integration/verb-session-demo.sh`, the session as
+it is meant to read, and `packages/cli/integration/verb-session-gaps.sh`, the
+gap harness CI runs to keep the **[today]**/**[blocked]** marks below honest.
+Every measurement below was taken against that pattern on a local toolshed.
 
 **Every step is marked for what is real.** The point of the document is the
 line between them.
@@ -57,7 +60,7 @@ verbs, and they differ in nothing but what the new item is filed under:
 | `recordNote` | returns what only the pattern could compute: the clock is a handler capability, so the stamp cannot come from the caller | act 7 |
 | `finish` | returns a derived fact — `openBelow` takes a walk of the whole subtree, which a caller would pay N reads for | act 8 |
 | `archive` | declares no result: the invocation settles carrying no `result` at all, and what it changed is a separate read | act 9 |
-| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12, **[blocked]** |
+| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12 — the envelope spelling works, the printed-address spelling is refused |
 
 Those act numbers are `packages/cli/integration/verb-session-demo.sh`, which
 drives the session and prints each command before running it — the transcript is
@@ -67,6 +70,13 @@ pass/fail, and several of its steps assert that something does *not* work yet,
 failing loudly the day it does. A verb added to the fixture wants a row above, an
 act in the demo, and a step in the harness; a shape demonstrated in none of the
 three is a claim this document is making alone.
+
+This document quotes commands and never composes them: every `cf` line in a
+bash block below is a line the demo runs — or carries a `# not in the demo`
+comment saying why it cannot be — and every act number names an act the demo
+has. `deno task check-verb-session-sync` enforces both, so a command here
+cannot be wrong in a way the demo would have caught, and an act reference
+cannot go stale under renumbering.
 
 ## What you are driving
 
@@ -82,9 +92,12 @@ interface BoardInput {
   items?: ItemOutput[];
 }
 
-/** The board holds ROOT items only. Everything deeper is reached through an
- *  item's `children`. */
+/** A work-item tracker: root items on a board, everything deeper under an
+ *  item's `children`. State changes only through verbs — a caller files,
+ *  notes, finishes, archives, and relates items; nothing here is written
+ *  directly. */
 interface BoardOutput {
+  /** Root items only. The tree hangs off each one's `children`. */
   items: ItemOutput[];
   /** File a new root item on the board. */
   addItem: Stream<AddItemEvent, AddItemResult>;
@@ -167,7 +180,8 @@ measured at 3183 bytes for a single child on this pattern. Naming what you want
 brings it to 51:
 
 ```bash
-cf piece get --piece <item> children --select 'title,status'
+# not in the demo — the byte measurement's own illustration
+cf get <item-address> children --select 'title,status'
 ```
 
 That is not a workaround; it is the read model working. A schema is a query,
@@ -179,7 +193,7 @@ bytes unshaped, 140 with `--select 'item.title'`.
 **The prose above reaches a caller.** Each verb carries a doc comment saying
 what it is for, which is where that documentation belongs, and `cf` serves it:
 as a row's `description` under `cf piece verbs --json`, and as the summary line
-of the verb's own help page. Step 2 has the measurement.
+of the verb's own help page. Step 3 has the measurement.
 
 
 ## 1. Arrive with a slug **[today]**
@@ -187,8 +201,9 @@ of the verb's own help page. Step 2 has the measurement.
 An address a person can type, rather than a fid from a previous command.
 
 ```bash
+# not in the demo — the demo deploys straight against a live toolshed
 cf test tracker.test.tsx
-cf piece new tracker.tsx --test tracker.test.tsx --slug board
+cf piece new packages/cli/integration/pattern/tracker.tsx --slug board
 cf piece verbs --piece board
 ```
 
@@ -196,6 +211,7 @@ cf piece verbs --piece board
 PATTERN cf:module/ZPxyGdkkv-YmizdHdNx5DIlqlpc9JRSm5iXTl4Tb2T0#default
 NAME    KIND    ON     MARKS
 addItem handler result
+    File a new root item on the board.
 ```
 
 **One row, because the board declares one verb.** `items` is the board's array
@@ -208,17 +224,80 @@ Slug resolution sits on the shared path (`resolvePieceConfigWithPieces`,
 The listing carries the deployed pattern's source identity, which is how a
 client tells it is talking to a newer pattern than it was written against.
 
-**The table is names; `--json` is the description.** The columns are a grid to
-scan, so each row stays one line and a verb's prose — which runs to a sentence
-or several — travels on the machine-readable spelling instead, as the row's
-`description`, alongside the input and output schemas the table has no room for
-either. A person asking what one verb is for reads its help page, where the
-same words are the summary line.
+**Each row carries its verb's prose.** The columns stay a grid to scan — one
+table line per verb — and the verb's own doc comment rides beneath its row:
+the same sentence the help page opens with, and the same `description` the
+row carries under `--json`, alongside the input and output schemas the table
+has no room for. A person asking what one verb is for reads its help page; a
+person asking what the piece is for reads its own page, next.
 
-## 2. Ask what a verb wants **[today]**
+## 2. Ask what it is **[today]**
 
 ```bash
-cf piece call --piece board addItem -- --help
+cf piece describe --piece board
+```
+
+```text
+NAME    Work tracker
+PATTERN cf:module/ZPxyGdkkv-YmizdHdNx5DIlqlpc9JRSm5iXTl4Tb2T0#default (/tracker.tsx)
+
+  A work-item tracker: root items on a board, everything deeper under an
+  item's `children`. State changes only through verbs — a caller files,
+  notes, finishes, archives, and relates items; nothing here is written
+  directly.
+
+STATE
+  items  ItemOutput[]
+      Root items only. The tree hangs off each one's `children`.
+
+INPUTS
+  items  ItemOutput[]
+
+VERBS
+  addItem
+      File a new root item on the board.
+```
+
+The piece's man page: what it is, what it holds, what a caller supplies, and
+what it can do — one command, and every sentence on it is the author's own,
+compiled with the pattern and read back from it. The demo's act 2 runs it
+here, and act 4 runs it again against the address a call handed back, where
+the page that answers is the item's: its own purpose, its state fields'
+prose, and a summary line per verb.
+
+| Line | Written on | Compiled to |
+| --- | --- | --- |
+| the purpose paragraph | the result (Output) interface's own doc comment | the result schema's root `description` |
+| a STATE row's prose | the field's doc comment | `resultSchema.properties.<field>.description` |
+| an INPUTS row | a field of the argument (Input) interface | `argumentSchema.properties` — `Required.` marks what that schema requires |
+| a VERBS row's summary | the verb's doc comment | the listing row's `description` — the same sentence its help page opens with |
+
+**The purpose has exactly one compiled home.** A comment at the top of the
+pattern FILE compiles to nothing — emit strips comments, so it survives only
+in the stored source `cf piece getsrc` retrieves. The Output interface's
+comment is where a pattern's purpose reaches a caller, because the schema
+generator attaches a type's own doc comment only where that type is the root
+of a generated schema — which its result root is, and which the nested types
+inside it are not. The same rule is why an event interface's comment reaches
+nothing (step 3's table).
+
+**STATE and INPUTS split on who writes.** An INPUTS row is what a caller
+supplies; a STATE row belongs to the pattern and changes only when a verb is
+called. That split is the piece's usage model, and the page keeps it visible
+— which is also why `Required.` appears only under INPUTS: a result schema's
+`required` array marks fields the pattern owns, and that is not a claim on
+any caller.
+
+**The page degrades honestly.** A field nobody documented still lists with
+its name and declared type (`title` on an item does exactly that). A piece
+whose compiled pattern cannot be read keeps its VERBS — they still dispatch —
+and loses purpose, STATE, and INPUTS, with a note saying so rather than empty
+sections claiming the pattern declares nothing.
+
+## 3. Ask what a verb wants **[today]**
+
+```bash
+cf call --piece board addItem -- --help
 ```
 
 ```text
@@ -238,7 +317,7 @@ Flags after `--`:
 
 Output:
   The invocation's `result`:
-    item <json>
+    item <json>  The root item this call created.
 ```
 
 **Structure and prose are both published, and they come from different
@@ -279,7 +358,7 @@ compilation:
 | --- | --- |
 | a comment on the **verb itself**, as in the model above | `resultSchema.properties.<verb>.description`, a sibling of the `$ref` naming its event |
 | a comment on an **event field** (what `title` means) | `$defs.<Event>.properties.<field>.description` |
-| a comment on the **event interface** | nowhere — this one does not compile ([#5559](https://github.com/commontoolsinc/labs/issues/5559)) |
+| a comment on the **event interface** | nowhere — this one does not compile ([#5937](https://github.com/commontoolsinc/labs/issues/5937)) |
 
 `cf piece verbs` and `cf piece call <verb> --help` already load that pattern to
 report what a verb hands back, so both read the prose from the same load. The
@@ -317,46 +396,39 @@ Which leaves a real question this does not settle: a field an author declares
 and the body never reads is a field a caller cannot discover. Whether the two
 schemas should be reconciled, and in which direction, is open.
 
-### What the page still owes **[blocked]**
+### Three levels of documentation **[today]**
 
-Every line of prose on the page above already exists as a doc comment in
-`tracker.tsx`. Nothing is invented for the illustration — it is that file's own
-words, reaching a caller. One line is still missing, and it is the last one:
-
-```text
-Output:
-  The invocation's `result`:
-    item <json>       The root item this call created.
-```
-
-**Three levels of documentation, and one of them stops short.** An author writes
-each where the thing it describes is declared — the verb says what it does, and
-each parameter describes itself:
+Every line of prose on the page above exists as a doc comment in
+`tracker.tsx`. Nothing is invented for the illustration — it is that file's
+own words, reaching a caller. An author writes each where the thing it
+describes is declared — the verb says what it does, and each parameter
+describes itself:
 
 | Level | Written on | Compiled? | Reaches `cf`? |
 | --- | --- | --- | --- |
 | the verb — *what it does* | the `Stream` property | **yes**, beside the `$ref` | **yes**, as the summary line |
 | an **input** parameter | a field of the event interface | **yes**, in `$defs.<Event>.properties` | **yes**, beside its flag |
-| an **output** parameter | a field of the result interface | **yes**, on the declared result | **yes**, under `--help --json` — but not on the text page |
+| an **output** parameter | a field of the result interface | **yes**, on the declared result | **yes**, beside its `Output:` line |
 
-The output parameter's is the one still short of the page, and it is short by a
-single step. A verb's declared result reaches `cf` **unresolved** — `--help
---json` on `addItem` serves `properties.item` as a `$ref` into `$defs.ItemOutput`
-carrying `"description": "The root item this call created."`, the author's own
-comment, verbatim. What drops it is the rendering: the text page writes each
-result property as `name <placeholder>` and never reads the `description` beside
-it. So the prose is on the wire and one line of rendering away.
+The output parameter's needs no resolution to render. A verb's declared
+result reaches `cf` **unresolved**, and a field's description is a ref-site
+sibling on the property itself: `--help --json` on `addItem` serves
+`properties.item` as a `$ref` into `$defs.ItemOutput` carrying
+`"description": "The root item this call created."`, the author's own comment
+verbatim, and the text page prints that same sentence beside `item <json>`.
 
-The summary line is worth one more note, because an event *interface's* comment
-would be the other candidate for it. That is the one level here that does not
-compile at all ([#5559](https://github.com/commontoolsinc/labs/issues/5559)) —
-so the verb's own comment is both the shorter road and the better place for an
-author to write it, since it sits beside the type it describes.
+The summary line is worth one more note, because an event *interface's*
+comment would be the other candidate for it. That is the one level here that
+does not compile at all
+([#5937](https://github.com/commontoolsinc/labs/issues/5937)) — so the verb's
+own comment is both the shorter road and the better place for an author to
+write it, since it sits beside the type it describes.
 
-## 3. Complete against the live piece **[today]**
+## 4. Complete against the live piece **[today]**
 
 ```bash
-cf piece call --piece board <TAB>
+# not in the demo — completion needs a terminal
+cf call --piece board <TAB>
 addItem
 ```
 
@@ -372,20 +444,27 @@ same declared result a completion provider would read. What is missing is the
 provider consulting it, which is the same wiring a derived default selection
 needs.
 
-## 4. Create, and carry the address forward **[today]**
+## 5. Create, and carry the address forward **[today]**
 
 ```bash
-EPIC=$(cf piece call --piece board addItem -- --title "Login rewrite" \
-       --select 'item@' | jq -r '.result.item."$link"')
+EPIC=$(cf call --piece board --select 'item@' addItem -- \
+       --title "Login rewrite" | jq -r '.result.item."$link"')
 
-cf piece call --piece "$EPIC" addChild -- --title "Session cookie handling"
-cf piece call --piece "$EPIC" recordNote -- --body "Blocked on the cookie spec"
+cf call "$EPIC" addChild -- --title "Session cookies"
+cf call "$EPIC" recordNote -- --body "blocked on the cookie spec"
+cf get "$EPIC/status"
 ```
 
 **This is the composition the surface exists for.** A create hands back the
 piece it made, the address renders in place as one canonical reference, and the
-next call takes that same string as its target. Identity survives the round trip instead of being flattened into a copy
-of the item's contents.
+next command takes that same string — bare, in its first position. An address
+begins with `/` and a relative path never does, so the two cannot collide, and
+the address may carry the path, as the `get` above shows. The slug stays on
+`--piece`, where no path competes for the position; naming the target both
+ways at once is refused. Identity survives the round trip instead of being
+flattened into a copy of the item's contents. Read options (`--select`,
+`--schema`, `--filter`) come before the address on a `call`, because the first
+positional starts the callable's own command line.
 
 `--show-links` is the **[today]** spelling of the same move: it returns a
 dictionary of RFC 6901 pointers naming the document behind each result path, so
@@ -431,13 +510,12 @@ a stack trace.
 [A result that points back at its container](verbs-over-the-cli.md#a-result-that-points-back-at-its-container)
 shows the full exchange.
 
-## 5. Read the tree back, bounded **[today]**
+## 6. Read the tree back, bounded **[today]**
 
 ```bash
-cf piece get --piece board items --select 'title,status,children@'
+cf get --piece board items --select 'title,status,children@'
 
-cf piece get --piece board items --select 'title,status' \
-  --filter '.status != "done"'
+cf get "$EPIC" children --select title --filter '.status == "open"'
 ```
 
 Two commands rather than one, because **an `@` suffix and `--filter` are
@@ -464,27 +542,47 @@ their own options go.
 The demo's act 10 is this step run against the session's own tree: the whole
 board first, then only what is open, then the refusal.
 
-## 6. Relate two items **[blocked]**
+## 7. Relate two items **[today]**, minus one spelling
 
 ```bash
-cf piece call --piece "$EPIC" blockOn -- --on "$OTHER"
+cf call "$KID" blockOn -- --on "$CSRF"
 ```
 
-This is where the session stops.
+That spelling — the address exactly as a read printed it — is the one still
+refused (#5880 landed the capability, not the round trip). Wrap the same
+address in the link envelope by hand and the call dispatches, the edge that
+lands is the target rather than a copy, and the graph read below shows one
+item under two paths:
+
+```bash
+cf call --select blocked@,on@,blockedOnCount "$KID" blockOn '{"on":{"/":{"link@1":{"id":"of:fid1:…"}}}}'
+
+cf get "$EPIC" children --select @,title,blockedOn@
+```
+
+The demo's acts 12 and 13 run all three: the refusal as a claim that
+self-reports the day the printed address is accepted, the envelope as the
+workaround it is, and the two-paths read as the payoff addresses exist for.
 
 ## The composition axis
 
-Steps 4 and 6 are the same move — take an address out of one command and put it
-into the next — and only one of them works.
+Steps 5 and 7 are the same move — take an address out of one command and put it
+into the next — and the receiver half works in full while the argument half
+works only under a spelling no read emits.
 
 | Direction | State |
 | --- | --- |
-| address → `--piece` (the receiver) | works |
-| address → an argument field | refused |
+| address → the receiver (first positional, or `--piece`) | works |
+| a link envelope → an argument field | works (#5880) — the edge that lands is the target, not a copy |
+| the address a read emits → an argument field | refused |
 
-A call payload is plain JSON. `normalizeCallableInputForExecution`
-(`packages/cli/lib/exec-schema.ts`) does nothing with links, so `--on "$OTHER"`
-arrives as a string the pattern cannot resolve into a reference.
+The pre-dispatch gate now passes a link envelope opaquely where a verb
+declares a reference (#5880), matching the ruling the runtime's own dispatch
+gate had already made. What it still refuses is the canonical string a read
+prints — the one spelling a caller is actually holding, since every `$link`
+and `receipt` in this session emits exactly that form. A caller who wants the
+edge today must assemble the envelope from the string by hand, which is the
+round-trip property failing one level in.
 
 A tree mostly hides this, because the natural shape is to call the verb *on* the
 parent — the receiver carries the relationship, so no address needs to be an
@@ -506,14 +604,13 @@ Declared results make an **output** self-describing; this is about what an
 
 | Gap | Needs |
 | --- | --- |
-| A result field's prose absent from the text page | Only the renderer — the description is already served under `--help --json`, beside the field it documents |
-| An event interface's own comment absent everywhere | The one prose level that does not compile ([#5559](https://github.com/commontoolsinc/labs/issues/5559)). Nothing downstream can serve what was never emitted |
+| An event interface's own comment absent everywhere | The one prose level that does not compile ([#5937](https://github.com/commontoolsinc/labs/issues/5937)). Nothing downstream can serve what was never emitted |
 | A declared event field the handler body never reads is absent from the served input schema | A decision, not a patch: the served schema is the handler's read and the declared type is the contract, and which one a caller is owed is open |
 | `--select` completion, and refusal before the call | A provider reading the declared result the help page already resolves |
-| An address accepted as an argument | The round-trip property above |
+| The address a read emits accepted as an argument | The string form beside the envelope #5880 accepts — the round-trip property above. And beside it the protective refusal: a shape-matching payload still stores a detached copy and reports success |
 
-Five rows and five distinct gaps, and the first three are worth reading
-together because they look like one. They are not: the first is a renderer that
-does not print what it is handed, the second is a comment nothing emits, and the
-third is a *field* — not prose at all — and an open question rather than a
-defect. Only the second is an author's words going missing.
+Four rows and four distinct gaps, and the first two are worth reading
+together because they look like one. They are not: the first is a comment
+nothing emits, and the second is a *field* — not prose at all — and an open
+question rather than a defect. Only the first is an author's words going
+missing.

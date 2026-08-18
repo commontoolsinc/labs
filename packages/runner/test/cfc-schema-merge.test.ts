@@ -1197,4 +1197,24 @@ describe("cfcSchemaMergeIssue", () => {
     expect(issue?.migration).toBe(false);
     expect(issue?.message).toContain("confidentiality cannot be weakened");
   });
+
+  it("refuses two different claims whose identity is an array", () => {
+    // A claim reconciles with another only when their bindings correspond,
+    // which is read from the identity's `file` and `path`. An array carries
+    // neither. Different bindings conflict.
+    const mergeArrayIdentities = () =>
+      mergeCfcSchemaEnvelopes({
+        ifc: {
+          writeAuthorizedBy: { __ctWriterIdentityOf: ["one"] },
+        } as any,
+      }, {
+        ifc: {
+          writeAuthorizedBy: { __ctWriterIdentityOf: ["two"] },
+        } as any,
+      });
+
+    expect(mergeArrayIdentities).toThrow(
+      "writeAuthorizedBy must remain stable",
+    );
+  });
 });

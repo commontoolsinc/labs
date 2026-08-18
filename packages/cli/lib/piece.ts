@@ -9,10 +9,14 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { createSession, isDID, Session } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
+  FileSystemProgramResolver,
+  readDataFileSource,
+} from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
 import {
   assignSlug,
+  listSlugs,
   pieceId,
   resolvePieceAddress as resolveStoredPieceAddress,
   resolveSlugTargetCell,
@@ -68,6 +72,10 @@ import { caseFold } from "unicode-case-folding";
 import { isHandlerCell, isStreamValue } from "../../fuse/callables.ts";
 import { executeCallableCommand } from "./callable-command.ts";
 import {
+  buildPieceDescription,
+  type PieceDescription,
+} from "./piece-describe.ts";
+import {
   callableCommandSpec,
   type CallableExecutionDeps,
   type CallableResolution,
@@ -106,6 +114,8 @@ export interface EntryConfig {
   rootPath?: string;
   /** Test entry paths whose resolved source closures travel with the piece. */
   testPaths?: string[];
+  /** Data file paths stored with the piece and never compiled. */
+  dataFilePaths?: string[];
 }
 
 export interface SpaceConfig {
@@ -140,6 +150,13 @@ export interface PieceConfig extends SpaceConfig {
    * carries them.
    */
   piecePath?: (string | number)[];
+  /**
+   * True when the reference carried the `#argument` suffix: the caller
+   * selected the piece's arguments cell. A command that takes `--input`
+   * honors it as that flag; every other command rejects a reference that
+   * carries it.
+   */
+  pieceInput?: boolean;
 }
 
 export interface SetPiecePatternOptions {
@@ -591,8 +608,12 @@ export async function getProgramFromFile(
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
   const entryPaths = [entry.mainPath, ...(entry.testPaths ?? [])];
+  const dataPaths = entry.dataFilePaths ?? [];
   const rootPath = entry.rootPath ??
-    join(common(entryPaths.map((path) => dirname(path))), ".");
+    join(
+      common([...entryPaths, ...dataPaths].map((path) => dirname(path))),
+      ".",
+    );
   const programs: RuntimeProgram[] = await Promise.all(
     entryPaths.map((path) =>
       pieces.runtime.harness.resolve(
@@ -613,12 +634,29 @@ export async function getProgramFromFile(
       files.set(file.name, file);
     }
   }
+  // Data files are read directly rather than resolved: nothing imports them, so
+  // there is no closure to follow, and their bytes are never parsed.
+  const dataFiles: string[] = [];
+  for (const path of dataPaths) {
+    const source = readDataFileSource(path, rootPath);
+    if (dataFiles.includes(source.name)) continue;
+    // The entry or one of its tests reaches this name through an import, so the
+    // package would have to both compile it and store it uninterpreted.
+    if (files.has(source.name)) {
+      throw new Error(
+        `Data file "${source.name}" is also a source module of this package.`,
+      );
+    }
+    files.set(source.name, source);
+    dataFiles.push(source.name);
+  }
   const program: RuntimeProgram = {
     main: mainProgram.main,
     files: [...files.values()],
     ...(testPrograms.length === 0
       ? {}
       : { sourceRoots: testPrograms.map((test) => test.main) }),
+    ...(dataFiles.length === 0 ? {} : { dataFiles }),
   };
   if (entry.mainExport) {
     program.mainExport = entry.mainExport;
@@ -667,6 +705,41 @@ export async function listPieces(
       } catch (err) {
         return {
           id: piece.id,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }),
+  );
+}
+
+/** One `cf piece slugs` row: a name the space's slug index records, and the
+ * piece it resolves to. A row carries `error` instead of `piece` when the
+ * name does not resolve to one — a slug pointing at a plain cell path, or at
+ * a document that no longer loads, is still a name the space has, and a
+ * listing that dropped it would misreport the namespace. */
+export interface SlugSummary {
+  slug: string;
+  piece?: string;
+  error?: string;
+}
+
+/** Every slug the space's index records, each resolved to the piece id
+ * `--piece` would resolve it to. The index bounds the listing: it names
+ * slugs assigned since it existed, so an older slug still resolves but is
+ * not listed — nothing can enumerate what it was never told the name of. */
+export async function listSpaceSlugs(
+  config: SpaceConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<SlugSummary[]> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const slugs = await listSlugs(pieces);
+  return Promise.all(
+    slugs.map(async (slug) => {
+      try {
+        return { slug, piece: await resolveStoredPieceAddress(pieces, slug) };
+      } catch (err) {
+        return {
+          slug,
           error: err instanceof Error ? err.message : String(err),
         };
       }
@@ -2702,6 +2775,19 @@ export async function listPieceCallables(
   deps: PieceCallableDependencies = {},
 ): Promise<PieceCallablesListing> {
   const { piece } = await loadPieceForCallables(config, deps);
+  return (await listCallablesForLoadedPiece(piece)).listing;
+}
+
+/** The listing walk over an already-loaded piece, returning the compiled
+ * pattern it consulted beside the listing itself. Held apart from
+ * `listPieceCallables` so `describePiece` can share one piece load — and one
+ * pattern read — with the verbs listing instead of performing both twice.
+ * `compiled` is null exactly when the listing is `incomplete`: the two
+ * degrade together, off the same failed read. */
+async function listCallablesForLoadedPiece(piece: any): Promise<{
+  listing: PieceCallablesListing;
+  compiled: { argumentSchema?: unknown; resultSchema?: unknown } | null;
+}> {
   let pattern: PiecePatternRef | null = null;
   if (typeof piece.getPatternRef === "function") {
     try {
@@ -2734,12 +2820,16 @@ export async function listPieceCallables(
   let handlerResults = new Map<string, JSONSchema | undefined>();
   let verbProse = new Map<string, DeclaredVerbProse>();
   let graphConsulted = false;
+  let compiledPattern:
+    | { argumentSchema?: unknown; resultSchema?: unknown }
+    | null = null;
   if (typeof piece.getPattern === "function") {
     try {
       const compiled = await piece.getPattern();
       graphNames = patternResultNames(compiled);
       handlerResults = handlerVerbResults(compiled);
       verbProse = declaredVerbProse(compiled);
+      compiledPattern = compiled ?? null;
       graphConsulted = true;
     } catch {
       // Reported as `incomplete` below rather than swallowed.
@@ -2948,10 +3038,44 @@ export async function listPieceCallables(
   // Byte-order, not locale collation: this is a machine-readable surface and
   // must sort identically on every host (utf8Compare is the repo comparator).
   return {
-    pattern,
-    ...(graphConsulted ? {} : { incomplete: "pattern-unavailable" as const }),
-    verbs: [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name)),
+    listing: {
+      pattern,
+      ...(graphConsulted ? {} : { incomplete: "pattern-unavailable" as const }),
+      verbs: [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name)),
+    },
+    compiled: compiledPattern,
   };
+}
+
+/**
+ * `cf piece describe` on one piece load: the NAME cell, the callable listing,
+ * and the compiled pattern's two schemas, assembled by
+ * `buildPieceDescription` into the piece's documentation.
+ *
+ * The display name is advisory the way the pattern identity is: a piece with
+ * no NAME cell, or one whose read fails, is still described — the header
+ * degrades, never the command.
+ */
+export async function describePiece(
+  config: PieceConfig,
+  deps: PieceCallableDependencies = {},
+): Promise<PieceDescription> {
+  const { piece } = await loadPieceForCallables(config, deps);
+  const { listing, compiled } = await listCallablesForLoadedPiece(piece);
+  let name: string | undefined;
+  try {
+    const pieceCell = typeof piece.getCell === "function"
+      ? piece.getCell()
+      : undefined;
+    const nameCell = pieceCell?.key?.(NAME);
+    const value = typeof nameCell?.pull === "function"
+      ? await nameCell.pull()
+      : nameCell?.get?.();
+    if (typeof value === "string" && value !== "") name = value;
+  } catch {
+    // Unnamed is a state, not a failure.
+  }
+  return buildPieceDescription({ name, listing, compiled });
 }
 
 /**

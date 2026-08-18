@@ -130,9 +130,6 @@ export const bindLoomLocalRunManifest = (
   };
 };
 
-const isJsonObject = (input: unknown): input is Record<string, unknown> =>
-  isObjectNotArray(input);
-
 const isLoomRunManifestType = (input: unknown): boolean =>
   input === undefined || input === LOOM_RUN_MANIFEST_TYPE;
 
@@ -142,7 +139,7 @@ const normalizeLoomRunManifestCfc = (
   if (input === undefined) {
     return undefined;
   }
-  if (!isJsonObject(input)) {
+  if (!isObjectNotArray(input)) {
     throw new Error("run manifest cfc must be a JSON object");
   }
   if (
@@ -177,7 +174,7 @@ const normalizeCredentialOwnerRef = (
   input: unknown,
 ): HarnessCredentialOwnerRef | undefined => {
   if (input === undefined) return undefined;
-  if (!isJsonObject(input)) {
+  if (!isObjectNotArray(input)) {
     throw new Error("run manifest credentialOwner must be a JSON object");
   }
   if (
@@ -201,7 +198,7 @@ const normalizeCredentialOwnerRef = (
 export const normalizeLoomRunManifest = (
   input: unknown,
 ): LoomRunManifest => {
-  if (!isJsonObject(input)) {
+  if (!isObjectNotArray(input)) {
     throw new Error("run manifest must be a JSON object");
   }
   if (!isLoomRunManifestType(input.type)) {
