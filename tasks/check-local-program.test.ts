@@ -1,5 +1,5 @@
-import { assert, assertEquals, assertFalse } from "@std/assert";
-import { join } from "@std/path";
+import { assert, assertEquals, assertFalse, assertRejects } from "@std/assert";
+import { fromFileUrl, join } from "@std/path";
 import {
   ALLOWLIST,
   main,
@@ -192,6 +192,18 @@ Deno.test("scan passes over a file that only writes about the resolver", async (
   }
 });
 
+Deno.test("scan passes over an allowlisted file that does construct it", async () => {
+  const root = await fixtureRepo({
+    "packages/js-compiler/program.ts":
+      "export class FileSystemProgramResolver {}\n",
+  });
+  try {
+    assertEquals(await scan(root), []);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("scan tolerates a tracked file deleted from the working tree", async () => {
   const root = await fixtureRepo({
     "packages/foo/gone.ts":
@@ -238,4 +250,48 @@ Deno.test("main reports the offender and the route to take instead", async () =>
   } finally {
     await Deno.remove(root, { recursive: true });
   }
+});
+
+// A tracked path that has become a directory is not a deletion, so the read
+// fails for a reason the scan has no answer for and the failure carries.
+Deno.test("scan reports a tracked path it cannot read for another reason", async () => {
+  const root = await fixtureRepo({
+    "packages/foo/build.ts":
+      "export const r = new FileSystemProgramResolver(main);\n",
+  });
+  try {
+    const path = join(root, "packages/foo/build.ts");
+    await Deno.remove(path);
+    await Deno.mkdir(path);
+    await assertRejects(() => scan(root), Deno.errors.IsADirectory);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+// Runs the check the way CI does, as a program rather than as an import. The
+// repository passes it, so this doubles as the end-to-end case: the entry
+// point wires the scan to an exit code, and the tree it ships is clean.
+Deno.test("the check runs as a program over this repository", async () => {
+  const script = fromFileUrl(
+    new URL("./check-local-program.ts", import.meta.url),
+  );
+  const { success, stdout } = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--allow-read",
+      "--allow-env",
+      "--allow-run=git",
+      script,
+    ],
+  }).output();
+  assert(
+    success,
+    "the repository has a program built from local files by hand",
+  );
+  assert(
+    new TextDecoder().decode(stdout).includes(
+      "Local programs are built through one operation",
+    ),
+  );
 });
