@@ -4,7 +4,7 @@ A verb carries two input schemas, and they diverge by construction. Every
 surface that judges a caller's payload has picked one of the two implicitly,
 and the next capability in the references arc cannot be built until the pick
 is explicit. This document frames that single decision, names what hangs on
-it, and recommends an answer. It decides nothing about outputs: a verb's
+it, and records the ruling. It decides nothing about outputs: a verb's
 declared result is already the authored type, end to end.
 
 ## The two candidates
@@ -73,10 +73,13 @@ resolve together against the same candidate.
 
 ## The decision
 
-**Recommendation: the authored event is the contract.** The usage summary
-remains real and useful — it is what the runtime provably consumes, the right
-basis for capability narrowing and for internal optimization — but it stops
-being what a caller is validated against, documented with, or refused by.
+**The authored event is the contract; the grant stays usage-derived; delivery
+follows the contract.** Three clauses, because the strongest argument for the
+summary turns out to be answering a different question than the one a caller
+asks, and the ruling has to split the two rather than pick between them. The
+usage summary remains real and useful — it is the right basis for capability
+narrowing — but it stops being what a caller is validated against, documented
+with, or refused by.
 
 The grounds, in order of weight:
 
@@ -96,20 +99,48 @@ The grounds, in order of weight:
    field because the body ignores it is a misrefusal under this reading, and
    the fix is the same emission change the rest requires.
 
-What the other reading has in its favor — the summary is what dispatch
-actually honors, so validating against it never promises delivery the runtime
-will not make — is real, and survives the decision: a field the body does not
-read is still delivered-and-ignored, exactly as dispatch behaves today. The
-contract names what a caller may say; it does not promise every word changes
-the outcome.
+### The split: what a caller may say is not what the handler may do
+
+In this runtime a schema is not only an interface — it is also what
+confinement reasons about. A declared `Writable<>` position the body never
+reads is not an inert reserved slot the way an unused parameter is in an
+ordinary interface; honored as authored, it would be standing authority
+granted against a future body that might want it. That is the genuine case
+for the summary, and it survives this ruling intact: the **grant** — what the
+handler's own reads may do — stays derived from usage, intersected with the
+authored declaration. A declared-but-unread reference arrives and confers no
+exercised authority until a body actually reads it, at which point the
+widened grant becomes visible exactly when it becomes real, which is what the
+principle of least authority wants. The **contract** — what a caller may say
+and be validated against — is the authored event. The two never needed to be
+the same schema.
+
+### Delivery follows the contract, or the strip comes back
+
+The two schemas cannot be mixed freely: validating a payload against the
+authored event while dispatch reads it through the summary would accept a
+declared-but-unread field and then silently drop it — the silent-strip
+failure the undeclared-field refusal was built to end, reintroduced one layer
+down. So this ruling obligates dispatch to deliver per the authored schema.
+That is cheaper than it looks: an event is delivered once, not stored or
+subscribed to, so authored-width delivery carries none of the
+reactivity-breadth cost that makes schema narrowing matter for reads. A plain
+data field delivered and ignored is inert, as in any interface.
+
+### Where no authored event exists
+
+A handler written without an explicit event type has only the inferred
+summary; for those, the summary is the contract, because nothing else can be.
+Authoring an event type is what opts a verb into the stronger promise.
 
 ## What the decision unlocks, in order
 
 1. **Emission serves the authored event** — `schema-injection.ts` injects the
    declared interface (reference markers included) as the stream cell's input
-   schema, with the usage summary carried beside it where the runtime wants
-   it, not in front of callers. This edit sits in the file the one-file rule
-   currently queues behind #5746; it waits its turn.
+   schema, and dispatch delivers through it, per the clause above. The
+   usage-derived grant travels separately; its representation is the
+   implementer's call. This edit sits in the file the one-file rule currently
+   queues behind #5746; it waits its turn.
 2. **The judging surfaces follow without code changes of their own** — the
    refusal, the flags, the help page, and the listing all read the served
    schema; serving the authored event corrects all four at once.
@@ -122,9 +153,9 @@ the outcome.
 
 ## What this document does not decide
 
-How the usage summary travels once it is no longer the served contract —
-a second schema beside the first, a runtime-internal annotation, or derived
-on demand — is the implementer's call in step 1. Whether dispatch should
-begin enforcing the contract it delivers past (#5686's other horn) is the
-closed-world question, resolved with that issue, not here. And the date for
-step 1 is #5746's to set, per the one-file rule.
+How the usage-derived grant is represented once it no longer rides the served
+contract — a second schema beside the first, a runtime-internal annotation,
+or derived on demand — is the implementer's call in step 1. Whether dispatch
+should begin refusing what the contract does not name (#5686's other horn) is
+the closed-world question, resolved with that issue, not here. And the date
+for step 1 is #5746's to set, per the one-file rule.

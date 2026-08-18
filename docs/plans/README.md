@@ -79,8 +79,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   single decision the references arc is gated on: a verb carries two input
   schemas — the authored event and the handler body's usage summary — and
   every surface that judges a caller's payload has picked one implicitly. It
-  recommends the authored event as the contract, names the four surfaces that
-  correct themselves the day emission serves it, and sequences the
+  rules the authored event the contract while the handler's grant stays
+  usage-derived and delivery follows the contract, names the four surfaces
+  that correct themselves the day emission serves it, and sequences the
   emitted-address spelling and the detached-copy refusal behind that.
 - [Designing verbs so they can change](verb-evolution.md) records how verbs are
   declared so that adding to and changing them later is possible: verbs are
