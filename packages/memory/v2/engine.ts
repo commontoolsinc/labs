@@ -5286,13 +5286,14 @@ const applyCommitTransaction = (
     (cidSetsInCommit ??= new Map()).set(operation.id, operation.value);
   }
 
-  // Commit-time closure validation: every schema reference the commit
-  // introduces must be backed by a VERIFIED schema document — installed
-  // by this same commit or already stored in the space — and so must the
-  // whole closure behind it. With this, the commit API cannot create a
-  // broken or forged closure for any reference it writes: an assembly
-  // failure downstream can only mean out-of-band tampering or a store
-  // that predates this validation.
+  // Commit-time closure validation: every schema reference the scan
+  // above collects must be backed by a VERIFIED schema document —
+  // installed by this same commit or already stored in the space — and
+  // so must the whole closure behind it. With this, the commit API
+  // cannot create a broken or forged closure for any reference the scan
+  // sees: an assembly failure downstream means the patch gap documented
+  // above, out-of-band tampering, or a store that predates this
+  // validation.
   if (requiredSchemaRefs.size > 0) {
     const verified = commitVerifiedSchemaDocRefs(engine);
     const pending = [...requiredSchemaRefs];

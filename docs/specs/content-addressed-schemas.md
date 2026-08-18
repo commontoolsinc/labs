@@ -91,8 +91,10 @@ A schema document is a `cid:` document whose value is a JSON Schema:
   harmlessly.
 - **Space scope only, by rule**: the commit boundary rejects a `cid:`
   write at any other scope. A scoped partition could hold a divergent
-  copy under one content-addressed id, and every reader resolves `cid:`
-  documents at space scope.
+  copy under one content-addressed id, and the paths that read the
+  store — delivery, traversal, and commit validation — resolve `cid:`
+  documents at space scope. (Direct-registry reuse across spaces is
+  hash-verified, so a divergent copy could never enter it.)
 
 ### Decomposition
 
@@ -316,9 +318,10 @@ in the same commit or already stored in the space — by a document whose
 content verifies against its id, transitively through the closure. A
 commit that references what it does not supply, or supplies content
 that does not hash to its id, is rejected. The commit API therefore
-cannot create a missing or forged closure for any reference it writes;
-readers treat one that exists anyway as out-of-band tampering or a
-store that predates this validation, and fail loudly on it. The
+cannot create a missing or forged closure for any reference this
+collection sees; readers treat a broken closure that exists anyway as
+the patch shape below, out-of-band tampering, or a store that predates
+this validation, and fail loudly on it. The
 writer's obligation to install the closure atomically with the referrer
 remains normative — the boundary is its enforcement, not a substitute
 for it.
@@ -409,7 +412,8 @@ traversal deliberately does not take it — traversal is where the
 read-side guarantee is enforced, and its strictness only ever bites where
 the write-side guarantee was violated, which is exactly where a loud
 signal is wanted. The commit boundary's closure validation makes the
-write-side guarantee server-checked for every commit.
+write-side guarantee server-checked for every commit, up to the one
+patch shape documented under Resolution.
 
 ### Traversal and sync
 
@@ -428,10 +432,11 @@ delivery and traversal split the work in two layers:
   own store, and joins it to the delivered set and watch set — failing
   the query on a hole. A refresh revalidates the established delivery
   state too, so a corrupted dependency fails even under an unchanged
-  referrer. An assembly failure means out-of-band tampering or a store
-  predating commit-time validation — never a transient condition, since
-  the commit boundary validates every closure a commit references and
-  preserves every installed document. A
+  referrer. An assembly failure means the patch shape that escapes
+  commit-time validation (see Resolution), out-of-band tampering, or a
+  store predating that validation — never a transient condition, since
+  the commit boundary validates every closure it collects and preserves
+  every installed document. A
   request-shaped evaluation (watch installation, an initial query)
   answers its caller with the diagnostic as a QueryError; the fan-out
   refresh logs the failure and skips the affected session's frame,
@@ -490,10 +495,11 @@ phased on the op-migration playbook:
   reference-only schema positions in the same change.
 - **Phase 0.5 — commit-boundary enforcement.** `cid:` immutability
   (no delete, patch, or differing re-set) and commit-time closure
-  validation (every reference a commit's content introduces is backed,
-  in the commit or the space's store, by content that verifies against
-  its id, transitively), landed with the readers so no writer flag can
-  ever produce a reference the boundary would not accept.
+  validation (every collected reference — all but the one patch shape
+  documented under Resolution — is backed, in the commit or the space's
+  store, by content that verifies against its id, transitively), landed
+  with the readers so no writer flag can ever produce a reference the
+  boundary would not accept.
 - **Phase 1 — write references on links (flag-gated).** Decomposition +
   same-transaction document installs; links carry references. Old inline
   links keep reading forever — links rewrite on every re-instantiation, so
@@ -541,7 +547,8 @@ phased on the op-migration playbook:
 2. **Server-side integrity enforcement.** Partially resolved: the commit
    boundary rejects mutations of `cid:` documents and validates the
    referenced schema closure (presence and content identity, transitively)
-   for every commit. What remains open is generic first-install
+   for every commit, one documented patch shape excepted. What remains
+   open is generic first-install
    verification for `cid:` documents nothing references — the boundary
    cannot name an unreferenced document's class, so a forged blob-or-other
    install is still confined to its space and fails closed when first

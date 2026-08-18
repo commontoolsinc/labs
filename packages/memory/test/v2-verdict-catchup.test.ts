@@ -342,8 +342,8 @@ Deno.test("memory v2 server: a failed fan-out requeues the batch and the schedul
 
   // Fail INSIDE the fan-out — after refreshLoop has consumed the dirty
   // state — at the CONNECTION delivery layer, below the evaluation
-  // boundary (an evaluation failure closes the connection instead of
-  // requeueing; this pin is about transport-class failures).
+  // boundary (an evaluation failure is logged and its frame skipped
+  // rather than requeued; this pin is about transport-class failures).
   const original = committer.refreshDirty.bind(committer);
   let calls = 0;
   (committer as unknown as {
@@ -791,7 +791,7 @@ Deno.test("memory v2 server: a failing timer-driven flush warns and leaves recov
   );
 });
 
-Deno.test("memory v2 server: an evaluation failure closes only its connection; later spaces deliver in the same pass", async () => {
+Deno.test("memory v2 server: an evaluation failure skips only that session's frame; later spaces deliver in the same pass", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-multi-space",
@@ -845,9 +845,9 @@ Deno.test("memory v2 server: an evaluation failure closes only its connection; l
     return original(...args);
   };
 
-  // The evaluation failure closes ONLY the committer's connection at the
-  // boundary; the same pass still reaches the other space's observer —
-  // nothing is stranded and nothing throws.
+  // The evaluation failure skips ONLY the failed session's frame; the
+  // same pass still reaches the other space's observer — nothing is
+  // stranded and nothing throws.
   await server.flushSessions([space, spaceB]);
   assertEquals(committerMessages.length, 0);
   const observerSync = assertEffect(shiftMessage(observerMessages))
