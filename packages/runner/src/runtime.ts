@@ -15,8 +15,13 @@ import {
   resetPersistentSchedulerStateConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
+  setSyncSchemaTableConfig,
 } from "@commonfabric/memory/v2";
 import { RuntimeTelemetry } from "@commonfabric/runner";
+import {
+  getContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "./schema-doc-config.ts";
 import { StaticCache } from "@commonfabric/static";
 import {
   type AsyncLocalStore,
@@ -208,6 +213,13 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
   modernCellRep?: boolean | undefined;
+  /**
+   * Link writers replace inline schemas with references to
+   * content-addressed schema documents
+   * (`docs/specs/content-addressed-schemas.md`, Phase 1). Gates writers
+   * only; readers accept both link forms unconditionally. Defaults to off.
+   */
+  contentAddressedSchemas?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
@@ -1006,6 +1018,20 @@ export class Runtime {
     // `undefined` and probably get very confused).
     setModernCellRepConfig(this.experimental.modernCellRep);
     this.experimental.modernCellRep = getModernCellRepConfig();
+    setContentAddressedSchemasConfig(
+      this.experimental.contentAddressedSchemas,
+    );
+    this.experimental.contentAddressedSchemas =
+      getContentAddressedSchemasConfig();
+    if (this.experimental.contentAddressedSchemas) {
+      // Content-addressed schema references and the sync schema table dedupe
+      // the same link-schema positions; a reference-bearing link never needs
+      // frame compression, so a flag-on process stops negotiating the table
+      // entirely rather than running both mechanisms. Ambient and one-way
+      // like the flag itself: once any runtime in the realm enables the
+      // flag, the table stays off for the process.
+      setSyncSchemaTableConfig(false);
+    }
     setPersistentSchedulerStateConfig(
       this.experimental.persistentSchedulerState,
     );

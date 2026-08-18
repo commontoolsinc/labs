@@ -11,7 +11,10 @@ document's hash is well-founded.
 
 Design; the readers-first resolution infrastructure (Phase 0 of
 [the implementation plan](../history/plans/content-addressed-schemas-phase-0.md))
-is landing, and nothing writes references yet. The connection-scoped
+has landed, and Phase 1's link writer is landing behind the
+`contentAddressedSchemas` flag (off by default): links stamp references
+and commits materialize each closure into the destination space. `$alias`
+bindings and selector references are still ahead. The connection-scoped
 transport experiment (`syncSchemaCasV1`, unmerged) is not being pursued;
 this design is the storage-side successor for link positions, and a
 reference at rest never needs transport compression.
