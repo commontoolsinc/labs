@@ -22,6 +22,7 @@ import {
 } from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import { fabricRuntimeObservations } from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
   isSealedOpaqueLinkObject,
@@ -753,6 +754,10 @@ export const runPatternTool: HarnessToolDefinition<
         return mismatch;
       }
     }
+    // Position in the runtime's observation stream before the piece exists,
+    // so the post-settle read covers exactly this invocation's window.
+    const observations = fabricRuntimeObservations(pieces.runtime);
+    const observationStart = observations.sequence();
     let piece: PieceController<unknown>;
     try {
       // Deliberately unregistered: no `pieces.add()` and no default-pattern
@@ -921,6 +926,43 @@ export const runPatternTool: HarnessToolDefinition<
         linkedStringCount = sanitized.linkedStringCount;
       } catch (error) {
         valueError = errorMessage(error);
+      }
+    }
+    // A result that settled to nothing is not a success to report. When the
+    // sanitized value failed its schema, or the raw result holds no fields of
+    // its own beyond the framework keys, the runtime's observation window
+    // says why: an action error attributed to this piece names the failing
+    // computation, and a non-settling episode names the other observed shape
+    // — actions deferred past the convergence budget, which is what both a
+    // reactive cycle and a policy-refused commit look like from here. The
+    // refusal reason itself has no channel yet (CT-2037), so the message
+    // names the shapes rather than claiming to know which one happened.
+    const inertResultKeys = isObjectNotArray(rawValue)
+      ? Object.keys(rawValue).filter((key) => !key.startsWith("$"))
+      : undefined;
+    const resultAbsent = rawValue === undefined || rawValue === null ||
+      (inertResultKeys !== undefined && inertResultKeys.length === 0);
+    if (valueError !== undefined || resultAbsent) {
+      const pieceErrors = observations.errorsSince(observationStart, piece.id);
+      const registrationNote = registration !== undefined
+        ? `; the piece was registered at slug "${registration.slug}" and resolves to this broken result`
+        : "";
+      if (pieceErrors.length > 0) {
+        return errorOutput(
+          "error",
+          `the pattern ran but its computation failed while settling: ${
+            pieceErrors[0].message
+          }${registrationNote}`,
+        );
+      }
+      const episodes = observations.episodesSince(observationStart);
+      if (episodes.length > 0) {
+        return errorOutput(
+          "error",
+          `the pattern ran but its writes never landed: the scheduler deferred ${
+            episodes[episodes.length - 1].deferredActionCount
+          } action(s) past its convergence budget while settling. A reactive cycle, a non-idempotent computation, or a write the space's policy refuses all produce this shape${registrationNote}`,
+        );
       }
     }
     return {
