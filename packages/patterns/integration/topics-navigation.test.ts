@@ -17,8 +17,8 @@ import {
 } from "./pieces-controller.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
-const TARGET_TITLE = "Navigation target";
-const SOURCE_TITLE = "Crossref source";
+const FIRST_TITLE = "Navigation target";
+const SECOND_TITLE = "Navigation neighbour";
 
 describe("Topics durable navigation", () => {
   const shell = new ShellIntegration();
@@ -28,8 +28,7 @@ describe("Topics durable navigation", () => {
   let cc: PiecesController;
   let board: PieceController;
   let boardSinkCancel: (() => void) | undefined;
-  let targetFid: string;
-  let sourceFid: string;
+  let topicFids: string[];
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -51,22 +50,17 @@ describe("Topics durable navigation", () => {
     boardSinkCancel = resultCell.sink(() => {});
 
     await board.result.set(
-      { title: TARGET_TITLE, agentName: "Topics navigation test" },
+      { title: FIRST_TITLE, agentName: "Topics navigation test" },
       ["addTopic"],
     );
-    const target = await topicAt(board, 0);
-    targetFid = target.id;
-
     await board.result.set(
-      {
-        title: SOURCE_TITLE,
-        body: `This topic references ${targetFid}.`,
-        agentName: "Topics navigation test",
-      },
+      { title: SECOND_TITLE, agentName: "Topics navigation test" },
       ["addTopic"],
     );
-    const sourceReference = await topicAt(board, 1);
-    sourceFid = sourceReference.id;
+    topicFids = [
+      (await topicAt(board, 0)).id,
+      (await topicAt(board, 1)).id,
+    ];
   });
 
   afterAll(async () => {
@@ -74,7 +68,7 @@ describe("Topics durable navigation", () => {
     await cc?.dispose();
   });
 
-  it("opens topics and crossrefs after a cold browser load without scheduler handlers", async () => {
+  it("opens a topic after a cold browser load without scheduler handlers", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -83,24 +77,20 @@ describe("Topics durable navigation", () => {
     });
     await waitForRuntimeIdle(page);
     await Promise.all([
-      waitForText(page, "body", TARGET_TITLE),
-      waitForText(page, "body", SOURCE_TITLE),
+      waitForText(page, "body", FIRST_TITLE),
+      waitForText(page, "body", SECOND_TITLE),
     ]);
 
     // The browser worker has never run this board before. This is the exact
     // cold-load boundary where pattern-owned click streams used to be present
     // in persisted VDOM without a registered handler.
     const openedPieceId = await clickCellLink(page, "Open");
-    const openedFid = openedPieceId.replace(/^of:/, "");
+    assertEquals(
+      topicFids.map((fid) => `of:${fid}`).includes(openedPieceId),
+      true,
+      `Open navigated to ${openedPieceId}, which is neither board topic`,
+    );
     await waitForPieceView(page, SPACE_NAME, openedPieceId);
-
-    const otherTitle = openedFid === targetFid ? SOURCE_TITLE : TARGET_TITLE;
-    const otherFid = openedFid === targetFid ? sourceFid : targetFid;
-    await waitForText(page, "body", otherTitle);
-
-    const crossrefPieceId = await clickCellLink(page, otherTitle);
-    assertEquals(crossrefPieceId, `of:${otherFid}`);
-    await waitForPieceView(page, SPACE_NAME, crossrefPieceId);
 
     const droppedEvents = await page.evaluate(() =>
       ((globalThis as typeof globalThis & {

@@ -21,7 +21,6 @@ import type {
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { DecodeContext } from "@/codec-common/DecodeContext.ts";
 import { EncodeContext } from "@/codec-common/EncodeContext.ts";
-import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
@@ -293,18 +292,26 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
   // Instance members
   //
 
-  override encode(
-    value: FabricValue,
-    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  /**
+   * @inheritDoc
+   *
+   * The tree is what crosses, so there is nothing to convert.
+   */
+  protected override serializedFromEncoded(
+    encoded: ProbeValue,
+    _ctx: EncodeContext,
   ): ProbeValue {
-    return this.encodeValue(value, this.newEncodeContext(env));
+    return encoded;
   }
 
-  override decode(
-    data: ProbeValue,
-    env: LiveEnvironment,
-  ): FabricValue {
-    return this.decodeValue(data, this.newDecodeContext(env));
+  /**
+   * @inheritDoc
+   *
+   * The tree is what arrives, so there is nothing to convert and nothing this
+   * format can tell is not its own: any value at all is a candidate.
+   */
+  protected override encodedFromSerializedForm(data: ProbeValue): ProbeValue {
+    return data;
   }
 
   /** @inheritDoc */
@@ -319,7 +326,10 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
    * the tree itself, so a caller can hand `decode()` a graph with a cycle in
    * it, and the base's guard is what refuses one.
    */
-  protected override newDecodeContext(env: LiveEnvironment): DecodeContext {
+  protected override newDecodeContext(
+    env: LiveEnvironment,
+    _data: ProbeValue,
+  ): DecodeContext {
     return new DecodeContext(env);
   }
 

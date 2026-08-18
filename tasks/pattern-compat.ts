@@ -17,6 +17,11 @@
  * contract, and — decisively — an author-run `--update` that could *remove* a
  * baseline could remove the very one that would have caught the break. `--update`
  * can only add.
+ *
+ * A break the repository decides to ship — a surface removed on purpose, its
+ * held state an accepted casualty — cannot be recorded away and must not be
+ * deleted away. It is declared in `pattern-compat-accepted-breaks.ts`, which
+ * forgives named `(pattern, baseline)` pairs and nothing else.
  */
 
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -27,12 +32,15 @@ import {
   PATTERNS_DIR,
 } from "./pattern-files.ts";
 import { UNEVALUABLE_PATTERNS } from "./pattern-compat-unevaluable.ts";
+import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
 import {
+  acceptedBreakKey,
   checkPattern,
   type Finding,
   findRetired,
   parseArgs,
   parseShard,
+  partitionAcceptedBreaks,
   type PatternContract,
   readBaselines,
   shouldRecord,
@@ -148,6 +156,22 @@ async function main() {
   }
 
   const recorded: string[] = [];
+  // Every `(pattern, baseline)` pair a deliberate break is allowed to fail
+  // against, mapped to the schema paths it may blame, and the ones that turned
+  // out not to fail — a pair that needs no forgiving is an exemption outliving
+  // its break, so it fails the run.
+  const acceptedBreaks = new Map<string, ReadonlySet<string>>(
+    ACCEPTED_CONTRACT_BREAKS.flatMap((accepted) =>
+      accepted.baselines.map((baseline) =>
+        [
+          acceptedBreakKey(accepted.pattern, baseline),
+          new Set(accepted.paths),
+        ] as const
+      )
+    ),
+  );
+  const breaksUsed = new Set<string>();
+  const forgivenBreaks: Finding[] = [];
   // `unavailable` keys are included so a file that USED to export a pattern is
   // caught: it has baselines but no contract, which `checkPattern` reports.
   const keys = [...new Set([...contracts.keys(), ...unavailable.keys()])]
@@ -156,13 +180,27 @@ async function main() {
     const current = contracts.get(key);
     const baselines = await readBaselines(BASELINES_DIR, key);
     const checkStarted = performance.now();
-    const patternFindings = checkPattern(key, current, baselines);
+    const allFindings = checkPattern(key, current, baselines);
     if (timingEnabled) {
       const ms = Math.round(performance.now() - checkStarted);
       // A slow check means a contract CHANGED and its proof is expensive — the
       // schema machinery blows up combinatorially on some shapes.
       if (ms > 200) console.log(`  check ${ms}ms  ${key}`);
     }
+
+    // An accepted break stops being a finding here, BEFORE `shouldRecord` sees
+    // the list — which is the whole point. The contract that ships a decided
+    // removal has to reach a baseline, or the next change to that pattern has
+    // nothing to prove itself against.
+    const { standing: patternFindings, forgiven } = partitionAcceptedBreaks(
+      allFindings,
+      acceptedBreaks,
+    );
+    for (const finding of forgiven) {
+      if (finding.kind !== "incompatible") continue;
+      breaksUsed.add(acceptedBreakKey(finding.pattern, finding.baseline));
+    }
+    forgivenBreaks.push(...forgiven);
 
     if (update && current !== undefined) {
       if (shouldRecord(patternFindings)) {
@@ -191,6 +229,46 @@ async function main() {
     console.log(`\nRecorded ${recorded.length} contract(s):`);
     for (const name of recorded) console.log(`  ${name}`);
   }
+
+  if (forgivenBreaks.length > 0) {
+    console.log(
+      `\nForgave ${forgivenBreaks.length} accepted contract break(s) ` +
+        `(tasks/pattern-compat-accepted-breaks.ts):`,
+    );
+    for (const finding of forgivenBreaks) {
+      if (finding.kind !== "incompatible") continue;
+      console.log(
+        `  ${finding.pattern} over ${finding.baseline}: ` +
+          `${finding.detail.split("\n").slice(1).join(" ").trim()}`,
+      );
+    }
+  }
+  // Asked per PATTERN rather than of the whole list, because CI never runs the
+  // whole list in one process: the Pattern Update Compatibility job always sets
+  // `PATTERN_COMPAT_SHARD`, so a check gated on an unsharded run would never
+  // execute where it matters. A pattern belongs to exactly one shard, so the
+  // shard that examined it can say whether its pairs were needed, and the four
+  // shards between them cover every entry.
+  const examined = new Set(keys);
+  const staleBreaks = ACCEPTED_CONTRACT_BREAKS
+    .filter((accepted) => examined.has(accepted.pattern))
+    .flatMap((accepted) =>
+      accepted.baselines
+        .map((baseline) => acceptedBreakKey(accepted.pattern, baseline))
+        .filter((pair) => !breaksUsed.has(pair))
+    );
+  // An entry whose pattern is not in the tree AT ALL is invisible to the check
+  // above: no shard examines it, so its pairs are never used and never stale.
+  // Retiring a pattern deletes its baselines with it, which is exactly when an
+  // acceptance stops meaning anything — and exactly when nothing would notice.
+  // A whole-tree question, so only an unfiltered shard 1 asks it, as retirement
+  // itself does above.
+  const knownPatterns = new Set(allFiles.map((file) => patternKey(file)));
+  const orphanedBreaks = only.length === 0 && shard.index === 0
+    ? ACCEPTED_CONTRACT_BREAKS
+      .map((accepted) => accepted.pattern)
+      .filter((pattern) => !knownPatterns.has(pattern))
+    : [];
 
   if (unavailable.size > 0) {
     console.log(
@@ -266,9 +344,29 @@ async function main() {
         }. Remove them from that list so they are gated.`,
     );
   }
+  if (staleBreaks.length > 0) {
+    console.error(
+      `\n${staleBreaks.length} accepted contract break(s) in ` +
+        `tasks/pattern-compat-accepted-breaks.ts forgive nothing: ` +
+        `${
+          staleBreaks.join(", ")
+        }. The pair applies cleanly now, or blames only paths the entry does ` +
+        `not name, so the exemption outlives its break — remove it.`,
+    );
+  }
+  if (orphanedBreaks.length > 0) {
+    console.error(
+      `\n${orphanedBreaks.length} accepted contract break(s) in ` +
+        `tasks/pattern-compat-accepted-breaks.ts name a pattern that no ` +
+        `longer exists: ${orphanedBreaks.join(", ")}. Retiring a pattern ` +
+        `takes its baselines with it, so the acceptance forgives nothing and ` +
+        `nothing will ever notice — remove it.`,
+    );
+  }
 
   if (
-    findings.length > 0 || unexpectedFailures.length > 0 || recovered.length > 0
+    findings.length > 0 || unexpectedFailures.length > 0 ||
+    recovered.length > 0 || staleBreaks.length > 0 || orphanedBreaks.length > 0
   ) Deno.exit(1);
   console.log(
     `\n${contracts.size} pattern(s) can be updated from every recorded contract.`,

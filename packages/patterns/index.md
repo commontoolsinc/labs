@@ -189,15 +189,22 @@ addPiece.send({ piece: ann });
 **Topics — a multi-user tracker over #topic pieces** (durable units of shared
 attention; CT-1878): title, living body document, flat chronological comment
 thread, typed links out. Deliberately minimal — no statuses, labels, or
-assignees. The board derives the corpus's prose reference graph (topic fids
-pasted in bodies/comments/link URLs → navigable crossref chips, never
-persisted). Demonstrates: reading-list-style piece-in-list composition,
-`PerUser` display-name on a shared piece, mergeable comment appends,
-session-scoped drafts, read-side derived backlinks over sibling pieces
-(`resolveAsCell().entityId` for piece identity), `multiUserTest` coverage.
+assignees. The board publishes a bounded discovery index — the topics
+themselves, declared through a narrow row schema of summary scalars, so a row's
+address IS its topic's and a survey and the follow-up read name one document.
+`addTopic` returns the piece it created, so a caller addresses a new topic
+straight from the create. Topics reference each other by CELL: the board derives
+the whole graph once by scanning what each topic points at with `equals`, and
+each topic reads its own inbound edges out of that pivot. Demonstrates:
+reading-list-style piece-in-list composition, `PerUser` display-name on a shared
+piece, mergeable comment appends, session-scoped drafts, bounding a whole-list
+derivation with a narrow declared `lift` parameter, passing topics through a
+sort so an activity-ordered list keeps the identity its elements already have,
+`multiUserTest` coverage.
 
 **Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
-PerUser, mergeable, backlinks, crossrefs, references, graph
+PerUser, mergeable, index, discovery, bounded read, row identity, references,
+backlinks, cell identity, equals, mentions
 
 ### Input Schema
 
@@ -206,10 +213,9 @@ interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
   myName?: PerUser<Writable<string | Default<"">>>;
 }
-// TopicInput additionally takes mentionable?: Writable<TopicReference[]> —
-// the board's own list, wired at creation, for detail-page Connections.
-// TopicReference is TopicPiece minus its own crossrefs, so a Topic's schema
-// describes its siblings without recursing over the whole board.
+// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
+// board's own list, wired at creation, as the @-mention universe for the
+// topic's body editor.
 ```
 
 ### Output Schema
@@ -219,9 +225,14 @@ interface TopicsOutput {
   topics: TopicPiece[];
   mentionable: TopicPiece[];
   topicCount: number;
-  crossrefs: TopicCrossref[]; // { fid, topic, refsOut, referencedBy }
+  // The topics, read through { title, createdAt, createdBy, commentCount,
+  //   lastActivityAt } — a row addresses the topic it describes
+  index: TopicIndexRow[];
+  // { topic, mentionedBy } per topic — the reference graph, derived once here
+  crossrefs: TopicCrossrefRow[];
   myName: string;
-  addTopic: Stream<{ title: string }>;
+  // Returns { topic } — the piece it created
+  addTopic: Stream<AddTopicEvent, AddTopicResult>;
   setMyName: Stream<{ name: string }>;
 }
 ```

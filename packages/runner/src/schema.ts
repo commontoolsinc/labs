@@ -1214,7 +1214,7 @@ export function validateAndTransform(
     ) &&
     filteredSchema === undefined
   ) {
-    return createQueryResultProxy(runtime, tx, link, 0, false, cfcLabelView);
+    return createQueryResultProxy(runtime, tx, link, 0, cfcLabelView);
   }
 
   // Now resolve further links until we get the actual value.
@@ -1576,7 +1576,6 @@ class TransformObjectCreator
         this.tx,
         link,
         0,
-        false,
         this.labelViewFor(link),
       );
     } else if (isObjectOrArray(link.schema)) {
@@ -1626,7 +1625,6 @@ class TransformObjectCreator
           this.tx,
           link,
           0,
-          false,
           this.labelViewFor(link),
         );
       }

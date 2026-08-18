@@ -50,10 +50,12 @@ recorded in the implementation plan). What remains open is all of Part 1.
 ## Goal
 
 Any pattern drivable by an agent, with no pattern-specific CLI code. Filing one
-topic on the team board takes six CLI invocations, returns no handle, hides
-rejections, and duplicates on retry. The fix is smaller than it looks, because
-the hard parts already exist in the runtime: a durable id per event, a
-per-invocation result cell addressed by it, and an exactly-once receipt.
+topic on the team board took six CLI invocations, returned no handle, hid
+rejections, and duplicated on retry; `topics` is now down to three and surfaces
+its refusals, which is what adopting this contract buys. The fix was smaller
+than it looked, because the hard parts already exist in the runtime: a durable
+id per event, a per-invocation result cell addressed by it, and an exactly-once
+receipt. Retry idempotence is the part still outstanding.
 
 The design is two halves. **Part 1, the verb contract**: rules pattern authors
 adopt so their verbs are drivable — pattern-owned vocabulary, no new machinery.
@@ -65,30 +67,31 @@ results back. Patterns choose the words; the runtime carries them.
 
 ## The problem
 
-Filing one topic headlessly takes six CLI invocations:
+Filing one topic headlessly takes three CLI invocations:
 
 | invocations | what | cause |
 | --- | --- | --- |
-| 1 | `addTopic {title, agentName}` | the create itself |
-| 1 | `get crossrefs --step` to learn the new fid | create returns no handle |
-| 3 | `setBody` / `addComment` / `addLink` | the body cannot ride the create; the comment and link are the real work |
-| 1 | a verification read (`get … --step`) | no result to inspect |
+| 1 | `addTopic {title, body, agentName}` | the create itself, carrying the body and handing back the topic it made |
+| 2 | `addComment` / `addLink` | the real work, and not protocol tax |
 
-Half of this is protocol tax: the fid lookup and the verification read exist
-only because nothing is returned, and `setBody` rides every create only
-because the create cannot carry a body.
+That is what this contract asks of a create, and `topics` has reached it: the
+body rides the create, so no `setBody` finishes one; a declared result hands
+the topic back, so the caller neither searches a list for what it just made nor
+reads it back to learn whether the call did anything; and a refusal throws
+rather than returning quietly. What remains below is stated against the shape
+that got here.
 
-Three consequences:
+Three consequences the contract exists to remove, two of them now removed in
+`topics`:
 
-- **Create returns no handle.** `addTopic` returns nothing, so the caller reads
-  `crossrefs` to learn which topic it made — and `TopicCrossref.fid` reads `""`
-  until known. (Sub-piece addressability by fid itself works — #4758; only the
-  return value is missing.)
+- **A create with no declared result returns no handle**, leaving the caller to
+  search a list for the thing it just made. `addTopic` declares one
+  (`AddTopicResult.topic`) and hands back the piece itself, which is the shape
+  this contract asks of every create.
 - **Semantic rejection is invisible.** Runtime failures surface; a verb
-  declining on its own terms does not. `addTopic` early-returns on an empty
-  title and on a blank `agentName`, both indistinguishable from success.
-  (Throwing instead would surface today — as prose in a failure message, not a
-  typed code.)
+  declining on its own terms does not. `addTopic` now throws through
+  `rejectMutation` on an empty title and on a blank `agentName`, which surfaces
+  — as prose in a failure message, not yet as a typed code.
 - **Retries can duplicate.** One reported headless session saw creates report a
   sync timeout after the write had committed, so retrying minted duplicates.
   The topics skill advises "retry once" on an initial-sync timeout — safe only
@@ -346,23 +349,22 @@ board one read. The pattern owns the reference and summary; the client, which
 can inspect the backing cells, owns rendering the reference as a fid or full
 path.
 
-`topics.crossrefs` already carries each `topic` reference, but it is the
-cross-reference graph, not a compact index: each row's `topic`, `refsOut`, and
-`referencedBy` expand to full pieces on read
-(the `TopicCrossref` interface, `packages/patterns/topics/main.tsx`), and a
-headless survey of the live
-board through it produced over 300k tokens of output. Its explicit `fid` field
-is not the general model either: it is derived indirectly from runtime-only
-cell surface, reads `""` while unresolved, and a pattern cannot reliably see
-its own runtime address. The index is therefore a separate result — one
-reference-plus-summary row per child, reference edges as sibling references,
-never expanded pieces — and generic clients render identity on top: a coarse
-exploration mode such as `--include-ids` can annotate every point where the
-backing identity changes, with a narrower path-selected form to follow if the
-broad form proves too noisy. Both are projections of existing references, not
-fields every pattern must maintain. Acceptance for an index: its serialization
+`topics.index` is the worked example: one reference-plus-summary row per child,
+the reference declared through a title-only schema so no row can expand a topic
+(the `TopicIndexRow` interface, `packages/patterns/topics/main.tsx`). A
+reference-bearing result that does not do this is not an index — a row whose
+reference expands to the full piece made a headless survey of the live board
+produce over 300k tokens of output. Acceptance for an index: its serialization
 contains no expanded piece, action, or runtime values, and a full-board read
 stays bounded.
+
+A row carries no authored identifier, and that is the general model: the row IS
+the child, read through the narrow schema, so its address is the child's and a
+survey can be followed without the pattern maintaining an address field it
+cannot reliably see. A client asks for that address where it wants one —
+`--select index[].@` names it, the `@` suffix being the concise address form.
+Identity is a projection of a reference the result already holds, so no pattern
+has to publish one.
 
 Discovery is the parent's job; the child's own verbs are the child's. A comment
 is addressed to the topic, not routed through the board — **but that depends on
@@ -465,14 +467,16 @@ required field later stops the sugar applying rather than silently misbinding.
 
 ### Applied to `topics`
 
-`topics` already satisfies the interim atomic-attribution rule; filing is six
-invocations. The rest of Part 1 — a body argument on `addTopic` so `setBody`
-becomes an editing verb rather than part of every create, and thrown rejections
-in place of silent early-returns — makes it five. The remaining waste — the
-handle lookup and the verification read — is exactly what a returned child
-reference removes, and that is Part 2's job: with it, filing is `addTopic`,
-`addComment`, `addLink` — one call per thing the author meant to do. The CLI
-renders the returned reference as a usable fid/path.
+`topics` already satisfies the interim atomic-attribution rule, and Part 1 has
+landed there: filing is `addTopic` (carrying the body, handing back the topic),
+`addComment`, `addLink` — three invocations, one per thing the author meant to
+do. The handle lookup and the verification read are gone with the declared
+result, `setBody` is an editing verb rather than part of every create, and
+`rejectMutation` throws where the verbs used to return quietly. The CLI renders
+the returned reference as a usable address.
+
+What is still owed is the typed rejection code — a refusal surfaces as prose in
+a failure message — and Part 2's retry idempotence.
 
 ## Part 2 — the invocation protocol
 
@@ -536,8 +540,8 @@ This is not a new semantic — it is when the receipt commits today. But the CLI
 waits for far more than that: the handler branch awaits `runtime.idle()` and
 `manager.synced()` — the whole reactive graph quiescing, then full sync — so
 acknowledgment of an already-committed write is held hostage to every derived
-recomputation it triggered. On the live topics board that is `crossrefs`
-re-deriving over the whole board; mutations were observed taking 60–80 s. The
+recomputation it triggered. On the live topics board that is the board's own
+index re-deriving over every topic; mutations were observed taking 60–80 s. The
 work is exposure *and narrowing*: await this handling's commit, sync the
 receipt, return — never the graph going quiet. An acceptance test must prove a
 slow derived recomputation cannot delay acknowledgment (implementation plan,

@@ -28,9 +28,14 @@ import { cliText } from "../lib/cli-name.ts";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
 import { renderPiece } from "../lib/piece-render.ts";
+import type {
+  PieceDescription,
+  PieceFieldDescription,
+} from "../lib/piece-describe.ts";
 import {
   applyPieceInput,
   checkPiecePattern,
+  describePiece,
   type EntryConfig,
   executePieceCallable,
   formatViewTree,
@@ -44,6 +49,7 @@ import {
   LinkValidationError,
   listPieceCallables,
   listPieces,
+  listSpaceSlugs,
   MapFormat,
   newPiece,
   partitionVerbListing,
@@ -188,22 +194,36 @@ export function verbListingLines(
       ...notes.filter((note) => note !== hiddenNote).map((note) => `(${note})`),
     ];
   }
+  // One table line per row by construction — no cell holds a newline and no
+  // width is set — which is what lets each row's prose be slotted directly
+  // beneath it: the verb's own doc comment, the same sentence its help page
+  // opens with and `--json` carries as the row's `description`. The grid
+  // stays scannable; the words ride under it rather than in a column they
+  // would overflow.
+  const table = Table.from([
+    ["NAME", "KIND", "ON", "MARKS"],
+    ...shown.map((v) => [
+      v.name,
+      v.kind,
+      v.on,
+      [
+        ...(v.tier === "wrapper" ? ["wrapper"] : []),
+        ...(v.deprecated ? ["deprecated"] : []),
+      ].join(","),
+    ]),
+  ]).toString().split("\n");
+  const rows: string[] = [table[0]];
+  shown.forEach((verb, at) => {
+    rows.push(table[at + 1]);
+    for (const line of verb.description?.split("\n") ?? []) {
+      rows.push(`    ${line}`);
+    }
+  });
   return [
     ...(listing.pattern
       ? [`PATTERN ${formatPatternIdentity(listing.pattern)}`]
       : []),
-    Table.from([
-      ["NAME", "KIND", "ON", "MARKS"],
-      ...shown.map((v) => [
-        v.name,
-        v.kind,
-        v.on,
-        [
-          ...(v.tier === "wrapper" ? ["wrapper"] : []),
-          ...(v.deprecated ? ["deprecated"] : []),
-        ].join(","),
-      ]),
-    ]).toString(),
+    ...rows,
     ...notes.map((note) => `(${note})`),
   ];
 }
@@ -230,6 +250,140 @@ export function verbListingJson(
         },
       }
       : {}),
+  };
+}
+
+/** The parenthesised notes under a `cf piece describe` page, in print order.
+ * The hidden-count note is the verbs listing's own; the incomplete note says
+ * more here, because the page loses its purpose, state, and inputs to the
+ * same failed pattern read that costs the listing its graph-only verbs. */
+export function pieceDescribeNotes(
+  description: PieceDescription,
+  partition: { wrapper: number; deprecated: number },
+  all: boolean,
+): string[] {
+  const notes: string[] = [];
+  if (partition.wrapper + partition.deprecated > 0 && !all) {
+    notes.push(
+      `${partition.wrapper} wrapper, ${partition.deprecated} deprecated hidden; --all lists them`,
+    );
+  }
+  if (description.incomplete === "pattern-unavailable") {
+    notes.push(
+      "the pattern could not be read, so its purpose, state, and inputs are missing, and so are verbs its result type omits; the verbs listed are still callable",
+    );
+  }
+  return notes;
+}
+
+/** One field section — STATE or INPUTS — as `cf piece describe` prints it:
+ * the label, then per field a `name  type` line with the author's prose
+ * indented beneath it. An empty section prints nothing: a pattern declaring
+ * no inputs has no INPUTS story to tell, and the section's absence is it. */
+function fieldSectionLines(
+  label: string,
+  fields: PieceFieldDescription[],
+): string[] {
+  if (fields.length === 0) return [];
+  const width = Math.max(...fields.map((field) => field.name.length));
+  const lines: string[] = ["", label];
+  for (const field of fields) {
+    lines.push(`  ${field.name.padEnd(width)}  ${field.type}`);
+    const prose = [
+      ...(field.required === true ? ["Required."] : []),
+      ...(field.description !== undefined ? [field.description] : []),
+    ].join(" ");
+    for (const line of prose === "" ? [] : prose.split("\n")) {
+      lines.push(`      ${line}`);
+    }
+  }
+  return lines;
+}
+
+/** The VERBS entries: each verb's name — marked when it is a tool, wrapper,
+ * or deprecated — with its own doc comment indented beneath it, the same
+ * sentence its help page prints as the summary line. */
+function describedVerbLines(
+  verbs: PieceCallablesListing["verbs"],
+): string[] {
+  const lines: string[] = [];
+  for (const verb of verbs) {
+    const marks = [
+      ...(verb.kind === "tool" ? ["tool"] : []),
+      ...(verb.tier === "wrapper" ? ["wrapper"] : []),
+      ...(verb.deprecated === true ? ["deprecated"] : []),
+    ];
+    lines.push(
+      `  ${verb.name}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}`,
+    );
+    for (const line of verb.description?.split("\n") ?? []) {
+      lines.push(`      ${line}`);
+    }
+  }
+  return lines;
+}
+
+/** Every line `cf piece describe` prints for the human-readable view, in
+ * order: a man page for one piece — name, pattern, purpose, state, inputs,
+ * verbs — with every sentence the author's own.
+ *
+ * The whole view rather than fragments, on `verbListingLines`' reasoning: the
+ * omission notes read against the sections above them. A missing STATE or
+ * INPUTS section covers two states the notes tell apart — the pattern
+ * declares none, or it could not be read at all. */
+export function pieceDescribeLines(
+  description: PieceDescription,
+  all: boolean,
+): string[] {
+  const partition = partitionVerbListing(description.verbs);
+  const shown = all ? description.verbs : partition.shown;
+  const notes = pieceDescribeNotes(description, partition, all);
+  const lines: string[] = [`NAME    ${description.name ?? "<unnamed>"}`];
+  if (description.pattern) {
+    const identity = formatPatternIdentity(description.pattern);
+    const human = formatPatternRef(description.pattern);
+    lines.push(
+      `PATTERN ${identity}${
+        human !== "<unknown>" && human !== identity ? ` (${human})` : ""
+      }`,
+    );
+  }
+  if (description.purpose !== undefined) {
+    lines.push("");
+    for (const line of description.purpose.split("\n")) {
+      lines.push(`  ${line}`);
+    }
+  }
+  lines.push(...fieldSectionLines("STATE", description.state ?? []));
+  lines.push(...fieldSectionLines("INPUTS", description.inputs ?? []));
+  lines.push("", "VERBS");
+  if (shown.length === 0) {
+    lines.push(
+      partition.wrapper + partition.deprecated > 0 && !all
+        ? "  <no callable verbs shown>"
+        : "  <no callable verbs>",
+    );
+  } else {
+    lines.push(...describedVerbLines(shown));
+  }
+  lines.push(...notes.map((note) => `(${note})`));
+  return lines;
+}
+
+/** The `--json` payload for `cf piece describe`: the description's own
+ * fields, then its verb rows partitioned by `verbListingJson` itself, so the
+ * two surfaces cannot disagree about what a hidden row is. */
+export function pieceDescribeJson(
+  description: PieceDescription,
+  all: boolean,
+): Record<string, unknown> {
+  const { name, purpose, state, inputs, ...listingPart } = description;
+  return {
+    ...(name !== undefined ? { name } : {}),
+    ...(purpose !== undefined ? { purpose } : {}),
+    ...(state !== undefined ? { state } : {}),
+    ...(inputs !== undefined ? { inputs } : {}),
+    ...verbListingJson(listingPart, all),
   };
 }
 
@@ -260,6 +414,36 @@ export function renderPieceSummaries(
       piece.id,
       piece.error ? `<error: ${piece.error}>` : (piece.name ?? "<unnamed>"),
       piece.error ? "" : formatPatternRef(piece.patternRef),
+    ]),
+  ];
+  if (rows.length > 1) render(Table.from(rows).toString());
+}
+
+/** `cf piece slugs` output: one row per indexed name, the piece it resolves
+ * to where it resolves to one, and the resolution's own error where it does
+ * not. The error rides the JSON too — a machine reader has no table to read
+ * a `<error: …>` marker off. */
+export function renderSlugSummaries(
+  slugs: Array<{ slug: string; piece?: string; error?: string }>,
+  json: boolean,
+): void {
+  if (json) {
+    render(
+      slugs.map((entry) => ({
+        slug: entry.slug,
+        piece: entry.piece ?? null,
+        ...(entry.error !== undefined ? { error: entry.error } : {}),
+      })),
+      { json: true },
+    );
+    return;
+  }
+
+  const rows = [
+    ["SLUG", "PIECE"],
+    ...slugs.map((entry) => [
+      entry.slug,
+      entry.error !== undefined ? `<error: ${entry.error}>` : entry.piece!,
     ]),
   ];
   if (rows.length > 1) render(Table.from(rows).toString());
@@ -1674,6 +1858,20 @@ export const piece = targetOptions(
   )
   .option("--json", "Output machine-readable JSON.")
   .action(listPiecesFromCommand)
+  /* piece slugs */
+  .command(
+    "slugs",
+    "List the space's slugs and the piece each resolves to. The index " +
+      "covers slugs assigned since it existed; an older slug still " +
+      "resolves but is not listed.",
+  )
+  .usage(spaceUsage)
+  .example(
+    cliText(`cf piece slugs ${EX_ID} ${EX_COMP}`),
+    `List the slugs of "${RAW_EX_COMP.space}".`,
+  )
+  .option("--json", "Output machine-readable JSON.")
+  .action(listSlugsFromCommand)
   /* piece search */
   .command("search", "Search input and result data in registered pieces.")
   .usage(`${spaceUsage} <query>`)
@@ -2375,6 +2573,28 @@ updated effective label view.`),
       ),
     );
   })
+  /* piece describe */
+  .command(
+    "describe",
+    "Show a piece's documentation: name, purpose, state, inputs, and verbs.",
+  )
+  .usage(pieceUsage)
+  .example(
+    cliText(`cf piece describe ${EX_ID} ${EX_COMP_PIECE}`),
+    `Document piece "${RAW_EX_COMP.piece!}" from its own pattern.`,
+  )
+  .example(
+    cliText(`cf piece describe ${EX_ID} ${EX_URL} --json`),
+    "Machine-readable description: purpose, fields, and verb rows.",
+  )
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .option("--json", "Output machine-readable JSON.")
+  .option(
+    "--all",
+    "Include wrapper-tier and deprecated verbs the default view hides. " +
+      "Hidden verbs stay callable either way.",
+  )
+  .action(describePieceFromCommand)
   /* piece rm */
   .command("rm", "Remove a piece")
   .alias("remove")
@@ -2700,6 +2920,52 @@ export async function listPiecesFromCommand(
     parseSpaceOptions(options),
   );
   (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
+}
+
+export interface SlugListCommandDependencies {
+  listSpaceSlugs?: typeof listSpaceSlugs;
+  renderSlugSummaries?: typeof renderSlugSummaries;
+}
+
+export async function listSlugsFromCommand(
+  options: PieceSummaryCLIOptions,
+  deps: SlugListCommandDependencies = {},
+): Promise<void> {
+  const slugs = await (deps.listSpaceSlugs ?? listSpaceSlugs)(
+    parseSpaceOptions(options),
+  );
+  (deps.renderSlugSummaries ?? renderSlugSummaries)(slugs, !!options.json);
+}
+
+export interface PieceDescribeCommandDependencies {
+  describePiece?: typeof describePiece;
+}
+
+/** `cf piece describe`'s action, held apart from the cliffy chain the way
+ * `listPiecesFromCommand` is: the seam is what lets a test drive the whole
+ * action — quiet mode, config parse, both output shapes, and the hint —
+ * without a live piece behind it. */
+export async function describePieceFromCommand(
+  options:
+    & PieceSummaryCLIOptions
+    & { piece?: string; all?: boolean; quiet?: boolean },
+  deps: PieceDescribeCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = parsePieceOptions(options);
+  const description = await (deps.describePiece ?? describePiece)(pieceConfig);
+  if (options.json) {
+    render(pieceDescribeJson(description, !!options.all), { json: true });
+    return;
+  }
+  for (const line of pieceDescribeLines(description, !!options.all)) {
+    render(line);
+  }
+  hint(
+    cliText(
+      `TIP: 'cf piece verbs --piece ${pieceConfig.piece} --json' has each verb's schemas; 'cf piece call --piece ${pieceConfig.piece} <verb> -- --help' documents one verb.`,
+    ),
+  );
 }
 
 export interface PieceSearchCommandDependencies {

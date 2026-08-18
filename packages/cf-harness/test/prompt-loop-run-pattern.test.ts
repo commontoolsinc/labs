@@ -231,6 +231,120 @@ describe("prompt-loop run_pattern model boundary", () => {
     }
   });
 
+  it("shows the model a registered piece's slug and URL while keeping the piece id out of the tool message", async () => {
+    const signer = await Identity.fromPassphrase("run-pattern registration");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const spaceName = `run-pattern-register-${crypto.randomUUID()}`;
+    const fabricRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({ identity: signer, spaceName }),
+      fabricRuntime,
+    );
+    await pieces.synced();
+    try {
+      // A real default pattern, so the space has a piece registry to join.
+      const defaultRoot = await pieces.create(
+        [
+          "/// <cf-disable-transform />",
+          "import { handler, pattern, type Cell } from 'commonfabric';",
+          "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Cell<unknown[]> }>(",
+          "  true,",
+          "  { type: 'object', properties: { pieceRegistry: { type: 'array', asCell: ['cell'] } } },",
+          "  ({ piece }, { pieceRegistry }) => {",
+          "    pieceRegistry.push(piece);",
+          "  },",
+          ");",
+          "export default pattern<{ pieceRegistry: unknown[] }>(",
+          "  ({ pieceRegistry }) => ({",
+          "    pieceRegistry,",
+          "    addPiece: addPiece({ pieceRegistry }),",
+          "  }),",
+          ");",
+        ].join("\n"),
+        { input: { pieceRegistry: [] } },
+      );
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await fabricRuntime.idle();
+      await pieces.synced();
+      const doublingSource = [
+        "import { computed, pattern } from 'commonfabric';",
+        "export default pattern<{ n: number }, { doubled: number }>(",
+        "  ({ n }) => ({ doubled: computed(() => n * 2) }),",
+        ");",
+      ].join("\n");
+      let calls = 0;
+      const fetchFn: typeof fetch = () => {
+        calls += 1;
+        const payload = calls === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-1",
+                  type: "function",
+                  function: {
+                    name: "run_pattern",
+                    arguments: JSON.stringify({
+                      sourceText: doublingSource,
+                      inputs: { n: 3 },
+                      register: { slug: "doubling-report" },
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "Done." },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: "run-pattern-registration",
+          model: "gpt-5.4",
+          cfcEnforcementMode: "disabled",
+          fabricSessionFactory: () => Promise.resolve({ pieces }),
+        }),
+        fetchFn,
+      });
+
+      const result = await loop.runPrompt({ prompt: "Publish the pattern." });
+
+      const toolMessage = result.transcript.find(
+        (message) => message.role === "tool",
+      );
+      expect(toolMessage?.content).toContain("doubling-report");
+      expect(toolMessage?.content).toContain(
+        `http://toolshed.test/${spaceName}/doubling-report`,
+      );
+      // The address a person opens is the slug, and the piece id it stands in
+      // for stays on the trusted side as it always has.
+      const registered = await pieces.getRegisteredPieces();
+      expect(registered.length).toBe(1);
+      expect(toolMessage?.content).not.toContain(registered[0].id);
+      expect(toolMessage?.content).not.toContain("pieceId");
+    } finally {
+      await fabricRuntime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("keeps bare fabric identifiers in compile diagnostics out of the model-facing tool message while the artifact keeps the raw text", async () => {
     const signer = await Identity.fromPassphrase("run-pattern scrub");
     const storageManager = StorageManager.emulate({ as: signer });

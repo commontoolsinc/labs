@@ -763,13 +763,13 @@ const UNMODELED_SCHEMA_KEYWORDS: readonly string[] = [
  * loses nothing. A cell is tagged iff:
  * - it has at least one writer (a node listing its root under
  *   `node.outputs`) — zero-writer cells are seeded state, never tagged — and
- *   no writer disqualifies (`writerDisqualifies`): handler wrappers,
- *   writable-proxy modules, effects, raw/isolated modules, and builtin refs
- *   not proven replayable by name (see `builtin-replayability.ts`);
+ *   no writer disqualifies (`writerDisqualifies`): handler wrappers, effects,
+ *   raw/isolated modules, and builtin refs not proven replayable by name (see
+ *   `builtin-replayability.ts`);
  * - its root is never handed WRITABLE into another node
  *   (`collectInputDisqualifiedRoots`): read-only handler captures no longer
  *   disqualify, but `asCell` bindings granting a write-capable handle,
- *   schema-less / writable-proxy handlers, sub-pattern arguments,
+ *   schema-less handlers, sub-pattern arguments,
  *   op-sub-pattern builtin inputs (map/filter/flatMap), and every input of a
  *   non-replayable node (`llmDialog` writes through its inputs) still do;
  * - it is not a stream.
@@ -815,9 +815,7 @@ function assignComputedCellKinds(
   // `instantiatePassthroughNode`), with no code that could write elsewhere.
   const writerDisqualifies = (module: NodeRef["module"]): boolean => {
     if (!isModule(module)) return true; // Opaque module value: assume the worst.
-    if (module.wrapper === "handler" || module.writableProxy === true) {
-      return true;
-    }
+    if (module.wrapper === "handler") return true;
     if (module.isEffect === true) return true;
     switch (module.type) {
       case "javascript":
@@ -838,12 +836,13 @@ function assignComputedCellKinds(
   // and collects the cell roots the handler could WRITE through: roots
   // covered by a subschema that may grant a non-read-only `asCell` handle.
   // Read-only captures (no possible grant in the covering subschema) collect
-  // nothing — in a schema-carrying, non-writableProxy handler, write
-  // capability flows only through `asCell` handles, so a plain value binding
-  // cannot be written through. Any subtree the walk cannot align (boolean or
-  // missing subschema with a possible grant, unmodeled schema keywords,
-  // value/schema shape mismatch) conservatively collects ALL roots in that
-  // value subtree.
+  // nothing — a plain value binding reaches the body as a view whose own traps
+  // refuse a write. `h()` converting a `$`-prefixed JSX binding back into a
+  // handle is the exception, and the accepted result-surface consequence in
+  // `docs/specs/computed-cell-identity.md` is where that is reasoned about. Any
+  // subtree the walk cannot align (boolean or missing subschema with a possible
+  // grant, unmodeled schema keywords, value/schema shape mismatch)
+  // conservatively collects ALL roots in that value subtree.
   const collectWritablyBoundRoots = (
     value: unknown,
     schema: unknown,
@@ -962,9 +961,7 @@ function assignComputedCellKinds(
       // Handlers capture their closure under `$ctx` (builder/module.ts binds
       // `{ $ctx, $event }` against an argumentSchema of shape
       // `{ properties: { $event, $ctx } }`, see generateHandlerSchema).
-      // Without a schema — or with the legacy writable proxy — every capture
-      // is writable.
-      if (module.writableProxy === true) return all();
+      // Without a schema, every capture is writable.
       const schema = module.argumentSchema;
       const properties = isObjectNotArray(schema) &&
           isObjectNotArray(schema.properties)
@@ -986,7 +983,6 @@ function assignComputedCellKinds(
       }
       return roots;
     }
-    if (module.writableProxy === true) return all(); // Defensive: only handlers carry it today.
     if (module.isEffect === true) return all();
     switch (module.type) {
       case "javascript":

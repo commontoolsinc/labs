@@ -178,50 +178,6 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The same merge must hold when the append goes through the query-result proxy
-  // (a handler's `arr.push(x)` on a reactive array) rather than Cell.push. The
-  // proxy marks its own base-array read as the op's incidental read; without that
-  // mark the read enters the conflict set, session 2's commit false-conflicts
-  // against session 1's "A", and "B" is dropped instead of merging.
-  it("a concurrent proxy push merges alongside another append", async () => {
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage1,
-    });
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage2,
-    });
-    try {
-      const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit({ resolveAt: "verdict" });
-      await rt1.storageManager.synced();
-
-      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
-      await cell2.sync();
-      await cell2.pull();
-
-      const txA = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      await txA.commit({ resolveAt: "verdict" });
-      await rt1.storageManager.synced();
-
-      // Session 2 appends "B" through the proxy while still at the pre-"A" basis.
-      const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
-      proxy.push("B");
-      await txB.commit({ resolveAt: "verdict" });
-      await rt2.storageManager.synced();
-
-      expect([...await readDurable(server)].sort()).toEqual(["A", "B", "seed"]);
-    } finally {
-      await rt2.dispose();
-      await rt1.dispose();
-    }
-  });
-
   // A CONDITIONAL push — the handler reads the list explicitly before pushing
   // (the dedup-then-push shape) — must keep its read in the conflict set, so a
   // concurrent append makes it conflict (and, in the live system, retry). This
@@ -326,7 +282,7 @@ describe("mergeable array appends", () => {
   // The same protection through the query-result proxy's iterator: a handler that
   // counts the array with `for...of` (or a spread) before pushing records the
   // array's `length` read, so a concurrent append conflicts.
-  it("a for...of count before a proxy push conflicts with a concurrent append", async () => {
+  it("a for...of count before a push conflicts with a concurrent append", async () => {
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -351,11 +307,11 @@ describe("mergeable array appends", () => {
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
       let count = 0;
       for (const _ of proxy) count++;
-      proxy.push(`item-${count}`);
+      cellB.push(`item-${count}`);
       const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
@@ -449,10 +405,10 @@ describe("mergeable array appends", () => {
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
       const len = proxy.length;
-      proxy.push(`item-${len}`);
+      cellB.push(`item-${len}`);
       const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
@@ -495,10 +451,10 @@ describe("mergeable array appends", () => {
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
       const len = Object.keys(proxy).length;
-      proxy.push(`item-${len}`);
+      cellB.push(`item-${len}`);
       const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
@@ -688,69 +644,6 @@ describe("mergeable array appends", () => {
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["seed", "new"]);
-    } finally {
-      await rt1.dispose();
-    }
-  });
-
-  // A reshape (an in-place mutator that is not a mergeable push) after a push
-  // rewrites the array, so the recorded append tail no longer identifies the
-  // pushed element. The push intent is abandoned and the whole-array diff commits
-  // the reshaped result. `unshift` reads the array fresh, so the local value is
-  // exact.
-  it("push then unshift on a proxy commits the reshaped array", async () => {
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage1,
-    });
-    try {
-      const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      await tx0.commit({ resolveAt: "verdict" });
-      await rt1.storageManager.synced();
-
-      const tx1 = rt1.edit();
-      const proxy = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1)
-        .getAsQueryResult([], tx1, true) as unknown as string[];
-      proxy.push("b");
-      proxy.unshift("z");
-      await tx1.commit({ resolveAt: "verdict" });
-      await rt1.storageManager.synced();
-
-      expect(await readDurable(server)).toEqual(["z", "seed", "b"]);
-    } finally {
-      await rt1.dispose();
-    }
-  });
-
-  // A reshape after a push commits the correctly reshaped array. The reshape
-  // reads the array fresh (so `sort` sees the pushed "b"), and the push intent is
-  // poisoned so the commit emits the reshaped whole-array diff rather than a stale
-  // tail op.
-  it("push then sort on a proxy commits the sorted array with the pushed element", async () => {
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage1,
-    });
-    try {
-      const tx0 = rt1.edit();
-      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
-        "c",
-        "a",
-      ]);
-      await tx0.commit({ resolveAt: "verdict" });
-      await rt1.storageManager.synced();
-
-      const tx1 = rt1.edit();
-      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
-      const proxy = cell.getAsQueryResult([], tx1, true) as unknown as string[];
-      proxy.push("b");
-      proxy.sort();
-      expect(cell.get()).toEqual(["a", "b", "c"]);
-      await tx1.commit({ resolveAt: "verdict" });
-      await rt1.storageManager.synced();
-
-      expect(await readDurable(server)).toEqual(["a", "b", "c"]);
     } finally {
       await rt1.dispose();
     }
@@ -1298,9 +1191,9 @@ describe("mergeable array appends", () => {
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
-      proxy.push(1 in proxy ? "had-1" : "no-1");
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
+      cellB.push(1 in proxy ? "had-1" : "no-1");
       const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
@@ -1348,9 +1241,9 @@ describe("mergeable array appends", () => {
 
       // Session 2, at the pre-fill basis, probes `1 in arr` (false) and pushes.
       const txB = rt2.edit();
-      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
-        .getAsQueryResult([], txB, true) as unknown as string[];
-      proxy.push(1 in proxy ? "had-1" : "no-1");
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const proxy = cellB.getAsQueryResult([], txB) as unknown as string[];
+      cellB.push(1 in proxy ? "had-1" : "no-1");
       const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
@@ -2661,41 +2554,6 @@ describe("mergeable op guards and single-session branches", () => {
           .map(({ path }) => path),
       ).toEqual(remains);
     }
-  });
-
-  // The proxy reshapes an array two ways: by calling an in-place mutator on it,
-  // and by ASSIGNING over the property that holds it. Both are whole-value
-  // writes the recorded tail cannot survive, so both must poison. The assignment
-  // path runs through the proxy's `set` trap, which is a separate code path from
-  // the mutator dispatch.
-  it("a proxy property assignment poisons the tail intent it overwrites", () => {
-    const docSchema = {
-      type: "object",
-      properties: { rows: { type: "array", items: { type: "string" } } },
-      // deno-lint-ignore no-explicit-any
-    } as any;
-    const cause = "proxy-assign-poison";
-
-    const tx = rt.edit();
-    const doc = rt.getCell(space, cause, docSchema, tx);
-    doc.set({ rows: ["a", "b", "c"] });
-    // deno-lint-ignore no-explicit-any
-    const proxy = doc.getAsQueryResult([], tx, true) as any;
-
-    proxy.rows.push("p");
-    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
-      .toBe(1);
-
-    // Same shape as the ancestor-write case, reached by assignment: the two
-    // pushes sum to a count spanning the reshape, so the length arithmetic alone
-    // would look valid.
-    proxy.rows = ["m", "n", "o", "r"];
-    proxy.rows.push("q");
-
-    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
-      [],
-    );
-    expect(doc.get()).toEqual({ rows: ["m", "n", "o", "r", "q"] });
   });
 
   // The other direction, and the one that pins the predicate: a write BENEATH an

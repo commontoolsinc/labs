@@ -114,6 +114,7 @@ import type {
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
+import { isSealedOpaqueLinkObject } from "./structured-result.ts";
 import {
   parseSubagentReturnJson,
   parseSubagentReturnSchema,
@@ -1078,21 +1079,6 @@ const summarizeSubagentRunState = (
 };
 
 /**
- * Helper for `createStructuredSubagentReturn()`, which tells whether `value`
- * is a sealed opaque-link object — the single-key `@link` object the
- * sanitizer substitutes for a position it seals.
- */
-const isSealedOpaqueLinkObject = (value: unknown): boolean => {
-  if (!isObjectNotArray(value)) {
-    return false;
-  }
-  const target = value["@link"];
-  return Object.keys(value).length === 1 &&
-    typeof target === "string" &&
-    target.startsWith("opaque:");
-};
-
-/**
  * Helper for `createStructuredSubagentReturn()`, which walks a sanitized
  * structured return and the raw value it was sanitized from in tandem,
  * replacing each sealed opaque-link object whose raw counterpart is a string
@@ -1385,6 +1371,47 @@ const stripInternalCfcFields = (output: unknown): unknown => {
     & CfcSandboxResultCarrier
     & Record<string, unknown>;
   return publicOutput;
+};
+
+/**
+ * Applies the model-boundary scrub to every string a value carries at every
+ * depth, its object KEYS included.
+ *
+ * Scrubbing the free-text fields a tool declares is enough only for a tool
+ * whose author-controlled text sits in named fields. It is not enough for one
+ * whose output is a structure whose own shape is author-controlled — a
+ * disclosed JSON Schema most of all, where the property names are the point of
+ * the disclosure and are arbitrary text whoever wrote the schema chose. So the
+ * walk reaches keys as well as values.
+ *
+ * The scrub itself is {@link scrubBareFabricIdentifiers}; this decides only
+ * where it lands. A key that scrubs to the same text as a sibling collapses
+ * into it, which is the honest outcome: two names differing only in an
+ * identifier this boundary refuses to disclose are not distinguishable on the
+ * model's side of it either.
+ */
+const scrubBareFabricIdentifiersDeep = (value: unknown): unknown => {
+  if (typeof value === "string") {
+    return scrubBareFabricIdentifiers(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubBareFabricIdentifiersDeep(entry));
+  }
+  if (isObjectNotArray(value)) {
+    const scrubbed: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      // `defineProperty` rather than assignment, so a scrubbed key of
+      // `__proto__` becomes an own property instead of reaching the prototype.
+      Object.defineProperty(scrubbed, scrubBareFabricIdentifiers(key), {
+        value: scrubBareFabricIdentifiersDeep(entry),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    return scrubbed;
+  }
+  return value;
 };
 
 const toolOutputNeedsSandboxMediation = (
@@ -3198,7 +3225,10 @@ export class CfHarnessPromptLoop {
       // redundant with `resultRef` since the piece cell is the result cell.
       // It also keeps the pattern's result schema, which reaches the model
       // through `describe_handle` on the minted token rather than inline.
-      // The model sees only `resultRef` and the schema-sanitized `value`.
+      // The model sees `resultRef`, the schema-sanitized `value`, and — when
+      // registration was asked for — the `registration` block, whose slug is
+      // the model's own word and whose URL is composed from the session's API
+      // URL and space name, so neither is a fabric identifier.
       // Free-text diagnostic fields can embed compiler-generated bare
       // fabric identifiers the handle boundary never swaps, so those fields
       // are scrubbed here; the artifact keeps the raw text.
@@ -3209,13 +3239,24 @@ export class CfHarnessPromptLoop {
         ...publicOutput
       } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };
-      for (const field of ["message", "valueError"]) {
+      for (const field of ["message", "valueError", "registrationError"]) {
         const text = scrubbed[field];
         if (typeof text === "string") {
           scrubbed[field] = scrubBareFabricIdentifiers(text);
         }
       }
       return { output: stripInternalCfcFields(scrubbed) };
+    }
+    if (toolId === "describe_handle") {
+      // A disclosed schema's property names are whoever authored the schema's
+      // own text, and the shape reduction passes them through deliberately —
+      // code cannot be written over data without the names of its fields. That
+      // makes a property name a route for a bare fabric identifier into model
+      // context, at any depth of the schema, so the whole reply is scrubbed
+      // keys and all rather than field by field.
+      return {
+        output: scrubBareFabricIdentifiersDeep(stripInternalCfcFields(output)),
+      };
     }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
       return { output: stripInternalCfcFields(output) };

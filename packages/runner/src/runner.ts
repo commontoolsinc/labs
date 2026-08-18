@@ -5271,13 +5271,13 @@ export class Runner {
     module: Module,
     inputsCell: Cell<any>,
     tx: IExtendedStorageTransaction,
-    options: { bindTxToSchema?: boolean; writableProxy?: boolean } = {},
+    options: { bindTxToSchema?: boolean } = {},
   ): { argument: any; isValidArgument: boolean } {
     const argument = module.argumentSchema !== undefined
       ? options.bindTxToSchema
         ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
         : inputsCell.asSchema(module.argumentSchema).get()
-      : inputsCell.getAsQueryResult([], tx, options.writableProxy);
+      : inputsCell.getAsQueryResult([], tx);
 
     return {
       argument,
@@ -5887,15 +5887,7 @@ export class Runner {
         logger.timeStart("stream", "readInputs");
         const { argument, isValidArgument } = (() => {
           try {
-            return this.readJavaScriptArgument(
-              module,
-              inputsCell,
-              tx,
-              {
-                writableProxy:
-                  (module as { writableProxy?: boolean }).writableProxy,
-              },
-            );
+            return this.readJavaScriptArgument(module, inputsCell, tx);
           } finally {
             logger.timeEnd("stream", "readInputs");
           }

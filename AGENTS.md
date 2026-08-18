@@ -25,6 +25,22 @@ Common Fabric product.
 Anything under `packages/` not named above — utilities, build tooling, test
 support, internal dashboards, example code — sits outside the layer stack.
 
+Dependencies run downward: a package imports from its own layer or a lower one.
+That is the direction the stack is designed around, and the one to hold a new
+import to. It does not describe the tree as it stands — a number of imports run
+the other way, `runner` reaching into `js-compiler` and `llm` among them — so an
+existing import upward is not a precedent for the next one. Only the weaker
+property is enforced: `deno task check-package-cycles` fails when two packages
+import each other. Layer direction rests on review.
+
+When a module looks as though it belongs to a higher layer but something lower
+needs it, decide by what the module actually touches rather than by what it is
+named after. The JSX factory is the worked example. `h()` resolves cells to
+links and returns a plain view-node object, which is data construction over
+runtime primitives, so it lives in `runner` alongside the schema that describes
+that object. Turning those view nodes into DOM is rendering, so that lives in
+`html`.
+
 ## Documentation Lifecycle
 
 Whenever editing documentation, read [docs/README.md](docs/README.md) and follow
@@ -221,6 +237,8 @@ Each of these gates fails CI on its own, and none of them run as part of
   the walkthrough quotes commands, never composes them
 - `deno task check-single-copy-deps`, `check-unused-deps`, `check-deno-pins` —
   dependency declarations across the workspace
+- `deno task check-package-cycles` — two packages that import each other, the
+  part of "Dependencies run downward" above that a machine can settle
 - `deno task check-baselines-append-only` — a pattern baseline that was deleted
   rather than added to
 
