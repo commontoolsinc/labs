@@ -122,6 +122,7 @@ import {
 import * as V2Transaction from "./v2-transaction.ts";
 import {
   compactWatchEntries,
+  externalizeSyncSelector,
   normalizeSyncEntries,
   normalizeSyncSelector,
   watchIdForEntry,
@@ -1805,7 +1806,12 @@ class Provider implements IStorageProvider {
     selector?: SchemaPathSelector,
     scope?: CellScope,
   ): Promise<Result<Unit, Error>> {
-    const normalizedSelector = normalizeSyncSelector(selector);
+    // Externalization happens where requests enter, so request dedup, watch
+    // ids, and session-resume replay all see one selector form.
+    const normalizedSelector = externalizeSyncSelector(
+      normalizeSyncSelector(selector),
+      (hash) => this.replica.isSchemaDocPersisted(hash),
+    );
     const key = docKey(uri, scope);
     let requests = this.#syncRequests.get(key);
     if (requests === undefined) {
@@ -4293,6 +4299,16 @@ class SpaceReplica implements ISpaceReplica {
    * content under `cid:<hash>` that IS the schema document that id names —
    * the identity check, not presence.
    */
+  /**
+   * Whether this replica holds verified content for `cid:<hash>` — the
+   * emission gate for selector references: a document present here arrived
+   * by delivery or by this client's own commit, so the space's server
+   * holds it too, and content addressing means it can never change.
+   */
+  isSchemaDocPersisted(hash: string): boolean {
+    return this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY);
+  }
+
   #isVerifiedSchemaDocDelivered(
     hash: string,
     overlay: ReadonlyMap<string, unknown>,

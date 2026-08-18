@@ -1709,3 +1709,86 @@ Deno.test("memory v2 delivers a meta-linked document that arrives after its refe
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 resolves a selector schema reference against the stored closure", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-selector-ref";
+  try {
+    const leafSchema = {
+      type: "object",
+      properties: { selectorLeaf: { type: "string" } },
+    } as const;
+    const leafHash = internSchemaAsTaggedHashString(leafSchema);
+    applyCommit(engine, {
+      sessionId: "session:selector-ref-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: `cid:${leafHash}`, value: { value: leafSchema } },
+          {
+            op: "set",
+            id: "of:selector-ref-doc",
+            value: { value: { selectorLeaf: "present" } },
+          },
+        ],
+      },
+    });
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:selector-ref-doc",
+        selector: { path: [], schema: { $ref: `cid:${leafHash}` } },
+      }],
+    });
+    assert(
+      tracked.state.entities.has(`${space}/space/of:selector-ref-doc`),
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 rejects a selector referencing a schema document the space does not hold", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-selector-ref-absent";
+  try {
+    const absentHash = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "selector-never-installed",
+    });
+    applyCommit(engine, {
+      sessionId: "session:selector-absent-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:selector-absent-doc",
+          value: { value: { n: 1 } },
+        }],
+      },
+    });
+    // A compliant client only sends a reference it verified persisted, so
+    // an unresolvable selector reference is a protocol violation answered
+    // loudly — not the lenient selects-nothing wait link schemas get.
+    assertThrows(
+      () =>
+        trackGraph(space, engine, {
+          roots: [{
+            id: "of:selector-absent-doc",
+            selector: { path: [], schema: { $ref: `cid:${absentHash}` } },
+          }],
+        }),
+      Error,
+      "A selector reference must name a persisted closure",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

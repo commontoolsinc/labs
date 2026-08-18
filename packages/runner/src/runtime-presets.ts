@@ -194,6 +194,10 @@ export const EXPERIMENTAL_ENV_VARS = {
   // Content-addressed schemas Phase 1 rollout: env-reachable so a process
   // can opt in while the flag exists.
   contentAddressedSchemas: "EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS",
+  // Phase 2 rollout of the same feature: selector emission, gated
+  // separately so it can trail the link writer.
+  contentAddressedSelectorSchemas:
+    "EXPERIMENTAL_CONTENT_ADDRESSED_SELECTOR_SCHEMAS",
   persistentSchedulerState: "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback

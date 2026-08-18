@@ -28,3 +28,30 @@ export function setContentAddressedSchemasConfig(
 export function getContentAddressedSchemasConfig(): boolean {
   return contentAddressedSchemas;
 }
+
+/**
+ * The ambient control point for the `contentAddressedSelectorSchemas`
+ * experimental flag (`docs/development/EXPERIMENTAL_OPTIONS.md`): whether
+ * watch and sync selectors replace inline schemas with references to
+ * content-addressed schema documents
+ * (`docs/specs/content-addressed-schemas.md`, Phase 2). Same ambient shape
+ * as the link-writer flag above, and gated the same way: emission only —
+ * the server resolves both selector forms unconditionally.
+ */
+
+let contentAddressedSelectorSchemas = false;
+
+/**
+ * Sets the selector flag; `undefined` keeps the current state (the
+ * built-in default is off).
+ */
+export function setContentAddressedSelectorSchemasConfig(
+  enabled: boolean | undefined,
+): void {
+  if (enabled !== undefined) contentAddressedSelectorSchemas = enabled;
+}
+
+/** The effective selector-flag state. */
+export function getContentAddressedSelectorSchemasConfig(): boolean {
+  return contentAddressedSelectorSchemas;
+}

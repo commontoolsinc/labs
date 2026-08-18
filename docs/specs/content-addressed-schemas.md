@@ -13,8 +13,13 @@ Design; the readers-first resolution infrastructure (Phase 0 of
 [the implementation plan](../history/plans/content-addressed-schemas-phase-0.md))
 has landed, and Phase 1's link writer is landing behind the
 `contentAddressedSchemas` flag (off by default): links stamp references
-and commits materialize each closure into the destination space. `$alias`
-bindings and selector references are still ahead. The connection-scoped
+and commits materialize each closure into the destination space. Phase
+2's selector half is landing behind `contentAddressedSelectorSchemas`
+(off by default): a selector externalizes opportunistically, only when
+its whole closure is verifiably persisted in the target space, with the
+inline form as the permanent fallback and a loud server error for a
+reference nothing backs. `$alias` bindings are still ahead. The
+connection-scoped
 transport experiment (`syncSchemaCasV1`, unmerged) is not being pursued;
 this design is the storage-side successor for link positions, and a
 reference at rest never needs transport compression.

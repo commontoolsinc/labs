@@ -30,6 +30,7 @@ was last checked against the code.
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [`modernCellRep`](#moderncellrep)                                           | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental`                                                                            | off                                                                                  | Dan Bornstein (#3818)                                 | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, off by default                                                     |
 | [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | off                                                                                  | Robin McCollum (PR #5833)                             | graduate on once Phase 1 soaks (writers emit refs; readers already accept both forms), then continue the spec's phases                                                                                                            | implemented, off by default                                                     |
+| [`contentAddressedSelectorSchemas`](#contentaddressedselectorschemas)       | `EXPERIMENTAL_CONTENT_ADDRESSED_SELECTOR_SCHEMAS` env, or `RuntimeOptions.experimental`                                                          | off                                                                                  | Robin McCollum (PR #5878 successor)                   | graduate on once selector emission soaks behind the link writer, then continue the spec's phases                                                                                                                                  | implemented, off by default                                                     |
 | [`persistentSchedulerState`](#persistentschedulerstate)                     | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental`                                                                 | off                                                                                  | Bernhard Seefeld (#3646)                              | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement        |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
@@ -144,6 +145,30 @@ value is ignored with a warning rather than coerced. See
   keep reading forever and age out through pattern re-instantiation), then
   proceed to the spec's Phase 2 (references in selectors) and Phase 3
   (retiring transport schema compression for link positions).
+
+### `contentAddressedSelectorSchemas`
+
+- **Toggle via.** `EXPERIMENTAL_CONTENT_ADDRESSED_SELECTOR_SCHEMAS` environment
+  variable (through the canonical mapping described in the category note
+  above), or directly through
+  `RuntimeOptions.experimental.contentAddressedSelectorSchemas`. The ambient
+  control point is `setContentAddressedSelectorSchemasConfig` in
+  [`packages/runner/src/schema-doc-config.ts`](../../packages/runner/src/schema-doc-config.ts).
+- **Added by.** Robin McCollum (Phase 2 of content-addressed schemas).
+- **Purpose.** Phase 2 of
+  [content-addressed schemas](../specs/content-addressed-schemas.md): watch
+  and sync selectors replace inline schemas with `{ "$ref": "cid:<hash>" }`
+  references. Emission is opportunistic — a selector externalizes only when
+  the client verified its whole closure persisted in the target space
+  (local replica presence implies server presence), and falls back to the
+  inline form otherwise. Gates emission only: the server resolves both
+  selector forms unconditionally, and answers an unresolvable selector
+  reference with a loud QueryError, which a compliant client never
+  provokes.
+- **Current default and planned end state.** Off by default, trailing the
+  link-writer flag through its soak. Graduate to on once selector emission
+  soaks; the inline selector form stays a legal vintage until a protocol
+  version floor retires it (the spec's Phase 3 boundary).
 
 ### `persistentSchedulerState`
 

@@ -48,6 +48,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         contentAddressedSchemas: false,
+        contentAddressedSelectorSchemas: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
         plainResultReceipts: false,
@@ -73,6 +74,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
         contentAddressedSchemas: false,
+        contentAddressedSelectorSchemas: false,
         persistentSchedulerState: false,
         commitPreconditions: true,
         plainResultReceipts: true,
@@ -94,6 +96,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         contentAddressedSchemas: false,
+        contentAddressedSelectorSchemas: false,
         persistentSchedulerState: false,
         commitPreconditions: true,
         plainResultReceipts: true,
