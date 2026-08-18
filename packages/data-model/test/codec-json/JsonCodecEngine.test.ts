@@ -1182,11 +1182,6 @@ describe("JsonCodecEngine", () => {
     });
 
     describe("`/object` over a state that is not an object", () => {
-      // What the meta-tag exists to carry is an object. A state that is not
-      // one settles like every other malformation off a channel rather than
-      // being cast into: a bare `TypeError` is not a `ProblematicStateError`,
-      // so a lenient decode could not contain one.
-
       for (
         const [label, state] of [
           ["a string", "nope"],
