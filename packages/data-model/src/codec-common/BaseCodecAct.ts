@@ -1,5 +1,6 @@
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
+import type { CodecRegistry } from "./CodecRegistry.ts";
 
 /**
  * What one act of encoding or decoding holds, whether it encodes or decodes:
@@ -20,8 +21,9 @@ import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
  * What each subclass adds is its own discipline for entering a value, the
  * two differing in what a repeat visit means. See {@link #tryEnter}.
  */
-export abstract class BaseCodecAct {
-  readonly #config: CodecEngineConfig;
+export abstract class BaseCodecAct<Encoded> {
+  readonly #config: CodecEngineConfig<Encoded>;
+
   readonly #env: LiveEnvironment;
 
   /**
@@ -31,24 +33,36 @@ export abstract class BaseCodecAct {
   #seen: Set<object> | undefined;
 
   /** Constructs an instance. */
-  constructor(config: CodecEngineConfig, env: LiveEnvironment) {
+  constructor(config: CodecEngineConfig<Encoded>, env: LiveEnvironment) {
     this.#config = config;
     this.#env = env;
   }
+
+  //
+  // Instance members
+  //
 
   /** The live environment this act was given. */
   get env(): LiveEnvironment {
     return this.#env;
   }
 
-  /** The configuration of the engine that minted this act. */
-  protected get config(): CodecEngineConfig {
-    return this.#config;
-  }
-
   /** Leaves a value, its walk being finished. */
   leave(value: object): void {
     this.#seen?.delete(value);
+  }
+
+  /** The configuration of the engine that minted this act. */
+  protected get config(): CodecEngineConfig<Encoded> {
+    return this.#config;
+  }
+
+  /**
+   * The codecs this act encodes or decodes with. Named here as well as on the
+   * configuration because the walk consults it constantly.
+   */
+  protected get registry(): CodecRegistry<Encoded> {
+    return this.#config.registry;
   }
 
   /**
