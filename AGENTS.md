@@ -213,7 +213,8 @@ consider the information in `docs/development/COVERAGE.md`.
 ### Automated gates
 
 `deno task check` type-checks a hand-maintained list of paths in
-`tasks/check.sh`, which now names every workspace package. Most are covered in
+`tasks/typecheck.ts` (`tasks/check.sh` owns the Deno version gate and delegates
+there), and that list now names every workspace package. Most are covered in
 full; a few are partial by design. The `*.input.ts` transformer fixtures under
 `schema-generator` and `ts-transformers` name ambient wrappers the transformer
 supplies, so they do not compile on their own and are left out. `ui` is checked
