@@ -209,9 +209,10 @@ run cf piece describe -s "$SPACE" --piece board
 say "And the callable rows again as a table, the shape a client matches"
 say "against. Both are derived from the deployed pattern, not from a manifest."
 run cf piece verbs -s "$SPACE" --piece board
-say "In the table, ON names the cell a verb lives on and MARKS flags wrapper"
-say "or deprecated rows. The listings all take --json for tooling — the tables"
-say "are for the room; reads and calls already answer in JSON."
+say "In the table, ON names the cell a verb lives on. MARKS flags wrapper or"
+say "deprecated rows — hidden by default and listed under --all, so the column"
+say "is blank on a board that declares none. The listings all take --json for"
+say "tooling; reads and calls already answer in JSON."
 
 act "3 · Ask what a verb wants"
 say "Flags, types, required-ness and result all come from the author's TypeScript."
