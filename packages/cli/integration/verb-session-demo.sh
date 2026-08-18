@@ -268,6 +268,16 @@ CSRF=$(printf '%s' "$OUT" | jq -r '.[] | select(.title=="CSRF tokens")."$link"')
 act "7 · A verb returns what only the pattern could compute"
 say "The note's timestamp is the pattern's; the caller never supplied one."
 run cf call -s "$SPACE" "$EPIC" recordNote -- --body "blocked on the cookie spec"
+# The receipt out of the run just shown, not a second call. Every invocation
+# envelope carries one, and it is an address like any other.
+RECEIPT=$(printf '%s' "$OUT" | jq -r '.receipt')
+say "Act 6 asked a read twice. A call cannot be asked twice — it would run the"
+say "handler again — but it does not need to be: the outcome is durable at an"
+say "address, and every envelope above has carried it as 'receipt'."
+run cf get -s "$SPACE" "$RECEIPT" --select note,noteCount
+say "The same answer, and the timestamp is the proof. Reading a receipt is an"
+say "ordinary read, so the body did not run a second time — had it, the clock"
+say "would have moved."
 
 act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."

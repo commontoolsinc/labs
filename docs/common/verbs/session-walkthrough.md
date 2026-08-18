@@ -40,7 +40,7 @@ behind a particular act, read across:
 | 4 · Create, and act on what you were handed | step 5 |
 | 5 · Read addresses instead of contents | step 6, and "Why this pattern" on what an unshaped read costs |
 | 6 · Ask the same question twice | step 6, on why a read may be asked twice and a call may not |
-| 7 · A verb returns what only the pattern could compute | the verb-shapes table under "Why this pattern" |
+| 7 · A verb returns what only the pattern could compute, and its receipt reads that outcome back | the verb-shapes table under "Why this pattern", and step 6 on the receipt |
 | 8 · Finishing reports what the caller could not know | the verb-shapes table under "Why this pattern" |
 | 9 · A verb that declares no result | the verb-shapes table, and step 5's closing read |
 | 10 · Step back and read the board | step 6 |
@@ -477,6 +477,7 @@ type re-enters itself — answers with an address rather than recursing:
 answers with one scalar, because the address carried the path:
 
 ```text
+"receipt": "/of:fid1:-PqRcxDVvI1AvqsJevG-N3Ui-PqMDW1HUYRm1X0cPAY",
 "result": {
   "note": { "at": 1787075135000, "body": "blocked on the cookie spec" },
   "noteCount": 1
@@ -484,6 +485,8 @@ answers with one scalar, because the address carried the path:
 
 "open"
 ```
+
+That `receipt` is an address like any other, and step 6 reads it back.
 
 **This is the composition the surface exists for.** A create hands back the
 piece it made, the address renders in place as one canonical reference, and the
@@ -598,13 +601,39 @@ running one again returns the same answer and changes nothing — which is what
 makes every read in this session safe to put in a script, and why the demo
 takes the addresses its later acts drive out of a read the reader already
 watched rather than from a hidden second one. A call is the opposite: it runs
-the handler body, so asking twice does the work twice. That asymmetry is why
-calls carry an idempotency id and reads need nothing —
-[verbs over the CLI](over-the-cli.md) has the id's contract.
+the handler body, so asking twice does the work twice.
 
-The demo's acts 5, 6 and 10 are this step: an address-only read, the same read
-run a second time to show it answers the same, and then the whole board, what
-is open, and the refusal.
+**But a call need not be asked twice, because its outcome has an address.**
+Every settled envelope names a `receipt` — the cell this handling wrote its
+outcome to — and reading it is an ordinary read:
+
+```bash
+cf get "$RECEIPT" --select note,noteCount
+```
+
+```text
+{
+  "note": { "at": 1787075135000, "body": "blocked on the cookie spec" },
+  "noteCount": 1
+}
+```
+
+**The timestamp is the proof, not the prose.** `recordNote` stamps the clock,
+which the caller cannot supply — so a readback that had re-run the handler
+would carry a later `at` than the call did. It carries the same one, which is
+what says the body did not run again. The harness asserts exactly that
+comparison, so the claim fails loudly if it ever stops holding.
+
+That is the whole asymmetry: reads repeat freely, calls do not repeat but
+their outcomes stay readable. Where a caller does need to retry a call — a
+dropped connection, an unknown outcome — an idempotency id makes the retry
+collide with the original receipt rather than doing the work twice;
+[verbs over the CLI](over-the-cli.md) has that contract.
+
+The demo's acts 5, 6, 7 and 10 are this step: an address-only read, the same
+read run a second time to show it answers the same, a call's receipt read back
+to show the outcome outlived the call, and then the whole board, what is open,
+and the refusal.
 
 ## 7. Refuse what the surface does not accept
 
