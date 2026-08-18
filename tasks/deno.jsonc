@@ -1,6 +1,7 @@
 {
   // Dependency guide: ../docs/development/DEPENDENCIES.md
   "imports": {
+    "@std/yaml": "jsr:@std/yaml@^1.0.12",
     "typescript": "npm:typescript@6.0.3"
   },
   "tasks": {
