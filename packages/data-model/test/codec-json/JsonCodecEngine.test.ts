@@ -457,7 +457,7 @@ describe("JsonCodecEngine", () => {
     it("returns a `ProblematicValue` for unparseable bytes when lenient", () => {
       // This entry point reaches a conversion without passing through
       // `decode()`, so it settles the refusal itself. Were it not to, the
-      // byte boundary would answer a malformed payload differently from the
+      // byte boundary would treat a malformed payload differently from the
       // string boundary for no reason a caller could name.
       const bytes = new TextEncoder().encode("{not json");
       const decoded = newDefaultJsonCodecEngine({ lenient: true })

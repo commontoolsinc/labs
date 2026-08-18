@@ -7,7 +7,7 @@ import { ProblematicValue } from "./ProblematicValue.ts";
 
 /**
  * The state of one act of decoding: what {@link BaseCodecAct} holds, plus how
- * this act answers wire data it finds malformed.
+ * this act reports wire data it finds malformed.
  *
  * An engine mints one of these per `decode()` call, through a factory its
  * subclass supplies. A format needing more -- a wire marker read off the
@@ -19,7 +19,7 @@ import { ProblematicValue } from "./ProblematicValue.ts";
  */
 export class DecodeAct extends BaseCodecAct {
   /**
-   * Enters a node, answering whether it was already in progress.
+   * Enters a node, and returns whether it was entered.
    *
    * Whether a format guards cycles at all is decided by whether its walk
    * calls this: a format whose input it parses for itself is handed a tree by

@@ -2,7 +2,7 @@ import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
 
 /**
- * What one act of encoding or decoding holds whichever direction it runs in:
+ * What one act of encoding or decoding holds, whether it encodes or decodes:
  * the configuration of the engine that minted it, the live environment the
  * caller supplied, and the values whose walk is in progress.
  *
@@ -17,7 +17,7 @@ import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
  * caller named no environment passes the null one, which fails by name when
  * asked for a cell.
  *
- * What each direction adds is its own discipline for entering a value, the
+ * What each subclass adds is its own discipline for entering a value, the
  * two differing in what a repeat visit means. See {@link #tryEnter}.
  */
 export abstract class BaseCodecAct {
@@ -52,10 +52,9 @@ export abstract class BaseCodecAct {
   }
 
   /**
-   * Enters a value, answering whether it was already in progress. What a
-   * repeat visit means is the direction's to say, so each subclass wraps this
-   * with its own: encoding refuses a cycle outright, where decoding reports
-   * one.
+   * Enters a value, and returns whether it was entered. What a repeat visit
+   * means is up to the caller, so each subclass wraps this with its own
+   * reading: encoding refuses a cycle outright, where decoding reports one.
    *
    * The set behind this is created here rather than in the constructor, so
    * that walking a lone self-representing value -- much the commonest case,

@@ -181,8 +181,8 @@ export abstract class BaseCodecEngine<
    * What arrives is data off a channel and is not to be assumed well-formed. A
    * form that is not this format's is refused by throwing
    * `ProblematicStateError`, which {@link #decode} settles against
-   * {@link #lenient} -- so a lenient decode answers a syntactic fault with a
-   * `ProblematicValue`, exactly as it does a fault found further in.
+   * {@link #lenient} -- so a lenient decode returns a `ProblematicValue` for
+   * a syntactic fault, exactly as it does for a fault found further in.
    *
    * Takes no act. What a format needs out of the form for the act it is
    * about to run, it takes in {@link #newDecodeAct}, which sees the same
