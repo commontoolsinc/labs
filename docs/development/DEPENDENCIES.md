@@ -380,9 +380,9 @@ run the complete CLI test task:
 
 ### SQLite
 
-Six workspace members pin `@db/sqlite` exactly: `memory`, `toolshed`,
-`state-inspector`, `cf-harness`, `cli`, and `piece`. They must resolve one
-version. The memory package also repeats that version in
+Seven workspace members pin `@db/sqlite` exactly: `memory`, `toolshed`,
+`state-inspector`, `cf-harness`, `cli`, `piece`, and `patterns`. They must
+resolve one version. The memory package also repeats that version in
 `SQLITE3_RELEASE_VERSION` in
 `packages/memory/v2/sqlite/column-origin.ts`.
 
@@ -393,7 +393,7 @@ the column-origin binding derives the same URL from
 both files creates two independent libsqlite3 images, and passing a prepared
 statement between them can crash the process.
 
-To roll SQLite, update all six import maps and
+To roll SQLite, update all seven import maps and
 `SQLITE3_RELEASE_VERSION` in one change, run `deno install`, and verify:
 
 ```bash

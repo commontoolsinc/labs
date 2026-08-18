@@ -46,11 +46,12 @@
     "integration": "LOG_LEVEL=warn deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts",
     "integration:reload": "LOG_LEVEL=warn deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A $INTEGRATION_TEST_FLAGS ./integration/reload/*.test.ts",
     "integration:all": "TEST_HTTP=1 TEST_LLM=1 LOG_LEVEL=warn deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A ./integration/*.test.ts",
-    // `test/source-coverage/` runs in a second pass under workspace resolution,
-    // not `test-import-map.json`: its `commonfabric` shim re-exports real
-    // `data-model` helpers, whose internal `@/` graph the flat test import map
-    // can't resolve. See test/source-coverage/pattern-source-coverage.test.ts.
-    "test": "deno test -A --import-map ./test-import-map.json --ignore='**/*.test.tsx' --ignore='integration' --ignore='google/core/integration' --ignore='auth' --ignore='test/source-coverage' . && deno test -A test/source-coverage/"
+    // These tests run in a second pass under workspace resolution:
+    // `agent-sessions-debug/provenance.test.ts` imports `state-inspector`, and
+    // the source-coverage shim re-exports real `data-model` helpers. The first
+    // pass's flat import map replaces `commonfabric` throughout every imported
+    // workspace package.
+    "test": "deno test -A --import-map ./test-import-map.json --ignore='**/*.test.tsx' --ignore='integration' --ignore='google/core/integration' --ignore='auth' --ignore='agent-sessions-debug/provenance.test.ts' --ignore='test/source-coverage' . && deno test -A agent-sessions-debug/provenance.test.ts test/source-coverage/"
   },
   // File discovery for the `test` task (lane 1). `include` keeps only
   // `.test.ts`, so pattern tests (`.test.tsx`, lane 2) are never collected;
@@ -72,6 +73,7 @@
   // process runs under Deno's native OpenTelemetry.
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1"
   }
 }

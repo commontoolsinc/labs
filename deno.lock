@@ -2576,6 +2576,7 @@
       },
       "packages/patterns": {
         "dependencies": [
+          "jsr:@db/sqlite@0.13.0",
           "npm:@opentelemetry/api@^1.9.1"
         ]
       },
