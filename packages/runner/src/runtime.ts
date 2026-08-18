@@ -339,6 +339,13 @@ export type PatternInstantiationObserver = (
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
+   * Behavior of interval `#now/N` wishes. `live` refreshes a restored clock
+   * cell and schedules future ticks. `frozen` keeps a restored value and does
+   * not schedule ticks. Defaults to `live`; state-vintage replay uses `frozen`
+   * so an update is compared under the environment the fixture captured.
+   */
+  intervalNowMode?: "live" | "frozen";
+  /**
    * Optional map from space DIDs to HTTP or HTTPS origins. Space-bound work
    * (LLM calls, fetches, blob uploads) for a mapped space targets
    * that host; absent map or entry ⇒ `apiUrl`. Mirrors the storage
@@ -703,6 +710,7 @@ export class Runtime {
   /** Resolved committed-write backpressure policy (all fields present). */
   readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
+  readonly intervalNowMode: "live" | "frozen";
   readonly spaceHostMap?: Record<string, string>;
   /**
    * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
@@ -1066,6 +1074,7 @@ export class Runtime {
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
+    this.intervalNowMode = options.intervalNowMode ?? "live";
     // Validate eagerly, mirroring the storage layer's resolver: a
     // malformed host should fail at configuration time naming the
     // space, not mid-builtin as a bare Invalid URL.

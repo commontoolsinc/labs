@@ -1047,10 +1047,14 @@ function acquireIntervalNowTimer(
     const existing = cell.withTx(tx).sample() as number | null | undefined;
     if (existing == null) {
       cell.withTx(tx).set(coarsened);
-    } else if (existing !== coarsened) {
+    } else if (
+      existing !== coarsened && runtime.intervalNowMode === "live"
+    ) {
       writeIntervalNowTick(runtime, timer, intervalMs);
     }
-    scheduleIntervalNowTick(runtime, timer, intervalMs);
+    if (runtime.intervalNowMode === "live") {
+      scheduleIntervalNowTick(runtime, timer, intervalMs);
+    }
   }
   timer.refCount++;
   return timer;

@@ -42,6 +42,8 @@
  * | apiUrl                     | per-site (required param)                        |
  * | storageManager             | per-site (required param; open vs emulate, and   |
  * |                            | its identity/session, are the caller's domain)   |
+ * | intervalNowMode            | constructor-default (`live`); vintage replay     |
+ * |                            | explicitly selects `frozen`                      |
  * | experimental               | per-site (required param — pass                  |
  * |                            | `experimentalOptionsFromEnv(...)`, host data, or |
  * |                            | an explicit `{}`; requiredness is the seal)      |
@@ -122,6 +124,7 @@ import type {
  */
 export const RUNTIME_OPTION_KEYS = [
   "apiUrl",
+  "intervalNowMode",
   "spaceHostMap",
   "storageManager",
   "consoleHandler",

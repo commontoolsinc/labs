@@ -38,6 +38,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [2026-08-cfc-overlap-coalescing-review.md](plans/2026-08-cfc-overlap-coalescing-review.md) — the final review correction restoring live per-rejection conflict notifications, August 2026.
 - [2026-08-cfc-conflict-repair-event-retry.md](plans/2026-08-cfc-conflict-repair-event-retry.md) — the finite conflict-repair generation and durable event-retry correction required by strict CFC browser verification, August 2026.
 - [2026-08-cfc-lunch-poll-optional-avatar.md](plans/2026-08-cfc-lunch-poll-optional-avatar.md) — the stored Lunch Poll identity-card argument compatibility correction, August 2026.
+- [2026-08-cfc-vintage-interval-clock.md](plans/2026-08-cfc-vintage-interval-clock.md) — the captured interval-clock correction for state-vintage replay, August 2026.
 - [2026-08-cfc-lot-watch-admin-registry.md](plans/2026-08-cfc-lot-watch-admin-registry.md) — the Lot Watch admin-registry schema correction required by strict CFC defaults, August 2026.
 - [2026-08-cfc-lot-watch-trusted-admin.md](plans/2026-08-cfc-lot-watch-trusted-admin.md) — the trusted administrator mutation path required for Lot Watch under strict CFC enforcement, August 2026.
 - [2026-08-cfc-lot-watch-input-cells-review.md](plans/2026-08-cfc-lot-watch-input-cells-review.md) — the protected factory input cell type correction for Lot Watch, August 2026.

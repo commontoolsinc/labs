@@ -319,6 +319,7 @@ export async function openFileBackedRuntime(
   const runtime = new Runtime({
     apiUrl: new URL("http://toolshed.test"),
     storageManager,
+    intervalNowMode: fromSnapshot === undefined ? "live" : "frozen",
     ...LEGACY_CFC_OPTIONS,
   });
 

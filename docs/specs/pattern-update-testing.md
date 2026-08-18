@@ -111,6 +111,12 @@ still be able to write its previous result shape.
 Replays committed SQLite stores — real state, written through a pattern's own
 handlers by running its own tests — under today's pattern source.
 
+Replay freezes interval `#now/N` wishes at the values held by the restored
+store. A fixture is evidence about an update applied to its captured world.
+Advancing its environmental clock to the day CI happens to run would instead
+mix elapsed time into the source change being checked. Production runtimes and
+new fixture captures retain the normal live interval clock.
+
 ### What a green run asserts
 
 Per fixture:

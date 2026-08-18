@@ -87,6 +87,7 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   },
   // Everything below rides the constructor default unless a preset's
   // declared delta param supplies it (covered by the routing tests).
+  intervalNowMode: { treat: "absent" },
   spaceHostMap: { treat: "absent" },
   consoleHandler: { treat: "absent" },
   errorHandlers: { treat: "absent" },
