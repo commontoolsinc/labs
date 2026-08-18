@@ -132,9 +132,12 @@ export function overSixtySeconds(
     .sort((a, b) => b.maxDurationMs - a.maxDurationMs);
 }
 
-function recentDatePrefixes(days: number): string[] {
+/** The report window's partitions, newest first. */
+export function recentDatePrefixes(
+  days: number,
+  now: number = Date.now(),
+): string[] {
   const prefixes: string[] = [];
-  const now = Date.now();
   for (let back = 0; back < days; back++) {
     const day = new Date(now - back * 24 * 60 * 60 * 1000);
     prefixes.push(datePartition(day.toISOString()));
@@ -142,36 +145,30 @@ function recentDatePrefixes(days: number): string[] {
   return prefixes;
 }
 
-async function main(): Promise<void> {
-  let days = 7;
-  let gate = false;
-  const args = [...Deno.args];
-  while (args.length > 0) {
-    const flag = args.shift()!;
-    if (flag === "--gate") {
-      gate = true;
-    } else if (flag === "--days") {
-      days = Number(args.shift());
-      if (!Number.isInteger(days) || days < 1) {
-        console.error("--days takes a positive integer");
-        Deno.exit(2);
-      }
-    } else {
-      console.error(`unknown flag ${flag}`);
-      Deno.exit(2);
-    }
-  }
+export interface ReportOptions {
+  days: number;
+  gate: boolean;
+  bucket: string;
+  prefix: string;
+  fetchImpl?: typeof fetch;
+  aliases?: AliasResolver;
+  now?: number;
+}
 
-  const bucket = storeBucket();
-  const prefix = ciSubmissionsPrefix();
+/**
+ * Reads the window, prints the reports, and returns whether the
+ * sixty-second ratchet failed.
+ */
+export async function runReport(options: ReportOptions): Promise<boolean> {
+  const { bucket, prefix, days } = options;
   const names: string[] = [];
-  for (const day of recentDatePrefixes(days)) {
-    names.push(
-      ...await listObjects({
-        bucket,
-        prefix: `${prefix}/v1/${day}/`,
-      }),
-    );
+  for (const day of recentDatePrefixes(days, options.now)) {
+    const listOptions: Parameters<typeof listObjects>[0] = {
+      bucket,
+      prefix: `${prefix}/v1/${day}/`,
+    };
+    if (options.fetchImpl !== undefined) listOptions.fetch = options.fetchImpl;
+    names.push(...await listObjects(listOptions));
   }
   console.log(
     `${names.length} object(s) under ${prefix} in the last ${days} day(s).`,
@@ -179,7 +176,12 @@ async function main(): Promise<void> {
   const reports: StoredReport[] = [];
   let forkReports = 0;
   for (const objectName of names) {
-    const report = await readObject({ bucket, objectName });
+    const readOptions: Parameters<typeof readObject>[0] = {
+      bucket,
+      objectName,
+    };
+    if (options.fetchImpl !== undefined) readOptions.fetch = options.fetchImpl;
+    const report = await readObject(readOptions);
     // Fork-authored reports never feed decisions — this report's numbers
     // and its ratchet gate among them (docs/specs/test-records.md).
     if (report.context?.ci?.fork === true) {
@@ -194,7 +196,10 @@ async function main(): Promise<void> {
   const runs = new Set(
     reports.map((report) => report.context?.ci?.workflowRunId ?? ""),
   ).size;
-  const byIdentity = aggregate(reports, await loadAliasResolver());
+  const byIdentity = aggregate(
+    reports,
+    options.aliases ?? await loadAliasResolver(),
+  );
   console.log(
     `${byIdentity.size} distinct identities across ${runs} workflow run(s).`,
   );
@@ -225,13 +230,43 @@ async function main(): Promise<void> {
     );
   }
 
-  if (gate && slow.length > 0) {
+  if (options.gate && slow.length > 0) {
     console.error(
       `\n${slow.length} test(s) exceed the sixty-second rule; the ratchet ` +
         "fails.",
     );
-    Deno.exit(1);
+    return true;
   }
+  return false;
+}
+
+async function main(): Promise<void> {
+  let days = 7;
+  let gate = false;
+  const args = [...Deno.args];
+  while (args.length > 0) {
+    const flag = args.shift()!;
+    if (flag === "--gate") {
+      gate = true;
+    } else if (flag === "--days") {
+      days = Number(args.shift());
+      if (!Number.isInteger(days) || days < 1) {
+        console.error("--days takes a positive integer");
+        Deno.exit(2);
+      }
+    } else {
+      console.error(`unknown flag ${flag}`);
+      Deno.exit(2);
+    }
+  }
+
+  const gateFailed = await runReport({
+    days,
+    gate,
+    bucket: storeBucket(),
+    prefix: ciSubmissionsPrefix(),
+  });
+  if (gateFailed) Deno.exit(1);
 }
 
 if (import.meta.main) {

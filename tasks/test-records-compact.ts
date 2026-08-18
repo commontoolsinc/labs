@@ -52,14 +52,98 @@ export function rollupName(day: string): string {
  */
 export const COMPACTION_LAG_DAYS = 7;
 
-function closedDays(days: number): string[] {
+/** The compactable partitions: past the lag, inside the window. */
+export function closedDays(days: number, now: number = Date.now()): string[] {
   const result: string[] = [];
-  const now = Date.now();
   for (let back = COMPACTION_LAG_DAYS; back <= days; back++) {
     const day = new Date(now - back * 24 * 60 * 60 * 1000);
     result.push(datePartition(day.toISOString()));
   }
   return result;
+}
+
+export interface CompactOptions {
+  days: number;
+  plan: boolean;
+  bucket: string;
+  rawPrefix: string;
+  /** Required unless plan is set. */
+  token?: string;
+  fetchImpl?: typeof fetch;
+  now?: number;
+}
+
+/** Compacts every closed day that has records and no rollup yet. */
+export async function compactDays(options: CompactOptions): Promise<void> {
+  const { bucket, rawPrefix, plan } = options;
+  for (const day of closedDays(options.days, options.now)) {
+    const listOptions: Parameters<typeof listObjects>[0] = {
+      bucket,
+      prefix: rollupName(day),
+    };
+    if (options.fetchImpl !== undefined) listOptions.fetch = options.fetchImpl;
+    const existing = await listObjects(listOptions);
+    if (existing.length > 0) continue;
+    const rawListOptions: Parameters<typeof listObjects>[0] = {
+      bucket,
+      prefix: `${rawPrefix}/v${RECORD_SCHEMA_VERSION}/${day}/`,
+    };
+    if (options.fetchImpl !== undefined) {
+      rawListOptions.fetch = options.fetchImpl;
+    }
+    const raw = await listObjects(rawListOptions);
+    if (raw.length === 0) continue;
+
+    let body = "";
+    let reportCount = 0;
+    let recordCount = 0;
+    for (const objectName of raw) {
+      const readOptions: Parameters<typeof readObject>[0] = {
+        bucket,
+        objectName,
+      };
+      if (options.fetchImpl !== undefined) {
+        readOptions.fetch = options.fetchImpl;
+      }
+      const report = await readObject(readOptions);
+      if (report.context === undefined) continue;
+      reportCount++;
+      recordCount += report.records.length;
+      body += buildObjectBody(report.context, report.records);
+    }
+    // A day with no records gets no rollup: the write-once rollup would
+    // permanently exclude anything that later lands in that day — an old
+    // run re-run, a late orphan — for nothing.
+    if (recordCount === 0) {
+      console.log(`${day}: no records yet; leaving the day open`);
+      continue;
+    }
+    if (plan) {
+      console.log(
+        `would compact ${day}: ${raw.length} object(s), ${reportCount} ` +
+          `report(s), ${recordCount} record(s) -> ${rollupName(day)}`,
+      );
+      continue;
+    }
+    const createOptions: Parameters<typeof createObject>[0] = {
+      bucket,
+      name: rollupName(day),
+      body: await gzipText(body),
+      token: options.token!,
+      contentType: "application/x-ndjson",
+      contentEncoding: "gzip",
+    };
+    if (options.fetchImpl !== undefined) {
+      createOptions.fetch = options.fetchImpl;
+    }
+    const result = await createObject(createOptions);
+    console.log(
+      `${day}: ${recordCount} record(s) from ${raw.length} object(s) ` +
+        `${result === "created" ? "compacted to" : "already at"} ${
+          rollupName(day)
+        }`,
+    );
+  }
 }
 
 async function main(): Promise<void> {
@@ -82,10 +166,12 @@ async function main(): Promise<void> {
     }
   }
 
-  const bucket = storeBucket();
-  const rawPrefix = ciSubmissionsPrefix();
-
-  let token: string | undefined;
+  const options: CompactOptions = {
+    days,
+    plan,
+    bucket: storeBucket(),
+    rawPrefix: ciSubmissionsPrefix(),
+  };
   if (!plan) {
     const keyPath = readEnv("CF_TEST_RECORDS_COMPACTOR_KEY_FILE");
     if (keyPath === undefined || keyPath.length === 0) {
@@ -100,60 +186,10 @@ async function main(): Promise<void> {
       console.error(`${keyPath} is not a service-account key file`);
       Deno.exit(2);
     }
-    token = await tokenFromKey(key, STORE_WRITE_SCOPE);
+    options.token = await tokenFromKey(key, STORE_WRITE_SCOPE);
   }
 
-  for (const day of closedDays(days)) {
-    const existing = await listObjects({
-      bucket,
-      prefix: rollupName(day),
-    });
-    if (existing.length > 0) continue;
-    const raw = await listObjects({
-      bucket,
-      prefix: `${rawPrefix}/v${RECORD_SCHEMA_VERSION}/${day}/`,
-    });
-    if (raw.length === 0) continue;
-
-    let body = "";
-    let reportCount = 0;
-    let recordCount = 0;
-    for (const objectName of raw) {
-      const report = await readObject({ bucket, objectName });
-      if (report.context === undefined) continue;
-      reportCount++;
-      recordCount += report.records.length;
-      body += buildObjectBody(report.context, report.records);
-    }
-    // A day with no records gets no rollup: the write-once rollup would
-    // permanently exclude anything that later lands in that day — an old
-    // run re-run, a late orphan — for nothing.
-    if (recordCount === 0) {
-      console.log(`${day}: no records yet; leaving the day open`);
-      continue;
-    }
-    if (plan) {
-      console.log(
-        `would compact ${day}: ${raw.length} object(s), ${reportCount} ` +
-          `report(s), ${recordCount} record(s) -> ${rollupName(day)}`,
-      );
-      continue;
-    }
-    const result = await createObject({
-      bucket,
-      name: rollupName(day),
-      body: await gzipText(body),
-      token: token!,
-      contentType: "application/x-ndjson",
-      contentEncoding: "gzip",
-    });
-    console.log(
-      `${day}: ${recordCount} record(s) from ${raw.length} object(s) ` +
-        `${result === "created" ? "compacted to" : "already at"} ${
-          rollupName(day)
-        }`,
-    );
-  }
+  await compactDays(options);
 }
 
 if (import.meta.main) {

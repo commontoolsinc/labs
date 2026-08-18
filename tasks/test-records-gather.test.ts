@@ -5,6 +5,7 @@ import { join } from "@std/path";
 import {
   gather,
   headCommitOfEvent,
+  parseGatherArgs,
   parseJUnitSpec,
 } from "./test-records-gather.ts";
 import {
@@ -141,6 +142,85 @@ describe("test-records-gather", () => {
         await Deno.readTextFile(join(out, "job.json")),
       );
       expect(facts.job).toBe("Check");
+    });
+
+    it("records the commit, branch, and pull request head from the environment", async () => {
+      const out = join(dir, "out");
+      const eventPath = join(dir, "event.json");
+      await Deno.writeTextFile(
+        eventPath,
+        JSON.stringify({ pull_request: { head: { sha: "f".repeat(40) } } }),
+      );
+      await gather({
+        out,
+        job: "Check",
+        junit: [],
+        env: (name) => {
+          if (name === "GITHUB_SHA") return "a".repeat(40);
+          if (name === "GITHUB_HEAD_REF") return "feature-branch";
+          if (name === "GITHUB_EVENT_PATH") return eventPath;
+          return undefined;
+        },
+      });
+      const facts = JSON.parse(
+        await Deno.readTextFile(join(out, "job.json")),
+      );
+      expect(facts.commit).toBe("a".repeat(40));
+      expect(facts.branch).toBe("feature-branch");
+      expect(facts.headCommit).toBe("f".repeat(40));
+    });
+
+    it("keeps ingesting after one unreadable JUnit file", async () => {
+      await Deno.writeTextFile(join(dir, "a-bad.xml"), "<testsuite name=");
+      await Deno.writeTextFile(join(dir, "b-good.xml"), JUNIT);
+      const out = join(dir, "out");
+      await gather({
+        out,
+        job: "Check",
+        junit: [{ kind: "unit", scope: "cli", glob: join(dir, "*.xml") }],
+      });
+      const lines = (await Deno.readTextFile(join(out, "records.ndjson")))
+        .trimEnd().split("\n");
+      expect(lines.length).toBe(1);
+    });
+  });
+
+  describe("parseGatherArgs()", () => {
+    it("returns the options of a full command line", () => {
+      const options = parseGatherArgs([
+        "--out",
+        "artifact",
+        "--job",
+        "Test (3/8)",
+        "--shard",
+        "3/8",
+        "--junit",
+        "kind=unit,scope=cli,glob=*.xml",
+      ]);
+      expect(options?.out).toBe("artifact");
+      expect(options?.job).toBe("Test (3/8)");
+      expect(options?.shard).toBe("3/8");
+      expect(options?.junit.length).toBe(1);
+    });
+
+    it("skips a malformed junit specification and keeps the rest", () => {
+      const options = parseGatherArgs([
+        "--out",
+        "artifact",
+        "--job",
+        "Check",
+        "--junit",
+        "not a spec",
+        "--junit",
+        "kind=unit,scope=cli,glob=*.xml",
+      ]);
+      expect(options?.junit.length).toBe(1);
+    });
+
+    it("returns undefined for unknown flags and missing values", () => {
+      expect(parseGatherArgs(["--out"])).toBeUndefined();
+      expect(parseGatherArgs(["--mystery", "x"])).toBeUndefined();
+      expect(parseGatherArgs(["--out", "artifact"])).toBeUndefined();
     });
   });
 });

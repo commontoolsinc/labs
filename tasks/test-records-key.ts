@@ -24,6 +24,7 @@
 
 import { join } from "@std/path";
 import {
+  type Environment,
   readEnv,
   RECORDS_KEY_FILE_VARIABLE,
 } from "@commonfabric/test-support/records";
@@ -43,50 +44,71 @@ import { readZip } from "./test-records-zip.ts";
 
 const API = "https://api.github.com";
 
-function configDir(): string {
-  const xdg = readEnv("XDG_CONFIG_HOME");
+/**
+ * What the two commands reach outside the process through, injectable so
+ * tests run them against stubs.
+ */
+export interface KeyToolDeps {
+  env: Environment;
+  fetchImpl: typeof fetch;
+  githubToken: () => Promise<string | undefined>;
+}
+
+function defaultGithubToken(): Promise<string | undefined> {
+  return (async () => {
+    const fromEnv = readEnv("GH_TOKEN") ?? readEnv("GITHUB_TOKEN");
+    if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
+    try {
+      const { code, stdout } = await new Deno.Command("gh", {
+        args: ["auth", "token"],
+        stdout: "piped",
+        stderr: "null",
+      }).output();
+      if (code !== 0) return undefined;
+      const token = new TextDecoder().decode(stdout).trim();
+      return token.length > 0 ? token : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+}
+
+function defaultDeps(): KeyToolDeps {
+  return {
+    env: Deno.env.get,
+    fetchImpl: fetch,
+    githubToken: defaultGithubToken,
+  };
+}
+
+function configDir(env: Environment): string {
+  const xdg = readEnv("XDG_CONFIG_HOME", env);
   if (xdg !== undefined && xdg.length > 0) {
     return join(xdg, "common-fabric");
   }
-  const home = readEnv("HOME") ?? readEnv("USERPROFILE");
+  const home = readEnv("HOME", env) ?? readEnv("USERPROFILE", env);
   if (home === undefined || home.length === 0) {
     throw new Error("neither XDG_CONFIG_HOME nor HOME is set");
   }
   return join(home, ".config", "common-fabric");
 }
 
-function identityPath(): string {
-  return join(configDir(), "test-records-identity.json");
+function identityPath(env: Environment): string {
+  return join(configDir(env), "test-records-identity.json");
 }
 
-function keyFilePath(): string {
-  return join(configDir(), "test-records-key.json");
-}
-
-async function githubToken(): Promise<string | undefined> {
-  const fromEnv = readEnv("GH_TOKEN") ?? readEnv("GITHUB_TOKEN");
-  if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
-  try {
-    const { code, stdout } = await new Deno.Command("gh", {
-      args: ["auth", "token"],
-      stdout: "piped",
-      stderr: "null",
-    }).output();
-    if (code !== 0) return undefined;
-    const token = new TextDecoder().decode(stdout).trim();
-    return token.length > 0 ? token : undefined;
-  } catch {
-    return undefined;
-  }
+function keyFilePath(env: Environment): string {
+  return join(configDir(env), "test-records-key.json");
 }
 
 async function github(
+  deps: KeyToolDeps,
   token: string,
   method: string,
   path: string,
   body?: unknown,
 ): Promise<Response> {
-  return await fetch(`${API}${path}`, {
+  return await deps.fetchImpl(`${API}${path}`, {
     method,
     headers: {
       accept: "application/vnd.github+json",
@@ -97,37 +119,41 @@ async function github(
   });
 }
 
-async function loadIdentity(): Promise<KeyDeliveryIdentity | undefined> {
+async function loadIdentity(
+  env: Environment,
+): Promise<KeyDeliveryIdentity | undefined> {
   try {
     return JSON.parse(
-      await Deno.readTextFile(identityPath()),
+      await Deno.readTextFile(identityPath(env)),
     ) as KeyDeliveryIdentity;
   } catch {
     return undefined;
   }
 }
 
-async function requestCommand(): Promise<void> {
-  let identity = await loadIdentity();
+export async function requestCommand(
+  deps: KeyToolDeps = defaultDeps(),
+): Promise<void> {
+  let identity = await loadIdentity(deps.env);
   if (identity === undefined) {
     identity = await generateIdentity();
-    await Deno.mkdir(configDir(), { recursive: true });
+    await Deno.mkdir(configDir(deps.env), { recursive: true });
     await Deno.writeTextFile(
-      identityPath(),
+      identityPath(deps.env),
       JSON.stringify(identity, null, 2) + "\n",
       { mode: 0o600 },
     );
-    console.log(`delivery identity stored: ${identityPath()}`);
+    console.log(`delivery identity stored: ${identityPath(deps.env)}`);
   } else {
-    console.log(`delivery identity already stored: ${identityPath()}`);
+    console.log(`delivery identity already stored: ${identityPath(deps.env)}`);
   }
   const recipient = identity.recipient;
   console.log(`recipient: ${recipient}`);
 
-  const token = await githubToken();
+  const token = await deps.githubToken();
   let username: string | undefined;
   if (token !== undefined) {
-    const who = await github(token, "GET", "/user");
+    const who = await github(deps, token, "GET", "/user");
     if (who.ok) {
       username = (await who.json() as { login?: string }).login;
     } else {
@@ -136,6 +162,7 @@ async function requestCommand(): Promise<void> {
   }
   if (token !== undefined && username !== undefined) {
     const dispatched = await github(
+      deps,
       token,
       "POST",
       `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/dispatches`,
@@ -172,15 +199,17 @@ finishes:
 `);
 }
 
-async function collectCommand(): Promise<void> {
-  const identity = await loadIdentity();
+export async function collectCommand(
+  deps: KeyToolDeps = defaultDeps(),
+): Promise<number> {
+  const identity = await loadIdentity(deps.env);
   if (identity === undefined) {
     throw new Error(
-      `no delivery identity at ${identityPath()}; ` +
+      `no delivery identity at ${identityPath(deps.env)}; ` +
         "run `deno task test-records-key request` first",
     );
   }
-  const token = await githubToken();
+  const token = await deps.githubToken();
   if (token === undefined) {
     throw new Error(
       "a GitHub token is needed to download the delivery artifact; " +
@@ -191,7 +220,7 @@ async function collectCommand(): Promise<void> {
   // whoever collects it, and listing only the collector's own dispatches
   // keeps the delivery findable however many other minting runs happened
   // since the request.
-  const whoAmI = await github(token, "GET", "/user");
+  const whoAmI = await github(deps, token, "GET", "/user");
   const login = whoAmI.ok
     ? (await whoAmI.json() as { login?: string }).login
     : undefined;
@@ -206,6 +235,7 @@ async function collectCommand(): Promise<void> {
   const artifactName = `test-records-key-${fingerprint}`;
 
   const runsRes = await github(
+    deps,
     token,
     "GET",
     `/repos/${REPO}/actions/workflows/${MINT_WORKFLOW_FILE}/runs` +
@@ -224,6 +254,7 @@ async function collectCommand(): Promise<void> {
       continue;
     }
     const artifactsRes = await github(
+      deps,
       token,
       "GET",
       `/repos/${REPO}/actions/runs/${run.id}/artifacts?per_page=100`,
@@ -241,6 +272,7 @@ async function collectCommand(): Promise<void> {
     if (delivery === undefined) continue;
 
     const download = await github(
+      deps,
       token,
       "GET",
       `/repos/${REPO}/actions/artifacts/${delivery.id}/zip`,
@@ -278,25 +310,25 @@ async function collectCommand(): Promise<void> {
           `this token belongs to ${login}; refusing to install it`,
       );
     }
-    await Deno.mkdir(configDir(), { recursive: true });
+    await Deno.mkdir(configDir(deps.env), { recursive: true });
     await Deno.writeTextFile(
-      keyFilePath(),
+      keyFilePath(deps.env),
       keyText,
       { mode: 0o600 },
     );
-    console.log(`key installed: ${keyFilePath()}
+    console.log(`key installed: ${keyFilePath(deps.env)}
 
 Add this line to your shell profile to opt in to test reporting:
 
-    export ${RECORDS_KEY_FILE_VARIABLE}="${keyFilePath()}"
+    export ${RECORDS_KEY_FILE_VARIABLE}="${keyFilePath(deps.env)}"
 `);
-    return;
+    return 0;
   }
   if (sawUnfinished) {
     console.log(
       "the minting run has not finished; run this command again once it has.",
     );
-    Deno.exit(1);
+    return 1;
   }
   throw new Error(
     `no completed minting run delivered ${artifactName}; ` +
@@ -314,7 +346,8 @@ if (import.meta.main) {
   if (command === "request") {
     await requestCommand();
   } else if (command === "collect") {
-    await collectCommand();
+    const code = await collectCommand();
+    if (code !== 0) Deno.exit(code);
   } else {
     usage();
   }

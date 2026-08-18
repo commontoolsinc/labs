@@ -19,6 +19,7 @@
 import { expandGlob } from "@std/fs";
 import { join } from "@std/path";
 import {
+  type Environment,
   ingestJUnit,
   readEnv,
   readSpool,
@@ -84,6 +85,7 @@ export interface GatherOptions {
   shard?: string;
   junit: JUnitSpec[];
   spoolDir?: string;
+  env?: Environment;
 }
 
 /** Gathers the spool and JUnit files into the artifact directory. */
@@ -126,6 +128,7 @@ export async function gather(options: GatherOptions): Promise<void> {
     }
   }
 
+  const env = options.env ?? Deno.env.get;
   const facts: JobFacts = {
     job: options.job,
     os: Deno.build.os,
@@ -133,11 +136,12 @@ export async function gather(options: GatherOptions): Promise<void> {
     denoVersion: Deno.version.deno,
   };
   if (options.shard !== undefined) facts.shard = options.shard;
-  const commit = readEnv("GITHUB_SHA");
+  const commit = readEnv("GITHUB_SHA", env);
   if (commit !== undefined && commit.length > 0) facts.commit = commit;
-  const branch = readEnv("GITHUB_HEAD_REF") ?? readEnv("GITHUB_REF_NAME");
+  const branch = readEnv("GITHUB_HEAD_REF", env) ??
+    readEnv("GITHUB_REF_NAME", env);
   if (branch !== undefined && branch.length > 0) facts.branch = branch;
-  const eventPath = readEnv("GITHUB_EVENT_PATH");
+  const eventPath = readEnv("GITHUB_EVENT_PATH", env);
   if (eventPath !== undefined && eventPath.length > 0) {
     try {
       const payload = JSON.parse(await Deno.readTextFile(eventPath));
@@ -172,16 +176,24 @@ function usage(): never {
   Deno.exit(2);
 }
 
-async function main(): Promise<void> {
+/**
+ * Parses the command line into gather options, or returns undefined for a
+ * malformed one. A malformed --junit specification skips itself with a
+ * warning: the spool and the other specifications still gather, so one bad
+ * flag does not cost the job's whole record set.
+ */
+export function parseGatherArgs(
+  argsIn: readonly string[],
+): GatherOptions | undefined {
   let out: string | undefined;
   let job: string | undefined;
   let shard: string | undefined;
   const junit: JUnitSpec[] = [];
-  const args = [...Deno.args];
+  const args = [...argsIn];
   while (args.length > 0) {
     const flag = args.shift()!;
     const value = args.shift();
-    if (value === undefined) usage();
+    if (value === undefined) return undefined;
     switch (flag) {
       case "--out":
         out = value;
@@ -193,9 +205,6 @@ async function main(): Promise<void> {
         shard = value;
         break;
       case "--junit":
-        // A malformed specification skips itself with a warning: the spool
-        // and the other specifications still gather, so one bad flag does
-        // not cost the job's whole record set.
         try {
           junit.push(parseJUnitSpec(value));
         } catch (error) {
@@ -203,12 +212,18 @@ async function main(): Promise<void> {
         }
         break;
       default:
-        usage();
+        return undefined;
     }
   }
-  if (out === undefined || job === undefined) usage();
+  if (out === undefined || job === undefined) return undefined;
   const options: GatherOptions = { out, job, junit };
   if (shard !== undefined) options.shard = shard;
+  return options;
+}
+
+async function main(): Promise<void> {
+  const options = parseGatherArgs(Deno.args);
+  if (options === undefined) usage();
   const spoolDir = recordsDir();
   if (spoolDir !== undefined) options.spoolDir = spoolDir;
   await gather(options);

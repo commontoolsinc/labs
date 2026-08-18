@@ -218,5 +218,13 @@ describe("aliases", () => {
       const resolver = await loadAliasResolver(join(directory, "absent"));
       expect(resolver.empty).toBe(true);
     });
+
+    it("finds the repository's own alias file with no path given", async () => {
+      // The committed alias file is empty today; the point is that the
+      // default path resolves inside the repository and loads cleanly.
+      const resolver = await loadAliasResolver();
+      const identity = { k: "unit", s: "bakery", n: "unmapped" };
+      expect(resolver.resolve(identity, "2026/08/10")).toEqual(identity);
+    });
   });
 });

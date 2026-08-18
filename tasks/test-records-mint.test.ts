@@ -1,5 +1,6 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { join } from "@std/path";
 
 import {
   accountIdFor,
@@ -8,8 +9,11 @@ import {
   ensureServiceAccount,
   isGitHubUsername,
   mintKey,
+  runMint,
   usernameOfDisplayName,
 } from "./test-records-mint.ts";
+import { generateIdentity, open } from "./test-records-crypto.ts";
+import { parsePersonalKeyFile } from "./test-records-config.ts";
 
 function sequenceFetch(
   responses: { status: number; json?: unknown }[],
@@ -254,6 +258,104 @@ describe("test-records-mint", () => {
         "sa@x",
         "octocat",
       )).rejects.toThrow("revoking");
+    });
+  });
+
+  describe("runMint()", () => {
+    let out: string;
+
+    beforeEach(async () => {
+      out = await Deno.makeTempDir({ prefix: "test-records-mint-" });
+    });
+
+    afterEach(async () => {
+      await Deno.remove(out, { recursive: true }).catch(() => {});
+    });
+
+    // A whole-run GCP stub: fresh account, fresh folder, no previous keys.
+    function mintFetch(log: string[]): typeof fetch {
+      const keyData = btoa(JSON.stringify({
+        client_email: "test-records-gh-octocat@p.iam.gserviceaccount.com",
+        private_key: "pem",
+        token_uri: "https://oauth2.googleapis.com/token",
+      }));
+      return ((input: URL | RequestInfo, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        log.push(`${method} ${decodeURIComponent(url)}`);
+        if (url.includes("/keys?keyTypes=USER_MANAGED")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ keys: [] }), { status: 200 }),
+          );
+        }
+        if (url.endsWith("/keys") && method === "POST") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ privateKeyData: keyData }), {
+              status: 200,
+            }),
+          );
+        }
+        if (url.includes("/serviceAccounts/") && method === "GET") {
+          return Promise.resolve(new Response("{}", { status: 404 }));
+        }
+        if (url.includes("/managedFolders/") && url.endsWith("/iam")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify(method === "GET" ? { bindings: [] } : {}),
+              { status: 200 },
+            ),
+          );
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as typeof fetch;
+    }
+
+    it("provisions, mints, and seals a delivery the recipient can open", async () => {
+      const identity = await generateIdentity();
+      const log: string[] = [];
+      const githubOutput = join(out, "github-output.txt");
+      const path = await runMint({
+        recipient: identity.recipient,
+        username: "OctoCat",
+        out: join(out, "delivery"),
+        client: { token: "t", fetchImpl: mintFetch(log) },
+        githubOutput,
+      });
+
+      const box = JSON.parse(await Deno.readTextFile(path));
+      const keyText = new TextDecoder().decode(await open(identity, box));
+      const key = parsePersonalKeyFile(keyText);
+      expect(key?.cf_username).toBe("octocat");
+      expect(path).toContain("test-records-key-");
+      expect(await Deno.readTextFile(githubOutput)).toMatch(
+        /^fingerprint=[0-9a-f]{32}\n$/,
+      );
+      // The provisioning canonicalized the login before naming anything.
+      expect(log.some((line) => line.includes("local/octocat/"))).toBe(true);
+      expect(log.some((line) => line.includes("OctoCat"))).toBe(false);
+    });
+
+    it("refuses a malformed recipient before touching anything", async () => {
+      const log: string[] = [];
+      await expect(runMint({
+        recipient: "age1notours",
+        username: "octocat",
+        out,
+        client: { token: "t", fetchImpl: mintFetch(log) },
+      })).rejects.toThrow("not a cfr1 delivery recipient");
+      expect(log).toEqual([]);
+    });
+
+    it("refuses a malformed username before touching anything", async () => {
+      const log: string[] = [];
+      const identity = await generateIdentity();
+      await expect(runMint({
+        recipient: identity.recipient,
+        username: "-bad-",
+        out,
+        client: { token: "t", fetchImpl: mintFetch(log) },
+      })).rejects.toThrow("not a GitHub username");
+      expect(log).toEqual([]);
     });
   });
 });

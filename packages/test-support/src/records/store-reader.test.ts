@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { parseReportGroups } from "./store-reader.ts";
+import { listObjects, parseReportGroups, readObject } from "./store-reader.ts";
 import { buildObjectBody, type RunContext, type TestRecord } from "./schema.ts";
 
 const RECORD: TestRecord = {
@@ -35,6 +35,68 @@ function ciContext(reportId: string, fork: boolean): RunContext {
 }
 
 describe("store-reader", () => {
+  describe("listObjects()", () => {
+    it("paginates until the listing has no next page", async () => {
+      const pages = [
+        { items: [{ name: "a" }, { name: "b" }], nextPageToken: "t2" },
+        { items: [{ name: "c" }] },
+      ];
+      const urls: string[] = [];
+      const names = await listObjects({
+        bucket: "cf-ci-metadata",
+        prefix: "labs/test-records/",
+        fetch: ((input: URL | RequestInfo) => {
+          urls.push(String(input));
+          return Promise.resolve(
+            new Response(JSON.stringify(pages.shift()), { status: 200 }),
+          );
+        }) as typeof fetch,
+      });
+      expect(names).toEqual(["a", "b", "c"]);
+      expect(urls.length).toBe(2);
+      expect(urls[1]).toContain("pageToken=t2");
+    });
+
+    it("throws for an error status", async () => {
+      await expect(listObjects({
+        bucket: "b",
+        prefix: "p",
+        fetch: (() =>
+          Promise.resolve(
+            new Response("nope", { status: 500 }),
+          )) as typeof fetch,
+      })).rejects.toThrow("HTTP 500");
+    });
+  });
+
+  describe("readObject()", () => {
+    it("throws for an error status", async () => {
+      await expect(readObject({
+        bucket: "b",
+        objectName: "x/y.ndjson",
+        fetch: (() =>
+          Promise.resolve(
+            new Response("gone", { status: 404 }),
+          )) as typeof fetch,
+      })).rejects.toThrow("HTTP 404");
+    });
+
+    it("fetches and groups a stored object", async () => {
+      const context = ciContext("01READ000000000000000000", false);
+      const report = await readObject({
+        bucket: "b",
+        objectName: "x/y.ndjson",
+        fetch: (() =>
+          Promise.resolve(
+            new Response(buildObjectBody(context, [RECORD]), { status: 200 }),
+          )) as typeof fetch,
+      });
+      expect(report.context?.reportId).toBe(context.reportId);
+      expect(report.records.length).toBe(1);
+      expect(report.reports.length).toBe(1);
+    });
+  });
+
   describe("parseReportGroups()", () => {
     it("returns one group per context line with its own records", () => {
       const first = ciContext("01AAA0000000000000000000", false);

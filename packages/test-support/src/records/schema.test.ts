@@ -131,6 +131,31 @@ describe("schema", () => {
       expect(parseContextLine(serializeRecordLine(RECORD).trim()))
         .toBeUndefined();
     });
+
+    it("returns undefined for a malformed ci block", () => {
+      const ci = {
+        workflowRunId: "1",
+        runAttempt: 1,
+        workflow: "CI",
+        job: "x",
+      };
+      const base = { ...CONTEXT, env: "ci" };
+      expect(parseContextLine(JSON.stringify({ ...base, ci: "not a block" })))
+        .toBeUndefined();
+      expect(parseContextLine(JSON.stringify({
+        ...base,
+        ci: { ...ci, workflowRunId: 5 },
+      }))).toBeUndefined();
+      expect(parseContextLine(JSON.stringify({
+        ...base,
+        ci: { ...ci, fork: "yes" },
+      }))).toBeUndefined();
+    });
+
+    it("returns undefined for non-JSON and non-object lines", () => {
+      expect(parseContextLine("{nope")).toBeUndefined();
+      expect(parseContextLine("42")).toBeUndefined();
+    });
   });
 
   describe("buildObjectBody()", () => {
@@ -174,6 +199,13 @@ describe("schema", () => {
 
     it("returns the same name for the same context", () => {
       expect(localObjectName(CONTEXT)).toBe(localObjectName(CONTEXT));
+    });
+
+    it("labels a context with no branch as detached", () => {
+      const { branch: _branch, ...detached } = CONTEXT;
+      expect(localObjectName(detached as typeof CONTEXT)).toContain(
+        "-detached.ndjson",
+      );
     });
   });
 

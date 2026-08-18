@@ -26,6 +26,17 @@ import {
   parseAliasLine,
 } from "@commonfabric/test-support/records";
 
+/**
+ * Whether a failed `git show <ref>:<path>` means the path was absent at
+ * that ref. Only that failure reads as empty history; any other git
+ * failure fails the gate, since treating it as an absent file would
+ * approve a rewrite on an error.
+ */
+export function gitShowFailureMeansAbsent(message: string): boolean {
+  return message.includes("does not exist") ||
+    message.includes("exists on disk, but not in");
+}
+
 async function git(...args: string[]): Promise<string> {
   const { code, stdout, stderr } = await new Deno.Command("git", {
     args,
@@ -57,13 +68,7 @@ async function main(): Promise<void> {
   try {
     committed = await git("show", `${mergeBase}:${ALIAS_FILE}`);
   } catch (error) {
-    // Only a path that did not exist at the merge base reads as empty
-    // history. Any other git failure fails the gate: treating it as an
-    // absent file would approve a rewrite on an error.
-    const message = String(error);
-    const absent = message.includes("does not exist") ||
-      message.includes("exists on disk, but not in");
-    if (!absent) {
+    if (!gitShowFailureMeansAbsent(String(error))) {
       console.error(`Cannot read ${ALIAS_FILE} at the merge base: ${error}`);
       Deno.exit(2);
     }

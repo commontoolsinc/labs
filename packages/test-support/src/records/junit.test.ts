@@ -97,6 +97,50 @@ describe("junit", () => {
         JUnitParseError,
       );
     });
+
+    it("skips comments, CDATA sections, and declarations", () => {
+      const cases = parseJUnit(
+        "<!DOCTYPE testsuite>" +
+          '<!-- a comment with a <testcase name="ghost"/> inside -->' +
+          '<testsuite name="s"><![CDATA[<testcase name="ghost2"/>]]>' +
+          '<testcase name="real" time="0.001"/></testsuite>',
+      );
+      expect(cases.map((c) => c.name)).toEqual(["real"]);
+    });
+
+    it("reads single-quoted attributes and numeric entities", () => {
+      const cases = parseJUnit(
+        "<testsuite name='s'><testcase name='a &#62; b &#x26; c'/>" +
+          "</testsuite>",
+      );
+      expect(cases[0]?.name).toBe("a > b & c");
+    });
+
+    it("throws for every unterminated construct", () => {
+      expect(() => parseJUnit('<?xml version="1.0"')).toThrow(
+        JUnitParseError,
+      );
+      expect(() => parseJUnit("<!-- open comment")).toThrow(JUnitParseError);
+      expect(() => parseJUnit("<![CDATA[ open")).toThrow(JUnitParseError);
+      expect(() => parseJUnit("<!DOCTYPE open")).toThrow(JUnitParseError);
+      expect(() => parseJUnit("</testsuite")).toThrow(JUnitParseError);
+      expect(() => parseJUnit('<testcase name="a"')).toThrow(JUnitParseError);
+      expect(() => parseJUnit('<testcase name="unclosed>')).toThrow(
+        JUnitParseError,
+      );
+    });
+
+    it("throws for a tag with no name", () => {
+      expect(() => parseJUnit("< >")).toThrow(JUnitParseError);
+    });
+
+    it("ignores markers outside any open testcase", () => {
+      const cases = parseJUnit(
+        '<testsuite name="s"><failure message="stray"/><skipped/>' +
+          "</testcase></testsuite>",
+      );
+      expect(cases).toEqual([]);
+    });
   });
 
   describe("dropContainerCases()", () => {

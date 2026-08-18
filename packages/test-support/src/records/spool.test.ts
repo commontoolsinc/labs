@@ -66,12 +66,23 @@ describe("spool", () => {
       expect(await listStagingSpools(root)).toEqual([]);
       expect(await listSpools(root)).toEqual([held.dir]);
     });
+
+    it("throws and cleans its staging directory for an unusable root", async () => {
+      const file = join(root, "a-file");
+      await Deno.writeTextFile(file, "not a directory");
+      await expect(createRunSpool(file, CONTEXT)).rejects.toThrow();
+      expect(await listStagingSpools(root)).toEqual([]);
+    });
   });
 
   describe("tryAdoptSpool()", () => {
     it("returns undefined while the owner holds the lock", async () => {
       held = await createRunSpool(root, CONTEXT);
       expect(await tryAdoptSpool(held.dir)).toBeUndefined();
+    });
+
+    it("returns undefined for a directory that does not exist", async () => {
+      expect(await tryAdoptSpool(join(root, "absent"))).toBeUndefined();
     });
 
     it("returns the spool once the owner released it", async () => {
@@ -178,6 +189,21 @@ describe("spool", () => {
       const dir = join(root, "run-01NOCONTEXT0000000000000");
       await Deno.mkdir(dir);
       const contents = await readSpool(dir);
+      expect(contents.context).toBeUndefined();
+      expect(contents.records).toEqual([]);
+    });
+
+    it("warns about a context that does not parse", async () => {
+      const dir = join(root, "run-01BADCONTEXT000000000000");
+      await Deno.mkdir(dir);
+      await Deno.writeTextFile(join(dir, CONTEXT_FILE), "not json\n");
+      const contents = await readSpool(dir);
+      expect(contents.context).toBeUndefined();
+      expect(contents.warnings[0]).toContain("unreadable context");
+    });
+
+    it("returns nothing for a spool directory that vanished", async () => {
+      const contents = await readSpool(join(root, "run-GONE"));
       expect(contents.context).toBeUndefined();
       expect(contents.records).toEqual([]);
     });

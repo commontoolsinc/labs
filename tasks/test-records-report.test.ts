@@ -7,6 +7,8 @@ import {
   collisions,
   identityKey,
   overSixtySeconds,
+  recentDatePrefixes,
+  runReport,
 } from "./test-records-report.ts";
 import {
   AliasResolver,
@@ -142,6 +144,106 @@ describe("test-records-report", () => {
       const slow = overSixtySeconds(byIdentity);
       expect(slow.length).toBe(1);
       expect(slow[0]?.key).toBe('["unit","bakery","slow"]');
+    });
+  });
+
+  describe("recentDatePrefixes()", () => {
+    it("returns the window's partitions, newest first", () => {
+      const now = Date.parse("2026-08-18T12:00:00Z");
+      expect(recentDatePrefixes(3, now)).toEqual([
+        "2026/08/18",
+        "2026/08/17",
+        "2026/08/16",
+      ]);
+    });
+  });
+
+  describe("runReport()", () => {
+    const NOW = Date.parse("2026-08-18T12:00:00Z");
+
+    // One day's listing with two objects: a trusted report and a
+    // fork-authored one carrying an over-sixty-seconds record.
+    function reportFetch(bodies: Record<string, string>): typeof fetch {
+      return ((input: URL | RequestInfo) => {
+        const url = String(input);
+        if (url.includes("/storage/v1/")) {
+          const prefix = new URL(url).searchParams.get("prefix")!;
+          const items = prefix.includes("2026/08/18/")
+            ? Object.keys(bodies).map((name) => ({ name }))
+            : [];
+          return Promise.resolve(
+            new Response(JSON.stringify({ items }), { status: 200 }),
+          );
+        }
+        const name = Object.keys(bodies).find((candidate) =>
+          url.endsWith(candidate)
+        );
+        return Promise.resolve(
+          new Response(bodies[name ?? ""] ?? "", { status: 200 }),
+        );
+      }) as typeof fetch;
+    }
+
+    function ciBody(
+      fork: boolean,
+      records: ReturnType<typeof record>[],
+    ): string {
+      const context = {
+        ...contextOn("2026-08-18T01:00:00.000Z"),
+        env: "ci" as const,
+        ci: {
+          workflowRunId: fork ? "2" : "1",
+          runAttempt: 1,
+          workflow: "CI",
+          job: "Test",
+          fork,
+        },
+      };
+      return JSON.stringify(context) + "\n" +
+        records.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
+    }
+
+    it("excludes fork-authored reports from the ratchet", async () => {
+      const gateFailed = await runReport({
+        days: 1,
+        gate: true,
+        bucket: "b",
+        prefix: "p",
+        now: NOW,
+        fetchImpl: reportFetch({
+          "trusted.ndjson": ciBody(false, [record("fast", "pass", 5)]),
+          "forked.ndjson": ciBody(true, [record("slow", "fail", 90_000)]),
+        }),
+      });
+      expect(gateFailed).toBe(false);
+    });
+
+    it("fails the gate for an over-sixty-seconds trusted record", async () => {
+      const gateFailed = await runReport({
+        days: 1,
+        gate: true,
+        bucket: "b",
+        prefix: "p",
+        now: NOW,
+        fetchImpl: reportFetch({
+          "trusted.ndjson": ciBody(false, [record("slow", "pass", 61_000)]),
+        }),
+      });
+      expect(gateFailed).toBe(true);
+    });
+
+    it("reports without failing when the gate is off", async () => {
+      const gateFailed = await runReport({
+        days: 1,
+        gate: false,
+        bucket: "b",
+        prefix: "p",
+        now: NOW,
+        fetchImpl: reportFetch({
+          "trusted.ndjson": ciBody(false, [record("slow", "pass", 61_000)]),
+        }),
+      });
+      expect(gateFailed).toBe(false);
     });
   });
 });

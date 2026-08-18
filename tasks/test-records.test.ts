@@ -6,6 +6,7 @@ import { join } from "@std/path";
 import {
   buildLocalContext,
   finishRunRecording,
+  readPersonalKey,
   recordingChildEnv,
   shipSpool,
   startRunRecording,
@@ -79,6 +80,39 @@ describe("test-records", () => {
       );
       expect(context.agent).toBe("probe-agent");
     });
+
+    it("falls back to unknown facts outside a repository", async () => {
+      const context = await buildLocalContext(root, () => undefined);
+      expect(context.commit).toBe("unknown");
+      expect(context.branch).toBeUndefined();
+      expect(context.dirty).toBe(false);
+    });
+  });
+
+  describe("readPersonalKey()", () => {
+    it("returns undefined with the variable unset", () => {
+      expect(readPersonalKey(() => undefined)).toBeUndefined();
+    });
+
+    it("returns undefined for an unreadable key path", () => {
+      expect(
+        readPersonalKey((name) =>
+          name === "CF_TEST_RECORDS_KEY_FILE"
+            ? join(root, "absent.json")
+            : undefined
+        ),
+      ).toBeUndefined();
+    });
+
+    it("returns undefined for a file that is not a key", async () => {
+      const path = join(root, "not-a-key.json");
+      await Deno.writeTextFile(path, "{}");
+      expect(
+        readPersonalKey((name) =>
+          name === "CF_TEST_RECORDS_KEY_FILE" ? path : undefined
+        ),
+      ).toBeUndefined();
+    });
   });
 
   describe("startRunRecording()", () => {
@@ -88,6 +122,30 @@ describe("test-records", () => {
       );
       expect(recording).toEqual({ mode: "join", dir: "/some/spool" });
       expect(recordingChildEnv(recording)).toEqual({});
+    });
+
+    it("is off when the spool root cannot be created", async () => {
+      const keyPath = join(root, "key.json");
+      await Deno.writeTextFile(keyPath, JSON.stringify(KEY));
+      const blocking = join(root, "blocking-file");
+      await Deno.writeTextFile(blocking, "not a directory");
+      const recording = await startRunRecording((name) => {
+        if (name === "CF_TEST_RECORDS_KEY_FILE") return keyPath;
+        if (name === "CF_TEST_RECORDS_SPOOL_ROOT") {
+          return join(blocking, "root");
+        }
+        return undefined;
+      });
+      expect(recording).toEqual({ mode: "off" });
+    });
+
+    it("is off when no spool root can be derived at all", async () => {
+      const keyPath = join(root, "key.json");
+      await Deno.writeTextFile(keyPath, JSON.stringify(KEY));
+      const recording = await startRunRecording((name) =>
+        name === "CF_TEST_RECORDS_KEY_FILE" ? keyPath : undefined
+      );
+      expect(recording).toEqual({ mode: "off" });
     });
 
     it("is off with neither a run nor a key", async () => {
@@ -112,6 +170,17 @@ describe("test-records", () => {
   });
 
   describe("shipSpool()", () => {
+    it("leaves a spool with no readable context in place", async () => {
+      const dir = join(root, "run-01NOCONTEXT0000000000000");
+      await Deno.mkdir(dir);
+      const shipped = await shipSpool(dir, KEY, () => undefined, {
+        mintToken: () => Promise.resolve("stub-token"),
+        fetchImpl: okFetch([]),
+      });
+      expect(shipped).toBe(false);
+      expect((await listSpools(root)).length).toBe(1);
+    });
+
     it("uploads one gzipped object under the holder's prefix and deletes the spool", async () => {
       const spool = await createRunSpool(root, CONTEXT);
       const writer = FragmentWriter.open(spool.dir);

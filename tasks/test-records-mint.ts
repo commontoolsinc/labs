@@ -71,7 +71,7 @@ export function usernameOfDisplayName(displayName: string): string | undefined {
   return match?.[1];
 }
 
-interface GcpClient {
+export interface GcpClient {
   token: string;
   fetchImpl: typeof fetch;
 }
@@ -277,6 +277,68 @@ function usage(): never {
   Deno.exit(2);
 }
 
+export interface MintRunOptions {
+  recipient: string;
+  username: string;
+  out: string;
+  client: GcpClient;
+  /** GITHUB_OUTPUT file to append the fingerprint line to, when set. */
+  githubOutput?: string;
+}
+
+/**
+ * The whole minting run: validates the inputs, provisions the account and
+ * folders, mints the rotated key, and writes the sealed delivery. Returns
+ * the path of the sealed file.
+ */
+export async function runMint(options: MintRunOptions): Promise<string> {
+  const { recipient, out, client } = options;
+  if (!isRecipient(recipient)) {
+    throw new Error(
+      "the recipient input is not a cfr1 delivery recipient; " +
+        "generate one with: deno task test-records-key request",
+    );
+  }
+  if (!isGitHubUsername(options.username)) {
+    throw new Error(`not a GitHub username: ${options.username}`);
+  }
+  // GitHub logins are case-insensitive, so the login is canonicalized to
+  // lowercase before it names anything: the account id, the folder, the
+  // display name, and the key's cf_username all agree however the person
+  // typed it into the dispatch form.
+  const username = options.username.toLowerCase();
+  if (!DATASET_PREFIXES.includes(storePrefix())) {
+    throw new Error(
+      `the configured store prefix ${storePrefix()} is not in ` +
+        "DATASET_PREFIXES; a key minted now could not write where " +
+        "uploads go",
+    );
+  }
+
+  const email = await ensureServiceAccount(client, username);
+  console.log(`service account: ${email}`);
+  const bucket = storeBucket();
+  for (const prefix of DATASET_PREFIXES) {
+    await ensurePersonFolder(client, bucket, prefix, username, email);
+    console.log(`folder ready: ${prefix}/submissions/local/${username}/`);
+  }
+  const keyFile = await mintKey(client, email, username);
+  const sealed = await seal(recipient, new TextEncoder().encode(keyFile));
+  const fingerprint = await recipientFingerprint(recipient);
+  await Deno.mkdir(out, { recursive: true });
+  const path = join(out, `test-records-key-${fingerprint}.sealed`);
+  await Deno.writeTextFile(path, JSON.stringify(sealed) + "\n");
+  console.log(`sealed delivery written: ${path}`);
+  if (options.githubOutput !== undefined && options.githubOutput.length > 0) {
+    await Deno.writeTextFile(
+      options.githubOutput,
+      `fingerprint=${fingerprint}\n`,
+      { append: true },
+    );
+  }
+  return path;
+}
+
 async function main(): Promise<void> {
   let recipient: string | undefined;
   let username: string | undefined;
@@ -303,55 +365,19 @@ async function main(): Promise<void> {
   if (recipient === undefined || username === undefined || out === undefined) {
     usage();
   }
-  if (!isRecipient(recipient)) {
-    throw new Error(
-      "the recipient input is not a cfr1 delivery recipient; " +
-        "generate one with: deno task test-records-key request",
-    );
-  }
-  if (!isGitHubUsername(username)) {
-    throw new Error(`not a GitHub username: ${username}`);
-  }
-  // GitHub logins are case-insensitive, so the login is canonicalized to
-  // lowercase before it names anything: the account id, the folder, the
-  // display name, and the key's cf_username all agree however the person
-  // typed it into the dispatch form.
-  username = username.toLowerCase();
-  if (!DATASET_PREFIXES.includes(storePrefix())) {
-    throw new Error(
-      `the configured store prefix ${storePrefix()} is not in ` +
-        "DATASET_PREFIXES; a key minted now could not write where " +
-        "uploads go",
-    );
-  }
   const token = readEnv("TEST_RECORDS_GCP_TOKEN");
   if (token === undefined || token.length === 0) {
     throw new Error("TEST_RECORDS_GCP_TOKEN is not set");
   }
-  const client: GcpClient = { token, fetchImpl: fetch };
-
-  const email = await ensureServiceAccount(client, username);
-  console.log(`service account: ${email}`);
-  const bucket = storeBucket();
-  for (const prefix of DATASET_PREFIXES) {
-    await ensurePersonFolder(client, bucket, prefix, username, email);
-    console.log(`folder ready: ${prefix}/submissions/local/${username}/`);
-  }
-  const keyFile = await mintKey(client, email, username);
-  const sealed = await seal(recipient, new TextEncoder().encode(keyFile));
-  const fingerprint = await recipientFingerprint(recipient);
-  await Deno.mkdir(out, { recursive: true });
-  const path = join(out, `test-records-key-${fingerprint}.sealed`);
-  await Deno.writeTextFile(path, JSON.stringify(sealed) + "\n");
-  console.log(`sealed delivery written: ${path}`);
-  const outputPath = readEnv("GITHUB_OUTPUT");
-  if (outputPath !== undefined && outputPath.length > 0) {
-    await Deno.writeTextFile(
-      outputPath,
-      `fingerprint=${fingerprint}\n`,
-      { append: true },
-    );
-  }
+  const runOptions: MintRunOptions = {
+    recipient,
+    username,
+    out,
+    client: { token, fetchImpl: fetch },
+  };
+  const githubOutput = readEnv("GITHUB_OUTPUT");
+  if (githubOutput !== undefined) runOptions.githubOutput = githubOutput;
+  await runMint(runOptions);
 }
 
 if (import.meta.main) {

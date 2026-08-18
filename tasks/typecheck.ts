@@ -113,11 +113,11 @@ const GLOBS = [
 const UI_COMPONENTS_DIR = "packages/ui/src/v2/components";
 const UI_EXCLUDED_TRAILING = new Set("outliner");
 
-async function uiComponentFiles(): Promise<string[]> {
+async function uiComponentFiles(root: string): Promise<string[]> {
   const files: string[] = [];
   const directories: Deno.DirEntry[] = [];
   try {
-    for await (const entry of Deno.readDir(UI_COMPONENTS_DIR)) {
+    for await (const entry of Deno.readDir(`${root}/${UI_COMPONENTS_DIR}`)) {
       directories.push(entry);
     }
   } catch (error) {
@@ -131,7 +131,7 @@ async function uiComponentFiles(): Promise<string[]> {
     const last = entry.name.at(-1);
     if (last !== undefined && UI_EXCLUDED_TRAILING.has(last)) continue;
     for await (
-      const file of Deno.readDir(`${UI_COMPONENTS_DIR}/${entry.name}`)
+      const file of Deno.readDir(`${root}/${UI_COMPONENTS_DIR}/${entry.name}`)
     ) {
       if (file.isFile && /\.tsx?$/.test(file.name)) {
         files.push(`${UI_COMPONENTS_DIR}/${entry.name}/${file.name}`);
@@ -151,18 +151,23 @@ export function scopeOfPath(checkPath: string): string {
   return parts[0] ?? "repo";
 }
 
-async function collectPathsByScope(): Promise<Map<string, string[]>> {
+/** Every checked path, repository-relative, grouped by owning scope. */
+export async function collectPathsByScope(
+  root: string = Deno.cwd(),
+): Promise<Map<string, string[]>> {
   const paths: string[] = [...DIRS];
   for (const pattern of GLOBS) {
-    for await (const entry of expandGlob(pattern, { includeDirs: false })) {
+    for await (
+      const entry of expandGlob(pattern, { root, includeDirs: false })
+    ) {
       paths.push(
-        entry.path.startsWith(Deno.cwd())
-          ? entry.path.slice(Deno.cwd().length + 1)
+        entry.path.startsWith(root)
+          ? entry.path.slice(root.length + 1)
           : entry.path,
       );
     }
   }
-  paths.push(...await uiComponentFiles());
+  paths.push(...await uiComponentFiles(root));
   const byScope = new Map<string, string[]>();
   for (const checkPath of paths.sort()) {
     const scope = scopeOfPath(checkPath);
