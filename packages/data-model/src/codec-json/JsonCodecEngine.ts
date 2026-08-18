@@ -608,12 +608,6 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     return JsonCodecEngine.#textEncoder.encode(JSON.stringify(data));
   }
 
-  /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
-  static #fromBytes(bytes: Uint8Array): JsonCodecValue {
-    const json = JsonCodecEngine.#textDecoder.decode(bytes);
-    return JsonCodecEngine.#parseWireText(json);
-  }
-
   /**
    * Indicates whether `count` is usable as a `/hole` run length: a safe
    * integer of at least one. A run always stands for at least one absent

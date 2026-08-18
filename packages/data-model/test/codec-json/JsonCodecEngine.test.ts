@@ -442,6 +442,31 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
+    it("throws for unparseable bytes when strict", () => {
+      const bytes = new TextEncoder().encode("{not json");
+
+      expect(() =>
+        newDefaultJsonCodecEngine().decodeFromBytes(
+          bytes,
+          new TestLiveEnvironment(),
+        )
+      ).toThrow(/Malformed JSON in an encoded `FabricValue` string/);
+    });
+
+    it("returns a `ProblematicValue` for unparseable bytes when lenient", () => {
+      // This entry point reaches a conversion without passing through
+      // `decode()`, so it settles the refusal itself. Were it not to, the
+      // byte boundary would answer a malformed payload differently from the
+      // string boundary for no reason a caller could name.
+      const bytes = new TextEncoder().encode("{not json");
+      const decoded = newDefaultJsonCodecEngine({ lenient: true })
+        .decodeFromBytes(bytes, new TestLiveEnvironment());
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect((decoded as ProblematicValue).error)
+        .toMatch(/Malformed JSON in an encoded `FabricValue` string/);
+    });
+
     it("returns `Uint8Array` from `encodeToBytes()`", () => {
       const { jsonCodecEngine } = makeTestCodec();
       const result = jsonCodecEngine.encodeToBytes(42);
