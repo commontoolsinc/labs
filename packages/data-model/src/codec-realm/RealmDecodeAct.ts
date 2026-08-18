@@ -124,9 +124,9 @@ export class RealmDecodeAct
         return this.#decodePlainObject(data);
       }
 
-      // Wire data is untrusted, and cloning carries a good deal this format
-      // never emits -- a bare `Uint8Array`, a `Date`, a multi-entry `Map` --
-      // all of which reach here.
+      // Cloning carries a good deal this format never emits -- a bare
+      // `Uint8Array`, a `Date`, a multi-entry `Map` -- all of which reach here
+      // if the far side is a different build.
       return this.reportMalformed(
         "",
         data,

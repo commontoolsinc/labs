@@ -288,9 +288,10 @@ both come from the walk.
 The two directions refuse a cycle differently, for the reason they differ
 everywhere else. Encoding **raises**: the value is a local caller's, and a
 cycle in it is that caller's bug. Decoding **reports**, settled against the
-engine's leniency, because a cycle arriving on a channel is untrusted data like
-any other malformation — and cloning delivers one faithfully, so a peer can
-send one.
+engine's leniency: cloning delivers a cycle faithfully, so one can arrive even
+though no conforming encoder emits one — which makes it a malformation like any
+other, and something to report rather than to raise on a caller who did nothing
+wrong (Section 7.1).
 
 Sharing is preserved by copy-on-write rather than by a memo. A subtree needing
 no encoding is returned by identity, so every position that held the one object
@@ -415,15 +416,38 @@ carries.
 
 ### 7.1 Codec State Validation
 
+**This boundary is not a trust boundary.** Both sides are assumed to run this
+same implementation, so what a peer sends is what this format's encoder emits.
+A payload is not adversarial input, and Section 2.3 says the same of the marker
+from the other direction: it is not authentication, and nothing here defends
+against a peer that means harm.
+
+What a peer may be is a **different build**. That is what codec validation is
+for.
+
 A codec **validates the state it is handed and rejects what it will not
-accept**, rather than coercing it. Wire data is untrusted: a `Bytes@1` whose
-state is a string, a `Hash@1` whose `tag` is not a string, a `Symbol@1` whose
-state is not a string — each is a malformation, settled against leniency like
-any other, and never a value built from whatever arrived.
+accept**, rather than coercing it: a `Bytes@1` whose state is a string, a
+`Hash@1` whose `tag` is not a string, a `Symbol@1` whose state is not a string
+— each is a malformation, settled against leniency like any other, and never a
+value built from whatever arrived. Such a state means the two ends disagree
+about the type, which is a version difference or a bug, and either way is
+something to report rather than to guess at.
 
 This is a requirement rather than an observation. An implementation that
 coerced instead would satisfy every other claim in this document while
 producing values a sender never sent.
+
+**Do not guard against shapes the transport cannot deliver.** `structuredClone()`
+normalizes what it carries: an object arrives with `Object.prototype` however
+its original was made, an `Array` subclass arrives as a plain `Array`, and an
+accessor arrives as a data property. A check for a null-prototype record, an
+exotic array, or a getter-backed index is therefore unreachable, and reads to a
+later maintainer as though the boundary defended against something it does not.
+
+What the transport *does* carry faithfully is an array's extra own properties,
+which arrive intact. Nothing here emits one, which is what rules them out --
+the assumption at the top of this section, and the one place it does load-
+bearing work.
 
 **A field of a codec's state that the codec does not read is ignored, not
 refused.** A state is matched by what it must carry, so a record arriving with
