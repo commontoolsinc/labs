@@ -21,7 +21,6 @@ import {
   type AdminManagerCredential,
   adminManagerCredentialIsActive,
   adminRegistryEntries,
-  type EmptyAdminRegistryValue,
 } from "../../cfc/admin/mod.ts";
 import { normalizePlateId, US_STATES } from "../../vehicles.ts";
 
@@ -155,9 +154,9 @@ export interface LotWatchAdminRegistryStoredValue {
   admins?: LotWatchAdminList;
 }
 
-export type LotWatchAdminRegistryValue =
-  | LotWatchAdminRegistryStoredValue
-  | Default<EmptyAdminRegistryValue>;
+export type LotWatchAdminRegistryValue = Default<
+  LotWatchAdminRegistryStoredValue
+>;
 export type LotWatchAdminRegistryCell = Writable<LotWatchAdminRegistryValue>;
 export type LotWatchAdminManagerCredentialCell = Writable<
   LotWatchAdminManagerCredential | null
