@@ -1005,8 +1005,9 @@ export class Scheduler {
   /** The bound yield hook handed to the settle loop and the fan-out loop
    * (stage C tuning T3): a promise to await when the slice is spent, else
    * undefined. Defined only when `cooperativeYield` exists. */
-  private readonly cooperativeYieldBetweenRuns = (): Promise<void> | undefined =>
-    this.cooperativeYield?.maybeYield();
+  private readonly cooperativeYieldBetweenRuns = ():
+    | Promise<void>
+    | undefined => this.cooperativeYield?.maybeYield();
 
   /** DIAGNOSTIC (tests): the serving posture's cooperative yielder, if
    * this scheduler has one. */

@@ -197,7 +197,9 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
       );
       outIds.push(out.getAsNormalizedFullLink().id);
       const walk = (tx: IExtendedStorageTransaction): void => {
-        const value = trigger.withTx(tx).get() as { value?: number } | undefined;
+        const value = trigger.withTx(tx).get() as
+          | { value?: number }
+          | undefined;
         burn(STEP_MS);
         out.withTx(tx).set({ step, n: value?.value ?? 0 });
       };

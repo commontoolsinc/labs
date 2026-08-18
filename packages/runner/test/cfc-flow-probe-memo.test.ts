@@ -86,9 +86,24 @@ describe("CFC flow-label probe memo (stage C tuning T1)", () => {
     const { runtime, storageManager } = newRuntime();
     try {
       const tx = runtime.edit();
-      const a = runtime.getCell(signer.did(), "probe-memo-inv-a", undefined, tx);
-      const b = runtime.getCell(signer.did(), "probe-memo-inv-b", undefined, tx);
-      const c = runtime.getCell(signer.did(), "probe-memo-inv-c", undefined, tx);
+      const a = runtime.getCell(
+        signer.did(),
+        "probe-memo-inv-a",
+        undefined,
+        tx,
+      );
+      const b = runtime.getCell(
+        signer.did(),
+        "probe-memo-inv-b",
+        undefined,
+        tx,
+      );
+      const c = runtime.getCell(
+        signer.did(),
+        "probe-memo-inv-c",
+        undefined,
+        tx,
+      );
       a.getRaw();
       b.set({ v: 1 });
       const before = probeCounts(runtime);
@@ -193,8 +208,18 @@ describe("CFC flow-label probe memo (stage C tuning T1)", () => {
       const { runtime, storageManager } = newRuntime({ serverExecution });
       try {
         const tx = runtime.edit();
-        const a = runtime.getCell(signer.did(), "probe-memo-arm-a", undefined, tx);
-        const b = runtime.getCell(signer.did(), "probe-memo-arm-b", undefined, tx);
+        const a = runtime.getCell(
+          signer.did(),
+          "probe-memo-arm-a",
+          undefined,
+          tx,
+        );
+        const b = runtime.getCell(
+          signer.did(),
+          "probe-memo-arm-b",
+          undefined,
+          tx,
+        );
         a.getRaw();
         b.set({ v: 1 });
         const before = probeCounts(runtime);
