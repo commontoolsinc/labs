@@ -84,13 +84,14 @@ not a style reference.
 
 ## fixture
 
-`gideon-tests/`, `integration/`, `test/`, `scope-bug-computed-vnode-blank/`,
-`scope-bug-ct1597-forward/`, `scope-bug-ct1597-reduce/`, `cell-link.tsx`
-(suggestion tester), `nested-map-ifelse-test.tsx`, `render-test.tsx`,
-`self-reference-test.tsx`, and every `*.test.ts(x)` file anywhere in this
-package. (The blanket `*.test.ts(x)` rule is about pattern-authoring idioms —
-test _style_ is governed by `docs/common/workflows/pattern-testing.md`, and the
-exemplars' own test files remain good references for it.)
+`gideon-tests/`, `integration/`, `test/`, `plain-array-callback-locals/`,
+`scope-bug-computed-vnode-blank/`, `scope-bug-ct1597-forward/`,
+`scope-bug-ct1597-reduce/`, `cell-link.tsx` (suggestion tester),
+`nested-map-ifelse-test.tsx`, `render-test.tsx`, `self-reference-test.tsx`, and
+every `*.test.ts(x)` file anywhere in this package. (The blanket `*.test.ts(x)`
+rule is about pattern-authoring idioms — test _style_ is governed by
+`docs/common/workflows/pattern-testing.md`, and the exemplars' own test files
+remain good references for it.)
 
 ## legacy
 

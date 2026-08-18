@@ -86,6 +86,42 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
+### Addendum 4 (plain-array value callbacks carry pattern-owned sites)
+
+A `map`, `filter`, or `find` callback on an ordinary JavaScript array inside a
+pattern body now carries pattern-owned expression sites, the same ones the
+pattern body carries. `supportsPatternOwnedWrapperCallbackSite`
+(`policy/callback-boundary.ts`) admits the `plain-array-value` boundary
+alongside `reactive-array-method`, `pattern-builder`, and `render-builder`.
+
+The callback runs eagerly during pattern build, so its statements are pattern
+body statements that happen to be written once and executed several times. A
+value binding in one is therefore a pattern-body binding, and a reactive
+computation bound there lowers to its own lift-applied call per iteration.
+
+Two behaviors change:
+
+- A binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside
+  `COLUMN_INDICES.map((colIdx) => …)` lowers. Previously the comparison was
+  emitted raw, so it ran on the reactive proxies rather than their values and
+  froze to `false`. Reading the binding as a JSX condition then rendered the
+  wrong branch with no diagnostic, because the JSX exemption in
+  `isInRestrictedReactiveContext` suppresses the "wrap it in `computed()`"
+  errors that the same binding draws outside JSX.
+- `pattern-context:get-call` and `pattern-context:optional-chaining` no longer
+  fire for a read that the callback's own value sites can carry, so
+  `["-", "+"].map((sep) => rows.get().join(sep))` compiles to an array of
+  per-separator lifts instead of being rejected.
+
+A reactive array-method callback keeps the older, stricter rule, and the
+difference is structural rather than stylistic: that callback is lowered into a
+sub-pattern over per-element cells, so a `.get()` on the element binding has no
+pattern-body site to become a lift.
+
+This is P-011 applied to a boundary that had been drawn by the receiver's type
+rather than by what the callback lowers to. Whether the mapped array is plain
+says nothing about whether the values the callback closes over are reactive.
+
 ### Addendum 3 (`toJSON` is an ordinary member name)
 
 `pattern-context:object-member` treats `toJSON` like any other member. A

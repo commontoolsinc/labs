@@ -3420,7 +3420,7 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
-    "still errors on optional access inside a lowered array-method callback",
+    "allows optional access inside an array-method callback on a .get() chain",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
 
@@ -3437,8 +3437,12 @@ Deno.test("Reactive .get() Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern-context:optional-chaining");
+      assertEquals(
+        errors.length,
+        0,
+        "the callback's value sites carry the access, so its '?.' runs on " +
+          "resolved values",
+      );
     },
   );
 
@@ -3483,7 +3487,7 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
-    "errors on a .get() inside a plain array-method callback",
+    "allows a .get() inside a plain array-method callback",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
 
@@ -3496,8 +3500,12 @@ Deno.test("Reactive .get() Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern-context:get-call");
+      assertEquals(
+        errors.length,
+        0,
+        "a plain array-method callback runs in the pattern body, so its " +
+          "value sites carry the read into a per-element lift",
+      );
     },
   );
 

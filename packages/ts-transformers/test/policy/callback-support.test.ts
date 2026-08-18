@@ -99,7 +99,7 @@ Deno.test(
     });
     assertEquals(semantics.isReactiveArrayMethodCallback, false);
     assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
-    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
   },
 );
 
@@ -127,7 +127,7 @@ Deno.test(
     });
     assertEquals(semantics.isReactiveArrayMethodCallback, false);
     assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
-    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
   },
 );
 
