@@ -24,7 +24,7 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import { UnknownValue } from "@commonfabric/data-model/codec-common";
-import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
+import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
@@ -264,7 +264,7 @@ describe("data-uri", () => {
       const payload = new TextDecoder().decode(
         fromBase64url(dataURI.slice(dataURI.indexOf(",") + 1)),
       );
-      expect(seemsLikeJsonEncodedFabricValue(payload)).toBe(true);
+      expect(JsonCodecEngine.seemsLikeEncoded(payload)).toBe(true);
     });
 
     // The standard encoding canonicalizes key order, so the minted id is a

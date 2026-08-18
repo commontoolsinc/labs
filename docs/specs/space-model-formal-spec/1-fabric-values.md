@@ -2944,13 +2944,15 @@ export function plainObjectFromJson<T extends object = object>(
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/src/codec-json/impl.ts
+// file: packages/data-model/src/codec-json/JsonCodecEngine.ts
 
-/**
- * Indicates if the given text has a "first-blush" appearance as text in the
- * JSON-embedded encoding (i.e., carries the `fvj1:` prefix).
- */
-export function seemsLikeJsonEncodedFabricValue(value: string): boolean;
+declare class ExampleJsonCodecEngine {
+  /**
+   * Indicates if the given text has a "first-blush" appearance as text in the
+   * JSON-embedded encoding (i.e., carries the `fvj1:` prefix).
+   */
+  static seemsLikeEncoded(value: string): boolean;
+}
 ```
 
 `codecs.ts` creates a single stateless `JsonCodecEngine` instance at module load
