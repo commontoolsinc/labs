@@ -1,14 +1,18 @@
 import {
   action,
+  cellFromUrl,
+  type ComparableCell,
   computed,
   Default,
-  entityRefToString,
   equals,
   handler,
+  lift,
   NAME,
   pattern,
   type PerSession,
   type PerUser,
+  type ReadonlyCell,
+  SELF,
   Stream,
   UI,
   type VNode,
@@ -48,6 +52,49 @@ export interface AddLinkEvent extends AgentAuthoredEvent {
 
 export interface SetBodyEvent extends AgentAuthoredEvent {
   body: string;
+}
+
+/**
+ * Reference another piece from this topic.
+ *
+ * Carries no `agentName`, unlike every other verb here, and the absence is the
+ * honest one: a mention records where a reference points and nothing about who
+ * made it, so a signature would be accepted and then dropped. Fabric still has
+ * the principal that made the write.
+ */
+export interface MentionEvent {
+  /** The piece to reference — the piece itself, not an address. Identity here
+   * is the cell, so this is what a caller passes and what gets stored.
+   *
+   * Declared through the ONE field every topic has rather than `unknown`, and
+   * the narrowness is what makes a non-reference CHEAP TO CATCH — not what
+   * catches it. An `asCell` payload is wrapped whole without validating what
+   * is behind it, so naming a property refuses nothing at the boundary: an
+   * address sent as text, which an inline CLI call argument produces by being
+   * parsed as plain JSON, arrives here as readily as a piece does. What the
+   * named property buys is a one-field read that tells the two apart —
+   * `topic.get()` is `undefined` for a value that is not a reference and an
+   * object for any piece — and `mention` spends it before storing anything.
+   *
+   * `title` is also the most this can safely name: this schema reaches every
+   * topic in `mentionable`, so a property without a default would be demanded
+   * of topics written before it existed and refuse their update. `title`
+   * carries one, and that default does double duty — it is also why the check
+   * admits a piece that is not a topic at all, which reads back `{ title: "" }`
+   * rather than `undefined`. `deno task pattern-vintage` proves the update side
+   * by replaying a real board.
+   *
+   * Nothing reads THROUGH it beyond that one field — the value is stored and
+   * compared. */
+  topic: Writable<{ title: string | Default<""> }>;
+}
+
+/** Stop referencing a piece. */
+export interface UnmentionEvent {
+  /** Declared and checked exactly as `MentionEvent.topic` is, and for the same
+   * reason: a payload that is not a reference matches no stored entry, so
+   * without the check it would remove nothing and report success. */
+  topic: Writable<{ title: string | Default<""> }>;
 }
 
 // ===== Verb results =====
@@ -120,50 +167,132 @@ export interface TopicInput {
     TopicAuthor | Default<{ kind: "person"; name: "" }>
   >;
   bodyUpdatedAt?: Writable<number | Default<0>>;
-  /** The board's own topics list — the sibling set for this topic's derived
-   * crossrefs and the mention universe for authoring. A reference to the
-   * tracker's array, wired at creation like `myName` (and backfillable as a
-   * one-time link-bind on pieces created before it existed). Absent, the
-   * detail page simply derives no connections. */
-  mentionable?: Writable<TopicReference[] | Default<[]>>;
+  /** The board's own topics list — the mention universe the body editor
+   * autocompletes over. A reference to the tracker's array, wired at creation
+   * like `myName` (and backfillable as a one-time link-bind on pieces created
+   * before it existed). Absent, the editor simply offers no completions. */
+  mentionable?: Writable<TopicPiece[] | Default<[]>>;
+  /** Where this topic's `[Label][key]` mentions point, keyed by the token that
+   * appears in the body. The editor owns the contents; this pattern owns the
+   * cell, which is what makes a mention durable and — because each entry holds
+   * the destination as a REFERENCE — what makes the reference graph a question
+   * about cell identity rather than about text.
+   *
+   * The default has to match the one `TopicOutput` publishes. A map published
+   * under a different default than its input carries cannot be materialized. */
+  // deno-lint-ignore ban-types
+  references?: Writable<TopicMentionRefMap | Default<{}>>;
+  /** Pieces this topic references outside its prose — what `mention` records.
+   *
+   * Its own list rather than an entry in `references`, because that map belongs
+   * to the body editor: the editor mints its keys, rewrites its labels, and
+   * collects entries whose token has left the document. A verb writing there
+   * would be writing into somebody else's bookkeeping. Here there is nothing to
+   * key by, because there is nothing to point back at from the prose — a
+   * reference outside a sentence is just a link in a list. */
+  mentioned?: Writable<unknown[] | Default<[]>>;
+  /** The board's mention pivot, one row per topic. A topic reads its own row
+   * out of it and nothing else; see `backlinksOf`. Absent, a topic simply shows
+   * no inbound references.
+   *
+   * Readable, not writable: the pivot is the board's derivation, and a topic
+   * has no business writing into it. Declaring the narrower cell says so where
+   * a reader can see it, rather than leaving it to convention. */
+  boardCrossrefs?: ReadonlyCell<TopicCrossrefRow[] | Default<[]>>;
 }
 
 /**
- * A sibling Topic as seen from another Topic: enough to render and navigate a
- * crossref chip and to scan its prose for references, and deliberately not its
- * own crossref graph. Keeping this projection non-recursive is what lets one
- * Topic's schema describe its siblings without traversing the whole board.
+ * One `[Label][key]` mention: where it points, and whether the reader has given
+ * it a wording of their own.
+ *
+ * `destination` is `unknown` because a mention may address any piece, and
+ * because that is the declaration that keeps it a reference. Every consumer
+ * here compares it by identity — nothing reads through it — so nothing needs
+ * a wider type, and a wider type would start expanding the piece behind it.
+ *
+ * The shape is the `cf-code-editor` `$references` contract
+ * (`packages/ui/src/v2/core/mention-refs.ts`), which notes carries too.
  */
-export interface TopicReference {
-  /** Like the other derived display fields, a cold retained sibling may not
-   * have produced this path yet. Its persisted title remains authoritative. */
-  [NAME]: string | Default<""> | undefined;
-  title: string;
-  body: string;
-  comments: TopicComment[];
-  links: TopicLink[];
+export interface TopicMentionRef {
+  destination: unknown;
+  modifiedTitle: boolean;
+}
+
+/** A topic's mentions, keyed by the token that appears in its body. The keys
+ * are local to one topic and mean nothing anywhere else. */
+export type TopicMentionRefMap = Record<string, TopicMentionRef>;
+
+/**
+ * What the board's pivot reads from one topic: what it points at, and nothing
+ * else. This is the entire cost of deriving the whole graph.
+ *
+ * The mentions are CELLS, and the annotation is what makes the answer settle.
+ * Declared `unknown` each entry still arrives as a link — the proxy keeps the
+ * back-pointer, and `equals` compares it correctly every time — but nothing
+ * tells the runtime that the entry is a reference worth tracking, so whether
+ * the document behind it has loaded when this runs is a matter of timing. The
+ * pivot then computes a different graph on different passes and never
+ * converges: the row for a topic that IS mentioned comes back empty, and the
+ * idempotency recheck reports differing writes for `mentionedBy`.
+ *
+ * `ComparableCell` is that missing annotation. It does not change what an entry
+ * is, only what the runtime knows to do about it, which is the whole difference
+ * between a graph that settles and one that depends on load order.
+ */
+export interface TopicMentionSource {
+  mentions: ComparableCell<unknown>[] | Default<[]>;
+}
+
+/**
+ * One row of the board's mention pivot: a topic, and the topics that mention
+ * it.
+ *
+ * ONE ROW PER DISTINCT TOPIC. That is the contract, not a property of the
+ * board that happens to hold: a row is addressed by `Writable.for(topic)`, so
+ * a board listing the same topic twice addresses ONE row from both entries and
+ * the second write lands on the first. Set semantics by construction — nothing
+ * downstream dedupes, and a reader finding its row by identity finds exactly
+ * one. The pivot's self-skip is asked of the topic rather than of its position
+ * so that a duplicate entry stays inert here too.
+ *
+ * Both sides are declared `unknown`, which is the whole design rather than a
+ * shortcut. A row holds cell REFERENCES — `unknown` is the declaration that
+ * lets a cell be written into one without a cast, and the one that stops any
+ * reader of the table expanding a topic it did not ask for. Each consumer
+ * declares what it wants to see through them.
+ */
+export interface TopicCrossrefRow {
+  /** The topic this row is about. `unknown` because it is written as a
+   * reference and only ever compared — `equals` takes the raw link. Anything
+   * wider retrieves the piece instead of pointing at it: declared `object`,
+   * this field reads back as the whole expanded topic, `$UI` tree included. */
+  topic: unknown;
+  mentionedBy: unknown[];
+}
+
+/**
+ * The least a board row needs from a topic: its title, and the scalars a
+ * full-board survey summarises.
+ *
+ * An input projection, not a published type — every reference this pattern
+ * publishes is declared at `TopicPiece`. Keeping it out of the published
+ * surface is what leaves it free to shrink.
+ */
+export interface TopicSummary {
+  /** Defaulted rather than required, like every other field a board card
+   * renders. The card list is a mapped sub-pattern, so this type reaches a
+   * piece holding topics written before the field existed as the argument
+   * schema its update is checked against, and a required property those topics
+   * lack refuses that update outright. `deno task pattern-vintage` is what
+   * catches it, by replaying a real deployed board. */
+  title: string | Default<"">;
   createdAt: number;
-  /** Mixed-version list projections can resolve an older sibling's absent
-   * path as undefined. Fabric shapes that absence to this inert legacy
-   * sentinel at the list boundary; newly computed non-empty authorship remains
-   * a structured TopicAuthor. */
   createdBy?:
     | TopicAuthor
     | Default<{ kind: "person"; name: "" }>
     | undefined;
-  /** @deprecated Compatibility shadow for consumers of the previous result
-   * schema. New callers must use `createdBy`; the pattern mirrors this field. */
-  createdByName: string;
-  bodyUpdatedBy?: TopicAuthor | undefined;
-  bodyUpdatedAt?: number | undefined;
-  /** Cold mixed-version references can expose an unresolved computed path as
-   * explicit undefined. Shape it to zero until the sibling starts. */
   commentCount: number | Default<0> | undefined;
-  /** Max of creation, comments, body saves, and link additions. */
   lastActivityAt: number | Default<0> | undefined;
-  addComment: Stream<AddCommentEvent, AddCommentResult>;
-  addLink: Stream<AddLinkEvent, AddLinkResult>;
-  setBody: Stream<SetBodyEvent, SetBodyResult>;
 }
 
 /**
@@ -173,25 +302,71 @@ export interface TopicReference {
  * status, labels, or assignees; what a topic grows next is part of the
  * experiment (CT-1878).
  *
- * This is the board-facing projection, and the one stored in the tracker's
- * list. Session-local UI controls are intentionally excluded: a TopicPiece can
- * be followed from a shared list even when the viewer has no matching
- * session-local cells. Crossref targets deliberately use the non-recursive
- * TopicReference contract: a Topic needs enough sibling data to render and
- * navigate chips, not each sibling's entire crossref graph.
+ * This is the board-facing projection: the one stored in the tracker's list,
+ * and the one a topic's editor autocompletes over through `mentionable`.
+ * Session-local UI controls are intentionally excluded: a TopicPiece can be
+ * followed from a shared list even when the viewer has no matching
+ * session-local cells.
  */
-export interface TopicPiece extends TopicReference {
-  /** This topic's own place in the board's prose graph, derived read-side
-   * from `mentionable` (the sibling pieces it links, resolved from the
-   * board's own list). Both sets stay empty until `mentionable` is wired.
-   * Optional (2026-07-21 deploy): pieces healed before their `mentionable`
-   * link exists carry a session-scoped crossrefs indirection that resolves
-   * undefined outside the minting session; the list projection must accept
-   * that rather than fail argument validation. */
-  crossrefs?:
-    | { refsOut: TopicReference[]; referencedBy: TopicReference[] }
-    | Default<{ refsOut: []; referencedBy: [] }>
-    | undefined;
+export interface TopicPiece extends TopicSummary {
+  /** The topic's display name. Like the other derived display fields, a cold
+   * retained topic may not have produced this path yet; its persisted title
+   * remains authoritative until it does. */
+  [NAME]: string | Default<""> | undefined;
+  /** @deprecated Compatibility shadow for consumers of the previous result
+   * schema. New callers must use `createdBy`; the pattern mirrors this field. */
+  createdByName: string | Default<"">;
+  body: string | Default<"">;
+  comments: TopicComment[];
+  links: TopicLink[];
+  /** Every piece this topic's prose and links point at, as references.
+   *
+   * The board's pivot is declared over this and nothing else, so what one topic
+   * costs a full-board scan is exactly this list of identities. Declared
+   * `unknown[]` because these are references, and comparing them never reads
+   * what is behind them.
+   *
+   * The cell annotation that makes them comparable belongs to the READER, not
+   * here: the pivot declares its own view of this list as
+   * `TopicMentionSource.mentions: ComparableCell<unknown>[]`, and that is what
+   * makes its graph settle rather than depend on load order. A published
+   * `unknown[]` is what each reader annotates for itself.
+   *
+   * The default stands alone: a declared default and `| undefined` collide,
+   * and the default is what a topic deployed before this path existed
+   * materializes against. */
+  mentions: unknown[] | Default<[]>;
+  /** Where this topic's `[Label][key]` mentions point. Durable content, like
+   * `links`. The body editor works on a session copy of this map, which a save
+   * publishes here whole, beside the prose whose tokens name its entries. */
+  // deno-lint-ignore ban-types
+  references: TopicMentionRefMap | Default<{}>;
+  /** Pieces referenced outside the prose, recorded by `mention`. */
+  mentioned: unknown[] | Default<[]>;
+  /** The topics that mention this one, read out of the board's pivot.
+   *
+   * Declared through `TopicSummary` rather than `TopicPiece`, and that is
+   * load-bearing rather than stingy: a topic whose backlinks were topics would
+   * be a type that contains itself, and resolving one from a list would walk
+   * the graph. The summary carries no reference of its own, so it terminates.
+   * A reader that wants more follows the link, which resolves whole. */
+  referencedBy: TopicSummary[] | Default<[]>;
+  bodyUpdatedBy?: TopicAuthor | undefined;
+  bodyUpdatedAt?: number | undefined;
+  addComment: Stream<AddCommentEvent, AddCommentResult>;
+  addLink: Stream<AddLinkEvent, AddLinkResult>;
+  setBody: Stream<SetBodyEvent, SetBodyResult>;
+  /** Reference another piece from this topic, and stop referencing it. The
+   * browser equivalent is picking a completion in the body editor, which writes
+   * the same map.
+   *
+   * OPTIONAL, unlike the verbs beside them, and for the reason every added path
+   * on this projection is: a topic deployed before these existed carries
+   * neither, and a required property it cannot produce refuses its update
+   * outright. The older verbs predate every deployed generation, so they can
+   * stay required; these cannot. */
+  mention?: Stream<MentionEvent>;
+  unmention?: Stream<UnmentionEvent>;
 }
 
 /** The complete result available when a Topic is instantiated directly. */
@@ -207,20 +382,25 @@ export interface TopicOutput extends TopicPiece {
   linkUrlDraft: PerSession<Writable<string>>;
   linkLabelDraft: PerSession<Writable<string>>;
   linkKindDraft: PerSession<Writable<TopicLinkKind>>;
+  /**
+   * The body draft's mention map, staged so Cancel can discard it.
+   *
+   * `cf-code-editor` writes an entry the moment a mention is inserted and
+   * drops one the moment its token leaves the document, neither of them
+   * waiting for Save. Pointed at the durable map while `$value` holds a
+   * session draft, those writes would outlive a discarded edit: a canceled
+   * insertion would leave an edge no token names, and a canceled deletion
+   * would strip the destination from a token the durable body still carries.
+   * The editor's own ordering assumes its two bindings share a lifetime, so
+   * this gives them one.
+   */
+  referencesDraft: PerSession<Writable<TopicMentionRefMap>>;
   /** UI affordances as streams: composer submit, body edit lifecycle. */
   submitComment: Stream<void>;
   startEditBody: Stream<void>;
   saveBody: Stream<void>;
   cancelEditBody: Stream<void>;
   submitLink: Stream<void>;
-}
-
-/** The durable, non-reactive information a rendered link needs. Keeping this
- * separate from TopicReference avoids persisting a scheduler-backed click
- * stream in VDOM: the shell resolves the fid and owns navigation. */
-export interface TopicNavigationLink {
-  fid: string;
-  title: string;
 }
 
 // ===== Shared theme (calm editorial light) =====
@@ -244,11 +424,6 @@ export const TOPICS_THEME = {
 };
 
 // ===== Pure helpers =====
-
-/** Safely coerce a reactive array read to an array (intermediate updates can
- * momentarily yield a non-array). Same guard as reading-list. */
-export const asArray = <T,>(v: readonly T[] | T[]): T[] =>
-  Array.isArray(v) ? v as T[] : [];
 
 const MONTHS = [
   "Jan",
@@ -331,116 +506,6 @@ export const topicAuthorLabel = (
 export const isSafeLinkUrl = (url: string): boolean =>
   /^https?:\/\//i.test((url ?? "").trim());
 
-/** Every fid payload referenced anywhere in `text`, in match order,
- * duplicates included (callers dedupe as needed).
- *
- * Matches a fid in every shape people paste: bare `fid1:X`, storage-form
- * `of:fid1:X`, page URLs `https://host/space/fid1:X`, and share links where
- * the colon is percent-encoded (`fid1%3AX`). The base64url payload alone is
- * the identity — hosts and prefixes around it vary, and base64url survives
- * percent-encoding untouched. The length floor keeps prose that merely
- * mentions "fid1" from matching (real payloads are 43 chars of hash). The
- * regex lives inside the function: a module-scope `/g` RegExp is stateful
- * and the closure verifier rejects it as captured data. */
-export const extractFidPayloads = (text: string): string[] => {
-  const fidInText = /fid1(?::|%3a)([A-Za-z0-9_-]{20,})/gi;
-  const out: string[] = [];
-  for (const m of (text ?? "").matchAll(fidInText)) out.push(m[1]);
-  return out;
-};
-
-/** The payload of a `fid1:…` tagged hash string; "" for anything else. */
-export const fidPayload = (fid: string): string => {
-  const m = /^fid1:([A-Za-z0-9_-]{20,})$/.exec((fid ?? "").trim());
-  return m ? m[1] : "";
-};
-
-/** The prose surfaces of one topic that count as reference edges: the body,
- * every comment body, and every link URL (the design's scan ∪ TopicLink).
- * Structurally typed so pure tests can drive it with literals. */
-export const topicCorpus = (
-  t:
-    | {
-      body?: string;
-      comments?: readonly { body?: string }[];
-      links?: readonly { url?: string }[];
-    }
-    | undefined
-    | null,
-): string => {
-  if (!t) return "";
-  const parts = [t.body ?? ""];
-  for (const c of asArray(t.comments ?? [])) parts.push(c?.body ?? "");
-  for (const l of asArray(t.links ?? [])) parts.push(l?.url ?? "");
-  return parts.join("\n");
-};
-
-/** Join each corpus against the set of entry payloads: one shared
- * payload→index map, one scan per text — the shape a second consumer (notes,
- * when backlinks-index's write path retires) imports rather than forks.
- * refsOut[i] lists, in first-mention order, the entries whose fids appear in
- * corpus i; referencedBy is the inverse view (ascending by referrer).
- * Self-references, repeat mentions, and payloads no entry owns all drop;
- * "" payloads (unresolved entries) own nothing. */
-export const crossrefJoin = (
-  corpora: string[],
-  payloads: string[],
-): { refsOut: number[][]; referencedBy: number[][] } => {
-  const byPayload = new Map<string, number>();
-  payloads.forEach((p, i) => {
-    if (p) byPayload.set(p, i);
-  });
-  const refsOut: number[][] = corpora.map(() => []);
-  const referencedBy: number[][] = corpora.map(() => []);
-  corpora.forEach((text, i) => {
-    const seen = new Set<number>();
-    for (const p of extractFidPayloads(text)) {
-      const j = byPayload.get(p);
-      if (j === undefined || j === i || seen.has(j)) continue;
-      seen.add(j);
-      refsOut[i].push(j);
-      referencedBy[j].push(i);
-    }
-  });
-  return { refsOut, referencedBy };
-};
-
-/** A Topic destination rendered as data, not as a pattern-owned handler.
- * `cf-cell-link` resolves the fid in the active space and delegates ordinary
- * and Cmd/Ctrl-click navigation to the shell. This remains usable after a
- * cold load because the persisted VDOM contains no ephemeral event stream. */
-export const topicCellLink = (fid: string, label: string) =>
-  fid
-    ? (
-      <cf-cell-link
-        link={`/of:${fid}`}
-        label={label}
-        static
-      />
-    )
-    : null;
-
-/** One row of crossref links ("references →" / "← referenced by"). The view
- * carries only durable fid/title snapshots; the public crossref result keeps
- * its existing piece-valued contract. */
-export const crossrefLinkRow = (
-  caption: string,
-  links: TopicNavigationLink[],
-) =>
-  links.length === 0
-    ? null
-    : (
-      <cf-hstack gap="1" align="center" style="flex-wrap: wrap;">
-        <cf-text variant="caption" tone="muted">{caption}</cf-text>
-        {links.map((link) =>
-          topicCellLink(
-            link.fid,
-            snippet(link.title || "(untitled topic)", 40),
-          )
-        )}
-      </cf-hstack>
-    );
-
 const LINK_KIND_ITEMS = [
   { label: "Web", value: "web" },
   { label: "PR", value: "pr" },
@@ -473,6 +538,9 @@ export const submitProfileComment = handler<void, {
 export const saveProfileBody = handler<void, {
   body: Writable<string | Default<"">>;
   bodyDraft: Writable<string>;
+  // deno-lint-ignore ban-types
+  references: Writable<TopicMentionRefMap | Default<{}>>;
+  referencesDraft: Writable<TopicMentionRefMap>;
   editingBody: Writable<boolean>;
   bodyUpdatedBy: Writable<
     TopicAuthor | Default<{ kind: "person"; name: "" }>
@@ -485,6 +553,8 @@ export const saveProfileBody = handler<void, {
   {
     body,
     bodyDraft,
+    references,
+    referencesDraft,
     editingBody,
     bodyUpdatedBy,
     bodyUpdatedAt,
@@ -497,9 +567,35 @@ export const saveProfileBody = handler<void, {
   // One whole-value set per explicit save keeps the conflict window small; a
   // live-bound textarea on a shared string would conflict per keystroke.
   body.set(bodyDraft.get());
+  // The map publishes with the prose it describes, in this one transaction:
+  // the tokens and the destinations they name are one document, and a save
+  // that landed only half of it would leave a dead link either way. Whole-map,
+  // for the same reason the body above is whole-value — an entry belongs to
+  // the draft that minted it, and the two conflict as one document or not at
+  // all. `destination` is `unknown`, which is what carries each one across as
+  // a link rather than expanding the piece behind it.
+  references.set(referencesDraft.get());
   bodyUpdatedBy.set(author);
   bodyUpdatedAt.set(Date.now());
   editingBody.set(false);
+});
+
+/**
+ * Drop one verb-made reference from the browser.
+ *
+ * A handler rather than an inline closure because the card renders one control
+ * per entry, and each has to carry the piece it removes. Retracting is
+ * `removeByValue` here for the same reason it is in `unmention`: it resolves
+ * against durable state instead of rewriting the list.
+ */
+export const dropMention = handler<void, {
+  mentioned: Writable<unknown[] | Default<[]>>;
+  // A CELL, because `removeByValue` matches a cell by its link. Bound as a
+  // plain value it would arrive resolved, match nothing, and remove nothing.
+  topic: Writable<unknown>;
+}>((_, { mentioned, topic }) => {
+  if (!topic) return;
+  mentioned.removeByValue(topic);
 });
 
 /** Browser link submit under the current Profile snapshot. */
@@ -536,6 +632,111 @@ export const submitProfileLink = handler<void, {
   linkKindDraft.set("web");
 });
 
+// ===== Derivations =====
+//
+// Each of these is a module-scope `lift` rather than a pattern-body derivation
+// for one reason: the declared parameter type is what bounds the read. An
+// inferred input schema falls back to reading its input whole, while a `lift`'s
+// declared parameter is a ceiling that no opaque helper in its body can widen.
+
+/**
+ * This topic's INBOUND references: its own row of the board's pivot.
+ *
+ * The board has already done the join, so this is a lookup, and it is written
+ * as one — find the row whose `topic` is this piece, hand back its
+ * `mentionedBy`. Nothing else about the table is touched.
+ *
+ * It re-runs whenever any row changes, which at board scale is often. That is
+ * fine, and deliberately so: the rows are addressed by the topic each describes
+ * rather than by position, so a re-run over an unchanged board recomputes the
+ * same links and writes nothing. What would make it expensive is reading
+ * through the references, which is why the parameter declares them `unknown`:
+ * `topic` is compared by identity and `mentionedBy` is passed through as links,
+ * so surveying the whole table expands no topic at all.
+ *
+ * HACK, as elsewhere in this pattern: reads `unknown[]`, publishes
+ * `TopicSummary[]`. A reference through a lift is a link and resolves to the
+ * whole topic however little the lift declared, so the assertion states what a
+ * consumer receives while the narrow parameter bounds what this reads.
+ */
+const backlinksOf = lift((
+  { table, self }: {
+    table:
+      | { topic: ComparableCell<unknown>; mentionedBy: unknown[] }[]
+      | Default<[]>;
+    self: ComparableCell<unknown>;
+  },
+): TopicSummary[] =>
+  // `filter` + `flatMap` rather than `find`, so a topic with no row on the
+  // table — no board wired in — yields an empty array from the shape of the
+  // expression instead of from a `?? []` bolted onto a miss. At most one row
+  // matches: rows are keyed by the topic they describe.
+  table
+    .filter((row) => equals(self, row.topic))
+    .flatMap((row) => row.mentionedBy) as TopicSummary[]
+);
+
+/**
+ * Every piece this topic points at, from both places a reference can come from:
+ * the body editor's mention map, and a link whose URL names a piece.
+ *
+ * The two arrive already resolved — the editor mints a mention as a reference,
+ * and `cellFromUrl` answers a link's URL with the cell it names. So this only
+ * concatenates, and the parameter says as much: `destination` and the resolved
+ * cells are `unknown`, compared by identity and never read through.
+ *
+ * A URL naming no piece resolves with no cell, which is how an ordinary web
+ * link stays an ordinary web link.
+ */
+const mentionsOf = lift((
+  { references, mentioned, linkTargets }: {
+    // deno-lint-ignore ban-types
+    references: Record<string, { destination: unknown }> | Default<{}>;
+    mentioned: unknown[] | Default<[]>;
+    linkTargets: { cell?: unknown; pending?: boolean }[] | Default<[]>;
+  },
+): unknown[] =>
+  [
+    // Three places a reference can come from, and only the last two are this
+    // pattern's to write: the body editor's map, the `mention` verb's list,
+    // and a link whose URL named a piece.
+    ...Object.values(references).map((ref) => ref?.destination),
+    ...mentioned,
+    ...linkTargets.map((resolution) => resolution?.cell),
+  ].filter((destination) => destination !== undefined && destination !== null)
+);
+
+/** Max of creation, the newest comment, the newest link, and the last body
+ * save — declared over just those four timestamp surfaces. */
+const lastActivityOf = lift((
+  { comments, links, createdAt, bodyUpdatedAt }: {
+    comments: { sentAt: number }[];
+    links: { addedAt?: number }[];
+    createdAt: number;
+    bodyUpdatedAt: number;
+  },
+): number => {
+  let newest = Math.max(createdAt, bodyUpdatedAt);
+  for (const c of comments) newest = Math.max(newest, c.sentAt);
+  // `addedAt` is optional on TopicLink: links written before it existed carry
+  // no timestamp and simply do not move the clock.
+  for (const l of links) newest = Math.max(newest, l.addedAt ?? 0);
+  return newest;
+});
+
+/** A legacy Topic has only `createdByName`. Project that snapshot into the
+ * structured result instead of returning a dangling link to an absent optional
+ * input path; sibling Topic schemas can then validate the piece. */
+const createdByOf = lift((
+  { createdBy, createdByName }: {
+    createdBy?: TopicAuthor;
+    createdByName: string;
+  },
+): TopicAuthor => {
+  if (createdBy && createdBy.name.trim()) return createdBy;
+  return { kind: "person", name: createdByName.trim() };
+});
+
 // ===== The pattern =====
 
 export default pattern<TopicInput, TopicOutput>(
@@ -552,6 +753,10 @@ export default pattern<TopicInput, TopicOutput>(
       bodyUpdatedBy,
       bodyUpdatedAt,
       mentionable,
+      references,
+      mentioned,
+      boardCrossrefs,
+      [SELF]: self,
     },
   ) => {
     // Session-local UI state (new-tab test: none of this should carry over).
@@ -561,31 +766,24 @@ export default pattern<TopicInput, TopicOutput>(
     const linkUrlDraft = new Writable.perSession("");
     const linkLabelDraft = new Writable.perSession("");
     const linkKindDraft = new Writable.perSession<TopicLinkKind>("web");
+    const referencesDraft = new Writable.perSession<TopicMentionRefMap>({});
 
     // Browser mutations snapshot the current viewer's canonical Profile.
     // Agent-facing streams below deliberately remain wish-free and accept the
     // agent's content-level signature in the same event as the mutation.
-    const profileWish = wish<{ name?: string; avatar?: string }>({
+    // One wish, not three: `#profile` resolves the profile itself, and `name`
+    // and `avatar` are fields on it.
+    const profileWish = wish<{ name: string; avatar: string }>({
       query: "#profile",
     });
-    const profileNameWish = wish<string>({ query: "#profileName" });
-    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-    const profileName = computed(() => profileNameWish.result ?? "");
-    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
-    const hasProfile = computed(() =>
-      profileName.trim().length > 0 && profileWish.result !== undefined
-    );
-    // A legacy Topic has only `createdByName`. Project that snapshot into the
-    // structured result instead of returning a dangling link to an absent
-    // optional input path; sibling Topic schemas can then validate the piece.
-    const createdByView = computed(() => {
-      const name = (createdBy?.name ?? "").trim();
-      if (name && createdBy) return createdBy;
-      const legacyName = (createdByName ?? "").trim();
-      return legacyName
-        ? { kind: "person" as const, name: legacyName }
-        : { kind: "person" as const, name: "" as const };
-    });
+    // A wish resolves after setup, so each of these stays a derivation. Reading
+    // the fields once here would pin the page to the empty profile the topic
+    // opened with: the composer's controls never enable, and a comment or edit
+    // made through them carries blank attribution.
+    const profileName = computed(() => profileWish.result?.name ?? "");
+    const profileAvatar = computed(() => profileWish.result?.avatar ?? "");
+    const hasProfile = computed(() => profileName.trim().length > 0);
+    const createdByView = createdByOf({ createdBy, createdByName });
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
@@ -658,6 +856,49 @@ export default pattern<TopicInput, TopicOutput>(
       },
     );
 
+    /**
+     * Record a reference to another piece.
+     *
+     * Writes the destination ITSELF into the map — no address is parsed, no id
+     * is minted for the target, and nothing is written into the target. What
+     * makes this an edge is that the stored value and the piece are the same
+     * cell.
+     *
+     * The entry carries a key but no prose token, so a mention made this way is
+     * a reference without a sentence around it. The editor leaves it alone: it
+     * only collects keys it saw when the document loaded or minted itself, so a
+     * key that arrived from elsewhere is kept.
+     */
+    const mention = action<MentionEvent>(({ topic }) => {
+      // A reference, or a rejection. The schema wraps whatever it is handed as
+      // a cell without looking behind it, so this is the boundary — and the
+      // narrowed payload is what makes it one read of one field: `undefined`
+      // is a value with no document behind it, and any real piece answers with
+      // an object because `title` carries a default.
+      if (!topic || topic.get() === undefined) {
+        rejectMutation("mention", "topic must be a reference");
+      }
+      // A set-add, not an append: referencing the same piece twice is one
+      // reference. Mergeable, so concurrent mentions of distinct pieces all
+      // land and a repeated one is a no-op against durable state.
+      mentioned.addUnique(topic);
+    });
+
+    /** Stop referencing a piece — every entry naming it. */
+    const unmention = action<UnmentionEvent>(({ topic }) => {
+      // Same check as `mention`, and it earns its place here too: a payload
+      // that is not a reference matches no stored entry, so the removal below
+      // would quietly do nothing and report success.
+      if (!topic || topic.get() === undefined) {
+        rejectMutation("unmention", "topic must be a reference");
+      }
+      // `removeByValue`, not `remove` or `removeAll`: those two rebuild the
+      // array and set it back, which is both a clobbering write and the shape
+      // that flattens surviving references. This one resolves against durable
+      // state, so concurrent removals of distinct entries merge.
+      mentioned.removeByValue(topic);
+    });
+
     // --- UI-side actions (close over session drafts) ---
 
     const submitComment = submitProfileComment({
@@ -669,12 +910,18 @@ export default pattern<TopicInput, TopicOutput>(
 
     const startEditBody = action(() => {
       bodyDraft.set(body.get());
+      // Seeded together with the prose, so the editor opens on a map that
+      // resolves every token the draft carries. Each `destination` crosses as
+      // a link, which is what `unknown` is declared for.
+      referencesDraft.set(references.get());
       editingBody.set(true);
     });
 
     const saveBody = saveProfileBody({
       body,
       bodyDraft,
+      references,
+      referencesDraft,
       editingBody,
       bodyUpdatedBy,
       bodyUpdatedAt,
@@ -682,6 +929,8 @@ export default pattern<TopicInput, TopicOutput>(
       profileAvatar,
     });
 
+    // Nothing to undo: the prose and its mention map are both session drafts,
+    // so leaving them behind IS the discard.
     const cancelEditBody = action(() => {
       editingBody.set(false);
     });
@@ -697,356 +946,351 @@ export default pattern<TopicInput, TopicOutput>(
 
     // --- Derived values ---
 
-    const commentCount = computed(() => asArray(comments.get()).length);
+    // Each of these reads its own topic's data, which the page renders in full
+    // anyway, and the shrunk schemas say so: a `.length` read declares
+    // `items: unknown` and never expands an element.
+    const commentCount = comments.get().length;
 
-    const lastActivityAt = computed(() => {
-      const newestComment = asArray(comments.get())
-        .reduce((max, c) => Math.max(max, c?.sentAt ?? 0), 0);
-      const newestLink = asArray(links.get())
-        .reduce((max, link) => Math.max(max, link?.addedAt ?? 0), 0);
-      return Math.max(
-        createdAt ?? 0,
-        newestComment,
-        newestLink,
-        bodyUpdatedAt.get() ?? 0,
-      );
+    const lastActivityAt = lastActivityOf({
+      comments,
+      links,
+      createdAt,
+      bodyUpdatedAt,
     });
 
+    // `computed()` here and for `linksView` below is not ceremony: a `.get()`
+    // whose result is the array itself — bare, or fed to a callback-taking
+    // method — is the shape the transformer rejects at pattern scope. Scalar
+    // reductions like `comments.get().length` need no wrapper.
     const commentsView = computed(() =>
-      asArray(comments.get())
-        .filter((c) => c)
-        .toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))
+      comments.get().toSorted((a, b) => a.sentAt - b.sentAt)
     );
 
-    const linksView = computed(() => asArray(links.get()).filter((l) => l));
+    const linksView = computed(() => links.get());
+    const hasLinks = linksView.length > 0;
+    const hasComments = commentCount > 0;
+    const hasBody = body.get().trim().length > 0;
 
-    // This topic's own place in the board's prose graph, derived read-side
-    // from the mentionable siblings — the same join the board's cards use,
-    // reduced to this piece's row (identified via SELF). Nothing persisted;
-    // pre-rev pieces without `mentionable` simply derive empty sets.
-    const crossrefView = computed(() => {
-      const sibs = asArray(mentionable.get());
-      if (sibs.length === 0) {
-        return {
-          refsOut: [],
-          referencedBy: [],
-          refsOutLinks: [],
-          referencedByLinks: [],
-        };
-      }
-      // Each sibling's own fid payload ("" while unresolved — such entries
-      // hold no edges this render). Cell-runtime surface cast, as in notes'
-      // appendLink.
-      const payloads = sibs.map((t, i) => {
-        if (!t) return "";
-        const ref = (mentionable.key(i) as any).resolveAsCell?.()?.entityId;
-        return ref ? fidPayload(entityRefToString(ref)) : "";
-      });
-      const joined = crossrefJoin(sibs.map((t) => topicCorpus(t)), payloads);
-      // Select this Topic by a durable field-link identity. Its result title is
-      // a write-through link to its unique argument title cell, so following a
-      // retained sibling's title through any wrapper/result aliases meets the
-      // current input title without relying on the materialized object's
-      // comparable marker (which some derived wrappers lose).
-      const me = sibs.findIndex((t, i) =>
-        t && equals(mentionable.key(i).key("title"), title)
-      );
-      return me < 0
-        ? {
-          refsOut: [],
-          referencedBy: [],
-          refsOutLinks: [],
-          referencedByLinks: [],
-        }
-        : {
-          refsOut: joined.refsOut[me].map((j) => sibs[j]),
-          referencedBy: joined.referencedBy[me].map((j) => sibs[j]),
-          refsOutLinks: joined.refsOut[me].map((j) => ({
-            fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-            title: sibs[j]?.title ?? "",
-          })),
-          referencedByLinks: joined.referencedBy[me].map((j) => ({
-            fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-            title: sibs[j]?.title ?? "",
-          })),
-        };
+    // Inbound: who points at this topic, looked up in the board's pivot rather
+    // than derived a second time.
+    const referencedBy = backlinksOf({
+      table: boardCrossrefs,
+      self,
     });
-    // Preserve the deployed public result schema. Navigation-only fid/title
-    // snapshots stay private to the rendered view.
-    const crossrefs = computed(() => ({
-      refsOut: crossrefView.refsOut,
-      referencedBy: crossrefView.referencedBy,
-    }));
+    const hasReferences = referencedBy.length > 0;
+    // Only what THIS pattern owns is offered for removal. The union `mentions`
+    // also carries the editor's map and the link resolutions, and a control
+    // here could not honestly retract either: a mention in the prose is removed
+    // by editing the prose, and a link's reference belongs to the link.
+    const mentionedView = computed(() => mentioned.get());
+    const hasMentioned = mentionedView.length > 0;
 
-    const hasLinks = computed(() => linksView.length > 0);
-    const hasComments = computed(() => commentsView.length > 0);
-    const hasBody = computed(() => body.get().trim().length > 0);
+    const topicName = title.get().trim() || "(untitled topic)";
 
-    const topicName = computed(() => title.get().trim() || "(untitled topic)");
+    // Declared BEFORE the link resolution below, and the ordering is
+    // load-bearing rather than stylistic. A `.map()` over a reactive array
+    // lowers to an inline pattern, and inline patterns are NUMBERED IN SOURCE
+    // ORDER. A deployed piece records the number it was instantiated from, so
+    // inserting a new map ahead of an existing one renumbers that one and
+    // strands every piece already made by it — `deno task pattern-vintage`
+    // reports it as a refused update, which is how this was found. New maps
+    // therefore go after the ones already here, and the rendered view holds
+    // two of them.
+    const view = (
+      <cf-theme theme={TOPICS_THEME}>
+        <cf-screen>
+          <cf-vstack slot="header" gap="1" padding="4">
+            <cf-input
+              $value={title}
+              placeholder="Topic title…"
+              style="font-size: 1.25rem; font-weight: 600;"
+            />
+            <cf-hstack justify="between" align="center">
+              <cf-text variant="caption" tone="muted">
+                started by {topicAuthorLabel(createdByView, createdByName)}
+                {createdAt ? ` · ${whenLabel(createdAt)}` : ""}
+              </cf-text>
+              <cf-hstack gap="2" align="center">
+                <cf-text variant="caption" tone="muted">Acting as</cf-text>
+                {hasProfile
+                  ? (
+                    <cf-profile-badge
+                      $profile={profileWish.result}
+                      size="sm"
+                      noNavigate
+                    />
+                  )
+                  : <div>{profileWish[UI]}</div>}
+              </cf-hstack>
+            </cf-hstack>
+          </cf-vstack>
+
+          <cf-vstack gap="3" padding="4">
+            {/* ── The living body document ── */}
+            <cf-card>
+              <cf-vstack gap="2">
+                <cf-hstack justify="between" align="center">
+                  <cf-heading level={5}>Body</cf-heading>
+                  {editingBody ? null : (
+                    <cf-button
+                      variant="secondary"
+                      disabled={!hasProfile}
+                      onClick={startEditBody}
+                    >
+                      Edit
+                    </cf-button>
+                  )}
+                </cf-hstack>
+
+                {editingBody
+                  ? (
+                    <cf-vstack gap="2">
+                      <cf-code-editor
+                        $value={bodyDraft}
+                        $mentionable={mentionable}
+                        $references={referencesDraft}
+                        language="text/markdown"
+                        mode="prose"
+                        wordWrap
+                        tabIndent
+                        placeholder="The topic's living document…"
+                        style="min-height: 12rem;"
+                      />
+                      <cf-hstack gap="2">
+                        <cf-button
+                          variant="primary"
+                          disabled={!hasProfile}
+                          onClick={saveBody}
+                        >
+                          Save
+                        </cf-button>
+                        <cf-button variant="ghost" onClick={cancelEditBody}>
+                          Cancel
+                        </cf-button>
+                      </cf-hstack>
+                    </cf-vstack>
+                  )
+                  : hasBody
+                  ? <cf-markdown content={body} />
+                  : (
+                    <cf-text tone="muted" block>
+                      No body yet. The body is this topic's living document —
+                      durable conclusions get folded up here while the thread
+                      below holds the deliberation.
+                    </cf-text>
+                  )}
+                {bodyUpdatedAt.get()
+                  ? (
+                    <cf-text variant="caption" tone="muted">
+                      Last updated by {topicAuthorLabel(bodyUpdatedBy.get())}
+                      {" · "}
+                      {whenLabel(bodyUpdatedAt.get() ?? 0)}
+                    </cf-text>
+                  )
+                  : null}
+              </cf-vstack>
+            </cf-card>
+
+            {/* ── Links out ── */}
+            <cf-card>
+              <cf-vstack gap="2">
+                <cf-heading level={5}>Links</cf-heading>
+                {hasLinks
+                  ? (
+                    <cf-vstack gap="1">
+                      {linksView.map((link) => (
+                        <cf-hstack gap="2" align="center">
+                          <cf-badge size="xs" color="neutral">
+                            {link.kind}
+                          </cf-badge>
+                          {isSafeLinkUrl(link.url)
+                            ? (
+                              <a
+                                href={link.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style="color: inherit;"
+                              >
+                                {link.label || link.url}
+                              </a>
+                            )
+                            : (
+                              <cf-text tone="muted">
+                                {link.label || link.url}
+                              </cf-text>
+                            )}
+                          {link.addedBy
+                            ? (
+                              <cf-text variant="caption" tone="muted">
+                                by {topicAuthorLabel(link.addedBy)}
+                              </cf-text>
+                            )
+                            : null}
+                        </cf-hstack>
+                      ))}
+                    </cf-vstack>
+                  )
+                  : (
+                    <cf-text tone="muted" block>
+                      No links yet — PRs, agent sessions, other topics.
+                    </cf-text>
+                  )}
+                <cf-hstack gap="2" align="end">
+                  <cf-field label="Kind" style="width: 130px;">
+                    <cf-select
+                      $value={linkKindDraft}
+                      items={LINK_KIND_ITEMS}
+                    />
+                  </cf-field>
+                  <cf-field label="URL" style="flex: 1;">
+                    <cf-input $value={linkUrlDraft} placeholder="https://…" />
+                  </cf-field>
+                  <cf-field label="Label" style="width: 180px;">
+                    <cf-input
+                      $value={linkLabelDraft}
+                      placeholder="optional"
+                    />
+                  </cf-field>
+                  <cf-button
+                    variant="secondary"
+                    disabled={!hasProfile}
+                    onClick={submitLink}
+                  >
+                    Add
+                  </cf-button>
+                </cf-hstack>
+              </cf-vstack>
+            </cf-card>
+
+            {/* ── The thread ── */}
+            <cf-card>
+              <cf-vstack gap="2">
+                <cf-hstack justify="between" align="center">
+                  <cf-heading level={5}>Thread</cf-heading>
+                  <cf-text variant="caption" tone="muted">
+                    {commentCount} comments
+                  </cf-text>
+                </cf-hstack>
+
+                {hasComments
+                  ? (
+                    <cf-vstack gap="2">
+                      {commentsView.map((comment) => (
+                        <cf-vstack
+                          gap="0"
+                          style="border-left: 2px solid var(--cf-theme-color-border); padding-left: 0.75rem;"
+                        >
+                          <cf-hstack gap="2" align="center">
+                            <cf-avatar
+                              src={comment.author?.avatar || ""}
+                              name={topicAuthorLabel(
+                                comment.author,
+                                comment.authorName,
+                              )}
+                              size="xs"
+                            />
+                            <cf-text style="font-weight: 600;">
+                              {topicAuthorLabel(
+                                comment.author,
+                                comment.authorName,
+                              )}
+                            </cf-text>
+                            <cf-text variant="caption" tone="muted">
+                              {whenLabel(comment.sentAt)}
+                            </cf-text>
+                          </cf-hstack>
+                          <cf-text block style="white-space: pre-wrap;">
+                            {comment.body}
+                          </cf-text>
+                        </cf-vstack>
+                      ))}
+                    </cf-vstack>
+                  )
+                  : (
+                    <cf-text tone="muted" block>
+                      No comments yet.
+                    </cf-text>
+                  )}
+
+                <cf-hstack gap="2" align="end">
+                  <cf-field label="Comment" style="flex: 1;">
+                    <cf-textarea
+                      $value={commentDraft}
+                      rows={3}
+                      placeholder="Add to the thread…"
+                    />
+                  </cf-field>
+                  <cf-button
+                    variant="primary"
+                    disabled={!hasProfile}
+                    onClick={submitComment}
+                  >
+                    Send
+                  </cf-button>
+                </cf-hstack>
+              </cf-vstack>
+            </cf-card>
+
+            {/* ── Referenced by (the board's pivot; nothing persisted) ── */}
+            {hasReferences
+              ? (
+                <cf-card>
+                  <cf-vstack gap="2">
+                    <cf-heading level={5}>Referenced by</cf-heading>
+                    <cf-vstack gap="1">
+                      {referencedBy.map((topic) => (
+                        <cf-cell-link $cell={topic} />
+                      ))}
+                    </cf-vstack>
+                  </cf-vstack>
+                </cf-card>
+              )
+              : null}
+
+            {/* ── References made outside the prose (the `mention` verb) ── */}
+            {hasMentioned
+              ? (
+                <cf-card>
+                  <cf-vstack gap="2">
+                    <cf-heading level={5}>References</cf-heading>
+                    <cf-text variant="caption" tone="muted">
+                      Added directly rather than written into the body. A
+                      mention inside the text is removed by editing the text.
+                    </cf-text>
+                    <cf-vstack gap="1">
+                      {mentionedView.map((topic) => (
+                        <cf-hstack gap="2" align="center">
+                          <cf-cell-link $cell={topic} />
+                          <cf-button
+                            variant="ghost"
+                            onClick={dropMention({ mentioned, topic })}
+                          >
+                            Remove
+                          </cf-button>
+                        </cf-hstack>
+                      ))}
+                    </cf-vstack>
+                  </cf-vstack>
+                </cf-card>
+              )
+              : null}
+          </cf-vstack>
+        </cf-screen>
+      </cf-theme>
+    );
+
+    // A link's URL, asked of `cellFromUrl` once per link. Most answer with no
+    // cell — they are web pages — and those simply are not mentions.
+    const linkUrls = computed(() => links.get().map((link) => link.url ?? ""));
+    const linkTargets = linkUrls.map((url) => cellFromUrl({ url }));
+    // Outbound: what this topic points at. Only this half depends on the
+    // topic's own content, which is what keeps the board's join reading one
+    // small list per topic.
+    const mentions = mentionsOf({ references, mentioned, linkTargets });
 
     return {
       [NAME]: topicName,
-      [UI]: (
-        <cf-theme theme={TOPICS_THEME}>
-          <cf-screen>
-            <cf-vstack slot="header" gap="1" padding="4">
-              <cf-input
-                $value={title}
-                placeholder="Topic title…"
-                style="font-size: 1.25rem; font-weight: 600;"
-              />
-              <cf-hstack justify="between" align="center">
-                <cf-text variant="caption" tone="muted">
-                  started by {topicAuthorLabel(createdByView, createdByName)}
-                  {createdAt ? ` · ${whenLabel(createdAt)}` : ""}
-                </cf-text>
-                <cf-hstack gap="2" align="center">
-                  <cf-text variant="caption" tone="muted">Acting as</cf-text>
-                  {hasProfile
-                    ? (
-                      <cf-profile-badge
-                        $profile={profileWish.result}
-                        size="sm"
-                        noNavigate
-                      />
-                    )
-                    : <div>{profileWish[UI]}</div>}
-                </cf-hstack>
-              </cf-hstack>
-            </cf-vstack>
-
-            <cf-vstack gap="3" padding="4">
-              {/* ── The living body document ── */}
-              <cf-card>
-                <cf-vstack gap="2">
-                  <cf-hstack justify="between" align="center">
-                    <cf-heading level={5}>Body</cf-heading>
-                    {editingBody ? null : (
-                      <cf-button
-                        variant="secondary"
-                        disabled={computed(() => !hasProfile)}
-                        onClick={startEditBody}
-                      >
-                        Edit
-                      </cf-button>
-                    )}
-                  </cf-hstack>
-
-                  {editingBody
-                    ? (
-                      <cf-vstack gap="2">
-                        <cf-code-editor
-                          $value={bodyDraft}
-                          $mentionable={mentionable}
-                          language="text/markdown"
-                          mode="prose"
-                          wordWrap
-                          tabIndent
-                          placeholder="The topic's living document…"
-                          style="min-height: 12rem;"
-                        />
-                        <cf-hstack gap="2">
-                          <cf-button
-                            variant="primary"
-                            disabled={computed(() => !hasProfile)}
-                            onClick={saveBody}
-                          >
-                            Save
-                          </cf-button>
-                          <cf-button variant="ghost" onClick={cancelEditBody}>
-                            Cancel
-                          </cf-button>
-                        </cf-hstack>
-                      </cf-vstack>
-                    )
-                    : hasBody
-                    ? <cf-markdown content={body} />
-                    : (
-                      <cf-text tone="muted" block>
-                        No body yet. The body is this topic's living document —
-                        durable conclusions get folded up here while the thread
-                        below holds the deliberation.
-                      </cf-text>
-                    )}
-                  {bodyUpdatedAt.get()
-                    ? (
-                      <cf-text variant="caption" tone="muted">
-                        Last updated by {topicAuthorLabel(bodyUpdatedBy.get())}
-                        {" · "}
-                        {whenLabel(bodyUpdatedAt.get() ?? 0)}
-                      </cf-text>
-                    )
-                    : null}
-                </cf-vstack>
-              </cf-card>
-
-              {/* ── Links out ── */}
-              <cf-card>
-                <cf-vstack gap="2">
-                  <cf-heading level={5}>Links</cf-heading>
-                  {hasLinks
-                    ? (
-                      <cf-vstack gap="1">
-                        {computed(() =>
-                          linksView.map((link) => (
-                            <cf-hstack gap="2" align="center">
-                              <cf-badge size="xs" color="neutral">
-                                {link.kind}
-                              </cf-badge>
-                              {isSafeLinkUrl(link.url)
-                                ? (
-                                  <a
-                                    href={link.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style="color: inherit;"
-                                  >
-                                    {link.label || link.url}
-                                  </a>
-                                )
-                                : (
-                                  <cf-text tone="muted">
-                                    {link.label || link.url}
-                                  </cf-text>
-                                )}
-                              {link.addedBy
-                                ? (
-                                  <cf-text variant="caption" tone="muted">
-                                    by {topicAuthorLabel(link.addedBy)}
-                                  </cf-text>
-                                )
-                                : null}
-                            </cf-hstack>
-                          ))
-                        )}
-                      </cf-vstack>
-                    )
-                    : (
-                      <cf-text tone="muted" block>
-                        No links yet — PRs, agent sessions, other topics.
-                      </cf-text>
-                    )}
-                  <cf-hstack gap="2" align="end">
-                    <cf-field label="Kind" style="width: 130px;">
-                      <cf-select
-                        $value={linkKindDraft}
-                        items={LINK_KIND_ITEMS}
-                      />
-                    </cf-field>
-                    <cf-field label="URL" style="flex: 1;">
-                      <cf-input $value={linkUrlDraft} placeholder="https://…" />
-                    </cf-field>
-                    <cf-field label="Label" style="width: 180px;">
-                      <cf-input
-                        $value={linkLabelDraft}
-                        placeholder="optional"
-                      />
-                    </cf-field>
-                    <cf-button
-                      variant="secondary"
-                      disabled={computed(() => !hasProfile)}
-                      onClick={submitLink}
-                    >
-                      Add
-                    </cf-button>
-                  </cf-hstack>
-                </cf-vstack>
-              </cf-card>
-
-              {/* ── Connections (derived crossrefs; nothing persisted) ── */}
-              {computed(() => {
-                const { refsOutLinks, referencedByLinks } = crossrefView;
-                return refsOutLinks.length === 0 &&
-                    referencedByLinks.length === 0
-                  ? null
-                  : (
-                    <cf-card>
-                      <cf-vstack gap="2">
-                        <cf-heading level={5}>Connections</cf-heading>
-                        {crossrefLinkRow("references →", refsOutLinks)}
-                        {crossrefLinkRow(
-                          "← referenced by",
-                          referencedByLinks,
-                        )}
-                      </cf-vstack>
-                    </cf-card>
-                  );
-              })}
-
-              {/* ── The thread ── */}
-              <cf-card>
-                <cf-vstack gap="2">
-                  <cf-hstack justify="between" align="center">
-                    <cf-heading level={5}>Thread</cf-heading>
-                    <cf-text variant="caption" tone="muted">
-                      {commentCount} comments
-                    </cf-text>
-                  </cf-hstack>
-
-                  {hasComments
-                    ? (
-                      <cf-vstack gap="2">
-                        {computed(() =>
-                          commentsView.map((comment) => (
-                            <cf-vstack
-                              gap="0"
-                              style="border-left: 2px solid var(--cf-theme-color-border); padding-left: 0.75rem;"
-                            >
-                              <cf-hstack gap="2" align="center">
-                                <cf-avatar
-                                  src={comment.author?.avatar || ""}
-                                  name={topicAuthorLabel(
-                                    comment.author,
-                                    comment.authorName,
-                                  )}
-                                  size="xs"
-                                />
-                                <cf-text style="font-weight: 600;">
-                                  {topicAuthorLabel(
-                                    comment.author,
-                                    comment.authorName,
-                                  )}
-                                </cf-text>
-                                <cf-text variant="caption" tone="muted">
-                                  {whenLabel(comment.sentAt)}
-                                </cf-text>
-                              </cf-hstack>
-                              <cf-text block style="white-space: pre-wrap;">
-                                {comment.body}
-                              </cf-text>
-                            </cf-vstack>
-                          ))
-                        )}
-                      </cf-vstack>
-                    )
-                    : (
-                      <cf-text tone="muted" block>
-                        No comments yet.
-                      </cf-text>
-                    )}
-
-                  <cf-hstack gap="2" align="end">
-                    <cf-field label="Comment" style="flex: 1;">
-                      <cf-textarea
-                        $value={commentDraft}
-                        rows={3}
-                        placeholder="Add to the thread…"
-                      />
-                    </cf-field>
-                    <cf-button
-                      variant="primary"
-                      disabled={computed(() => !hasProfile)}
-                      onClick={submitComment}
-                    >
-                      Send
-                    </cf-button>
-                  </cf-hstack>
-                </cf-vstack>
-              </cf-card>
-            </cf-vstack>
-          </cf-screen>
-        </cf-theme>
-      ),
+      [UI]: view,
       title,
       body,
       comments,
@@ -1058,16 +1302,22 @@ export default pattern<TopicInput, TopicOutput>(
       bodyUpdatedAt,
       commentCount,
       lastActivityAt,
-      crossrefs,
+      references,
+      mentioned,
+      mentions,
+      referencedBy,
       addComment,
       addLink,
       setBody,
+      mention,
+      unmention,
       commentDraft,
       bodyDraft,
       editingBody,
       linkUrlDraft,
       linkLabelDraft,
       linkKindDraft,
+      referencesDraft,
       submitComment,
       startEditBody,
       saveBody,
