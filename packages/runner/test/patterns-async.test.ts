@@ -209,6 +209,11 @@ describe("Pattern Runner - Async", () => {
     await timeoutPromise;
     expect(timeoutCalled).toBe(true);
     expect(caughtErrorTryingToSetResult).toBeDefined();
+    // Named, so a `state.result` that read `undefined` — a TypeError from the
+    // property access — cannot stand in for the refusal under test.
+    expect(caughtErrorTryingToSetResult?.name).toBe(
+      "StorageTransactionCompleteError",
+    );
     const value = await piece.pull();
     expect(value?.result).toBe(0); // No change
   });

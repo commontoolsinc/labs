@@ -77,7 +77,28 @@ describe("query-result proxy mutation guard", () => {
     expect(() => items.sort()).toThrow("read-only");
   });
 
-  it("still allows the read-only array methods", () => {
+  it("refuses every in-place array mutator", () => {
+    // Named in full rather than by a representative few: each is dispatched
+    // from the same classifying map, so a name dropped from it is the way this
+    // set stops refusing as a group.
+    const mutate: Record<string, (items: number[]) => unknown> = {
+      copyWithin: (items) => items.copyWithin(0, 1),
+      fill: (items) => items.fill(0),
+      pop: (items) => items.pop(),
+      push: (items) => items.push(4),
+      reverse: (items) => items.reverse(),
+      shift: (items) => items.shift(),
+      sort: (items) => items.sort(),
+      splice: (items) => items.splice(0, 1),
+      unshift: (items) => items.unshift(0),
+    };
+    for (const [name, call] of Object.entries(mutate)) {
+      const items = makeArrayProxy();
+      expect(() => call(items), `${name} must refuse`).toThrow("read-only");
+    }
+  });
+
+  it("maps, filters and measures length through the view", () => {
     const items = makeArrayProxy();
     expect(items.map((n) => n * 2)).toEqual([2, 4, 6]);
     expect(items.filter((n) => n > 1)).toEqual([2, 3]);

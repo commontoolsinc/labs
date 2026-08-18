@@ -836,11 +836,13 @@ function assignComputedCellKinds(
   // and collects the cell roots the handler could WRITE through: roots
   // covered by a subschema that may grant a non-read-only `asCell` handle.
   // Read-only captures (no possible grant in the covering subschema) collect
-  // nothing — write capability flows only through `asCell` handles, so a plain
-  // value binding cannot be written through. Any subtree the walk cannot align (boolean or
-  // missing subschema with a possible grant, unmodeled schema keywords,
-  // value/schema shape mismatch) conservatively collects ALL roots in that
-  // value subtree.
+  // nothing — a plain value binding reaches the body as a view whose own traps
+  // refuse a write. `h()` converting a `$`-prefixed JSX binding back into a
+  // handle is the exception, and the accepted result-surface consequence in
+  // `docs/specs/computed-cell-identity.md` is where that is reasoned about. Any
+  // subtree the walk cannot align (boolean or missing subschema with a possible
+  // grant, unmodeled schema keywords, value/schema shape mismatch)
+  // conservatively collects ALL roots in that value subtree.
   const collectWritablyBoundRoots = (
     value: unknown,
     schema: unknown,

@@ -1,10 +1,7 @@
 /**
- * Minimal repro for CT-1173: Array push() via query result proxy didn't
- * assign identity to items.
- *
- * This test verifies that when using .push() on arrays accessed via query
- * result proxies, new items are anchored automatically, ensuring they're
- * stored as separate entity documents rather than inline data.
+ * `Cell.push` anchors an element that carries no explicit identity, so it is
+ * stored as its own entity document and the array holds a link to it rather
+ * than inline data (CT-1173).
  */
 
 import { expect } from "@std/expect";
@@ -21,7 +18,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("CT-1173: array push via query-result-proxy", () => {
+describe("CT-1173: array push anchors its elements", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -41,7 +38,7 @@ describe("CT-1173: array push via query-result-proxy", () => {
     await storageManager?.close();
   });
 
-  it("should anchor objects pushed via query-result-proxy", () => {
+  it("anchors objects pushed without an explicit identity", () => {
     // Create a cell with an empty array
     const arrayCell = runtime.getCell<{ name: string }[]>(
       space,
@@ -63,12 +60,17 @@ describe("CT-1173: array push via query-result-proxy", () => {
     pushFrame(frame);
 
     try {
-      // Get a query result proxy (this is what patterns use when they access
-      // writable arrays via their input/output bindings)
-      // Push objects without any explicit identity.
-      // The bug was that they should be anchored automatically but weren't.
-      arrayCell.push({ name: "Alice" });
-      arrayCell.push({ name: "Bob" });
+      // Minted inside the frame: `Cell.push` anchors from the frame its cell was
+      // constructed in. Pushed without an explicit identity, so anchoring is
+      // what turns each element into its own entity.
+      const inFrame = runtime.getCell<{ name: string }[]>(
+        space,
+        "test-array-push-id",
+        undefined,
+        tx,
+      );
+      inFrame.push({ name: "Alice" });
+      inFrame.push({ name: "Bob" });
     } finally {
       popFrame();
     }

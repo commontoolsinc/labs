@@ -157,17 +157,20 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
  * Builds a read-only JS proxy view over a stored cell. Read traps resolve
  * links and wrap nested values; every write refuses.
  *
- * **A view carries no write capability.** Property assignment and the in-place
- * array mutators (`push`, `splice`, `unshift`, …) throw, naming `Writable<..>`
- * as the way to ask for write access. Writes reach a cell through the `asCell`
- * handle a `Writable<..>` field mints, whose `Cell.set`/`Cell.push` carry the
- * merge intent and the write-boundary normalization.
+ * **A view's own traps carry no write capability.** Property assignment and
+ * the in-place array mutators (`push`, `splice`, `unshift`, …) throw, naming
+ * `Writable<..>` as the way to ask for write access. Writes reach a cell
+ * through the `asCell` handle a `Writable<..>` field mints, whose
+ * `Cell.set`/`Cell.push` carry the merge intent and the write-boundary
+ * normalization.
  *
- * The builder depends on the refusal rather than merely documenting it:
- * `collectWritablyBoundRoots` in `builder/pattern.ts` takes a plain
- * (non-`asCell`) binding in a handler to be unwritable, and a cell written
- * only through such a binding would be classified `computed` — replayable from
- * its inputs — if that held and the refusal did not.
+ * `h()` (`builder/h.ts`) is the one route that turns a view back into a
+ * handle: a view bound to a `$`-prefixed JSX prop is converted to a
+ * `keepAsCell` link, so `<cf-input $value={props.title} />` renders a writable
+ * binding from a plain one. `collectWritablyBoundRoots` in `builder/pattern.ts`
+ * reads a plain binding as unwritable when it classifies a cell `computed`;
+ * `docs/specs/computed-cell-identity.md` records exposure on the result surface
+ * as an accepted consequence rather than a disqualifier.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,

@@ -678,7 +678,7 @@ describe("module", () => {
 
     it("attaches source location to handler implementations", () => {
       const fn = (event: MouseEvent, props: { x: number }) => {
-        props.x = event.clientX;
+        void (event.clientX + props.x);
       };
       handler(true, true, fn);
 

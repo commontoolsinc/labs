@@ -178,11 +178,6 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // The same merge must hold when the append goes through the query-result proxy
-  // (a handler's `arr.push(x)` on a reactive array) rather than Cell.push. The
-  // proxy marks its own base-array read as the op's incidental read; without that
-  // mark the read enters the conflict set, session 2's commit false-conflicts
-  // against session 1's "A", and "B" is dropped instead of merging.
   // A CONDITIONAL push — the handler reads the list explicitly before pushing
   // (the dedup-then-push shape) — must keep its read in the conflict set, so a
   // concurrent append makes it conflict (and, in the live system, retry). This
@@ -654,15 +649,6 @@ describe("mergeable array appends", () => {
     }
   });
 
-  // A reshape (an in-place mutator that is not a mergeable push) after a push
-  // rewrites the array, so the recorded append tail no longer identifies the
-  // pushed element. The push intent is abandoned and the whole-array diff commits
-  // the reshaped result. `unshift` reads the array fresh, so the local value is
-  // exact.
-  // A reshape after a push commits the correctly reshaped array. The reshape
-  // reads the array fresh (so `sort` sees the pushed "b"), and the push intent is
-  // poisoned so the commit emits the reshaped whole-array diff rather than a stale
-  // tail op.
   // A whole-array Cell.set after a push reshapes the array; the append intent is
   // poisoned so the commit emits the set's array, not a tail op sliced from it.
   it("push then a whole-array set commits the set array", async () => {
@@ -2570,11 +2556,6 @@ describe("mergeable op guards and single-session branches", () => {
     }
   });
 
-  // The proxy reshapes an array two ways: by calling an in-place mutator on it,
-  // and by ASSIGNING over the property that holds it. Both are whole-value
-  // writes the recorded tail cannot survive, so both must poison. The assignment
-  // path runs through the proxy's `set` trap, which is a separate code path from
-  // the mutator dispatch.
   // The other direction, and the one that pins the predicate: a write BENEATH an
   // array (an element edit) must leave that array's intent alone. Asserted on
   // the intents, and with the push FIRST — the durable value cannot discriminate

@@ -437,8 +437,8 @@ retry.
 The implemented drop is narrower than that. It removes only the reads the op
 *itself* issues — the list value it reads to build the write (marked
 `mergeableOpRead`), the link-resolution and element sub-reads strictly beneath
-the array path, and the `["cfc"]` policy label — and keeps a *recursive* read
-at the array path
+the array path, the shape-only container read a view of the array records, and
+the `["cfc"]` policy label — and keeps a *recursive* read at the array path
 that the op did not make, which is the handler's own explicit `.get()`/`.some()`.
 So a handler that reads the list and then `push`es still records that read: two
 concurrent conditional appends conflict, the loser retries, sees the winner's

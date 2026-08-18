@@ -177,20 +177,23 @@ describe("CT-1173: array push with complex objects", () => {
     };
     pushFrame(frame1);
     try {
-      arrayCell.push({
-        name: "Alice",
-        email: "",
-        phone: "",
-        usualCommuteMode: "drive",
-        livesNearby: false,
-        spotPreferences: [],
-        compatibleSpots: [1, 5, 12],
-        defaultSpot: 1,
-        priorityRank: 1,
-        totalBookings: 0,
-        lastBookingDate: null,
-        createdAt: 1000,
-      });
+      // Minted inside the frame: `Cell.push` anchors from the frame its cell was
+      // constructed in, which is what makes the counter reset below observable.
+      runtime.getCell<Person[]>(space, "test-separate-pushes", undefined, tx)
+        .push({
+          name: "Alice",
+          email: "",
+          phone: "",
+          usualCommuteMode: "drive",
+          livesNearby: false,
+          spotPreferences: [],
+          compatibleSpots: [1, 5, 12],
+          defaultSpot: 1,
+          priorityRank: 1,
+          totalBookings: 0,
+          lastBookingDate: null,
+          createdAt: 1000,
+        });
     } finally {
       popFrame();
     }
@@ -206,20 +209,21 @@ describe("CT-1173: array push with complex objects", () => {
     };
     pushFrame(frame2);
     try {
-      arrayCell.push({
-        name: "Bob",
-        email: "",
-        phone: "",
-        usualCommuteMode: "drive",
-        livesNearby: false,
-        spotPreferences: [],
-        compatibleSpots: [1, 5, 12],
-        defaultSpot: 5,
-        priorityRank: 2,
-        totalBookings: 0,
-        lastBookingDate: null,
-        createdAt: 2000,
-      });
+      runtime.getCell<Person[]>(space, "test-separate-pushes", undefined, tx)
+        .push({
+          name: "Bob",
+          email: "",
+          phone: "",
+          usualCommuteMode: "drive",
+          livesNearby: false,
+          spotPreferences: [],
+          compatibleSpots: [1, 5, 12],
+          defaultSpot: 5,
+          priorityRank: 2,
+          totalBookings: 0,
+          lastBookingDate: null,
+          createdAt: 2000,
+        });
     } finally {
       popFrame();
     }
