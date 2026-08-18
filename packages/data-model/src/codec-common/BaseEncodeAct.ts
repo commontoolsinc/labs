@@ -41,7 +41,7 @@ import { SELF_REP } from "./CodecRegistry.ts";
  * index is written down. A format that answers those differently is not
  * varying an implementation detail; it is being a different format.
  */
-export abstract class EncodeAct<Encoded, SerializedForm = Encoded>
+export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
   extends BaseCodecAct<Encoded> {
   //
   // Subclass contract

@@ -2,7 +2,7 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { DecodeAct } from "@/codec-common/DecodeAct.ts";
+import { BaseDecodeAct } from "@/codec-common/BaseDecodeAct.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
@@ -22,7 +22,7 @@ import {
  * shaped like it -- the quoting rules, and the explicit runs that stand for
  * array holes.
  */
-export class JsonDecodeAct extends DecodeAct<JsonCodecValue, string> {
+export class JsonDecodeAct extends BaseDecodeAct<JsonCodecValue, string> {
   /**
    * @inheritDoc
    *
@@ -69,6 +69,14 @@ export class JsonDecodeAct extends DecodeAct<JsonCodecValue, string> {
 
       // `CODEC_META_TAGS.object` unwrapping (Section 5.6).
       if (tag === CODEC_META_TAGS.object) {
+        if (!isPlainObject(rawState)) {
+          return this.reportMalformed(
+            tag,
+            rawState,
+            "`/object` state is not an object.",
+          );
+        }
+
         const inner = rawState as Record<string, JsonCodecValue>;
         const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {

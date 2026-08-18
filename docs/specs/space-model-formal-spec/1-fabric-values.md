@@ -68,7 +68,7 @@ wrapper classes (Section 1.4).
 > abstract base that carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
 > `FabricCodec`, `LiveEnvironment`) lives in `codec-interface/` (Section 2),
 > and the machinery that acts on it in `codec-common/` -- including
-> `EncodeAct` and `DecodeAct`, which are classes the walk carries
+> `BaseEncodeAct` and `BaseDecodeAct`, which are classes the walk carries
 > rather than contracts a caller implements. The conversion functions are in
 > `native-conversion.ts` (Section 8).
 >
