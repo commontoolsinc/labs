@@ -41,22 +41,45 @@ function tileRun(run: Run, repo: string): Run {
 
 async function fetchRuns(repo: string, workflow: string): Promise<Run[]> {
   const cutoff = Date.now() - CI_RUNS_MAX_AGE_DAYS * 86_400_000;
-  const out: Run[] = [];
+  const collected = new Map<number, Run>();
   const pages = Math.ceil(CI_RUNS_MAX / 100);
+  let previousPageOldest: Run | undefined;
+  walk:
   for (let page = 1; page <= pages; page++) {
     const r = await github<{ workflow_runs: Run[] }>(
       `repos/${repo}/actions/workflows/${workflow}/runs?branch=main&per_page=100&page=${page}`,
     );
     const batch = r.workflow_runs ?? [];
     if (!batch.length) break;
+    // Each page is the slice of one list that carries on from the page before
+    // it. A page that opens on a run newer than the one the previous page ended
+    // on, and that the previous page did not carry, was cut from a different
+    // moment: joining the two leaves a hole in the window and can put a run from
+    // weeks back at the head, where every tile reads the state of the tree.
+    const first = batch[0];
+    if (
+      previousPageOldest && !collected.has(first.id) &&
+      Date.parse(first.created_at) >
+        Date.parse(previousPageOldest.created_at)
+    ) {
+      throw new Error(
+        `GitHub ${repo} ${workflow} runs page ${page} opens at ${first.created_at}, ` +
+          `after page ${page - 1} ended at ${previousPageOldest.created_at}`,
+      );
+    }
+    previousPageOldest = batch[batch.length - 1];
     for (const run of batch) {
       const t = Date.parse(run.run_started_at);
-      if (Number.isFinite(t) && t < cutoff) return out; // newest-first, so the rest are older too
-      out.push(tileRun(run, repo));
-      if (out.length >= CI_RUNS_MAX) return out;
+      if (Number.isFinite(t) && t < cutoff) break walk; // newest-first, so the rest are older too
+      collected.set(run.id, tileRun(run, repo));
+      if (collected.size >= CI_RUNS_MAX) break walk;
     }
   }
-  return out;
+  // The walk decides which runs are in the window; the sort decides their order,
+  // so a page served out of turn cannot leave an old run at the head.
+  return [...collected.values()].sort((a, b) =>
+    Date.parse(b.created_at) - Date.parse(a.created_at)
+  );
 }
 
 export function makeCtx(): Ctx {

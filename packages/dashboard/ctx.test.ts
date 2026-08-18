@@ -1,10 +1,16 @@
 /**
  * Ctx tests: makeCtx() builds the memoized data sources every tile reads. The
  * GitHub API is stubbed with a canned runs response, so these pin the paging,
- * the age cutoff, the cap, and the caching without a network.
+ * the age cutoff, the cap, the order the window comes back in, the join between
+ * pages, and the caching without a network.
  */
 
-import { assert, assertEquals } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { makeCtx } from "./ctx.ts";
 import {
   CI_RUNS_MAX,
@@ -16,8 +22,12 @@ import {
 } from "./config.ts";
 import type { Ctx, Run } from "./types.ts";
 
+// GitHub hands back a workflow's runs newest first, so the canned runs are timed
+// from their id: a larger id is an older run, and a page of ascending ids reads
+// the way a real page does.
 function run(over: Partial<Run> = {}): Run {
-  const startedAt = new Date(Date.now() - 3_600_000).toISOString();
+  const startedAt = new Date(Date.now() - 3_600_000 - (over.id ?? 1) * 60_000)
+    .toISOString();
   return {
     id: 1,
     status: "completed",
@@ -254,6 +264,58 @@ Deno.test("runs(): a run keeps only the fields tiles read", async () => {
         Object.keys(only).filter((key) => key in surplus),
         [],
       );
+    },
+  );
+});
+
+const DAY_MS = 86_400_000;
+
+// A run whose creation and start are `msAgo` behind now, for the tests that care
+// which moment a page was cut from.
+const aged = (id: number, msAgo: number) => {
+  const at = new Date(Date.now() - msAgo).toISOString();
+  return run({ id, created_at: at, run_started_at: at });
+};
+
+Deno.test("runs(): pages cut from different moments are refused, not spliced", async () => {
+  // Page one answers from a month back while page two answers from now. Joined,
+  // they would read as one window with a month-wide hole and a stale run at the
+  // head, which is the state of the tree every CI tile reports.
+  await withGithub(
+    (url) =>
+      pageOf(url) === 1
+        ? Array.from({ length: 100 }, (_, i) => aged(1000 + i, 35 * DAY_MS + i * 60_000))
+        : Array.from({ length: 100 }, (_, i) => aged(1 + i, 3 * DAY_MS + i * 60_000)),
+    async (ctx) => {
+      const error = await assertRejects(() => ctx.runs(), Error);
+      assertStringIncludes(error.message, "runs page 2 opens at");
+    },
+  );
+});
+
+Deno.test("runs(): the newest run heads the window whatever order a page arrives in", async () => {
+  await withGithub(
+    (url) => (pageOf(url) === 1 ? [aged(1, 35 * DAY_MS), aged(2, 3_600_000)] : []),
+    async (ctx) => {
+      assertEquals((await ctx.runs()).map((r) => r.id), [2, 1]);
+    },
+  );
+});
+
+Deno.test("runs(): a run repeated across pages is carried once", async () => {
+  // A run landing between the two requests shifts page two back over page one's
+  // last entry. The pages still describe one window; the repeat is not two runs.
+  await withGithub(
+    (url) =>
+      pageOf(url) === 1
+        ? Array.from({ length: 100 }, (_, i) => aged(1 + i, (1 + i) * 60_000))
+        : Array.from({ length: 100 }, (_, i) => aged(100 + i, (100 + i) * 60_000)),
+    async (ctx) => {
+      const out = await ctx.runs();
+      assertEquals(out.length, 199);
+      assertEquals(new Set(out.map((r) => r.id)).size, 199);
+      assertEquals(out[0].id, 1);
+      assertEquals(out[out.length - 1].id, 199);
     },
   );
 });

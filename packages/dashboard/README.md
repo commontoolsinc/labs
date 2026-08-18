@@ -85,6 +85,17 @@ tile once per collection interval. A tile with several workflows can update
 once for each workflow as they arrive. This keeps a repository's build, trust,
 duration, and recent-run views in agreement when their intervals coincide.
 
+A workflow snapshot is read a page at a time, and the pages have to describe
+one moment. A page that opens on a run newer than the one the previous page
+ended on, and that the previous page did not carry, was cut from a different
+moment, so the fetch fails rather than joining the two. The runs that do come
+back are ordered newest-first by the collection, not by the order the pages
+arrived in. A fetch whose newest run is older than the newest run already held
+read a stale view of the workflow: the scheduler keeps the snapshot it has and
+names the source, and the next fetch that reaches a current view clears that.
+Together these keep a stale read from putting a run from weeks back at the head
+of a window, where every CI tile takes the state of the tree from.
+
 The recent-main-runs tile reads both the Labs and Loom snapshots. It rebuilds
 and sorts the combined list whenever either snapshot arrives. If one snapshot
 has not arrived yet, it shows the runs from the available snapshot in gray and
