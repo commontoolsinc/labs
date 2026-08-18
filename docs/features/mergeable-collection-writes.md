@@ -256,9 +256,8 @@ first, since the op carries only the delta.
 
 - **Call sites** — `Cell.push` (`packages/runner/src/cell.ts`) calls
   `recordMergeableOp` with an `append` delta after writing the combined array, so
-  id anchoring,
-  cross-space link elements, and CFC write-policy recording continue to run
-  through the existing `diffAndUpdate` path unchanged.
+  id anchoring, cross-space link elements, and CFC write-policy recording
+  continue to run through the existing `diffAndUpdate` path unchanged.
 
 ## Semantics and limitations
 
