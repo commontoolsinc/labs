@@ -92,12 +92,20 @@ describe("idle consults head-event park with a wake timer armed", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { cell, handler, pattern } = commonfabric;
     let invocations = 0;
-    const bump = handler<{ value: number }, { effects: { total: number } }>(
+    const bump = handler<
+      { value: number },
+      { effects: Cell<{ total: number }> }
+    >(
+      true,
+      {
+        type: "object",
+        properties: { effects: { type: "object", asCell: ["cell"] } },
+      },
       (event, { effects }) => {
         invocations++;
-        effects.total += event.value;
+        const total = effects.key("total");
+        total.set(total.get() + event.value);
       },
-      { proxy: true },
     );
     const rootPattern = pattern(() => {
       const effects = cell({ total: 0 });

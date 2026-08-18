@@ -1697,11 +1697,18 @@ describe("persistent scheduler observations", () => {
       let producerEvents = 0;
       const updateGenerated = handler<
         { value: number },
-        { generated: number }
-      >(({ value }, state) => {
-        producerEvents++;
-        state.generated = value;
-      }, { proxy: true });
+        { generated: Cell<number> }
+      >(
+        true,
+        {
+          type: "object",
+          properties: { generated: { type: "number", asCell: ["cell"] } },
+        },
+        ({ value }, state) => {
+          producerEvents++;
+          state.generated.set(value);
+        },
+      );
 
       const eventOnlyProducerPattern = pattern<{ generated: number }>(
         ({ generated }) => ({

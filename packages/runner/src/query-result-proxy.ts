@@ -182,13 +182,13 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
  * read-only view gives — "declare type as `Writable<..>`" — names the way to
  * ask for write access, but the refusal itself is enforcement that the builder
  * depends on: `collectWritablyBoundRoots` in `builder/pattern.ts` takes a plain
- * (non-`asCell`) binding in a schema-carrying handler to be unwritable, and a
- * cell written only through such a binding would be classified `computed` —
- * replayable from its inputs — if that held and the refusal did not. So a view
- * built for one writability must never answer a request for the other. Write
- * capability reaches a pattern two ways: an `asCell` handle minted from a
- * `Writable<..>` field, or the whole argument of a handler declaring
- * `{ proxy: true }`, which is the one construction site passing `writable` true.
+ * (non-`asCell`) binding in a handler to be unwritable, and a cell written only
+ * through such a binding would be classified `computed` — replayable from its
+ * inputs — if that held and the refusal did not. So a view built for one
+ * writability must never answer a request for the other. Write capability
+ * reaches a pattern through an `asCell` handle minted from a `Writable<..>`
+ * field; every proxy a pattern is handed is read-only, and a writable one is
+ * reached only by asking `Cell.getAsQueryResult` for one directly.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,

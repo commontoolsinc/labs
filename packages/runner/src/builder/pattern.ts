@@ -815,9 +815,7 @@ function assignComputedCellKinds(
   // `instantiatePassthroughNode`), with no code that could write elsewhere.
   const writerDisqualifies = (module: NodeRef["module"]): boolean => {
     if (!isModule(module)) return true; // Opaque module value: assume the worst.
-    if (module.wrapper === "handler" || module.writableProxy === true) {
-      return true;
-    }
+    if (module.wrapper === "handler") return true;
     if (module.isEffect === true) return true;
     switch (module.type) {
       case "javascript":
@@ -838,9 +836,8 @@ function assignComputedCellKinds(
   // and collects the cell roots the handler could WRITE through: roots
   // covered by a subschema that may grant a non-read-only `asCell` handle.
   // Read-only captures (no possible grant in the covering subschema) collect
-  // nothing — in a schema-carrying, non-writableProxy handler, write
-  // capability flows only through `asCell` handles, so a plain value binding
-  // cannot be written through. Any subtree the walk cannot align (boolean or
+  // nothing — write capability flows only through `asCell` handles, so a plain
+  // value binding cannot be written through. Any subtree the walk cannot align (boolean or
   // missing subschema with a possible grant, unmodeled schema keywords,
   // value/schema shape mismatch) conservatively collects ALL roots in that
   // value subtree.
@@ -962,9 +959,7 @@ function assignComputedCellKinds(
       // Handlers capture their closure under `$ctx` (builder/module.ts binds
       // `{ $ctx, $event }` against an argumentSchema of shape
       // `{ properties: { $event, $ctx } }`, see generateHandlerSchema).
-      // Without a schema — or with the legacy writable proxy — every capture
-      // is writable.
-      if (module.writableProxy === true) return all();
+      // Without a schema, every capture is writable.
       const schema = module.argumentSchema;
       const properties = isObjectNotArray(schema) &&
           isObjectNotArray(schema.properties)
@@ -986,7 +981,6 @@ function assignComputedCellKinds(
       }
       return roots;
     }
-    if (module.writableProxy === true) return all(); // Defensive: only handlers carry it today.
     if (module.isEffect === true) return all();
     switch (module.type) {
       case "javascript":

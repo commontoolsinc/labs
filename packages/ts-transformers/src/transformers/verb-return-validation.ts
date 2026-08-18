@@ -103,9 +103,9 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
 
 /**
  * The verb body: the call's single function-shaped argument. Every authored
- * form — `action(cb)`, `handler(cb)`, `handler(cb, { proxy: true })`,
- * `handler(eventSchema, stateSchema, cb)` — carries exactly one; anything
- * else is a shape this validator does not judge.
+ * form — `action(cb)`, `handler(cb)`, `handler(eventSchema, stateSchema, cb)`
+ * — carries exactly one; anything else is a shape this validator does not
+ * judge.
  */
 function verbCallback(
   call: ts.CallExpression,

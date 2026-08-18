@@ -341,7 +341,7 @@ value is ignored with a warning rather than coerced. See
   `computed:` URI scheme replacing `of:`) for derived internal cells. The
   builder classifies written internals as computed by default, then applies
   conservative writer- and input-side disqualifiers. These include streams;
-  handler, writable-proxy, effect, opaque, and non-replayable writers; and roots
+  handler, effect, opaque, and non-replayable writers; and roots
   handed writable to handlers, sub-patterns, sub-pattern operations, or
   non-replayable builtins. The linked spec is the exhaustive classifier
   reference. The flag gates minting only; readers accept both id forms

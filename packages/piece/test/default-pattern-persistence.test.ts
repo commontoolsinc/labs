@@ -20,12 +20,13 @@ const defaultPatternProgram: RuntimeProgram = {
       name: "/main.tsx",
       contents: [
         "/// <cf-disable-transform />",
-        "import { handler, pattern } from 'commonfabric';",
-        "const addPiece = handler<{ piece: unknown }, { pieceRegistry: unknown[] }>(",
+        "import { handler, pattern, type Cell } from 'commonfabric';",
+        "const addPiece = handler<{ piece: unknown }, { pieceRegistry: Cell<unknown[]> }>(",
+        "  true,",
+        "  { type: 'object', properties: { pieceRegistry: { type: 'array', asCell: ['cell'] } } },",
         "  ({ piece }, { pieceRegistry }) => {",
         "    pieceRegistry.push(piece);",
         "  },",
-        "  { proxy: true },",
         ");",
         "export default pattern<{ pieceRegistry: unknown[] }>(({ pieceRegistry }) => ({",
         "  pieceRegistry,",
@@ -55,12 +56,16 @@ async function createDefaultPatternPieceWithResult(pieces: PiecesController) {
 
   const addPiece = handler<
     { piece: Cell<unknown> },
-    { pieceRegistry: Cell<unknown>[] }
+    { pieceRegistry: Cell<Cell<unknown>[]> }
   >(
+    true,
+    {
+      type: "object",
+      properties: { pieceRegistry: { type: "array", asCell: ["cell"] } },
+    },
     ({ piece }, { pieceRegistry }) => {
       pieceRegistry.push(piece);
     },
-    { proxy: true },
   );
   const defaultPattern = pattern<{ pieceRegistry: Cell<unknown>[] }>(
     ({ pieceRegistry }) => ({
@@ -125,12 +130,16 @@ describe("PiecesController default pattern persistence", () => {
 
     const addPiece = handler<
       { piece: Cell<unknown> },
-      { pieceRegistry: Cell<unknown>[] }
+      { pieceRegistry: Cell<Cell<unknown>[]> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { pieceRegistry: { type: "array", asCell: ["cell"] } },
+      },
       ({ piece }, { pieceRegistry }) => {
         pieceRegistry.push(piece);
       },
-      { proxy: true },
     );
     const defaultPattern = pattern<{ pieceRegistry: Cell<unknown>[] }>(
       ({ pieceRegistry }) => ({

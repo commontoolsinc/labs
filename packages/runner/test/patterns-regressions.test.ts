@@ -6,7 +6,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type FactoryInput, NAME } from "../src/builder/types.ts";
+import { type Cell, type FactoryInput, NAME } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { Pattern } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -159,13 +159,17 @@ describe("Pattern Runner - Regressions", () => {
 
     const createNote = handler<
       void,
-      { notes: Array<ReturnType<typeof notePattern>> }
+      { notes: Cell<Array<ReturnType<typeof notePattern>>> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { notes: { type: "array", asCell: ["cell"] } },
+      },
       (_, { notes }) => {
         const newNote = notePattern({ title: "Stream Created Note" });
         notes.push(newNote);
       },
-      { proxy: true },
     );
 
     const notebookLikePattern = pattern<{

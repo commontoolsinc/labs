@@ -7,6 +7,7 @@ import {
 } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
+  type Cell,
   type Frame,
   isModule,
   isPattern,
@@ -246,24 +247,44 @@ describe("module", () => {
 
   describe("handler function", () => {
     it("creates a node factory for event handlers", () => {
-      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
-        (event, props) => {
-          props.x = event.clientX;
-          props.y = event.clientY;
+      const clickHandler = handler<
+        MouseEvent,
+        { x: Cell<number>; y: Cell<number> }
+      >(
+        true,
+        {
+          type: "object",
+          properties: {
+            x: { type: "number", asCell: ["cell"] },
+            y: { type: "number", asCell: ["cell"] },
+          },
         },
-        { proxy: true },
+        (event, props) => {
+          props.x.set(event.clientX);
+          props.y.set(event.clientY);
+        },
       );
       expect(typeof clickHandler).toBe("function");
       expect(isModule(clickHandler)).toBe(true);
     });
 
     it("creates a opaque ref with stream when called", () => {
-      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
-        (event, props) => {
-          props.x = event.clientX;
-          props.y = event.clientY;
+      const clickHandler = handler<
+        MouseEvent,
+        { x: Cell<number>; y: Cell<number> }
+      >(
+        true,
+        {
+          type: "object",
+          properties: {
+            x: { type: "number", asCell: ["cell"] },
+            y: { type: "number", asCell: ["cell"] },
+          },
         },
-        { proxy: true },
+        (event, props) => {
+          props.x.set(event.clientX);
+          props.y.set(event.clientY);
+        },
       );
       const stream = clickHandler({ x: reactive(10), y: reactive(20) });
       expect(isReactive(stream)).toBe(true);
@@ -451,12 +472,22 @@ describe("module", () => {
     });
 
     it("creates a opaque ref with stream when with is called", () => {
-      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
-        (event, props) => {
-          props.x = event.clientX;
-          props.y = event.clientY;
+      const clickHandler = handler<
+        MouseEvent,
+        { x: Cell<number>; y: Cell<number> }
+      >(
+        true,
+        {
+          type: "object",
+          properties: {
+            x: { type: "number", asCell: ["cell"] },
+            y: { type: "number", asCell: ["cell"] },
+          },
         },
-        { proxy: true },
+        (event, props) => {
+          props.x.set(event.clientX);
+          props.y.set(event.clientY);
+        },
       );
       const stream = clickHandler.with({ x: reactive(10), y: reactive(20) });
       expect(isReactive(stream)).toBe(true);
@@ -649,7 +680,7 @@ describe("module", () => {
       const fn = (event: MouseEvent, props: { x: number }) => {
         props.x = event.clientX;
       };
-      handler(fn, { proxy: true });
+      handler(true, true, fn);
 
       expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
     });

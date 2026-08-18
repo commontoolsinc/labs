@@ -2584,12 +2584,6 @@ export interface HandlerFunction {
     handler: (event: E, props: HandlerState<T>) => any,
   ): HandlerFactory<E, T>;
 
-  // Without schemas
-  <E, T>(
-    handler: (event: E, props: T) => any,
-    options: { proxy: true },
-  ): HandlerFactory<E, T>;
-
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
   ): HandlerFactory<E, T>;
@@ -2602,11 +2596,6 @@ export interface HandlerFunction {
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => R,
-  ): HandlerFactory<E, T, R>;
-
-  <E, T, R>(
-    handler: (event: E, props: T) => R,
-    options: { proxy: true },
   ): HandlerFactory<E, T, R>;
 
   <E, T, R>(

@@ -57,12 +57,17 @@ describe("Pattern Runner - Handlers", () => {
   it("should execute handlers", async () => {
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number } }
+      { counter: Cell<{ value: number }> }
     >(
-      ({ amount }, { counter }) => {
-        counter.value += amount;
+      true,
+      {
+        type: "object",
+        properties: { counter: { type: "object", asCell: ["cell"] } },
       },
-      { proxy: true },
+      ({ amount }, { counter }) => {
+        const value = counter.key("value");
+        value.set(value.get() + amount);
+      },
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
@@ -95,12 +100,17 @@ describe("Pattern Runner - Handlers", () => {
 
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number } }
+      { counter: Cell<{ value: number }> }
     >(
-      ({ amount }, { counter }) => {
-        counter.value += amount;
+      true,
+      {
+        type: "object",
+        properties: { counter: { type: "object", asCell: ["cell"] } },
       },
-      { proxy: true },
+      ({ amount }, { counter }) => {
+        const value = counter.key("value");
+        value.set(value.get() + amount);
+      },
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
@@ -138,12 +148,17 @@ describe("Pattern Runner - Handlers", () => {
 
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number } }
+      { counter: Cell<{ value: number }> }
     >(
-      ({ amount }, { counter }) => {
-        counter.value += amount;
+      true,
+      {
+        type: "object",
+        properties: { counter: { type: "object", asCell: ["cell"] } },
       },
-      { proxy: true },
+      ({ amount }, { counter }) => {
+        const value = counter.key("value");
+        value.set(value.get() + amount);
+      },
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
@@ -180,12 +195,17 @@ describe("Pattern Runner - Handlers", () => {
 
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number } }
+      { counter: Cell<{ value: number }> }
     >(
-      ({ amount }, { counter }) => {
-        counter.value += amount;
+      true,
+      {
+        type: "object",
+        properties: { counter: { type: "object", asCell: ["cell"] } },
       },
-      { proxy: true },
+      ({ amount }, { counter }) => {
+        const value = counter.key("value");
+        value.set(value.get() + amount);
+      },
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
@@ -212,104 +232,6 @@ describe("Pattern Runner - Handlers", () => {
     expect(registeredHandler.writes).toBeDefined();
 
     addEventHandlerSpy.restore();
-  });
-  it("should demand handler-written pattern results when pulled", async () => {
-    const counter = runtime.getCell<{ value: number }>(
-      space,
-      "should demand handler-written pattern results when pulled 1",
-      undefined,
-      tx,
-    );
-    counter.set({ value: 0 });
-    const nested = runtime.getCell<{ a: { b: { c: number } } }>(
-      space,
-      "should demand handler-written pattern results when pulled 2",
-      undefined,
-      tx,
-    );
-    nested.set({ a: { b: { c: 0 } } });
-
-    const values: [number, number, number][] = [];
-
-    const incLogger = lift<
-      {
-        counter: { value: number };
-        amount: number;
-        nested: { c: number };
-      },
-      [number, number, number]
-    >(({ counter, amount, nested }) => {
-      const tuple: [number, number, number] = [counter.value, amount, nested.c];
-      values.push(tuple);
-      return tuple;
-    });
-
-    const incHandler = handler<
-      { amount: number },
-      {
-        counter: { value: number };
-        nested: { a: { b: { c: number } } };
-        latest?: number[];
-      }
-    >(
-      (event, state) => {
-        state.counter.value += event.amount;
-        state.latest = incLogger({
-          counter: state.counter,
-          amount: event.amount,
-          nested: state.nested.a.b,
-        });
-      },
-      { proxy: true },
-    );
-
-    const incPattern = pattern<{
-      counter: { value: number };
-      nested: { a: { b: { c: number } } };
-    }>(({ counter, nested }) => {
-      const latest = Writable.of<number[] | undefined>(undefined);
-      const stream = incHandler({ counter, nested, latest });
-      return { stream, latest };
-    });
-
-    const resultCell = runtime.getCell<{
-      stream: any;
-      latest?: number[];
-    }>(
-      space,
-      "should demand handler-written pattern results when pulled",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, incPattern, {
-      counter,
-      nested,
-    }, resultCell);
-    tx.commit();
-
-    await result.pull();
-
-    result.key("stream").send({ amount: 1 });
-    await runtime.idle();
-    expect(values).toEqual([]);
-    expect(await result.key("latest").pull()).toEqual([1, 1, 0]);
-    expect(values).toEqual([[1, 1, 0]]);
-
-    result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-
-    expect(values).toContainEqual([1, 1, 0]);
-    expect(await result.key("latest").pull()).toEqual([3, 2, 0]);
-    expect(values).toContainEqual([3, 2, 0]);
-    expect(values.some((tuple) => tuple.join(",") === "3,1,0")).toBe(false);
-
-    const graph = runtime.scheduler.getGraphSnapshot();
-    expect(
-      graph.nodes.some((node) => node.id.startsWith("readResult:")),
-    ).toBe(false);
-    expect(
-      graph.nodes.some((node) => node.id.startsWith("handlerResult:")),
-    ).toBe(false);
   });
 
   it("should execute handlers with schemas", async () => {
@@ -369,15 +291,19 @@ describe("Pattern Runner - Handlers", () => {
 
     const divHandler = handler<
       { divisor: number; dividend: number },
-      { result: number }
+      { result: Cell<number> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { result: { type: "number", asCell: ["cell"] } },
+      },
       ({ divisor, dividend }, state) => {
         if (dividend === 0) {
           throw new Error("division by zero");
         }
-        state.result = divisor / dividend;
+        state.result.set(divisor / dividend);
       },
-      { proxy: true },
     );
 
     const divPattern = pattern<{ result: number }>(

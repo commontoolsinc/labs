@@ -7,6 +7,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
+import { type Cell } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -97,19 +98,23 @@ describe("Pattern Runner - Async", () => {
     let handlerCalled = false;
     let timeoutCalled = false;
 
-    const slowHandler = handler<{ value: number }, { result: number }>(
+    const slowHandler = handler<{ value: number }, { result: Cell<number> }>(
+      true,
+      {
+        type: "object",
+        properties: { result: { type: "number", asCell: ["cell"] } },
+      },
       ({ value }, state) => {
         handlerCalled = true;
         // Using Promise to simulate an async operation
         return new Promise<void>((resolve) =>
           setTimeout(() => {
             timeoutCalled = true;
-            state.result = value * 2;
+            state.result.set(value * 2);
             resolve();
           }, 100)
         );
       },
-      { proxy: true },
     );
 
     const slowHandlerPattern = pattern<{ result: number }>(
@@ -151,7 +156,12 @@ describe("Pattern Runner - Async", () => {
     let timeoutPromise: Promise<void> | undefined;
     let caughtErrorTryingToSetResult: Error | undefined;
 
-    const slowHandler = handler<{ value: number }, { result: number }>(
+    const slowHandler = handler<{ value: number }, { result: Cell<number> }>(
+      true,
+      {
+        type: "object",
+        properties: { result: { type: "number", asCell: ["cell"] } },
+      },
       ({ value }, state) => {
         handlerCalled = true;
         // Capturing the promise, but _not_ returning it.
@@ -159,7 +169,7 @@ describe("Pattern Runner - Async", () => {
           setTimeout(() => {
             timeoutCalled = true;
             try {
-              state.result = value * 2;
+              state.result.set(value * 2);
             } catch (error) {
               caughtErrorTryingToSetResult = error as Error;
             }
@@ -167,7 +177,6 @@ describe("Pattern Runner - Async", () => {
           }, 10)
         );
       },
-      { proxy: true },
     );
 
     const slowHandlerPattern = pattern<{ result: number }>(
