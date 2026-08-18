@@ -804,6 +804,19 @@ space's authorization, and only a healthy session is cached for the run. A
 session that fails to build surfaces as an ordinary tool-output error rather
 than a run failure, and the next tool call retries the construction.
 
+Two further flags set the session runtime's CFC dials, and both need the three
+session flags present. `--fabric-cfc-enforcement-mode`
+(`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
+`enforce-strict` — raise-only, since the session's runtime preset already pins
+`enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
+confidentiality its target's declared policy does not admit has its commit
+refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
+accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
+onto everything a pattern's transaction writes, which is what makes a labelled
+read visible to that refusal. These dials govern the fabric session's runtime
+only — `--cfc-enforcement-mode` remains the harness's own dial for tool policy
+and the sandbox, and the two are set independently.
+
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, an
 optional `resultSchema`, and an optional `register`. An `inputs` string value

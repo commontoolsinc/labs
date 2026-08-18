@@ -126,6 +126,12 @@ The current package provides:
   persisted artifacts; without the session configuration the tool is absent from
   the tool surface, for a `default`- or `pattern-author`-profile subagent as
   much as for the parent — a child shares the one session the parent built;
+  `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
+  `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
+  set the session runtime's CFC dials, so with labels persisted a
+  confidentiality-tainted pattern write is refused at commit under strict —
+  these are the fabric session's dials, independent of the harness's own
+  `--cfc-enforcement-mode`;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable

@@ -61,11 +61,20 @@ async () => {
     await Deno.readFile(config.identityKeyPath),
   );
   const apiUrl = new URL(config.apiUrl);
+  const cfcDials = {
+    ...(config.cfcEnforcementMode !== undefined
+      ? { cfcEnforcementMode: config.cfcEnforcementMode }
+      : {}),
+    ...(config.cfcFlowLabels !== undefined
+      ? { cfcFlowLabels: config.cfcFlowLabels }
+      : {}),
+  };
   if (!isDID(config.space)) {
     const pieces = await PiecesController.initialize({
       apiUrl,
       identity,
       spaceName: config.space,
+      ...cfcDials,
     });
     assertSpaceAuthorized(pieces);
     return { pieces };
@@ -82,6 +91,7 @@ async () => {
       spaceIdentity: session.spaceIdentity,
     }),
     experimental: experimentalOptionsFromEnv((key) => Deno.env.get(key)),
+    ...cfcDials,
     trustSnapshotProvider: () => ({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),

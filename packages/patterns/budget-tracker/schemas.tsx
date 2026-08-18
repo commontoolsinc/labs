@@ -3,12 +3,15 @@
  *
  * Type definitions used across all budget tracker sub-patterns.
  */
-import { Default } from "commonfabric";
+import { type Confidential, Default } from "commonfabric";
 
 // ============ CORE TYPES ============
 
 export interface Expense {
-  description: string;
+  // The free-text note is the private part of a record; the inert
+  // `category` / `amount` / `date` fields alongside it are not labelled, so
+  // an aggregate computed from them alone carries no confidentiality.
+  description: Confidential<string, readonly ["expense-note"]>;
   amount: number;
   category: string | Default<"Other">;
   date: string; // YYYY-MM-DD
