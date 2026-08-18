@@ -670,12 +670,11 @@ export function recomposeSchema(
 
   // Drain the referenced-document queue, recomposing each into `combined`.
   // A cyclic group contributes each member under its assigned name; a bare
-  // document contributes its own schema under its derived name.
-  const emitted = new Set<string>();
+  // document contributes its own schema under its derived name. The queue
+  // holds each ref at most once: `assignName` is its only feeder, and a ref
+  // enqueues only on its first name assignment.
   while (pending.length > 0) {
     const ref = pending.shift()!;
-    if (emitted.has(ref)) continue;
-    emitted.add(ref);
     const parsed = parseExternalSchemaRef(ref)!;
     const document = getDocument(parsed.taggedHash);
     if (parsed.defName !== undefined) {
