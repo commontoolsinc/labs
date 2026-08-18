@@ -106,6 +106,17 @@ describe("verb-emitted-address", () => {
       expect(resolved.refusal).toContain("is not an address");
     });
 
+    // The parser THROWS on an unknown suffix rather than declining; the walk
+    // absorbs that into the same refusal, so a caller never sees a parser
+    // stack where a refusal was owed.
+    it("refuses a suffix the address grammar rejects outright", () => {
+      const resolved = resolveEmittedAddressArguments(
+        { on: `${ADDRESS}#bogus` },
+        inlineMarker,
+      );
+      expect(resolved.refusal).toContain("is not an address");
+    });
+
     it("refuses an inline copy at a reference position as a detached document", () => {
       const resolved = resolveEmittedAddressArguments(
         { on: { title: "a copy" } },
@@ -162,7 +173,7 @@ describe("verb-emitted-address", () => {
       ).toContain('"nope" at <event>.them[1] is not an address');
     });
 
-    it("walks `prefixItems` by position", () => {
+    it("walks `prefixItems` by position, and flows the positions beyond them", () => {
       const schema: JSONSchema = {
         type: "object",
         properties: {
@@ -178,9 +189,17 @@ describe("verb-emitted-address", () => {
       expect(
         resolveEmittedAddressArguments({ pair: ["label", ADDRESS] }, schema),
       ).toEqual({ value: { pair: ["label", ENVELOPE] } });
+      // A third element has no declared position: it flows through as
+      // written, address form or not.
+      expect(
+        resolveEmittedAddressArguments(
+          { pair: ["label", ADDRESS, ADDRESS] },
+          schema,
+        ),
+      ).toEqual({ value: { pair: ["label", ENVELOPE, ADDRESS] } });
     });
 
-    it("walks a conjunction member-wise", () => {
+    it("walks a conjunction member-wise, refusals included", () => {
       const schema: JSONSchema = {
         allOf: [{
           type: "object",
@@ -189,6 +208,9 @@ describe("verb-emitted-address", () => {
       };
       expect(resolveEmittedAddressArguments({ on: ADDRESS }, schema))
         .toEqual({ value: { on: ENVELOPE } });
+      expect(
+        resolveEmittedAddressArguments({ on: "nope" }, schema).refusal,
+      ).toContain('"nope" at <event>.on is not an address');
     });
 
     // Choosing a disjunction branch is the caller's; converting inside one
@@ -305,7 +327,9 @@ describe("verb-emitted-address", () => {
     it("omits a result property no handler node drives", () => {
       const pattern = {
         result: { data: link(1) },
-        nodes: [{ inputs: { $event: link(2) }, module: {} }],
+        // A node with no inputs at all sits beside the mismatch: the walk
+        // steps over what it cannot read rather than crashing on it.
+        nodes: [{}, { inputs: { $event: link(2) }, module: {} }],
       };
       expect(handlerVerbEvents(pattern).has("data")).toBe(false);
     });
@@ -332,6 +356,7 @@ describe("verb-emitted-address", () => {
           "",
           "interface Recorded { count: number; }",
           "interface RelateEvent { on: Writable<ProbeOutput>; }",
+          "interface TagEvent { on: Writable<ProbeOutput>; label: string; }",
           "interface NoteEvent { body: string; }",
           "",
           "export interface ProbeOutput {",
@@ -340,6 +365,7 @@ describe("verb-emitted-address", () => {
           "  links: ProbeOutput[];",
           "  notes: string[];",
           "  relate: Stream<RelateEvent, Recorded>;",
+          "  tag: Stream<TagEvent, Recorded>;",
           "  note: Stream<NoteEvent, Recorded>;",
           "}",
           "",
@@ -355,11 +381,17 @@ describe("verb-emitted-address", () => {
           "      links.push(target);",
           "      return { count: (links.get() ?? []).length };",
           "    });",
+          "    const tag = action<TagEvent, Recorded>((event) => {",
+          "      if (!event.on || !event.label) throw new Error('tag: on and label');",
+          "      links.push(event.on);",
+          "      notes.push(event.label);",
+          "      return { count: (links.get() ?? []).length };",
+          "    });",
           "    const note = action<NoteEvent, Recorded>((event) => {",
           "      notes.push(event.body);",
           "      return { count: (notes.get() ?? []).length };",
           "    });",
-          "    return { [NAME]: 'Probe', label: 'probe-root', links, notes, relate, note };",
+          "    return { [NAME]: 'Probe', label: 'probe-root', links, notes, relate, tag, note };",
           "  },",
           ");",
           "",
@@ -389,6 +421,7 @@ describe("verb-emitted-address", () => {
     async function withProbe<T>(
       passphrase: string,
       body: (probe: Probe) => Promise<T>,
+      options: { patternUnavailable?: boolean } = {},
     ): Promise<T> {
       const signer = await Identity.fromPassphrase(passphrase);
       const storageManager = StorageManager.emulate({ as: signer });
@@ -421,7 +454,9 @@ describe("verb-emitted-address", () => {
           getCell: () => root,
           getPattern: () => {
             patternLoads++;
-            return Promise.resolve(compiled);
+            return options.patternUnavailable
+              ? Promise.reject(new Error("pattern unavailable"))
+              : Promise.resolve(compiled);
           },
         };
         const deps = {
@@ -528,6 +563,31 @@ describe("verb-emitted-address", () => {
         await probe.call("relate", { on: probe.address });
         expect(probe.patternLoads()).toBe(1);
       });
+    });
+
+    // A conversion repairs one position; it does not vouch for the rest of
+    // the payload. What the published shape still refuses after it is the
+    // refusal the caller reads — the REMAINING problem, not the solved one.
+    it("re-judges a converted payload, and reports what still fails", async () => {
+      await withProbe("emitted-address-rejudge", async (probe) => {
+        const failure = await probe.call("tag", { on: probe.address })
+          .then(() => undefined, (error: unknown) => String(error));
+        expect(failure).toContain("label");
+        expect(failure).not.toContain("is not an address");
+        expect(probe.linkCount()).toBe(0);
+      });
+    });
+
+    // Degradation, not a crash: a pattern that will not load costs the call
+    // its conversion — the plain shape refusal stands — while a payload the
+    // published shape accepts still dispatches.
+    it("keeps the plain refusal when the pattern will not load", async () => {
+      await withProbe("emitted-address-no-pattern", async (probe) => {
+        await expect(probe.call("relate", { on: probe.address }))
+          .rejects.toThrow("does not match type object");
+        await probe.call("note", { body: "still dispatches" });
+        expect(probe.notes()).toEqual(["still dispatches"]);
+      }, { patternUnavailable: true });
     });
   });
 });
