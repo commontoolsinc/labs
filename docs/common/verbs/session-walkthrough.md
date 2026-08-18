@@ -86,22 +86,8 @@ verbs, and they differ in nothing but what the new item is filed under:
 | `archive` | declares no result: the invocation settles carrying no `result` at all, and what it changed is a separate read | act 9 |
 | `blockOn` | takes an address as an **argument** rather than as the receiver | act 12 — the address as printed, standing where the verb declares a reference |
 
-Those act numbers are `packages/cli/integration/verb-session-demo.sh`, which
-drives the session and prints each command before running it — the transcript is
-what that script is for. Beside it,
-`packages/cli/integration/verb-session-gaps.sh` asserts the same surface as
-pass/fail. A step there may assert that something does *not* work yet, failing
-loudly the day it does; none does at the moment, which is why every step below
-is marked **[today]**. A verb added to the fixture wants a row above, an act in
-the demo, and a step in the harness; a shape demonstrated in none of the three
-is a claim this document is making alone.
-
-This document quotes commands and never composes them: every `cf` line in a
-bash block below is a line the demo runs — or carries a `# not in the demo`
-comment saying why it cannot be — and every act number names an act the demo
-has. `deno task check-verb-session-sync` enforces both, so a command here
-cannot be wrong in a way the demo would have caught, and an act reference
-cannot go stale under renumbering.
+Those act numbers name acts in the demo script, which the table at the top of
+this document maps against its steps.
 
 ## What you are driving
 
@@ -221,7 +207,7 @@ as a row's `description` under `cf piece verbs --json`, and as the summary line
 of the verb's own help page. Step 3 has the measurement.
 
 
-## 1. Arrive with a slug **[today]**
+## 1. Arrive with a slug
 
 An address a person can type, rather than a fid from a previous command.
 
@@ -261,7 +247,7 @@ row carries under `--json`, alongside the input and output schemas the table
 has no room for. A person asking what one verb is for reads its help page; a
 person asking what the piece is for reads its own page, next.
 
-## 2. Ask what it is **[today]**
+## 2. Ask what it is
 
 ```bash
 cf piece describe --piece board
@@ -324,7 +310,7 @@ whose compiled pattern cannot be read keeps its VERBS — they still dispatch �
 and loses purpose, STATE, and INPUTS, with a note saying so rather than empty
 sections claiming the pattern declares nothing.
 
-## 3. Ask what a verb wants **[today]**
+## 3. Ask what a verb wants
 
 ```bash
 cf call --piece board addItem -- --help
@@ -381,7 +367,7 @@ Which document carries what, and why the fold walks both, is
 consequences show up in this session: a field an author declares and the
 handler never reads is still served, flagged and documented (the authored
 event is the contract), and a declared reference arrives with its capability
-marker stripped — which is what step 7's dispatch gate reads the pattern to
+marker stripped — which is what step 8's dispatch gate reads the pattern to
 recover.
 
 ### Three levels of documentation
@@ -412,7 +398,7 @@ does not compile at all
 own comment is both the shorter road and the better place for an author to
 write it, since it sits beside the type it describes.
 
-## 4. Complete against the live piece **[today]**
+## 4. Complete against the live piece
 
 ```bash
 # not in the demo — completion needs a terminal
@@ -432,7 +418,7 @@ same declared result a completion provider would read. What is missing is the
 provider consulting it, which is the same wiring a derived default selection
 needs.
 
-## 5. Create, and carry the address forward **[today]**
+## 5. Create, and carry the address forward
 
 ```bash
 EPIC=$(cf call --piece board --select 'item@' addItem -- \
@@ -454,7 +440,7 @@ flattened into a copy of the item's contents. Read options (`--select`,
 `--schema`, `--filter`) come before the address on a `call`, because the first
 positional starts the callable's own command line.
 
-`--show-links` is the **[today]** spelling of the same move: it returns a
+`--show-links` is a second spelling of the same move: it returns a
 dictionary of RFC 6901 pointers naming the document behind each result path, so
 the address is one `jq` hop further away but reachable.
 
@@ -498,7 +484,7 @@ a stack trace.
 [A result that points back at its container](over-the-cli.md#a-result-that-points-back-at-its-container)
 shows the full exchange.
 
-## 6. Read the tree back, bounded **[today]**
+## 6. Read the tree back, bounded
 
 ```bash
 cf get --piece board items --select 'title,status,children@'
@@ -530,7 +516,47 @@ their own options go.
 The demo's act 10 is this step run against the session's own tree: the whole
 board first, then only what is open, then the refusal.
 
-## 7. Relate two items **[today]**
+## 7. Refuse what the surface does not accept
+
+Every step so far named something the pattern declares. Getting it wrong is the
+other half of a surface that knows its own vocabulary, and the demo's act 11
+asks for two things that are not there — one on a call, one on a read:
+
+```bash
+cf call --piece board addItem '{"title":"Ship it","titel":"typo"}'
+
+cf get "$EPIC" children --schema '{"type":"array","items":{"type":"object","propertes":{"title":true}}}'
+```
+
+```text
+Invalid input for "addItem": "titel" at <event> is not a field this verb
+declares. Did you mean "title"? <event> takes "title"
+
+Invalid --schema at <root>[]: "propertes" is not a projection schema keyword.
+Did you mean "properties"? Projection reads "type", "properties", "items",
+"additionalProperties", "$link"
+```
+
+**One shape of answer from both ends.** Each names what was wrong, the position
+it sat at, what that position accepts, and the nearest thing you probably
+meant — from the call gate and the projection reader alike, which are different
+code answering in one voice.
+
+**A refusal is a capability, not a failure.** What each one replaces is worse
+than an error: a payload carrying `titel` used to be accepted, the field
+dropped on the way in, and the caller told the call settled. That is the
+silent-strip failure, and it is what a caller writing JSON by hand or by model
+hits while a TypeScript author never does. The same holds for the projection
+keyword: two denylists were consulted and every key in neither was carried
+onward, so `propertes` shaped nothing and said nothing.
+
+**Nothing is spent.** Both are refused before an invocation exists, so a
+caller retries against a surface in the state they left it. Three more
+refusals appear elsewhere in this session — the `@`-under-`--filter`
+combination in step 6, and the two reference-position guards in step 8 —
+and they answer in this same shape.
+
+## 8. Relate two items
 
 ```bash
 cf call --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
@@ -564,7 +590,7 @@ the two-paths read as the payoff addresses exist for.
 
 ## The composition axis
 
-Steps 5 and 7 are the same move — take an address out of one command and put
+Steps 5 and 8 are the same move — take an address out of one command and put
 it into the next — and both halves now hold: the receiver half in full, and
 the argument half under every spelling a caller might be holding.
 
@@ -607,4 +633,4 @@ Two rows, and two that used to sit beside them are gone the way this table
 intends: the served input schema now carries every declared event field —
 the [verb input contract](../../history/plans/verb-input-contract.md) ruled the
 authored event authoritative — and the address a read emits dispatches as an
-argument, with the detached-copy refusal standing guard beside it (step 7).
+argument, with the detached-copy refusal standing guard beside it (step 8).

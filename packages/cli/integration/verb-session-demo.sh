@@ -16,16 +16,13 @@
 # line that ran cannot drift apart. What a reader sees is what they can retype,
 # given the two environment variables the header names.
 #
-# No act is marked PENDING today. `pending` stays for the next capability
-# that is sequenced but unbuilt: it prints the command and the result it will
-# produce, without running it, so what does not work yet stays deliberately
-# visible — a demo that quietly omits what does not work teaches a surface
-# that does not exist.
-#
-# No act is marked BROKEN today. `broken` stays for the next one that is: it
-# checks that the defect an act claims still answers to its own signature, so
-# an act cannot go on asserting a defect that has been fixed. Deriving that
-# again from scratch is how it acquires the same hole twice.
+# Every act carries a claim, and the script checks all three kinds: an
+# unmarked act says the command works, a REFUSED one says the surface turns
+# this down, and a BROKEN one says a named defect is still there. Two further
+# helpers, `pending` and `broken`, are defined and unused today — they are how
+# an unbuilt or defective capability stays deliberately visible rather than
+# being quietly omitted. Each carries its full contract at its definition
+# below; a reader who never sees one fire does not need them here.
 #
 #   API_URL=http://localhost:8000 packages/cli/integration/verb-session-demo.sh
 set -uo pipefail
@@ -256,7 +253,8 @@ say "An unshaped read follows every link. A bare @ stops at the address."
 run cf get -s "$SPACE" "$EPIC" children --select @,title
 
 act "6 · Ask the same question twice"
-say "The first thing anyone watching says is 'show me that again'."
+say "The same command as act 5, deliberately — because the first thing anyone"
+say "watching a live system says is 'show me that again'."
 run cf get -s "$SPACE" "$EPIC" children --select @,title
 say "The same answer. A projection is a question you may ask twice, which is"
 say "what makes any of the reads above safe to put in a script — as here: the"
