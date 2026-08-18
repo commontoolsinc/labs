@@ -434,12 +434,20 @@ const NEGATIVE_ZERO_HASH = computeHash(-0);
  * bigints, registry-interned symbols) can't be WeakMap keys, so they use a
  * bounded cache. Sizing is based on historical testing (expected ~97% hit
  * rate in practice).
+ *
+ * A string key is held by the cache itself, and a hashed string can be a
+ * whole document: an inline document's `data:` URI runs to tens of thousands
+ * of characters. The entry count alone would let 50,000 of those add up to
+ * gigabytes, so the same byte budget `stringRepCache` carries applies here,
+ * and the count bounds the short keys that make up the rest.
  */
 const primitiveHashCache = new LRUCache<
   string | number | bigint | symbol,
   FabricHash
 >({
   capacity: 50_000,
+  weigh: (key) => (typeof key === "string" ? key.length * 2 : 16) + 96,
+  maxWeight: 8 * 1024 * 1024,
 });
 
 /**

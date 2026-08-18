@@ -30,6 +30,7 @@ import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { LRUCache } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { getLogger } from "../../utils/src/logger.ts";
@@ -195,19 +196,66 @@ function pathKey(path: readonly string[]): string {
 const keyComponent = (value: string): string => `${value.length}:${value}`;
 
 /**
+ * Longest document id a memo key spells out in full.
+ *
+ * An entity id runs to about fifty characters and a space DID to about sixty,
+ * so every id that names a stored document stays well under this and reaches
+ * a key directly.
+ */
+const MAX_SPELLED_OUT_ID_LENGTH = 128;
+
+/**
+ * Digests of the ids too long to spell out. See `memoIdComponent()`.
+ *
+ * Every key held here is one of those long ids, so the bound that matters is
+ * a budget in characters rather than a count of entries.
+ */
+const _memoIdDigests = new LRUCache<string, string>({
+  capacity: INTERN_CACHE_MAX,
+  weigh: (id, digest) => id.length * 2 + digest.length + 64,
+  maxWeight: 8 * 1024 * 1024,
+});
+
+/**
+ * Fixed-size stand-in for a document id that carries its own content.
+ *
+ * A data URI names the value it holds, so an inline document's id is as long
+ * as the document — tens of thousands of characters for a component that
+ * holds a list. A key built from that id costs a copy and a hash of every one
+ * of those characters, and the traversal builds one key per node it visits
+ * inside that same document, so the work becomes the node count multiplied by
+ * the document size. Digesting the id keeps the key a fixed size. The digest
+ * is computed once per id: the cache is keyed by the id, and every one of
+ * those visits arrives holding the same string.
+ */
+function memoIdComponent(id: string): string {
+  const cached = _memoIdDigests.get(id);
+  if (cached !== undefined) return cached;
+  const digest = `d${keyComponent(hashStringOf(id))}`;
+  _memoIdDigests.put(id, digest);
+  return digest;
+}
+
+/**
  * Full address identity for the shared schema-result memo.
  *
  * A document id is only unique within its space and scope. Omitting those
  * fields let a shared query memo return another partition's result when the
  * same id/path/schema appeared in both. Length prefixes keep the key
- * injective without paying for JSON serialization on every schema visit.
+ * injective without paying for JSON serialization on every schema visit. A
+ * spelled-out id and a digested one carry different tags, `i` and `d`, so an
+ * id that reads like a digest still gets a key of its own.
  */
 function schemaMemoAddressKey(address: IMemorySpaceAddress): string {
   return `s${keyComponent(address.space)}c${
     keyComponent(address.scope ?? "space")
-  }i${keyComponent(address.id)}t${
-    keyComponent(address.type ?? "application/json")
-  }p${pathKey(address.path)}`;
+  }${
+    address.id.length > MAX_SPELLED_OUT_ID_LENGTH
+      ? memoIdComponent(address.id)
+      : `i${keyComponent(address.id)}`
+  }t${keyComponent(address.type ?? "application/json")}p${
+    pathKey(address.path)
+  }`;
 }
 
 /**
