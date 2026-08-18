@@ -35,6 +35,7 @@ deno task cf piece link ... editor-id/items viewer-id/items
   stored verbatim — never parsed, compiled, or importable — and recovered by
   `cf piece getsrc` with the rest of the package. The pattern reads one with
   `dataFile(path)` from `commonfabric`, naming the path it is stored under.
+  `cf check` and `cf test` take `--datafile` as well, so the read works locally.
   Repeat every flag on each `setsrc`; an update defines the complete source
   revision.
 - Deploy once, then use `setsrc` for updates

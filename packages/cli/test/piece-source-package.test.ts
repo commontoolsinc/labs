@@ -252,7 +252,7 @@ describe("piece source package", () => {
         { runtime: { harness: { resolve } } } as any,
         { mainPath, rootPath: root, dataFilePaths: [sharedPath] },
       )).rejects.toThrow(
-        'Data file "/shared.ts" is also a source module of this package.',
+        'Data file "/shared.ts" is also a source module of this program.',
       );
     } finally {
       await Deno.remove(root, { recursive: true });

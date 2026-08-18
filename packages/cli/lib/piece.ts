@@ -9,10 +9,8 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { createSession, isDID, Session } from "@commonfabric/identity";
-import {
-  FileSystemProgramResolver,
-  readDataFileSource,
-} from "@commonfabric/js-compiler";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { attachDataFiles } from "./data-files.ts";
 import { setLLMUrl } from "@commonfabric/llm";
 import {
   assignSlug,
@@ -634,30 +632,17 @@ export async function getProgramFromFile(
       files.set(file.name, file);
     }
   }
-  // Data files are read directly rather than resolved: nothing imports them, so
-  // there is no closure to follow, and their bytes are never parsed.
-  const dataFiles: string[] = [];
-  for (const path of dataPaths) {
-    const source = readDataFileSource(path, rootPath);
-    if (dataFiles.includes(source.name)) continue;
-    // The entry or one of its tests reaches this name through an import, so the
-    // package would have to both compile it and store it uninterpreted.
-    if (files.has(source.name)) {
-      throw new Error(
-        `Data file "${source.name}" is also a source module of this package.`,
-      );
-    }
-    files.set(source.name, source);
-    dataFiles.push(source.name);
-  }
-  const program: RuntimeProgram = {
-    main: mainProgram.main,
-    files: [...files.values()],
-    ...(testPrograms.length === 0
-      ? {}
-      : { sourceRoots: testPrograms.map((test) => test.main) }),
-    ...(dataFiles.length === 0 ? {} : { dataFiles }),
-  };
+  const program = attachDataFiles(
+    {
+      main: mainProgram.main,
+      files: [...files.values()],
+      ...(testPrograms.length === 0
+        ? {}
+        : { sourceRoots: testPrograms.map((test) => test.main) }),
+    },
+    dataPaths,
+    rootPath,
+  );
   if (entry.mainExport) {
     program.mainExport = entry.mainExport;
   }

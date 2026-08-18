@@ -77,8 +77,10 @@ Repeatable `--datafile <path>` attaches a file that is not code — a fixture, a
 lookup table — so it ships and is recovered with the source. Its bytes are
 stored verbatim and never parsed, compiled, or importable; it must be UTF-8 text
 inside the deployment root. A pattern reads one with `dataFile(path)` from
-`commonfabric`, naming the path it is stored under. The same complete-revision
-rule applies, so repeat every data-file flag on each update too.
+`commonfabric`, naming the path it is stored under. Pass the same `--datafile`
+flags to `cf check` and `cf test`, or the read fails there. The same
+complete-revision rule applies, so repeat every data-file flag on each update
+too.
 
 **Inspect piece state:**
 

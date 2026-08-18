@@ -233,6 +233,10 @@ export async function runMultiUserTestPattern(
           apiUrl: server.url.href,
           testPath,
           root: options.root,
+          // Each participant compiles the pattern in its own worker, so the
+          // attachment has to cross that boundary: a participant reading a data
+          // file otherwise fails for want of a closure the parent had.
+          dataFilePaths: options.dataFilePaths,
           patternCoverageDir: options.patternCoverageDir,
           continuousUI: options.continuousUI,
           participant: spec.name,

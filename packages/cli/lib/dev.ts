@@ -1,3 +1,4 @@
+import { dirname } from "@std/path";
 import {
   collectImportSpecifiers,
   FileSystemProgramResolver,
@@ -6,6 +7,7 @@ import {
   resolveImportSpecifier,
   type Source,
 } from "@commonfabric/js-compiler";
+import { attachDataFiles } from "./data-files.ts";
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { Identity } from "@commonfabric/identity";
 import {
@@ -56,6 +58,8 @@ export interface ProcessOptions {
   verboseErrors?: boolean;
   space?: string;
   patternJson?: boolean;
+  /** Data file paths to attach, so a pattern that reads one can run here. */
+  dataFilePaths?: string[];
 }
 
 export interface ProcessResult {
@@ -94,6 +98,13 @@ export async function process(
   if (options.mainExport) {
     program.mainExport = options.mainExport;
   }
+  // Attach the same data files a deployment would, so `dataFile` reads what it
+  // will read once deployed instead of failing for want of a closure.
+  program = attachDataFiles(
+    program,
+    options.dataFilePaths,
+    options.rootPath ?? dirname(options.main),
+  );
   let transformed: string | undefined;
   const getTransformedProgram = options.showTransformed
     ? (program: Program) => {

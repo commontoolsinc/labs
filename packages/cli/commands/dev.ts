@@ -42,6 +42,7 @@ async function checkAction(
     json?: boolean;
     root?: string;
     space?: string;
+    datafile?: string[];
   },
   ...files: string[]
 ) {
@@ -71,6 +72,9 @@ async function checkAction(
         mainExport: options.mainExport,
         verboseErrors: options.verboseErrors,
         space: options.space,
+        dataFilePaths: options.datafile?.map((path) =>
+          isAbsolute(path) ? path : join(Deno.cwd(), path)
+        ),
         patternJson: options.patternJson,
       });
       results.push({ file, output, transformed, patternJson });
@@ -145,6 +149,10 @@ function createCheckCommand(): Command<any> {
       cliText(`cf check ./pattern.tsx --no-check`),
       "Compile and evaluate pattern without typechecking.",
     )
+    .example(
+      cliText(`cf check ./pattern.tsx --datafile ./data/cities.json`),
+      "Check a pattern that reads an attached data file.",
+    )
     .option("--no-run", "Do not execute input, only type check.")
     .option("--no-check", "Do not type check input.")
     .option(
@@ -177,6 +185,11 @@ function createCheckCommand(): Command<any> {
     .option(
       "--root <path:string>",
       "Root directory for resolving imports. Allows imports from parent directories within this root.",
+    )
+    .option(
+      "--datafile <path:string>",
+      "Attach a data file the pattern reads with dataFile(). Repeatable.",
+      { collect: true },
     )
     .option(
       "--space <did:string>",

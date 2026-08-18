@@ -35,6 +35,8 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { dirname } from "@std/path";
+import { attachDataFiles } from "./data-files.ts";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
@@ -277,6 +279,11 @@ export interface TestRunnerOptions {
   verbose?: boolean;
   /** Root directory for resolving imports. If not provided, uses the test file's directory. */
   root?: string;
+  /**
+   * Data file paths to attach, so a pattern under test that reads one with
+   * `dataFile` reads here what it will read once deployed.
+   */
+  dataFilePaths?: string[];
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
   /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
@@ -1067,9 +1074,13 @@ export async function runTestPattern(
     // 2. Compile the test pattern
     const program = await withPhase(
       ["runTestPattern", "resolve"],
-      () =>
-        engine.resolve(
-          new FileSystemProgramResolver(testPath, options.root),
+      async () =>
+        attachDataFiles(
+          await engine.resolve(
+            new FileSystemProgramResolver(testPath, options.root),
+          ),
+          options.dataFilePaths,
+          options.root ?? dirname(testPath),
         ),
     );
     const evalResult = await withPhase(

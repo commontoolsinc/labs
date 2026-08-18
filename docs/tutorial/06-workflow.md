@@ -140,6 +140,30 @@ the same text on every load of a given revision. Reading at module scope rather
 than inside a pattern produces a top-level value like any other, so it takes
 the usual `__cf_data` snapshot.
 
+`dataFile` returns text, so parsing it yields `any`. Name the shape you expect,
+or the result schema the transformer infers has nothing to go on:
+
+```tsx
+// Shown for illustration only.
+interface Cities {
+  cities: string[];
+}
+
+const parsed = JSON.parse(dataFile("/data/cities.json")) as Cities;
+```
+
+`cf check` and `cf test` take the same repeatable `--datafile` flag, so a
+pattern that reads one can be checked and tested before it is deployed:
+
+```bash
+deno task cf check pattern.tsx --datafile data/cities.json
+deno task cf test pattern.test.tsx --datafile data/cities.json
+```
+
+Without the flag the pattern compiles and type-checks, then fails on the read —
+`dataFile` is declared whether or not a file is attached, so the absence shows
+up when the pattern runs rather than when it compiles.
+
 Data files also travel for whoever reads the source next — you on another
 machine, a teammate running `cf piece getsrc`, a tool reading the FUSE `.src/`
 view. They are fixed at deploy time: data that changes while the pattern runs
