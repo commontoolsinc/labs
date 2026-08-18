@@ -325,6 +325,10 @@ Decodes to: `{ "/myKey": <decoded Link> }`. The `/object` wrapper
 is stripped; inner keys are taken literally; inner values go through normal
 decoding.
 
+A state under this tag that is **not** a plain object is malformed wire data,
+and is refused rather than unwrapped — settled against `lenient` like any
+other malformation off a channel.
+
 **When the encoder emits `/object`:** During encoding, if a plain object
 has any string key that starts with `/` — regardless of how many other keys the
 object has — the encoder wraps it in one of these escapes (either `/object`

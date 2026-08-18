@@ -5,6 +5,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import {
@@ -15,7 +16,7 @@ import {
 
 export type ProcessExampleOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   decoyStatus: string;
   songHint?: string;
   identifiedSongId?: string;
@@ -278,10 +279,10 @@ export default pattern<Record<PropertyKey, never>>(() => ({
             ))}
           </cf-vstack>
         </cf-card>
-        <div>{SongIdentificationRecordingExample}</div>
-        <div>{CalendarAvailabilityPolicyExample}</div>
-        <div>{BatchPhotoUploadJobExample}</div>
-        <div>{DocumentExportJobExample}</div>
+        <div>{SongIdentificationRecordingExample({})}</div>
+        <div>{CalendarAvailabilityPolicyExample({})}</div>
+        <div>{BatchPhotoUploadJobExample({})}</div>
+        <div>{DocumentExportJobExample({})}</div>
       </cf-vstack>
     </cf-screen>
   ),

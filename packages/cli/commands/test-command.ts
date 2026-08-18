@@ -42,7 +42,7 @@ export const test = new Command()
   )
   .option(
     "--root <dir:string>",
-    "Root directory for resolving imports. Enables imports like '../shared/utils.tsx'.",
+    "Root directory for resolving imports. Defaults to the nearest ancestor whose deno.json(c) declares a package name, else the test file's directory.",
   )
   .option(
     "--datafile <path:string>",

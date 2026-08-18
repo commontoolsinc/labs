@@ -1,4 +1,10 @@
+import type { JSONSchema as SchemaDocJSONSchema } from "@commonfabric/api";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
+import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
+import { lookupSchemaDocument } from "../schema-registry.ts";
+import type { URI } from "../sigil-types.ts";
 import {
   type FabricPlainObject,
   type FabricValue,
@@ -1483,7 +1489,86 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     };
   }
 
+  // `"<space>|<hash>"` pairs this transaction has already materialized (or
+  // decided it cannot), so repeat passes never re-call writeOrThrow — a
+  // repeat write, even an elided one, would invalidate a prepared CFC
+  // digest (`write-after-prepare`).
+  #ensuredSchemaDocs = new Set<string>();
+
+  /**
+   * The write-side delivery guarantee of content-addressed schemas
+   * (`docs/specs/content-addressed-schemas.md`): every schema document a
+   * written link references travels in the same transaction, into the same
+   * space, as the reference itself. Scans this transaction's writes for
+   * link schemas carrying external refs, expands each to its closure
+   * through the realm registry (the link writer registered the documents
+   * when it stamped the reference), and blind-writes the documents at the
+   * canonical space scope. Runs before CFC prepare (so the writes are part
+   * of the prepared digest) and again at commit for transactions that
+   * never prepare; the dedupe set makes the second pass a no-op.
+   *
+   * A hash the registry cannot supply is skipped: only a hand-crafted
+   * value carries a reference its writer never registered. The commit
+   * boundary rejects such a commit outright unless the space already
+   * stores the document, and read-side assembly fails closed on whatever
+   * predates that validation.
+   */
+  #materializeReferencedSchemaDocuments(): void {
+    if (!getContentAddressedSchemasConfig()) return;
+    const log = this.getReactivityLog();
+    const spaces = new Set(
+      [...(log.writes ?? []), ...(log.attemptedWrites ?? [])].map((write) =>
+        write.space
+      ),
+    );
+    for (const space of spaces) {
+      for (const detail of this.getWriteDetails(space)) {
+        if (detail.address.id.startsWith("cid:")) continue;
+        if (detail.value === undefined) continue;
+        const hashes = new Set<string>();
+        mapLinkSchemas(detail.value, (schema) => {
+          for (
+            const hash of collectExternalSchemaRefHashes(
+              schema as SchemaDocJSONSchema,
+            )
+          ) {
+            hashes.add(hash);
+          }
+          return schema;
+        });
+        const pending = [...hashes];
+        while (pending.length > 0) {
+          const hash = pending.pop()!;
+          const key = `${space}|${hash}`;
+          if (this.#ensuredSchemaDocs.has(key)) continue;
+          this.#ensuredSchemaDocs.add(key);
+          const document = lookupSchemaDocument(hash);
+          if (document === undefined) {
+            logger.warn("schema-doc-materialize", () => [
+              "A written link references a schema document the registry cannot supply:",
+              `cid:${hash}`,
+            ]);
+            continue;
+          }
+          this.#runPrivilegedSystemWrite(() => {
+            this.writeOrThrow(
+              {
+                space,
+                id: `cid:${hash}` as URI,
+                type: "application/json",
+                path: [],
+              },
+              { value: document },
+            );
+          });
+          pending.push(...collectExternalSchemaRefHashes(document));
+        }
+      }
+    }
+  }
+
   prepareCfc(): string {
+    this.#materializeReferencedSchemaDocuments();
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
     // matches real activity, so accepting an external input here would let a
@@ -2014,6 +2099,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.tx.clearReadOnly?.();
     }
     if (!readOnly) {
+      // Before the CFC probes and the prepared-digest recheck: writes added
+      // here must precede any prepare, and the dedupe set makes this a
+      // no-op for transactions prepareCfc() already covered.
+      this.#materializeReferencedSchemaDocuments();
       // Flow-label relevance is computed, not caller-marked: a tx that
       // observed or wrote a labeled doc derives labels even when nothing
       // called markCfcRelevant (S16 — value-copy laundering happens in

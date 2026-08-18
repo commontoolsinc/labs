@@ -1181,6 +1181,39 @@ describe("JsonCodecEngine", () => {
       });
     });
 
+    describe("`/object` over a state that is not an object", () => {
+      for (
+        const [label, state] of [
+          ["a string", "nope"],
+          ["a number", 42],
+          ["`null`", null],
+          ["an array", [1, 2]],
+        ] as const
+      ) {
+        it(`returns a \`ProblematicValue\` for ${label} when lenient`, () => {
+          const decoded = fromEncodedFormat(
+            { "/object": state } as JsonCodecValue,
+            true,
+          );
+
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+          expect((decoded as ProblematicValue).error)
+            .toMatch(/`\/object` state is not an object/);
+        });
+      }
+
+      it("throws for a state that is not an object when strict", () => {
+        const engine = newDefaultJsonCodecEngine();
+        const text = JsonCodecEngine.wrapEncodedValueForTesting(
+          JSON.stringify({ "/object": "nope" }),
+          true,
+        );
+
+        expect(() => engine.decode(text, new TestLiveEnvironment()))
+          .toThrow(/`\/object` state is not an object/);
+      });
+    });
+
     describe("/object: any value requires encoding", () => {
       it("emits `/quote` for doubly-nested `/`-prefixed literal object (whole subtree is literal)", () => {
         const obj = { "/x": { "/y": 123 } };

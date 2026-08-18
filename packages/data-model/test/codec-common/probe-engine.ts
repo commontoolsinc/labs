@@ -19,8 +19,8 @@ import type {
   WireFormat,
 } from "@/codec-interface/interface.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
-import { DecodeAct } from "@/codec-common/DecodeAct.ts";
-import { EncodeAct } from "@/codec-common/EncodeAct.ts";
+import { BaseDecodeAct } from "@/codec-common/BaseDecodeAct.ts";
+import { BaseEncodeAct } from "@/codec-common/BaseEncodeAct.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
@@ -289,7 +289,7 @@ export class MarkerCodec extends BaseTerminalCodec<ProbeValue> {
  * least a container can do, so that what a test observes is the base class and
  * not this.
  */
-export class ProbeEncodeAct extends EncodeAct<ProbeValue> {
+export class ProbeEncodeAct extends BaseEncodeAct<ProbeValue> {
   /** @inheritDoc */
   override serializedFromEncoded(encoded: ProbeValue): ProbeValue {
     return encoded;
@@ -334,7 +334,7 @@ export class ProbeEncodeAct extends EncodeAct<ProbeValue> {
  * tree itself, so a caller can hand `decode()` a graph with a cycle in it, and
  * the guard is what refuses one.
  */
-export class ProbeDecodeAct extends DecodeAct<ProbeValue> {
+export class ProbeDecodeAct extends BaseDecodeAct<ProbeValue> {
   /**
    * @inheritDoc
    *
