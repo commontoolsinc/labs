@@ -728,12 +728,11 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5760 | an indirect reference has no contract | runner-owned. A rendered address cannot declare itself indirect: replacing a cell's contents with a link is an ordinary write, so indirectness is a property of what the target holds at read time rather than of the reference. What survives is provenance — whether an address can say it names a spot rather than a canonical cell. The other two answers are @seefeldb's, given in review and reported here rather than cited, so they want his statement on the issue before it closes on that basis |
 | #5761 | the projection derivation cannot express conjunction; `allOf` refuses | filed out of item 2 and **relied on by it**: `sourceProvesContainer` refuses to prove a container through `allOf` for this reason |
 
-**Filed against neighboring subsystems, and not sequenced here.** `{ proxy:
-true }` never reaching `module.writableProxy` for a transformed pattern
-(#5502), an unnormalized external piece id upserting twice (#5499), and a
-create that drops its navigation (#5530). Each is real and none is about the
-verb surface; they are recorded so that reading this plan does not imply they
-were triaged away.
+**Filed against neighboring subsystems, and not sequenced here.** An
+unnormalized external piece id upserting twice (#5499), and a create that
+drops its navigation (#5530). Each is real and none is about the verb surface;
+they are recorded so that reading this plan does not imply they were triaged
+away.
 
 ## Out of scope
 

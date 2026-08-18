@@ -3096,9 +3096,9 @@ function handlePatternSchemaInjection(
  * on `handler<Event, State, Result>`, or carried there by the `action<Event,
  * Result>` lowering (`closures/strategies/action-strategy.ts`).
  *
- * A call that already passes options — the `{ proxy: true }` form — keeps
- * them, spread into the same object, so one slot holds every option. A verb
- * that declares no result gets its arguments back untouched.
+ * A call that already passes an options object keeps it, spread into the same
+ * object, so one slot holds every option. A verb that declares no result gets
+ * its arguments back untouched.
  */
 function withDeclaredResultSchema(
   args: readonly ts.Expression[],

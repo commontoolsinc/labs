@@ -21,10 +21,14 @@ const createDefaultPattern = () => {
     { piece: Cell<unknown> },
     { pieceRegistry: Cell<Cell<unknown>[]> }
   >(
+    true,
+    {
+      type: "object",
+      properties: { pieceRegistry: { type: "array", asCell: ["cell"] } },
+    },
     ({ piece }, { pieceRegistry }) => {
       pieceRegistry.push(piece);
     },
-    { proxy: true },
   );
   return pattern<{ pieceRegistry: Cell<unknown>[] }>(
     ({ pieceRegistry }) => ({
@@ -38,10 +42,11 @@ const createCounterPattern = () => {
   const { commonfabric } = createBuilder();
   const { handler, pattern } = commonfabric;
   const increment = handler<void, { value: number }>(
+    true,
+    true,
     (_, { value }) => {
       value++;
     },
-    { proxy: true },
   );
   return pattern<{ value: number }>(
     ({ value }) => ({
