@@ -346,19 +346,25 @@ describe("Runtime.hostForSpace", () => {
     const realFetch = globalThis.fetch;
     const controller = new AbortController();
     const reason = new Error("health check canceled");
-    let receivedSignal: AbortSignal | null = null;
+    const receivedSignals: Array<AbortSignal | null> = [];
+    let requestCount = 0;
     let requestEntered!: () => void;
-    const requestStarted = new Promise<void>((resolve) => {
-      requestEntered = resolve;
+    const requestsStarted = new Promise<void>((resolve) => {
+      requestEntered = () => {
+        requestCount++;
+        if (requestCount === 2) resolve();
+      };
     });
+    const rejectRequests: Array<(reason?: unknown) => void> = [];
     let runtime: ReturnType<typeof makeRuntime> | undefined;
     let check: Promise<boolean> | undefined;
     try {
       globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
         const signal = init?.signal ?? null;
-        receivedSignal = signal;
+        receivedSignals.push(signal);
         requestEntered();
         return new Promise<Response>((_resolve, reject) => {
+          rejectRequests.push(reject);
           signal?.addEventListener(
             "abort",
             () => reject(signal.reason),
@@ -366,14 +372,25 @@ describe("Runtime.hostForSpace", () => {
           );
         });
       }) as typeof fetch;
-      runtime = makeRuntime();
+      runtime = makeRuntime({ [spaceB]: "http://host-b.test" });
       check = runtime.healthCheck(controller.signal);
-      await requestStarted;
-      expect(receivedSignal).toBe(controller.signal);
+      const requestState = await Promise.race([
+        requestsStarted.then(() => "started" as const),
+        check.then(
+          () => "completed" as const,
+          () => "completed" as const,
+        ),
+      ]);
+      expect(requestState).toBe("started");
+      expect(receivedSignals).toEqual([
+        controller.signal,
+        controller.signal,
+      ]);
       controller.abort(reason);
       await expect(check).rejects.toBe(reason);
     } finally {
       controller.abort(reason);
+      for (const rejectRequest of rejectRequests) rejectRequest(reason);
       await check?.catch(() => {});
       globalThis.fetch = realFetch;
       await runtime?.dispose();
