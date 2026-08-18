@@ -24,9 +24,10 @@
  *   { assertion: assert(() => game.phase === "started") },
  * ]
  *
- * Note: By default, test patterns can only import from their own directory or
- * subdirectories. To enable imports from sibling directories (e.g., `../shared/`),
- * use the --root option to specify a common ancestor directory.
+ * Note: A test pattern's imports resolve within its root directory: an
+ * explicit --root when given, otherwise the nearest ancestor whose
+ * deno.json(c) declares a package name, otherwise the test file's own
+ * directory. An import that climbs above that root is refused by name.
  */
 
 import { basename } from "@std/path";
@@ -88,6 +89,7 @@ import {
   multiUserDescriptorMeta,
   runMultiUserTestPattern,
 } from "./multi-user-test-runner.ts";
+import { inferProgramRoot } from "./program-root.ts";
 import { buildActionEvent } from "./trusted-test-event.ts";
 
 const phaseLogger = getLogger("test-runner-phase", {
@@ -277,7 +279,11 @@ export interface TestRunResult {
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
-  /** Root directory for resolving imports. If not provided, uses the test file's directory. */
+  /**
+   * Root directory for resolving imports. If not provided, the nearest
+   * ancestor of the test file whose deno.json(c) declares a package name is
+   * used, falling back to the test file's directory.
+   */
   root?: string;
   /**
    * Data file paths to attach, so a pattern under test that reads one with
@@ -937,6 +943,16 @@ export async function runTestPattern(
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 60000;
+  // The effective import root: an explicit `root` wins; otherwise the nearest
+  // package root above the test file, so imports that span the package (shared
+  // helpers, sibling patterns) resolve without a flag. When neither exists the
+  // resolver anchors at the file's own directory.
+  const root = options.root ?? inferProgramRoot(testPath);
+  if (options.verbose && !options.root && root !== undefined) {
+    console.log(
+      `  Resolving imports from ${root} (nearest package root; --root overrides)`,
+    );
+  }
   const startTime = performance.now();
   performance.clearMarks();
   performance.clearMeasures();
@@ -1080,10 +1096,10 @@ export async function runTestPattern(
       async () =>
         attachDataFiles(
           await engine.resolve(
-            new FileSystemProgramResolver(testPath, options.root),
+            new FileSystemProgramResolver(testPath, root),
           ),
           options.dataFilePaths,
-          options.root ?? dirname(testPath),
+          root ?? dirname(testPath),
         ),
     );
     const evalResult = await withPhase(
@@ -1121,7 +1137,14 @@ export async function runTestPattern(
       writeLocalPatternCoverage = false;
       return await withPhase(
         ["runTestPattern", "multiUser"],
-        () => runMultiUserTestPattern(testPath, multiUserMeta, options),
+        // The participant workers compile the file again in their own
+        // processes; passing the resolved root keeps their import resolution
+        // identical to the detection compile above.
+        () =>
+          runMultiUserTestPattern(testPath, multiUserMeta, {
+            ...options,
+            root,
+          }),
       );
     }
 
@@ -1808,8 +1831,9 @@ export async function runTestPattern(
 
     // Add helpful hint for import resolution errors when --root wasn't provided
     if (
-      errorMessage.includes("No such file or directory") &&
-      errorMessage.includes("readfile") &&
+      (errorMessage.includes("escapes the program root") ||
+        (errorMessage.includes("No such file or directory") &&
+          errorMessage.includes("readfile"))) &&
       !options.root
     ) {
       errorMessage +=
@@ -1842,7 +1866,7 @@ export async function runTestPattern(
           writePatternCoverageLcov(
             patternCoverage,
             patternCoverageOutputPath(options.patternCoverageDir!, testPath),
-            { root: options.root },
+            { root },
           ),
       ).catch((error) => {
         console.error(
