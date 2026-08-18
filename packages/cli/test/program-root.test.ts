@@ -85,6 +85,16 @@ describe("program-root", () => {
     );
   });
 
+  it("falls through to deno.jsonc when deno.json is a directory", async () => {
+    // Deno's own discovery does the same: a non-file deno.json does not
+    // shadow its companion, so the named deno.jsonc anchors here.
+    await Deno.mkdir(join(dir, "pkg/deno.json"), { recursive: true });
+    await write("pkg/deno.jsonc", `{"name": "@cf-test/pkg"}`);
+    expect(inferProgramRoot(join(dir, "pkg/main.test.tsx"))).toBe(
+      join(dir, "pkg"),
+    );
+  });
+
   it("continues past a config that does not parse", async () => {
     await write("pkg/deno.json", `{"name": "@cf-test/pkg"}`);
     await write("pkg/sub/deno.json", `{not json`);

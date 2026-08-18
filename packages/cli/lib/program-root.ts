@@ -27,6 +27,10 @@ export function inferProgramRoot(entryPath: string): string | undefined {
       try {
         text = Deno.readTextFileSync(join(dir, file));
       } catch {
+        // Any unreadable entry — absent, a directory, permission-denied —
+        // falls through to the companion file, matching Deno's own config
+        // discovery: a directory named deno.json or a chmod-000 deno.json
+        // both leave Deno reading the sibling deno.jsonc.
         continue;
       }
       if (declaresPackageName(text)) return dir;
