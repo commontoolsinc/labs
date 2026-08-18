@@ -48,6 +48,7 @@ const SYNTHETIC_PREFIXES = [
   SYNTHETIC_MODULE_CALLBACK_PREFIX,
   "__cfHandler",
   "__cfAction",
+  "__cfBindVerifiedBinding",
   "__cf_pattern_input",
   "__cfAmdHooks",
 ];
