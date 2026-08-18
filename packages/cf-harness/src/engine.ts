@@ -525,10 +525,30 @@ export class CfHarnessEngine {
       this.config,
       options.runState,
     );
+    // The posture the fabric session's runtime will actually run at, resolved
+    // from the same config the session factory reads. The pin/default values
+    // restate what `runtimePresets.remoteClient` and the Runtime constructor
+    // supply when the dial is unset (`coreOptions` in
+    // `packages/runner/src/runtime-presets.ts`).
+    const fabricSessionCfc = this.config.fabricSession !== undefined
+      ? {
+        enforcementMode: this.config.fabricSession.cfcEnforcementMode ??
+          "enforce-explicit" as const,
+        enforcementModeSource:
+          this.config.fabricSession.cfcEnforcementMode !== undefined
+            ? "configured" as const
+            : "preset-pin" as const,
+        flowLabels: this.config.fabricSession.cfcFlowLabels ?? "off" as const,
+        flowLabelsSource: this.config.fabricSession.cfcFlowLabels !== undefined
+          ? "configured" as const
+          : "default" as const,
+      }
+      : undefined;
     this.#runState = options.runState ??
       createHarnessRunState({
         runId,
         cfcEnforcementMode: this.config.cfcEnforcementMode,
+        ...(fabricSessionCfc !== undefined ? { fabricSessionCfc } : {}),
         currentDir,
         model: this.config.model,
         modelProvider: this.config.modelProvider,

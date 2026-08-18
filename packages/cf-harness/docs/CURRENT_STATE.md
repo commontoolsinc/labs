@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-08-14
+Last verified: 2026-08-18
 
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
@@ -96,10 +96,11 @@ The current package provides:
   the tool. Property names do cross, since code cannot be written over data
   without them, so they are bounded in count and length and the model-facing
   reply is scrubbed of bare fabric identifiers at every depth, keys included.
-  Disclosing shape is a policy-governed read whose current default is
-  permissive, bounded to addresses in the session's own space; answering from
-  the fabric establishes the run's fabric session despite the tool's `read`
-  effect class;
+  Disclosure is permissive and fixed rather than configurable — no setting
+  narrows it — and is bounded to addresses in the session's own space; that
+  bound is on the handle's own address rather than on everything the document
+  reaches from it. Answering from the fabric establishes the run's fabric
+  session despite the tool's `read` effect class;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
   environment fallbacks): compiles and runs an inline `sourceText` pattern
@@ -109,21 +110,30 @@ The current package provides:
   refusing links into another space, inputs the compiled pattern declares no
   argument for, input values that carry a sealed opaque link anywhere within
   them, values that mismatch the compiled argument schema whether a live cell or
-  plain JSON supplies them, and a `register` slug that is unusable or that
-  already names a piece in the space, all before any piece exists; honors the
-  run's abort signal by stopping the created piece, removing it from the space's
-  piece list if it had joined, and returning a structured `cancelled` error that
-  names a slug the assignment had already begun taking — that assignment is not
-  withdrawn, because its redirect carries no per-assignment identity a
-  withdrawal could match, so the name keeps resolving to the created piece;
-  scrubs bare fabric identifiers from model-facing diagnostics; returns the
-  result cell's canonical reference plus an optionally schema-sanitized value,
-  and leaves the piece detached (no recorded origin) and, unless `register`
-  asked for a named address, out of the space's registered piece list, with
-  run→piece provenance carried by the run's persisted artifacts; without the
-  session configuration the tool is absent from the tool surface, for a
-  `default`- or `pattern-author`-profile subagent as much as for the parent — a
-  child shares the one session the parent built;
+  plain JSON supplies them, and a `register` slug that is unusable, that already
+  names a piece in the space, or whose availability the space could not
+  establish, all before any piece exists; honors the run's abort signal by
+  stopping the created piece, removing it from the space's piece list if it had
+  joined, and returning a structured `cancelled` error that names a slug the
+  assignment had already begun taking — that assignment is not withdrawn,
+  because its redirect carries no per-assignment identity a withdrawal could
+  match, so the message says the name may still resolve to the created piece and
+  reports the piece list as that path left it; scrubs bare fabric identifiers
+  from model-facing diagnostics; returns the result cell's canonical reference
+  plus an optionally schema-sanitized value, and leaves the piece detached (no
+  recorded origin) and, unless `register` asked for a named address, out of the
+  space's registered piece list, with run→piece provenance carried by the run's
+  persisted artifacts; without the session configuration the tool is absent from
+  the tool surface, for a `default`- or `pattern-author`-profile subagent as
+  much as for the parent — a child shares the one session the parent built;
+  `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
+  `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
+  set the session runtime's CFC dials, so with labels persisted a
+  confidentiality-tainted pattern write is refused at commit under strict —
+  these are the fabric session's dials, independent of the harness's own
+  `--cfc-enforcement-mode`, and the resolved posture (each dial's value and
+  source) is recorded as `fabricSessionCfc` in run state and printed in the
+  operator summary;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable

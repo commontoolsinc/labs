@@ -52,6 +52,23 @@ export type HarnessRunTerminalReason =
   | "prompt_loop_error"
   | "process_interrupted";
 
+/**
+ * The resolved CFC posture of the run's fabric session — the Runtime that
+ * `run_pattern` deploys patterns into. This is a different dial from the
+ * run-level `cfcEnforcementMode`, which governs tool policy and the sandbox;
+ * the two are set independently, so the artifacts state both. Absent when the
+ * run has no fabric session configuration — including when a test injects a
+ * session factory directly, whose runtime's posture the harness never saw.
+ */
+export interface HarnessFabricSessionCfcPosture {
+  enforcementMode: "enforce-explicit" | "enforce-strict";
+  /** `configured` when the operator set the dial; `preset-pin` otherwise. */
+  enforcementModeSource: "configured" | "preset-pin";
+  flowLabels: "off" | "observe" | "persist";
+  /** `configured` when the operator set the dial; `default` otherwise. */
+  flowLabelsSource: "configured" | "default";
+}
+
 export interface HarnessRunState {
   runId: string;
   status: HarnessRunStatus;
@@ -60,6 +77,7 @@ export interface HarnessRunState {
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
+  fabricSessionCfc?: HarnessFabricSessionCfcPosture;
   promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
@@ -105,6 +123,7 @@ export interface CreateHarnessRunStateOptions {
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
+  fabricSessionCfc?: HarnessFabricSessionCfcPosture;
   promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
@@ -157,6 +176,9 @@ export const createHarnessRunState = (
       ? { terminalReason: options.terminalReason }
       : {}),
     cfcEnforcementMode: options.cfcEnforcementMode,
+    ...(options.fabricSessionCfc !== undefined
+      ? { fabricSessionCfc: options.fabricSessionCfc }
+      : {}),
     ...(options.promptSlotBinding !== undefined
       ? { promptSlotBinding: options.promptSlotBinding }
       : {}),

@@ -445,6 +445,127 @@ Deno.test("parseCfHarnessCliArgs rejects a fabric API URL that does not parse", 
   );
 });
 
+Deno.test("parseCfHarnessCliArgs carries the fabric CFC dials into the session config", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--fabric-cfc-enforcement-mode",
+      "enforce-strict",
+      "--fabric-cfc-flow-labels",
+      "persist",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+    cfcEnforcementMode: "enforce-strict",
+    cfcFlowLabels: "persist",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs accepts fabric CFC dials from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_FABRIC_API_URL: "https://toolshed.example/",
+        CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+        CF_HARNESS_FABRIC_SPACE: "my-space",
+        CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE: "enforce-explicit",
+        CF_HARNESS_FABRIC_CFC_FLOW_LABELS: "observe",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcEnforcementMode: "enforce-explicit",
+    cfcFlowLabels: "observe",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a fabric CFC enforcement mode below the preset pin", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--fabric-cfc-enforcement-mode",
+          "observe",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-cfc-enforcement-mode must be enforce-explicit or enforce-strict",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects an unknown fabric CFC flow-labels mode", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "https://toolshed.example/",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+          "--fabric-cfc-flow-labels",
+          "always",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-cfc-flow-labels must be off, observe, or persist",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects fabric CFC dials without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-cfc-flow-labels",
+          "persist",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "need --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs resolves run manifest paths", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--run-manifest", "loom-run.json"],
@@ -3760,6 +3881,7 @@ Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
       "runId: run-policy",
       "status: completed",
       "modelTurns: 1",
+      "cfcMode: observe (harness)",
       "policyEvents: 1",
       "- warning bash: bash would require direct-command authorization in enforce modes",
       "",

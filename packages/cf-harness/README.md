@@ -154,6 +154,8 @@ What is not done yet:
   - core execution engine, run state, tool execution
 - [src/handle-table.ts](src/handle-table.ts)
   - session-local address handle table: token minting and both swap directions
+- [src/schema-shape.ts](src/schema-shape.ts)
+  - allowlist rebuild that reduces a schema to structure for `describe_handle`
 - [src/fabric-session.ts](src/fabric-session.ts)
   - lazy, cached trusted Fabric session behind the `run_pattern` tool
 - [src/prompt-loop.ts](src/prompt-loop.ts)
@@ -802,6 +804,25 @@ space's authorization, and only a healthy session is cached for the run. A
 session that fails to build surfaces as an ordinary tool-output error rather
 than a run failure, and the next tool call retries the construction.
 
+Two further flags set the session runtime's CFC dials, and both need the three
+session flags present. `--fabric-cfc-enforcement-mode`
+(`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
+`enforce-strict` — raise-only, since the session's runtime preset already pins
+`enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
+confidentiality its target's declared policy does not admit has its commit
+refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
+accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
+onto everything a pattern's transaction writes, which is what makes a labelled
+read visible to that refusal. These dials govern the fabric session's runtime
+only — `--cfc-enforcement-mode` remains the harness's own dial for tool policy
+and the sandbox, and the two are set independently.
+
+A run states both postures rather than leaving them to be inferred: the resolved
+fabric-session posture — each dial's value and whether the operator configured
+it or the preset supplied it — is recorded as `fabricSessionCfc` in
+`run-state.json` and the run report, and the operator summary prints it beside
+the harness's own `cfcMode`.
+
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, an
 optional `resultSchema`, and an optional `register`. An `inputs` string value
@@ -862,30 +883,37 @@ two writers pointing the same name at the same piece write byte-identical
 values, and the document carries no per-assignment identity by which a
 withdrawal could tell this run's assignment from a later writer's. Recording one
 would mean a marker inside a shared on-disk format kept solely for a cleanup
-path, so the assignment stands: the name goes on resolving to the created piece,
-which is stopped and no longer listed. This matches how cancellation treats the
-run's other durable effects — the piece itself is stopped, never deleted.
+path, so the assignment stands. The abort races the write rather than waiting on
+it, so the message says the name may still resolve to the created piece, and
+reports the piece as this path left it — delisted when the removal answered that
+it removed something, left listed when it did not. This matches how cancellation
+treats the run's other durable effects — the piece itself is stopped, never
+deleted.
 
 `register` is how a run publishes its result to a person. It takes one required
 field, `slug` — the named address the piece is reachable at, in the same
 lowercase-hyphen form every fabric slug uses — and asks for the piece to join
 the space's piece list. The slug is validated, and then checked for
 availability, before anything is compiled, so an unusable slug and a slug
-already in use are both structured errors that persist no piece. That second
-check is what stops a run from taking over a name a person already opens:
-assigning a slug is a blind write, so without it a model naming `home` would
-repoint `home` at whatever it had just written. It is a check and not a lock —
-resolution and assignment are not atomic, so a slug that becomes taken in
-between is still overwritten — and it closes the case that arises rather than a
-race against a concurrent writer. Registration itself runs after the pattern has
-settled: the piece joins the space's registry through the default pattern, and
-the slug is then pointed at it, the same two steps `cf piece new` performs. A
-space with no default pattern has no registry to join; `run_pattern` reports
-that as `registrationError` on an otherwise `ok` output rather than
-bootstrapping the space's root, so the computation and its `resultRef` survive a
-failed publish. `register` sets the address, not the title: what the piece list
-displays is the pattern's own `NAME` result, so a pattern that wants a title
-sets `NAME` in its source.
+already in use are both structured errors that persist no piece. The
+availability question fails closed: a slug is free only on the outcomes that say
+nothing is there — no document, a malformed one, one that is not a piece, one
+carrying no piece id — and any other failure refuses the call saying the
+availability could not be established, because reporting a storage error as a
+free name would write over whatever is there. That check is what stops a run
+from taking over a name a person already opens: assigning a slug is a blind
+write, so without it a model naming `home` would repoint `home` at whatever it
+had just written. It is a check and not a lock — resolution and assignment are
+not atomic, so a slug that becomes taken in between is still overwritten — and
+it closes the case that arises rather than a race against a concurrent writer.
+Registration itself runs after the pattern has settled: the piece joins the
+space's registry through the default pattern, and the slug is then pointed at
+it, the same two steps `cf piece new` performs. A space with no default pattern
+has no registry to join; `run_pattern` reports that as `registrationError` on an
+otherwise `ok` output rather than bootstrapping the space's root, so the
+computation and its `resultRef` survive a failed publish. `register` sets the
+address, not the title: what the piece list displays is the pattern's own `NAME`
+result, so a pattern that wants a title sets `NAME` in its source.
 
 Every `run_pattern` invocation persists a piece in the configured space,
 registered or not. A cancelled run stops its piece, but no piece is ever

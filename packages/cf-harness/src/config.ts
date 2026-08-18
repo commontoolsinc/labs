@@ -1,5 +1,6 @@
 import {
   type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
   isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
 import type { HarnessCfcEnforcementModeSource } from "./contracts/cfc-policy-snapshot.ts";
@@ -21,16 +22,32 @@ export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
 export type HarnessGatewayAuthMode = "bearer" | "none";
 
 /**
+ * The fabric session's enforcement dial admits raises only: the remoteClient
+ * preset already pins `enforce-explicit`, so the sole configurable move is up
+ * to `enforce-strict`. This is a different dial from the harness's own
+ * `cfcEnforcementMode`, which governs tool policy and the sandbox — this one
+ * governs the runtime the `run_pattern` tool deploys patterns into.
+ */
+export type HarnessFabricCfcEnforcementMode =
+  | "enforce-explicit"
+  | "enforce-strict";
+export type HarnessFabricCfcFlowLabelsMode = CfcFlowLabelsMode;
+
+/**
  * Connection settings for the trusted Fabric session behind the
  * `run_pattern` tool: the deployed API URL, a PKCS#8 identity keyfile path
  * on the host, and the target space (a name or a `did:key`). When present,
  * the run offers `run_pattern` in the parent tool surface; when absent, the
- * tool is unavailable.
+ * tool is unavailable. The optional CFC dials reach the session's Runtime;
+ * unset means the remoteClient preset's first-party posture
+ * (`enforce-explicit`, flow labels off).
  */
 export interface HarnessFabricSessionConfig {
   apiUrl: string;
   identityKeyPath: string;
   space: string;
+  cfcEnforcementMode?: HarnessFabricCfcEnforcementMode;
+  cfcFlowLabels?: HarnessFabricCfcFlowLabelsMode;
 }
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"
