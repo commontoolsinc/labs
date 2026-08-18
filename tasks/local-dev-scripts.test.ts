@@ -13,6 +13,10 @@ const PORT_UNREACHABLE_EXIT = 4;
 // The offset that puts the shell dev server on port 6000.
 const UNREACHABLE_SHELL_OFFSET = 6000 - ports.shell;
 
+// The offset that puts the inspector on port 10080, leaving the shell and the
+// toolshed on ports every client will talk to.
+const UNREACHABLE_INSPECTOR_OFFSET = 10080 - ports.inspector;
+
 // An offset whose servers every client will talk to.
 const REACHABLE_OFFSET = 850;
 
@@ -24,6 +28,7 @@ const REACHABLE_OFFSET = 850;
 async function runScript(
   script: string,
   offset: number,
+  options: { args?: string[]; env?: Record<string, string> } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const binDir = await Deno.makeTempDir();
   const stub = path.join(binDir, "deno");
@@ -31,9 +36,14 @@ async function runScript(
   await Deno.chmod(stub, 0o755);
   try {
     const { code, stdout, stderr } = await new Deno.Command("bash", {
-      args: [`scripts/${script}`, "--port-offset", String(offset)],
+      args: [
+        `scripts/${script}`,
+        ...(options.args ?? []),
+        "--port-offset",
+        String(offset),
+      ],
       cwd: repoRoot,
-      env: { PATH: `${binDir}:${Deno.env.get("PATH")}` },
+      env: { ...options.env, PATH: `${binDir}:${Deno.env.get("PATH")}` },
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -67,6 +77,16 @@ describe("local-dev-scripts", () => {
       expect(code).not.toBe(PORT_UNREACHABLE_EXIT);
       expect(stderr).toContain("shell exited before it became ready");
     });
+
+    it("answers from the recorded list, not from the environment", async () => {
+      const { code, stderr } = await runScript(
+        "start-local-dev.sh",
+        UNREACHABLE_SHELL_OFFSET,
+        { env: { BLOCKED_PORTS: "1" } },
+      );
+      expect(code).toBe(PORT_UNREACHABLE_EXIT);
+      expect(stderr).toContain("shell port 6000");
+    });
   });
 
   describe("restart-local-dev.sh", () => {
@@ -79,6 +99,17 @@ describe("local-dev-scripts", () => {
       expect(stderr).toContain("shell port 6000");
       // The stop, and the cache and space clearing behind its flags, all
       // follow this line.
+      expect(stdout).not.toContain("Stopping local dev servers");
+    });
+
+    it("refuses an inspector port an --inspect run would bind", async () => {
+      const { code, stdout, stderr } = await runScript(
+        "restart-local-dev.sh",
+        UNREACHABLE_INSPECTOR_OFFSET,
+        { args: ["--inspect"] },
+      );
+      expect(code).toBe(PORT_UNREACHABLE_EXIT);
+      expect(stderr).toContain("inspector port 10080");
       expect(stdout).not.toContain("Stopping local dev servers");
     });
   });

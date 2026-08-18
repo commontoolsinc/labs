@@ -102,7 +102,11 @@ TOOLSHED_PORT=${TOOLSHED_PORT:-$((BASE_TOOLSHED_PORT + PORT_OFFSET))}
 # offset start-local-dev.sh will refuse costs nothing on the way to the refusal.
 require_reachable_port "shell" "$SHELL_PORT"
 require_reachable_port "toolshed" "$TOOLSHED_PORT"
-if [[ "$INSPECT" == "true" && -n "$INSPECT_PORT" ]]; then
+if [[ "$INSPECT" == "true" ]]; then
+    # The port start-local-dev.sh would pick for an --inspect run that names
+    # none, resolved here so the check covers it and the start it hands to
+    # binds the port that was checked.
+    INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
     require_reachable_port "inspector" "$INSPECT_PORT"
 fi
 
