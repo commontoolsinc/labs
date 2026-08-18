@@ -4,30 +4,54 @@ What driving a pattern entirely through `cf` looks like when the verb surface is
 complete: discovery, documentation, help, completion, and carrying an address
 from one call into the next.
 
-[Verbs over the CLI](verbs-over-the-cli.md) explains what a verb hands back.
-This walks a whole session using it, and marks where the surface is still
-incomplete.
+[Verbs over the CLI](over-the-cli.md) explains what a verb hands back.
+This walks a whole session using it.
 
 The subject is a work-item tracker — items in a tree, plus typed cross-links.
 It is a real pattern: `packages/cli/integration/pattern/tracker.tsx`, which
 belongs to this document and the two scripts beside it, so a change to a
 pattern the product ships can never break a demonstration of the verb surface.
-The scripts are `packages/cli/integration/verb-session-demo.sh`, the session as
-it is meant to read, and `packages/cli/integration/verb-session-gaps.sh`, the
-gap harness CI runs to keep the **[today]**/**[blocked]** marks below honest.
 Every measurement below was taken against that pattern on a local toolshed.
 
-**Every step is marked for what is real.** The point of the document is the
-line between them.
+**Every step here works against a current build.** That is not a claim this
+document makes on its own: `packages/cli/integration/verb-session-gaps.sh`
+asserts the same surface as pass/fail and CI runs it, so a step that stopped
+working would fail there rather than going stale here. A step needing
+something decided or built would say so; none does today.
 
-| Mark | Meaning |
+## The two scripts, and how they line up with this
+
+Two scripts sit beside this document.
+`packages/cli/integration/verb-session-demo.sh` is the session as it is meant
+to read: it narrates each command, runs it, and prints the result, so the
+transcript is the artifact. `verb-session-gaps.sh` asserts the same surface as
+pass/fail and is what keeps the demo honest.
+
+The demo counts in **acts**; this document counts in **steps**, and the two do
+not run one-for-one — a step is a theme, and an act is a beat. Read the demo's
+transcript beside this table:
+
+| Step here | Demo acts |
 | --- | --- |
-| **[today]** | works against a current build |
-| **[blocked]** | needs something decided or built |
+| 1. Arrive with a slug | act 1 |
+| 2. Ask what it is | act 2 |
+| 3. Ask what a verb wants | act 3 |
+| 4. Complete against the live piece | — completion needs a terminal, so no act runs it |
+| 5. Create, and carry the address forward | acts 4–9 |
+| 6. Read the tree back, bounded | act 10 |
+| 7. Refuse what the surface does not accept | act 11 |
+| 8. Relate two items | acts 12–13 |
 
-The read layer this document was drafted against has since landed in full: the
-concise `--select` spelling, the `@` address suffix, and their arrival on
-`piece call` all work today, so no step here is merely pending.
+A verb added to the fixture wants a row in the verb table below, an act in the
+demo, and a step in the harness; a shape demonstrated in none of the three is a
+claim this document is making alone.
+
+This document quotes commands and never composes them: every `cf` line in a
+bash block below is a line the demo runs — or carries a `# not in the demo`
+comment saying why it cannot be — and every act number names an act the demo
+has. `deno task check-verb-session-sync` enforces both, so a command here
+cannot be wrong in a way the demo would have caught, and an act reference
+cannot go stale under renumbering.
 
 Section headers inside the help output below are the literal strings
 `renderPieceCallHelp` emits (`packages/cli/lib/exec-schema.ts`). Their contents
@@ -66,10 +90,11 @@ Those act numbers are `packages/cli/integration/verb-session-demo.sh`, which
 drives the session and prints each command before running it — the transcript is
 what that script is for. Beside it,
 `packages/cli/integration/verb-session-gaps.sh` asserts the same surface as
-pass/fail, and several of its steps assert that something does *not* work yet,
-failing loudly the day it does. A verb added to the fixture wants a row above, an
-act in the demo, and a step in the harness; a shape demonstrated in none of the
-three is a claim this document is making alone.
+pass/fail. A step there may assert that something does *not* work yet, failing
+loudly the day it does; none does at the moment, which is why every step below
+is marked **[today]**. A verb added to the fixture wants a row above, an act in
+the demo, and a step in the harness; a shape demonstrated in none of the three
+is a claim this document is making alone.
 
 This document quotes commands and never composes them: every `cf` line in a
 bash block below is a line the demo runs — or carries a `# not in the demo`
@@ -187,7 +212,7 @@ cf get <item-address> children --select 'title,status'
 That is not a workaround; it is the read model working. A schema is a query,
 and a caller who names nothing has asked for everything. The same flags shape a
 verb's result, because
-[a result is a read on a different cell](../plans/fabric-read-model.md) — 1743
+[a result is a read on a different cell](../../plans/fabric-read-model.md) — 1743
 bytes unshaped, 140 with `--select 'item.title'`.
 
 **The prose above reaches a caller.** Each verb carries a doc comment saying
@@ -345,71 +370,21 @@ The structural half needs nothing authored per pattern:
 `--title <string> Required.`
 falls out of the type. That is why the page exists at all.
 
-**Part of the prose is not on the wire with it**, and knowing which part keeps
-a reader from looking for it in the wrong place. A verb dispatches through a
-callable cell, and that cell takes its schema from the link chain it resolves
-through (`cell.ts:asSchemaFromLinks`). For a verb that link is the handler
-node's `$event` input — which, since the [verb input
-contract](../history/plans/verb-input-contract.md), is the author's event type
-rather than a summary of what the body reads, so a declared field the body
-never mentions is served like any other, and the field comments beside those
-fields travel with it.
+**The two halves arrive by different roads**, and the page assembles them.
+The structural half rides the schema the piece serves. The prose is read from
+the compiled pattern, because that is where a doc comment survives
+compilation — the same load `cf piece verbs` already makes to report what a
+verb hands back. A caller sees one page; `cf` read two documents to build it.
 
-Two things still do not. A comment on the **verb** describes the verb, not its
-event, so it lives on the pattern's result schema and never rides the event
-schema at all. And link sanitization strips every capability marker but
-`stream`, which is why a declared reference position arrives shape-intact and
-marker-less — the fact the dispatch gate reads the compiled pattern to
-recover (step 7).
+Which document carries what, and why the fold walks both, is
+[an author's prose, over the CLI](prose-over-the-cli.md). Two of its
+consequences show up in this session: a field an author declares and the
+handler never reads is still served, flagged and documented (the authored
+event is the contract), and a declared reference arrives with its capability
+marker stripped — which is what step 7's dispatch gate reads the pattern to
+recover.
 
-So the pattern is loaded for those, and it is where each level survives
-compilation:
-
-| An author writes… | Where the compiled pattern keeps it |
-| --- | --- |
-| a comment on the **verb itself**, as in the model above | `resultSchema.properties.<verb>.description`, a sibling of the `$ref` naming its event |
-| a comment on an **event field** (what `title` means) | `$defs.<Event>.properties.<field>.description` |
-| a comment on the **event interface** | nowhere — this one does not compile ([#5937](https://github.com/commontoolsinc/labs/issues/5937)) |
-
-`cf piece verbs` and `cf call <verb> --help` already load that pattern to
-report what a verb hands back, so both read the prose from the same load. The
-verb's own comment becomes the listing row's `description` and the help page's
-summary line. The event fields' comments are folded into the input schema the
-page renders flags from, at the positions that schema already has.
-
-**Which means walking two documents that need not agree structurally.** A
-handler with an authored event type serves that type, so the two now line up
-by construction; a handler written without one has only the inferred summary,
-and there the old divergence stands. The same field can be a `$ref` in one and
-an inline object in the other, and a union the declared side spells as `anyOf`
-can arrive as one merged object. So a walk that steps through `properties`
-key-for-key finds a bare `$ref` on one side with no `properties` under it, or a
-field whose prose is inside an arm that no longer exists on the other side, and
-stops short of the words in both cases.
-
-Both sides' references are followed for that reason, and a declared combinator
-is read through to its members. A served reference is followed *without* being
-inlined, and a served combinator is never flattened: a caller's tooling reads
-that shape, and a definition several positions share is not one position's to
-rewrite. A field's own prose is therefore written where the field is, never into
-the definition it points at — which would attribute one position's sentence to
-every other holder of the same type. The precise list of positions the fold
-walks is on `withDeclaredFieldProse` (`packages/cli/lib/piece.ts`), enumerated
-rather than summarized, along with the keywords it leaves alone.
-
-**Folded in, never substituted.** Only `description` annotations cross between
-the two documents, so the served schema stays the authority on shape and takes
-only the words. Substituting one document for the other would describe the
-source rather than the piece being talked to — which stays the rule even now
-that an authored event makes the two agree, because the piece in front of a
-caller may be running an older pattern than the source in the checkout.
-
-The question this section used to leave open — whether a field an author
-declares and the body never reads is discoverable — is settled: it is. The
-authored event is the contract, so the field is served, flagged, and
-documented like any other.
-
-### Three levels of documentation **[today]**
+### Three levels of documentation
 
 Every line of prose on the page above exists as a doc comment in
 `tracker.tsx`. Nothing is invented for the illustration — it is that file's
@@ -423,7 +398,7 @@ describes itself:
 | an **input** parameter | a field of the event interface | **yes**, in `$defs.<Event>.properties` | **yes**, beside its flag |
 | an **output** parameter | a field of the result interface | **yes**, on the declared result | **yes**, beside its `Output:` line |
 
-The output parameter's needs no resolution to render. A verb's declared
+The output parameter's prose needs no resolution to render. A verb's declared
 result reaches `cf` **unresolved**, and a field's description is a ref-site
 sibling on the property itself: `--help --json` on `addItem` serves
 `properties.item` as a `$ref` into `$defs.ItemOutput` carrying
@@ -520,7 +495,7 @@ loop would start again — comes through as an address, the same address a
 `$link` marker would have produced. If the verb declares no result, there is
 nothing to fall back on, and the call fails with a clear message rather than
 a stack trace.
-[A result that points back at its container](verbs-over-the-cli.md#a-result-that-points-back-at-its-container)
+[A result that points back at its container](over-the-cli.md#a-result-that-points-back-at-its-container)
 shows the full exchange.
 
 ## 6. Read the tree back, bounded **[today]**
@@ -567,7 +542,7 @@ That spelling — the address exactly as a read printed it — dispatches where
 the verb declares a reference, and the edge that lands is the target rather
 than a copy: the graph read shows one item under two paths. The dispatch gate
 reads the DECLARED contract ([verb input
-contract](../history/plans/verb-input-contract.md)) to know which positions declare
+contract](../../history/plans/verb-input-contract.md)) to know which positions declare
 references, and the same contract refuses the two payloads that could only
 ever be mistakes at one:
 
@@ -605,7 +580,7 @@ spelling a caller is actually holding, since every `$link` and `receipt` in
 this session emits exactly that form. The positions it converts at come from
 the DECLARED contract read off the compiled pattern, because the schema a
 dispatch cell carries keeps only stream markers; the [verb input
-contract](../history/plans/verb-input-contract.md) is what makes that declaration
+contract](../../history/plans/verb-input-contract.md) is what makes that declaration
 authoritative.
 
 A tree mostly hides the argument half, because the natural shape is to call
@@ -615,7 +590,7 @@ related to each other: `blockOn`, a `duplicates` edge, a `move`, or a removal
 that names a child rather than an index. Indices are not addresses; a
 position shifts under concurrent writes.
 
-[CLI surface shape](../plans/cli-surface-shape.md) states the property for
+[CLI surface shape](../../plans/cli-surface-shape.md) states the property for
 commands — an address printed by one command is accepted by the next. The
 argument half is the same property one level in, on arguments. A second
 instance sits on `cf piece set-slug`, whose source positional resolves
@@ -630,6 +605,6 @@ through its own path rather than the one `--piece` uses.
 
 Two rows, and two that used to sit beside them are gone the way this table
 intends: the served input schema now carries every declared event field —
-the [verb input contract](../history/plans/verb-input-contract.md) ruled the
+the [verb input contract](../../history/plans/verb-input-contract.md) ruled the
 authored event authoritative — and the address a read emits dispatches as an
 argument, with the detached-copy refusal standing guard beside it (step 7).

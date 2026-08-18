@@ -6,7 +6,7 @@
 # the transcript is the artifact. Its companion `verb-session-gaps.sh` asserts
 # the same surface as pass/fail and is what keeps this one honest.
 #
-# docs/common/verb-session-walkthrough.md is the prose half: why the fixture
+# docs/common/verbs/session-walkthrough.md is the prose half: why the fixture
 # declares the verbs it does, and which shape of the surface each act is here
 # to show. An act added here without a row there is an act nobody can place.
 #

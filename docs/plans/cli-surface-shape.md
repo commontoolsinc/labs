@@ -210,7 +210,7 @@ intermediate state wrong. What each step owes:
 
 | Step | Documentation owed |
 | --- | --- |
-| 2 | The read options gain a second host — `piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs-over-the-cli.md) |
+| 2 | The read options gain a second host — `piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
 | 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
 | 4 | `#argument` beside every `--input` example, in the same places |
 | 5 | The new spellings alongside the old ones everywhere both work |

@@ -9,7 +9,7 @@
 # many are open is tallied as they run and printed on the last line, so no
 # prose here can fall out of step with the assertions below.
 #
-# Documented in docs/common/verb-session-walkthrough.md.
+# Documented in docs/common/verbs/session-walkthrough.md.
 #
 # It deploys pattern/tracker.tsx and nothing else. That fixture belongs to this
 # session alone, so a change to a pattern the product ships can never break a

@@ -8,7 +8,7 @@ the part that changes what a caller types.
 The split is deliberate, though not absolute. The read layer breaks two things,
 both of which it owns and sequences itself. Scoping invocation ids to a session
 makes `--invocation` without one an error — a spelling that works today and that
-[Verbs over the CLI](../common/verbs-over-the-cli.md) teaches — and that lands
+[Verbs over the CLI](../common/verbs/over-the-cli.md) teaches — and that lands
 alone, ahead of anything that publishes an address. Checking projection keys
 against an allowlist refuses a schema carrying a key that was silently dropped
 before, which is a command that exited zero and now does not.

@@ -449,7 +449,7 @@ Each step carries its own, rather than a sweep at the end.
 | Step | Owed |
 | --- | --- |
 | F2 | `packages/cli/README.md` output conventions: two flags, which syntax each takes |
-| A1, A3 | The marker and the suffix, same file; [Verbs over the CLI](../../common/verbs-over-the-cli.md), already stale |
+| A1, A3 | The marker and the suffix, same file; [Verbs over the CLI](../../common/verbs/over-the-cli.md), already stale |
 | A4 | Address forms wherever `--piece` is taught — the CLI README and the tutorial's workflow chapter |
 | S1, S2 | `cf invocation-session new`, `CF_INVOCATION_SESSION`, and what an absent session means; the CLI README and the agent-facing skills that teach invocation ids |
 | C1 | What a receipt declares, in the design document's open-question slot |

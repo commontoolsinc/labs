@@ -452,7 +452,7 @@ misled about how the runtime works now. All verified against code.
 
 - **Three surfaces teach stripping the `of:` prefix** that #5459 made
   unnecessary: `packages/cli/README.md:302-303`,
-  `docs/common/verbs-over-the-cli.md:443-446` and `:545-546`,
+  `docs/common/verbs/over-the-cli.md:443-446` and `:545-546`,
   `skills/cf/SKILL.md:296` — while the walkthrough's own receipt examples
   pass `of:` ids verbatim. The strip advice contradicts the arc's
   composition goal and the docs contradict themselves.
