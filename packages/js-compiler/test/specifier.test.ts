@@ -54,6 +54,27 @@ describe("specifier", () => {
         importEscapesProgramRoot("../shared/mod.ts", from("main.tsx")),
       ).toBe(false);
     });
+
+    it("detects the escape under an HTTP-style double-slash name", () => {
+      expect(
+        importEscapesProgramRoot(
+          "../../outside.ts",
+          from("//pkg/main.tsx"),
+        ),
+      ).toBe(true);
+      expect(
+        importEscapesProgramRoot(
+          "../../outside.ts",
+          from("///pkg/main.tsx"),
+        ),
+      ).toBe(true);
+    });
+
+    it("keeps an inside import inside under a double-slash name", () => {
+      expect(
+        importEscapesProgramRoot("./helper.ts", from("//pkg/main.tsx")),
+      ).toBe(false);
+    });
   });
 
   describe("resolveImportSpecifier", () => {

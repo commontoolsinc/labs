@@ -53,8 +53,9 @@ export function importEscapesProgramRoot(
     return false;
   }
   if (from.name.substring(0, 1) !== "/") return false;
-  const dir = dirname(from.name);
-  const relativeDir = dir === "/" ? "" : dir.substring(1);
+  // Every leading slash: an HTTP-derived name preserves its URL pathname,
+  // which may begin "//...", and a base left absolute would clamp again.
+  const relativeDir = dirname(from.name).replace(/^\/+/, "");
   const joined = join(relativeDir, specifier);
   return joined === ".." || joined.substring(0, 3) === "../";
 }
