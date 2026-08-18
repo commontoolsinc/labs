@@ -253,15 +253,79 @@ ambient-state one.
   (serving-loop.md §3): a cycle that ends before its drained event ran
   re-arms the scan, and the next cycle's drain used to queue a second
   copy — a per-cut-cycle multiplier on a NON-IDEMPOTENT handler. Stated
-  narrowly: it dedupes the drain against ITSELF only.
-  The LT1 same-space in-process cascade copy (a `streamEntry`-less
-  emit queued in-process alongside the durable append — #5969's (α))
-  and the general "one durable entry = one COMPLETED delivery"
-  invariant across BOTH producers remain owed to the owner's ruling
-  (verification-coverage.md OW32's Stage-C dossier), not decided here.
+  narrowly: it dedupes the drain against ITSELF only — the drain half
+  of the invariant below.
+- **One entry, one COMPLETED delivery (RULED 2026-08-18 — owner:
+  "agreed with your recommendations", on #5969's double-dispatch
+  dossier and the coordinator's concurrence; the cross-producer
+  invariant the drain sentence above left owed):** **"One durable
+  stream entry is delivered to its handler exactly once as a COMPLETED
+  run, regardless of dispatch path or reference count. An entry whose
+  in-process (LT1 same-wave) run does not complete within its
+  appending wave is dispatched by the drain alone; the serving loop
+  purges unrun in-process leftovers at the flush deadline and skips at
+  the drain any id already queued or run with a durable entry. A
+  derivation-kind emitter's superseded LT1 leftover re-arms nothing and
+  its orphan delivery is REFUSED (never delivered without a durable
+  entry)."** The two producers the sentence unifies are the
+  durable-entry + drain path (the store's unconsequenced entries,
+  re-scanned per cycle) and the LT1 same-space in-process copy (§2:
+  the emitting handler's tx writes the durable entry AND queues the
+  event in-process for its own wave, `streamEntry`-less — "the batch
+  owns the mark"). Under OFF there is one in-process queue and one
+  handler registration per stream link, so exactly-once holds BY
+  CONSTRUCTION; the served path's second producer with no dedupe
+  between them was a serving-loop PARITY GAP, not a pattern bug
+  (#5969's Flag 1: one eventId consequenced by 2–5 derived commits per
+  click on the lunch gate; the two-browsers lockdown toggle is the
+  same class through the re-drain variant alone). COMPLETED is the
+  operative word: a run whose consequence commit lost a per-doc basis
+  CAS is REQUEUED — rolled back to unconsequenced and re-delivered by
+  the drain in a later wave (serving-loop.md §3d) — which is one
+  completed delivery, not two, so the invariant binds completions,
+  never dispatch attempts. Enforcement lives in the serving loop at
+  two seams: (α) a PURGE, synchronous at the flush-deadline decision
+  (before the scheduler's next turn), of every LT1 in-process leftover
+  that has not run — discriminator `served !== undefined &&
+  served.streamEntry === undefined`; a plain in-process event on the
+  serving runtime carries neither and is never purged — whose durable
+  entry is the truth the next drain re-runs WITH a `streamEntry`, so
+  the mark lands; and (β) the per-eventId drain SKIP of an entry
+  already queued (shaper-HELD events included) or already run in the
+  still-open wave, taken ONLY on the strength of a copy that carries a
+  mark path (a `streamEntry`-bearing dispatch), never on a
+  `streamEntry`-less leftover, which cannot mark. The drain-against-
+  itself guard above is (β) for the drain's own copies; (α) and the
+  in-wave half of (β) are OWED to the design build stage
+  (verification-coverage.md OW35). The third clause decides the
+  sub-case the dossier left open: a DERIVATION-kind emitter's LT1
+  append riding a doc whose derived write is per-doc supersede-DROPPED
+  (serving-loop.md §3d — the drop RE-ARMS NOTHING, RULED 2026-08-05)
+  has no durable entry and nothing re-emits it; delivering the
+  leftover anyway would be an ORPHAN consequence — one delivery, zero
+  entries, the same invariant broken from the other side — so it is
+  REFUSED. The cross-space twin already has this shape: a cross-space
+  append is a durable outbox row, re-sent on activation and deduped at
+  the target's `eventId` horizon (serving-loop.md §5) — the durable row
+  is the truth and every delivery path dedupes against it, exactly as
+  here. Scope, so it is not misread: the client's speculative echo
+  COMMITS NOWHERE (it renders only — speculation.md §1), and the
+  AUTHORED event commit and the DERIVED result commit are TWO commits;
+  the invariant binds the RESULT side — how many times one durable
+  entry's consequences are committed — while the authored append's
+  exactly-once is the `eventId` dedupe horizon above. NOT ruled, and
+  refused: "make handlers idempotent" — it contradicts OFF parity and
+  would make every non-idempotent handler (append / increment / toggle)
+  wrong under serving, which this section's exactly-once exists to
+  prevent. `events.processed > events.appended` is NOT the signature
+  (re-drains inflate `processed`; in-wave LT1 cascades count in
+  neither); per-event run counts are.
 
 FORBIDDEN: a processed-events table; per-event acks from clients;
-handler-run provenance records.
+handler-run provenance records; a handler delivery with no durable
+stream entry behind it; requiring pattern handlers to be idempotent as
+the double-dispatch remedy (parity with the OFF arm is the serving
+loop's duty).
 
 ## 5. Failure semantics
 

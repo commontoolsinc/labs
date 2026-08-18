@@ -2663,6 +2663,70 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   narrowed by the fixer (flag-don't-fill). Inert while the constant is
   `false` (the grant is flag-gated; OFF the configured list is used
   verbatim). Trigger: before the flip PR.
+  **RULED 2026-08-18 — the write-authority posture; implementation
+  OWED post-merge, BEFORE the flip PR; OFF-invisible.** Owner,
+  verbatim intent: toolshed's serving identity (a generic one, not
+  user-specific) must NOT be used to write into users' home spaces;
+  the USER's identity does — for wish provisioning and `.inSpace()`
+  genesis; the service principal is not an implicit OWNER of users'
+  spaces. Genesis shape, ruled: "the new space's own keys can be used
+  for the genesis transaction, immediately delegating owner to the
+  acting user (so that first commit happens under the space's own
+  identity, the rest is then the user's)." Scoping report (the
+  evidence, work order and proposed spec text):
+  [`stage-c-ow31-scope-report.md`](../../history/plans/server-execution-v2/stage-c/stage-c-ow31-scope-report.md).
+  Findings, as they bear on the build: (i) served home-space WRITES
+  ALREADY ride the delegated path under the acting user — the wave's
+  accept gate ignores the service-DID blanket and the engine sink
+  carries `delegated{actingPrincipal, capabilityRef}` — so the ruling
+  was the architecture's intent, honored for every write but one;
+  (ii) the ONE defect is the `.inSpace()` genesis ACL's CONTENT, which
+  names the SERVICE as OWNER (`packages/runner/src/storage/v2.ts:1047-1221`
+  — the bootstrap session signs as the space, but `signer` = the
+  manager's `as` = the service on the loopback plane), so a served
+  create mints a service-owned space — or an ACL-less one when the
+  sink's data commit wins the race with the mount's genesis; UNPINNED
+  today; the fix is `registerSpaceIdentity(identity, { owner:
+  actingUser })` threaded from the serving-side `resolveSpaceName`
+  (a serving runtime with no actor REFUSES to register), the genesis
+  forced BEFORE the sink's data batch for every `creation`-granted
+  foreign target, and the sink refusing a foreign batch into a
+  seq-0 / no-ACL engine (INV-13 mirrored on the engine-direct plane);
+  replay-idempotent, because actor and keys are both functions of the
+  creation event (CT-1650 + the event's stamped `firedAt.user`);
+  (iii) the READ side: removing the OWNER blanket with no replacement
+  makes `session.open` deny the serving runtime on EVERY owner-only
+  home space — under ON, where clients do not commit derivations,
+  every private-space piece stops deriving — so a READ-ONLY SERVICE
+  CLASS in the memory ACL policy (`acl.readOnlyServiceDids`: a READ
+  floor, never WRITE or OWNER by that class, never a genesis
+  initializer; ON: the process identity; OFF: empty) is the
+  RECOMMENDATION on file, NOT yet ruled; (iv) flagged residual for the
+  owner's eye: the genesis ACL's `"*": WRITE` wildcard (the client's
+  own rollout default) leaves the service — and every authenticated
+  principal — with WRITE on the new space via the wildcard; "the user
+  is OWNER, the service is not" holds, "the service cannot write P"
+  does not follow, and narrowing the wildcard is a separate policy
+  question. Pins for the build: "a served `.inSpace()` genesis: actor
+  = the space DID, ACL owner = the acting user, the service principal
+  appears nowhere in the ACL, and the space's commit #1 IS the ACL
+  commit"; "the service principal cannot write into a user home space"
+  (session plane refused under `enforce`; a carriage-less wave write
+  refused at accumulation; a carriage-bearing write acting as another
+  user refused on the `acl` arm); a creation-granted foreign batch
+  never lands before the genesis; kill/replay between genesis, data
+  and home commits converges on ONE user-owned ACL; and the served-wish
+  + lunch gates as acceptance (no `lacks READ` in the toolshed log,
+  `foreignWriteRefusals` 0, a store dump with no `of:<P>` owned by the
+  service DID; an `observe`-mode canary counting the process
+  identity's write would-denies — expected 0, any non-zero names a
+  residual to re-route). Guard against creep: the OWNER-class list
+  stays operator-configured; if a future stage needs the process
+  identity to WRITE over the session plane, the answer is a
+  wave-stamped path or an explicit grant, never re-adding it to that
+  list. Does not gate landing the stack OFF (the grant is flag-gated;
+  OFF the configured list is used verbatim); the flip PR's gate reads
+  against the built posture.
 - OW32 — the CLIENT-side `scheduler-non-settling` loop under the full
   ON posture in the two-browser journeys — the EVIDENCED mechanism of
   the two two-browser gates' red, UNATTRIBUTED (P7 independent review
@@ -3307,10 +3371,13 @@ supply; OW29/OW32/OW34 closed):
     inch"): the re-measured runs never reproduced the late dispatch
     (`overlayLateEchoDrops` 0), so the rule's live firing is unobserved;
     its unit pin covers the mechanism. The rule's sentence in
-    speculation.md §4 step 2 is DATED (2026-08-18), not RULED —
-    **pending owner ratification** (#5969 had called it a candidate
-    rule, owner call; it landed here as the retirement condition the
-    step already states). The rule reaches the late echo's
+    speculation.md §4 step 2 landed DATED (2026-08-18), not RULED, and
+    was **ratified 2026-08-18** — RULED as written, with its rationale
+    (a speculative preview of an event the server has already completed
+    has nothing to add and can only mislead); #5969 had called it a
+    candidate rule, owner call; it landed here as the retirement
+    condition the step already states (register OW36, closed). The
+    rule reaches the late echo's
     client CASCADE too (a child echo whose `parentEventId` is the jobless
     intent, and its children), and a dropped late echo's enactable
     effects are owned and not enacted (the closed-overlay arm's shape).
@@ -3383,7 +3450,8 @@ supply; OW29/OW32/OW34 closed):
     check could still queue a second copy (`events.drainInFlightSkips`;
     events.md §4's new sentence, stated narrowly as the drain deduping
     against ITSELF — the LT1 (α) in-process copy and the cross-producer
-    invariant stay owed to the owner's ruling). Pinned:
+    invariant stayed owed to the owner's ruling at this landing; RULED
+    2026-08-18, OW35 below). Pinned:
     `executor-events-down.test.ts` (exactly-once under an honest
     deadline: one fire mid-settle → processed 1, ONE consequence commit,
     the counter reads 1; mutation: guard removed → processed 11, red).
@@ -3427,7 +3495,9 @@ supply; OW29/OW32/OW34 closed):
   siblings are stacked. Rows minted here (the siblings mint no new
   numbers; the coordination delta owns OW35–OW38):
   - **OW35 — the served-handler DOUBLE-DISPATCH parity gap: (α) + the
-    cross-producer invariant sentence — OWNER RULING OWED.** One
+    cross-producer invariant sentence — RULED 2026-08-18 (owner:
+    "agreed with your recommendations" — (ii) as stated, NOT (iii));
+    the (α) build is OWED to the design build stage.** One
     durable entry, one eventId, dispatched N× (2–5 on the lunch gate;
     the two-browsers lockdown toggle is the same class, re-drain
     variant only) via the LT1 in-process leftover (α), the drain
@@ -3452,11 +3522,47 @@ supply; OW29/OW32/OW34 closed):
     for DERIVATION-kind LT1 emitters (a superseded per-doc drop re-emits
     nothing; today an orphan consequence — refuse or tolerate); NOT
     "make handlers idempotent". `events.processed > events.appended` is
-    NOT the signature; per-event run counts are. Trigger: before the
-    lunch skip lifts and before the ON arm is called correct on
-    non-idempotent handlers — i.e. before the confidence verdict is
-    stated as "no fundamental issue" without this qualification.
-  - **OW36 — the late-echo arrival-gate rule, PENDING RATIFICATION.**
+    NOT the signature; per-event run counts are. **RULED 2026-08-18:**
+    events.md §4 now carries the binding sentence — *"One durable
+    stream entry is delivered to its handler exactly once as a
+    COMPLETED run, regardless of dispatch path or reference count. An
+    entry whose in-process (LT1 same-wave) run does not complete within
+    its appending wave is dispatched by the drain alone; the serving
+    loop purges unrun in-process leftovers at the flush deadline and
+    skips at the drain any id already queued or run with a durable
+    entry. A derivation-kind emitter's superseded LT1 leftover re-arms
+    nothing and its orphan delivery is REFUSED (never delivered without
+    a durable entry)."* — the orphan-delivery sub-clause decided
+    REFUSE, (iii) refused (a FORBIDDEN entry names it), and
+    serving-loop.md §3d (REQUEUE = one completed delivery; the
+    supersede-drop re-arms nothing) / §5 (the outbox's durable-row +
+    `eventId`-horizon twin) cross-referenced. State against the
+    sentence: the tuning trio's drain in-flight guard ALREADY covers
+    the (β) drain re-queue for the drain's own copies (it dedupes the
+    drain against ITSELF — `events.drainInFlightSkips`, released on the
+    wave outcome; pinned in `executor-events-down.test.ts`); OWED to the
+    design build stage: (α) the deadline-time purge of unrun LT1
+    in-process leftovers (discriminator `served !== undefined &&
+    served.streamEntry === undefined`, synchronous at the deadline
+    decision), the drain's skip against an in-wave `streamEntry`-bearing
+    run (the (β) half beyond the drain's own copies, shaper-held events
+    included), the derivation-emitter orphan REFUSAL, and a per-event
+    run-count pin (one fire under an LT1 cascade that misses the
+    deadline → exactly one COMPLETED run; `processed == appended` is
+    not that pin). Scope, recorded at the owner's request so the
+    invariant is not misread: the client's speculative echo COMMITS
+    NOWHERE — it renders only (speculation.md §1) — and the AUTHORED
+    event commit (the client's append, one per fire) and the DERIVED
+    result commit (the served handler's consequences) are TWO commits;
+    the invariant binds the RESULT side — how many times one durable
+    entry's consequences are committed — not the authored append (whose
+    exactly-once is the `eventId` dedupe horizon) and not the echo.
+    Trigger unchanged for the build: before the lunch skip lifts and
+    before the ON arm is called correct on non-idempotent handlers —
+    i.e. before the confidence verdict is stated as "no fundamental
+    issue" without this qualification.
+  - **OW36 — the late-echo arrival-gate rule — RULED 2026-08-18
+    (ratified as written); CLOSED.**
     Implemented in #5991 (T2 (b)) as speculation.md §4 step 2 read as a
     state predicate — an event-handler echo sealed after its intent's
     terminal consequence already arrived is jobless and NOT registered;
@@ -3468,9 +3574,15 @@ supply; OW29/OW32/OW34 closed):
     mechanism (`speculation-arrival-gate.test.ts`, with mutation). E2's
     mechanism is INFERRED (no prompt echo, a busy worker, the
     click-bound toggle re-toggling), not witnessed by a client trace.
-    Owed: the owner ratifies the sentence (or marks it pending) — with
-    the trio's landing; the sub-questions in the tuning review's Q1/Q2
-    (cascade semantics; effects) are answered by option (a) as built.
+    **RULED 2026-08-18:** the owner ratified the sentence AS WRITTEN;
+    speculation.md §4 step 2 now carries the RULED marker with the
+    one-clause rationale — a speculative preview of an event the server
+    has already completed has nothing to add and can only mislead. The
+    tuning review's Q1/Q2 sub-questions (cascade semantics; effects)
+    are answered by option (a) as built (the T2 row above records the
+    two arms). Nothing owed; the live-firing evidence gap stays as
+    recorded (`overlayLateEchoDrops` 0 across the re-measured runs; the
+    unit pin covers the mechanism).
   - **OW37 — the §4 amplification ratio, a hair over budget under the
     honest deadline — a testing.md §4 TRIGGER breach that needs its
     human inspection.** Re-benchmark: chat 2.05 / 2.14 (≤2 pure), lunch
@@ -3505,9 +3617,16 @@ supply; OW29/OW32/OW34 closed):
     on the cross-user step; the owner rules. Trigger: the design pass's
     re-benchmark; the flip gate (plan Phase 7 task 1 item 4) reads
     against the RULED bar, not against the client-local OFF number.
-  - OW31 (unchanged row above): unruled at 2026-08-18; travels with the
-    flip PR and does not gate landing the stack OFF (the grant is
-    flag-gated; OFF uses the configured list verbatim).
+  - OW31 (row above, RULED 2026-08-18): the write-authority posture is
+    ruled — the serving identity never writes users' home spaces, the
+    user's identity does; a provisioned space's genesis is signed by
+    the space's own keys and names the acting user OWNER in that same
+    first commit — with the work order recorded (the scoping report
+    beside the closeout); implementation OWED post-merge, BEFORE the
+    flip PR; OFF-invisible; does not gate landing the stack OFF (the
+    grant is flag-gated; OFF uses the configured list verbatim). The
+    READ-side replacement (a read-only service class) is the
+    recommendation on file, not yet ruled.
   - Not rows, recorded: #5991's ledger comment is pending; the design
     pass's reconciled report (`stage-c-design.md`) was pending at the
     handoff and, when written, belongs beside the closeout with the

@@ -76,8 +76,8 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   `nowTick` timing (refuted; two positive pins) but a served-handler
   DOUBLE DISPATCH of one durable event (2–5× per click) plus a late
   divergent client echo the arrival gate strands; no production code;
-  the dossier is the PR's Flag 1; owner ruling owed (below); the
-  arrival gate KEEP.
+  the dossier is the PR's Flag 1; the invariant RULED 2026-08-18 and
+  the late-echo rule RATIFIED (below); the arrival gate KEEP.
 - **The tuning trio (#5991) — DONE, ledger comment pending**: T1 one CFC
   probe per commit; T2 retirement on arrival + the late-echo rule; T3
   honest deadline + mid-wave renew; the drain's in-flight guard. Every
@@ -124,23 +124,32 @@ benchmarked measuring server settle time; (3) the CONFIDENCE VERDICT to
 the owner; (4) on "no fundamental issue", land the train on main with
 the flag OFF (siblings stacked; default lanes OFF) and continue on
 main; (5) the flip's ordered gates as listed under Phase 7 (skip list
-EMPTY, deployed binaries exercised ON, OW31 ruled, the benchmark against
-the ruled bar), then the flip PR and the soak.
+EMPTY, deployed binaries exercised ON, OW31's ruled posture BUILT, the
+benchmark against the ruled bar), then the flip PR and the soak.
 
-**Open owner rulings (unruled at 2026-08-18; recommendations on file):**
-(1) served-handler DOUBLE-DISPATCH parity gap — rec: events.md §4 states
-"one durable entry = one COMPLETED delivery regardless of dispatch path
-or reference count; not completed in its appending wave → the drain
-alone dispatches", enforced by the deadline-time purge of unrun LT1
+**Owner rulings (state at 2026-08-18; recommendations on file for the
+open ones):** (1) served-handler DOUBLE-DISPATCH parity gap — **RULED
+2026-08-18** ("agreed with your recommendations"): events.md §4 states
+the one-entry-one-COMPLETED-delivery invariant (not completed in its
+appending wave → the drain alone dispatches; a derivation-kind
+emitter's superseded LT1 leftover re-arms nothing and its orphan
+delivery is REFUSED), enforced by the deadline-time purge of unrun LT1
 leftovers + the per-eventId drain skip (the trio's guard is the drain
-half), with the orphan-delivery sub-clause for derivation-kind LT1
-emitters decided (register OW35); (2) the late-echo arrival-gate rule —
-implemented in #5991 as a DATED speculation.md §4 step-2 predicate,
-never fired live — ratify or mark pending (OW36); (3) OW31's
-write-authority posture (owner-everywhere vs a read-only ACL class) —
-travels with the flip PR; (4) the design-pass set above; (5) #5968's
-Flags (instantiation seat, `resolvedHash`, fetch-parity on live
-completion failure, `plainProgramOf`).
+half; the (α) purge is OWED to the design build stage — register OW35);
+(2) the late-echo arrival-gate rule — **RATIFIED 2026-08-18** as
+written (speculation.md §4 step 2 RULED; OW36 closed); (3) OW31's
+write-authority posture — **RULED 2026-08-18**: the serving identity
+never writes into users' home spaces, the USER's identity does (wish
+provisioning, `.inSpace()` genesis); genesis is signed by the new
+space's own keys and names the acting user OWNER in that same first
+commit, the service neither owner nor actor; the served writes are
+already delegated, the one defect is the served genesis ACL's content
+(service-owned), the READ side needs a read-only service class
+(recommended, not yet ruled) — work order recorded (register OW31; the
+scoping report beside the closeout), implementation OWED POST-MERGE,
+BEFORE the flip PR, OFF-invisible; (4) the design-pass set above,
+UNRULED; (5) #5968's Flags (instantiation seat, `resolvedHash`,
+fetch-parity on live completion failure, `plainProgramOf`), UNRULED.
 
 ## Phase 0 — Rulings and guardrails
 
@@ -1001,8 +1010,9 @@ Tasks:
       2026-08-17/18 as three sibling PRs off fan-out B plus two
       benchmarks and an attribution (the "Coordination state" block
       above; the closeout record): the lunch residual RE-CHARACTERIZED
-      as served-handler double dispatch (#5969, skip STAYS, owner ruling
-      owed — OW35); the tuning trio (#5991) restored COMPLETION (ON
+      as served-handler double dispatch (#5969, skip STAYS; the
+      invariant RULED 2026-08-18, its (α) purge owed to the design build
+      — OW35); the tuning trio (#5991) restored COMPLETION (ON
       finishes every journey, `lease.lost` 0); latency remains
       design-class — the design pass is next*; (3)
       OW28 — compile-and-run as an outbox effect kind + completion-class
@@ -1023,8 +1033,11 @@ Tasks:
       `PiecesController`) exercised ON by a gate — the flip PR's own
       obligation (review finding 8: today nothing exercises them ON);
       then (6) the flip PR, and the soak starts at ITS merge. OW31 (the
-      service-principal write-authority posture) is a ruled item for the
-      owner before the flip.
+      service-principal write-authority posture) was RULED 2026-08-18 —
+      the serving identity never writes users' home spaces; genesis
+      under the space's own keys, owner := the acting user — and its
+      build (register OW31's work order) lands post-merge, BEFORE the
+      flip.
 - [ ] Retire the flag; OFF path removed; `EXPERIMENTAL_OPTIONS.md` entry
       closed out — **SPLIT OUT: the post-soak removal PR** (named here as
       the flip's follow-up; it also removes the OFF regression-guard CI

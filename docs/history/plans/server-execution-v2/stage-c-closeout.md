@@ -536,6 +536,10 @@ itself (§5).
   — #5969's two-round self-review.
 - [`stage-c-tuning-review-report.md`](stage-c/stage-c-tuning-review-report.md)
   — #5991's adversarial review + builder disposition.
+- [`stage-c-ow31-scope-report.md`](stage-c/stage-c-ow31-scope-report.md)
+  — the OW31 write-authority scoping report behind the 2026-08-18
+  ruling (added after the handoff; the register's OW31 row carries the
+  ruling and the work order).
 
 `fan-out/` (the design behind fan-out stages A/B, 2026-08-16, P7 head
 `6d18d6998`; kept here because stage C is that design's closeout stage):

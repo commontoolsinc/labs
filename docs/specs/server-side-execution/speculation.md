@@ -85,11 +85,14 @@ On each pushed `derived` commit with `derivedThrough = W` and
    the authoritative consequences (or, for a dropped event, its
    notice — events.md §5) now exist; the echo's job is done. This is a
    condition on STATE, not on arrival order (stage C tuning T2,
-   2026-08-18): an echo of `e` sealed AFTER `e`'s terminal consequence
-   (consequenced, errored, dropped, or refused) has already arrived at
-   this client — the local dispatch ran late (a load-parked head event,
-   a busy worker) — is jobless on the same grounds and is NOT
-   registered: its writes are dropped before any layer is sealed. A
+   2026-08-18; **RULED 2026-08-18** — ratified as written: a
+   speculative preview of an event the server has already completed
+   has nothing to add and can only mislead): an echo of `e` sealed
+   AFTER `e`'s terminal consequence (consequenced, errored, dropped, or
+   refused) has already arrived at this client — the local dispatch
+   ran late (a load-parked head event, a busy worker) — is jobless on
+   the same grounds and is NOT registered: its writes are dropped
+   before any layer is sealed. A
    non-idempotent handler's late echo is divergent by construction (it
    re-toggles the already-served state), and its floor sits at the
    served commit's seq, above every W reachable until the next authored
