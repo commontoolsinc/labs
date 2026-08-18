@@ -67,22 +67,33 @@ export interface MentionEvent {
    * is the cell, so this is what a caller passes and what gets stored.
    *
    * Declared through the ONE field every topic has rather than `unknown`, and
-   * the narrowness is the point twice over. It is the least that still makes
-   * this a reference: a schema naming a property refuses a bare string, so an
-   * address sent as text — which an inline CLI call argument produces, being
-   * parsed as plain JSON — is rejected at the boundary instead of stored as an
-   * entry that resolves to no piece. And it is the most this can safely name:
-   * this schema reaches every topic in `mentionable`, so a property without a
-   * default would be demanded of topics written before it existed and refuse
-   * their update. `title` carries one, which is what makes it nameable here;
-   * `deno task pattern-vintage` is what proves that by replaying a real board.
+   * the narrowness is what makes a non-reference CHEAP TO CATCH — not what
+   * catches it. An `asCell` payload is wrapped whole without validating what
+   * is behind it, so naming a property refuses nothing at the boundary: an
+   * address sent as text, which an inline CLI call argument produces by being
+   * parsed as plain JSON, arrives here as readily as a piece does. What the
+   * named property buys is a one-field read that tells the two apart —
+   * `topic.get()` is `undefined` for a value that is not a reference and an
+   * object for any piece — and `mention` spends it before storing anything.
    *
-   * Nothing reads through it regardless — the value is stored and compared. */
+   * `title` is also the most this can safely name: this schema reaches every
+   * topic in `mentionable`, so a property without a default would be demanded
+   * of topics written before it existed and refuse their update. `title`
+   * carries one, and that default does double duty — it is also why the check
+   * admits a piece that is not a topic at all, which reads back `{ title: "" }`
+   * rather than `undefined`. `deno task pattern-vintage` proves the update side
+   * by replaying a real board.
+   *
+   * Nothing reads THROUGH it beyond that one field — the value is stored and
+   * compared. */
   topic: Writable<{ title: string | Default<""> }>;
 }
 
 /** Stop referencing a piece. */
 export interface UnmentionEvent {
+  /** Declared and checked exactly as `MentionEvent.topic` is, and for the same
+   * reason: a payload that is not a reference matches no stored entry, so
+   * without the check it would remove nothing and report success. */
   topic: Writable<{ title: string | Default<""> }>;
 }
 
@@ -851,7 +862,14 @@ export default pattern<TopicInput, TopicOutput>(
      * key that arrived from elsewhere is kept.
      */
     const mention = action<MentionEvent>(({ topic }) => {
-      if (!topic) rejectMutation("mention", "topic must be a reference");
+      // A reference, or a rejection. The schema wraps whatever it is handed as
+      // a cell without looking behind it, so this is the boundary — and the
+      // narrowed payload is what makes it one read of one field: `undefined`
+      // is a value with no document behind it, and any real piece answers with
+      // an object because `title` carries a default.
+      if (!topic || topic.get() === undefined) {
+        rejectMutation("mention", "topic must be a reference");
+      }
       // A set-add, not an append: referencing the same piece twice is one
       // reference. Mergeable, so concurrent mentions of distinct pieces all
       // land and a repeated one is a no-op against durable state.
@@ -860,7 +878,12 @@ export default pattern<TopicInput, TopicOutput>(
 
     /** Stop referencing a piece — every entry naming it. */
     const unmention = action<UnmentionEvent>(({ topic }) => {
-      if (!topic) rejectMutation("unmention", "topic must be a reference");
+      // Same check as `mention`, and it earns its place here too: a payload
+      // that is not a reference matches no stored entry, so the removal below
+      // would quietly do nothing and report success.
+      if (!topic || topic.get() === undefined) {
+        rejectMutation("unmention", "topic must be a reference");
+      }
       // `removeByValue`, not `remove` or `removeAll`: those two rebuild the
       // array and set it back, which is both a clobbering write and the shape
       // that flattens surviving references. This one resolves against durable

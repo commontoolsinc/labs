@@ -746,6 +746,26 @@ export default pattern(() => {
     (twinBoard.topics?.[1]?.referencedBy ?? []).length === 0
   );
 
+  // A mention may address ANY piece, not only a topic, and the narrowed payload
+  // must not quietly turn that into a topics-only verb. `mention` tells a
+  // reference from a non-reference by reading the one field its schema names,
+  // and a piece without that field answers with the declared default rather
+  // than `undefined` — which is what keeps this piece admissible. Its own board
+  // so the counts stand alone.
+  const guestTopics = new Writable<TopicPiece[] | Default<[]>>([]);
+  const guestBoard = Topics({ topics: guestTopics });
+  const nonTopicPiece = new Writable<{ note: string }>({ note: "not a topic" });
+  const action_add_guest = action(() => {
+    guestBoard.addTopic.send({ title: "Guest", agentName: "Sol" });
+  });
+  const action_guest_mentions_non_topic = action(() => {
+    // deno-lint-ignore no-explicit-any
+    (guestBoard.topics?.[0]?.mention as any)?.send({ topic: nonTopicPiece });
+  });
+  const assert_non_topic_mention_lands = assert(() =>
+    (guestBoard.topics?.[0]?.mentions ?? []).length === 1
+  );
+
   // Nothing was written into the target: retract the mention and the edge is
   // simply gone from the topic that was being referenced.
   const action_source_retracts_mention = action(() => {
@@ -888,6 +908,9 @@ export default pattern(() => {
       { action: action_list_twin_again },
       { action: action_twin_mentions_itself },
       { assertion: assert_twin_earns_no_edge },
+      { action: action_add_guest },
+      { action: action_guest_mentions_non_topic },
+      { assertion: assert_non_topic_mention_lands },
       { action: action_source_retracts_mention },
       { assertion: assert_reference_retracted },
       { action: action_ui_mentions_two },

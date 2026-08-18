@@ -84,10 +84,13 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // `deno task pattern-vintage` refuses it otherwise, naming the field.
     //
     // `mention` moves for the opposite reason: its payload stopped being
-    // `unknown` and now names `title`, so the verb refuses an address sent as
-    // text instead of storing it as an entry that resolves to no piece. A
-    // narrowed payload is a real tightening of what the verb accepts, which is
-    // the decision being recorded here rather than worked around.
+    // `unknown` and now names `title`. Naming it does not by itself refuse
+    // anything — an `asCell` payload is wrapped whole, without validating what
+    // is behind it — but it is what lets the verb tell a reference from a
+    // non-reference in one read of one field, and `mention` now rejects rather
+    // than storing an entry that resolves to no piece. A narrowed payload is a
+    // real tightening of what the verb accepts, which is the decision being
+    // recorded here rather than worked around.
     paths: [
       "argument.topics[]",
       "result.mentionable[].mention",
@@ -135,7 +138,8 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "whose row shape the `boardCrossrefs` input changed to match. " +
       "`mentionable[]` moves because `TopicPiece` gained the reference fields, " +
       "and `mention` because its payload now names `title` rather than being " +
-      "`unknown` — the least that makes it a reference, so a bare string is " +
-      "refused at the boundary rather than stored inert.",
+      "`unknown` — the one field that lets the verb read a payload and tell a " +
+      "reference from a bare string, which it now rejects rather than storing " +
+      "inert.",
   },
 ];
