@@ -61,6 +61,7 @@
     "jsr:@std/testing@^1.0.19": "1.0.19",
     "jsr:@std/text@~1.0.7": "1.0.19",
     "jsr:@std/yaml@*": "1.0.12",
+    "jsr:@std/yaml@^1.0.12": "1.0.12",
     "jsr:@zip-js/zip-js@^2.7.52": "2.8.33",
     "npm:@ai-sdk/anthropic@^4.0.16": "4.0.16_zod@4.4.3",
     "npm:@ai-sdk/google-vertex@^5.0.22": "5.0.22_zod@4.4.3",
@@ -2187,6 +2188,7 @@
       },
       "tasks": {
         "dependencies": [
+          "jsr:@std/yaml@^1.0.12",
           "npm:typescript@6.0.3"
         ]
       }
