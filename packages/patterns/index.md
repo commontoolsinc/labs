@@ -1376,11 +1376,10 @@ inputs and produces a focused output.
 
 ## `suggestable/summary.tsx`
 
-Generates a concise summary of provided context using an LLM.
-
-An instance with no `topic` has nothing to summarize. Its prompt stays empty, so
-no model request opens: `pending` stays `false` and `summary` stays `""`. The
-first `topic` a caller supplies is what starts the request.
+Generates a concise summary of provided context using an LLM. The topic is what
+asks for the summary: with none given the pattern holds the request back, so
+`pending` stays `false` and `summary` stays empty until a caller names a
+subject.
 
 **Keywords:** summary, generateText, suggestion-fuel
 
@@ -1405,11 +1404,9 @@ type SummaryOutput = {
 
 ## `suggestable/checklist.tsx`
 
-Generates a checklist of actionable steps from a topic and context.
-
-An instance with no `topic` has no steps to draw up. Its prompt stays empty, so
-no model request opens: `pending` stays `false` and `items` stays empty. The
-first `topic` a caller supplies is what starts the request.
+Generates a checklist of actionable steps from a topic and context. The topic is
+what asks for the steps: with none given the pattern holds the request back, so
+`pending` stays `false` and `items` stays empty until a caller names a subject.
 
 **Keywords:** checklist, generateObject, suggestion-fuel
 
@@ -1439,12 +1436,10 @@ type ChecklistOutput = {
 
 ## `suggestable/question.tsx`
 
-Generates a clarifying question with optional multiple-choice options.
-
-An instance with no `topic` has nothing to ask about. Its prompt stays empty, so
-no model request opens: `pending` stays `false`, `question` stays `""` and
-`options` stays empty. The first `topic` a caller supplies is what starts the
-request.
+Generates a clarifying question with optional multiple-choice options. The topic
+is what asks for the question: with none given the pattern holds the request
+back, so `pending` stays `false` and both `question` and `options` stay empty
+until a caller names a subject.
 
 **Keywords:** question, generateObject, suggestion-fuel
 
@@ -1472,11 +1467,9 @@ type QuestionOutput = {
 ## `suggestable/diagram.tsx`
 
 Generates an ASCII diagram illustrating relationships, flows, or structures.
-Rendered in a `<pre>` tag with monospace styling.
-
-An instance with no `topic` has nothing to draw. Its prompt stays empty, so no
-model request opens: `pending` stays `false` and `diagram` stays `""`. The first
-`topic` a caller supplies is what starts the request.
+Rendered in a `<pre>` tag with monospace styling. The topic is what asks for the
+diagram: with none given the pattern holds the request back, so `pending` stays
+`false` and `diagram` stays empty until a caller names a subject.
 
 **Keywords:** diagram, ASCII, generateText, suggestion-fuel
 
@@ -1502,11 +1495,10 @@ type DiagramOutput = {
 ## `suggestable/svg-diagram.tsx`
 
 Generates an SVG diagram illustrating relationships, flows, or structures.
-Rendered via `<cf-svg>` web component for scalable vector output.
-
-An instance with no `topic` has nothing to draw. Its prompt stays empty, so no
-model request opens: `pending` stays `false` and `diagram` stays `""`. The first
-`topic` a caller supplies is what starts the request.
+Rendered via `<cf-svg>` web component for scalable vector output. The topic is
+what asks for the diagram: with none given the pattern holds the request back,
+so `pending` stays `false` and `diagram` stays empty until a caller names a
+subject.
 
 **Keywords:** diagram, SVG, generateText, suggestion-fuel, cf-svg
 
