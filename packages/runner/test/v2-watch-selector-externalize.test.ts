@@ -5,13 +5,13 @@ import type { JSONSchemaObj } from "@commonfabric/api";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 
 import { decomposeSchema } from "../src/schema-decompose.ts";
-import { setContentAddressedSelectorSchemasConfig } from "../src/schema-doc-config.ts";
+import { setContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { externalizeSyncSelector } from "../src/storage/v2-watch.ts";
 
 describe("v2-watch", () => {
   describe("externalizeSyncSelector()", () => {
     afterEach(() => {
-      setContentAddressedSelectorSchemasConfig(false);
+      setContentAddressedSchemasConfig(false);
     });
 
     const schema: JSONSchemaObj = {
@@ -31,7 +31,7 @@ describe("v2-watch", () => {
     });
 
     it("emits a reference when the whole closure is persisted", () => {
-      setContentAddressedSelectorSchemasConfig(true);
+      setContentAddressedSchemasConfig(true);
       const decomposed = decomposeSchema(schema);
       const persisted = new Set(decomposed.documents.keys());
       const externalized = externalizeSyncSelector(
@@ -43,7 +43,7 @@ describe("v2-watch", () => {
     });
 
     it("falls back to the inline form when any closure document is absent", () => {
-      setContentAddressedSelectorSchemasConfig(true);
+      setContentAddressedSchemasConfig(true);
       const decomposed = decomposeSchema(schema);
       const [first] = decomposed.documents.keys();
       const selector = { path: [], schema } as const;
@@ -53,7 +53,7 @@ describe("v2-watch", () => {
     });
 
     it("leaves boolean and reference-only selectors alone", () => {
-      setContentAddressedSelectorSchemasConfig(true);
+      setContentAddressedSchemasConfig(true);
       const permissive = { path: [], schema: true } as const;
       expect(externalizeSyncSelector(permissive, () => true)).toBe(permissive);
       const hash = internSchemaAsTaggedHashString({
@@ -68,7 +68,7 @@ describe("v2-watch", () => {
     });
 
     it("keeps a selector whose decomposition refuses inline", () => {
-      setContentAddressedSelectorSchemasConfig(true);
+      setContentAddressedSchemasConfig(true);
       const refused = {
         path: [],
         schema: {

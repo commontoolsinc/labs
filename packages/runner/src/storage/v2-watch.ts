@@ -15,7 +15,7 @@ import {
   decomposeSchema,
   SchemaNotDecomposableError,
 } from "../schema-decompose.ts";
-import { getContentAddressedSelectorSchemasConfig } from "../schema-doc-config.ts";
+import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import {
   lookupSchemaDocument,
   registerSchemaDocument,
@@ -54,7 +54,7 @@ export const externalizeSyncSelector = (
   selector: SchemaPathSelector,
   isSchemaDocPersisted: (hash: string) => boolean,
 ): SchemaPathSelector => {
-  if (!getContentAddressedSelectorSchemasConfig()) return selector;
+  if (!getContentAddressedSchemasConfig()) return selector;
   const schema = selector.schema;
   if (schema === undefined || typeof schema === "boolean") return selector;
   const keys = Object.keys(schema);

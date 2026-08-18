@@ -20,9 +20,7 @@ import {
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import {
   getContentAddressedSchemasConfig,
-  getContentAddressedSelectorSchemasConfig,
   setContentAddressedSchemasConfig,
-  setContentAddressedSelectorSchemasConfig,
 } from "./schema-doc-config.ts";
 import { StaticCache } from "@commonfabric/static";
 import {
@@ -218,20 +216,13 @@ export interface ExperimentalOptions {
   /**
    * Link writers replace inline schemas with references to
    * content-addressed schema documents
-   * (`docs/specs/content-addressed-schemas.md`, Phase 1). Gates writers
-   * only; readers accept both link forms unconditionally. Defaults to off.
+   * (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2): link
+   * writers stamp references, and selectors externalize opportunistically
+   * when their closure is already persisted in the target space. Gates
+   * emission only; readers and the server accept both forms
+   * unconditionally. Defaults to off.
    */
   contentAddressedSchemas?: boolean | undefined;
-  /**
-   * Watch and sync selectors replace inline schemas with references to
-   * content-addressed schema documents
-   * (`docs/specs/content-addressed-schemas.md`, Phase 2). Gates emission
-   * only — the server resolves both selector forms unconditionally — and
-   * a selector externalizes only when its whole closure is already
-   * persisted in the target space, falling back to the inline form
-   * otherwise. Defaults to off.
-   */
-  contentAddressedSelectorSchemas?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
@@ -1035,11 +1026,6 @@ export class Runtime {
     );
     this.experimental.contentAddressedSchemas =
       getContentAddressedSchemasConfig();
-    setContentAddressedSelectorSchemasConfig(
-      this.experimental.contentAddressedSelectorSchemas,
-    );
-    this.experimental.contentAddressedSelectorSchemas =
-      getContentAddressedSelectorSchemasConfig();
     if (this.experimental.contentAddressedSchemas) {
       // Content-addressed schema references and the sync schema table dedupe
       // the same link-schema positions; a reference-bearing link never needs
