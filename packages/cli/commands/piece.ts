@@ -2537,23 +2537,7 @@ updated effective label view.`),
     "Include wrapper-tier and deprecated verbs the default view hides. " +
       "Hidden verbs stay callable either way.",
   )
-  .action(async (options) => {
-    setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
-    const description = await describePiece(pieceConfig);
-    if (options.json) {
-      render(pieceDescribeJson(description, !!options.all), { json: true });
-      return;
-    }
-    for (const line of pieceDescribeLines(description, !!options.all)) {
-      render(line);
-    }
-    hint(
-      cliText(
-        `TIP: 'cf piece verbs --piece ${pieceConfig.piece} --json' has each verb's schemas; 'cf piece call --piece ${pieceConfig.piece} <verb> -- --help' documents one verb.`,
-      ),
-    );
-  })
+  .action(describePieceFromCommand)
   /* piece rm */
   .command("rm", "Remove a piece")
   .alias("remove")
@@ -2867,6 +2851,37 @@ export async function listPiecesFromCommand(
     parseSpaceOptions(options),
   );
   (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
+}
+
+export interface PieceDescribeCommandDependencies {
+  describePiece?: typeof describePiece;
+}
+
+/** `cf piece describe`'s action, held apart from the cliffy chain the way
+ * `listPiecesFromCommand` is: the seam is what lets a test drive the whole
+ * action — quiet mode, config parse, both output shapes, and the hint —
+ * without a live piece behind it. */
+export async function describePieceFromCommand(
+  options:
+    & PieceSummaryCLIOptions
+    & { piece?: string; all?: boolean; quiet?: boolean },
+  deps: PieceDescribeCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = parsePieceOptions(options);
+  const description = await (deps.describePiece ?? describePiece)(pieceConfig);
+  if (options.json) {
+    render(pieceDescribeJson(description, !!options.all), { json: true });
+    return;
+  }
+  for (const line of pieceDescribeLines(description, !!options.all)) {
+    render(line);
+  }
+  hint(
+    cliText(
+      `TIP: 'cf piece verbs --piece ${pieceConfig.piece} --json' has each verb's schemas; 'cf piece call --piece ${pieceConfig.piece} <verb> -- --help' documents one verb.`,
+    ),
+  );
 }
 
 export interface PieceSearchCommandDependencies {

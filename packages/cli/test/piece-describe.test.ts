@@ -9,7 +9,13 @@ import {
 } from "../lib/piece-describe.ts";
 import type { PieceCallablesListing } from "../lib/piece.ts";
 import { describePiece } from "../lib/piece.ts";
-import { pieceDescribeJson, pieceDescribeLines } from "../commands/piece.ts";
+import {
+  describePieceFromCommand,
+  piece,
+  pieceDescribeJson,
+  pieceDescribeLines,
+} from "../commands/piece.ts";
+import { decode } from "@commonfabric/utils/encoding";
 
 /** A result schema shaped as the generator emits a board-like pattern's: an
  * inline root carrying its interface's doc comment, a stream-marked verb
@@ -170,6 +176,19 @@ describe("piece-describe", () => {
       expect(schemaTypeLabel({}, root)).toBe("unknown");
     });
 
+    it("labels the shapes that carry no single type keyword", () => {
+      expect(schemaTypeLabel(42, root)).toBe("unknown");
+      expect(schemaTypeLabel({ "$ref": "http://elsewhere/schema" }, root))
+        .toBe("unknown");
+      expect(schemaTypeLabel({ type: ["string", "null"] }, root)).toBe(
+        "string | null",
+      );
+      expect(schemaTypeLabel(
+        { properties: { title: { type: "string" } } },
+        root,
+      )).toBe("object");
+    });
+
     it("stops at a self-referential anonymous definition", () => {
       const cyclic: JSONSchema = {
         "$defs": {
@@ -265,6 +284,29 @@ describe("piece-describe", () => {
       expect(description.inputs).toEqual([]);
       // The root prose is undamaged by the malformed property map.
       expect(description.purpose).toBe("Still the purpose.");
+    });
+
+    it("yields no documentation from schemas that resolve to nothing usable", () => {
+      // A root reference resolving to a non-object, and a property that is
+      // not an object at all: both are shapes a hand-assembled or truncated
+      // schema can carry, and both must degrade a field, never the page.
+      const description = buildPieceDescription({
+        listing: listingOf([]),
+        compiled: {
+          argumentSchema: {
+            type: "object",
+            properties: { ok: { type: "string" }, bad: true },
+          } as never,
+          resultSchema: {
+            "$ref": "#/$defs/Gone",
+            "$defs": { Gone: true },
+          } as never,
+        },
+      });
+
+      expect(Object.hasOwn(description, "purpose")).toBe(false);
+      expect(description.state).toEqual([]);
+      expect(description.inputs).toEqual([{ name: "ok", type: "string" }]);
     });
 
     it("omits the documentation half when the pattern was unreadable", () => {
@@ -406,6 +448,64 @@ describe("piece-describe", () => {
       expect(description.purpose).toBe(
         "A work tracker: root items on a board.",
       );
+    });
+  });
+
+  describe("describePieceFromCommand", () => {
+    function captureStdout(fn: () => Promise<void>): Promise<string> {
+      let captured = "";
+      const original = Deno.stdout.writeSync;
+      Deno.stdout.writeSync = (data: Uint8Array): number => {
+        captured += decode(data);
+        return data.length;
+      };
+      return fn().then(() => captured).finally(() => {
+        Deno.stdout.writeSync = original;
+      });
+    }
+
+    const OPTIONS = {
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      space: "home",
+      piece: "board",
+      quiet: true,
+    };
+
+    const DESCRIPTION: PieceDescription = {
+      name: "Work tracker",
+      pattern: null,
+      purpose: "A work tracker.",
+      state: [],
+      inputs: [],
+      verbs: [ADD_ITEM_ROW],
+    };
+
+    it("renders the JSON spelling and nothing else under --json", async () => {
+      const out = await captureStdout(() =>
+        describePieceFromCommand({ ...OPTIONS, json: true }, {
+          describePiece: () => Promise.resolve(DESCRIPTION),
+        })
+      );
+      expect(JSON.parse(out).purpose).toBe("A work tracker.");
+    });
+
+    it("renders the page lines on the text spelling", async () => {
+      const out = await captureStdout(() =>
+        describePieceFromCommand(OPTIONS, {
+          describePiece: () => Promise.resolve(DESCRIPTION),
+        })
+      );
+      expect(out).toContain("NAME    Work tracker");
+      expect(out).toContain("  A work tracker.");
+      expect(out).toContain("  addItem");
+    });
+
+    it("is the action the piece command registers for describe", () => {
+      const registered = piece.getCommand("describe") as unknown as {
+        actionHandler: unknown;
+      };
+      expect(registered.actionHandler).toBe(describePieceFromCommand);
     });
   });
 
