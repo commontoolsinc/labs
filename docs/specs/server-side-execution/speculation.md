@@ -83,7 +83,22 @@ On each pushed `derived` commit with `derivedThrough = W` and
 1. Apply the commit to the local store replica (existing path).
 2. Retire overlay entries whose `origin` is `intent(e)` for `e ∈ E` —
    the authoritative consequences (or, for a dropped event, its
-   notice — events.md §5) now exist; the echo's job is done.
+   notice — events.md §5) now exist; the echo's job is done. This is a
+   condition on STATE, not on arrival order (stage C tuning T2,
+   2026-08-18): an echo of `e` sealed AFTER `e`'s terminal consequence
+   (consequenced, errored, dropped, or refused) has already arrived at
+   this client — the local dispatch ran late (a load-parked head event,
+   a busy worker) — is jobless on the same grounds and is NOT
+   registered: its writes are dropped before any layer is sealed. A
+   non-idempotent handler's late echo is divergent by construction (it
+   re-toggles the already-served state), and its floor sits at the
+   served commit's seq, above every W reachable until the next authored
+   input, so it would otherwise stand indefinitely and hide the served
+   value (the two-browsers lockdown chip's 48-s / 300-s stalls; #5969's
+   late castVote echo). Impl: `overlay-destination.ts`
+   `#terminalIntents` at `#sealSpeculative`; pinned in
+   `speculation-arrival-gate.test.ts` (the late-echo rule, scripted,
+   with its mutation).
 3. Retire overlay entries whose `origin` is `input` once their authored
    commit is acked AND `W ≥` that commit's seq AND — the ARRIVAL GATE
    (RULED 2026-08-16, landed with fan-out stage A) — every doc INSTANCE
@@ -155,7 +170,25 @@ covering watermark, or one the client never watched, keeps its echo
 until the next watermark event (value-identical when the values agree;
 otherwise the echo hides the authoritative value that long). An arrival
 re-sweep is the owed follow-up if that coupling ever loosens (recorded
-in verification-coverage.md's stage-A delta). Two riders ride with the
+in verification-coverage.md's stage-A delta). **LANDED (stage C tuning
+T2, 2026-08-18): the coupling DID loosen — an EXHAUSTED wave carries no
+watermark movement (serving-loop.md §3: its `derivedThrough` is frozen),
+so its derived values arrive DECOUPLED from W, and with the honest flush
+deadline (T3) exhaustion is the routine shape of a busy wave. The
+replica now fires an ARRIVAL wake
+(`ISpaceReplica.speculationArrivalObserver`) at the end of integrating
+any frame that moves a doc's confirmed seq forward, and the overlay
+re-sweeps the space when an arrived doc is one some live entry WROTE.
+The gate's predicates are UNCHANGED — arrival is a second, EARLIER
+trigger, never a relaxation of coverage (`W ≥ floor`) or of the arrival
+gate itself; the sweep re-evaluates both on replica state at every
+trigger, so the wake can only retire an entry the next watermark event
+would have retired anyway (the store has spoken for the instance at seq
+≥ the entry's floor: the derivation the gate waits for HAS landed).
+Pinned in `speculation-arrival-gate.test.ts` (the E2 shape end to end,
+mutation: wake removed → the entry stands until an unrelated commit;
+scripted: an arrival for an unwritten doc sweeps nothing, an arrival
+while `W < floor` retires nothing).** Two riders ride with the
 gate: SUPERSEDE-BY-NEWER — a
 newer entry of the same writer whose WHOLE-DOC ops cover every doc an
 older entry wrote retires the older one at seal (the drop of a lower

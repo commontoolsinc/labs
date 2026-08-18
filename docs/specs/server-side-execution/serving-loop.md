@@ -163,7 +163,17 @@ processes* (deploy overlap, partition) it holds via the lease:
   the in-process residue is a local obligation, not wire machinery.
 - Acquire with a conditional write; TTL 15 s; renew every 5 s **by direct
   table update — a lease renewal is NEVER a commit** (v1's renewal-adjacent
-  traffic was part of the storm).
+  traffic was part of the storm). The renew has TWO drivers (stage C
+  tuning T3, 2026-08-18): the interval timer, and a MID-WAVE renew issued
+  from the serving scheduler's cooperative macrotask yield (§3) once the
+  tenure has gone TTL/3 without a renewal — the timer rides the macrotask
+  queue a long settle used to starve (the stage-C attribution's t2:
+  renew gaps to 10 s against the 15-s TTL, then `lease-lost` on every
+  active space at once), so the belt renews at the same cadence without
+  depending on the timer queue being serviced. Neither driver is a
+  commit. Impl: `space-server.ts` `#renewIfDue` on
+  `Runtime.servingYieldObserver`; pinned in
+  `executor-cooperative-yield.test.ts` (ii).
 - On renewal failure or expiry: the SpaceServer MUST stop committing
   immediately (in-flight transaction aborts), then re-acquire or park.
 - The memory server rejects a derived-class commit whose `holder` does not
@@ -257,6 +267,26 @@ visibility in the same batch — head-of-line blocking ACROSS users,
 because the whole input batch commits once at the batch's derived
 closure. With it, a consequence is visible within roughly
 2·T_flush + push even while the wave behind it keeps deriving.
+**The deadline is HONEST only if the settle yields (stage C tuning T3,
+2026-08-18):** the scheduler's settle loop and per-demander fan-out
+loop ran a whole wave's runs on one microtask chain, so the deadline
+timer could fire only after the last run — the stage-C attribution
+measured chat event waves late by 2.5–8.3 s with `wavesBudgetExhausted`
+a symptom, not a bound. A SERVING runtime's scheduler now yields one
+macrotask between runs whenever its slice of continuous work (16 ms)
+is spent (`scheduler/cooperative-yield.ts`; the OFF arm and clients
+construct no yielder and keep their exact microtask shape), so the
+deadline fires within one run + a slice of its time (measured live:
+lateness p50 25 ms, p90 152 ms, max 399 ms — a single long walk
+instance or a resubscribe still runs to its end; the WORK is the
+design half's). Its companion, the DRAIN'S IN-FLIGHT GUARD: with cycles
+routinely cut before a just-drained event has run, the post-commit
+re-arm re-drains the still-pending entry every cycle and used to queue
+a SECOND copy each time (4× dispatch of the lockdown toggle on the
+two-browsers gate); the drain now skips an entry whose earlier drain
+copy has not yet reached its commit callback (`events.drainInFlightSkips`;
+events.md §4). Pinned: `executor-cooperative-yield.test.ts` (i) and
+`executor-events-down.test.ts` (exactly-once under an honest deadline).
 Light waves never reach the deadline and stay single-commit — the
 zero-delta case, which is why this is a trigger on the EXISTING
 exhaustion machinery rather than a new commit topology. T_flush is

@@ -1169,7 +1169,9 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   scope — is illegal and its reads are empty either way. (vi) The
   arrival gate's sweep has no arrival trigger of its own (speculation.md
   §4 now states the frame-coupling assumption); an arrival re-sweep is
-  owed if that coupling loosens. (vii) Two PRE-EXISTING SpaceServer
+  owed if that coupling loosens — LANDED, stage C tuning T2 (2026-08-18;
+  the coupling loosened by construction under the honest flush deadline
+  — see the stage-C tuning delta below). (vii) Two PRE-EXISTING SpaceServer
   blip-window shapes surfaced by the fix round's E2E, not stage A's and
   not filled: (a) with the lease row expired but the in-process tenure
   live, the loop re-attempts its watermark advance every cycle and each
@@ -3219,6 +3221,136 @@ supply; OW29/OW32/OW34 closed):
   draft) — a recurrence in CI is evidence about B7 (a keyed cascade
   not dirtying a walk instance) and should be read as such, not
   retried.
+
+- **Stage C tuning delta (2026-08-18) — the tuning trio, owner-approved
+  as the tuning half of the tuning-vs-design split (the design half —
+  the per-demander demand walk × roots, and the client's whole-sidecar
+  intent tracking with a CFC probe per fire — is a SEPARATE stage;
+  untouched here). Every item re-measured on the harness protocol
+  (fresh store per run, ON binary posture-verified via `/api/meta` +
+  `servingLoop` present, load recorded, NO configured LLM model — the
+  attribution found the 08-17 daytime greens masked by exactly that
+  churn):**
+  - **T1 — one CFC flow-label probe per commit** (`cfc/prepare.ts`
+    `flowLabelWorkExists`, evaluated by both `Runtime.prepareTxForCommit`
+    and the commit chokepoint on the same unprepared, not-yet-relevant
+    tx — 65 % of a saturated client worker on the ON note series). The
+    NEGATIVE verdict is memoized on the transaction
+    (`IExtendedStorageTransaction.probeFlowLabelWork`), invalidated by
+    any journaled read/write/dereference trace/trigger read (an activity
+    epoch); a positive verdict marks the tx relevant, after which nobody
+    probes. Shared client code, both arms: verdicts unchanged (a memo of
+    a deterministic function; the flow-label suites pin them), probe
+    count 2 → 1 per commit in both. Pinned:
+    `cfc-flow-probe-memo.test.ts` (one evaluation + one memo hit; a
+    read or a write between the asks re-evaluates; a positive verdict is
+    never memoized; both arms) with mutations (memo disabled → red;
+    read-bump removed → the invalidation pin red). Re-measured, note
+    create n=20 (`default-app.test.ts`, `CF_NOTE_CREATE_TIMING_SERIES=20`):
+    ON createToView p50 **4 224 / 4 361 ms** (two reps, loads 3.3 / 3.0)
+    vs the attribution's baseline **8 927 / 5 841 ms**; p95 **8 165 /
+    7 358 ms** vs **23 335 / 26 451**; the series completed n=20 in
+    253 / 227 s (baseline 502 s, and a 780-s cap hit at note 18); the
+    adjacent OFF control (OFF binary from the same tip, load 3.6)
+    createToView p50 **1 129 ms** / p95 1 236 — inside the baseline OFF
+    band (1 085–1 171 / 1 328–1 496): the OFF arm's timing is unchanged.
+    ON/OFF ratio 3.7× (was 5.4–8.2×). The per-note growth is still
+    monotone (1.2 → 14.9 s at note 20): the O(events²) intent-tracking
+    term is the design half's, as predicted; the console-gate red on the
+    ON reps is the pre-existing `splitDefinitions` error the
+    attribution's §6 records, unrelated to timing.
+  - **T2 — retirement on ARRIVAL, and the late-echo rule** (the
+    attribution's §4: a correctly served + pushed derived value held 48 s
+    by the client's overlay). (a) The owed arrival re-sweep LANDED: the
+    replica fires `speculationArrivalObserver` at the end of integrating
+    a frame that moves a doc's confirmed seq forward; the overlay
+    re-sweeps when an arrived doc is one some live entry wrote. The
+    gate's predicates are UNCHANGED — arrival is a second, EARLIER
+    trigger (speculation.md §4's amended paragraph states the soundness
+    argument: the sweep re-evaluates coverage and arrival on replica
+    state at every trigger). Reconciled with #5969's arrival-gate KEEP
+    verdict: the gate STAYS as the fallback; the wake fires ahead of the
+    watermark. (b) The late-echo edge #5969 flagged is the SAME gate and
+    IS covered here, by a different sentence than the arrival wake: an
+    event-handler echo sealed after its intent's terminal consequence
+    already arrived is not registered (speculation.md §4 step 2 read as
+    the state it names — the consequences exist, the echo is jobless).
+    Evidence that E2 WAS that edge: the chip never flipped even
+    speculatively (`flippedAt=-1`) — no prompt echo — while Alice's
+    worker was busy for 8.7–12 s (`ipc/runtime:idle` max in every red
+    run: A1 8 658, D4 12 015, E2 8 699 ms; the green runs 3.2–7.3 s);
+    the toggle handler is bound to `onClick` with no `detail.checked`,
+    so a dispatch that runs after the served consequences reads
+    `everyoneIsAdmin=false` and toggles it BACK — the DOM's "Everyone is
+    admin"; that echo's floor is the served commit's seq (above every W
+    until the next authored input) and its mark was consumed before it
+    existed, so nothing retires it — until Bob's draft lifts W (the
+    48-s release the report timed). Pinned: `speculation-arrival-gate.test.ts`
+    (the E2 shape end to end — a served value arriving decoupled from a
+    watermark advance retires and renders at once, mutation: wake
+    removed → the entry stands; the trigger-not-relaxation scripted pin;
+    the late-echo rule scripted with its mutation). Re-measured, the
+    two-browsers lockdown gate at night-like conditions (no LLM model,
+    loads 2.2–6.5): **GREEN 10/10** — 7/7 on the final binary
+    (`a9534d18…`, G3–G9: 30–58 s walls) + I1 (instrumented, byte-equal
+    code) + G1/G2 on interim builds — vs the attribution's 5 stalls in 12
+    night attempts; per browser, `overlayArrivalSweeps` 15–25 per run
+    (the wake fires routinely — served values now arrive decoupled from W
+    as the ordinary shape), `overlayLateEchoDrops` 0 (the late dispatch
+    did not recur: Alice's `ipc/runtime:idle` max fell to 0.66–2.3 s per
+    run, total 3.4–6.7 s vs 11.8–31.4 s — T1's client relief; the
+    late-echo rule stands as the backstop). Also found and FIXED while
+    landing (a): the browser worker bundle drops UNINITIALIZED class
+    fields, so `"speculationAckObserver" in replica` read false in
+    browsers — leg-C's origin-ack wake had never installed in a browser
+    client (Deno-only green); the replica's observer fields are now
+    initialized explicitly and the overlay probes capability by method
+    (`speculationRetirementView`). The overlay counters ride the browser
+    load summary (`cfc-browser-helpers.ts` churn:
+    `overlayLateEchoDrops`, `overlayArrivalSweeps`).
+  - **T3 — the honest deadline and the mid-wave renew** (attribution
+    §2b/§3: deadline late by 2.5–8.3 s; renew gaps to 10 s vs a 15-s TTL;
+    t2's `lease-lost` on all spaces at once). A SERVING runtime's
+    scheduler yields one macrotask between settle-loop runs and between a
+    fanned-out node's instance runs once its 16-ms slice of continuous
+    work is spent (`scheduler/cooperative-yield.ts` — `setTimeout(0)`,
+    the one primitive that lets due timers fire in deadline order;
+    MessageChannel and setImmediate measured to starve them); the OFF arm
+    and clients construct no yielder (posture-gated at construction).
+    The SpaceServer installs `Runtime.servingYieldObserver` at
+    activation and renews the lease from it once the tenure has gone
+    TTL/3 without a renewal (`leaseTtlMs` policy knob for tests). Pinned:
+    `executor-cooperative-yield.test.ts` — (i) a 1.2-s synthetic walk
+    under a 100-ms deadline commits its first exhausted wave in < 600 ms
+    (mutation: yield removed → 1 239 ms, red); (ii) a wave outliving a
+    600-ms TTL twice over commits under a live lease with the timer inert
+    (mutation: renew-on-yield removed → the commit is refused, red);
+    (iii) posture gate; unit. Live (I1, instrumented scratch build):
+    deadline lateness on exhausted cycles p50 **25 ms**, p90 152, max
+    399 ms (was p50 125 / p90 443 / max 1 155 on the note run, and
+    seconds on chat event waves); renew gaps p50 **5 020 ms**, max 5 120
+    (was p50 5.0–7.9 s, max 10.0 s); `lease.lost` **0** in all 13
+    re-measured runs; `wavesBudgetExhausted` now an honest count
+    (140–210 per chat run vs 29 — it counts every cut cycle). Its
+    COMPANION, forced by honesty: with cycles cut before a drained event
+    ran, the post-commit re-arm re-drained the still-pending entry every
+    cycle and queued a second copy each time — G1 (pre-guard) showed
+    `events: appended 8 / processed 34` (4.25× dispatch of the lockdown
+    toggle; #5969's (β) re-scan variant); the drain now skips an entry
+    whose earlier drain copy has not reached its commit callback
+    (`events.drainInFlightSkips`; events.md §4's new sentence, stated
+    narrowly as the drain deduping against ITSELF — the LT1 (α)
+    in-process copy and the cross-producer invariant stay owed to the
+    owner's ruling). Pinned: `executor-events-down.test.ts` (exactly-once
+    under an honest deadline: one fire mid-settle → processed 1, ONE
+    consequence commit, the counter reads 1; mutation: guard removed →
+    processed 11, red). Every guarded run: `processed == appended`.
+  - OFF witness: T1 is arm-independent by design (verdicts pinned);
+    T2 lives in the flag-ON client overlay (constructed only under the
+    flag on non-serving runtimes) and the replica seam fires only with an
+    observer installed; T3 is gated on `runtime.servingPosture` at
+    construction (the yielder does not exist elsewhere) and the drain
+    guard sits inside the serving loop. Whole-suite witness in the PR.
 
 ## 4. Standing rule
 

@@ -235,6 +235,23 @@ ambient-state one.
   default) is SUBSUMED by `eventWatermark` under the flag; the two
   mechanisms MUST NOT be active for the same event
   (runtime-mapping.md N26).
+- **The drain's own re-scan (stage C tuning, 2026-08-18):** the drain
+  queues a pending entry into the serving scheduler AT MOST ONCE while
+  that copy is still queued, held, or running — an entry whose earlier
+  drain copy has not yet reached its final commit callback is skipped
+  on a re-drain (`events.drainInFlightSkips`), and re-drains as before
+  once the copy completes, defers, or fails (a withdrawn wave, a
+  deferral, a requeue leave the entry pending and it re-queues). This
+  is the mark path's own exactly-once, made robust to the honest flush
+  deadline (serving-loop.md §3): a cycle that ends before its drained
+  event ran re-arms the scan, and the next cycle's drain used to queue
+  a second copy — a per-cut-cycle multiplier on a NON-IDEMPOTENT
+  handler. Stated narrowly: it dedupes the drain against ITSELF only.
+  The LT1 same-space in-process cascade copy (a `streamEntry`-less
+  emit queued in-process alongside the durable append — #5969's (α))
+  and the general "one durable entry = one COMPLETED delivery"
+  invariant across BOTH producers remain owed to the owner's ruling
+  (verification-coverage.md OW32's Stage-C dossier), not decided here.
 
 FORBIDDEN: a processed-events table; per-event acks from clients;
 handler-run provenance records.
