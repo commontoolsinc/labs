@@ -8,7 +8,7 @@ import {
 } from "@commonfabric/utils/bigint";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import {
