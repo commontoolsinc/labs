@@ -23,9 +23,17 @@
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
-import LotWatch from "./main.tsx";
+import LotWatch, {
+  TRUSTED_LOT_WATCH_ADMIN_ACTION,
+  TRUSTED_LOT_WATCH_ADMIN_SURFACE,
+} from "./main.tsx";
 import type { KnownVehicle, PlateGroup, Sighting } from "./main.tsx";
 import { classifyPlate, plateKey } from "./main.tsx";
+
+const trustedLotWatchAdminGesture = {
+  surface: TRUSTED_LOT_WATCH_ADMIN_SURFACE,
+  action: TRUSTED_LOT_WATCH_ADMIN_ACTION,
+};
 
 // groupSightingsByPlate is not exported; inline the same logic here so we can
 // test the grouping contract without modifying main.tsx.
@@ -590,10 +598,6 @@ export default pattern(() => {
   // Alice is toggled as admin and then markVehicle is called, the registry
   // should still be empty because reporterName (blank) doesn't match "Alice".
   // This confirms that admin gating uses the reporter identity, not just any toggle.
-  const action_s6_toggle_alice_admin = action(() => {
-    s6.togglePersonAdmin.send({ name: "Alice" });
-  });
-
   // After Alice is toggled admin, markVehicle called by non-matching reporter
   // (blank reporter) should still be a no-op for knownVehicles.
   const assert_s6_still_no_known_vehicles = assert(() =>
@@ -720,9 +724,6 @@ export default pattern(() => {
 
   // --- Establish admin: enable manager + toggle Alice + reporterName=Alice
   const action_s8_enable_manager = action(() => s8.enableAdminManager.send());
-  const action_s8_toggle_alice = action(() => {
-    s8.togglePersonAdmin.send({ name: "Alice" });
-  });
   const action_s8_set_reporter_alice = action(() => {
     s8.setReporterName.send({ name: "Alice" });
   });
@@ -824,7 +825,11 @@ export default pattern(() => {
       { action: action_s6_delete_no_admin },
       { assertion: assert_s6_delete_no_admin_noop },
       { action: action_s6_enable_admin_manager },
-      { action: action_s6_toggle_alice_admin },
+      {
+        action: s6.trustedTogglePersonAdmin,
+        event: { name: "Alice" },
+        trustedUi: trustedLotWatchAdminGesture,
+      },
       { assertion: assert_s6_still_no_known_vehicles },
 
       // S7: Classification priority
@@ -845,7 +850,11 @@ export default pattern(() => {
       { assertion: assert_s8_assign_no_admin_noop },
       // Establish admin
       { action: action_s8_enable_manager },
-      { action: action_s8_toggle_alice },
+      {
+        action: s8.trustedTogglePersonAdmin,
+        event: { name: "Alice" },
+        trustedUi: trustedLotWatchAdminGesture,
+      },
       { action: action_s8_set_reporter_alice },
       // Positive: markVehicle mutates
       { action: action_s8_mark_x_offender },

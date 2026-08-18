@@ -12,6 +12,7 @@ import {
   type PerUser,
   type RequiresIntegrity,
   Stream,
+  type TrustedActionWrite,
   UI,
   type VNode,
   wish,
@@ -126,6 +127,8 @@ type PeopleCell = Writable<PersonWithVehicles[] | Default<[]>>;
 export const LOT_WATCH_ADMIN_INTEGRITY = "lot-watch-admin" as const;
 export const LOT_WATCH_ADMIN_MANAGER_INTEGRITY =
   "lot-watch-admin-manager" as const;
+export const TRUSTED_LOT_WATCH_ADMIN_SURFACE = "TrustedLotWatchAdminSurface";
+export const TRUSTED_LOT_WATCH_ADMIN_ACTION = "TrustedLotWatchAdminToggle";
 
 export interface LotWatchAdminSubject {
   personName: string;
@@ -150,6 +153,27 @@ export type LotWatchAdminList = RequiresIntegrity<
   readonly [typeof LOT_WATCH_ADMIN_MANAGER_INTEGRITY]
 >;
 
+export interface LotWatchAdminChange extends LotWatchAdminRoleAssignment {
+  admin: boolean;
+}
+
+type TrustedLotWatchAdminChange = AddIntegrity<
+  LotWatchAdminChange,
+  readonly [
+    typeof LOT_WATCH_ADMIN_INTEGRITY,
+    typeof LOT_WATCH_ADMIN_MANAGER_INTEGRITY,
+  ]
+>;
+type TrustedLotWatchAdminChangeList = RequiresIntegrity<
+  TrustedActionWrite<
+    TrustedLotWatchAdminChange[],
+    typeof commitTrustedLotWatchAdminToggle,
+    typeof TRUSTED_LOT_WATCH_ADMIN_ACTION,
+    typeof TRUSTED_LOT_WATCH_ADMIN_SURFACE
+  >,
+  readonly [typeof LOT_WATCH_ADMIN_MANAGER_INTEGRITY]
+>;
+
 export interface LotWatchAdminRegistryStoredValue {
   admins?: LotWatchAdminList;
 }
@@ -158,6 +182,12 @@ export type LotWatchAdminRegistryValue = Default<
   LotWatchAdminRegistryStoredValue
 >;
 export type LotWatchAdminRegistryCell = Writable<LotWatchAdminRegistryValue>;
+type TrustedLotWatchAdminChangeRegistryValue = Default<{
+  changes?: TrustedLotWatchAdminChangeList;
+}>;
+type TrustedLotWatchAdminChangeRegistryCell = Writable<
+  TrustedLotWatchAdminChangeRegistryValue
+>;
 export type LotWatchAdminManagerCredentialCell = Writable<
   LotWatchAdminManagerCredential | null
 >;
@@ -175,6 +205,7 @@ export interface LotWatchInput {
   knownVehicles?: PerSpace<KnownVehiclesCell>;
   // Phase 3c: admin gating (DESIGN §6)
   adminRegistry?: PerSpace<LotWatchAdminRegistryCell>;
+  adminChanges?: PerSpace<TrustedLotWatchAdminChangeRegistryCell>;
   adminManagerCredential?: PerUser<LotWatchAdminManagerCredentialCell>;
 }
 
@@ -212,6 +243,8 @@ export interface LotWatchOutput {
   saveGuest: Stream<void>;
   enableAdminManager: Stream<void>;
   togglePersonAdmin: Stream<{ name: string }>;
+  trustedTogglePersonAdmin: Stream<LotWatchAdminToggleEvent>;
+  adminChanges: PerSpace<TrustedLotWatchAdminChangeRegistryCell>;
   toggleAdminMode: Stream<void>;
 }
 
@@ -391,12 +424,35 @@ const lotWatchAdminRolesValue = (
   registry: LotWatchAdminRegistryCell,
 ): LotWatchAdminRole[] => adminRegistryEntries<LotWatchAdminRole>(registry);
 
+const latestLotWatchAdminChange = (
+  changeRegistry: TrustedLotWatchAdminChangeRegistryCell,
+  personName: string,
+): TrustedLotWatchAdminChange | null | undefined => {
+  const stored = changeRegistry.get() as
+    | { changes?: TrustedLotWatchAdminChangeList }
+    | undefined;
+  const changes = Array.from(stored?.changes ?? []);
+  for (let index = changes.length - 1; index >= 0; index -= 1) {
+    const change = changes[index];
+    if (change.subject.personName === personName) {
+      return change.admin ? change : null;
+    }
+  }
+  return undefined;
+};
+
 const personIsLotWatchAdmin = (
   registry: LotWatchAdminRegistryCell,
+  changeRegistry: TrustedLotWatchAdminChangeRegistryCell,
   personName: string | undefined,
 ): boolean => {
   const trimmed = (personName ?? "").trim();
   if (!trimmed) return false;
+  const latestChange = latestLotWatchAdminChange(
+    changeRegistry,
+    trimmed,
+  );
+  if (latestChange !== undefined) return latestChange !== null;
   return lotWatchAdminRolesValue(registry).some(
     (role) => role.subject.personName === trimmed,
   );
@@ -405,27 +461,89 @@ const personIsLotWatchAdmin = (
 const prepareLotWatchAdminToggle = (
   credential: LotWatchAdminManagerCredential | null | undefined,
   registry: LotWatchAdminRegistryCell,
+  changeRegistry: TrustedLotWatchAdminChangeRegistryCell,
   rawName: string,
-): LotWatchAdminRole[] | null => {
+): LotWatchAdminChange | null => {
   const personName = rawName.trim();
   if (!adminManagerCredentialIsActive(credential) || personName === "") {
     return null;
   }
-  const adminRoles = lotWatchAdminRolesValue(registry);
-  const nextRoles = adminRoles.filter(
-    (role) => role.subject.personName !== personName,
-  );
-  if (nextRoles.length !== adminRoles.length) {
-    return nextRoles;
-  }
-  return [
-    ...nextRoles,
-    {
-      subject: lotWatchAdminSubject(personName),
-      displayName: personName,
-    } as LotWatchAdminRole,
-  ];
+  return {
+    subject: lotWatchAdminSubject(personName),
+    displayName: personName,
+    admin: !personIsLotWatchAdmin(registry, changeRegistry, personName),
+  };
 };
+
+export interface LotWatchAdminToggleEvent {
+  name?: string;
+  target?: {
+    name?: string;
+    dataset?: { lotWatchAdminToggle?: string };
+  };
+}
+
+export const commitTrustedLotWatchAdminToggle = handler<
+  LotWatchAdminToggleEvent,
+  {
+    mode: "toggle" | "become" | "step-down";
+    adminManagerCredential: LotWatchAdminManagerCredentialCell;
+    adminRegistry: LotWatchAdminRegistryCell;
+    adminChanges: TrustedLotWatchAdminChangeRegistryCell;
+    adminMode: Writable<boolean>;
+    reporterName: Writable<string>;
+  }
+>((event, {
+  mode,
+  adminManagerCredential,
+  adminRegistry,
+  adminChanges,
+  adminMode,
+  reporterName,
+}) => {
+  const name = (
+    event?.name ?? event?.target?.dataset?.lotWatchAdminToggle ??
+      event?.target?.name ?? reporterName.get() ?? ""
+  ).trim();
+  if (!name) return;
+
+  if (mode === "become") {
+    adminManagerCredential.set({
+      canManageAdmins: true,
+    } as LotWatchAdminManagerCredential);
+    if (!personIsLotWatchAdmin(adminRegistry, adminChanges, name)) {
+      const changes = adminChanges.key("changes");
+      changes.set([
+        ...Array.from(changes.get() ?? []),
+        {
+          subject: lotWatchAdminSubject(name),
+          displayName: name,
+          admin: true,
+        } as TrustedLotWatchAdminChange,
+      ] as TrustedLotWatchAdminChangeList);
+    }
+    adminMode.set(true);
+    return;
+  }
+
+  if (mode === "step-down") {
+    adminMode.set(false);
+    if (!personIsLotWatchAdmin(adminRegistry, adminChanges, name)) return;
+  }
+
+  const nextAdmins = prepareLotWatchAdminToggle(
+    adminManagerCredential.get(),
+    adminRegistry,
+    adminChanges,
+    name,
+  );
+  if (nextAdmins === null) return;
+  const changes = adminChanges.key("changes");
+  changes.set([
+    ...Array.from(changes.get() ?? []),
+    nextAdmins,
+  ] as TrustedLotWatchAdminChangeList);
+});
 
 // ============================================================
 // Default seed data
@@ -449,6 +567,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     people: inputPeople,
     knownVehicles: inputKnownVehicles,
     adminRegistry: inputAdminRegistry,
+    adminChanges: inputAdminChanges,
   }) => {
     // ---- Cells (DESIGN §5) ----
 
@@ -474,6 +593,11 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     );
     const adminRegistry: LotWatchAdminRegistryCell = inputAdminRegistry ??
       defaultAdminRegistry;
+    const defaultAdminChanges = new Writable.perSpace<
+      TrustedLotWatchAdminChangeRegistryValue
+    >({} as TrustedLotWatchAdminChangeRegistryValue);
+    const adminChanges: TrustedLotWatchAdminChangeRegistryCell =
+      inputAdminChanges ?? defaultAdminChanges;
     const adminManagerCredential = new Writable.perUser<
       LotWatchAdminManagerCredential | null
     >(null);
@@ -612,15 +736,29 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       const nextAdmins = prepareLotWatchAdminToggle(
         adminManagerCredential.get(),
         adminRegistry,
+        adminChanges,
         name,
       );
       if (nextAdmins === null) return;
-      adminRegistry.set({ admins: nextAdmins as LotWatchAdminList });
+      const changes = adminChanges.key("changes");
+      changes.set([
+        ...Array.from(changes.get() ?? []),
+        nextAdmins,
+      ] as TrustedLotWatchAdminChangeList);
+    });
+    const trustedTogglePersonAdmin = commitTrustedLotWatchAdminToggle({
+      mode: "toggle",
+      adminManagerCredential,
+      adminRegistry,
+      adminChanges,
+      adminMode,
+      reporterName,
     });
 
     const toggleAdminMode = action(() => {
       const isAdmin = personIsLotWatchAdmin(
         adminRegistry,
+        adminChanges,
         reporterName.get() || "",
       );
       if (!isAdmin) {
@@ -637,43 +775,24 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // already), and turns admin view on. `personIsLotWatchAdmin` then
     // gates curation actions exactly as before — only the UX collapses,
     // not the underlying integrity model.
-    const becomeCurator = action(() => {
-      const name = (reporterName.get() || "").trim();
-      if (!name) return; // need a reporter identity to bind the role to
-      adminManagerCredential.set({
-        canManageAdmins: true,
-      } as LotWatchAdminManagerCredential);
-      // Toggle the role only if not already an admin (so an already-admin
-      // user clicking "Become curator" doesn't accidentally step down).
-      if (!personIsLotWatchAdmin(adminRegistry, name)) {
-        const nextAdmins = prepareLotWatchAdminToggle(
-          adminManagerCredential.get(),
-          adminRegistry,
-          name,
-        );
-        if (nextAdmins !== null) {
-          adminRegistry.set({ admins: nextAdmins as LotWatchAdminList });
-        }
-      }
-      adminMode.set(true);
+    const becomeCurator = commitTrustedLotWatchAdminToggle({
+      mode: "become",
+      adminManagerCredential,
+      adminRegistry,
+      adminChanges,
+      adminMode,
+      reporterName,
     });
 
     // Symmetric one-click step-down: drop view + drop the role for the
     // current reporter, so "Become curator" is again a single click later.
-    const stepDownCurator = action(() => {
-      adminMode.set(false);
-      const name = (reporterName.get() || "").trim();
-      if (!name) return;
-      if (personIsLotWatchAdmin(adminRegistry, name)) {
-        const nextAdmins = prepareLotWatchAdminToggle(
-          adminManagerCredential.get(),
-          adminRegistry,
-          name,
-        );
-        if (nextAdmins !== null) {
-          adminRegistry.set({ admins: nextAdmins as LotWatchAdminList });
-        }
-      }
+    const stepDownCurator = commitTrustedLotWatchAdminToggle({
+      mode: "step-down",
+      adminManagerCredential,
+      adminRegistry,
+      adminChanges,
+      adminMode,
+      reporterName,
     });
 
     // Quick-pick: set the assignPersonName cell to a known name. Used by
@@ -810,7 +929,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     const deleteSighting = action<{ id: string }>(({ id }) => {
       // Admin-gated: only active admins may delete sightings
-      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+      if (
+        !personIsLotWatchAdmin(
+          adminRegistry,
+          adminChanges,
+          reporterName.get() || "",
+        )
+      ) {
         return;
       }
       sightings.set((sightings.get() ?? []).filter((s) => s.id !== id));
@@ -819,7 +944,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     const initiateDelete = action<{ id: string }>(({ id }) => {
       // Admin-gated: only show confirm dialog to active admins
-      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+      if (
+        !personIsLotWatchAdmin(
+          adminRegistry,
+          adminChanges,
+          reporterName.get() || "",
+        )
+      ) {
         return;
       }
       deleteConfirmTarget.set(id);
@@ -846,7 +977,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // Writes a coordinator-shaped Vehicle into that person's vehicles array.
     // Admin-gated: only active admins may assign vehicles to people.
     const assignToPerson = action(() => {
-      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+      if (
+        !personIsLotWatchAdmin(
+          adminRegistry,
+          adminChanges,
+          reporterName.get() || "",
+        )
+      ) {
         return;
       }
       const targetId = assignTarget.get();
@@ -929,7 +1066,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // Reads guestTarget (sighting id) + guestName from cells; writes to registry.
     const saveGuest = action(() => {
       // Admin-gated: only active admins may curate guests
-      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+      if (
+        !personIsLotWatchAdmin(
+          adminRegistry,
+          adminChanges,
+          reporterName.get() || "",
+        )
+      ) {
         return;
       }
       const targetId = guestTarget.get();
@@ -991,7 +1134,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       label?: string;
       name?: string;
     }>(({ plateNumber, plateState, category, org, label, name }) => {
-      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+      if (
+        !personIsLotWatchAdmin(
+          adminRegistry,
+          adminChanges,
+          reporterName.get() || "",
+        )
+      ) {
         return;
       }
       const normPlate = normalizePlateId(plateNumber);
@@ -1034,7 +1183,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       plateNumber: string;
       plateState: string;
     }>(({ plateNumber, plateState }) => {
-      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+      if (
+        !personIsLotWatchAdmin(
+          adminRegistry,
+          adminChanges,
+          reporterName.get() || "",
+        )
+      ) {
         return;
       }
       const normPlate = normalizePlateId(plateNumber);
@@ -1088,7 +1243,11 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       // in a computed() nested inside the .map() below — it silently never
       // re-renders.
       const isAdminValue = adminMode.get() &&
-        personIsLotWatchAdmin(adminRegistry, reporterName.get() || "");
+        personIsLotWatchAdmin(
+          adminRegistry,
+          adminChanges,
+          reporterName.get() || "",
+        );
 
       // Per-row inline-open state. We read the perSession "which row's form is
       // open" cells HERE, at the top of this computed, and emit a plain boolean
@@ -1247,7 +1406,11 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // still keys on personIsLotWatchAdmin(reporterName) per action.
     const adminModeEnabled = computed(() =>
       adminMode.get() &&
-      personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")
+      personIsLotWatchAdmin(
+        adminRegistry,
+        adminChanges,
+        reporterName.get() || "",
+      )
     );
 
     // DESIGN §10: Report tab computeds — all over PerSpace sightings (guard ?? [])
@@ -1428,7 +1591,10 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     return {
       [NAME]: "Lot Watch",
       [UI]: (
-        <cf-screen>
+        <cf-screen
+          data-ui-pattern={TRUSTED_LOT_WATCH_ADMIN_SURFACE}
+          data-ui-event-integrity={TRUSTED_LOT_WATCH_ADMIN_SURFACE}
+        >
           {/* Header with tab navigation */}
           <div
             slot="header"
@@ -1445,19 +1611,21 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                 {adminModeEnabled
                   ? (
                     <cf-button
+                      data-ui-action={TRUSTED_LOT_WATCH_ADMIN_ACTION}
                       variant="primary"
                       size="sm"
-                      onClick={() => stepDownCurator.send()}
+                      onClick={stepDownCurator}
                     >
                       🔒 Step down
                     </cf-button>
                   )
                   : (
                     <cf-button
+                      data-ui-action={TRUSTED_LOT_WATCH_ADMIN_ACTION}
                       variant="secondary"
                       size="sm"
                       disabled={noReporterName}
-                      onClick={() => becomeCurator.send()}
+                      onClick={becomeCurator}
                     >
                       🔓 Curator mode
                     </cf-button>
@@ -2483,6 +2651,10 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       saveGuest,
       enableAdminManager,
       togglePersonAdmin,
+      trustedTogglePersonAdmin,
+      adminChanges: adminChanges as PerSpace<
+        TrustedLotWatchAdminChangeRegistryCell
+      >,
       toggleAdminMode,
     };
   },
