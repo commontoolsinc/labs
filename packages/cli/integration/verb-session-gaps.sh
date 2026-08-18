@@ -302,44 +302,43 @@ check "1" "$(echo "$N" | jq -r '.result.noteCount // empty')" \
 AT=$(echo "$N" | jq -r '.result.note.at // 0')
 [ "$AT" -gt 0 ] && ok "and a timestamp the caller never supplied ($AT)" ||
   bad "no pattern-stamped time on the note"
-# The receipt is an address like any other, and reading it is an ordinary read.
-# `noteCount` is the discriminator, NOT the stamp: `notes` is append-only, so a
-# readback that re-ran the handler would leave two notes behind and answer 2.
-# The stamp cannot carry that weight — the sandbox clock is coarsened to one
-# second (see `Note.at` in pattern/tracker.tsx), and a re-execution during a
-# readback lands in the same second as the call it followed, so the two stamps
-# would agree in precisely the case this is meant to catch. Equal stamps show
-# the readback returned the ORIGINAL outcome rather than a freshly computed
-# one, which is worth asserting, but it is corroboration and not the proof.
+# Both recovery routes are asserted against the LIVE piece, not against what
+# the envelope reports. A receipt is a frozen snapshot of the outcome its
+# handling committed, and a replay is defined to hand that same snapshot back —
+# so an envelope shows the original count and body whether or not a second
+# append actually landed. Only reading the item's own `notes` afterwards can
+# tell those apart, which makes the live length the discriminator for both.
+notes_len() { $CF get --quiet --piece "$EPIC" $ARGS notes 2>/dev/null | jq 'length'; }
+LIVE0=$(notes_len)
 RCPT=$(echo "$N" | jq -r '.receipt // empty')
 if [ -z "$RCPT" ]; then
   bad "the settled envelope named no receipt to read back"
 else
   RB=$($CF get --quiet --piece "$RCPT" $ARGS --select note,noteCount 2>/dev/null)
+  check "blocked on the cookie spec" "$(echo "$RB" | jq -r '.note.body // empty')" \
+    "the receipt address holds the outcome that handling committed"
   check "1" "$(echo "$RB" | jq -r '.noteCount // empty')" \
-    "the receipt reads the outcome back, and appended nothing — the handler did not run again"
-  check "$AT" "$(echo "$RB" | jq -r '.note.at // 0')" \
-    "and the outcome it returns is the original one, stamp and all"
+    "and reading it hands that outcome back without calling anything again"
+  check "$LIVE0" "$(notes_len)" \
+    "and the piece is untouched by the read — no note was appended"
 fi
-# The other recovery route: no address kept, so the id is the handle. The
-# replay carries a DIFFERENT payload on purpose — if it took, the body would
-# come back as the second text and the count would climb, so the assertions
-# below distinguish a genuine replay from a second append rather than trusting
-# that the two calls looked alike.
+
+# The other route: no address kept, so the id is the handle. The replay carries
+# a DIFFERENT payload on purpose, so a returned body of the FIRST text is
+# evidence the second call's event never became an outcome.
 R1=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
   recordNote '{"body":"first attempt"}' 2>/dev/null)
-R1_AT=$(echo "$R1" | jq -r '.result.note.at // 0')
-R1_COUNT=$(echo "$R1" | jq -r '.result.noteCount // empty')
+LIVE1=$(notes_len)
 R2=$($CF call --quiet --piece "$EPIC" $ARGS --invocation note-retry \
   recordNote '{"body":"a different body entirely"}' 2>/dev/null)
 check "first attempt" "$(echo "$R2" | jq -r '.result.note.body // empty')" \
   "replaying a settled id hands back the original result, not the new payload"
-check "$R1_COUNT" "$(echo "$R2" | jq -r '.result.noteCount // empty')" \
-  "and appends nothing — the count is the one the first call reported"
-check "$R1_AT" "$(echo "$R2" | jq -r '.result.note.at // 0')" \
-  "and the stamp is the first call's"
+check "$(echo "$R1" | jq -r '.receipt // empty')" "$(echo "$R2" | jq -r '.receipt // empty')" \
+  "and names the same receipt the first call did"
 check "true" "$(echo "$R2" | jq -r '.deduplicated // false')" \
-  "and the envelope says so itself, rather than leaving a caller to infer it"
+  "and says so itself, rather than leaving a caller to infer it"
+check "$LIVE1" "$(notes_len)" \
+  "and the piece is unchanged — the replay committed no second note"
 
 step "8. Finishing reports what the caller could not know"
 # Exit code checked for the same reason as step 4's creates.

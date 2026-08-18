@@ -16,9 +16,10 @@ gated by CI against the scripts it describes, while that page is a snapshot
 kept by hand.
 
 The subject is a work-item tracker — items in a tree, plus typed cross-links.
-It is a real pattern: [`packages/cli/integration/pattern/tracker.tsx`][tracker], which
-belongs to this document and the two scripts beside it, so a change to a
-pattern the product ships can never break a demonstration of the verb surface.
+It is a real pattern: [`packages/cli/integration/pattern/tracker.tsx`][tracker],
+which belongs to this document and its two companion scripts and to nothing
+else, so a change to a pattern the product ships can never break a
+demonstration of the verb surface.
 Every measurement below was taken against that pattern on a local toolshed.
 
 **Every step here works against a current build.** That is not a claim this
@@ -29,7 +30,7 @@ something decided or built would say so; none does today.
 
 ## The two scripts, and how they line up with this
 
-Two scripts sit beside this document.
+Two companion scripts under `packages/cli/integration/` carry this session.
 [`packages/cli/integration/verb-session-demo.sh`][demo] is the session as it is meant
 to read: it narrates each command, runs it, and prints the result, so the
 transcript is the artifact. [`verb-session-gaps.sh`][gaps] asserts the same surface as
@@ -652,18 +653,15 @@ cf get "$RECEIPT" --select note,noteCount
 }
 ```
 
-**`noteCount` is the proof, not the timestamp.** `notes` is append-only, so a
-readback that had re-run the handler would leave a second note behind and
-answer `2`. It answers `1`, which is what says the body did not run again.
-
-The stamp cannot carry that proof, and it is worth saying why, because it
-looks like it should: the sandbox clock is coarsened to one-second resolution
-(`Note.at` in [the fixture][tracker]), and a re-execution during a readback
-lands in the same second as the call it followed — so the two stamps would
-agree in exactly the case the check exists to catch. That they agree says
-something else, still worth having: the receipt returned the **original**
-outcome rather than a freshly computed one. The harness asserts both, with
-`noteCount` carrying the weight.
+**What that does not prove, and where the proof lives.** A receipt is a
+frozen snapshot of the outcome its handling committed, so it reports that
+outcome whether or not anything has happened since. Reading it back therefore
+cannot, on its own, tell you that the handler did not run again — the numbers
+inside it would look the same either way. Only the piece can settle that:
+`notes` is append-only, so a second execution leaves a second entry, and
+reading the item's own `notes` is what shows there is none. The harness
+asserts the live length after every one of these operations for exactly that
+reason.
 
 That is the whole asymmetry: reads repeat freely, calls do not repeat but
 their outcomes stay readable.
@@ -692,13 +690,32 @@ cf call --invocation note-retry "$EPIC" recordNote -- --body "a different body e
 }
 ```
 
-The second payload is deliberately different text, and it does not take: the
-body, the stamp, the count and the receipt are all the first call's, and the
-envelope says `deduplicated` rather than leaving a caller to infer it. An id
-is only half the handle — it is scoped to an **invocation session**, so one
-agent's `note-retry` is not another's. Mint one per run and keep it in
-`CF_INVOCATION_SESSION`, where the environment is closer to the secret it is
-than a command line would be.
+The second payload is deliberately different text, and the body that comes
+back is the first call's — along with the same receipt, and `deduplicated`,
+which the first call did not carry. The same caution applies as above: a
+replay is *defined* to hand the original snapshot back, so the envelope would
+read like this whether or not a second note actually landed. The board is
+what settles it:
+
+```bash
+cf get "$EPIC" notes --select body
+```
+
+```text
+[
+  { "body": "blocked on the cookie spec" },
+  { "body": "first attempt" }
+]
+```
+
+Two entries, from the two calls that committed, and the replay's text is not
+among them.
+
+An id is only half the handle — it is scoped to an **invocation session**, so
+one agent's `note-retry` is not another's. Mint one per run and keep it in
+`CF_INVOCATION_SESSION`: putting it in the environment keeps it out of the
+command lines and shell history that a casual reader of your terminal would
+see.
 
 **A retry is still not free.** The guarantee is at-most-once **commit**, not
 at-most-once **execution**: the redelivered event re-runs the handler body and

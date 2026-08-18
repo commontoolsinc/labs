@@ -52,9 +52,10 @@ if [ -z "${CF_IDENTITY:-}" ]; then
 fi
 export CF_IDENTITY
 # An invocation session scopes the ids act 7 replays under. It belongs in the
-# environment rather than on a command line: it is closer to a secret than a
-# setting — it is what keeps an outcome's address out of a stranger's reach,
-# and arguments are readable in a process listing where the environment is not.
+# environment rather than on a command line: it is what keeps an outcome's
+# address out of a stranger's reach, and keeping it out of argv keeps it out of
+# shell history and the default process listing. That is a reduction in casual
+# exposure, not secret storage — `ps -E` prints the environment too.
 if [ -z "${CF_INVOCATION_SESSION:-}" ]; then
   CF_INVOCATION_SESSION=$(cf invocation-session new 2>/dev/null)
 fi
@@ -306,12 +307,11 @@ say "Act 6 asked a read twice. A call cannot be asked twice — it would run the
 say "handler again — but it does not need to be: the outcome is durable at an"
 say "address, and every envelope above has carried it as 'receipt'."
 run cf get -s "$SPACE" "$RECEIPT" --select note,noteCount
-say "The same outcome, and noteCount is what proves it: notes are append-only,"
-say "so a readback that re-ran the handler would leave two behind and answer 2."
-say "The stamp cannot carry that proof — the sandbox clock is coarsened to one"
-say "second, so a re-execution here would land in the same second and agree."
-say "That it agrees says the receipt returned the ORIGINAL outcome, which is"
-say "the other thing worth knowing."
+say "The same outcome, without calling anything again. Note what this does"
+say "NOT prove on its own: a receipt is a frozen snapshot of what its handling"
+say "committed, so it reports that outcome whether or not anything else has"
+say "happened since. The board is the only place that can settle it, and this"
+say "act reads it at the end."
 say ""
 say "That route needs the address. The other one is for when you never got it"
 say "— a dropped connection, a response nobody saw. Name the call with an"
@@ -320,12 +320,19 @@ run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote -- --body "fi
 say "Replaying that id hands back the original. The payload below is"
 say "deliberately different text, and it does not take:"
 run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote -- --body "a different body entirely"
-say "Same body, same stamp, same count, and the same receipt — the second"
-say "call wrote nothing. The envelope says so itself: deduplicated: true, a"
-say "field the first call did not carry. An id"
+say "Same body, same receipt — and deduplicated: true, a field the first call"
+say "did not carry. The same caution applies: a replay is DEFINED to hand the"
+say "original snapshot back, so the envelope would look like this whether or"
+say "not a second note actually landed. An id"
 say "is only half the handle: it is scoped to an invocation session, so one"
 say "agent's note-retry is not another's, which is why the session is exported"
 say "above rather than typed here."
+say "So read the board, which is where a second note would show up. Two"
+say "entries, from the two calls that committed — and the replay's text is"
+say "not among them:"
+run cf get -s "$SPACE" "$EPIC" notes --select body
+say "That is the proof, and it is the only one that holds: the envelopes"
+say "above could not have told you."
 say "The caveat that keeps this honest: the replay DOES run the handler body"
 say "again, and then loses the race for the receipt. Nothing commits twice,"
 say "but a verb that sends mail or spends a model call has already done it."
