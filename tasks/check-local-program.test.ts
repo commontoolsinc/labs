@@ -1,5 +1,55 @@
 import { assert, assertEquals, assertFalse } from "@std/assert";
-import { ALLOWLIST, namesResolverInCode } from "./check-local-program.ts";
+import { join } from "@std/path";
+import {
+  ALLOWLIST,
+  main,
+  namesResolverInCode,
+  scan,
+} from "./check-local-program.ts";
+
+// Builds a git repository holding the named files and returns its root. The
+// scan reads what git tracks, so a fixture has to be a repository with the
+// files added to its index. The caller removes the tree.
+async function fixtureRepo(
+  files: Record<string, string>,
+): Promise<string> {
+  const root = await Deno.makeTempDir({ prefix: "check-local-program-" });
+  for (const [path, contents] of Object.entries(files)) {
+    const full = join(root, path);
+    await Deno.mkdir(join(full, ".."), { recursive: true });
+    await Deno.writeTextFile(full, contents);
+  }
+  const git = async (...args: string[]) => {
+    const { success, stderr } = await new Deno.Command("git", {
+      args,
+      cwd: root,
+    }).output();
+    if (!success) throw new Error(new TextDecoder().decode(stderr));
+  };
+  await git("init", "--quiet");
+  await git("add", "--all");
+  return root;
+}
+
+// Runs `body` with console.log and console.error captured, returning what each
+// received. Restores the originals afterward.
+async function captureConsole(
+  body: () => Promise<void>,
+): Promise<{ out: string; err: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const origLog = console.log;
+  const origError = console.error;
+  console.log = (...args) => out.push(args.map(String).join(" "));
+  console.error = (...args) => err.push(args.map(String).join(" "));
+  try {
+    await body();
+  } finally {
+    console.log = origLog;
+    console.error = origError;
+  }
+  return { out: out.join("\n"), err: err.join("\n") };
+}
 
 Deno.test("namesResolverInCode finds a direct construction", () => {
   assert(
@@ -114,5 +164,78 @@ Deno.test("the allowlist records a reason for every exemption", () => {
   for (const [path, reason] of ALLOWLIST) {
     assertEquals(typeof reason, "string");
     assert(reason.length > 0, `${path} is exempt without a reason.`);
+  }
+});
+
+Deno.test("scan names a file that constructs the resolver", async () => {
+  const root = await fixtureRepo({
+    "packages/foo/build.ts":
+      "export const r = new FileSystemProgramResolver(main);\n",
+  });
+  try {
+    assertEquals(await scan(root), ["packages/foo/build.ts"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("scan passes over a file that only writes about the resolver", async () => {
+  const root = await fixtureRepo({
+    "packages/foo/notes.ts":
+      "// Never construct a FileSystemProgramResolver here.\nexport const x = 1;\n",
+    "docs/guide.md": "Do not use `FileSystemProgramResolver`.\n",
+  });
+  try {
+    assertEquals(await scan(root), []);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("scan tolerates a tracked file deleted from the working tree", async () => {
+  const root = await fixtureRepo({
+    "packages/foo/gone.ts":
+      "export const r = new FileSystemProgramResolver(main);\n",
+  });
+  try {
+    await Deno.remove(join(root, "packages/foo/gone.ts"));
+    assertEquals(await scan(root), []);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("main reports success and returns 0 on a clean tree", async () => {
+  const root = await fixtureRepo({
+    "packages/foo/build.ts": "export const x = 1;\n",
+  });
+  try {
+    let code = -1;
+    const { out } = await captureConsole(async () => {
+      code = await main(root);
+    });
+    assertEquals(code, 0);
+    assert(out.includes("Local programs are built through one operation"));
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("main reports the offender and the route to take instead", async () => {
+  const root = await fixtureRepo({
+    "packages/foo/build.ts":
+      "export const r = new FileSystemProgramResolver(main);\n",
+  });
+  try {
+    let code = -1;
+    const { err } = await captureConsole(async () => {
+      code = await main(root);
+    });
+    assertEquals(code, 1);
+    assert(err.includes("packages/foo/build.ts"));
+    assert(err.includes("resolveLocalProgram"));
+    assert(err.includes("tasks/check-local-program.ts"));
+  } finally {
+    await Deno.remove(root, { recursive: true });
   }
 });
