@@ -25,7 +25,7 @@ import {
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "@/fabric-bases/BaseFabricInstance.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";

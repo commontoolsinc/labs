@@ -64,8 +64,8 @@ wrapper classes (Section 1.4).
 > `packages/data-model/`. The fabric-value types and the base classes
 > (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`) are declared in
 > `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
-> `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
-> carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
+> `IS_DEEP_FROZEN`) in `fabric-bases/`, on `BaseFabricInstance` alongside the
+> abstract base that carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
 > `FabricCodec`, `LiveEnvironment`) lives in `codec-interface/` (Section 2),
 > and the machinery that acts on it in `codec-common/` -- including
 > `EncodeContext` and `DecodeContext`, which are classes the walk carries
@@ -78,8 +78,9 @@ wrapper classes (Section 1.4).
 > their contents are reached through `@commonfabric/data-model/fabric-value`,
 > which re-exports them. `codec-interface/` is internal in the same way: it
 > is reached through `@commonfabric/data-model/codec-common`, which
-> re-exports it. `codec-common/` and `fabric-instances/` are exported subpaths
-> in their own right and are imported directly under those names;
+> re-exports it. `codec-common/`, `fabric-bases/` and `fabric-instances/` are
+> exported subpaths in their own right and are imported directly under those
+> names;
 > `fabric-value` does *not* re-export the codec vocabulary, so
 > `LiveEnvironment` and its siblings come from
 > `@commonfabric/data-model/codec-common`. Cite a module to say where
@@ -1479,7 +1480,7 @@ export const JSON_CODEC: unique symbol =
 ```
 
 ```typescript
-// file: packages/data-model/codec-common/BaseFabricInstance.ts
+// file: packages/data-model/fabric-bases/BaseFabricInstance.ts
 
 /**
  * Well-known symbol for deeply freezing a fabric instance in place. The
@@ -1624,7 +1625,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/codec-common/BaseFabricInstance.ts
+// file: packages/data-model/fabric-bases/BaseFabricInstance.ts
 
 /**
  * Abstract base class providing shared scaffolding for `FabricInstance`
@@ -3010,8 +3011,9 @@ The implementation is split across several files for separation of concerns:
 |------|---------|
 | `fabric-value.ts` | Public surface: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), and the clone helpers (from `value-clone.ts`); defines `valueEqual()` |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isFabricCompatible` |
-| `fabric-instances/` | `FabricInstance` subclasses, each in its own file: `BaseFabricInstance.ts`, `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricMap.ts`, `FabricSet.ts`, `UnknownValue.ts`, `ProblematicValue.ts` (plus an `index.ts` barrel). |
-| `fabric-primitives/` | `FabricPrimitive` subclasses, each in its own file: `BaseFabricPrimitive.ts`, `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDays.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
+| `fabric-bases/` | The abstract bases a concrete fabric value extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
+| `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |
+| `fabric-primitives/` | Concrete `FabricPrimitive` subclasses, each in its own file: `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDays.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
 
 ---
 
