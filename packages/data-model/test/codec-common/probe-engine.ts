@@ -316,7 +316,7 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
 
   /** @inheritDoc */
   protected override newEncodeAct(env: LiveEnvironment): EncodeAct {
-    return new EncodeAct(env);
+    return new EncodeAct(this, env);
   }
 
   /**
@@ -330,7 +330,7 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
     env: LiveEnvironment,
     _data: ProbeValue,
   ): DecodeAct {
-    return new DecodeAct(env);
+    return new DecodeAct(this, env);
   }
 
   protected override wrapTag(
@@ -380,7 +380,7 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
     // Every object node goes through the guard, the tagged form included: this
     // format's transport is the tree itself, so a `Tagged` can hold a
     // reference back to a node above it with no container in between.
-    const cycle = this.enterOrReport(act, data);
+    const cycle = act.enterOrReport(data);
     if (cycle !== null) {
       return cycle;
     }

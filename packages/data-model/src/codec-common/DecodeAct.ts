@@ -1,39 +1,25 @@
-import type { LiveEnvironment } from "@/codec-interface/interface.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
+import type { FabricValue } from "@/interface.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
+import { BaseCodecAct } from "./BaseCodecAct.ts";
+import { ProblematicStateError } from "./ProblematicStateError.ts";
+import { ProblematicValue } from "./ProblematicValue.ts";
 
 /**
- * The state of one act of decoding: the live environment the caller supplied,
- * and whatever the walk carries from node to node.
+ * The state of one act of decoding: what {@link BaseCodecAct} holds, plus how
+ * this act reports wire data it finds malformed.
  *
  * An engine mints one of these per `decode()` call, through a factory its
- * subclass supplies. The environment is held here rather than threaded
- * separately because every walk method needs both, and a format needing more
- * -- a wire marker read off the incoming envelope, say -- subclasses this and
- * holds that alongside.
+ * subclass supplies. A format needing more -- a wire marker read off the
+ * incoming envelope, say -- subclasses this and holds that alongside.
  *
- * Per call rather than per engine, for the reason `EncodeAct` gives, and
- * additionally because the environment is a per-call argument to begin with.
+ * The reporting members live here rather than on the engine because what they
+ * settle is a property of the act: they run while a walk is in progress, and
+ * every one of them is reached with the act already in hand.
  */
-export class DecodeAct {
-  readonly #env: LiveEnvironment;
-
+export class DecodeAct extends BaseCodecAct {
   /**
-   * The nodes whose decoding is in progress, or `undefined` before the first
-   * node is entered.
-   */
-  #seen: Set<object> | undefined;
-
-  /** Constructs an instance. */
-  constructor(env: LiveEnvironment) {
-    this.#env = env;
-  }
-
-  /** The live environment this decode was given. */
-  get env(): LiveEnvironment {
-    return this.#env;
-  }
-
-  /**
-   * Enters a node, refusing a repeat visit.
+   * Enters a node, and returns whether it was entered.
    *
    * Whether a format guards cycles at all is decided by whether its walk
    * calls this: a format whose input it parses for itself is handed a tree by
@@ -41,24 +27,127 @@ export class DecodeAct {
    * handed a tree it did not build enters every node it descends through.
    *
    * @returns `true` if the node was entered, `false` if it was already in
-   *   progress -- which is a cycle, and the caller's to report. Reported
-   *   rather than raised, unlike the encode side's refusal: a cycle here
-   *   arrived from a channel, and every malformation off a channel settles
-   *   against the engine's leniency.
+   *   progress -- which is a cycle, and the caller's to report.
    */
   enter(value: object): boolean {
-    const seen = this.#seen ??= new Set();
-
-    if (seen.has(value)) {
-      return false;
-    }
-
-    seen.add(value);
-    return true;
+    return this.tryEnter(value);
   }
 
-  /** Leaves a node, its decoding being finished. */
-  leave(value: object): void {
-    this.#seen?.delete(value);
+  /**
+   * Enters a container, reporting rather than entering if it is already in
+   * progress.
+   *
+   * Reported rather than raised, unlike the encode side's refusal: a cycle
+   * here arrived from a channel, and every malformation off a channel settles
+   * against leniency. Raising unconditionally would also be the one refusal a
+   * lenient decode could not contain.
+   *
+   * The report carries a rendering of the container rather than the container
+   * itself, a cyclic graph being the one thing a `ProblematicValue` cannot
+   * hold onto.
+   *
+   * @param value The container about to be walked.
+   * @returns The report, or `null` if `value` was entered.
+   * @throws If this act is not lenient.
+   */
+  enterOrReport(value: object): FabricValue | null {
+    if (!this.enter(value)) {
+      return this.reportMalformed(
+        "",
+        toCompactDebugString(value, 50),
+        "circular reference in decoded data",
+      );
+    }
+
+    return null;
+  }
+
+  /**
+   * Settles a thrown value against leniency: strictly it re-raises, and
+   * leniently a `ProblematicStateError` becomes a `ProblematicValue`.
+   *
+   * Only that one error type is settled. Anything else is somebody's bug
+   * rather than a report about wire data, and is re-raised untouched -- so a
+   * fault in the code doing the decoding does not come back to a caller
+   * disguised as malformed input.
+   *
+   * The commonest thing to hand this is a refusal of the serialized form
+   * itself, from a format's own entry points, which reach a conversion without
+   * passing through `decode()` -- `JsonCodecEngine`'s byte pair, for one. Such
+   * a form is data off a channel like any other, so being the wrong shape for
+   * this format is a malformation of the same kind as a bad state inside a
+   * well-formed one, and settles the same way. Nothing here is specific to
+   * that case.
+   *
+   * @throws Whatever it was given, if this act is not lenient or the throw was
+   *   not a `ProblematicStateError`.
+   */
+  settleThrown(e: unknown): FabricValue {
+    if (this.config.lenient && (e instanceof ProblematicStateError)) {
+      // The error renders itself rather than being taken apart and rebuilt:
+      // it already holds the three facts, normalized the way this class would
+      // normalize them, and hands back a deep-frozen value.
+      return e.asProblematicValue();
+    }
+
+    // Rethrown rather than rebuilt, strictly: the refusal already names its
+    // tag and state, and re-raising it keeps whatever `cause` it carries.
+    throw e;
+  }
+
+  /**
+   * Reports wire data the engine itself found malformed, settled against
+   * leniency: strictly it raises, and leniently it becomes a
+   * `ProblematicValue` in the result.
+   *
+   * A codec rejecting a state it was handed goes through the same setting.
+   * Which of the two noticed is an implementation detail of where a check
+   * happens to live, so it does not decide what a caller sees; leniency does.
+   *
+   * @param wireTypeTag The tag the malformed data arrived under, or the
+   *   meta-tag naming the structure at fault. Of any type whatsoever: what
+   *   sits in tag position is wire data like any other, and a tag that is not
+   *   a tag is among the faults reported here. `ProblematicValue` renders what
+   *   it cannot keep.
+   * @param state The data at fault, of any type whatsoever, preserved so that
+   *   a lenient result round-trips. A format whose states are not
+   *   `FabricValue`s hands one over as it stands; `ProblematicValue` renders
+   *   what it cannot keep.
+   * @param error What is wrong with it, phrased to stand on its own -- it is
+   *   the whole of the message when this raises.
+   * @throws If this act is not lenient.
+   */
+  reportMalformed(
+    wireTypeTag: any,
+    state: any,
+    error: string,
+  ): FabricValue {
+    if (!this.config.lenient) {
+      throw new ProblematicStateError(wireTypeTag, state, error);
+    }
+
+    return deepFreeze(new ProblematicValue(wireTypeTag, state, error));
+  }
+
+  /**
+   * Reports a key this runtime reserves, found in wire data, settled against
+   * leniency like any other malformation.
+   *
+   * The names are `__proto__` and `constructor`, and what makes them a
+   * boundary concern is that the walks rebuild an object by assignment: the
+   * first routes through an inherited setter on a host that has one, and both
+   * are refused rather than silently reshaped.
+   *
+   * @param key The reserved key.
+   * @param state The object it was found in, preserved so a lenient result
+   *   round-trips.
+   * @throws If this act is not lenient.
+   */
+  reportReservedKey(key: string, state: any): FabricValue {
+    return this.reportMalformed(
+      key,
+      state,
+      `object contains a key this runtime reserves: "${key}"`,
+    );
   }
 }

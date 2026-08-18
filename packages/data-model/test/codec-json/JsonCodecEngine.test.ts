@@ -437,8 +437,20 @@ describe("JsonCodecEngine", () => {
         .decode("fvj1:{not json", new TestLiveEnvironment());
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
-      expect((decoded as ProblematicValue).error)
+
+      const problem = decoded as ProblematicValue;
+
+      // All three facts, not just the message: the tag and state are what
+      // carry the refusal's account of what arrived, and a settlement that
+      // dropped them would still match on the message alone.
+      expect(problem.error)
         .toMatch(/Malformed JSON in an encoded `FabricValue` string/);
+      expect(problem.wireTypeTag).toBe("");
+      expect(problem.state).toBe("{not json");
+
+      // Deep-frozen like any other decoded result, so a caller cannot alter
+      // the account it was handed.
+      expect(Object.isFrozen(problem)).toBe(true);
     });
   });
 
@@ -457,7 +469,7 @@ describe("JsonCodecEngine", () => {
     it("returns a `ProblematicValue` for unparseable bytes when lenient", () => {
       // This entry point reaches a conversion without passing through
       // `decode()`, so it settles the refusal itself. Were it not to, the
-      // byte boundary would answer a malformed payload differently from the
+      // byte boundary would treat a malformed payload differently from the
       // string boundary for no reason a caller could name.
       const bytes = new TextEncoder().encode("{not json");
       const decoded = newDefaultJsonCodecEngine({ lenient: true })
@@ -1732,14 +1744,50 @@ describe("JsonCodecEngine", () => {
       >;
       expect(Object.isFrozen(result)).toBe(true);
     });
+
+    // Every arm of the dispatch, so that the guarantee does not depend on
+    // which one produced the value. `isDeepFrozen()` rather than
+    // `Object.isFrozen()`: an arm that froze only the value it built, and not
+    // what it wrapped, would pass the shallow check.
+
+    it("an `UnknownValue` from an unrecognized tag is deep-frozen", () => {
+      const result = fromEncodedFormat(
+        { "/Nope@1": { a: 1 } } as JsonCodecValue,
+      );
+
+      expect(result).toBeInstanceOf(UnknownValue);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
+    it("an `UnknownValue` is deep-frozen through its state", () => {
+      const result = fromEncodedFormat(
+        { "/Nope@1": { inner: { deep: [1, 2] } } } as JsonCodecValue,
+      ) as UnknownValue;
+      const state = result.state as { inner: { deep: unknown[] } };
+
+      expect(isDeepFrozen(result)).toBe(true);
+      expect(Object.isFrozen(state.inner)).toBe(true);
+      expect(Object.isFrozen(state.inner.deep)).toBe(true);
+    });
+
+    it("a `ProblematicValue` from a malformed tag is deep-frozen", () => {
+      // `malformed`, because the wrap helper validates with a strict decode
+      // and would otherwise reject the very payload this case is made of.
+      const result = fromEncodedFormat(
+        { "/": { a: 1 } } as JsonCodecValue,
+        true,
+      );
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
   });
 
   describe("`FabricCodec.decode()` deep-frozen contract", () => {
-    // The contract is scoped to the codec dispatch arm: anything returned via
-    // a registered `FabricCodec` is guaranteed deep-frozen at the `decode()`
-    // boundary, so callers do not each have to freeze. The unknown-tag
-    // fallback (`UnknownValue`) is a separate arm and is intentionally NOT
-    // covered by this contract.
+    // Anything returned via a registered `FabricCodec` is guaranteed
+    // deep-frozen at the `decode()` boundary, so callers do not each have to
+    // freeze. That holds of every other arm too, the unknown-tag fallback
+    // included; the cases just above cover those.
 
     it("codec-produced value is deep-frozen at the boundary", () => {
       // `/EpochNsec@1` dispatches through a registered codec; the
