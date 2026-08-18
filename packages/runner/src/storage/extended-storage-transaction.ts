@@ -1491,9 +1491,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * never prepare; the dedupe set makes the second pass a no-op.
    *
    * A hash the registry cannot supply is skipped: only a hand-crafted
-   * value carries a reference its writer never registered, and the read
-   * path fails closed on it (the server-enforcement open question covers
-   * rejecting such writes outright).
+   * value carries a reference its writer never registered. The commit
+   * boundary rejects such a commit outright unless the space already
+   * stores the document, and read-side assembly fails closed on whatever
+   * predates that validation.
    */
   #materializeReferencedSchemaDocuments(): void {
     if (!getContentAddressedSchemasConfig()) return;
