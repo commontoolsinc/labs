@@ -1,10 +1,19 @@
-import { computed, NAME, pattern, UI, Writable } from "commonfabric";
+import {
+  computed,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commonfabric";
 import Counter from "../counter/counter.tsx";
 import Note from "../notes/note.tsx";
 
 type Input = Record<string, never>;
 
 export type Result = {
+  [NAME]: string;
+  [UI]: VNode;
   counterAValue: number;
   counterBValue: number;
   counterCValue: number;
@@ -20,7 +29,7 @@ export default pattern<Input, Result>(
     const counterC = Counter({ value: 30 });
 
     const selectedIndex = new Writable(0);
-    const items = [counterA, counterB, counterC];
+    const items = computed(() => [counterA, counterB, counterC]);
     const selection = computed(() => items[selectedIndex.get()]);
 
     return {
@@ -52,8 +61,7 @@ export default pattern<Input, Result>(
           </cf-card>
 
           <cf-card>
-            {/* The cast is because OpaqueCell does not satisfy CellLike, but... it is */}
-            <cf-picker $items={items as any} $selectedIndex={selectedIndex} />
+            <cf-picker $items={items} $selectedIndex={selectedIndex} />
           </cf-card>
         </cf-vstack>
       ),
