@@ -275,8 +275,19 @@ describe("schema-doc-writer", () => {
     });
     expect(synced.error).toBeUndefined();
     const stored = (provider as unknown as {
-      get: (uri: URI) => unknown;
+      get: (uri: URI) => { value?: { vintage?: unknown } } | undefined;
     }).get("of:vintage-root" as URI);
     expect(stored).toBeDefined();
+    // The stored link is still the inline vintage: the schema rides in
+    // place, exactly as written — no reference was stamped on it, and no
+    // sync-frame rewrite replaced it.
+    const storedSchema = payloadSchema(stored!.value?.vintage) as
+      | JSONSchemaObj
+      | undefined;
+    expect(storedSchema).toEqual({
+      type: "object",
+      properties: { vintageMarker: { type: "string" } },
+    });
+    expect(storedSchema?.$ref).toBeUndefined();
   });
 });
