@@ -437,8 +437,20 @@ describe("JsonCodecEngine", () => {
         .decode("fvj1:{not json", new TestLiveEnvironment());
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
-      expect((decoded as ProblematicValue).error)
+
+      const problem = decoded as ProblematicValue;
+
+      // All three facts, not just the message: the tag and state are what
+      // carry the refusal's account of what arrived, and a settlement that
+      // dropped them would still match on the message alone.
+      expect(problem.error)
         .toMatch(/Malformed JSON in an encoded `FabricValue` string/);
+      expect(problem.wireTypeTag).toBe("");
+      expect(problem.state).toBe("{not json");
+
+      // Deep-frozen like any other decoded result, so a caller cannot alter
+      // the account it was handed.
+      expect(Object.isFrozen(problem)).toBe(true);
     });
   });
 
@@ -457,7 +469,7 @@ describe("JsonCodecEngine", () => {
     it("returns a `ProblematicValue` for unparseable bytes when lenient", () => {
       // This entry point reaches a conversion without passing through
       // `decode()`, so it settles the refusal itself. Were it not to, the
-      // byte boundary would answer a malformed payload differently from the
+      // byte boundary would treat a malformed payload differently from the
       // string boundary for no reason a caller could name.
       const bytes = new TextEncoder().encode("{not json");
       const decoded = newDefaultJsonCodecEngine({ lenient: true })

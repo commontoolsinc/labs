@@ -56,7 +56,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
   /** @inheritDoc */
   protected override newEncodeAct(env: LiveEnvironment): EncodeAct {
-    return new EncodeAct(env);
+    return new EncodeAct(this, env);
   }
 
   /**
@@ -70,7 +70,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     env: LiveEnvironment,
     _data: string,
   ): DecodeAct {
-    return new DecodeAct(env);
+    return new DecodeAct(this, env);
   }
 
   /**
@@ -134,7 +134,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     try {
       tree = JsonCodecEngine.#parseWireText(text);
     } catch (e) {
-      return this.settleSyntacticRefusal(e);
+      return act.settleThrown(e);
     }
 
     return this.decodeValue(tree, act);
@@ -282,7 +282,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
           // Same reservation as the plain-object arm below: the assignment
           // cannot rebuild these names.
           if (isUnsafeObjectKey(key)) {
-            return this.reportReservedKey(key, inner);
+            return act.reportReservedKey(key, inner);
           }
           result[key] = this.decodeValue(val, act);
         }
@@ -347,7 +347,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       ) {
         const count = entryDecoded.state;
         if (!JsonCodecEngine.#isHoleCount(count)) {
-          return this.reportMalformed(
+          return act.reportMalformed(
             CODEC_META_TAGS.hole,
             count,
             `hole: expected a positive integer count, got ${
@@ -369,7 +369,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     // machinery, which says nothing about the wire that caused it.
     const MAX_ARRAY_LENGTH = 0xffff_ffff;
     if (targetIndex > MAX_ARRAY_LENGTH) {
-      return this.reportMalformed(
+      return act.reportMalformed(
         CODEC_META_TAGS.hole,
         data,
         `hole: runs total ${targetIndex} elements, past the ` +
@@ -393,7 +393,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
       if (key.startsWith("/")) {
-        return this.reportMalformed(
+        return act.reportMalformed(
           key.slice(1),
           data,
           `object contains reserved /-prefixed key: "${key}"`,
@@ -405,7 +405,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       // implementation, whose write path refuses it, so report it rather than
       // decoding something the bytes do not say.
       if (isUnsafeObjectKey(key)) {
-        return this.reportReservedKey(key, data);
+        return act.reportReservedKey(key, data);
       }
       result[key] = this.decodeValue(val, act);
     }

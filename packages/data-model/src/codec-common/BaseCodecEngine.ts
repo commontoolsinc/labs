@@ -14,6 +14,7 @@ import type {
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
 import { DecodeAct } from "./DecodeAct.ts";
 import { EncodeAct } from "./EncodeAct.ts";
+import type { CodecEngineConfig } from "./CodecEngineConfig.ts";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 import { ProblematicStateError } from "./ProblematicStateError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
@@ -72,7 +73,7 @@ export abstract class BaseCodecEngine<
   SerializedForm = Encoded,
   EncAct extends EncodeAct = EncodeAct,
   DecAct extends DecodeAct = DecodeAct,
-> {
+> implements CodecEngineConfig {
   readonly #lenient: boolean;
   readonly #registry: CodecRegistry<Encoded>;
 
@@ -155,7 +156,7 @@ export abstract class BaseCodecEngine<
     try {
       return this.decodeValue(this.encodedFromSerializedForm(data), act);
     } catch (e) {
-      return this.settleSyntacticRefusal(e);
+      return act.settleThrown(e);
     }
   }
 
@@ -180,8 +181,8 @@ export abstract class BaseCodecEngine<
    * What arrives is data off a channel and is not to be assumed well-formed. A
    * form that is not this format's is refused by throwing
    * `ProblematicStateError`, which {@link #decode} settles against
-   * {@link #lenient} -- so a lenient decode answers a syntactic fault with a
-   * `ProblematicValue`, exactly as it does a fault found further in.
+   * {@link #lenient} -- so a lenient decode returns a `ProblematicValue` for
+   * a syntactic fault, exactly as it does for a fault found further in.
    *
    * Takes no act. What a format needs out of the form for the act it is
    * about to run, it takes in {@link #newDecodeAct}, which sees the same
@@ -349,92 +350,6 @@ export abstract class BaseCodecEngine<
   }
 
   /**
-   * Settles a refusal of the serialized form itself against {@link #lenient}:
-   * strictly it raises, and leniently it becomes a `ProblematicValue`.
-   *
-   * A serialized form is data off a channel like any other, so being the wrong
-   * shape for this format -- or the right shape around a payload that will not
-   * parse -- is a malformation of the same kind as a bad state inside a
-   * well-formed one, and settles the same way.
-   *
-   * Only this class's own refusal is settled. Anything else thrown while
-   * converting a form is the format's own business and is re-raised untouched,
-   * so a bug in a conversion does not come back as a `ProblematicValue`.
-   *
-   * Available to a format's own entry points, which reach a conversion without
-   * passing through {@link #decode} -- `JsonCodecEngine`'s byte pair, for one.
-   *
-   * @throws Whatever it was given, if this engine is not lenient or the throw
-   *   was not a refusal.
-   */
-  protected settleSyntacticRefusal(e: unknown): FabricValue {
-    if (this.lenient && (e instanceof ProblematicStateError)) {
-      return this.reportMalformed(e.wireTypeTag, e.state, e.message);
-    }
-
-    // Rethrown rather than rebuilt, strictly: the refusal already names its
-    // tag and state, and re-raising it keeps whatever `cause` it carries.
-    throw e;
-  }
-
-  /**
-   * Reports wire data this engine itself found malformed, settled against
-   * {@link #lenient}: strictly it raises, and leniently it becomes a
-   * `ProblematicValue` in the result.
-   *
-   * A codec rejecting a state it was handed goes through the same setting, in
-   * {@link #decodeTagged}. Which of the two noticed is an implementation
-   * detail of where a check happens to live, so it does not decide what a
-   * caller sees; `lenient` does.
-   *
-   * @param wireTypeTag The tag the malformed data arrived under, or the
-   *   meta-tag naming the structure at fault. Of any type whatsoever: what
-   *   sits in tag position is wire data like any other, and a tag that is not
-   *   a tag is among the faults reported here. `ProblematicValue` renders what
-   *   it cannot keep.
-   * @param state The data at fault, of any type whatsoever, preserved so that
-   *   a lenient result round-trips. A format whose states are not
-   *   `FabricValue`s hands one over as it stands; `ProblematicValue` renders
-   *   what it cannot keep.
-   * @param error What is wrong with it, phrased to stand on its own -- it is
-   *   the whole of the message when this raises.
-   * @throws If this engine is not lenient.
-   */
-  protected reportMalformed(
-    wireTypeTag: any,
-    state: any,
-    error: string,
-  ): FabricValue {
-    if (!this.lenient) {
-      throw new ProblematicStateError(wireTypeTag, state, error);
-    }
-
-    return deepFreeze(new ProblematicValue(wireTypeTag, state, error));
-  }
-
-  /**
-   * Reports a key this runtime reserves, found in wire data, settled against
-   * {@link #lenient} like any other malformation.
-   *
-   * The names are `__proto__` and `constructor`, and what makes them a
-   * boundary concern is that the walks rebuild an object by assignment: the
-   * first routes through an inherited setter on a host that has one, and both
-   * are refused rather than silently reshaped.
-   *
-   * @param key The reserved key.
-   * @param state The object it was found in, preserved so a lenient result
-   *   round-trips.
-   * @throws If this engine is not lenient.
-   */
-  protected reportReservedKey(key: string, state: any): FabricValue {
-    return this.reportMalformed(
-      key,
-      state,
-      `object contains a key this runtime reserves: "${key}"`,
-    );
-  }
-
-  /**
    * Decodes one tagged value, dispatching on the tag through the registry. A
    * subclass calls this once it has recognized a tagged form and taken off
    * whatever meta-tags this format defines for itself.
@@ -465,7 +380,7 @@ export abstract class BaseCodecEngine<
       // than preserved as an `UnknownValue`: that form exists to round-trip a
       // tag no codec claims, which presupposes a tag. Reported over the
       // decoded state, so that a lenient result carries what arrived.
-      return this.reportMalformed(
+      return act.reportMalformed(
         tag,
         this.decodeValue(rawState, act),
         `tagged value has a malformed tag: ${
@@ -511,7 +426,7 @@ export abstract class BaseCodecEngine<
 
       // Report over the state the codec was actually handed, so that it says
       // what the codec choked on.
-      return this.reportMalformed(
+      return act.reportMalformed(
         tag,
         state,
         e instanceof Error ? e.message : String(e),
@@ -542,39 +457,6 @@ export abstract class BaseCodecEngine<
     // `FabricPrimitive` is already frozen, making it an O(1) cache hit -- and
     // the lenient fallback above alike.
     return deepFreeze(decoded);
-  }
-
-  /**
-   * Enters a container into the in-progress set, reporting rather than
-   * entering if it is already there.
-   *
-   * Reported rather than raised, unlike the encode side's refusal: a cycle
-   * here arrived from a channel, and every malformation off a channel settles
-   * against {@link #lenient}. Raising unconditionally would also be the one
-   * refusal a lenient decode could not contain.
-   *
-   * The report carries a rendering of the container rather than the container
-   * itself, a cyclic graph being the one thing a `ProblematicValue` cannot
-   * hold onto.
-   *
-   * @param act The act of decoding this container belongs to.
-   * @param value The container about to be walked.
-   * @returns The report, or `null` if `value` was entered.
-   * @throws If this engine is not lenient.
-   */
-  protected enterOrReport(
-    act: DecAct,
-    value: object,
-  ): FabricValue | null {
-    if (!act.enter(value)) {
-      return this.reportMalformed(
-        "",
-        toCompactDebugString(value, 50),
-        "circular reference in decoded data",
-      );
-    }
-
-    return null;
   }
 
   /** Encodes one value through the codec the registry matched to it. */

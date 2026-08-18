@@ -379,7 +379,7 @@ describe("BaseCodecEngine", () => {
 
       const { engine } = newProbeEngine({ extraCodecs: [codec] });
       const boom = new Boom() as unknown as FabricValue;
-      const act = new EncodeAct(ENV);
+      const act = new EncodeAct(engine, ENV);
       const probe = engine as unknown as {
         encodeValue(value: FabricValue, act: EncodeAct): unknown;
       };
@@ -392,7 +392,7 @@ describe("BaseCodecEngine", () => {
       // The decode-side twin of the encode re-entrancy test, and the reason
       // the decode act is per call too. The probe format's transport is the
       // tree itself, so its walk guards cycles; with one act shared across
-      // acts, an inner decode entering a node the outer walk is inside would
+      // calls, an inner decode entering a node the outer walk is inside would
       // report a cycle that is not there.
       let reentered = false;
       let innerResult: unknown;
