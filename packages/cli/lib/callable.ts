@@ -181,7 +181,7 @@ export interface InvocationOutcome {
    * callback carries, so the address is known BEFORE the outcome is read.
    * That is what makes it available under `--no-wait`: a caller that chose
    * not to wait still holds the address to collect from, and reads it back
-   * with `cf piece get --piece <receipt>` rather than re-invoking the verb.
+   * with `cf get --piece <receipt>` rather than re-invoking the verb.
    * The receipt is a COMMIT witness, not an execution witness — a same-id
    * replay
    * runs the handler body again and then loses the race, so effects outside
@@ -1344,7 +1344,7 @@ async function boundCyclicResult(
       " Collect the outcome with a shape that bounds it: " +
       (receiptId === undefined
         ? "read the receipt with --select or --schema."
-        : `cf piece get --piece ${receiptId} ` +
+        : `cf get --piece ${receiptId} ` +
           `--schema '{"properties":{"<field>":{"$link":true}}}'.`) +
       " Calling the verb again under --select or --schema shapes it at the " +
       "call, but runs the handler body a second time.",

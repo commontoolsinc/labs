@@ -307,9 +307,9 @@ cf call --piece board addItem -- --help
 
 ```text
 Usage:
-  cf piece call --piece board addItem -- --help
-  cf piece call --piece board addItem <json>
-  cf piece call --piece board addItem -- --title <string>
+  cf call --piece board addItem -- --help
+  cf call --piece board addItem <json>
+  cf call --piece board addItem -- --title <string>
 
 File a new root item on the board.
 
@@ -365,7 +365,7 @@ compilation:
 | a comment on an **event field** (what `title` means) | `$defs.<Event>.properties.<field>.description` |
 | a comment on the **event interface** | nowhere — this one does not compile ([#5937](https://github.com/commontoolsinc/labs/issues/5937)) |
 
-`cf piece verbs` and `cf piece call <verb> --help` already load that pattern to
+`cf piece verbs` and `cf call <verb> --help` already load that pattern to
 report what a verb hands back, so both read the prose from the same load. The
 verb's own comment becomes the listing row's `description` and the help page's
 summary line. The event fields' comments are folded into the input schema the

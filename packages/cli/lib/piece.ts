@@ -279,7 +279,7 @@ export class PieceVerbReadError extends Error {
   constructor(verb: string, piece: string, callable: boolean) {
     super(
       callable
-        ? `Path resolves to a verb; use 'cf piece call --piece ${piece} ${verb}' instead.`
+        ? `Path resolves to a verb; use 'cf call --piece ${piece} ${verb}' instead.`
         : `Path resolves to a verb that is not directly callable: verbs are ` +
           `invoked at the piece's root surface. Read the parent object ` +
           `instead, or list the callable verbs with ` +
@@ -3143,8 +3143,12 @@ export async function executePieceCallable(
       return parsed.showHelpJson
         ? renderExecHelpJson(spec)
         : renderPieceCallHelp(
+          // Each mount passes its own spelling, so the page names the
+          // command that was typed. The fallback is the canonical top-level
+          // spelling: a page minted with no mount to name must not teach
+          // the deprecated one.
           deps.helpCommandPrefix ??
-            cliCommand(["piece", "call", "...", callableName]),
+            cliCommand(["call", "...", callableName]),
           spec,
         );
     },
