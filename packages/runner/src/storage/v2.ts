@@ -1998,7 +1998,7 @@ type SyncTask = {
 };
 
 type WatchRefreshBatch = {
-  type: "pull" | "integrate";
+  type: "pull" | "integrate" | "conflict-repair";
   entries: Map<
     string,
     [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
@@ -2119,6 +2119,7 @@ class SpaceReplica implements ISpaceReplica {
   // commit locally and gates its retry on that promise, so the retry rebuilds
   // against the repaired base rather than the dead one.
   readonly #rejectedPendingLayers = new Map<number, Promise<void>>();
+  readonly #rejectedRepairDocuments = new Map<string, number>();
   // Every unsettled commit's outcome promise, keyed by localSeq (a superset
   // of #inFlightCommits: zero-read commits appear here too). The old-server
   // scalarization hold awaits these for the OMITTED lower dependencies —
@@ -2919,7 +2920,7 @@ class SpaceReplica implements ISpaceReplica {
     entries: Iterable<
       [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
     >,
-    type: "pull" | "integrate" = "pull",
+    type: "pull" | "integrate" | "conflict-repair" = "pull",
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.activeSessionHandle();
@@ -2985,10 +2986,15 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private enqueueWatchRefresh(
-    type: "pull" | "integrate",
+    type: "pull" | "integrate" | "conflict-repair",
     entries: [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector][],
   ): Promise<Result<Unit, PullError>> {
     if (this.#queuedWatchRefresh !== null) {
+      if (this.#queuedWatchRefresh.type !== type) {
+        return this.#queuedWatchRefresh.pending.promise.then(() =>
+          this.enqueueWatchRefresh(type, entries)
+        );
+      }
       for (const [address, selector] of entries) {
         this.#queuedWatchRefresh.entries.set(
           watchIdForEntry(address, selector, ""),
@@ -3920,6 +3926,31 @@ class SpaceReplica implements ISpaceReplica {
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const conflictReads = rejection.name === "ConflictError"
+      ? [
+        ...rejection.transaction.reads.confirmed,
+        ...rejection.transaction.reads.pending,
+      ]
+      : [];
+    const touched = [
+      ...operations.map((operation) => ({
+        id: operation.id,
+        scope: operation.scope,
+      })),
+      ...conflictReads.map((read) => ({
+        id: read.id as URI,
+        scope: read.scope,
+      })),
+    ];
+    const repairDocumentKeys = rejection.name === "ConflictError"
+      ? new Set(touched.map(({ id, scope }) => docKey(id, scope)))
+      : new Set<string>();
+    for (const key of repairDocumentKeys) {
+      this.#rejectedRepairDocuments.set(
+        key,
+        (this.#rejectedRepairDocuments.get(key) ?? 0) + 1,
+      );
+    }
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
     // Mark the layer dead for that window so no new commit is minted and sent
@@ -3934,10 +3965,6 @@ class SpaceReplica implements ISpaceReplica {
       if (source !== undefined) {
         notifyCommitRejected(source, rejection);
       }
-      const touched = operations.map((operation) => ({
-        id: operation.id,
-        scope: operation.scope,
-      }));
       const hasSemanticOperations = operations.length > 0;
       const shouldNotifySubscribers = hasSemanticOperations &&
         this.hasNotificationSubscribers();
@@ -3957,6 +3984,7 @@ class SpaceReplica implements ISpaceReplica {
       // recursion (a victim's own finalizeRejection lands back here with its
       // localSeq).
       this.cascadeDroppedDependency(localSeq);
+      await this.refreshConflictReads(rejection);
       if (before !== undefined) {
         const changes = before.compare(this);
         // The revert snapshots CURRENT confirmed state (which already includes
@@ -3982,6 +4010,14 @@ class SpaceReplica implements ISpaceReplica {
       return { error: rejection };
     } finally {
       this.#rejectedPendingLayers.delete(localSeq);
+      for (const key of repairDocumentKeys) {
+        const count = this.#rejectedRepairDocuments.get(key);
+        if (count === undefined || count <= 1) {
+          this.#rejectedRepairDocuments.delete(key);
+        } else {
+          this.#rejectedRepairDocuments.set(key, count - 1);
+        }
+      }
       dropped.resolve();
     }
   }
@@ -4307,7 +4343,7 @@ class SpaceReplica implements ISpaceReplica {
 
   private applySessionSync(
     sync: SessionSync,
-    type: "pull" | "integrate",
+    type: "pull" | "integrate" | "conflict-repair",
   ): void {
     const hasAdoptionObservations = type === "integrate" &&
       sync.observations !== undefined &&
@@ -4337,12 +4373,23 @@ class SpaceReplica implements ISpaceReplica {
       })),
     ];
 
-    const shouldNotifySubscribers = this.hasNotificationSubscribers();
-    const shouldNotifySinks = this.hasSinkSubscribers(touched);
+    // A rejected document's catch-up is reported by its revert after the dead
+    // pending layer is removed. Other documents in the same sync still notify.
+    const notificationTouched = type === "conflict-repair"
+      ? []
+      : touched.filter(({ id, scope }) =>
+        !this.#rejectedRepairDocuments.has(docKey(id, scope))
+      );
+    const shouldNotifySubscribers = notificationTouched.length > 0 &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = notificationTouched.length > 0 &&
+      this.hasSinkSubscribers(notificationTouched);
     const before = shouldNotifySubscribers
       ? Differential.checkout(
         this,
-        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        notificationTouched.map(({ id, scope }) =>
+          snapshotState(this, id, scope)
+        ),
       )
       : undefined;
 
@@ -4389,7 +4436,7 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
     } else if (shouldNotifySinks) {
-      this.notifySinksForIds(touched);
+      this.notifySinksForIds(notificationTouched);
     }
     // Subscription-carried scheduler observations — other clients' committed
     // action runs for this sync window. Handed to the scheduler AFTER the
@@ -4673,6 +4720,36 @@ class SpaceReplica implements ISpaceReplica {
       if (timer !== undefined) {
         clearTimeout(timer);
       }
+    }
+  }
+
+  private async refreshConflictReads(
+    rejection: StorageTransactionRejected,
+  ): Promise<void> {
+    if (rejection.name !== "ConflictError") return;
+    const conflictId = String(rejection.conflict.of);
+    const conflictReads = [
+      ...rejection.transaction.reads.confirmed,
+      ...rejection.transaction.reads.pending,
+    ].filter((read) => read.id === conflictId);
+    if (conflictReads.length === 0) return;
+    const result = await this.enqueueWatchRefresh(
+      "conflict-repair",
+      normalizeSyncEntries(conflictReads.map((read) => [{
+        id: read.id as URI,
+        type: DOCUMENT_MIME as MIME,
+        scope: read.scope,
+      }, {
+        path: read.path,
+        schema: true,
+      }])),
+    );
+    if (result.error !== undefined) {
+      logger.warn(
+        "conflict-read-refresh",
+        "conflict selector refresh failed while preserving original result",
+        result.error,
+      );
     }
   }
 
