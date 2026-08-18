@@ -1047,6 +1047,33 @@ the legacy public action as a rollback-compatible API; strict enforcement
 accepts the reviewed UI binding, while observe mode continues to report rather
 than reject other paths.
 
+## 46. Preserve the fabric session's rollback controls
+
+The upstream fabric-session controls landed while this branch was in progress.
+The first rebase combined the run-level CFC posture with the runtime behind
+`run_pattern`. That made the operator's fabric-session enforcement and
+flow-label arguments ineffective. It also recorded the old explicit/off
+defaults in run state even though the session actually received strict/persist
+values.
+
+Resolve one complete fabric-session posture from the fabric enforcement dial
+when it is present. Otherwise use the harness enforcement mode. Apply an
+explicit fabric flow-label value over that posture before constructing the
+runtime. Regular harness runs therefore default to strict enforcement and
+persisted flow labels. Loom's observe pin also keeps its `run_pattern` session
+in warn-only mode. The retained fabric-specific controls can still select the
+earlier explicit enforcement rung or a separate flow-label mode.
+
+Record the resolved values and their sources in run state. A resumed run uses
+that recorded posture when it reconstructs the session. Reject a newly
+supplied fabric dial when it conflicts with the recorded value, so execution
+cannot silently diverge from the saved evidence.
+
+Update the CLI and harness documentation so `enforce-explicit`, `off`, and
+`observe` are described as retained rollback and diagnostic values rather than
+as steps toward an older default. Cover both the strict/persist defaults and an
+explicit explicit/off rollback in the focused harness tests.
+
 ## Deliberately excluded work
 
 The previous combined patch rewrote a runner concurrency test to use an

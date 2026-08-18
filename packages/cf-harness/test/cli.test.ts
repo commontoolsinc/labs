@@ -503,7 +503,7 @@ Deno.test("parseCfHarnessCliArgs accepts fabric CFC dials from the environment",
   });
 });
 
-Deno.test("parseCfHarnessCliArgs rejects a fabric CFC enforcement mode below the preset pin", async () => {
+Deno.test("parseCfHarnessCliArgs rejects an unsupported fabric CFC enforcement mode", async () => {
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(

@@ -22,11 +22,11 @@ export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
 export type HarnessGatewayAuthMode = "bearer" | "none";
 
 /**
- * The fabric session's enforcement dial admits raises only: the remoteClient
- * preset already pins `enforce-explicit`, so the sole configurable move is up
- * to `enforce-strict`. This is a different dial from the harness's own
- * `cfcEnforcementMode`, which governs tool policy and the sandbox — this one
- * governs the runtime the `run_pattern` tool deploys patterns into.
+ * The fabric session's enforcement dial retains the previous explicit rung
+ * and the strict product default. This is a different dial from the harness's
+ * own `cfcEnforcementMode`, which supplies its default and governs tool policy
+ * and the sandbox. The fabric dial governs the runtime the `run_pattern` tool
+ * deploys patterns into.
  */
 export type HarnessFabricCfcEnforcementMode =
   | "enforce-explicit"
@@ -39,8 +39,8 @@ export type HarnessFabricCfcFlowLabelsMode = CfcFlowLabelsMode;
  * on the host, and the target space (a name or a `did:key`). When present,
  * the run offers `run_pattern` in the parent tool surface; when absent, the
  * tool is unavailable. The optional CFC dials reach the session's Runtime;
- * unset means the remoteClient preset's first-party posture
- * (`enforce-explicit`, flow labels off).
+ * unset means the harness posture. Regular harness runs default to strict
+ * enforcement with persisted flow labels. Loom remains in observe mode.
  */
 export interface HarnessFabricSessionConfig {
   apiUrl: string;

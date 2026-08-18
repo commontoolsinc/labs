@@ -17,21 +17,26 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import type { HarnessFabricSessionConfig } from "./config.ts";
+import type { HarnessFabricSessionCfcPosture } from "./run-state.ts";
 
 export interface HarnessFabricSession {
   pieces: PiecesController;
 }
 
-export type HarnessFabricCfcOptions = Pick<
-  RuntimeOptions,
-  | "cfcEnforcementMode"
-  | "cfcFlowLabels"
-  | "cfcWriteFloor"
-  | "cfcTriggerReadGating"
-  | "cfcPolicyEvaluation"
-  | "cfcLabelMetadataProtection"
-  | "cfcDeclaredMonotonicity"
+export type HarnessFabricCfcOptions = Required<
+  Pick<
+    RuntimeOptions,
+    | "cfcEnforcementMode"
+    | "cfcFlowLabels"
+    | "cfcWriteFloor"
+    | "cfcTriggerReadGating"
+    | "cfcPolicyEvaluation"
+    | "cfcLabelMetadataProtection"
+    | "cfcDeclaredMonotonicity"
+  >
 >;
+
+export type ResolvedHarnessFabricCfcOptions = HarnessFabricCfcOptions;
 
 export const harnessFabricCfcOptions = (
   enforcementMode: CfcEnforcementMode,
@@ -69,6 +74,23 @@ export const harnessFabricCfcOptions = (
         cfcDeclaredMonotonicity: "off",
       };
   }
+};
+
+export const resolveHarnessFabricCfcOptions = (
+  config: HarnessFabricSessionConfig,
+  harnessEnforcementMode: CfcEnforcementMode,
+  recordedPosture?: HarnessFabricSessionCfcPosture,
+): ResolvedHarnessFabricCfcOptions => {
+  const enforcementMode = recordedPosture?.enforcementMode ??
+    config.cfcEnforcementMode ?? harnessEnforcementMode;
+  return {
+    ...harnessFabricCfcOptions(enforcementMode),
+    ...(recordedPosture?.flowLabels !== undefined
+      ? { cfcFlowLabels: recordedPosture.flowLabels }
+      : config.cfcFlowLabels !== undefined
+      ? { cfcFlowLabels: config.cfcFlowLabels }
+      : {}),
+  };
 };
 
 /**

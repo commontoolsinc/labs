@@ -74,8 +74,8 @@ import {
 import {
   cacheHarnessFabricSessionFactory,
   createHarnessFabricSessionFactory,
-  harnessFabricCfcOptions,
   type HarnessFabricSessionFactory,
+  resolveHarnessFabricCfcOptions,
 } from "./fabric-session.ts";
 import { assertValidHarnessHandleTable } from "./handle-table.ts";
 import {
@@ -447,6 +447,34 @@ export class CfHarnessEngine {
     });
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
+    const recordedFabricSessionCfc = options.runState?.fabricSessionCfc;
+    if (
+      recordedFabricSessionCfc !== undefined &&
+      this.config.fabricSession?.cfcEnforcementMode !== undefined &&
+      this.config.fabricSession.cfcEnforcementMode !==
+        recordedFabricSessionCfc.enforcementMode
+    ) {
+      throw new Error(
+        "resumed run fabric CFC enforcement mode does not match requested mode",
+      );
+    }
+    if (
+      recordedFabricSessionCfc !== undefined &&
+      this.config.fabricSession?.cfcFlowLabels !== undefined &&
+      this.config.fabricSession.cfcFlowLabels !==
+        recordedFabricSessionCfc.flowLabels
+    ) {
+      throw new Error(
+        "resumed run fabric CFC flow-label mode does not match requested mode",
+      );
+    }
+    const fabricSessionCfcOptions = this.config.fabricSession === undefined
+      ? undefined
+      : resolveHarnessFabricCfcOptions(
+        this.config.fabricSession,
+        this.config.cfcEnforcementMode,
+        recordedFabricSessionCfc,
+      );
     // The session behind `run_pattern` is expensive and remote, so it is
     // built lazily on the tool's first invocation and cached for the run
     // while healthy; a failed construction is retried on the next call.
@@ -454,7 +482,7 @@ export class CfHarnessEngine {
       (this.config.fabricSession !== undefined
         ? createHarnessFabricSessionFactory(
           this.config.fabricSession,
-          harnessFabricCfcOptions(this.config.cfcEnforcementMode),
+          fabricSessionCfcOptions!,
         )
         : undefined);
     this.#fabricSessionFactory = fabricSessionFactory === undefined
@@ -529,24 +557,22 @@ export class CfHarnessEngine {
       options.runState,
     );
     // The posture the fabric session's runtime will actually run at, resolved
-    // from the same config the session factory reads. The pin/default values
-    // restate what `runtimePresets.remoteClient` and the Runtime constructor
-    // supply when the dial is unset (`coreOptions` in
-    // `packages/runner/src/runtime-presets.ts`).
-    const fabricSessionCfc = this.config.fabricSession !== undefined
-      ? {
-        enforcementMode: this.config.fabricSession.cfcEnforcementMode ??
-          "enforce-explicit" as const,
-        enforcementModeSource:
-          this.config.fabricSession.cfcEnforcementMode !== undefined
-            ? "configured" as const
-            : "preset-pin" as const,
-        flowLabels: this.config.fabricSession.cfcFlowLabels ?? "off" as const,
-        flowLabelsSource: this.config.fabricSession.cfcFlowLabels !== undefined
-          ? "configured" as const
-          : "default" as const,
-      }
-      : undefined;
+    // from the same complete options object the session factory reads.
+    const fabricSessionCfc = recordedFabricSessionCfc ??
+      (this.config.fabricSession !== undefined
+        ? {
+          enforcementMode: fabricSessionCfcOptions!.cfcEnforcementMode,
+          enforcementModeSource:
+            this.config.fabricSession.cfcEnforcementMode !== undefined
+              ? "configured" as const
+              : "harness" as const,
+          flowLabels: fabricSessionCfcOptions!.cfcFlowLabels,
+          flowLabelsSource:
+            this.config.fabricSession.cfcFlowLabels !== undefined
+              ? "configured" as const
+              : "enforcement-mode" as const,
+        }
+        : undefined);
     this.#runState = options.runState ??
       createHarnessRunState({
         runId,

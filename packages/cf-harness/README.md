@@ -806,21 +806,27 @@ than a run failure, and the next tool call retries the construction.
 Two further flags set the session runtime's CFC dials, and both need the three
 session flags present. `--fabric-cfc-enforcement-mode`
 (`CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`) accepts `enforce-explicit` or
-`enforce-strict` — raise-only, since the session's runtime preset already pins
-`enforce-explicit`; under `enforce-strict`, a pattern whose writes carry
-confidentiality its target's declared policy does not admit has its commit
-refused. `--fabric-cfc-flow-labels` (`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`)
-accepts `off`, `observe`, or `persist`; `persist` stamps the derived flow labels
-onto everything a pattern's transaction writes, which is what makes a labelled
-read visible to that refusal. These dials govern the fabric session's runtime
-only — `--cfc-enforcement-mode` remains the harness's own dial for tool policy
-and the sandbox, and the two are set independently.
+`enforce-strict`. When this fabric-specific dial is absent, the session uses the
+harness's CFC mode. Regular harness runs therefore use `enforce-strict`, while
+Loom's observe-mode pin also keeps `run_pattern` warn-only. The earlier
+`enforce-explicit` rung remains available for rollback. Under `enforce-strict`,
+a pattern whose writes carry confidentiality its target's declared policy does
+not admit has its commit refused. `--fabric-cfc-flow-labels`
+(`CF_HARNESS_FABRIC_CFC_FLOW_LABELS`) accepts `off`, `observe`, or `persist`;
+`persist` stamps the derived flow labels onto everything a pattern's transaction
+writes, which is what makes a labelled read visible to that refusal. The preset
+uses `persist`; the earlier values remain available for rollback and
+diagnostics. When the fabric-specific flow-label dial is absent, the enforcement
+mode selects its matching flow-label posture. These dials govern the fabric
+session's runtime only.
 
 A run states both postures rather than leaving them to be inferred: the resolved
 fabric-session posture — each dial's value and whether the operator configured
-it or the preset supplied it — is recorded as `fabricSessionCfc` in
-`run-state.json` and the run report, and the operator summary prints it beside
-the harness's own `cfcMode`.
+it or it followed the harness enforcement mode — is recorded as
+`fabricSessionCfc` in `run-state.json` and the run report, and the operator
+summary prints it beside the harness's own `cfcMode`. A resumed run reuses its
+recorded fabric posture and rejects newly supplied fabric dials that conflict
+with that record.
 
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, an

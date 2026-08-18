@@ -56,17 +56,18 @@ export type HarnessRunTerminalReason =
  * The resolved CFC posture of the run's fabric session — the Runtime that
  * `run_pattern` deploys patterns into. This is a different dial from the
  * run-level `cfcEnforcementMode`, which governs tool policy and the sandbox;
- * the two are set independently, so the artifacts state both. Absent when the
- * run has no fabric session configuration — including when a test injects a
- * session factory directly, whose runtime's posture the harness never saw.
+ * an explicit fabric dial can override the run-level mode, so the artifacts
+ * state both. Absent when the run has no fabric session configuration —
+ * including when a test injects a session factory directly, whose runtime's
+ * posture the harness never saw.
  */
 export interface HarnessFabricSessionCfcPosture {
-  enforcementMode: "enforce-explicit" | "enforce-strict";
-  /** `configured` when the operator set the dial; `preset-pin` otherwise. */
-  enforcementModeSource: "configured" | "preset-pin";
+  enforcementMode: CfcEnforcementMode;
+  /** `configured` when the operator set the fabric dial. */
+  enforcementModeSource: "configured" | "harness";
   flowLabels: "off" | "observe" | "persist";
-  /** `configured` when the operator set the dial; `default` otherwise. */
-  flowLabelsSource: "configured" | "default";
+  /** `configured` when the operator set the fabric dial. */
+  flowLabelsSource: "configured" | "enforcement-mode";
 }
 
 export interface HarnessRunState {

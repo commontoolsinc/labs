@@ -4,11 +4,72 @@ import {
   cacheHarnessFabricSessionFactory,
   harnessFabricCfcOptions,
   type HarnessFabricSession,
+  resolveHarnessFabricCfcOptions,
 } from "../src/fabric-session.ts";
 
 describe("fabric-session", () => {
   it("maps observe mode to a complete warn-only runtime posture", () => {
     expect(harnessFabricCfcOptions("observe")).toEqual({
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "observe",
+      cfcWriteFloor: "observe",
+      cfcTriggerReadGating: false,
+      cfcPolicyEvaluation: "observe",
+      cfcLabelMetadataProtection: "observe",
+      cfcDeclaredMonotonicity: "observe",
+    });
+  });
+
+  it("maps the fabric enforcement rollback to its complete posture", () => {
+    expect(resolveHarnessFabricCfcOptions({
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
+    }, "enforce-strict")).toEqual({
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
+      cfcWriteFloor: "off",
+      cfcTriggerReadGating: false,
+      cfcPolicyEvaluation: "off",
+      cfcLabelMetadataProtection: "off",
+      cfcDeclaredMonotonicity: "off",
+    });
+  });
+
+  it("inherits the harness mode while retaining a separate flow-label override", () => {
+    expect(resolveHarnessFabricCfcOptions({
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcFlowLabels: "persist",
+    }, "observe")).toEqual({
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+      cfcWriteFloor: "observe",
+      cfcTriggerReadGating: false,
+      cfcPolicyEvaluation: "observe",
+      cfcLabelMetadataProtection: "observe",
+      cfcDeclaredMonotonicity: "observe",
+    });
+  });
+
+  it("uses the recorded posture when a run resumes", () => {
+    expect(resolveHarnessFabricCfcOptions(
+      {
+        apiUrl: "https://toolshed.example/",
+        identityKeyPath: "/keys/agent.pkcs8",
+        space: "my-space",
+      },
+      "enforce-strict",
+      {
+        enforcementMode: "observe",
+        enforcementModeSource: "harness",
+        flowLabels: "observe",
+        flowLabelsSource: "enforcement-mode",
+      },
+    )).toEqual({
       cfcEnforcementMode: "observe",
       cfcFlowLabels: "observe",
       cfcWriteFloor: "observe",

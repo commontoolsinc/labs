@@ -174,7 +174,7 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     flowLabelsSource: "configured",
   });
 
-  const pinned = new CfHarnessEngine({
+  const inherited = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
     fabricSession: {
       apiUrl: "https://toolshed.example/",
@@ -182,17 +182,81 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
       space: "my-space",
     },
   });
-  assertEquals(pinned.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
-    enforcementModeSource: "preset-pin",
-    flowLabels: "off",
-    flowLabelsSource: "default",
+  assertEquals(inherited.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-strict",
+    enforcementModeSource: "harness",
+    flowLabels: "persist",
+    flowLabelsSource: "enforcement-mode",
+  });
+
+  const loomPosture = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    cfcEnforcementMode: "observe",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+  });
+  assertEquals(loomPosture.getRunState().fabricSessionCfc, {
+    enforcementMode: "observe",
+    enforcementModeSource: "harness",
+    flowLabels: "observe",
+    flowLabelsSource: "enforcement-mode",
   });
 
   const sessionless = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
   });
   assertEquals(sessionless.getRunState().fabricSessionCfc, undefined);
+});
+
+Deno.test("CfHarnessEngine preserves the recorded fabric posture on resume", () => {
+  const runState: HarnessRunState = {
+    runId: "resume-fabric-posture",
+    status: "failed",
+    createdAt: "2026-07-23T20:00:00.000Z",
+    updatedAt: "2026-07-23T20:00:01.000Z",
+    cfcEnforcementMode: "enforce-strict",
+    fabricSessionCfc: {
+      enforcementMode: "observe",
+      enforcementModeSource: "harness",
+      flowLabels: "observe",
+      flowLabelsSource: "enforcement-mode",
+    },
+    currentDir: "/workspace",
+    policyEvents: [],
+    toolOutputs: [],
+  };
+  const resumed = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState,
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+  });
+  assertEquals(
+    resumed.getRunState().fabricSessionCfc,
+    runState.fabricSessionCfc,
+  );
+
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+        fabricSession: {
+          apiUrl: "https://toolshed.example/",
+          identityKeyPath: "/keys/agent.pkcs8",
+          space: "my-space",
+          cfcEnforcementMode: "enforce-strict",
+        },
+      }),
+    Error,
+    "resumed run fabric CFC enforcement mode does not match requested mode",
+  );
 });
 
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {
