@@ -317,13 +317,15 @@ export interface TopicCrossrefRow {
  * surface is what leaves it free to shrink.
  */
 export interface TopicSummary {
-  /** Defaulted rather than required, like every other field a board card
-   * renders. The card list is a mapped sub-pattern, so this type reaches a
-   * piece holding topics written before the field existed as the argument
-   * schema its update is checked against, and a required property those topics
-   * lack refuses that update outright. `deno task pattern-vintage` is what
-   * catches it, by replaying a real deployed board. */
+  /** The topic's title. Defaulted rather than required, like every other
+   * field a board card renders: the card list is a mapped sub-pattern, so
+   * this type reaches a piece holding topics written before the field
+   * existed as the argument schema its update is checked against, and a
+   * required property those topics lack refuses that update outright.
+   * `deno task pattern-vintage` is what catches it, by replaying a real
+   * deployed board. */
   title: string | Default<"">;
+  /** When the topic was filed (epoch milliseconds), stamped at create. */
   createdAt: number;
   createdBy?:
     | TopicAuthor
@@ -354,8 +356,13 @@ export interface TopicPiece extends TopicSummary {
   /** @deprecated Compatibility shadow for consumers of the previous result
    * schema. New callers must use `createdBy`; the pattern mirrors this field. */
   createdByName: string | Default<"">;
+  /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
+  /** The thread, in arrival order: append-only point-in-time records, each
+   * carrying its author snapshot and `sentAt`. */
   comments: TopicComment[];
+  /** Typed outbound links, in arrival order, each carrying its author
+   * snapshot and `addedAt`. */
   links: TopicLink[];
   /** Every piece this topic's prose and links point at, as references.
    *
@@ -417,7 +424,20 @@ export interface TopicPiece extends TopicSummary {
   unmention?: Stream<UnmentionEvent>;
 }
 
-/** The complete result available when a Topic is instantiated directly. */
+/**
+ * A #topic — one durable unit of shared attention: a title, a living body
+ * document, a flat chronological comment thread, typed links out to other
+ * core objects (PRs, agent sessions, web pages), and the references it makes
+ * to sibling pieces.
+ *
+ * Durable conclusions get folded up into the body — revise it whole with
+ * `setBody`; the thread holds the deliberation as append-only, point-in-time
+ * `addComment` records. Sign every mutation with `agentName`: Fabric records
+ * the human principal behind the key; the name says which agent acted under
+ * it. The session-draft cells and `submit*` streams below belong to the
+ * rendered page, not the headless contract — they read state only this
+ * session holds.
+ */
 export interface TopicOutput extends TopicPiece {
   [UI]: VNode;
   /**

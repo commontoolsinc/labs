@@ -1,0 +1,1071 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "AddCommentEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "description": "The comment text, appended verbatim after trimming. Must be non-empty:\nan empty body rejects rather than recording a blank thread entry.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "AddLinkEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind",
+            "description": "What the link points at — a rendering hint, not a behavior switch.\nRequired by the deployed contract even though the handler would default\nit to \"web\": the compat gate compares a verb's event schema in the\nresult direction, where required-to-optional is refused, so relaxing\nthis rides the next acknowledged break rather than an ordinary deploy."
+          },
+          "label": {
+            "description": "Display label. A blank label falls back to the URL; required to be\npresent for the same gate reason as `kind`.",
+            "type": "string"
+          },
+          "url": {
+            "description": "The link target. Must be http(s): anything else rejects, because a\nuser-supplied scheme on a shared surface is script execution in every\nviewer's session.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "MentionEvent": {
+        "properties": {
+          "topic": {
+            "asCell": [
+              "cell"
+            ],
+            "description": "The piece to reference — the piece itself, not an address. Identity here\nis the cell, so this is what a caller passes and what gets stored.\n\nDeclared through the ONE field every topic has rather than `unknown`, and\nthe narrowness is what makes a non-reference CHEAP TO CATCH — not what\ncatches it. An `asCell` payload is wrapped whole without validating what\nis behind it, so naming a property refuses nothing at the boundary: an\naddress sent as text, which an inline CLI call argument produces by being\nparsed as plain JSON, arrives here as readily as a piece does. What the\nnamed property buys is a one-field read that tells the two apart —\n`topic.get()` is `undefined` for a value that is not a reference and an\nobject for any piece — and `mention` spends it before storing anything.\n\n`title` is also the most this can safely name: this schema reaches every\ntopic in `mentionable`, so a property without a default would be demanded\nof topics written before it existed and refuse their update. `title`\ncarries one, and that default does double duty — it is also why the check\nadmits a piece that is not a topic at all, which reads back `{ title: \"\" }`\nrather than `undefined`. `deno task pattern-vintage` proves the update side\nby replaying a real board.\n\nNothing reads THROUGH it beyond that one field — the value is stored and\ncompared.",
+            "properties": {
+              "title": {
+                "default": "",
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "topic"
+        ],
+        "type": "object"
+      },
+      "SetBodyEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "description": "The complete replacement body, persisted verbatim — no trimming, so\nwhitespace-sensitive Markdown survives. An empty body is legal: clearing\na living document is an edit, not an error.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "TopicAuthor": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TopicComment": {
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/TopicAuthor",
+            "description": "Snapshot taken at write time (profile enrichment comes later; never gate\nauthorship on a profile wish — CT-1879). Comments carry no minted id:\narray elements have stable entity identity; future editing addresses\nelements by reference (`equals()`), not by a synthetic key."
+          },
+          "authorName": {
+            "default": "",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "type": "string"
+          },
+          "sentAt": {
+            "default": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "authorName",
+          "body",
+          "sentAt"
+        ],
+        "type": "object"
+      },
+      "TopicLink": {
+        "properties": {
+          "addedAt": {
+            "type": "number"
+          },
+          "addedBy": {
+            "$ref": "#/$defs/TopicAuthor"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind",
+            "default": "web"
+          },
+          "label": {
+            "default": "",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "TopicLinkKind": {
+        "enum": [
+          "session",
+          "topic",
+          "pr",
+          "web"
+        ]
+      },
+      "TopicMentionRef": {
+        "properties": {
+          "destination": {
+            "type": "unknown"
+          },
+          "modifiedTitle": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destination",
+          "modifiedTitle"
+        ],
+        "type": "object"
+      },
+      "TopicMentionRefMap": {
+        "additionalProperties": {
+          "$ref": "#/$defs/TopicMentionRef"
+        },
+        "properties": {},
+        "type": "object"
+      },
+      "TopicPiece": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "description": "The topic's display name. Like the other derived display fields, a cold\nretained topic may not have produced this path yet; its persisted title\nremains authoritative until it does.",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "addComment": {
+            "$ref": "#/$defs/AddCommentEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Append to the thread — a point-in-time record of progress or\ndeliberation; durable conclusions belong in the body. Returns the\ncomment as recorded, resolved author and `sentAt` included."
+          },
+          "addLink": {
+            "$ref": "#/$defs/AddLinkEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Attach a typed outbound link — a PR, an agent session, a web page.\nReturns the link as recorded, resolved `addedBy` and `addedAt`\nincluded. Appends merge and nothing dedupes: a repeated URL is two\nentries."
+          },
+          "body": {
+            "default": "",
+            "description": "The living document, verbatim Markdown. `setBody` replaces it whole.",
+            "type": "string"
+          },
+          "bodyUpdatedAt": {
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "bodyUpdatedBy": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              }
+            ]
+          },
+          "commentCount": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "comments": {
+            "description": "The thread, in arrival order: append-only point-in-time records, each\ncarrying its author snapshot and `sentAt`.",
+            "items": {
+              "$ref": "#/$defs/TopicComment"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "description": "When the topic was filed (epoch milliseconds), stamped at create.",
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "createdByName": {
+            "default": "",
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "links": {
+            "description": "Typed outbound links, in arrival order, each carrying its author\nsnapshot and `addedAt`.",
+            "items": {
+              "$ref": "#/$defs/TopicLink"
+            },
+            "type": "array"
+          },
+          "mention": {
+            "$ref": "#/$defs/MentionEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Reference another piece from this topic, and stop referencing it. The\nbrowser equivalent is picking a completion in the body editor, which writes\nthe same map.\n\nOPTIONAL, unlike the verbs beside them, and for the reason every added path\non this projection is: a topic deployed before these existed carries\nneither, and a required property it cannot produce refuses its update\noutright. The older verbs predate every deployed generation, so they can\nstay required; these cannot."
+          },
+          "mentioned": {
+            "default": [],
+            "description": "Pieces referenced outside the prose, recorded by `mention`.",
+            "items": {
+              "type": "unknown"
+            },
+            "type": "array"
+          },
+          "mentions": {
+            "default": [],
+            "description": "Every piece this topic's prose and links point at, as references.\n\nThe board's pivot is declared over this and nothing else, so what one topic\ncosts a full-board scan is exactly this list of identities. Declared\n`unknown[]` because these are references, and comparing them never reads\nwhat is behind them.\n\nThe cell annotation that makes them comparable belongs to the READER, not\nhere: the pivot declares its own view of this list as\n`TopicMentionSource.mentions: ComparableCell<unknown>[]`, and that is what\nmakes its graph settle rather than depend on load order. A published\n`unknown[]` is what each reader annotates for itself.\n\nThe default stands alone: a declared default and `| undefined` collide,\nand the default is what a topic deployed before this path existed\nmaterializes against.",
+            "items": {
+              "type": "unknown"
+            },
+            "type": "array"
+          },
+          "referencedBy": {
+            "default": [],
+            "description": "The topics that mention this one, read out of the board's pivot.\n\nDeclared through `TopicSummary` rather than `TopicPiece`, and that is\nload-bearing rather than stingy: a topic whose backlinks were topics would\nbe a type that contains itself, and resolving one from a list would walk\nthe graph. The summary carries no reference of its own, so it terminates.\nA reader that wants more follows the link, which resolves whole.",
+            "items": {
+              "$ref": "#/$defs/TopicSummary"
+            },
+            "type": "array"
+          },
+          "references": {
+            "$ref": "#/$defs/TopicMentionRefMap",
+            "default": {},
+            "description": "Where this topic's `[Label][key]` mentions point. Durable content, like\n`links`. The body editor works on a session copy of this map, which a save\npublishes here whole, beside the prose whose tokens name its entries."
+          },
+          "setBody": {
+            "$ref": "#/$defs/SetBodyEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Replace the living document whole — read it, revise it, write it back\ncomplete; the body is one value with whole-value conflict semantics.\nReturns the persisted body and any attribution written."
+          },
+          "title": {
+            "default": "",
+            "description": "The topic's title. Defaulted rather than required, like every other\nfield a board card renders: the card list is a mapped sub-pattern, so\nthis type reaches a piece holding topics written before the field\nexisted as the argument schema its update is checked against, and a\nrequired property those topics lack refuses that update outright.\n`deno task pattern-vintage` is what catches it, by replaying a real\ndeployed board.",
+            "type": "string"
+          },
+          "unmention": {
+            "$ref": "#/$defs/UnmentionEvent",
+            "asCell": [
+              "stream"
+            ]
+          }
+        },
+        "required": [
+          "createdByName",
+          "body",
+          "comments",
+          "links",
+          "mentions",
+          "references",
+          "mentioned",
+          "referencedBy",
+          "addComment",
+          "addLink",
+          "setBody",
+          "$NAME",
+          "title",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt"
+        ],
+        "type": "object"
+      },
+      "TopicSummary": {
+        "properties": {
+          "commentCount": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "createdAt": {
+            "description": "When the topic was filed (epoch milliseconds), stamped at create.",
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "title": {
+            "default": "",
+            "description": "The topic's title. Defaulted rather than required, like every other\nfield a board card renders: the card list is a mapped sub-pattern, so\nthis type reaches a piece holding topics written before the field\nexisted as the argument schema its update is checked against, and a\nrequired property those topics lack refuses that update outright.\n`deno task pattern-vintage` is what catches it, by replaying a real\ndeployed board.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt"
+        ],
+        "type": "object"
+      },
+      "UnmentionEvent": {
+        "properties": {
+          "topic": {
+            "asCell": [
+              "cell"
+            ],
+            "description": "Declared and checked exactly as `MentionEvent.topic` is, and for the same\nreason: a payload that is not a reference matches no stored entry, so\nwithout the check it would remove nothing and report success.",
+            "properties": {
+              "title": {
+                "default": "",
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "topic"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "myName": {
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "topics": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "The board's durable topic list. `addTopic` appends here; direct writes\nare legitimate but unattributed, and a whole-array write forfeits the\nmergeability the verb's append keeps.",
+        "items": {
+          "$ref": "#/$defs/TopicPiece"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "topics/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "AddCommentEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "description": "The comment text, appended verbatim after trimming. Must be non-empty:\nan empty body rejects rather than recording a blank thread entry.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "AddLinkEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind",
+            "description": "What the link points at — a rendering hint, not a behavior switch.\nRequired by the deployed contract even though the handler would default\nit to \"web\": the compat gate compares a verb's event schema in the\nresult direction, where required-to-optional is refused, so relaxing\nthis rides the next acknowledged break rather than an ordinary deploy."
+          },
+          "label": {
+            "description": "Display label. A blank label falls back to the URL; required to be\npresent for the same gate reason as `kind`.",
+            "type": "string"
+          },
+          "url": {
+            "description": "The link target. Must be http(s): anything else rejects, because a\nuser-supplied scheme on a shared surface is script execution in every\nviewer's session.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "AddTopicEvent": {
+        "properties": {
+          "agentName": {
+            "description": "The agent making this mutation. The authenticated principal remains the\nhuman whose identity key invoked the stream; this is the agent's explicit\ncontent-level signature under that shared principal. Optional only so\ncallers of the previous deployed schema remain valid; new callers must\nprovide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "description": "The topic's initial living-document body. A topic born with a body\nappears with it atomically — no reader observes the title-only halfway\nstate, and no follow-up `setBody` call is needed to finish a create\n(verb contract: the atomic-unit rule).",
+            "type": "string"
+          },
+          "title": {
+            "description": "The topic's title, trimmed before it is stored. Must be non-empty.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "MentionEvent": {
+        "properties": {
+          "topic": {
+            "description": "The piece to reference — the piece itself, not an address. Identity here\nis the cell, so this is what a caller passes and what gets stored.\n\nDeclared through the ONE field every topic has rather than `unknown`, and\nthe narrowness is what makes a non-reference CHEAP TO CATCH — not what\ncatches it. An `asCell` payload is wrapped whole without validating what\nis behind it, so naming a property refuses nothing at the boundary: an\naddress sent as text, which an inline CLI call argument produces by being\nparsed as plain JSON, arrives here as readily as a piece does. What the\nnamed property buys is a one-field read that tells the two apart —\n`topic.get()` is `undefined` for a value that is not a reference and an\nobject for any piece — and `mention` spends it before storing anything.\n\n`title` is also the most this can safely name: this schema reaches every\ntopic in `mentionable`, so a property without a default would be demanded\nof topics written before it existed and refuse their update. `title`\ncarries one, and that default does double duty — it is also why the check\nadmits a piece that is not a topic at all, which reads back `{ title: \"\" }`\nrather than `undefined`. `deno task pattern-vintage` proves the update side\nby replaying a real board.\n\nNothing reads THROUGH it beyond that one field — the value is stored and\ncompared.",
+            "properties": {
+              "title": {
+                "default": "",
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "topic"
+        ],
+        "type": "object"
+      },
+      "SetBodyEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "description": "The complete replacement body, persisted verbatim — no trimming, so\nwhitespace-sensitive Markdown survives. An empty body is legal: clearing\na living document is an edit, not an error.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "TopicAuthor": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TopicComment": {
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/TopicAuthor",
+            "description": "Snapshot taken at write time (profile enrichment comes later; never gate\nauthorship on a profile wish — CT-1879). Comments carry no minted id:\narray elements have stable entity identity; future editing addresses\nelements by reference (`equals()`), not by a synthetic key."
+          },
+          "authorName": {
+            "default": "",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "type": "string"
+          },
+          "sentAt": {
+            "default": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "authorName",
+          "body",
+          "sentAt"
+        ],
+        "type": "object"
+      },
+      "TopicCrossrefRow": {
+        "properties": {
+          "mentionedBy": {
+            "items": {
+              "type": "unknown"
+            },
+            "type": "array"
+          },
+          "topic": {
+            "description": "The topic this row is about. `unknown` because it is written as a\nreference and only ever compared — `equals` takes the raw link. Anything\nwider retrieves the piece instead of pointing at it: declared `object`,\nthis field reads back as the whole expanded topic, `$UI` tree included.",
+            "type": "unknown"
+          }
+        },
+        "required": [
+          "topic",
+          "mentionedBy"
+        ],
+        "type": "object"
+      },
+      "TopicIndexRow": {
+        "properties": {
+          "commentCount": {
+            "default": 0,
+            "description": "Coalesced to 0 for a cold or older topic whose derived path is absent,\nso the row itself never carries the mixed-version undefined.",
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            },
+            "description": "Authorship has no honest zero, so absence stays declared rather than\nbeing coalesced to an empty author."
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt"
+        ],
+        "type": "object"
+      },
+      "TopicLink": {
+        "properties": {
+          "addedAt": {
+            "type": "number"
+          },
+          "addedBy": {
+            "$ref": "#/$defs/TopicAuthor"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind",
+            "default": "web"
+          },
+          "label": {
+            "default": "",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "TopicLinkKind": {
+        "enum": [
+          "session",
+          "topic",
+          "pr",
+          "web"
+        ]
+      },
+      "TopicMentionRef": {
+        "properties": {
+          "destination": {
+            "type": "unknown"
+          },
+          "modifiedTitle": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destination",
+          "modifiedTitle"
+        ],
+        "type": "object"
+      },
+      "TopicMentionRefMap": {
+        "additionalProperties": {
+          "$ref": "#/$defs/TopicMentionRef"
+        },
+        "properties": {},
+        "type": "object"
+      },
+      "TopicPiece": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "description": "The topic's display name. Like the other derived display fields, a cold\nretained topic may not have produced this path yet; its persisted title\nremains authoritative until it does.",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "addComment": {
+            "$ref": "#/$defs/AddCommentEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Append to the thread — a point-in-time record of progress or\ndeliberation; durable conclusions belong in the body. Returns the\ncomment as recorded, resolved author and `sentAt` included."
+          },
+          "addLink": {
+            "$ref": "#/$defs/AddLinkEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Attach a typed outbound link — a PR, an agent session, a web page.\nReturns the link as recorded, resolved `addedBy` and `addedAt`\nincluded. Appends merge and nothing dedupes: a repeated URL is two\nentries."
+          },
+          "body": {
+            "default": "",
+            "description": "The living document, verbatim Markdown. `setBody` replaces it whole.",
+            "type": "string"
+          },
+          "bodyUpdatedAt": {
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "bodyUpdatedBy": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              }
+            ]
+          },
+          "commentCount": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "comments": {
+            "description": "The thread, in arrival order: append-only point-in-time records, each\ncarrying its author snapshot and `sentAt`.",
+            "items": {
+              "$ref": "#/$defs/TopicComment"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "description": "When the topic was filed (epoch milliseconds), stamped at create.",
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "createdByName": {
+            "default": "",
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "links": {
+            "description": "Typed outbound links, in arrival order, each carrying its author\nsnapshot and `addedAt`.",
+            "items": {
+              "$ref": "#/$defs/TopicLink"
+            },
+            "type": "array"
+          },
+          "mention": {
+            "$ref": "#/$defs/MentionEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Reference another piece from this topic, and stop referencing it. The\nbrowser equivalent is picking a completion in the body editor, which writes\nthe same map.\n\nOPTIONAL, unlike the verbs beside them, and for the reason every added path\non this projection is: a topic deployed before these existed carries\nneither, and a required property it cannot produce refuses its update\noutright. The older verbs predate every deployed generation, so they can\nstay required; these cannot."
+          },
+          "mentioned": {
+            "default": [],
+            "description": "Pieces referenced outside the prose, recorded by `mention`.",
+            "items": {
+              "type": "unknown"
+            },
+            "type": "array"
+          },
+          "mentions": {
+            "default": [],
+            "description": "Every piece this topic's prose and links point at, as references.\n\nThe board's pivot is declared over this and nothing else, so what one topic\ncosts a full-board scan is exactly this list of identities. Declared\n`unknown[]` because these are references, and comparing them never reads\nwhat is behind them.\n\nThe cell annotation that makes them comparable belongs to the READER, not\nhere: the pivot declares its own view of this list as\n`TopicMentionSource.mentions: ComparableCell<unknown>[]`, and that is what\nmakes its graph settle rather than depend on load order. A published\n`unknown[]` is what each reader annotates for itself.\n\nThe default stands alone: a declared default and `| undefined` collide,\nand the default is what a topic deployed before this path existed\nmaterializes against.",
+            "items": {
+              "type": "unknown"
+            },
+            "type": "array"
+          },
+          "referencedBy": {
+            "default": [],
+            "description": "The topics that mention this one, read out of the board's pivot.\n\nDeclared through `TopicSummary` rather than `TopicPiece`, and that is\nload-bearing rather than stingy: a topic whose backlinks were topics would\nbe a type that contains itself, and resolving one from a list would walk\nthe graph. The summary carries no reference of its own, so it terminates.\nA reader that wants more follows the link, which resolves whole.",
+            "items": {
+              "$ref": "#/$defs/TopicSummary"
+            },
+            "type": "array"
+          },
+          "references": {
+            "$ref": "#/$defs/TopicMentionRefMap",
+            "default": {},
+            "description": "Where this topic's `[Label][key]` mentions point. Durable content, like\n`links`. The body editor works on a session copy of this map, which a save\npublishes here whole, beside the prose whose tokens name its entries."
+          },
+          "setBody": {
+            "$ref": "#/$defs/SetBodyEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Replace the living document whole — read it, revise it, write it back\ncomplete; the body is one value with whole-value conflict semantics.\nReturns the persisted body and any attribution written."
+          },
+          "title": {
+            "default": "",
+            "description": "The topic's title. Defaulted rather than required, like every other\nfield a board card renders: the card list is a mapped sub-pattern, so\nthis type reaches a piece holding topics written before the field\nexisted as the argument schema its update is checked against, and a\nrequired property those topics lack refuses that update outright.\n`deno task pattern-vintage` is what catches it, by replaying a real\ndeployed board.",
+            "type": "string"
+          },
+          "unmention": {
+            "$ref": "#/$defs/UnmentionEvent",
+            "asCell": [
+              "stream"
+            ]
+          }
+        },
+        "required": [
+          "createdByName",
+          "body",
+          "comments",
+          "links",
+          "mentions",
+          "references",
+          "mentioned",
+          "referencedBy",
+          "addComment",
+          "addLink",
+          "setBody",
+          "$NAME",
+          "title",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt"
+        ],
+        "type": "object"
+      },
+      "TopicSummary": {
+        "properties": {
+          "commentCount": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "createdAt": {
+            "description": "When the topic was filed (epoch milliseconds), stamped at create.",
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "title": {
+            "default": "",
+            "description": "The topic's title. Defaulted rather than required, like every other\nfield a board card renders: the card list is a mapped sub-pattern, so\nthis type reaches a piece holding topics written before the field\nexisted as the argument schema its update is checked against, and a\nrequired property those topics lack refuses that update outright.\n`deno task pattern-vintage` is what catches it, by replaying a real\ndeployed board.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt"
+        ],
+        "type": "object"
+      },
+      "UnmentionEvent": {
+        "properties": {
+          "topic": {
+            "description": "Declared and checked exactly as `MentionEvent.topic` is, and for the same\nreason: a payload that is not a reference matches no stored entry, so\nwithout the check it would remove nothing and report success.",
+            "properties": {
+              "title": {
+                "default": "",
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "topic"
+        ],
+        "type": "object"
+      }
+    },
+    "description": "Topics — a tracker over #topic pieces: durable units of shared attention\n(CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics\nsort by last activity. Replaces Linear / GitHub issues / loose process docs\nfor the team; PR workflows stay in GitHub and arrive here as links.\n\nHeadless use: survey the whole board with one bounded read of `index` — a\nrow IS its topic, so a row's own address (`--select index[].@`) is what\nthat topic's reads and verbs take as the piece. File with `addTopic`,\ntitle and optional initial body in one call, then work on the topic\ndirectly: the body is its living document, the thread its append-only\ndeliberation. Sign every mutation with `agentName` — Fabric records the\nhuman principal behind the key; the name says which agent acted under it.",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addTopic": {
+        "$ref": "#/$defs/AddTopicEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "File a topic. The atomic unit takes the initial body with the title, so\nno reader observes a title-only halfway state and no follow-up `setBody`\nfinishes a create. Returns the created topic as its survey row — the\nreference plus the write-time facts the pattern resolved."
+      },
+      "crossrefs": {
+        "default": [],
+        "description": "The board's mention pivot, one row per topic: the topic, and the topics\nthat mention it. Published so a topic composed outside `addTopic` can be\nwired to the same table the board's own children read — the graph is\nderived once, here, and never per topic.",
+        "items": {
+          "$ref": "#/$defs/TopicCrossrefRow"
+        },
+        "type": "array"
+      },
+      "index": {
+        "default": [],
+        "description": "The full-board survey surface: one bounded row per topic, carrying the\nscalars a survey reads. A row IS its topic, so a row's own address is the\ntopic's — `--select index[].@` reads it, and an index into this array is\nnot a stable address.",
+        "items": {
+          "$ref": "#/$defs/TopicIndexRow"
+        },
+        "type": "array"
+      },
+      "mentionable": {
+        "default": [],
+        "description": "The same list, under the name the topic pattern's editor autocompletes\nover — what `addTopic` wires into each child as its mention universe.",
+        "items": {
+          "$ref": "#/$defs/TopicPiece"
+        },
+        "type": "array"
+      },
+      "myName": {
+        "type": "string"
+      },
+      "newTitle": {
+        "description": "Session-local draft for the footer composer (exposed for embedding and\nheadless driving, like the chat exemplar's drafts).",
+        "type": "string"
+      },
+      "setMyName": {
+        "asCell": [
+          "stream"
+        ],
+        "deprecated": true,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "submitTopic": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Submit the footer composer as the current viewer's canonical Profile.",
+        "tier": "wrapper"
+      },
+      "topicCount": {
+        "description": "How many topics the board holds, nulls included.",
+        "type": "number"
+      },
+      "topics": {
+        "description": "The board's topics, in filing order, as complete pieces — bodies,\nthreads, and verbs included. Survey through `index` instead; read this\nwhen you already know which topic you are expanding.",
+        "items": {
+          "$ref": "#/$defs/TopicPiece"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "topics",
+      "mentionable",
+      "topicCount",
+      "crossrefs",
+      "index",
+      "addTopic",
+      "myName",
+      "setMyName",
+      "submitTopic",
+      "$NAME",
+      "$UI"
+    ],
+    "tags": [
+      "topic"
+    ],
+    "type": "object"
+  }
+}
