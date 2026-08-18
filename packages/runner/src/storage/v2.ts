@@ -4077,9 +4077,9 @@ class SpaceReplica implements ISpaceReplica {
           isCfcLabelPath(read.path) ||
           // Deep reads under the op path (link resolution, element sub-reads) are
           // incidental to the op. A shape-only (nonRecursive) read AT the op path
-          // is also incidental — it is the query-result proxy's container read of
-          // the array being mutated, which must not false-conflict with a
-          // concurrent mergeable op. A RECURSIVE read AT the op path is the
+          // is also incidental — it is the container read a view of the array
+          // records, which must not false-conflict with a concurrent mergeable
+          // op on that array. A RECURSIVE read AT the op path is the
           // handler's explicit read of the collection, and is kept so a
           // conditional mergeable write still conflicts and retries.
           opPaths.some((opPath) =>

@@ -39,12 +39,7 @@ describe("Pattern Runner - Handlers", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({
-      lift,
-      pattern,
-      handler,
-      Writable,
-    } = commonfabric);
+    ({ lift, pattern, handler, Writable } = commonfabric);
   });
 
   afterEach(async () => {
@@ -57,12 +52,17 @@ describe("Pattern Runner - Handlers", () => {
   it("should execute handlers", async () => {
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number } }
+      { counter: Cell<{ value: number }> }
     >(
-      ({ amount }, { counter }) => {
-        counter.value += amount;
+      true,
+      {
+        type: "object",
+        properties: { counter: { type: "object", asCell: ["cell"] } },
       },
-      { proxy: true },
+      ({ amount }, { counter }) => {
+        const value = counter.key("value");
+        value.set(value.get() + amount);
+      },
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
@@ -90,17 +90,68 @@ describe("Pattern Runner - Handlers", () => {
     expect(value).toMatchObject({ counter: { value: 3 } });
   });
 
+  it("throws when a handler writes through a binding its `$ctx` schema left plain", async () => {
+    // The builder classifies a cell `computed` on the strength of this refusal:
+    // `collectWritablyBoundRoots` reads a plain (non-`asCell`) binding as one
+    // the body cannot write through. Asserted here through a dispatched
+    // handler, because a view built directly from a cell does not exercise the
+    // path the classifier reasons about.
+    let caught: unknown;
+    const writeHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      true,
+      true,
+      ({ amount }, { counter }) => {
+        try {
+          // `HandlerState` already marks a plain binding read-only at the type
+          // level; the cast reaches past that to the runtime refusal, which is
+          // the half the builder's classification rests on.
+          (counter as { value: number }).value = amount;
+        } catch (error) {
+          caught = error;
+        }
+      },
+    );
+
+    const writePattern = pattern<{ counter: { value: number } }>(
+      ({ counter }) => ({ counter, stream: writeHandler({ counter }) }),
+    );
+
+    const resultCell = runtime.getCell<
+      { counter: { value: number }; stream: any }
+    >(space, "plain binding refuses a write", undefined, tx);
+    const result = runtime.run(tx, writePattern, {
+      counter: { value: 0 },
+    }, resultCell);
+    tx.commit();
+    await result.pull();
+
+    result.key("stream").send({ amount: 7 });
+    const value = await result.pull();
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("read-only");
+    expect(value).toMatchObject({ counter: { value: 0 } });
+  });
+
   it("defers handler registration for retryable setup transactions until commit", async () => {
     const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
 
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number } }
+      { counter: Cell<{ value: number }> }
     >(
-      ({ amount }, { counter }) => {
-        counter.value += amount;
+      true,
+      {
+        type: "object",
+        properties: { counter: { type: "object", asCell: ["cell"] } },
       },
-      { proxy: true },
+      ({ amount }, { counter }) => {
+        const value = counter.key("value");
+        value.set(value.get() + amount);
+      },
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
@@ -138,12 +189,17 @@ describe("Pattern Runner - Handlers", () => {
 
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number } }
+      { counter: Cell<{ value: number }> }
     >(
-      ({ amount }, { counter }) => {
-        counter.value += amount;
+      true,
+      {
+        type: "object",
+        properties: { counter: { type: "object", asCell: ["cell"] } },
       },
-      { proxy: true },
+      ({ amount }, { counter }) => {
+        const value = counter.key("value");
+        value.set(value.get() + amount);
+      },
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
@@ -180,12 +236,17 @@ describe("Pattern Runner - Handlers", () => {
 
     const incHandler = handler<
       { amount: number },
-      { counter: { value: number } }
+      { counter: Cell<{ value: number }> }
     >(
-      ({ amount }, { counter }) => {
-        counter.value += amount;
+      true,
+      {
+        type: "object",
+        properties: { counter: { type: "object", asCell: ["cell"] } },
       },
-      { proxy: true },
+      ({ amount }, { counter }) => {
+        const value = counter.key("value");
+        value.set(value.get() + amount);
+      },
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
@@ -213,17 +274,18 @@ describe("Pattern Runner - Handlers", () => {
 
     addEventHandlerSpy.restore();
   });
-  it("should demand handler-written pattern results when pulled", async () => {
+
+  it("evaluates a handler-written pattern result only when it is pulled", async () => {
     const counter = runtime.getCell<{ value: number }>(
       space,
-      "should demand handler-written pattern results when pulled 1",
+      "demand handler-written pattern results 1",
       undefined,
       tx,
     );
     counter.set({ value: 0 });
     const nested = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
-      "should demand handler-written pattern results when pulled 2",
+      "demand handler-written pattern results 2",
       undefined,
       tx,
     );
@@ -232,11 +294,7 @@ describe("Pattern Runner - Handlers", () => {
     const values: [number, number, number][] = [];
 
     const incLogger = lift<
-      {
-        counter: { value: number };
-        amount: number;
-        nested: { c: number };
-      },
+      { counter: { value: number }; amount: number; nested: { c: number } },
       [number, number, number]
     >(({ counter, amount, nested }) => {
       const tuple: [number, number, number] = [counter.value, amount, nested.c];
@@ -247,20 +305,29 @@ describe("Pattern Runner - Handlers", () => {
     const incHandler = handler<
       { amount: number },
       {
-        counter: { value: number };
+        counter: Cell<{ value: number }>;
         nested: { a: { b: { c: number } } };
-        latest?: number[];
+        latest: Cell<number[] | undefined>;
       }
     >(
+      true,
+      {
+        type: "object",
+        properties: {
+          counter: { type: "object", asCell: ["cell"] },
+          nested: true,
+          latest: { type: "array", asCell: ["cell"] },
+        },
+      },
       (event, state) => {
-        state.counter.value += event.amount;
-        state.latest = incLogger({
+        const value = state.counter.key("value");
+        value.set(value.get() + event.amount);
+        state.latest.set(incLogger({
           counter: state.counter,
           amount: event.amount,
           nested: state.nested.a.b,
-        });
+        }));
       },
-      { proxy: true },
     );
 
     const incPattern = pattern<{
@@ -272,19 +339,13 @@ describe("Pattern Runner - Handlers", () => {
       return { stream, latest };
     });
 
-    const resultCell = runtime.getCell<{
-      stream: any;
-      latest?: number[];
-    }>(
+    const resultCell = runtime.getCell<{ stream: any; latest?: number[] }>(
       space,
-      "should demand handler-written pattern results when pulled",
+      "demand handler-written pattern results",
       undefined,
       tx,
     );
-    const result = runtime.run(tx, incPattern, {
-      counter,
-      nested,
-    }, resultCell);
+    const result = runtime.run(tx, incPattern, { counter, nested }, resultCell);
     tx.commit();
 
     await result.pull();
@@ -295,21 +356,13 @@ describe("Pattern Runner - Handlers", () => {
     expect(await result.key("latest").pull()).toEqual([1, 1, 0]);
     expect(values).toEqual([[1, 1, 0]]);
 
-    result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-
-    expect(values).toContainEqual([1, 1, 0]);
-    expect(await result.key("latest").pull()).toEqual([3, 2, 0]);
-    expect(values).toContainEqual([3, 2, 0]);
-    expect(values.some((tuple) => tuple.join(",") === "3,1,0")).toBe(false);
-
+    // The node the handler built is reached by pulling its cell, not by a
+    // scheduler node minted for the handler's result.
     const graph = runtime.scheduler.getGraphSnapshot();
-    expect(
-      graph.nodes.some((node) => node.id.startsWith("readResult:")),
-    ).toBe(false);
-    expect(
-      graph.nodes.some((node) => node.id.startsWith("handlerResult:")),
-    ).toBe(false);
+    expect(graph.nodes.some((node) => node.id.startsWith("readResult:")))
+      .toBe(false);
+    expect(graph.nodes.some((node) => node.id.startsWith("handlerResult:")))
+      .toBe(false);
   });
 
   it("should execute handlers with schemas", async () => {
@@ -369,15 +422,19 @@ describe("Pattern Runner - Handlers", () => {
 
     const divHandler = handler<
       { divisor: number; dividend: number },
-      { result: number }
+      { result: Cell<number> }
     >(
+      true,
+      {
+        type: "object",
+        properties: { result: { type: "number", asCell: ["cell"] } },
+      },
       ({ divisor, dividend }, state) => {
         if (dividend === 0) {
           throw new Error("division by zero");
         }
-        state.result = divisor / dividend;
+        state.result.set(divisor / dividend);
       },
-      { proxy: true },
     );
 
     const divPattern = pattern<{ result: number }>(

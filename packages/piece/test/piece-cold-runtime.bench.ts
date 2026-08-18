@@ -18,7 +18,6 @@ const defaultPatternProgram: RuntimeProgram = {
         "  ({ piece }, { pieceRegistry }) => {",
         "    pieceRegistry.push(piece);",
         "  },",
-        "  { proxy: true },",
         ");",
         "export default pattern<{ pieceRegistry: unknown[] }>(({ pieceRegistry }) => ({",
         "  pieceRegistry,",

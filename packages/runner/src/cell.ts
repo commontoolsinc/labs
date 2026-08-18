@@ -421,7 +421,6 @@ declare module "@commonfabric/api" {
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
-      writable?: boolean,
     ): CellResult<DeepKeyLookup<T, Path>>;
     getAsNormalizedFullLink(): NormalizedFullLink;
     getAsLink(
@@ -2424,7 +2423,6 @@ export class CellImpl<T extends FabricValue>
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
-    writable?: boolean,
   ): CellResult<DeepKeyLookup<T, Path>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
@@ -2436,7 +2434,6 @@ export class CellImpl<T extends FabricValue>
         path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
       },
       0,
-      writable,
       rebaseCfcLabelView(
         this._cfcLabelView,
         subPath.map((p) => p.toString()),

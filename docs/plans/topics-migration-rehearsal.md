@@ -53,8 +53,7 @@ authored lines of `topic.tsx`). The board's `main.tsx` mentions
 "more than one pattern generation is live in the space" is a trigger in the
 generic runbook, and multiple live generations is what the incident record ties
 to cross-version write storms. The run is therefore *two* legacy→current
-transitions, and #4997's dangling-author and recursive-crossref fixes have to
-hold for both.
+transitions, and #4997's dangling-author fix has to hold for both.
 
 Reproduce the grouping — and get the FID list itself — from the snapshot. This
 is the migration manifest: run it before pass one, check the output in, and diff
@@ -228,7 +227,7 @@ Then the acceptance items from the implementation plan's live checklist, which
 - all 73 topics present; comment and link totals unchanged;
 - a **cold** board read returns all 73 (wait ≥20 s; a cold load is slow and a
   premature check caused a production rollback);
-- a cold crossref read resolves a linked topic;
+- a cold index read resolves a linked topic;
 - `createdBy` / `bodyUpdatedBy` attribution survived;
 - body Markdown preserved **exactly** — no trimming;
 - a returned reference renders to a fid that opens the canonical child, not an

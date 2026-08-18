@@ -78,14 +78,6 @@ export function _handlerOverloadTypeProbe() {
     Same<typeof declared, HandlerFactory<AddTopic, BoundState, TopicRef>>
   >;
 
-  const declaredProxy = handler<AddTopic, BoundState, TopicRef>(
-    (_event, _state) => ({ id: "topic-1" }),
-    { proxy: true },
-  );
-  type _ProxyCarriesResult = MustBeTrue<
-    Same<typeof declaredProxy, HandlerFactory<AddTopic, BoundState, TopicRef>>
-  >;
-
   const declaredWithSchemas = handler<AddTopic, BoundState, TopicRef>(
     { type: "object" },
     { type: "object" },
@@ -113,10 +105,8 @@ export function _handlerOverloadTypeProbe() {
   >;
 
   // Props parity with api's `HandlerFunction` (the other hand-maintained
-  // half): a non-proxy callback sees `HandlerState<T>` — non-handle members
-  // readonly, cell handles passed through whole — while the `{ proxy: true }`
-  // form keeps bare `T`, since a writable proxy's props are exactly the thing
-  // it exists to let the body mutate.
+  // half): a callback sees `HandlerState<T>` — non-handle members readonly,
+  // cell handles passed through whole.
   const stateTyped = handler<AddTopic, MixedState>((_event, state) => {
     type _PropsAreHandlerState = MustBeTrue<
       Equal<typeof state, HandlerState<MixedState>>
@@ -129,20 +119,11 @@ export function _handlerOverloadTypeProbe() {
     >;
     state.selected.set("writable-through-the-handle");
   });
-  const proxyTyped = handler<AddTopic, MixedState>((_event, state) => {
-    type _ProxyPropsStayBare = MustBeTrue<
-      Equal<Pick<typeof state, "label">, { label: string }>
-    >;
-    state.label = "mutable-under-proxy";
-  }, { proxy: true });
-
   return {
     concise,
     declared,
-    declaredProxy,
     declaredWithSchemas,
     stateTyped,
-    proxyTyped,
   };
 }
 

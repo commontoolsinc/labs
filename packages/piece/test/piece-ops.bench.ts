@@ -37,10 +37,14 @@ async function createBenchEnv(): Promise<BenchEnv> {
     { piece: Cell<unknown> },
     { pieceRegistry: Cell<Cell<unknown>[]> }
   >(
+    true,
+    {
+      type: "object",
+      properties: { pieceRegistry: { type: "array", asCell: ["cell"] } },
+    },
     ({ piece }, { pieceRegistry }) => {
       pieceRegistry.push(piece);
     },
-    { proxy: true },
   );
   const defaultPattern = pattern<{ pieceRegistry: Cell<unknown>[] }>(
     ({ pieceRegistry }) => ({
@@ -58,10 +62,11 @@ async function createBenchEnv(): Promise<BenchEnv> {
   await pieces.synced();
 
   const increment = handler<void, { value: number }>(
+    true,
+    true,
     (_, { value }) => {
       value++;
     },
-    { proxy: true },
   );
   const counterPattern = pattern<{ value: number }>(
     ({ value }) => ({

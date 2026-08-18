@@ -20,7 +20,9 @@
 #   API_URL=https://<host> CF_IDENTITY=~/.config/commonfabric/identity.key \
 #     packages/cli/integration/verbs-over-the-cli.sh
 #
-# CI runs it through integration.sh's `verbs` section.
+# CI runs it through integration.sh's `piece-call` section (the
+# cli-integration matrix in .github/workflows/deno.yml); the `verbs` section
+# is the standalone selector for running just this script by hand.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

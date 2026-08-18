@@ -1139,8 +1139,8 @@ structurally representable top-level result:
   declared result into this third type-argument slot (§7). An absent third
   argument, and an explicit `void`, emit no options object at all: a declared
   result is opt-in and never inferred, so a concise body whose completion
-  value happens to be a cell declares nothing. A call that already passes
-  options (the `{ proxy: true }` form) keeps them, spread into the same object.
+  value happens to be a cell declares nothing. A call that already passes an
+  options object keeps it, spread into the same object.
   The runtime reads `resultSchema` off that slot onto the node's
   `Module.resultSchema` (`packages/runner/src/builder/module.ts`); it does NOT
   reach the pattern's own `resultSchema`, which is what the piece update gate

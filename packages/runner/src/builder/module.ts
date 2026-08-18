@@ -414,8 +414,7 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
  * at all, which is what keeps a declared result opt-in.
  *
  * The schema-injected call spreads any options the author wrote into this same
- * object, so a member here may be one this builder does not read: the writable
- * proxy is asked for in the state-schema slot above.
+ * object, so a member here may be one this builder does not read.
  */
 export interface HandlerOptions {
   resultSchema?: JSONSchema;
@@ -426,25 +425,15 @@ function handlerInternal<E, T>(
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
-  stateSchema?: JSONSchema | { proxy: true },
+  stateSchema?: JSONSchema,
   handler?: (event: E, props: T) => any,
   options?: HandlerOptions,
 ): HandlerFactory<E, T> {
-  let writableProxy = false;
   if (typeof eventSchema === "function") {
-    if (
-      stateSchema && typeof stateSchema === "object" &&
-      "proxy" in stateSchema && stateSchema.proxy === true
-    ) {
-      handler = eventSchema;
-      eventSchema = stateSchema = undefined;
-      writableProxy = true;
-    } else {
-      throw new Error(
-        "Handler requires schemas or CTS transformer\n" +
-          "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> for automatic schema inference, or provide explicit schemas",
-      );
-    }
+    throw new Error(
+      "Handler requires schemas or CTS transformer\n" +
+        "help: CTS transforms are enabled by default; remove /// <cf-disable-transform /> for automatic schema inference, or provide explicit schemas",
+    );
   }
 
   // Attach source location and preview to handler function for debugging
@@ -455,10 +444,7 @@ function handlerInternal<E, T>(
     hardenVerifiedFunction(handler);
   }
 
-  const schema = generateHandlerSchema(
-    eventSchema,
-    stateSchema as JSONSchema | undefined,
-  );
+  const schema = generateHandlerSchema(eventSchema, stateSchema);
 
   // Carry the argument schema's ifc confidentiality through to the declared
   // result, as `createNodeFactory` does for a lift. Only a declared result is
@@ -482,7 +468,6 @@ function handlerInternal<E, T>(
     toEncodableForm: () => moduleToEncodableForm(module),
     ...(schema !== undefined && { argumentSchema: schema }),
     ...(resultSchema !== undefined && { resultSchema }),
-    ...(writableProxy && { writableProxy: true }),
   };
 
   const factory = Object.assign(
@@ -536,10 +521,6 @@ export function handler<E, T>(
   handler: (event: E, props: HandlerState<T>) => any,
 ): HandlerFactory<E, T>;
 export function handler<E, T>(
-  handler: (Event: E, props: T) => any,
-  options: { proxy: true },
-): HandlerFactory<E, T>;
-export function handler<E, T>(
   handler: (event: E, props: HandlerState<T>) => any,
 ): HandlerFactory<E, T>;
 // Declared results, reached only by naming all three type arguments — the
@@ -548,17 +529,12 @@ export function handler<E, T>(
 // present in only one of them is unreachable from patterns while the other's
 // tests stay green). The `=> any` overloads above absorb every inferred call
 // first, so an incidental return never declares a result. Props typing
-// mirrors api too: non-proxy callbacks see `HandlerState<T>` (non-handle
-// members readonly), and only the `{ proxy: true }` forms keep bare `T` —
-// a writable proxy is the one contract whose props are theirs to mutate.
+// mirrors api too: a callback sees `HandlerState<T>`, with non-handle members
+// readonly.
 export function handler<E, T, R>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
   handler: (event: E, props: HandlerState<T>) => R,
-): HandlerFactory<E, T, R>;
-export function handler<E, T, R>(
-  handler: (event: E, props: T) => R,
-  options: { proxy: true },
 ): HandlerFactory<E, T, R>;
 export function handler<E, T, R>(
   handler: (event: E, props: HandlerState<T>) => R,
@@ -571,7 +547,7 @@ export function handler<E, T, R = void>(
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
-  stateSchema?: JSONSchema | { proxy: true },
+  stateSchema?: JSONSchema,
   handler?: (event: E, props: T) => any,
   options?: HandlerOptions,
 ): HandlerFactory<E, T, R> {

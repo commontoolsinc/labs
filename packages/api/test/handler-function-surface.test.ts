@@ -39,27 +39,18 @@ export function _handlerFunctionSurfaceProbe() {
   // The `=> any` forms must absorb it, leaving the result void.
   const concise = handler(
     (id: string, _props: BoundState) => someCell.set(id),
-    { proxy: true },
   );
   type _ConciseHasNoResult = MustBeTrue<
     Same<typeof concise, HandlerFactory<string, BoundState>>
   >;
 
   // A result is reachable from a pattern, and only by naming all three type
-  // arguments — on each of the three call forms.
+  // arguments — on each of the call forms.
   const declared = handler<AddTopic, BoundState, TopicRef>(
     (_event, _props) => ({ topic: { fid: "topic-1" } }),
   );
   type _DeclaredCarriesResult = MustBeTrue<
     Same<typeof declared, HandlerFactory<AddTopic, BoundState, TopicRef>>
-  >;
-
-  const declaredProxy = handler<AddTopic, BoundState, TopicRef>(
-    (_event, _props) => ({ topic: { fid: "topic-1" } }),
-    { proxy: true },
-  );
-  type _ProxyCarriesResult = MustBeTrue<
-    Same<typeof declaredProxy, HandlerFactory<AddTopic, BoundState, TopicRef>>
   >;
 
   const declaredWithSchemas = handler<AddTopic, BoundState, TopicRef>(
@@ -88,7 +79,7 @@ export function _handlerFunctionSurfaceProbe() {
   }
   const output: Output = { addTopic: declared({ count: 0 }) };
 
-  return { concise, declared, declaredProxy, declaredWithSchemas, output };
+  return { concise, declared, declaredWithSchemas, output };
 }
 
 Deno.test("HandlerFunction exposes the declared-result overloads to patterns", () => {

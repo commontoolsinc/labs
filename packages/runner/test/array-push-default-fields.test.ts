@@ -12,7 +12,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -75,16 +74,8 @@ describe("CT-1173: array push with complex objects", () => {
     pushFrame(frame);
 
     try {
-      const proxy = createQueryResultProxy<Person[]>(
-        runtime,
-        tx,
-        arrayCell.getAsNormalizedFullLink(),
-        0,
-        true,
-      );
-
       // Push first person (Alice)
-      proxy.push({
+      arrayCell.push({
         name: "Alice",
         email: "alice@example.com",
         phone: "123-456-7890",
@@ -100,7 +91,7 @@ describe("CT-1173: array push with complex objects", () => {
       });
 
       // Push second person (Bob)
-      proxy.push({
+      arrayCell.push({
         name: "Bob",
         email: "bob@example.com",
         phone: "098-765-4321",
@@ -116,7 +107,7 @@ describe("CT-1173: array push with complex objects", () => {
       });
 
       // Push third person (Charlie)
-      proxy.push({
+      arrayCell.push({
         name: "Charlie",
         email: "charlie@example.com",
         phone: "555-555-5555",
@@ -186,27 +177,23 @@ describe("CT-1173: array push with complex objects", () => {
     };
     pushFrame(frame1);
     try {
-      const proxy = createQueryResultProxy<Person[]>(
-        runtime,
-        tx,
-        arrayCell.getAsNormalizedFullLink(),
-        0,
-        true,
-      );
-      proxy.push({
-        name: "Alice",
-        email: "",
-        phone: "",
-        usualCommuteMode: "drive",
-        livesNearby: false,
-        spotPreferences: [],
-        compatibleSpots: [1, 5, 12],
-        defaultSpot: 1,
-        priorityRank: 1,
-        totalBookings: 0,
-        lastBookingDate: null,
-        createdAt: 1000,
-      });
+      // Minted inside the frame: `Cell.push` anchors from the frame its cell was
+      // constructed in, which is what makes the counter reset below observable.
+      runtime.getCell<Person[]>(space, "test-separate-pushes", undefined, tx)
+        .push({
+          name: "Alice",
+          email: "",
+          phone: "",
+          usualCommuteMode: "drive",
+          livesNearby: false,
+          spotPreferences: [],
+          compatibleSpots: [1, 5, 12],
+          defaultSpot: 1,
+          priorityRank: 1,
+          totalBookings: 0,
+          lastBookingDate: null,
+          createdAt: 1000,
+        });
     } finally {
       popFrame();
     }
@@ -222,27 +209,21 @@ describe("CT-1173: array push with complex objects", () => {
     };
     pushFrame(frame2);
     try {
-      const proxy = createQueryResultProxy<Person[]>(
-        runtime,
-        tx,
-        arrayCell.getAsNormalizedFullLink(),
-        0,
-        true,
-      );
-      proxy.push({
-        name: "Bob",
-        email: "",
-        phone: "",
-        usualCommuteMode: "drive",
-        livesNearby: false,
-        spotPreferences: [],
-        compatibleSpots: [1, 5, 12],
-        defaultSpot: 5,
-        priorityRank: 2,
-        totalBookings: 0,
-        lastBookingDate: null,
-        createdAt: 2000,
-      });
+      runtime.getCell<Person[]>(space, "test-separate-pushes", undefined, tx)
+        .push({
+          name: "Bob",
+          email: "",
+          phone: "",
+          usualCommuteMode: "drive",
+          livesNearby: false,
+          spotPreferences: [],
+          compatibleSpots: [1, 5, 12],
+          defaultSpot: 5,
+          priorityRank: 2,
+          totalBookings: 0,
+          lastBookingDate: null,
+          createdAt: 2000,
+        });
     } finally {
       popFrame();
     }

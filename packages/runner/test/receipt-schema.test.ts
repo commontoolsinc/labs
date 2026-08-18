@@ -70,8 +70,9 @@ describe("receipt schema", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { handler, pattern } = commonfabric;
     const verb = handler<unknown, Record<string, never>>(
+      true,
+      true,
       () => returns(),
-      { proxy: true },
     );
     const rootPattern = pattern(() => ({ verb: verb({}) }));
     const rootCell = runtime.getCell<{ verb: unknown }>(
@@ -302,8 +303,9 @@ describe("receipt schema", () => {
     // The second delivery returns a DIFFERENT shape, so a loser whose metadata
     // write landed would show up in the schema as well as in the value.
     const verb = handler<unknown, Record<string, never>>(
+      true,
+      true,
       () => (++invocations === 1 ? { first: true } : { second: true, n: 2 }),
-      { proxy: true },
     );
     const rootPattern = pattern(() => ({ verb: verb({}) }));
     const rootCell = runtime.getCell<{ verb: unknown }>(
