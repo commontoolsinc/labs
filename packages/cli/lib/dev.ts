@@ -8,7 +8,10 @@ import {
   resolveImportSpecifier,
   type Source,
 } from "@commonfabric/js-compiler";
-import { attachDataFiles } from "./data-files.ts";
+import {
+  attachDataFiles,
+  resolveLocalProgram,
+} from "@commonfabric/runner/local-program.deno";
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { Identity } from "@commonfabric/identity";
 import {
@@ -92,23 +95,26 @@ export async function process(
   );
   let program: RuntimeProgram;
   if (options.space) {
-    program = await collectLocalProgram(resolver, { fabricImports: "allow" });
+    program = attachDataFiles(
+      await collectLocalProgram(resolver, { fabricImports: "allow" }),
+      options.dataFilePaths,
+      options.rootPath ?? dirname(options.main),
+    );
   } else {
     // engine.resolve fails fabric specifiers as generic unresolved modules;
     // scan first so they get the friendlier requires-a-space message.
     await collectLocalProgram(resolver, { fabricImports: "reject" });
-    program = await engine.resolve(resolver);
+    program = await resolveLocalProgram((r) => engine.resolve(r), {
+      main: options.main,
+      ...(options.rootPath === undefined ? {} : { root: options.rootPath }),
+      ...(options.dataFilePaths === undefined
+        ? {}
+        : { dataFilePaths: options.dataFilePaths }),
+    });
   }
   if (options.mainExport) {
     program.mainExport = options.mainExport;
   }
-  // Attach the same data files a deployment would, so `dataFile` reads what it
-  // will read once deployed instead of failing for want of a closure.
-  program = attachDataFiles(
-    program,
-    options.dataFilePaths,
-    options.rootPath ?? dirname(options.main),
-  );
   let transformed: string | undefined;
   const getTransformedProgram = options.showTransformed
     ? (program: Program) => {

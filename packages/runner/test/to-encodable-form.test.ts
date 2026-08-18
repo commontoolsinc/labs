@@ -24,7 +24,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -386,11 +386,9 @@ describe("moduleToEncodableForm", () => {
       "../../patterns/factory-outputs/parking-coordinator/main.test.tsx",
       import.meta.url,
     ).pathname;
-    const program = await compileEngine.resolve(
-      new FileSystemProgramResolver(
-        sourcePath,
-        repoRoot,
-      ),
+    const program = await resolveLocalProgram(
+      (resolver) => compileEngine.resolve(resolver),
+      { main: sourcePath, root: repoRoot },
     );
     const { main } = await compileEngine.compileAndEvaluateModules(program);
     const pattern = main?.default as any;

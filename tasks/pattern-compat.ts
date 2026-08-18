@@ -24,7 +24,7 @@
  * forgives named `(pattern, baseline)` pairs and nothing else.
  */
 
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
 import {
   collectPatternFiles,
@@ -103,8 +103,9 @@ async function main() {
     const key = patternKey(file);
     const started = performance.now();
     try {
-      const program = await engine.resolve(
-        new FileSystemProgramResolver(`${cwd}/${file}`, cwd),
+      const program = await resolveLocalProgram(
+        (resolver) => engine.resolve(resolver),
+        { main: `${cwd}/${file}`, root: cwd },
       );
       // `noCheck`: cfcheck already type-checks this tree in its own job. Here
       // the compile exists only to reach the pattern object's schemas.

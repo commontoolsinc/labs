@@ -9,7 +9,7 @@ import { fromFileUrl } from "@std/path/from-file-url";
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import type { PatchOp } from "@commonfabric/memory/v2";
 
 import { Runtime } from "../src/runtime.ts";
@@ -472,11 +472,13 @@ Deno.test("memory v2 transactions elide transient nested patches from composed h
       "../../generated-patterns/integration/patterns/counter-nested-handler-composition.pattern.ts",
       import.meta.url,
     );
-    const programResolver = new FileSystemProgramResolver(
-      fromFileUrl(modulePath),
+    const program = await resolveLocalProgram(
+      (resolver) => runtime.harness.resolve(resolver),
+      {
+        main: fromFileUrl(modulePath),
+        mainExport: "counterWithNestedHandlerComposition",
+      },
     );
-    const program = await runtime.harness.resolve(programResolver);
-    program.mainExport = "counterWithNestedHandlerComposition";
     const patternFactory = await runtime.patternManager.compilePattern(program);
 
     const tx = runtime.edit();

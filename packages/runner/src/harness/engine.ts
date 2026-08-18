@@ -1923,10 +1923,15 @@ function bindDataFileReader(
     const bytes = dataByPath.get(path);
     if (bytes !== undefined) return bytes;
     const attached = [...dataByPath.keys()].sort();
+    // The message states what is attached and stops there. How a caller
+    // attaches one differs by the surface driving the compile — a CLI flag, a
+    // scenario field, an argument to `resolveLocalProgram` — and the runtime
+    // knows none of that, so naming any single mechanism would misdirect
+    // every caller reaching it by another route.
     throw new Error(
       `No attached data file "${path}". ` +
         (attached.length === 0
-          ? "This pattern has none; attach one with --datafile."
+          ? "This pattern has no attached data files."
           : `Attached: ${attached.join(", ")}.`),
     );
   };

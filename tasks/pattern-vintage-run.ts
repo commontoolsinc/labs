@@ -11,7 +11,7 @@
  */
 
 import { exists } from "@std/fs";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import type { Identity } from "@commonfabric/identity";
 import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
 import {
@@ -90,11 +90,8 @@ function patternsPrefix(roots: GateRoots): string {
   return `${roots.patternsRoot.slice(roots.repoRoot.length)}/`;
 }
 
-function resolver(roots: GateRoots, key: string) {
-  return new FileSystemProgramResolver(
-    `${roots.patternsRoot}/${key}`,
-    roots.repoRoot,
-  );
+function localProgramOptions(roots: GateRoots, key: string) {
+  return { main: `${roots.patternsRoot}/${key}`, root: roots.repoRoot };
 }
 
 /**
@@ -577,8 +574,9 @@ export async function replayVintage(
       const source = `${roots.patternsRoot}/${key}`;
       let program;
       try {
-        program = await runtimeVintage.runtime.harness.resolve(
-          new FileSystemProgramResolver(source, roots.repoRoot),
+        program = await resolveLocalProgram(
+          (r) => runtimeVintage.runtime.harness.resolve(r),
+          { main: source, root: roots.repoRoot },
         );
       } catch (error) {
         report.failures.push({
@@ -1078,8 +1076,9 @@ export async function captureVintage(
     // several. Deriving the name from one of them would have to pick a
     // privileged one, and there is no principled choice — a test that drives
     // two patterns equally has no primary.
-    const program = await vintage.runtime.harness.resolve(
-      resolver(roots, testKey),
+    const program = await resolveLocalProgram(
+      (r) => vintage.runtime.harness.resolve(r),
+      localProgramOptions(roots, testKey),
     );
     const pattern = await vintage.runtime.patternManager.compilePattern(
       program as never,

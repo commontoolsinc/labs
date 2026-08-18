@@ -42,7 +42,7 @@ import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   initializePiecesController,
   PieceController,
@@ -110,10 +110,9 @@ describe("record module chrome integration test", () => {
       apiUrl: new URL(API_URL),
       identity,
     });
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(
-        join(import.meta.dirname!, "..", "record.tsx"),
-      ),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: join(import.meta.dirname!, "..", "record.tsx") },
     );
     record = await cc.create(program, {
       input: { title: "Elizabeth Bennet", subPieces: [], trashedSubPieces: [] },
