@@ -1,0 +1,289 @@
+/**
+ * The repository type check, run per package. Each owning scope's paths are
+ * checked as their own `deno check` invocation, timed and recorded as that
+ * scope's `typecheck`-kind test, the way cfcheck already shards pattern
+ * type-checking; the invocations run concurrently and any failure fails
+ * the whole task. tasks/check.sh owns the Deno version gate and delegates
+ * here.
+ *
+ * This list is the single type-checking point for the paths it names: the
+ * CI test jobs and the package test tasks that cover these paths run
+ * `deno test --no-check` and rely on this task (via the Check job's
+ * "Type check codebase" step) for type safety. Before adding --no-check to
+ * a test invocation, make sure every file it loads is under a path listed
+ * here. Removing a path from this list removes its type checking entirely.
+ */
+
+import { expandGlob } from "@std/fs";
+import { FragmentWriter } from "@commonfabric/test-support/records";
+
+// Directory paths (no glob expansion needed).
+const DIRS = [
+  "packages/agents-host",
+  "packages/api",
+  "packages/background-piece-service",
+  "packages/cf-harness",
+  "packages/cli/commands",
+  "packages/cli/lib",
+  "packages/cli/support",
+  "packages/cli/test",
+  "packages/connectors/agents",
+  "packages/content-hash",
+  "packages/dashboard",
+  "packages/data-model",
+  "packages/deno-web-test",
+  "packages/felt",
+  "packages/fuse",
+  "packages/generated-patterns",
+  "packages/home-schemas",
+  "packages/html",
+  "packages/identity",
+  "packages/iframe-sandbox",
+  "packages/integration",
+  "packages/js-compiler",
+  "packages/leb128",
+  "packages/lib-shell",
+  "packages/llm",
+  "packages/memory",
+  "packages/patterns/auth",
+  "packages/patterns/battleship",
+  "packages/patterns/budget-tracker",
+  "packages/patterns/contacts",
+  "packages/patterns/examples",
+  "packages/patterns/gideon-tests",
+  "packages/patterns/google/core/integration",
+  "packages/patterns/google/core/util",
+  "packages/patterns/integration",
+  "packages/patterns/notes",
+  "packages/patterns/record",
+  "packages/patterns/scrabble",
+  "packages/patterns/system",
+  "packages/patterns/test",
+  "packages/patterns/tools",
+  "packages/patterns/weekly-calendar",
+  "packages/piece",
+  "packages/pure-json",
+  "packages/runner",
+  "packages/runtime-client",
+  "packages/schema-generator/src",
+  "packages/shell",
+  "packages/spec-model",
+  "packages/state-inspector",
+  "packages/static/scripts",
+  "packages/static/test",
+  "packages/test-support",
+  "packages/toolshed",
+  "packages/ts-transformers/src",
+  "packages/utils",
+];
+
+// Glob patterns, expanded the way the shell used to expand them.
+const GLOBS = [
+  "tasks/*.ts",
+  "scripts/*.ts",
+  "packages/cli/*.ts",
+  "packages/static/*.ts",
+  "packages/patterns/*.ts",
+  "packages/patterns/*.tsx",
+  "packages/ts-transformers/test/**/*.test.ts",
+  // schema-generator tests, excluding test/fixtures: the `*.input.ts`
+  // fixtures name ambient wrappers (Cell, Stream, Writable) without
+  // importing them, since the transformer supplies those, so they do not
+  // type-check on their own. The test-file suffix keeps them out.
+  "packages/schema-generator/test/**/*.test.ts",
+  // Google patterns (previously checked individually to avoid OOM, now
+  // included with the increased heap limit).
+  "packages/patterns/google/core/*.ts",
+  "packages/patterns/google/core/*.tsx",
+  "packages/patterns/google/core/experimental/*.ts",
+  "packages/patterns/google/core/experimental/*.tsx",
+  "packages/patterns/google/extractors/*.ts",
+  "packages/patterns/google/extractors/*.tsx",
+  "packages/patterns/google/WIP/*.ts",
+  "packages/patterns/google/WIP/*.tsx",
+];
+
+// The ui components entry replicates the shell pattern
+// `packages/ui/src/v2/components/*[!outliner]/*.ts*`: a component directory
+// is included unless its name ends with one of the characters of
+// "outliner". The character class reads as a name filter for the outliner
+// component but excludes every directory with one of those trailing
+// letters, and this port preserves that behavior exactly rather than
+// silently widening the checked set.
+const UI_COMPONENTS_DIR = "packages/ui/src/v2/components";
+const UI_EXCLUDED_TRAILING = new Set("outliner");
+
+async function uiComponentFiles(): Promise<string[]> {
+  const files: string[] = [];
+  let directories: Deno.DirEntry[] = [];
+  try {
+    directories = [];
+    for await (const entry of Deno.readDir(UI_COMPONENTS_DIR)) {
+      directories.push(entry);
+    }
+  } catch {
+    return files;
+  }
+  for (const entry of directories) {
+    if (!entry.isDirectory) continue;
+    const last = entry.name.at(-1);
+    if (last !== undefined && UI_EXCLUDED_TRAILING.has(last)) continue;
+    for await (
+      const file of Deno.readDir(`${UI_COMPONENTS_DIR}/${entry.name}`)
+    ) {
+      if (file.isFile && /\.tsx?$/.test(file.name)) {
+        files.push(`${UI_COMPONENTS_DIR}/${entry.name}/${file.name}`);
+      }
+    }
+  }
+  return files.sort();
+}
+
+/** The owning scope of a checked path: the workspace member's name. */
+export function scopeOfPath(checkPath: string): string {
+  const parts = checkPath.split("/");
+  if (parts[0] === "packages") {
+    if (parts[1] === "connectors") return "connectors/agents";
+    return parts[1] ?? "repo";
+  }
+  return parts[0] ?? "repo";
+}
+
+async function collectPathsByScope(): Promise<Map<string, string[]>> {
+  const paths: string[] = [...DIRS];
+  for (const pattern of GLOBS) {
+    for await (const entry of expandGlob(pattern, { includeDirs: false })) {
+      paths.push(
+        entry.path.startsWith(Deno.cwd())
+          ? entry.path.slice(Deno.cwd().length + 1)
+          : entry.path,
+      );
+    }
+  }
+  paths.push(...await uiComponentFiles());
+  const byScope = new Map<string, string[]>();
+  for (const checkPath of paths.sort()) {
+    const scope = scopeOfPath(checkPath);
+    const group = byScope.get(scope);
+    if (group === undefined) {
+      byScope.set(scope, [checkPath]);
+    } else {
+      group.push(checkPath);
+    }
+  }
+  return byScope;
+}
+
+interface GroupResult {
+  scope: string;
+  durationMs: number;
+  success: boolean;
+  output: string;
+}
+
+async function checkGroup(
+  scope: string,
+  paths: string[],
+  reload: boolean,
+): Promise<GroupResult> {
+  const startedAt = performance.now();
+  const args = ["check", ...(reload ? ["--reload"] : []), ...paths];
+  let success = false;
+  let output = "";
+  try {
+    const result = await new Deno.Command(Deno.execPath(), {
+      args,
+      env: { DENO_V8_FLAGS: "--max-old-space-size=8192" },
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    success = result.success;
+    output = new TextDecoder().decode(result.stdout) +
+      new TextDecoder().decode(result.stderr);
+  } catch (error) {
+    output = String(error);
+  }
+  return {
+    scope,
+    durationMs: performance.now() - startedAt,
+    success,
+    output,
+  };
+}
+
+export async function main(): Promise<void> {
+  const byScope = await collectPathsByScope();
+  if (Deno.args.includes("--list")) {
+    // Prints every checked path with its scope, for auditing what the
+    // groups cover.
+    for (const [scope, paths] of byScope) {
+      for (const checkPath of paths) {
+        console.log(`${scope}\t${checkPath}`);
+      }
+    }
+    return;
+  }
+  const total = [...byScope.values()].reduce(
+    (sum, group) => sum + group.length,
+    0,
+  );
+  if (total === 0) {
+    console.error("No files to check?! (Project is in an odd state.)");
+    Deno.exit(1);
+  }
+  const reload = (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "";
+  if (reload) {
+    console.log("Reloading Deno dependencies before checking...");
+  }
+  console.log(
+    `Type checking ${total} paths in ${byScope.size} package groups...`,
+  );
+
+  const recordsFragment = FragmentWriter.openForRun();
+  const scopes = [...byScope.keys()];
+  const results: GroupResult[] = [];
+  let next = 0;
+  // Capped: each worker is a deno check with an 8 GB heap ceiling, and a
+  // many-core workstation does not want eight of those at once.
+  const workerCount = Math.min(
+    4,
+    Math.max(2, Math.floor(navigator.hardwareConcurrency / 2)),
+    scopes.length,
+  );
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (next < scopes.length) {
+      const scope = scopes[next++]!;
+      const result = await checkGroup(scope, byScope.get(scope)!, reload);
+      results.push(result);
+      recordsFragment?.append({
+        line: "record",
+        test: { k: "typecheck", s: scope, n: "deno-check" },
+        outcome: result.success ? "pass" : "fail",
+        durationMs: Math.round(result.durationMs),
+      });
+      console.log(
+        `${result.success ? "ok" : "FAILED"}  ${scope} ` +
+          `(${(result.durationMs / 1000).toFixed(1)}s)`,
+      );
+    }
+  });
+  await Promise.all(workers);
+  recordsFragment?.close();
+
+  const failed = results.filter((result) => !result.success);
+  for (const result of failed) {
+    console.error(`\nType errors in ${result.scope}:`);
+    console.error(result.output.trimEnd());
+  }
+  if (failed.length > 0) {
+    console.error(
+      `\nType check failed in ${failed.length} of ${results.length} groups.`,
+    );
+    Deno.exit(1);
+  }
+  console.log("Type check complete.");
+}
+
+if (import.meta.main) {
+  await main();
+}

@@ -25,6 +25,7 @@
  */
 
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import { FragmentWriter } from "@commonfabric/test-support/records";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
 import {
   collectPatternFiles,
@@ -99,6 +100,12 @@ async function main() {
   // than by pattern count, so a cost regression is not visible from the total.
   const timingEnabled = Deno.env.get("PATTERN_COMPAT_TIMING") !== undefined;
   const timings: { key: string; ms: number }[] = [];
+  // One gate-kind record per pattern file in this shard, named
+  // "pattern-compat <key>", with the compile and check time and whether
+  // that file produced findings. Inert without CF_TEST_RECORDS_DIR.
+  const recordsFragment = FragmentWriter.openForRun();
+  const checkMsByKey = new Map<string, number>();
+  const failedKeys = new Set<string>();
   for (const file of files) {
     const key = patternKey(file);
     const started = performance.now();
@@ -182,8 +189,9 @@ async function main() {
     const baselines = await readBaselines(BASELINES_DIR, key);
     const checkStarted = performance.now();
     const allFindings = checkPattern(key, current, baselines);
+    checkMsByKey.set(key, performance.now() - checkStarted);
     if (timingEnabled) {
-      const ms = Math.round(performance.now() - checkStarted);
+      const ms = Math.round(checkMsByKey.get(key)!);
       // A slow check means a contract CHANGED and its proof is expensive — the
       // schema machinery blows up combinatorially on some shapes.
       if (ms > 200) console.log(`  check ${ms}ms  ${key}`);
@@ -215,16 +223,43 @@ async function main() {
       }
       // A recorded contract still has to survive the incompatibility check
       // below — `--update` adds evidence, it never clears a finding.
-      findings.push(
-        ...patternFindings.filter((f) => f.kind !== "missing-baseline"),
-      );
+      const kept = patternFindings.filter((f) => f.kind !== "missing-baseline");
+      if (kept.length > 0) failedKeys.add(key);
+      findings.push(...kept);
       continue;
     }
 
+    if (patternFindings.length > 0) failedKeys.add(key);
     findings.push(...patternFindings);
   }
 
   await runtime.dispose();
+
+  // The retirement findings of an unfiltered shard 1 concern patterns
+  // outside this shard's file set; they fail the run-level record, not a
+  // per-file one. Every file this shard processed gets its own record.
+  if (recordsFragment !== undefined) {
+    const compileMsByKey = new Map(
+      timings.map((timing) => [timing.key, timing.ms]),
+    );
+    const unexpectedKeys = new Set(
+      evaluationErrors
+        .filter((failure) => !UNEVALUABLE_PATTERNS.has(failure.pattern))
+        .map((failure) => failure.pattern),
+    );
+    for (const key of keys) {
+      const durationMs = (compileMsByKey.get(key) ?? 0) +
+        (checkMsByKey.get(key) ?? 0);
+      const failed = failedKeys.has(key) || unexpectedKeys.has(key);
+      recordsFragment.append({
+        line: "record",
+        test: { k: "gate", s: "repo", n: `pattern-compat ${key}` },
+        outcome: failed ? "fail" : "pass",
+        durationMs: Math.round(durationMs),
+      });
+    }
+    recordsFragment.close();
+  }
 
   if (recorded.length > 0) {
     console.log(`\nRecorded ${recorded.length} contract(s):`);

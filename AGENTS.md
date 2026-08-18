@@ -253,6 +253,8 @@ Each of these gates fails CI on its own, and none of them run as part of
   the caller attached
 - `deno task check-baselines-append-only` — a pattern baseline that was deleted
   rather than added to
+- `deno task check-test-aliases` — a test-identity alias line that was edited or
+  removed rather than appended, mapped an identity twice, or formed a cycle
 
 The detail behind each of these lives in `.claude/rules/`, one file per kind of
 file it governs. Claude Code loads the matching rule on its own when it reads a

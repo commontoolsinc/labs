@@ -1,0 +1,77 @@
+# Mints a personal test-records reporting key. Dispatching a workflow
+# takes write access to this repository, so the ability to trigger this is
+# the authorization check: team members mint for themselves, and the
+# username input lets a team member mint on someone's behalf when that is
+# ever wanted (the dispatch log records who minted for whom). The broker
+# identity this
+# workflow assumes is pinned to exactly this file on main (infra:
+# tofu/test-records). The key leaves here only sealed to the requester's
+# delivery recipient, published as a short-lived artifact named by the
+# recipient's fingerprint so the requester's tool finds its own delivery.
+
+name: Test Records Mint
+
+on:
+  workflow_dispatch:
+    inputs:
+      recipient:
+        description: >-
+          Delivery recipient (cfr1...) printed by
+          `deno task test-records-key request`
+        required: true
+      username:
+        description: >-
+          GitHub login to mint for; defaults to whoever dispatches
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  mint:
+    name: "Mint Reporting Key"
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+
+      - name: 🔑 Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: commontools-core
+          workload_identity_provider: ${{ vars.TEST_RECORDS_BROKER_WIF_PROVIDER }}
+          service_account: ${{ vars.TEST_RECORDS_BROKER_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
+      - name: 🔐 Mint and seal the key
+        id: mint
+        env:
+          TEST_RECORDS_GCP_TOKEN: ${{ steps.auth.outputs.access_token }}
+          TEST_RECORDS_BUCKET: ${{ vars.TEST_RECORDS_BUCKET }}
+          MINT_RECIPIENT: ${{ inputs.recipient }}
+          MINT_USERNAME: ${{ inputs.username }}
+          DISPATCHER: ${{ github.actor }}
+        run: |
+          username="${MINT_USERNAME:-$DISPATCHER}"
+          deno run --allow-read --allow-write --allow-env --allow-net \
+            tasks/test-records-mint.ts \
+            --recipient "$MINT_RECIPIENT" \
+            --username "$username" \
+            --out sealed-delivery
+
+      - name: 📤 Publish the sealed delivery
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-records-key-${{ steps.mint.outputs.fingerprint }}
+          path: sealed-delivery/
+          retention-days: 7
+          if-no-files-found: error

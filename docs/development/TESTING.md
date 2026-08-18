@@ -247,6 +247,10 @@ files, and why `deno task check-local-program` refuses a
 
 ## Related documentation
 
+- [test-records.md](test-records.md) — the record of every test execution:
+  every suite here reports one record per test to a public store, and that
+  document covers what gets recorded, opting a workstation in, and reading
+  the data.
 - [unit-test-coding-style.md](unit-test-coding-style.md) — how a unit test file
   is shaped: where it lives and what it is called, the single top-level
   `describe()` and the blocks nested under it, how an `it()` description is
