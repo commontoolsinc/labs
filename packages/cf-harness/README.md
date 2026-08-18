@@ -832,23 +832,13 @@ A link that resolves into a space other than the configured session space is
 refused with a structured error before anything is created, and an input whose
 value does not match the compiled pattern's argument schema for its key is
 refused the same way — named after the offending key, with no piece persisted.
-
-A result that settles to nothing is an error, not a success: when the settled
-result fails the declared `resultSchema` or holds no fields of its own beyond
-the framework keys, the tool consults what the session's runtime reported during
-that invocation's settle window and names the cause. An action error attributed
-to the created piece names the failing computation; a non-settling episode — the
-scheduler deferring actions past its convergence budget — names the other
-observed shape, which a reactive cycle, a non-idempotent computation, and a
-policy-refused commit all produce. The refusal reason itself has no channel yet
-(CT-2037), so the message names the shapes rather than claiming to know which
-one happened. What supplies the value does not change that question: a live cell
-is measured by what it currently holds, and a plain JSON value by itself. So is
-an input the pattern's argument schema does not declare at all, listing the
-names the pattern does declare: a misnamed input is the mismatch a shape check
-cannot see, since the pattern then runs with that argument undefined and renders
-a complete page holding no values. Only a pattern whose argument schema names
-its properties, and does not admit further ones, is measured that way — an
+What supplies the value does not change that question: a live cell is measured
+by what it currently holds, and a plain JSON value by itself. So is an input the
+pattern's argument schema does not declare at all, listing the names the pattern
+does declare: a misnamed input is the mismatch a shape check cannot see, since
+the pattern then runs with that argument undefined and renders a complete page
+holding no values. Only a pattern whose argument schema names its properties,
+and does not admit further ones, is measured that way — an
 `additionalProperties` that is `true`, or that is a schema describing what an
 undeclared key may hold, admits undeclared inputs by name. What such an input's
 value is measured against is whatever that `additionalProperties` states:
@@ -956,6 +946,18 @@ swap resolves such a token passed back through `inputs`; the tool itself carries
 no handle code. The persisted tool-output artifact keeps the raw reference, the
 raw result value, and the `pieceId` — a bare fabric identifier the handle
 boundary never swaps, so it stays out of the model-facing rendering.
+
+A result that settles to nothing names its cause when one was observed: when the
+settled result fails the declared `resultSchema` or holds no fields of its own
+beyond the framework keys, the tool consults what the session's runtime reported
+during that invocation's settle window. An action error attributed to the
+created piece names the failing computation; a convergence-budget episode whose
+deferred-action labels name this pattern's module identity names the other
+observed shape, which a reactive cycle, a non-idempotent computation, and a
+policy-refused commit all produce. The refusal reason itself has no channel yet
+(CT-2037), so the message names the shapes rather than claiming to know which
+one happened — and an empty result with no observed cause still reports ok,
+since silence is not evidence of failure.
 
 A registered run adds `registration` to that output: `{ slug }`, plus `url` when
 the harness can compose one honestly. The URL is the session's API URL, the
