@@ -119,6 +119,61 @@ export interface TopicsExport {
   manifest: { fid: string; patternIdentity: string; resultKeys: string[] }[];
 }
 
+/** The known link-valued argument fields a restore handles specially:
+ * `mentionable` is re-established with `cf piece link` after the write, and
+ * the deprecated `myName` stays retired. */
+export const STRUCTURAL_LINK_FIELDS = ["mentionable"] as const;
+export const LEGACY_LINK_FIELDS = ["myName"] as const;
+
+export interface RestoreDocument {
+  /** The complete input document a restore applies. */
+  doc: Record<string, unknown>;
+  /** Link fields present in the raw argument that the caller re-links. */
+  structural: string[];
+  /** Deprecated link fields present in the raw argument, left retired. */
+  legacy: string[];
+}
+
+/**
+ * The document a restore writes, built from the export's raw argument rather
+ * than from a fixed field list: `cf piece apply` replaces the whole document,
+ * so a field a list failed to name would be zeroed by the restore — a schema
+ * that has since grown a field must not lose it to an older script. Every
+ * plain-valued field is carried verbatim; the linked arrays take their
+ * resolved values; the known link fields are reported for the caller to
+ * handle; and an unrecognized link-valued field throws, because writing it as
+ * data would corrupt it and dropping it would destroy it.
+ */
+export function buildRestoreDocument(
+  rawArgument: Record<string, unknown>,
+  resolved: { comments: unknown[]; links: unknown[] },
+): RestoreDocument {
+  const doc: Record<string, unknown> = {};
+  const structural: string[] = [];
+  const legacy: string[] = [];
+  for (const [field, value] of Object.entries(rawArgument)) {
+    if (value === undefined) continue;
+    if ((LINKED_ARRAY_FIELDS as readonly string[]).includes(field)) {
+      doc[field] = resolved[field as (typeof LINKED_ARRAY_FIELDS)[number]];
+    } else if ((STRUCTURAL_LINK_FIELDS as readonly string[]).includes(field)) {
+      structural.push(field);
+    } else if ((LEGACY_LINK_FIELDS as readonly string[]).includes(field)) {
+      legacy.push(field);
+    } else {
+      const linkPath = findLink(value);
+      if (linkPath) {
+        throw new Error(
+          `${field} holds a link at ${linkPath} and this restore does not ` +
+            "understand it; writing it as data would corrupt it and " +
+            "dropping it would destroy it",
+        );
+      }
+      doc[field] = value;
+    }
+  }
+  return { doc, structural, legacy };
+}
+
 /** The path below any node where a `$link` marker appears, or null. Used to
  * refuse an export that would silently record a reference as content. */
 export function findLink(node: unknown, path = "$"): string | null {

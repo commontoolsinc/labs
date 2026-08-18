@@ -162,7 +162,18 @@ async function resolveElement(
   return resolved;
 }
 
+// Fields this tool classifies; anything else an argument document carries is
+// still exported raw and restored by `buildRestoreDocument`, and is worth a
+// line in the summary so a schema that grew is noticed at export time.
+const CLASSIFIED_FIELDS = new Set<string>([
+  ...SCALAR_CONTENT_FIELDS,
+  ...LINKED_ARRAY_FIELDS,
+  "myName",
+  "mentionable",
+]);
+
 const topics: TopicExportRow[] = [];
+const unclassified = new Set<string>();
 let commentTotal = 0;
 let linkTotal = 0;
 for (const info of topicInfos) {
@@ -187,6 +198,9 @@ for (const info of topicInfos) {
     }
     content[field] = resolved;
   }
+  for (const field of Object.keys(raw)) {
+    if (!CLASSIFIED_FIELDS.has(field)) unclassified.add(field);
+  }
   commentTotal += content.comments.length;
   linkTotal += content.links.length;
   topics.push({
@@ -210,7 +224,7 @@ if (boardInfos.length === 1) {
   };
 }
 
-const export_: TopicsExport = {
+const topicsExport: TopicsExport = {
   version: 1,
   exportedAt: new Date().toISOString(),
   snapshot,
@@ -224,7 +238,10 @@ const export_: TopicsExport = {
   })),
 };
 
-await Deno.writeTextFile(outPath, JSON.stringify(export_, null, 2) + "\n");
+await Deno.writeTextFile(
+  outPath,
+  JSON.stringify(topicsExport, null, 2) + "\n",
+);
 
 const identities = [...new Set(topicInfos.map((t) => t.pattern?.identity))];
 console.log(`wrote ${outPath}`);
@@ -232,6 +249,12 @@ console.log(
   `topics: ${topics.length}  comments: ${commentTotal}  links: ${linkTotal}`,
 );
 console.log(`topic pattern identities: ${identities.join(", ")}`);
+if (unclassified.size > 0) {
+  console.log(
+    `note: unclassified authored fields, carried raw and restored ` +
+      `verbatim: ${[...unclassified].sort().join(", ")}`,
+  );
+}
 if (board) {
   console.log(
     `board: ${board.fid} (${board.patternIdentity}), ` +

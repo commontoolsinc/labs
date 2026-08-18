@@ -270,7 +270,14 @@ cleanly.
 A restore mechanism that has never been exercised is not a mechanism, so each
 rehearsal pass ends by proving it: deliberately clobber one topic on the
 clone, restore it from the baseline export, and re-run the authored-content
-check.
+check. The whole loop also exists as one self-contained command against any
+toolshed — it deploys its own board into a fresh space, so it needs nothing
+from the pass it runs beside:
+
+```bash
+API_URL=http://localhost:8010 CF_DRILL_STORE_DIR=<the server's MEMORY_DIR> \
+  packages/cli/integration/topics-restore-drill.sh
+```
 
 ```bash
 # Damage one topic the worst way a bad migration would.

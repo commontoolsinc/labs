@@ -1,6 +1,14 @@
+/** Unit coverage for the pure halves of the Topics export/restore pair; the
+ * live halves are exercised by the rehearsal drill
+ * (`packages/cli/integration/topics-restore-drill.sh`). */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { deepEqual, findLink, normalizeFid } from "./topics-rehearsal-lib.ts";
+import {
+  buildRestoreDocument,
+  deepEqual,
+  findLink,
+  normalizeFid,
+} from "./topics-rehearsal-lib.ts";
 
 describe("topics-rehearsal-lib", () => {
   describe("findLink", () => {
@@ -42,6 +50,47 @@ describe("topics-rehearsal-lib", () => {
     it("returns true for equal arrays of records", () => {
       const comments = [{ body: "x", sentAt: 5 }, { body: "y", sentAt: 6 }];
       expect(deepEqual(comments, structuredClone(comments))).toBe(true);
+    });
+  });
+
+  describe("buildRestoreDocument", () => {
+    const link = { $link: { id: "of:fid1:board" } };
+    const resolved = {
+      comments: [{ body: "c", sentAt: 1 }],
+      links: [{ url: "https://x", addedAt: 2 }],
+    };
+
+    it("carries a plain field no list names, so a grown schema survives", () => {
+      const { doc } = buildRestoreDocument(
+        { title: "t", titleUpdatedAt: 5, mentionable: link },
+        resolved,
+      );
+      expect(doc.titleUpdatedAt).toBe(5);
+    });
+
+    it("substitutes resolved values for the linked arrays", () => {
+      const { doc } = buildRestoreDocument(
+        { comments: [link], links: [link] },
+        resolved,
+      );
+      expect(doc.comments).toEqual(resolved.comments);
+      expect(doc.links).toEqual(resolved.links);
+    });
+
+    it("routes known link fields aside instead of into the document", () => {
+      const { doc, structural, legacy } = buildRestoreDocument(
+        { title: "t", mentionable: link, myName: link },
+        resolved,
+      );
+      expect(structural).toEqual(["mentionable"]);
+      expect(legacy).toEqual(["myName"]);
+      expect(doc.mentionable).toBeUndefined();
+      expect(doc.myName).toBeUndefined();
+    });
+
+    it("throws on a link-valued field it does not understand", () => {
+      expect(() => buildRestoreDocument({ attachments: [link] }, resolved))
+        .toThrow("attachments");
     });
   });
 

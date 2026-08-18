@@ -22,16 +22,21 @@
  * and refuse it — the input side judges the stored `mentionable` link
  * against its declared array type unresolved, and the result side demands
  * session-scoped fields no other session can see. So the script applies the
- * complete content in one call, then re-establishes the board link that a
- * document write cannot carry (`$link` values are refused by the same
- * validation), using `cf piece link` on the board recorded in the export.
+ * complete document in one call — built from the export's RAW argument, so
+ * a plain authored field no field list here names still rides the restore —
+ * then re-establishes the board link that a document write cannot carry
+ * (`$link` values are refused by the same validation), using
+ * `cf piece link` on the board recorded in the export.
  *
- * Two honest costs. Comment and link elements are re-written as plain
+ * Three honest costs. Comment and link elements are re-written as plain
  * values, so their element entities are minted fresh: content, order,
  * timestamps, and attribution are exact, but a stored reference to an
- * individual old element is not preserved. And the deprecated `myName`
- * legacy link is not restored — it exists only as the pre-agentName
- * attribution fallback.
+ * individual old element is not preserved. The re-established `mentionable`
+ * targets the board's result `topics` where the original targeted its
+ * argument document — aliases of one another (#5632), so a before/after
+ * diff of the stored link differs while resolution does not. And the
+ * deprecated `myName` legacy link is not restored — it exists only as the
+ * pre-agentName attribution fallback.
  *
  * The target's deployed pattern identity must match the export row's;
  * --allow-identity-mismatch overrides, which a restore after a deliberate
@@ -39,17 +44,14 @@
  */
 
 import {
+  buildRestoreDocument,
   cf,
   cfApply,
   cfJson,
   deepEqual,
-  LINKED_ARRAY_FIELDS,
   normalizeFid,
-  SCALAR_CONTENT_FIELDS,
   type TopicsExport,
 } from "./topics-rehearsal-lib.ts";
-
-const CONTENT_FIELDS = [...SCALAR_CONTENT_FIELDS, ...LINKED_ARRAY_FIELDS];
 
 function usage(): never {
   console.error(
@@ -134,19 +136,17 @@ async function liveValue(field: string): Promise<unknown> {
   }
 }
 
-const restoreDoc: Record<string, unknown> = {};
+const { doc: restoreDoc, structural, legacy } = buildRestoreDocument(
+  (row.rawArgument ?? {}) as Record<string, unknown>,
+  row.content,
+);
 const differing: string[] = [];
-for (const field of CONTENT_FIELDS) {
-  const wanted = (row.content as Record<string, unknown>)[field];
-  if (wanted === undefined) continue;
-  restoreDoc[field] = wanted;
+for (const [field, wanted] of Object.entries(restoreDoc)) {
   if (!deepEqual(await liveValue(field), wanted)) differing.push(field);
 }
 
-const rawMentionable = (row.rawArgument as Record<string, unknown> | undefined)
-  ?.mentionable;
 const boardFid = export_.board?.fid;
-const wantsMentionable = rawMentionable !== undefined;
+const wantsMentionable = structural.includes("mentionable");
 const liveMentionable = await cfJson<unknown>([
   "get",
   "-q",
@@ -219,8 +219,8 @@ if (wantsMentionable) {
     console.log("mentionable: board link present");
   }
 }
-if ((row.rawArgument as Record<string, unknown> | undefined)?.myName) {
-  console.log("myName: not restored (deprecated legacy link)");
+for (const field of legacy) {
+  console.log(`${field}: not restored (deprecated legacy link)`);
 }
 
 console.log(`restored ${Object.keys(restoreDoc).length} field(s)`);
