@@ -595,7 +595,11 @@ export class SpaceServer implements TransactionSealDestination {
     });
     this.#outbox = outbox;
     runtime.asyncWorkObserver = (work) => outbox.observeAsyncWork(work);
-    runtime.effectMemoObserver = () => {
+    runtime.effectMemoObserver = (event) => {
+      if (event.kind === "superseded") {
+        this.#options.stats.outbox.superseded += 1;
+        return;
+      }
       this.#options.stats.memo.hits += 1;
     };
     // Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start

@@ -25,7 +25,15 @@
 //   clears, NO re-fire across further waves (input-driven retry, never a
 //   timer: the T14 posture), and a fixed program recovers;
 // - counters: misses/queued/completed and hits live; and the P7 symptom's
-//   own counter — `unstampedSealRefusals` — stays ZERO throughout.
+//   own counter — `unstampedSealRefusals` — stays ZERO throughout;
+// - SUPERSESSION (the independent review's MAJOR-A): A→B→A within A's
+//   compile duration — the re-issued A attaches to A's in-flight effect,
+//   whose completion must LAND (never return on a stale abort); and a
+//   completion that finds itself superseded writes nothing, releases its
+//   key, and is counted (`outbox.superseded`);
+// - FAN-OUT at cardinality 2 (the review's MAJOR-B): a NARROWED node
+//   (a per-user program) — one real compile, one effect completion + one
+//   instantiation per demanded instance, both instances land.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -44,6 +52,7 @@ const spaceSigner = await Identity.fromPassphrase("compile and run space");
 const space = spaceSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("compile and run service");
 const aliceSigner = await Identity.fromPassphrase("compile and run alice");
+const bobSigner = await Identity.fromPassphrase("compile and run bob");
 
 const waitUntil = async (
   predicate: () => boolean,
@@ -75,6 +84,29 @@ const PARENT_PATTERN = [
   ");",
 ].join("\n");
 
+/** A parent whose compile-and-run node NARROWS to user (the review's
+ * MAJOR-B shape — the per-user code editor): the PROGRAM is the
+ * demander's PerUser draft, so the node reads a user-scoped value, its
+ * cells are per-instance, and it fans out once per demander. Two
+ * demanders holding the SAME program text share ONE compile (the process
+ * content cache) while each owns its effect completion + instantiation.
+ * (A per-user cell passed as the child's `input` does NOT narrow the
+ * node: the builtin hands the child a cell HANDLE, never reading the
+ * per-user value itself.) */
+const PER_USER_PROGRAM_PARENT = [
+  "import { compileAndRun, Default, pattern, PerUser, Writable } from 'commonfabric';",
+  "type Draft = Writable<string | Default<''>>;",
+  "export default pattern<{ code?: PerUser<Draft> }, { compiled: any }>(",
+  "  ({ code }) => {",
+  "    const compiled = compileAndRun({",
+  "      files: [{ name: '/main.tsx', contents: code! }],",
+  "      main: '/main.tsx',",
+  "    });",
+  "    return { compiled };",
+  "  },",
+  ");",
+].join("\n");
+
 const childProgram = (answer: number) =>
   [
     "import { pattern } from 'commonfabric';",
@@ -99,50 +131,78 @@ describe("stage C (OW28): compile-and-run served as an outbox effect", () => {
   let clientRuntime: Runtime;
   /** Compiles the SERVING runtime performed, per program main-file
    * contents (a counting wrapper over the real compile — never a stub:
-   * the child must really instantiate). */
+   * the child must really instantiate). Counts `compileOrGetPattern`
+   * CALLS — a content-cache hit counts too. */
   let servingCompiles: string[];
+  /** REAL compiles on the serving side (`compilePattern` — reached only
+   * on a genuine content-cache miss), per program main-file contents:
+   * the "exactly one compile per program per process" witness. */
+  let servingRealCompiles: string[];
   /** Compiles the CLIENT runtime's builtin path performed: must stay
    * empty (the client reads through, speculation.md §2). */
   let clientCompiles: string[];
   let created: Cell<any>[];
   /** Serving-runtime creations, in order (activation #1, #2, ...). */
   let servingRuntimes: Runtime[];
-  /** A HOLD on the serving side's compile (the mid-compile-park journey):
-   * when set, the serving runtime whose activation index matches holds
-   * its compile of the matching program on a promise the test never
-   * releases — the process-death stand-in (a real park disposes the
-   * runtime and its outbox work with it). */
+  /** Extra client runtimes (a second demander), disposed after each. */
+  let extraClients: Array<
+    { runtime: Runtime; manager: EmulatedStorageManager }
+  >;
+  /** A HOLD on the serving side's compile: when set, the serving runtime
+   * whose activation index matches holds its compile of the matching
+   * program. Without `release` the hold is forever — the process-death
+   * stand-in of the mid-compile-park journey (a real park disposes the
+   * runtime and its outbox work with it). With `release`, the compile
+   * RESUMES (the real compile runs) once that promise resolves — the
+   * supersession journeys, where the effect outlives its request. */
   let holdCompile:
-    | { activation: number; contents: string; held: () => void }
+    | {
+      activation: number;
+      contents: string;
+      held: () => void;
+      release?: Promise<void>;
+    }
     | undefined;
 
   const countCompiles = (
     runtime: Runtime,
     into: string[],
     activation: number,
+    realInto?: string[],
   ) => {
     const manager = runtime.patternManager as unknown as {
       compileOrGetPattern: (
         input: unknown,
         space?: MemorySpace,
       ) => Promise<unknown>;
+      compilePattern: (input: unknown, options?: unknown) => Promise<unknown>;
+    };
+    const contentsOf = (input: unknown) => {
+      const program = input as { files?: Array<{ contents?: string }> };
+      return program.files?.[0]?.contents ?? String(input);
     };
     const real = manager.compileOrGetPattern.bind(manager);
     manager.compileOrGetPattern = (input, targetSpace) => {
-      const program = input as {
-        files?: Array<{ contents?: string }>;
-      };
-      const contents = program.files?.[0]?.contents ?? String(input);
+      const contents = contentsOf(input);
       into.push(contents);
       if (
         holdCompile !== undefined && holdCompile.activation === activation &&
         holdCompile.contents === contents
       ) {
         holdCompile.held();
-        return new Promise<never>(() => {});
+        const release = holdCompile.release;
+        if (release === undefined) return new Promise<never>(() => {});
+        return release.then(() => real(input, targetSpace));
       }
       return real(input, targetSpace);
     };
+    if (realInto !== undefined) {
+      const realCompile = manager.compilePattern.bind(manager);
+      manager.compilePattern = (input, options) => {
+        realInto.push(contentsOf(input));
+        return realCompile(input, options);
+      };
+    }
   };
 
   const newHost = (
@@ -166,7 +226,12 @@ describe("stage C (OW28): compile-and-run served as an outbox effect", () => {
           },
         });
         servingRuntimes.push(runtime);
-        countCompiles(runtime, servingCompiles, servingRuntimes.length);
+        countCompiles(
+          runtime,
+          servingCompiles,
+          servingRuntimes.length,
+          servingRealCompiles,
+        );
         return {
           runtime,
           dispose: async () => {
@@ -181,9 +246,11 @@ describe("stage C (OW28): compile-and-run served as an outbox effect", () => {
   beforeEach(() => {
     server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
     servingCompiles = [];
+    servingRealCompiles = [];
     clientCompiles = [];
     created = [];
     servingRuntimes = [];
+    extraClients = [];
     holdCompile = undefined;
   });
 
@@ -192,6 +259,10 @@ describe("stage C (OW28): compile-and-run served as an outbox effect", () => {
     host = undefined;
     await clientRuntime?.dispose();
     await clientManager?.close();
+    for (const extra of extraClients) {
+      await extra.runtime.dispose();
+      await extra.manager.close();
+    }
     await server.close();
   });
 
@@ -212,6 +283,21 @@ describe("stage C (OW28): compile-and-run served as an outbox effect", () => {
     // The client is never a serving activation (activation 0 matches no
     // hold): its compiles are only counted — and must stay at the parent's.
     countCompiles(clientRuntime, clientCompiles, 0);
+  };
+
+  /** A SECOND demander (fan-out cardinality 2): its own session, a plain
+   * flag-ON client, no piece-creation hook; its compiles count with the
+   * client's (and must stay at zero for the child). */
+  const openSecondClient = (signer: Identity): Runtime => {
+    const manager = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+      experimental: { serverExecution: true },
+    });
+    countCompiles(runtime, clientCompiles, 0);
+    extraClients.push({ runtime, manager });
+    return runtime;
   };
 
   const compilesOf = (into: string[], contents: string) =>
@@ -559,5 +645,361 @@ describe("stage C (OW28): compile-and-run served as an outbox effect", () => {
     expect(compilesOf(clientCompiles, childProgram(5))).toBe(0);
     expect(host.stats().unstampedSealRefusals).toBe(0);
     cancelDemand();
+  });
+
+  /** Stand a piece up from the client with `code`, demanded by the
+   * client's root watch; returns the views the steps below poll. */
+  const standUpPiece = async (options: {
+    names: { arg: string; result: string };
+    code: string;
+    parentPattern?: string;
+    /** The parent's `code` is a PerUser cell (PER_USER_PROGRAM_PARENT):
+     * write it THROUGH the argument schema, into the writer's instance. */
+    perUserCode?: boolean;
+  }) => {
+    const parent = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: options.parentPattern ?? PARENT_PATTERN,
+      }],
+    }, { space });
+    const argument = clientRuntime.getCell<{ code: string }>(
+      space,
+      options.names.arg,
+      options.perUserCode ? parent.argumentSchema : undefined,
+    );
+    const result = clientRuntime.getCell<{ compiled: CompiledView }>(
+      space,
+      options.names.result,
+      parent.resultSchema,
+    );
+    await argument.sync();
+    await result.sync();
+    const writeCode = async (runtime: Runtime, code: string) => {
+      const arg = runtime === clientRuntime ? argument : runtime.getCell<
+        { code: string }
+      >(
+        space,
+        options.names.arg,
+        options.perUserCode ? parent.argumentSchema : undefined,
+      );
+      if (runtime !== clientRuntime) await arg.sync();
+      const tx = runtime.edit();
+      if (options.perUserCode) {
+        arg.key("code").withTx(tx).set(code);
+      } else {
+        arg.withTx(tx).set({ code });
+      }
+      expect((await tx.commit()).error).toBeUndefined();
+    };
+    await writeCode(clientRuntime, options.code);
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, parent, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    const compiled = () => result.key("compiled");
+    const answerOf = () =>
+      compiled().key("result").key("answer").get() as unknown as
+        | number
+        | undefined;
+    const pendingOf = () => compiled().key("pending").get();
+    const setCode = (code: string) => writeCode(clientRuntime, code);
+    const view = () =>
+      `pending=${pendingOf()}, answer=${answerOf()}, error=${
+        JSON.stringify(compiled().key("error").get())
+      }`;
+    return {
+      parent,
+      argument,
+      result,
+      compiled,
+      answerOf,
+      pendingOf,
+      setCode,
+      writeCode,
+      view,
+      cancelDemand,
+    };
+  };
+
+  it("SUPERSESSION (the independent review's MAJOR-A, probe P6): A→B→A within A's compile duration — the re-issued A attaches to A's still-in-flight effect (same key), so A's completion must LAND (its hash is current again at writeback), never return on a stale abort; pending clears and the child serves", async () => {
+    host = newHost();
+    openClient();
+    const A = childProgram(11);
+    const B = childProgram(12);
+    // Activation #1 holds A's compile until the test releases it — A's
+    // effect outlives two more requests (B, then A again).
+    let heldOnce = false;
+    const releaseA = Promise.withResolvers<void>();
+    holdCompile = {
+      activation: 1,
+      contents: A,
+      held: () => {
+        heldOnce = true;
+      },
+      release: releaseA.promise,
+    };
+    const piece = await standUpPiece({
+      names: { arg: "supersede-arg", result: "supersede-result" },
+      code: A,
+    });
+    // A is issued and its compile is entered (held).
+    await waitUntil(
+      () => heldOnce && piece.pendingOf() === true,
+      () => `A's issue + held compile (${piece.view()})`,
+    );
+    expect(host.stats().memo.inflight).toBe(1);
+
+    // B supersedes A: a NEW key — B's own effect compiles and LANDS while
+    // A's compile is still held (A's abort signal fires here at issue).
+    await piece.setCode(B);
+    await waitUntil(
+      () => piece.pendingOf() === false && piece.answerOf() === 12,
+      () => `B to land while A is held (${piece.view()})`,
+    );
+    expect(compilesOf(servingCompiles, B)).toBe(1);
+    // B's effect retired; only A's held effect is in flight.
+    await waitUntil(
+      () => host!.stats().memo.inflight === 1,
+      () => `B's effect to retire (inflight=${host!.stats().memo.inflight})`,
+    );
+    const queuedBeforeReissue = host.stats().outbox.queued;
+
+    // A AGAIN, within A's compile duration: the re-issue carries A's key,
+    // and the outbox's in-flight dedupe ATTACHES it to the held effect —
+    // no second admission, no second compile. The client observes the
+    // re-issue (pending=true) only after the wave that enqueued it
+    // committed and its effects were admitted (the wave cycle admits
+    // BEFORE reporting the commit for push), so the attach has happened
+    // by the time this wait returns.
+    await piece.setCode(A);
+    await waitUntil(
+      () => piece.pendingOf() === true && piece.answerOf() === undefined,
+      () => `A's re-issue to be observed (${piece.view()})`,
+    );
+    expect(host.stats().outbox.queued).toBe(queuedBeforeReissue);
+    expect(host.stats().memo.inflight).toBe(1);
+    expect(compilesOf(servingCompiles, A)).toBe(1);
+
+    // Release A's compile: the completion re-reads the CURRENT request
+    // (A again) and lands its re-arm; the derivation instantiates A. At
+    // eb6d1e4bb the completion returned on `signal.aborted` (aborted at
+    // B's issue) and wrote nothing — pending=true forever, no counter
+    // naming it (the wedge).
+    releaseA.resolve();
+    await waitUntil(
+      () => piece.pendingOf() === false && piece.answerOf() === 11,
+      () => `A to land after the release (${piece.view()})`,
+    );
+    expect(piece.compiled().key("error").get()).toBeUndefined();
+    // Exactly one compile of A ever ran (the re-issue attached, never
+    // compiled); the client compiled nothing; every effect retired; no
+    // completion was superseded (A was current again at its writeback).
+    expect(compilesOf(servingCompiles, A)).toBe(1);
+    expect(compilesOf(clientCompiles, A)).toBe(0);
+    expect(compilesOf(clientCompiles, B)).toBe(0);
+    await waitUntil(
+      () => host!.stats().memo.inflight === 0,
+      () => `every effect to retire (inflight=${host!.stats().memo.inflight})`,
+    );
+    const stats = host.stats();
+    expect(stats.outbox.queued).toBe(queuedBeforeReissue);
+    expect(stats.outbox.completed).toBe(queuedBeforeReissue);
+    expect(stats.outbox.failed).toBe(0);
+    expect(stats.outbox.superseded).toBe(0);
+    expect(stats.unstampedSealRefusals).toBe(0);
+    piece.cancelDemand();
+  });
+
+  it("SUPERSEDED COMPLETION: an effect whose request was superseded by the time it completes writes NOTHING (the landed successor stands, no wipe), RELEASES its key, and is COUNTED (`outbox.superseded`); the superseded program re-requested later lands from the warm process cache (its compile did run) with no new effect", async () => {
+    host = newHost();
+    openClient();
+    const A = childProgram(31);
+    const B = childProgram(32);
+    let heldOnce = false;
+    const releaseA = Promise.withResolvers<void>();
+    holdCompile = {
+      activation: 1,
+      contents: A,
+      held: () => {
+        heldOnce = true;
+      },
+      release: releaseA.promise,
+    };
+    const piece = await standUpPiece({
+      names: { arg: "superseded-arg", result: "superseded-result" },
+      code: A,
+    });
+    await waitUntil(
+      () => heldOnce && piece.pendingOf() === true,
+      () => `A's issue + held compile (${piece.view()})`,
+    );
+    // B supersedes A and lands.
+    await piece.setCode(B);
+    await waitUntil(
+      () => piece.pendingOf() === false && piece.answerOf() === 32,
+      () => `B to land while A is held (${piece.view()})`,
+    );
+    await waitUntil(
+      () => host!.stats().memo.inflight === 1,
+      () => `B's effect to retire (inflight=${host!.stats().memo.inflight})`,
+    );
+    expect(host.stats().outbox.superseded).toBe(0);
+
+    // A's compile completes AFTER B landed: its completion re-reads the
+    // current request (B), writes nothing — B's landed child is NOT
+    // wiped, its resolution stands — and the effect retires (its key
+    // released), counted as superseded.
+    releaseA.resolve();
+    await waitUntil(
+      () => host!.stats().outbox.superseded === 1,
+      () =>
+        `the superseded completion to be counted (superseded=${
+          host!.stats().outbox.superseded
+        })`,
+    );
+    await waitUntil(
+      () => host!.stats().memo.inflight === 0,
+      () => `A's effect to retire (inflight=${host!.stats().memo.inflight})`,
+    );
+    expect(piece.pendingOf()).toBe(false);
+    expect(piece.answerOf()).toBe(32);
+    expect(host.stats().outbox.failed).toBe(0);
+
+    // A requested again: the superseded effect DID compile A into the
+    // process cache before it found itself superseded, so this run
+    // instantiates straight from the warm cache — no new effect, no
+    // second compile — and lands. (Had A's key still been held by a
+    // wedged effect, a re-issue would have attached to it and never
+    // landed; the released key is what `memo.inflight === 0` witnessed.)
+    const queuedBefore = host.stats().outbox.queued;
+    await piece.setCode(A);
+    await waitUntil(
+      () => piece.pendingOf() === false && piece.answerOf() === 31,
+      () => `A to land on re-request (${piece.view()})`,
+    );
+    expect(host.stats().outbox.queued).toBe(queuedBefore);
+    expect(compilesOf(servingRealCompiles, A)).toBe(1);
+    expect(compilesOf(servingRealCompiles, B)).toBe(1);
+    expect(compilesOf(clientCompiles, A)).toBe(0);
+    expect(host.stats().unstampedSealRefusals).toBe(0);
+    piece.cancelDemand();
+  });
+
+  it("FAN-OUT cardinality 2 (the independent review's MAJOR-B): two demanders of a NARROWED compile-and-run node (a per-user program, the same text for both) — ONE real compile per program per process (content-cached), ONE effect completion + ONE instantiation PER DEMANDED INSTANCE: both instances land pending=false with the child; the effect key and the completion carry the instance, so the second demander's effect never dedupes against the first's and each completion lands on its own instance", async () => {
+    host = newHost();
+    openClient();
+    const bob = openSecondClient(bobSigner);
+    const A = childProgram(21);
+    // Activation #1 HOLDS the compile of A (releasable): both demanders'
+    // instances issue while the first effect is still in flight — the
+    // shape that wedged at eb6d1e4bb (the second issue aborted the first
+    // effect's signal at issue and deduped against its key).
+    let holds = 0;
+    const releaseA = Promise.withResolvers<void>();
+    holdCompile = {
+      activation: 1,
+      contents: A,
+      held: () => {
+        holds++;
+      },
+      release: releaseA.promise,
+    };
+    const piece = await standUpPiece({
+      names: { arg: "fanout-arg", result: "fanout-result" },
+      code: A,
+      parentPattern: PER_USER_PROGRAM_PARENT,
+      perUserCode: true,
+    });
+    // Alice's instance issues its effect (held).
+    await waitUntil(
+      () => holds >= 1 && piece.pendingOf() === true,
+      () => `alice's instance to issue (holds=${holds}, ${piece.view()})`,
+    );
+    expect(host.stats().outbox.queued).toBe(1);
+
+    // Bob's demand: the same space-scoped root watch every client holds —
+    // and his OWN per-user program (the same text as Alice's).
+    await piece.writeCode(bob, A);
+    const bobResult = bob.getCell<{ compiled: CompiledView }>(
+      space,
+      "fanout-result",
+      piece.parent.resultSchema,
+    );
+    await bobResult.sync();
+    const cancelBob = bobResult.sink(() => {});
+    await bob.idle();
+    await bob.storageManager.synced();
+    const resultId = piece.result.getAsNormalizedFullLink().id;
+    await waitUntil(
+      () => {
+        const demanded = host!.spaceServer(space)?.demandedIdentitiesOf(
+          resultId,
+        ) ?? [];
+        return [aliceSigner, bobSigner].every((signer) =>
+          demanded.some((i) => i.principal === signer.did())
+        );
+      },
+      () =>
+        "the registry to carry both root watchers (has " +
+        JSON.stringify(
+          host!.spaceServer(space)?.demandedIdentitiesOf(resultId),
+        ) +
+        ")",
+    );
+    const bobCompiled = () => bobResult.key("compiled");
+    const bobAnswer = () =>
+      bobCompiled().key("result").key("answer").get() as unknown as
+        | number
+        | undefined;
+    const bobPending = () => bobCompiled().key("pending").get();
+    const bobView = () => `pending=${bobPending()}, answer=${bobAnswer()}`;
+
+    // Bob's instance issues ITS OWN effect (the key carries the instance)
+    // while alice's is held: TWO admissions, two holds — never an attach.
+    // At eb6d1e4bb the second issue shared the first's key and attached
+    // to it (queued stayed 1) after aborting the first's signal.
+    await waitUntil(
+      () =>
+        host!.stats().outbox.queued === 2 && holds >= 2 &&
+        bobPending() === true,
+      () =>
+        `bob's instance to issue its own effect (queued=${
+          host!.stats().outbox.queued
+        }, holds=${holds}, bob: ${bobView()})`,
+    );
+
+    // Release: ONE real compile (the two effects single-flight on the
+    // content cache), TWO completions — each stamped with its instance —
+    // and BOTH instances land: each demander's client, reading ITS
+    // instance through the user-scoped links, sees pending=false and the
+    // child's value.
+    releaseA.resolve();
+    await waitUntil(
+      () =>
+        piece.pendingOf() === false && piece.answerOf() === 21 &&
+        bobPending() === false && bobAnswer() === 21,
+      () =>
+        `both instances to land (alice: ${piece.view()}; bob: ${bobView()})`,
+    );
+    expect(compilesOf(servingRealCompiles, A)).toBe(1);
+    expect(compilesOf(clientCompiles, A)).toBe(0);
+    await waitUntil(
+      () => host!.stats().memo.inflight === 0,
+      () => `every effect to retire (inflight=${host!.stats().memo.inflight})`,
+    );
+    const stats = host.stats();
+    expect(stats.outbox.queued).toBe(2);
+    expect(stats.outbox.completed).toBe(2);
+    expect(stats.outbox.failed).toBe(0);
+    expect(stats.outbox.superseded).toBe(0);
+    expect(stats.unstampedSealRefusals).toBe(0);
+    cancelBob();
+    piece.cancelDemand();
   });
 });

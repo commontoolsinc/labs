@@ -965,15 +965,24 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   index shows the consumers stale against the result doc's head (§6).
 - **In-flight dedupe**: one outstanding effect per (key, result
   target) per space; a second miss on the same (key, target)
-  attaches to the in-flight effect. Two DISTINCT result targets
+  attaches to the in-flight effect — an effect whose completion
+  WILL LAND for that target: a superseded in-flight effect either
+  completes for a re-issued same-hash request (its hash is current
+  again at writeback) or releases its key (writes nothing, retires,
+  counted `outbox.superseded` — §7); it never returns silently on a
+  stale abort, because the attached re-issue has no other completion
+  (the stage-C supersession wedge, OW28). A completion must not
+  overwrite a landed resolution. Two DISTINCT result targets
   carrying byte-identical inputs are two distinct requests, and
   each egresses (RULED 2026-08-13; the earlier per-key-only
   wording promised a cross-target sharing that §4's own miss
   rule — exactly one result-cell address per entry — could not
-  deliver). A response-sharing layer (one egress fanned to N
-  per-target writebacks, restricted to idempotent-marked
-  effects) remains a possible future optimization, not an owed
-  item.
+  deliver); the target's identity includes its scope INSTANCE where
+  the builtin supplies it (scopes.md §6; compile-and-run today, the
+  family owed — verification-coverage.md OW28-instance-family). A
+  response-sharing layer (one egress fanned to N per-target
+  writebacks, restricted to idempotent-marked effects) remains a
+  possible future optimization, not an owed item.
 - Failures commit an error-shaped result (the existing builtin error cell
   conventions) with the key, so retries are input-driven (inputs change →
   new key), never timer-driven loops.
@@ -1120,7 +1129,7 @@ unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
 watermarkLag, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed,
-budgetDeferrals}, lease:
+budgetDeferrals, superseded}, lease:
 {held, lost}, push: {prioritizedSessions, followerSessions,
 mixedFlushes} }` (`structureLoadFailures`/`structureLoadDeferred`
 count demanded-structure loads that threw / could not land yet —
@@ -1153,6 +1162,11 @@ never a home-space outage) (`effectAcks` counts
 effect-channel ack writes, so the
 §3 amplification metric is computable from counters alone;
 `outbox.budgetDeferrals` counts Phase-6 budget dispatch holds — §5;
+`outbox.superseded` counts effect completions that found their
+request superseded at writeback and wrote nothing, releasing their
+key — §4's in-flight-dedupe qualifier; a subset of `completed`,
+ordinary churn, reported by the builtins whose completions re-read
+the request (compile-and-run today; the family owed);
 the `push` block is the memory server's Phase-6 push-priority
 counters (protocol.md §3), nested under `servingLoop` in the health
 route so the OFF-arm response never changes shape —

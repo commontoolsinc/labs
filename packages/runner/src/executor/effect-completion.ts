@@ -36,15 +36,38 @@
 
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Cell } from "../cell.ts";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 
 const effectCompletionKeys = new WeakMap<object, string>();
 
 /**
  * The per-target effect key: `<builtin>:<inputHash>` widened by the
- * requesting node's result-cell identity (entity id + scope). This is
- * the OUTBOX in-flight/dedupe key and the completion-routing key — the
- * `idempotencyKey` the builtins enqueue with, and the key every
- * `markEffectCompletion` of that request must use.
+ * requesting node's result-cell identity (entity id + scope — or, when
+ * the caller passes the run's `identity`, entity id + scope INSTANCE
+ * key). This is the OUTBOX in-flight/dedupe key and the
+ * completion-routing key — the `idempotencyKey` the builtins enqueue
+ * with, and the key every `markEffectCompletion` of that request must
+ * use.
+ *
+ * The INSTANCE widening (server-execution v2 stage C, OW28's
+ * independent-review MAJOR-B; scopes.md §6: memo keys INCLUDE the
+ * instance key): a scoped node fans out once per demanded instance
+ * (one closure, per-instance stamped transactions), and each instance
+ * run writes ITS instance of the node's cells. With the scope NAME
+ * alone in the key, two demanders' identical requests collide — the
+ * second dedupes against the first's in-flight effect, whose completion
+ * lands (via the carriage captured at admission) on the FIRST
+ * demander's instance only, so the second stays pending forever. With
+ * the identity, the suffix is the resolved instance key
+ * (`user:<principal>` / `session:<principal>:<session>`), so each
+ * demanded instance owns its own effect, carriage, and completion; a
+ * space-scoped target carries no suffix either way, and a caller that
+ * passes no identity keeps the scope-name text byte for byte
+ * (`fetch*`, `generate*`, `sqlite*` today — their per-instance keying
+ * is an owed row in verification-coverage.md).
  *
  * Why the target rides in the key (the stage-G round-2 headline): two
  * DISTINCT recipe nodes can issue byte-identical inputs, colliding on
@@ -72,12 +95,23 @@ const effectCompletionKeys = new WeakMap<object, string>();
 export function effectTargetKey(
   base: string,
   targetCell: Cell<unknown>,
+  identity?: ScopeKeyIdentity,
 ): string {
   const link = targetCell.getAsNormalizedFullLink();
-  const scope = link.scope !== undefined && link.scope !== "space"
-    ? `:${String(link.scope)}`
-    : "";
-  return `${base}@${link.id}${scope}`;
+  if (link.scope === undefined || link.scope === "space") {
+    return `${base}@${link.id}`;
+  }
+  let suffix = String(link.scope);
+  if (identity !== undefined) {
+    try {
+      suffix = resolveScopeKey(link.scope, identity);
+    } catch {
+      // An identity that cannot resolve this scope (a sessionless pair
+      // at session depth): fall back to the scope name — the same key
+      // text an identity-less caller produces.
+    }
+  }
+  return `${base}@${link.id}:${suffix}`;
 }
 
 /**

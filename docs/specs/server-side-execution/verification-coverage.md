@@ -2574,43 +2574,208 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   wedge, pinned + mutation-verified in `compile-and-run.test.ts` and
   LIVE in `executor-compile-and-run.test.ts`'s mid-compile-park step). The
   client keeps reading through (speculation.md §2) for EVERY outcome: a
-  flag-ON non-serving run writes NOTHING speculatively — not even the
-  synchronous invalid-inputs / main-not-found outcomes — it renders the
-  committed served cells, so no overlay entry delays the served
-  `pending=false`. Failures are error-shaped results keyed by the program
-  hash (retry input-driven — the T14 posture); recovery re-uses a LANDED
-  piece (the loop resumes the child from its pointer), a mid-flight
-  request re-misses and re-fires the compile (§6 step 3), and a re-arm
-  whose process compile-cache entry was evicted re-fires rather than
-  wedging. Posture (stated, the request-hash builtins' identical one): a
-  completion commit that fails on a LIVE runtime that did NOT park stays
-  pending until re-activation or an input change — no dirtiness/timer
-  retry invented. A
-  ROOT DEFECT surfaced and fixed in passing: `createRef({ src: program })`
+  flag-ON non-serving run writes NOTHING request-bearing speculatively —
+  not even the synchronous invalid-inputs / main-not-found outcomes — it
+  renders the committed served cells, so no overlay entry delays the
+  served `pending=false` (the two writes the claim excepts: the shared
+  cell-init's `pending.send(false)` loading default and the `sendResult`
+  links, both request-free). Failures are error-shaped results keyed by
+  the program hash (retry input-driven — the T14 posture); recovery
+  re-uses a LANDED piece when the memo cell is synced by the fresh
+  runtime's first evaluation (the loop resumes the child from its
+  pointer, the hit rule reads through) — and when it is NOT (the memo
+  cell is unlinked and only `.sync()`ed at init; T10.Q4's at-least-once),
+  that first evaluation RE-MISSES: it re-issues, which WIPES the landed
+  child client-visibly (`result` cleared, `pending=true`) until the
+  re-arm re-instantiates it — a re-compile (cold cache) plus a brief
+  re-instantiation on that restart, correctness held by `resolvedHash`;
+  a mid-flight request (issued, never resolved) re-misses and re-fires
+  the compile the same way (§6 step 3); and a re-arm whose process
+  compile-cache entry was evicted re-fires rather than wedging. Posture
+  (stated, the request-hash builtins' identical one): a completion
+  commit that fails on a LIVE runtime that did NOT park stays pending
+  until re-activation or an input change — no dirtiness/timer retry
+  invented. A
+  ROOT DEFECT surfaced and WORKED AROUND ON-arm only (the underlying
+  defect is pre-existing and stays LIVE in the OFF arm — the createRef
+  owed row in the 2026-08-18 delta below): `createRef({ src: program })`
   — the content-cache key — is INSENSITIVE to nested `contents` when the
   program is the `asSchema` query-result PROXY (two distinct programs
   collapse to one key, so a re-compile got the PRIOR program), even
   though `hashOf` reads the proxy correctly; the served path normalizes
   to a PLAIN program (`plainProgramOf`) for both the compile and the sync
-  lookup. Pins: `compile-and-run.test.ts` (the deterministic bare-runtime
+  lookup, while the OFF arm still hands `compileOrGetPattern` the raw
+  proxy. Pins: `compile-and-run.test.ts` (the deterministic bare-runtime
   seams — compile-as-effect/not-from-action, re-arm, first instantiation,
   memo hit; recovery mid-flight re-fire; cache-eviction re-fire; the
-  failure leg; the client read-through incl. the sync outcomes; OFF-arm
-  neutrality), and `executor-compile-and-run.test.ts` — the piece-creation
-  flow END TO END against a real SpaceServer + flag-ON client (the
-  client's authored creation + demand → served miss → outbox → compile →
-  completion → the client reads through to the child, never compiling; a
-  program change re-compiles and re-instantiates with the NEW value;
-  recovery re-uses; the failure leg lands error-shaped with NO timer
-  retry; the piece-creation hook fires once; `unstampedSealRefusals`
-  stays ZERO throughout — the P7 symptom's own counter) plus the
-  MID-COMPILE PARK step (a park while the compile is in flight resolves
-  on re-activation — the fresh runtime re-fires; the pending-based-hit
-  mutant reproduces the wedge signature). The OFF arm is byte-identical
-  (the port is a distinct `on` branch; the OFF path is the
-  extracted-verbatim `compileAndRunOff`). Self-review (adversarial
-  subagent, full diff): 1 MAJOR / 3 MINOR / 3 NIT, all addressed —
-  resolutions in the PR body.
+  failure leg; the client read-through incl. the sync outcomes — the
+  `servingPosture` gate's ONLY witness, red with the gate removed (the
+  E2E's "0 client compiles" cannot see the gate: the client's speculation
+  overlay drops the effect either way, and no client-side counter names
+  the drop); OFF-arm neutrality), and `executor-compile-and-run.test.ts`
+  — the piece-creation flow END TO END against a real SpaceServer +
+  flag-ON client (the client's authored creation + demand → served miss →
+  outbox → compile → completion → the client reads through to the child,
+  never compiling; a program change re-compiles and re-instantiates with
+  the NEW value; recovery re-uses; the failure leg lands error-shaped
+  with NO timer retry; the piece-creation hook fires once;
+  `unstampedSealRefusals` stays ZERO throughout — the P7 symptom's own
+  counter) plus the MID-COMPILE PARK step (a park while the compile is in
+  flight resolves on re-activation — the fresh runtime re-fires; the
+  pending-based-hit mutant reproduces the wedge signature). The OFF arm
+  is a behavior-identical EXTRACTION of the pre-port builtin (the port is
+  a distinct `on` branch; the OFF path is `compileAndRunOff`, traced
+  operation for operation against the pre-port source — its closure
+  state is threaded through a context object, the one textual
+  difference; pinned by the OFF-arm neutrality test). Self-review
+  (adversarial subagent, full diff): 1 MAJOR / 3 MINOR / 3 NIT, all
+  addressed — resolutions in the PR body.
+  **Delta 2026-08-18 — the OW28 independent-review batch (same PR):**
+  two MAJORs, both live-reproduced red-first at eb6d1e4bb, plus MINORs.
+  (1) MAJOR-A, the SUPERSESSION WEDGE: A→B→A′ within A's compile
+  duration — the re-issued A′ carried A's outbox key and the in-flight
+  dedupe ATTACHED it to A's still-running effect, whose completion then
+  returned on the abort signal B's issue had fired (`signal.aborted`) and
+  wrote NOTHING — the node stayed `pending=true` forever, no counter
+  named it, and T14's input-driven-only retry made it permanent. FIXED
+  by the discipline the attach relies on: the ON arm has NO abort signal
+  — an issued compile effect always runs to its completion, and the
+  COMPLETION decides by re-reading the node's current request hash
+  through its own transaction (`stillCurrent`, §4's FP6 re-read at
+  writeback): current again → it LANDS; superseded → it writes nothing,
+  reports `superseded`, and its retirement RELEASES the key. Made
+  observable: §7's new `outbox.superseded` counter (a subset of
+  `completed`; the effect-memo observer's `superseded` event). Pinned
+  LIVE (`executor-compile-and-run.test.ts`, a releasable hold on the
+  serving compile): the P6 shape — hold A; A→B (lands)→A′ (attaches:
+  `outbox.queued` unchanged, `memo.inflight` 1); release → A lands
+  `pending=false`, one compile of A ever, `inflight` 0, `superseded` 0
+  (red at eb6d1e4bb: "pending=true, answer=undefined" after the release)
+  — and the SUPERSEDED-COMPLETION step (hold A; B lands; release → A's
+  completion writes nothing, B's resolution stands unwiped, `superseded`
+  1, `inflight` 0; A re-requested lands from the warm cache with no new
+  effect). Unit: the superseded completion reports and leaves the
+  successor's resolution intact (`compile-and-run.test.ts`, red at the
+  tip). FAMILY: `llm.ts`'s `thisRun !== currentRun` abandonment
+  (generateText/generateObject/llm) has the SAME class — an owed row
+  below, NOT filled here (the fix is not mechanically identical: the LLM
+  completion has no hash re-read, and the run counter also drives the
+  streaming `partial` cancellation and the queue semantics);
+  `fetch.ts` NARROWS the window rather than closing it (the abort
+  rejects the network request promptly, so the aborted effect settles
+  and releases its key within microtasks — a re-issue admitted inside
+  that window would still attach and land nothing; the next input change
+  re-issues) — verified by reading, recorded in the same row.
+  (2) MAJOR-B, FAN-OUT cardinality 2 on a NARROWED node: the closure's
+  single abort controller was shared by both demanders' instance runs
+  (fan-out keeps the node SINGULAR — one closure), so the second issue
+  aborted the first's not-yet-flushed effect at issue, and — the effect
+  key carrying only the scope NAME (`effectTargetKey`) — deduped its own
+  effect against the first's key: both instances pending forever. FIXED,
+  the PRIMARY shape: no per-request closure state in the ON arm at all
+  (the abort is gone — every per-instance fact lives outside the
+  closure), the effect key carries the run's INSTANCE
+  (`effectTargetKey(base, cell, identity)` — scopes.md §6's "memo keys
+  INCLUDE the instance key"; the resolved instance key replaces the
+  scope-name suffix; space-scoped targets and identity-less callers keep
+  today's key text byte for byte), AND the completion transaction is
+  STAMPED with the issuing run's identity (`tx.tx.scopeKeyIdentity`
+  before its first read) so its request re-read and its writes address
+  the instance the effect was issued for. That last part closes, for
+  compile-and-run only, the stage-A residual flagged at
+  `space-server.ts`'s completion committer ("the writeback transaction
+  itself is unstamped, so its hash-guard READS resolve against the
+  service's instances; a per-instance node's effect completion is
+  unpinned"): a NARROWED compile-and-run node — a per-user program
+  (`PerUser<Writable<string>>` code, or a computed over one) — did not
+  land even at CARDINALITY 1 at eb6d1e4bb (probed live: issued, one
+  completed effect, `pending=true` forever — the completion's re-read
+  resolved the service's empty instance, mismatched, and wrote nothing).
+  The instance rule, now stated in builtins.md §3: ONE compile per
+  program per process (the pattern cache is shared and single-flights);
+  ONE effect completion + ONE instantiation per demanded instance. Pinned
+  LIVE at cardinality 2 (`executor-compile-and-run.test.ts`, the FAN-OUT
+  step): a per-user program, the same text for alice and bob, alice's
+  compile held; bob's instance issues ITS OWN effect while alice's is in
+  flight (`outbox.queued` 2, two holds — never an attach); release → ONE
+  real compile (`compilePattern` counted), TWO completions, BOTH
+  instances `pending=false` with the child, `inflight` 0 (red at
+  eb6d1e4bb: bob's issue attached — `queued` stayed 1 — and neither
+  landed). Residuals, FLAGGED not filled: (a) the runner's per-instance
+  child registry — `runtime.run` / `runner.stop` key the child piece by
+  the result cell resolved against the RUNTIME's own identity, so two
+  instances' children share one registration (the pin's static child is
+  insensitive to this; a reactive child body is fan-out follow-up
+  territory); (b) the effectful FAMILY (`fetch*`, `generate*`,
+  `sqlite*`) keeps scope-name keys and unstamped completions — its
+  per-instance rows below. (3) MINOR-C: the createRef claim corrected
+  above; the OFF-arm defect PINNED as it stands (`compile-and-run.test.ts`
+  "OFF-arm DEFECT": a same-node program change in a WARM process serves
+  the PRIOR pattern, one real compile — the assertions to flip when the
+  owning layer fixes it) — an owed row below. (4) MINOR-D: the success
+  re-arm no longer clobbers a landed `resolvedHash` (an incidental re-run
+  can instantiate off the warm cache before the completion commits; the
+  completion now re-arms nothing in that case, and the next run memo-hits
+  instead of re-instantiating the running child) — pinned red-first;
+  the docs' "the re-arm is THE instantiate trigger" corrected to one of
+  two. (5) MINOR-E: the issue-time memo key pinned (a same-hash re-run
+  mid-flight waits — no re-issue, no second effect; probe P4's mutant —
+  a corrupt issue-time `requestHash` — turns exactly this pin red and no
+  other). (6) MINOR-F: the client read-through gate's witness is the UNIT
+  pin, stated above. NITs: the client hit branch fires the
+  piece-creation hook only on a PRESENT result (OFF's `if (pattern)`
+  parity); "byte-identical" → behavior-identical extraction; Flag 5
+  reconciled above (recovery re-uses when the memo is synced, else the
+  re-miss wipe — client-visible — then re-lands); the sync cache lookup's
+  no-refresh/no-replicate posture commented; the init `pending.send(false)`
+  named as the read-through exception. Suite: both OW28 files green
+  (12 cases, 5 E2E steps), the E2E soaked.
+- OW28-createRef — the content-cache key's proxy insensitivity, OWED (the
+  2026-08-18 delta above): `createRef({ src: program })` reads no nested
+  `contents` off an `asSchema` query-result proxy, so `compileOrGetPattern`
+  handed a proxy collapses distinct programs onto one cache entry — a
+  same-node program change in a WARM process serves the PRIOR pattern.
+  Owning layer: `create-ref.ts` / `pattern-manager.ts` (normalize at the
+  source — a plain deep copy before keying — so no caller has to). LIVE
+  in the OFF arm today (pinned as it stands: `compile-and-run.test.ts`
+  "OFF-arm DEFECT"); the ON arm works around it with `plainProgramOf`.
+  Trigger: any warm-process same-node program edit under the OFF arm
+  (a running code editor). Not fixed in the stage-C PR (it changes OFF
+  behavior; out of that PR's scope).
+- OW28-supersession-family — the LLM builtins' post-response
+  abandonment, OWED: `llm.ts` (`generateText`, `generateObject`, `llm`)
+  abandons an in-flight request's writeback when `thisRun !==
+  currentRun` — a run counter the next different-hash issue bumps. Under
+  the outbox's in-flight dedupe, A→B→A′ within A's call duration
+  ATTACHES A′ to A's effect, whose completion is then abandoned: NO
+  completion for A′, `pending=true` forever, no counter — the
+  compile-and-run MAJOR-A shape. The fix is NOT mechanically identical
+  (no hash re-read at the LLM completion; the counter also cancels the
+  streaming `partial` writer and interacts with the queue's
+  run-to-completion rule), so it is recorded rather than patched: the
+  completion must re-read the current request hash and land when
+  current / release when superseded, and count `outbox.superseded`.
+  `fetch.ts` narrows the window (the abort rejects the network request
+  promptly, so the aborted effect settles and releases its key within
+  microtasks) but does not close it. Trigger: any served LLM node whose
+  inputs flip A→B→A within one call's duration.
+- OW28-instance-family — per-instance keys and stamped completions for
+  the effectful FAMILY, OWED: `fetch*`, `generate*`, `sqlite*` still key
+  their effects by scope NAME (`effectTargetKey` without the identity)
+  and commit their completions through UNSTAMPED transactions (the
+  stage-A residual at the completion committer). On a NARROWED node
+  that is (a) the cardinality-2 attach (the second demander's identical
+  request dedupes against the first's key; only the first instance's
+  cells complete) and (b) the cardinality-1 hash-guard mis-read (a
+  per-instance request input re-read under the SERVICE identity
+  mismatches → the completion writes nothing). compile-and-run's fix
+  (the 2026-08-18 delta: identity into the key + into the completion tx)
+  is the template. Trigger: the fan-out arc's next narrowed-effect
+  scenario (any per-user fetch/LLM/sqlite node with two demanders, or
+  with a per-user request input at cardinality 1). Also recorded: the
+  runner's child registry keys per RUNTIME identity (`getDocKey`), so a
+  fanned-out compile-and-run node's per-instance children share one
+  registration — inert for a static child, open for a reactive one.
 - OW29 — space-root demanders + demand-arrival re-runs (the reverted
   Phase-7 extension recorded under OW17): a client whose only watch is
   the space-scoped piece root supplies NO identity to the run supply,

@@ -2062,6 +2062,15 @@ export class PatternManager {
    * flush. A cold process (recovery) misses here and re-issues the
    * compile effect (§6 step 3; the child's durable pattern pointer also
    * lets the loop resume it independently).
+   *
+   * Deliberately a PEEK, unlike the async path: it does NOT refresh the
+   * entry's FIFO recency (a peek must not reorder eviction behind the
+   * effect that populated the entry) and does NOT replicate the pattern's
+   * source closure to another space (`replicatePatternToSpace`) — the
+   * served builtin runs on the SpaceServer's runtime, one runtime per
+   * served space, so the entry was compiled INTO this space by the effect
+   * that cached it. A caller on a runtime spanning several spaces would
+   * need the async path for the cross-space replicate.
    */
   getCompiledPatternForProgramSync(
     input: string | RuntimeProgram,

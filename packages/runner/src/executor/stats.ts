@@ -162,6 +162,20 @@ export type ServingLoopStats = {
      * cap or an egress-rate token. Growth under load is the budget
      * WORKING (the runaway degrades its own space), not a failure. */
     budgetDeferrals: number;
+    /** Effect completions that found their request SUPERSEDED at
+     * writeback (serving-loop.md §4's hash re-read: the node's current
+     * request no longer matches the effect's) — the completion wrote
+     * nothing (the successor's own effect owns the cells) and the
+     * effect retired, RELEASING its dedupe key (stage C, OW28's
+     * independent-review MAJOR-A: a superseded effect must complete or
+     * release, never silently return — a re-issued same-key request
+     * that attached to it in flight would wedge pending forever, and
+     * no counter would name it). A subset of `completed`; growth is
+     * ordinary churn (an input changed while its effect ran), never a
+     * failure. Reported by the builtins whose completions re-read the
+     * request through the effect-memo observer (compile-and-run
+     * today). */
+    superseded: number;
   };
   lease: { held: number; lost: number };
 };
@@ -196,7 +210,13 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     skippedIdempotent: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
-  outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },
+  outbox: {
+    queued: 0,
+    completed: 0,
+    failed: 0,
+    budgetDeferrals: 0,
+    superseded: 0,
+  },
   lease: { held: 0, lost: 0 },
 });
 

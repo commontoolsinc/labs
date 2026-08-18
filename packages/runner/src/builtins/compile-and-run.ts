@@ -1,6 +1,7 @@
 import { type BuiltInCompileAndRunParams } from "commonfabric";
 import type { JSONSchema } from "@commonfabric/api";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
@@ -22,7 +23,12 @@ import { narrowestScope } from "../scope.ts";
  * re-compiles — cache-hit cheap, never an observable shape).
  *
  * - `requestHash` — the request the node's cells reflect. Written by the
- *   requesting DERIVATION at issue and re-asserted at every outcome.
+ *   requesting DERIVATION at issue and re-asserted at every outcome. The
+ *   issue-time write is load-bearing on its own: a same-hash re-run while
+ *   the effect is in flight reads `stored === hash` + issued and WAITS
+ *   for the re-arm; a corrupt or missing issue-time key would read as a
+ *   new request and re-issue into the in-flight effect's dedupe key —
+ *   the supersession wedge's shape (pinned: the issue-time-key test).
  * - `resolvedHash` — the RESOLUTION marker: set (== `requestHash`) on
  *   every TERMINAL outcome (a landed piece, an error-shaped result, or a
  *   synchronous invalid-inputs / main-not-found outcome). The §4 HIT rule
@@ -32,14 +38,46 @@ import { narrowestScope } from "../scope.ts";
  *   there and a pending-based hit would FALSELY treat it as landed
  *   (rendering an empty result forever — the recovery-mid-flight wedge).
  *   `resolvedHash` is never written by init, so it distinguishes issued
- *   from resolved across a crash/park.
+ *   from resolved across a crash/park. A completion NEVER overwrites a
+ *   landed resolution (an incidental re-run may instantiate off the warm
+ *   cache before the completion commits; the completion then re-arms
+ *   nothing rather than clearing the marker and forcing a second
+ *   instantiation of the running child).
  * - `compiledHash` — set by the compile EFFECT's marked completion once
  *   the program is compiled and cached: it RE-ARMS the derivation (a
  *   tracked read of this cell) WITHOUT marking resolved (the instantiation
  *   is still pending), so the re-run reaches the instantiate branch. On a
  *   cold process (recovery) the cache misses and the compile re-issues
  *   (§6 step 3); the child's own durable pattern pointer lets the loop
- *   resume a LANDED child regardless.
+ *   resume a LANDED child regardless. The re-arm is ONE of the two
+ *   instantiate triggers, not THE trigger: any run that finds the pattern
+ *   in the process cache (an incidental re-run after the compile cached
+ *   it, a fresh closure over a warm process) instantiates without waiting
+ *   for it.
+ *
+ * SUPERSESSION (the independent review's MAJOR-A): the ON arm has NO
+ * abort signal — an issued compile effect always runs to its completion,
+ * and the COMPLETION decides by re-reading the node's current request
+ * hash through its own transaction (`stillCurrent`, serving-loop.md §4's
+ * FP6 re-read at writeback): current again → it lands; superseded → it
+ * writes nothing, reports `superseded` (§7's `outbox.superseded`), and
+ * its retirement releases the outbox key. Why no signal: the outbox
+ * dedupes in flight per key, so an A→B→A′ sequence within A's compile
+ * duration ATTACHES A′ to A's still-running effect — an effect that
+ * returned on "aborted at B's issue" would drop A′'s only completion and
+ * the node would stay `pending=true` forever, no counter naming it.
+ * Completing-or-releasing is the discipline the attach relies on.
+ *
+ * INSTANCES (the review's MAJOR-B; scopes.md §6): a scoped node fans out
+ * once per demanded instance through ONE closure. Every per-instance
+ * fact lives outside the closure — the cells resolve their instance
+ * through the run's transaction, the effect key carries the run's
+ * instance (`effectTargetKey` with the run identity), and the
+ * completion transaction is stamped with that identity so its request
+ * re-read and its writes address the SAME instance the effect was
+ * issued for. One compile per program per process (the pattern cache is
+ * shared); one effect completion + one instantiation per demanded
+ * instance.
  */
 type CompileMemo = {
   requestHash?: string;
@@ -109,9 +147,12 @@ const programSchema: JSONSchema = {
  * Under EXPERIMENTAL_SERVER_EXECUTION (server-execution v2 stage C, OW28;
  * builtins.md §3, serving-loop.md §4–§5) the compile is served as an
  * OUTBOX EFFECT and the instantiation is an ordinary consequence of the
- * served graph run — see {@link compileAndRunServed}. The OFF arm is
- * byte-identical to the pre-port builtin (a floating compile promise with
- * unmarked writebacks) and lives in {@link compileAndRunOff}.
+ * served graph run — see {@link compileAndRunServed}. The OFF arm is a
+ * behavior-identical extraction of the pre-port builtin (a floating
+ * compile promise with unmarked writebacks; the same operations in the
+ * same order, traced against the pre-port source — the closure state it
+ * needs is threaded through a context object) and lives in
+ * {@link compileAndRunOff}.
  */
 export function compileAndRun(
   inputsCell: Cell<BuiltInCompileAndRunParams<any>>,
@@ -121,6 +162,10 @@ export function compileAndRun(
   parentCell: Cell<any>,
   runtime: Runtime,
 ): Action {
+  // OFF-arm only: the in-flight compile's abort controller and request
+  // id (the ON arm's effect has no abort — see CompileMemo's SUPERSESSION
+  // note — and keeps no per-request closure state at all, which is what
+  // lets one closure serve every demanded instance of a fanned-out node).
   let abortController: AbortController | undefined = undefined;
   // OFF-arm only: the in-memory request dedupe (unchanged).
   let previousCallHash: string | undefined = undefined;
@@ -146,13 +191,18 @@ export function compileAndRun(
   /** ON arm, client posture only: the last LANDED request hash this
    * closure reported through `pieceCreatedCallback` — a flag-ON client
    * never compiles, so it reports the served instantiation on OBSERVING
-   * the landing, once per landed request (runtime-mapping.md N39). */
+   * the landing, once per landed request (runtime-mapping.md N39). A
+   * client is cardinality 1 (its own instance), so one slot suffices;
+   * the serving runtime installs no hook and never reads this. */
   let reportedCreatedHash: string | undefined = undefined;
   let cellScope: CellScope | undefined;
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
-    // Abort any in-flight compilation if it's still pending.
+    // OFF arm: abort any in-flight compilation if it's still pending. (The
+    // ON arm's effect has nothing to abort: a compile is content-cached
+    // local work, and its completion is hash-guarded — a stopped node's
+    // completion lands at most a memo re-arm nobody re-runs on.)
     abortController?.abort("Pattern stopped");
   });
 
@@ -182,6 +232,13 @@ export function compileAndRun(
         tx,
       );
       pending = scopedCell(runtime, tx, basePending, outputScope);
+      // The loading-state default, written by BOTH arms at cell-init —
+      // including a flag-ON CLIENT's first run: the one write the ON
+      // client's "reads through, writes nothing speculatively" claim
+      // excepts (with the `sendResult` links below). It carries no
+      // request state (the §4 hit keys on `resolvedHash`, never on
+      // `pending`), so it decides nothing; it only renders the loading
+      // state until the served cells arrive.
       pending.send(false);
 
       const baseResult = runtime.getCell<any | undefined>(
@@ -260,16 +317,12 @@ export function compileAndRun(
           reportedCreatedHash = landedHash;
           return true;
         },
-        abort: () => {
-          abortController?.abort("New compilation started");
-          abortController = new AbortController();
-          return abortController.signal;
-        },
       });
       return;
     }
 
-    // ---- OFF arm (byte-identical to the pre-port builtin) ----
+    // ---- OFF arm (a behavior-identical extraction of the pre-port
+    // builtin) ----
     compileAndRunOff(runtime, tx, {
       inputsCell,
       parentCell,
@@ -317,8 +370,6 @@ function compileAndRunServed(
     isIntentionallyEmpty: boolean;
     /** Report the client's piece-creation hook once per landed request. */
     reportCreated: (landedHash: string) => boolean;
-    /** Abort any prior in-flight compile and return a fresh signal. */
-    abort: () => AbortSignal;
   },
 ): void {
   const { inputsCell, parentCell, cells, program, hash } = ctx;
@@ -349,12 +400,16 @@ function compileAndRunServed(
     // per LANDED successful compile, on observing the landing — the same
     // registration the OFF arm's compile completion fires (`pieces.add`
     // is idempotent). Nothing on the serving runtime and the OFF arm
-    // reaches this branch.
+    // reaches this branch. Guarded on a PRESENT result (parity with the
+    // OFF arm's `if (pattern)`): a resolved no-pattern outcome (a module
+    // without a default entry: `pending=false`, no result) never reports
+    // a piece.
     if (
       runtime.pieceCreatedCallback !== undefined &&
       ctx.hasValidInputs &&
       errorT.get() === undefined &&
       errorsT.get() === undefined &&
+      resultT.get() !== undefined &&
       ctx.reportCreated(hash)
     ) {
       runtime.pieceCreatedCallback(result);
@@ -368,12 +423,18 @@ function compileAndRunServed(
   // speculatively — not even the synchronous invalid-inputs /
   // main-not-found outcomes below, which the SERVER decides identically
   // and lands as committed cells the client's hit rule above then reads
-  // through. A speculative write here would only add an overlay entry
-  // that must retire before the server's committed cells are visible,
-  // delaying the read-through (a `pending=true` echo measurably delayed
-  // the served `pending=false`); the parent's `ifElse(pending || (!result
-  // && !error))` already renders the loading state while the served cells
-  // are empty.
+  // through. (The two writes the claim excepts are the shared cell-init's
+  // `pending.send(false)` loading default and the `sendResult` links —
+  // both request-free.) A speculative write here would only add an
+  // overlay entry that must retire before the server's committed cells
+  // are visible, delaying the read-through (a `pending=true` echo
+  // measurably delayed the served `pending=false`); the parent's
+  // `ifElse(pending || (!result && !error))` already renders the loading
+  // state while the served cells are empty. This gate's witness is the
+  // unit read-through pin (a bare flag-ON client runtime: no compile, no
+  // memo/pending/error write for any outcome — red with the gate
+  // removed); the E2E's "0 client compiles" cannot see it, because the
+  // client's speculation overlay drops the effect either way.
   if (!runtime.servingPosture) return;
 
   // ---- SERVING (the SpaceServer's runtime) from here on. Every scheduler
@@ -383,6 +444,12 @@ function compileAndRunServed(
   // serving-runtime run would refuse loudly at the seal (§3d's refusal,
   // counted in `unstampedSealRefusals` — the E2E pins it at ZERO across
   // every served compile-and-run leg), never silently mis-route. ----
+
+  // The run's instance identity (server-execution v2 stage A's tx→replica
+  // seam, stamped per demanded instance by the wave run stamp; absent on
+  // the wave-level fallback and on every bare runtime) keys this run's
+  // effect and rides into its completion — CompileMemo's INSTANCES note.
+  const identity: ScopeKeyIdentity | undefined = tx.tx.scopeKeyIdentity;
 
   // A fresh request (or a re-issue): the cells must reflect THIS hash.
   const reissue = stored !== hash;
@@ -399,7 +466,6 @@ function compileAndRunServed(
     }
     if (reissue || currentlyPending !== false) {
       runtime.runner.stop(result);
-      ctx.abort();
       resultT.set(undefined);
       errorT.set(undefined);
       errorsT.set(undefined);
@@ -413,7 +479,6 @@ function compileAndRunServed(
   if (!program.files.some((file) => file?.name === program.main)) {
     if (reissue) {
       runtime.runner.stop(result);
-      ctx.abort();
       resultT.set(undefined);
       errorsT.set(undefined);
       errorT.set(`"${program.main}" not found in files`);
@@ -473,12 +538,15 @@ function compileAndRunServed(
   //    compile cache no longer holds the entry (FIFO eviction between the
   //    effect and this run): re-fire rather than wedge — the effect
   //    re-compiles (cache miss → real compile) and re-arms again.
-  // Within a session, the issue's own `pending=true` write (init is
-  // skipped on re-runs) makes a same-hash re-arm-wait re-run read
-  // `pending===true` with no `compiledHash` yet — so it does NOT re-abort
-  // the in-flight compile or re-enqueue (the re-compile-forever bug); it
-  // waits for the `compiledHash` re-arm to reach the instantiate branch
-  // above.
+  // Within a session, the issue's own `pending=true` + `requestHash`
+  // writes (init is skipped on re-runs) make a same-hash re-arm-wait
+  // re-run read `stored === hash` + `pending===true` with no
+  // `compiledHash` yet — so it does NOT re-issue (the re-compile-forever
+  // bug); it waits for the `compiledHash` re-arm to reach the instantiate
+  // branch above. A DIFFERENT-hash run re-issues without aborting
+  // anything: the superseded effect runs to its hash-guarded completion
+  // and writes nothing (or lands, if its hash is current again by then —
+  // CompileMemo's SUPERSESSION note).
   //
   // Posture, stated: a same-hash request whose completion commit FAILED
   // on a LIVE runtime that did not park (an infrastructure failure the
@@ -493,14 +561,20 @@ function compileAndRunServed(
       resultT.get() === undefined) ||
     memo?.compiledHash === hash;
   if (!needIssue) return;
-  const signal = ctx.abort();
   runtime.runner.stop(result);
   resultT.set(undefined);
   errorT.set(undefined);
   errorsT.set(undefined);
   pendingT.set(true);
   internalT.set({ requestHash: hash });
-  const effectKey = effectTargetKey(`compileAndRun:${hash}`, result);
+  // The effect key carries this run's INSTANCE (scopes.md §6): a scoped
+  // node's demanded instances each own their effect, its carriage, and
+  // its completion; a space-scoped node's key is unchanged.
+  const effectKey = effectTargetKey(
+    `compileAndRun:${hash}`,
+    result,
+    identity ?? runtime.scopeKeyIdentity,
+  );
   const requestProgram = plainProgram;
   const space = parentCell.space;
   tx.enqueuePostCommitEffect({
@@ -510,9 +584,11 @@ function compileAndRunServed(
     flush: () => {
       // Only the SERVING loop reaches here: a flag-ON client returned
       // above (`!servingPosture`) without enqueuing, so this effect exists
-      // only on the serving runtime. `signal.aborted` skips a superseded
-      // request (the program changed before the post-commit flush ran).
-      if (signal.aborted) return;
+      // only on the serving runtime. No abort short-circuit: an effect
+      // superseded before its flush still runs to its hash-guarded
+      // completion (a re-issue of the same key may have ATTACHED to it —
+      // outbox.ts admitSealedEffects — and this effect is that request's
+      // only completion). The compile is content-cached local work.
       const work = performServedCompile(
         runtime,
         inputsCell,
@@ -521,7 +597,7 @@ function compileAndRunServed(
         requestProgram,
         hash,
         effectKey,
-        signal,
+        identity,
       );
       // Tracked as async builtin work owned by this run: the outbox
       // captures it during the flush's synchronous prefix (its settlement
@@ -540,6 +616,16 @@ function compileAndRunServed(
  * derivation's job (the loop's own run) — because a post-commit flush's
  * instantiation races the loop's resume of the prior child and loses.
  *
+ * Every completion is HASH-GUARDED (`stillCurrent`) and INSTANCE-STAMPED:
+ * the completion transaction carries the issuing run's identity, so its
+ * request re-read and its writes address the instance the effect was
+ * issued for (a per-instance node's request inputs are that instance's;
+ * an unstamped re-read would resolve the SERVICE's instance, mismatch,
+ * and land nothing — the wedge a per-user program hit at cardinality 1
+ * before this). A superseded completion writes nothing, reports
+ * `superseded`, and returns — its tracked work settles and the outbox
+ * releases the key (CompileMemo's SUPERSESSION note).
+ *
  * Rejects only when the completion itself cannot commit (the outbox counts
  * `outbox.failed`; recovery is §6's re-miss). An effect-level failure (the
  * compile rejecting) is an error-shaped RESULT, never a rejection.
@@ -557,17 +643,36 @@ async function performServedCompile(
   program: Program,
   hash: string,
   effectKey: string,
-  signal: AbortSignal,
+  identity: ScopeKeyIdentity | undefined,
 ): Promise<void> {
   /** The request the cells reflect NOW (re-read through the completion
    * transaction, so a superseded request writes nothing — the new
    * request's own effect owns the cells; serving-loop.md §4's failure/
    * retry rule and the FP6 structural basis re-read). */
   const stillCurrent = (tx: IExtendedStorageTransaction): boolean => {
-    if (signal.aborted) return false;
     const current = inputsCell.asSchema<Program>(programSchema).withTx(tx)
       .get();
     return hashOf(current ?? { files: [], main: "" }).toString() === hash;
+  };
+  /** Open a completion writeback: stamp the issuing run's instance
+   * identity FIRST (before the transaction's first read — the storage
+   * transaction enforces the order), mark it as this effect's completion,
+   * then re-read the request. Returns false when the request was
+   * superseded (write nothing). */
+  let superseded = false;
+  const beginCompletion = (tx: IExtendedStorageTransaction): boolean => {
+    if (identity !== undefined) tx.tx.scopeKeyIdentity = identity;
+    markEffectCompletion(tx, effectKey);
+    if (stillCurrent(tx)) return true;
+    superseded = true;
+    return false;
+  };
+  const reportIfSuperseded = () => {
+    if (!superseded) return;
+    runtime.effectMemoObserver?.({
+      kind: "superseded",
+      id: `compileAndRun:${hash}`,
+    });
   };
   let pattern: Awaited<
     ReturnType<typeof runtime.patternManager.compileOrGetPattern>
@@ -578,12 +683,10 @@ async function performServedCompile(
       space as never,
     );
   } catch (err) {
-    if (signal.aborted) return;
     // The compile failed: an error-shaped result, keyed, in one completion
     // commit — retries are input-driven (a new hash), never timers (T14).
     const written = await runtime.editWithRetry((tx) => {
-      markEffectCompletion(tx, effectKey);
-      if (!stillCurrent(tx)) return;
+      if (!beginCompletion(tx)) return;
       if (err instanceof CompilerError) {
         const structuredErrors = err.errors.map((e) => ({
           line: e.line ?? 1,
@@ -608,16 +711,15 @@ async function performServedCompile(
         { cause: err },
       );
     }
+    reportIfSuperseded();
     return;
   }
-  if (signal.aborted) return;
   if (!pattern) {
     // No pattern (a module without a default entry): today's OFF-arm
     // outcome is "not pending, no result, no error"; land the same, keyed,
     // so the request memo-hits instead of re-firing.
     const written = await runtime.editWithRetry((tx) => {
-      markEffectCompletion(tx, effectKey);
-      if (!stillCurrent(tx)) return;
+      if (!beginCompletion(tx)) return;
       cells.pending.withTx(tx).set(false);
       cells.internal.withTx(tx).set({ requestHash: hash, resolvedHash: hash });
     });
@@ -626,16 +728,22 @@ async function performServedCompile(
         `compileAndRun completion failed to commit: ${written.error.message}`,
       );
     }
+    reportIfSuperseded();
     return;
   }
   // Success: the pattern is now in the process compile cache. RE-ARM the
   // instantiating derivation — `compiledHash` is a tracked read, so this
   // marked completion dirties the action, which then sync-hits the cache
   // and instantiates the child (correctly scoped, no race). `pending`
-  // stays true until that instantiation lands `pending=false`.
+  // stays true until that instantiation lands `pending=false`. Unless the
+  // request already RESOLVED — an incidental re-run instantiated off the
+  // warm cache between the compile and this commit — in which case the
+  // landed resolution stands and this completion re-arms nothing (a
+  // whole-object `set` here would clear `resolvedHash` and the next run
+  // would re-instantiate the running child once more).
   const written = await runtime.editWithRetry((tx) => {
-    markEffectCompletion(tx, effectKey);
-    if (!stillCurrent(tx)) return;
+    if (!beginCompletion(tx)) return;
+    if (cells.internal.withTx(tx).get()?.resolvedHash === hash) return;
     cells.internal.withTx(tx).set({ requestHash: hash, compiledHash: hash });
   });
   if (written.error !== undefined) {
@@ -643,13 +751,18 @@ async function performServedCompile(
       `compileAndRun re-arm completion failed to commit: ${written.error.message}`,
     );
   }
+  reportIfSuperseded();
   // TODO(seefeld): Add capturing runtime errors.
 }
 
-/** The OFF arm — byte-identical to the pre-port builtin: a floating
- * compile promise with unmarked writebacks, the in-memory
- * `previousCallHash` dedupe, and `pieceCreatedCallback` at compile
- * completion. Extracted verbatim so the ON arm above cannot perturb it. */
+/** The OFF arm — a behavior-identical extraction of the pre-port builtin
+ * (traced operation for operation against the pre-port source; the
+ * closure state it reads and writes — the previous-call hash, the request
+ * id, the abort controller — is threaded through `ctx` rather than
+ * captured, which is the only textual difference): a floating compile
+ * promise with unmarked writebacks, the in-memory `previousCallHash`
+ * dedupe, and `pieceCreatedCallback` at compile completion. Kept apart so
+ * the ON arm above cannot perturb it. */
 function compileAndRunOff(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,

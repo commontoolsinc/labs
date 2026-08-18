@@ -97,12 +97,22 @@ Deno.test("compileAndRun initializes outputs and handles invalid programs", asyn
 //   §2);
 // - a failing compile lands an ERROR-SHAPED result, keyed — no infinite
 //   pending, and no re-fire on re-evaluation (input-driven retry, T14);
+// - the ISSUE-TIME memo key: a same-hash re-run mid-flight WAITS (no
+//   re-issue into the in-flight effect's key — probe P4's mutant turns
+//   exactly this pin red);
+// - a SUPERSEDED completion writes nothing, leaves the successor's landed
+//   resolution intact, and reports itself (`outbox.superseded`'s source);
+// - the success RE-ARM never clobbers a landed `resolvedHash` (an
+//   incidental warm-cache instantiation before the completion commits);
 // - the OFF arm compiles from the action, exactly as today, and has no
-//   memo cell.
+//   memo cell — and its pre-existing createRef-on-proxy program-change
+//   defect is pinned AS IT STANDS (an owed row; not fixed here).
 //
 // The re-instantiation on a PROGRAM change, the piece-creation hook, the
-// client read-through end to end, recovery (memo reuse across park), and
-// the §7 counters are pinned LIVE against a real SpaceServer + client in
+// client read-through end to end, recovery (memo reuse across park), the
+// supersession journeys (A→B→A within A's compile; the superseded
+// completion's release), fan-out at cardinality 2, and the §7 counters are
+// pinned LIVE against a real SpaceServer + client in
 // executor-compile-and-run.test.ts (a bare runtime has no wave cycle to
 // serialize a re-instantiated child's async body against).
 // ---------------------------------------------------------------------------
@@ -131,6 +141,18 @@ const BROKEN: ProgramInput = {
 };
 const hashOfProgram = (program: ProgramInput) => hashOf(program).toString();
 
+/** A hold on one program's compile: the wrapped compileOrGetPattern
+ * enters, reports `held`, and RESUMES the real compile once `release`
+ * resolves; `afterCompiled` (optional) runs after the real compile
+ * resolved and BEFORE the pattern is handed back to the effect — the
+ * window between "cached in the process" and "the completion commit". */
+type CompileHold = {
+  program: ProgramInput;
+  held: () => void;
+  release: Promise<void>;
+  afterCompiled?: () => Promise<void>;
+};
+
 /** A builtin instance over `runtime` whose compiles are COUNTED (the real
  * compileOrGetPattern is wrapped, never replaced — the instantiate branch
  * reads the genuine content cache). */
@@ -138,6 +160,7 @@ const armed = (
   runtime: Runtime,
   space: MemorySpace,
   name: string,
+  options: { hold?: CompileHold } = {},
 ) => {
   const launched: ProgramInput[] = [];
   const pm = runtime.patternManager as unknown as {
@@ -149,6 +172,18 @@ const armed = (
   const real = pm.compileOrGetPattern.bind(pm);
   pm.compileOrGetPattern = (input, targetSpace) => {
     launched.push(input as ProgramInput);
+    const hold = options.hold;
+    if (
+      hold !== undefined &&
+      JSON.stringify(input) === JSON.stringify(hold.program)
+    ) {
+      hold.held();
+      return hold.release.then(async () => {
+        const pattern = await real(input, targetSpace);
+        await hold.afterCompiled?.();
+        return pattern;
+      });
+    }
     return real(input, targetSpace);
   };
   const inputs = runtime.getCell<ProgramInput>(
@@ -194,6 +229,21 @@ const armed = (
     await runtime.settled();
     return { launchesAtAction, error: committed.error };
   };
+  /** Like `run`, but WITHOUT settling: the action runs and commits (the
+   * effect flush runs inline at commit and its compile may be HELD), and
+   * control returns while the effect is in flight — the mid-flight
+   * journeys. */
+  const issue = async (program: ProgramInput) => {
+    await runtime.idle();
+    const tx: IExtendedStorageTransaction = runtime.edit();
+    inputs.withTx(tx).set(program);
+    action(tx);
+    const committed = await tx.commit();
+    // The flush ran (its synchronous prefix started the compile — held or
+    // not — and tracked the work); the work itself may still be in flight.
+    await tx.postCommitEffectsSettled();
+    return { error: committed.error };
+  };
   /** Re-run the action (the loop's re-arm re-run) to reach the instantiate
    * branch after the compile effect cached the pattern. Settles first so
    * the prior run's instantiated child body has landed (a bare runtime has
@@ -230,6 +280,9 @@ const armed = (
         .length,
     run,
     rerun,
+    issue,
+    /** The raw action, for a test that drives it inside its own tx. */
+    action,
     outputs: () => outputs!,
     memo: () =>
       runtime.getCell<
@@ -456,6 +509,262 @@ Deno.test("OW28 — a failing compile lands an ERROR-SHAPED result, keyed: pendi
       assertEquals(await node.rerun(BROKEN), undefined);
     }
     assertEquals(node.launchesOf(BROKEN), compilesAfterFail);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("OW28 — the ISSUE-TIME memo key (the review's MINOR-E): an issued request writes `requestHash` at issue, so a same-hash re-run MID-FLIGHT waits — no re-issue, no second effect, the memo untouched (the guard whose failure mode is the supersession wedge)", async () => {
+  const { runtime, storageManager, space } = await newOnRuntime(
+    "compile and run issue-time key",
+    { servingPosture: true },
+  );
+  try {
+    let heldCount = 0;
+    const release = Promise.withResolvers<void>();
+    const node = armed(runtime, space, "issue-key", {
+      hold: {
+        program: PROGRAM_A,
+        held: () => {
+          heldCount++;
+        },
+        release: release.promise,
+      },
+    });
+    assertEquals((await node.issue(PROGRAM_A)).error, undefined);
+    assertEquals(heldCount, 1, "the effect entered the (held) compile");
+    // The issue's OWN memo write, observed mid-flight — before any
+    // completion could re-assert it: `requestHash` names the request,
+    // nothing is resolved, the request is pending.
+    assertEquals(node.memo()?.requestHash, hashOfProgram(PROGRAM_A));
+    assertEquals(node.memo()?.resolvedHash, undefined);
+    assertEquals(node.memo()?.compiledHash, undefined);
+    assertEquals(node.outputs().pending.get(), true);
+
+    // Same-hash re-runs mid-flight: `stored === hash` and issued → the
+    // run WAITS for the re-arm — no re-issue (one launch, one hold), the
+    // memo untouched. A corrupt or missing issue-time key (probe P4's
+    // mutant) reads as a NEW request here and re-issues: a second effect
+    // that dedupes against the first's key — the wedge shape.
+    assertEquals((await node.issue(PROGRAM_A)).error, undefined);
+    assertEquals((await node.issue(PROGRAM_A)).error, undefined);
+    assertEquals(node.launchesOf(PROGRAM_A), 1, "no re-issue mid-flight");
+    assertEquals(heldCount, 1);
+    assertEquals(node.memo()?.requestHash, hashOfProgram(PROGRAM_A));
+    assertEquals(node.memo()?.resolvedHash, undefined);
+    assertEquals(node.outputs().pending.get(), true);
+
+    // Release: the compile completes, re-arms; the next run instantiates.
+    release.resolve();
+    await runtime.settled();
+    assertEquals(node.memo()?.compiledHash, hashOfProgram(PROGRAM_A));
+    assertEquals(await node.rerun(PROGRAM_A), undefined);
+    assertEquals(node.outputs().pending.get(), false);
+    assertEquals(
+      node.outputs().result.key("answer").get() as unknown as number,
+      42,
+    );
+    assertEquals(node.launchesOf(PROGRAM_A), 1);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("OW28 — a SUPERSEDED completion (the review's MAJOR-A family): an effect whose request was superseded before it completed writes NOTHING — the successor's landed resolution stands (no wipe, no clobber) — and reports itself superseded; the successor's key and cells are its own", async () => {
+  const events: Array<{ kind: string; id: string }> = [];
+  const { runtime, storageManager, space } = await newOnRuntime(
+    "compile and run superseded completion",
+    { servingPosture: true },
+  );
+  runtime.effectMemoObserver = (event) => {
+    events.push(event);
+  };
+  try {
+    let heldCount = 0;
+    const release = Promise.withResolvers<void>();
+    const node = armed(runtime, space, "superseded", {
+      hold: {
+        program: PROGRAM_A,
+        held: () => {
+          heldCount++;
+        },
+        release: release.promise,
+      },
+    });
+    const B = childProgram(7);
+    // A issued, its compile held; B supersedes it and LANDS (compile,
+    // re-arm, instantiate) while A's effect is still in flight.
+    assertEquals((await node.issue(PROGRAM_A)).error, undefined);
+    assertEquals(heldCount, 1);
+    assertEquals((await node.issue(B)).error, undefined);
+    // Settle B: its (real) compile completes and re-arms; the re-arm run
+    // instantiates B. `settled()` waits for ALL tracked work — A's held
+    // compile included — so release A first, and let it complete AFTER B
+    // was issued: A's completion re-reads the current request (B) and
+    // must write nothing.
+    release.resolve();
+    await runtime.settled();
+    assertEquals(node.memo()?.requestHash, hashOfProgram(B));
+    assertEquals(node.memo()?.compiledHash, hashOfProgram(B));
+    assertEquals(await node.rerun(B), undefined);
+    assertEquals(node.outputs().pending.get(), false);
+    assertEquals(
+      node.outputs().result.key("answer").get() as unknown as number,
+      7,
+    );
+    assertEquals(node.memo()?.resolvedHash, hashOfProgram(B));
+    // A's completion was SUPERSEDED: reported as such (the counter's
+    // source), and B's landed resolution untouched by it. A re-issue of
+    // the superseded program running a FRESH effect (its key released) is
+    // pinned live in executor-compile-and-run.test.ts (a bare runtime has
+    // no wave cycle to serialize a re-instantiated child's async body
+    // against, so program changes are not chained here).
+    assertEquals(
+      events.filter((e) => e.kind === "superseded").map((e) => e.id),
+      [`compileAndRun:${hashOfProgram(PROGRAM_A)}`],
+    );
+    assertEquals(node.launchesOf(PROGRAM_A), 1);
+    assertEquals(node.launchesOf(B), 1);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("OW28 — the success RE-ARM must not clobber a LANDED resolution (the review's MINOR-D): an incidental re-run that instantiated off the warm cache before the completion committed keeps `resolvedHash`; the completion re-arms nothing and the next run memo-HITS instead of re-instantiating the running child", async () => {
+  const { runtime, storageManager, space } = await newOnRuntime(
+    "compile and run re-arm no clobber",
+    { servingPosture: true },
+  );
+  try {
+    const release = Promise.withResolvers<void>();
+    // The interposition: after the real compile resolved (the process
+    // cache is warm) and BEFORE the effect's completion commit, an
+    // incidental re-run of the derivation instantiates from the cache and
+    // RESOLVES the request.
+    let incidentalRuns = 0;
+    const node: ReturnType<typeof armed> = armed(
+      runtime,
+      space,
+      "rearm-clobber",
+      {
+        hold: {
+          program: PROGRAM_A,
+          held: () => {},
+          release: release.promise,
+          afterCompiled: async () => {
+            incidentalRuns++;
+            const tx: IExtendedStorageTransaction = runtime.edit();
+            node.inputs.withTx(tx).set(PROGRAM_A);
+            // The derivation's own run: the sync cache hits → instantiate +
+            // resolve, committed before the effect's completion.
+            node.action(tx);
+            assertEquals((await tx.commit()).error, undefined);
+          },
+        },
+      },
+    );
+    let instantiations = 0;
+    const realRun = runtime.run.bind(runtime);
+    (runtime as unknown as { run: typeof runtime.run }).run = (
+      ...args: Parameters<typeof runtime.run>
+    ) => {
+      instantiations++;
+      return realRun(...args);
+    };
+    assertEquals((await node.issue(PROGRAM_A)).error, undefined);
+    release.resolve();
+    await runtime.settled();
+    assertEquals(incidentalRuns, 1);
+    // The incidental run instantiated (once) and RESOLVED; the completion
+    // that followed must not have cleared that resolution.
+    assertEquals(instantiations, 1);
+    assertEquals(node.outputs().pending.get(), false);
+    assertEquals(node.memo()?.resolvedHash, hashOfProgram(PROGRAM_A));
+    assertEquals(node.memo()?.requestHash, hashOfProgram(PROGRAM_A));
+    // The next run is a memo HIT: no second instantiation of the running
+    // child (at eb6d1e4bb the completion's `set` dropped `resolvedHash`,
+    // so this run re-instantiated — stop + run — once more).
+    assertEquals(await node.rerun(PROGRAM_A), undefined);
+    assertEquals(instantiations, 1, "no re-instantiation after the re-arm");
+    assertEquals(node.outputs().pending.get(), false);
+    assertEquals(
+      node.outputs().result.key("answer").get() as unknown as number,
+      42,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("OFF-arm DEFECT, pre-existing (the review's MINOR-C; owed — verification-coverage.md OW28's createRef row): a same-node PROGRAM CHANGE in a WARM process serves the PRIOR pattern — `compileOrGetPattern(proxy)` keys the content cache by `createRef` of the asSchema proxy, which is insensitive to nested `contents`. Pinned AS IT STANDS so the fix flips this test; not fixed here (OFF behavior is out of this PR's scope)", async () => {
+  const identity = await Identity.fromPassphrase("compile and run off defect");
+  const storageManager = StorageManager.emulate({ as: identity });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  try {
+    const node = armed(runtime, identity.did() as MemorySpace, "off-defect");
+    const realCompiles: ProgramInput[] = [];
+    const pm = runtime.patternManager as unknown as {
+      compilePattern: (
+        input: ProgramInput,
+        options?: unknown,
+      ) => Promise<unknown>;
+    };
+    const realCompile = pm.compilePattern.bind(pm);
+    pm.compilePattern = (input, options) => {
+      realCompiles.push(input);
+      return realCompile(input, options);
+    };
+    const settledOff = async () => {
+      // The OFF arm's compile promise floats (untracked): drain reactive
+      // work and step the fake clock until `pending` clears.
+      for (let i = 0; i < 500 && node.outputs().pending.get() !== false; i++) {
+        await runtime.idle();
+        await clock.tick(20);
+      }
+      await runtime.settled();
+      await runtime.idle();
+    };
+    const B = childProgram(7);
+    assertEquals((await node.run(PROGRAM_A)).error, undefined);
+    await settledOff();
+    assertEquals(
+      node.outputs().result.key("answer").get() as unknown as number,
+      42,
+    );
+    assertEquals(realCompiles.length, 1);
+
+    // The program CHANGES on the same node, in the same (warm) process.
+    assertEquals((await node.run(B)).error, undefined);
+    await settledOff();
+    assertEquals(node.outputs().pending.get(), false);
+    // THE DEFECT: the child still serves the PRIOR program's value, and no
+    // second real compile ran — the proxy's content-cache key collapsed
+    // both programs onto one entry (`createRef({ src: proxy })` reads no
+    // nested `contents`), so the change was handed program A's pattern.
+    // The correct outcome is `answer === 7` and a second real compile;
+    // when the owning layer (create-ref.ts / pattern-manager.ts —
+    // normalize at the source) fixes this, flip these two assertions.
+    assertEquals(
+      node.outputs().result.key("answer").get() as unknown as number,
+      42,
+      "DEFECT pinned as it stands: the prior program's pattern is served",
+    );
+    assertEquals(
+      realCompiles.length,
+      1,
+      "DEFECT pinned as it stands: no real compile of the changed program",
+    );
+    // The ON arm keys the cache by a PLAIN program (`plainProgramOf`) —
+    // both the compile and the sync lookup — so it does not share this;
+    // its program-change re-compile is pinned live in
+    // executor-compile-and-run.test.ts (answer 42→7→99).
   } finally {
     await runtime.dispose();
     await storageManager.close();

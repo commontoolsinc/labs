@@ -76,22 +76,62 @@ ordinary consequence of the served graph run — the derivation reads the
 compiled pattern from the process cache and instantiates the child IN-RUN
 (the result-as-pattern shape below; derivation-class setup, correctly
 scoped per demander, the child's own body served as ordinary
-derivations). This split is deliberate: a post-commit flush that
-instantiated would RACE the serving loop's own resume of the prior child
-(the loop re-runs a demanded piece from its stored `patternIdentity`
-pointer, and a flush's `run`/`runSynced` loses the re-instantiation to
-it), so a program change would keep serving the OLD child. The §4 HIT
-rule keys on `resolvedHash` (set on every TERMINAL outcome — a landed
-piece, an error-shaped result, or a synchronous invalid-inputs/
-main-not-found), NOT on `pending`: the builtin's cell-init writes
-`pending=false` on a fresh closure's first run, so a pending-based hit
-would FALSELY fire for a durable mid-compile request on recovery — the
-piece would render empty forever (the recovery-mid-flight wedge). A
-compile FAILURE lands an error-shaped result keyed by the program hash
-(retry input-driven — never a timer, T14). Recovery re-uses a LANDED
-piece: the loop resumes the child from its pointer, and the hit rule
-reads through; a mid-flight request (issued, never resolved) RE-MISSES
-and re-fires the compile (§6 step 3) — every park / crash /
+derivations). The re-arm is ONE of two instantiate triggers, not the
+only one: any run that finds the pattern in the process cache — an
+incidental re-run after the effect cached it, a fresh closure over a warm
+process — instantiates without waiting for it, and the completion then
+re-arms nothing (a completion NEVER overwrites a landed resolution). This
+split is deliberate: a post-commit flush that instantiated would RACE the
+serving loop's own resume of the prior child (the loop re-runs a demanded
+piece from its stored `patternIdentity` pointer, and a flush's
+`run`/`runSynced` loses the re-instantiation to it), so a program change
+would keep serving the OLD child. The §4 HIT rule keys on `resolvedHash`
+(set on every TERMINAL outcome — a landed piece, an error-shaped result,
+or a synchronous invalid-inputs/ main-not-found), NOT on `pending`: the
+builtin's cell-init writes `pending=false` on a fresh closure's first
+run, so a pending-based hit would FALSELY fire for a durable mid-compile
+request on recovery — the piece would render empty forever (the
+recovery-mid-flight wedge). A compile FAILURE lands an error-shaped
+result keyed by the program hash (retry input-driven — never a timer,
+T14).
+
+**Supersession (the OW28 independent review's MAJOR-A).** The ON arm has
+NO abort signal: an issued compile effect always runs to its completion,
+and the COMPLETION decides by re-reading the node's CURRENT request hash
+through its own transaction (§4's FP6 re-read at writeback) — current
+again → it lands; superseded → it writes nothing, reports itself
+(§7's `outbox.superseded`), and its retirement RELEASES the outbox key.
+This is the discipline the outbox's in-flight attach relies on: an
+A→B→A′ sequence within A's compile duration attaches A′ to A's
+still-running effect (same key), so an effect that returned on "aborted
+at B's issue" would drop A′'s only completion and the node would stay
+`pending=true` forever, no counter naming it (the wedge, live-reproduced
+and pinned red-first). A same-hash re-run mid-flight reads the
+issue-time `requestHash` and WAITS — never re-issues into the in-flight
+key.
+
+**Instances (the review's MAJOR-B; scopes.md §6).** A scoped
+compile-and-run node fans out once per demanded instance through ONE
+closure, so every per-instance fact lives outside the closure: the
+cells resolve their instance through the run's transaction, the effect
+key carries the run's instance (`effectTargetKey` with the run identity —
+memo keys INCLUDE the instance key), and the completion transaction is
+STAMPED with the issuing run's identity so its request re-read and its
+writes address the instance the effect was issued for. The rule: ONE
+compile per program per process (the pattern cache is shared and
+single-flights); ONE effect completion + ONE instantiation per demanded
+instance (pinned live at cardinality 2 — a per-user program, the same
+text for two demanders: two effects, one real compile, both instances
+land). Recovery re-uses a LANDED piece when the memo cell is synced by
+the fresh runtime's first evaluation: the loop resumes the child from
+its pointer, and the hit rule reads through. When it is NOT (the memo
+cell is unlinked and only `.sync()`ed at init — T10.Q4's at-least-once),
+that first evaluation RE-MISSES: it re-issues, which WIPES the landed
+child client-visibly (`result` cleared, `pending=true`) until the re-arm
+re-instantiates it — a re-compile (cold cache) plus a brief
+re-instantiation on that restart, correctness held by `resolvedHash`. A
+mid-flight request (issued, never resolved) re-misses and re-fires the
+compile the same way (§6 step 3) — every park / crash /
 dropped-or-refused completion ends the serving runtime, and the fresh
 one's first evaluation re-fires (pinned live: a park mid-compile
 resolves on re-activation). A re-arm that landed but whose process
@@ -103,14 +143,18 @@ outbox counts as `outbox.failed`) stays pending until the space
 re-activates or the inputs change; no dirtiness- or timer-driven retry
 is invented. The CLIENT reads through (speculation.md §2) for EVERY
 outcome: a flag-ON non-serving run never compiles and writes nothing
-speculatively — not even the synchronous invalid-inputs / main-not-found
-outcomes, which the server decides identically and lands as committed
-cells — so the served `pending`/`result`/`error` render directly (a
-speculative echo only delayed the read-through). Content-cache note: the
-served path normalizes the program to a PLAIN object before keying the
-compile cache — `createRef({ src })` is insensitive to nested `contents`
-on the `asSchema` query-result proxy, which would collapse distinct
-programs to one cache key.
+request-bearing speculatively — not even the synchronous invalid-inputs
+/ main-not-found outcomes, which the server decides identically and
+lands as committed cells — so the served `pending`/`result`/`error`
+render directly (a speculative echo only delayed the read-through); the
+two writes the claim excepts are the shared cell-init's
+`pending.send(false)` loading default and the `sendResult` links, both
+request-free. Content-cache note: the served path normalizes the program
+to a PLAIN object before keying the compile cache — `createRef({ src })`
+is insensitive to nested `contents` on the `asSchema` query-result
+proxy, which would collapse distinct programs to one cache key; the
+underlying defect is pre-existing and stays live in the OFF arm
+(verification-coverage.md's OW28-createRef row).
 
 Result-as-pattern instantiation — a lift or handler RETURNING a
 pattern, instantiated into a deterministic result cell — is a RUNNER

@@ -1427,15 +1427,18 @@ export class Runtime {
   asyncWorkObserver: ((work: Promise<unknown>) => void) | undefined;
 
   /**
-   * Serving-loop observer of effect-memo hits (server-execution v2
-   * stage G, serving-loop.md §4's hit rule / §7's `memo.hits`): the
-   * effectful builtins report an evaluation that resolved from the
-   * stored request hash — no effect fired. Installed by the
-   * SpaceServer on the serving runtime; undefined everywhere else (the
-   * OFF arm pays one optional call).
+   * Serving-loop observer of effect-memo events (server-execution v2
+   * stage G, serving-loop.md §4 / §7): the effectful builtins report
+   * `hit` — an evaluation that resolved from the stored request hash,
+   * no effect fired (`memo.hits`) — and `superseded` — an effect
+   * completion that found its request superseded at writeback and
+   * wrote nothing, releasing its key (`outbox.superseded`; stage C,
+   * OW28's supersession discipline). Installed by the SpaceServer on
+   * the serving runtime; undefined everywhere else (the OFF arm pays
+   * one optional call).
    */
   effectMemoObserver:
-    | ((event: { kind: "hit"; id: string }) => void)
+    | ((event: { kind: "hit" | "superseded"; id: string }) => void)
     | undefined;
 
   /**
