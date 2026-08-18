@@ -371,6 +371,8 @@ interface PatternInput {
 
 /** BAM School Dashboard - At-a-glance view of school events and announcements. #bamSchool */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   emails: Email[];
   events: SchoolEvent[];
   urgentEvents: SchoolEvent[];

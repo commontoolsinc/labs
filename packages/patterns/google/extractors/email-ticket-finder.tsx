@@ -551,6 +551,8 @@ interface PatternInput {
 
 /** Email ticket finder for tracking upcoming events. #emailTickets */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   tickets: TrackedTicket[];
   todayTickets: TrackedTicket[];
   upcomingTickets: TrackedTicket[];
