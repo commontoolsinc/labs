@@ -453,17 +453,21 @@ patterns) and the full fixture suite green.
      binding name — closes the empty-`fn.name` debug-name gap).
 3. **Runtime read side (PR-2, NEXT)**: `fn.src` lazy getter reads the annotation
    instead of eval-frame resolution (CT-1754 machinery in `harness/engine.ts`
-   becomes dead on this path). Simplification available: the metadata is an
-   own-property on the implementation function itself
-   (`fn[__cfVerifiedBindingIdentity].position`), so the read may need no WeakMap
-   at all; apply the `helperInjectionLineOffset` line correction on this side
-   (the transformer cannot — a legacy stored envelope is byte-indistinguishable
-   from a fresh injection at transform time). Re-verify the
-   `recordModuleProvenance` region against #5927's engine rework before wiring.
-   Context note: stack traces never needed this — emitted sourcemaps were
-   already line-correct pre-1868 (verified empirically, 2026-07-21); the
-   annotation exists because `fn.src` needs function→position, which maps cannot
-   answer.
+   becomes dead on this path). Read the metadata off the annotated VALUE (the
+   factory), not the implementation function: `hardenVerifiedFunction` freezes
+   implementations during the builder call (`runner/src/builder/module.ts`,
+   createNodeFactory + handlerInternal), which runs before the annotation
+   statement, so the helper's implementation-stamp is skipped for those builders
+   (`Object.isExtensible` guard). The design-note shape stands: a
+   `readBindingIdentity(value)`-style read in `recordModuleProvenance`'s walk,
+   feeding a debug-only WeakMap keyed by the implementation. Apply the
+   `helperInjectionLineOffset` line correction on this side (the transformer
+   cannot — a legacy stored envelope is byte-indistinguishable from a fresh
+   injection at transform time). Re-verify the `recordModuleProvenance` region
+   against #5927's engine rework before wiring. Context note: stack traces never
+   needed this — emitted sourcemaps were already line-correct pre-1868 (verified
+   empirically, 2026-07-21); the annotation exists because `fn.src` needs
+   function→position, which maps cannot answer.
 4. **Delete the dev-build eager resolution**:
    `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` and `setEagerSourceAnnotation` gate
    (~25ms dev cold-boot, historical — re-derive).
