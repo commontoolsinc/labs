@@ -5225,6 +5225,17 @@ const applyCommitTransaction = (
         `memory v2 commit cannot ${operation.op} content-addressed document ${operation.id}`,
       );
     }
+    // Content-addressed documents live at space scope only: a scoped
+    // partition could hold a divergent copy under the same id (the
+    // immutability check reads at the operation's scope, so a scoped set
+    // reads an empty partition and passes as a first installation), and
+    // every reader resolves `cid:` documents at space scope. One id, one
+    // content, one partition.
+    if (normalizeScope(operation.scope) !== DEFAULT_SCOPE) {
+      throw new ProtocolError(
+        `memory v2 commit cannot write content-addressed document ${operation.id} at ${operation.scope} scope`,
+      );
+    }
     // A `cid:` set that IS a schema document (by content-addressed
     // identity — `cid:` also holds blobs) contributes its own refs;
     // anything else is scanned like an ordinary document. Schema content

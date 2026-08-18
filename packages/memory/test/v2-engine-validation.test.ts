@@ -299,6 +299,31 @@ Deno.test("rejects a set that changes a content-addressed document", async () =>
   });
 });
 
+Deno.test("rejects a content-addressed document written at a non-space scope", async () => {
+  await withEngine((engine) => {
+    // A scoped partition could hold a divergent copy under one cid: id —
+    // the immutability check reads at the operation's scope, and readers
+    // resolve cid: documents at space scope only.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          principal: "did:key:alice",
+          commit: commit(1, {
+            operations: [{
+              op: "set",
+              id: "cid:fid1:scoped",
+              scope: "user",
+              value: { value: { type: "string" } },
+            } as never],
+          }),
+        }),
+      ProtocolError,
+      "cannot write content-addressed document cid:fid1:scoped at user scope",
+    );
+  });
+});
+
 Deno.test("validates the schema closure a commit's content references", async () => {
   await withEngine((engine) => {
     const leafSchema = { type: "string", title: "closure-leaf" } as const;

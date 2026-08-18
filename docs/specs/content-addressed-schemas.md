@@ -89,6 +89,10 @@ A schema document is a `cid:` document whose value is a JSON Schema:
   reference to it, written there by whichever writer first references it in
   that space. Content addressing makes concurrent installs collide
   harmlessly.
+- **Space scope only, by rule**: the commit boundary rejects a `cid:`
+  write at any other scope. A scoped partition could hold a divergent
+  copy under one content-addressed id, and every reader resolves `cid:`
+  documents at space scope.
 
 ### Decomposition
 
@@ -385,9 +389,9 @@ changes under a previously verified `cid:` id fails outright. A broken
 ref rejects the frame whole, with the replica untouched. The repair
 paths that do exist serve callers, not arrival: the traversal loader's
 reads are tracked (arrival re-runs the reader), the missing-target kick
-requests the fetch, and `syncSchemaDocumentClosure` completes a closure
-by hash within its own space — never satisfied by realm-registry
-presence alone.
+requests the fetch, and any sync of a schema document delivers its
+whole closure through result assembly — never satisfied by
+realm-registry presence alone.
 
 Walking delivered values is a transitional cost: the intended end state
 moves each document's embedded-ref information into a meta field
