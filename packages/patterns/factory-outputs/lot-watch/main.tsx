@@ -592,15 +592,12 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       {} as LotWatchAdminRegistryValue,
     );
     const adminRegistry: LotWatchAdminRegistryCell =
-      (inputAdminRegistry as LotWatchAdminRegistryCell | undefined) ??
-        defaultAdminRegistry;
+      (inputAdminRegistry as never) ?? defaultAdminRegistry;
     const defaultAdminChanges = new Writable.perSpace<
       TrustedLotWatchAdminChangeRegistryValue
     >({} as TrustedLotWatchAdminChangeRegistryValue);
     const adminChanges: TrustedLotWatchAdminChangeRegistryCell =
-      (inputAdminChanges as
-        | TrustedLotWatchAdminChangeRegistryCell
-        | undefined) ?? defaultAdminChanges;
+      (inputAdminChanges as never) ?? defaultAdminChanges;
     const adminManagerCredential = new Writable.perUser<
       LotWatchAdminManagerCredential | null
     >(null);
