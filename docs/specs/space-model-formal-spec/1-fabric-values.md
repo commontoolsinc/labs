@@ -2827,10 +2827,10 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    from this arm
    are guaranteed deep-frozen at the walker boundary (the contract holds
    for both the codec-produced value and the lenient-mode
-   `ProblematicValue`), so callers need not each freeze. This contract is
-   scoped to this arm only; the unknown-tag arm (step 5) is intentionally
-   not covered. See Section 8.6 for the full deep-freeze protocol and the
-   egress-freezing call sites.
+   `ProblematicValue`), so callers need not each freeze. Every other arm
+   guarantees the same, the unknown-tag arm (step 5) included, so a caller
+   need not ask which arm produced what it was handed. See Section 8.6 for
+   the full deep-freeze protocol and the egress-freezing call sites.
 5. **Unknown tags** — a syntactically valid tag with no registered codec
    produces an `UnknownValue` wrapping the tag and (already-decoded) state,
    preserving the form for round-tripping (Section 3). Syntax is what
@@ -3979,14 +3979,21 @@ Visited objects are tracked in a per-call `Set` for cycle safety.
 The deep-freeze contract is enforced at the points where decoded
 values cross from internal codec machinery to callers:
 
-- **The decode walker's codec dispatch arm.**
-  Every value returned from this arm passes through `deepFreeze()` before
-  returning. This covers the codec-produced value (often a
-  `FabricPrimitive` subclass, already frozen — the cache hit makes this
-  O(1)) and the lenient-mode `ProblematicValue` fallback. The
-  unknown-tag arm (`UnknownValue`) is a separate sibling branch and is
-  intentionally NOT covered by this contract; broadening the contract
-  there is a separate follow-on. See Section 4.5 step 4.
+- **Every value the decode walker returns is deep-frozen at the boundary**,
+  whichever arm produced it. The arms reach that by two routes. A leaf arm
+  calls `deepFreeze()`: the codec-produced value (often a `FabricPrimitive`
+  subclass, already frozen — the cache hit makes this O(1)), the lenient-mode
+  `ProblematicValue` fallback, and the unknown-tag arm's `UnknownValue`. A
+  container arm calls `Object.freeze()` on the array or object it has just
+  built, whose children the leaf arms have already deep-frozen, so the
+  guarantee holds without walking them a second time. Which arm produced a
+  value is therefore not something a caller has to know. See Section 4.5
+  step 4.
+
+- **`ProblematicStateError.asProblematicValue()`.** The rendering of a thrown
+  refusal as a returned value is deep-frozen where it is built, rather than at
+  each call site, so a caller reaching it outside the walker gets the same
+  guarantee.
 
 - **`JsonCodecValue` parse boundary.** The `#parseWireText()` helper
   (invoked by `decode()` and `#fromBytes()`) deep-freezes the parsed tree

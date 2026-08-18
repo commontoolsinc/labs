@@ -56,7 +56,7 @@ export class UnknownValue extends BaseFabricInstance {
     }
 
     this.#wireTypeTag = wireTypeTag;
-    this.#state = state; // TODO(danfuzz): Should be guaranteed deep-frozen.
+    this.#state = state;
   }
 
   /** Arbitrary raw instance state. */
