@@ -429,6 +429,25 @@ needs.
 
 ## 5. Create, and carry the address forward
 
+This is where `--select` starts carrying the narrative, so here is the whole
+of the grammar the session uses. A selection names the shape of the answer;
+everything not named is left out.
+
+| Spelling | What comes back |
+| --- | --- |
+| `title,status` | those two fields and nothing else |
+| `item.title` | walks into `item` and keeps `title` — it prunes rather than flattens, so the answer is still shaped like the result |
+| `@` | the address of the position being read, in place of its contents |
+| `item@` | the address `item` holds, rather than following the link and copying what is behind it |
+| `children@` | applied across an array: each element's own address |
+| `@,title` | both — the address beside the field |
+
+An address always arrives under the key `$link`, which is why that key is
+everywhere in the output below. The full account of the suffix — marking
+positions deeper than a link, the `{"$link": true}` spelling a JSON Schema
+uses, and escaping a literal `@` — is in
+[verbs over the CLI](over-the-cli.md#asking-a-read-for-an-address).
+
 ```bash
 EPIC=$(cf call --piece board --select 'item@' addItem -- \
        --title "Login rewrite" | jq -r '.result.item."$link"')
@@ -437,6 +456,10 @@ cf call "$EPIC" addChild -- --title "Session cookies"
 cf call "$EPIC" recordNote -- --body "blocked on the cookie spec"
 cf get "$EPIC/status"
 ```
+
+The `jq` hop above is how an address gets from a response into a variable, and
+its quoting is load-bearing: `."$link"` must be quoted, because a bare
+`.$link` reads as one of jq's own variables rather than as a key.
 
 The create answers with the address that `EPIC` then holds, and every command
 after it takes that same string:

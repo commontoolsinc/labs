@@ -217,7 +217,22 @@ run cf call -s "$SPACE" --piece board addItem -- --help
 
 act "4 · Create, and act on what you were handed"
 say "The create returns the piece it made. Its address is the next command's target."
+say ""
+say "--select names the shape of the answer, and this is its first use, so:"
+say "a comma-separated list of fields, a dot to walk into one, and a trailing"
+say "@ meaning 'the address of this position, not the contents behind it'."
+say "So item@ says hand back where the new item lives rather than a copy of"
+say "it — and an address is what the rest of the session is built on."
 run cf call -s "$SPACE" --piece board --select item@ addItem -- --title "Login rewrite"
+say "The @ renders under the key \$link, which is the spelling every address"
+say "in this transcript arrives in. Capturing one in your own shell is a single"
+say "jq hop — and the quotes around \$link are load-bearing, since jq reads a"
+say "bare \$link as one of its own variables:"
+say ""
+say "    jq -r '.result.item.\"\$link\"'"
+say ""
+say "That is the exact expression the next line of this script runs against the"
+say "output you just saw — not a second call."
 # The address the reader can see in the output above, carried whole. Taken
 # from that run, not from a second one: `run` leaves the output it displayed
 # in $OUT. It is one reference string, used exactly as printed: `get` and
@@ -247,9 +262,16 @@ say "re-enters answers with an address, so the whole result is still one value."
 # callable's own command line, so a flag after it belongs to the verb.
 run cf call -s "$SPACE" --select item.title "$EPIC" addChild -- --title "CSRF tokens"
 say "And a caller who names one field is given one field, circle or no circle."
+say "item.title is the dotted form: it walks into item and keeps title. Note it"
+say "prunes rather than flattens — the answer is still shaped like the result,"
+say "with everything the caller did not ask for gone."
 
 act "5 · Read addresses instead of contents"
-say "An unshaped read follows every link. A bare @ stops at the address."
+say "The same two spellings, now on a read of a collection. An unshaped read"
+say "follows every link and copies what it finds; @ on its own names the"
+say "position being read rather than its contents, and applies to each element"
+say "when it crosses an array — so this asks for every child's address, with"
+say "its title beside it."
 run cf get -s "$SPACE" "$EPIC" children --select @,title
 
 act "6 · Ask the same question twice"
