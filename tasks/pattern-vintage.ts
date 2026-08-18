@@ -117,6 +117,7 @@ import {
   DEFAULT_APP_PATTERN_SOURCE,
   HOME_PATTERN_SOURCE,
 } from "../packages/piece/src/system-pattern-url.ts";
+import { reportBreakRegistryFindings } from "./pattern-break-registry-guards.ts";
 import {
   armVerdictGuard,
   type CommandOutput,
@@ -204,6 +205,24 @@ async function main() {
     Deno.exit(1);
   }
   const required = requiredPatternKeys(systemUrls);
+  // Judge the accepted-break registries before replaying anything: an entry
+  // naming a required pattern or pointing at no decision record is wrong
+  // regardless of what this run's fixtures show.
+  {
+    const registryReport = reportBreakRegistryFindings({
+      requiredPatternKeys: new Set(required),
+      recordExists: (path) => {
+        try {
+          return Deno.statSync(`${REPO_ROOT}/${path}`).isFile;
+        } catch {
+          return false;
+        }
+      },
+    });
+    if (registryReport !== undefined) {
+      emit({ err: registryReport, code: 1 });
+    }
+  }
 
   // Before anything else: a flag this task does not know is a MISTAKE, not a
   // no-op. Unhandled, it falls through to the plain gate and exits 0 having

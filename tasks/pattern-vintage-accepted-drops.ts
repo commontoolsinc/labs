@@ -62,6 +62,12 @@ export interface AcceptedStateDrop {
   capturedThrough: string;
   /** Why the removal was accepted. */
   reason: string;
+  /**
+   * Repo-relative path of the decision record under `docs/history/` — shared
+   * with the matching Tier 1 entry where there is one. Existence is enforced
+   * when either gate runs (`pattern-break-registry-guards.ts`).
+   */
+  record: string;
 }
 
 export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
@@ -98,6 +104,7 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "`referencedBy` instead of deriving its own edge row, so the old row is " +
       "gone from every child the board lists. The index rows became the topics " +
       "themselves, which is what retires their copied address and reference.",
+    record: "docs/history/topics-crossref-identity-break.md",
   },
   {
     pattern: "topics/topic.tsx",
@@ -111,6 +118,7 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
       "entry in tasks/pattern-compat-accepted-breaks.ts. The board's own " +
       "`crossrefs` came back as a pivot and strands nothing, so only a topic's " +
       "retired per-topic row is listed here.",
+    record: "docs/history/topics-crossref-identity-break.md",
   },
 ];
 

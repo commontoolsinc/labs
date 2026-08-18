@@ -34,6 +34,12 @@ import {
 } from "./pattern-files.ts";
 import { UNEVALUABLE_PATTERNS } from "./pattern-compat-unevaluable.ts";
 import { ACCEPTED_CONTRACT_BREAKS } from "./pattern-compat-accepted-breaks.ts";
+import { reportBreakRegistryFindings } from "./pattern-break-registry-guards.ts";
+import {
+  DEFAULT_APP_PATTERN_SOURCE,
+  HOME_PATTERN_SOURCE,
+} from "../packages/piece/src/system-pattern-url.ts";
+import { requiredPatternKeys } from "./pattern-vintage-lib.ts";
 import {
   acceptedBreakKey,
   checkPattern,
@@ -63,6 +69,26 @@ async function main() {
   } catch (error) {
     console.error(formatError(error));
     Deno.exit(2);
+  }
+
+  // The registries are judged before any pattern is: an entry that names a
+  // required pattern or points at no decision record is wrong regardless of
+  // what this shard's findings turn out to be.
+  const registryReport = reportBreakRegistryFindings({
+    requiredPatternKeys: new Set(
+      requiredPatternKeys([HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE]),
+    ),
+    recordExists: (path) => {
+      try {
+        return Deno.statSync(path).isFile;
+      } catch {
+        return false;
+      }
+    },
+  });
+  if (registryReport !== undefined) {
+    console.error(registryReport);
+    Deno.exit(1);
   }
 
   const allFiles = await collectPatternFiles();

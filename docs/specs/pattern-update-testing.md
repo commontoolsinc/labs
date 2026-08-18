@@ -73,6 +73,12 @@ decides to ship is declared instead, in `tasks/pattern-compat-accepted-breaks.ts
   per role, so a second problem in a role whose issue is an accepted path can
   still hide behind it; name as few paths as the removal needs.
 
+  An entry also names its decision record under `docs/history/` (`record`),
+  and may not name a required pattern — the home and default-app roots update
+  aggressively and unconditionally, so a break there is never accepted. Both
+  are enforced whenever either gate runs
+  (`tasks/pattern-break-registry-guards.ts`).
+
   The run prints every pair it forgave, and fails on one that no longer needs
   forgiving, so the list can only shrink. That audit is asked per pattern rather
   than of the whole list, because the CI job always sets `PATTERN_COMPAT_SHARD`
@@ -206,6 +212,9 @@ still fails. Nothing off the path to a drop is rebuilt either — a subtree that
 lost nothing is returned as itself, and a reduction (`{"[cell]": …}` and its
 kin) is never opened, because it stands for something the comparison must weigh
 whole.
+
+An entry names its decision record the same way Tier 1's does (`record`), and
+the required-pattern refusal applies here identically.
 
 The run prints every path it held back, and fails on one that no vintage needed,
 so this list can only shrink too. A pattern no fixture records is reported
