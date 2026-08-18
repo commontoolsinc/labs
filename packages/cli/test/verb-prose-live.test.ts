@@ -309,7 +309,7 @@ describe("an author's verb prose reaching a caller", () => {
         // `AddEvent.urgent` is declared and documented, and this handler's
         // body reads only `title`. The listing carries `urgent` anyway,
         // because the served schema is the verb's input contract — the
-        // authored event — per docs/plans/verb-input-contract.md: a contract
+        // authored event — per docs/history/plans/verb-input-contract.md: a contract
         // is edited deliberately, and a field the body ignores today is
         // still one the author asked callers to send. Dispatch delivers it
         // like any interface delivers an unused parameter; what the handler

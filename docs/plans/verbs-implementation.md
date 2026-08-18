@@ -53,7 +53,7 @@ without reconstructing it.
 | 2. an unrecognized projection key is refused | on main (#5817); design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
 | 5. `cf wish` and `cf exec` take the read options | on main (#5844) |
-| 11. a caller may name a reference | **capability on main** (#5880); the refusal that protects it is not built |
+| 11. a caller may name a reference | on main — envelope #5880; the emitted-address spelling and the protective refusals via the contract ruling (ordering row 14) |
 
 Item 9 is split because its two halves have different fates: the marks landed,
 the emission is parked.
@@ -277,9 +277,11 @@ adding a fourth.
 *Exit:* the same cell, reached four ways, renders identically under the same
 selection.
 
-**11. A caller may name a reference.** *(M)* **The capability is on main
-as #5880.** A caller names an existing cell where a verb declares a reference,
-and the edge that comes back is the target rather than a copy of it.
+**11. A caller may name a reference.** *(M)* **On main** — the envelope
+spelling as #5880, the emitted-address spelling and the protective refusals
+with row 14. A caller names an existing cell where a verb declares a
+reference, and the edge that comes back is the target rather than a copy of
+it.
 
 What it removes: a verb whose event declared `Writable<T>` was callable by a
 model and by nothing else. `traverseAndCellify`
@@ -287,13 +289,15 @@ model and by nothing else. `traverseAndCellify`
 live cell before dispatch, so the LLM boundary had a complete round trip while
 the CLI rejected the address and the webhook path forwarded it unresolved.
 
-**The refusal that protects it is not built.** A shape-matching payload is
-still accepted, still stores a detached copy, and still reports success — so a
-caller who sends the shape rather than the address is told it worked. Refusing
-that needs to identify a reference position, which needs the `asCell` marker,
-and the marker reaches nothing the CLI can read: the served event schema is the
-handler's narrowed read, and the stored pattern's declared schema has lost it
-too. #5560 carries the measurements.
+**The refusal that protects it is built beside the emitted spelling.**
+Refusing a shape-matching payload needs a reference position identified,
+which needs the `asCell` marker — and the marker survives on exactly one
+serialized surface: the handler module inside the compiled pattern
+(`Pattern.resultSchema` and every link-carried schema are sanitized to stream
+markers only). The CLI's dispatch gate reads it there, on the repair path a
+shape refusal opens, converts the emitted address into the link envelope, and
+refuses the two payloads that could only ever be mistakes at the position.
+#5560 carries the original measurements.
 
 *The refusal was drift, not policy, and #5880 removed it.*
 `closedWorldEventRejection` (`packages/runner/src/runner.ts`) has always
@@ -321,41 +325,38 @@ nothing gated it: the handler saw the target's own properties and read its
 means the door is already open under the native spelling. This item names a
 capability rather than adding one.
 
-Four parts. Two are independent of everything:
+Four parts, three of them landed:
 
-- **Refuse the structural copy.** Correct under any road, needs no vocabulary
-  and no gate change, and converts silent corruption into an error.
-- **Give the CLI gate the option the dispatch gate already passes.** One
-  argument at one call site — and on the measurement above, *sufficient on its
-  own* for the native sigil spelling, since the gate is the only thing between
-  that payload and a `send()` that already resolves it. Worth confirming
-  against a declared field rather than the `any` the probe used.
+- **Refuse the structural copy.** *Landed.* Correct under any road, needs no
+  vocabulary and no gate change, and converts silent corruption into an error.
+- **Give the CLI gate the option the dispatch gate already passes.** *Landed
+  as #5880.* One argument at one call site — and on the measurement above,
+  sufficient on its own for the native sigil spelling, since the gate is the
+  only thing between that payload and a `send()` that already resolves it.
+  Confirmed since against a declared field rather than the `any` the probe
+  used: the edge that lands reads back as the address that was named.
 - **Lift resolution to a shared home**, beside `parseLink` and the LLM-friendly
-  pair in `packages/runner/src/link-utils.ts`. This is what admits the *other*
-  spelling — the canonical reference string a read emits under a `$link`
-  marker — so it serves composition rather than basic capability.
-- **Fix event-schema emission.** The handler-side stream schema is a usage
-  summary: `applyCapabilitySummaryToArgument`
-  (`packages/ts-transformers/src/transformers/schema-injection.ts`) shrinks
-  the event parameter to what the body uses, so a declared reference field
-  the body never reads — named and inline spellings alike — disappears from
-  the emitted properties and `required`, while the pattern's durable `$defs`
-  keeps the full declared event. That half is independent and needed under
-  any road, doubly once anything refuses on the stream schema, since a field
-  it does not name cannot be supplied at all. Which of the two schemas is a
-  verb's input contract is the open question
-  [references as arguments](references-as-arguments.md) records; only the
-  `asCell` marker hangs on the decision below — and today's emitted marker
-  records the body's usage (`["readonly"]` for a read-only body), not the
-  author's `Writable`.
+  pair in `packages/runner/src/link-utils.ts`. *Still owed.* The CLI resolves
+  the emitted spelling at its own dispatch gate, which serves every caller that
+  comes through `cf`; the webhook and ingest paths reach the same handlers
+  through no gate at all, and a shared home is what would serve them.
+- **Fix event-schema emission.** *Landed as #5964.* The handler-side stream
+  schema was a usage summary — `applyCapabilitySummaryToArgument`
+  (`packages/ts-transformers/src/transformers/schema-injection.ts`) shrank the
+  event parameter to what the body used, so a declared reference field the body
+  never read disappeared from the emitted properties and `required`. It now
+  serves the authored event, per
+  [the input contract](../history/plans/verb-input-contract.md), with the
+  usage-derived capability riding the marker rather than the shape.
 
-*One decision inside the item:* schema-blind or schema-directed resolution.
-Schema-blind is proven twice — `traverseAndCellify` and the dispatch gate;
-schema-directed is checkable and refuses a typo. It decides whether the `asCell`
-marker is required or merely useful, so reach it before starting that half.
+*The decision inside the item is taken:* resolution at the CLI is
+schema-DIRECTED, off the declared contract, so a typo at a reference position
+is refused rather than resolved. The runtime's own dispatch gate stays
+schema-blind. A shared home for the remaining callers chooses between those
+two proven shapes.
 
-*A constraint rather than a decision:* what is accepted inbound must include the
-shape a read emits, or a caller cannot submit the address it was just handed.
+*A constraint rather than a decision, and met:* what is accepted inbound
+includes the shape a read emits.
 
 *CFC gets a notification, not a ruling* — an existing capability widening from
 the user's own model session to external principals.
@@ -366,9 +367,10 @@ the user's own model session to external principals.
 and by no other caller; a CLI caller now reaches it too, and the edge that comes
 back is the target rather than a copy of it.
 
-*The exit the item still owes:* the same call sending the target's SHAPE rather
-than its address is refused, instead of storing a detached copy and reporting
-success.
+*Exit, met by row 14:* the same call sending the target's SHAPE rather than
+its address is refused — including a copy carrying every field the target
+declares, which the published schema alone cannot tell from the real thing —
+instead of storing a detached copy and reporting success.
 
 **12. `cf` refuses an undeclared field on a call.** *(S)* **On main as
 #5835.** The failure it removes: a payload carrying a field the verb does not
@@ -499,7 +501,7 @@ its own track.
 | 12 | An unrecognized projection key is refused | **on main** (#5817) — item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md) |
 | 12a | `cf` refuses an undeclared field on a call | **on main** (#5835) — item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says. Built against #5817's wording rather than its code, since that branch is unmerged |
 | 13 | `cf wish` and `cf exec` take the read options | **on main** (#5844) — item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
-| 14 | A caller may name a reference | **capability on main** (#5880) — item 11, #5560 | — | A caller can now name an existing cell where a verb declares a reference, and the edge that comes back is the target rather than a copy of it. What remains is the REFUSAL that protects it: a shape-matching payload still **stores a detached copy and reports success**, so a caller who sends the shape instead of the address is still told it worked. Refusing it needs to identify a reference position, which needs the `asCell` marker, which reaches nothing the CLI can read — see #5560 for the measurements |
+| 14 | A caller may name a reference | **on main** — item 11, #5560; envelope #5880, emitted spelling and refusals via the contract ruling | — | A caller names an existing cell where a verb declares a reference in either spelling — the link envelope (#5880) or the address exactly as a read emits it — and the edge that lands is the target rather than a copy. The refusals that protect the position are built with it: a string that is no address, and the shape-matching payload that would have **stored a detached copy and reported success**, are both refused naming the position. The reference marker reaches the CLI through the handler module in the compiled pattern — the one serialized surface link sanitization leaves it on — read at the dispatch gate per [the input contract](../history/plans/verb-input-contract.md) |
 
 **`--show-links` is not redundant, and nothing should schedule its removal
 yet.** [Verb result selection](verb-result-selection.md) prices it as a stopgap
@@ -539,12 +541,11 @@ Keep `--show-links` meanwhile; retire it when a replacement exists or the need
 is confirmed dead. Note that `cf piece get` has never had an equivalent, so
 bulk resolution on a *read* is a gap that predates all of this.
 
-**Running beside all of the above.** A caller naming a reference (item 11, #5560) waits on confirming
-that a sigil resolves through a *declared* event field rather than an untyped
-one; it decides nothing item 1 decides — a declared result makes an *output*
-self-describing, this is what an *input* accepts — but it shares
-`schema-injection.ts` with that emission, so the one-file rule applies to the
-pair and one holder suits both.
+**Running beside all of the above.** A caller naming a reference (item 11,
+#5560) is landed in both spellings — the sigil resolves through a *declared*
+event field, and the emitted address converts to the sigil at the CLI's
+dispatch gate. It decided nothing item 1 decides: a declared result makes an
+*output* self-describing, and this is what an *input* accepts.
 
 **Where a doc comment actually goes, measured against the compile pipeline.**
 Step 5a rests on this, and it is not what either symptom looked like from the
@@ -715,7 +716,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 — **working as designed**; closes once #5754 lands the documentation |
 | #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | unscheduled. It rode ordering step 11 while that step was a question about identity; the answer there was that the two routes are aliases by design, which says nothing about a scheme the id itself drops. Independent, and still open |
 | #5589 | a click's `detail` and a `cf-select`'s `target.value` reach a handler as types no pattern declares | carried alongside — it belongs to whoever next touches `packages/html`. The ruling that closed item 9b also removed the only thing that ever compared the renderer's output against an author's declared type, so this has no detector left |
-| #5560 | an address a call returns cannot be passed back as a verb argument | item 11, and **row 14** — it had no ordering row until one was added. Not to be confused with ordering step 11, "one piece, one address", which is #5632 and decided |
+| #5560 | an address a call returns cannot be passed back as a verb argument | **fixed** by #5880 (the envelope) and row 14's CLI half (the emitted address, and the refusal for the shape-matching copy that used to store a detached document and report success). Not to be confused with ordering step 11, "one piece, one address", which is #5632 and decided |
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
 | #5685 | no CI job runs any verb integration script, and one of them says it does | **fixed** — `integration.sh`'s `piece-call` section runs both scripts (`verbs-over-the-cli.sh` since #5289, `verb-session-gaps.sh` since #5793), and CI's `cli-integration-test` matrix runs that section on every pull request. The arc's honesty checks gate |
 | #5663 | the compat checker admits a newly required verb event field, breaking every existing caller | **unscheduled.** It sits in `packages/piece/src/schema-compatibility.ts`, the set item 2 derives its tolerated tier from, so a change there meets this |

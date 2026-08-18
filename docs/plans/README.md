@@ -69,20 +69,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
   additive path to it. Start here rather than at either part.
 - [References as arguments](references-as-arguments.md) proposes lifting
   address resolution out of the LLM dialog builtin, which already does it, and
-  into the boundary every external caller crosses. An LLM can hand a pattern a
-  reference; the CLI, a webhook, and the ingest path cannot reach the same
-  handler the same way, and three encodings for "an address goes here" have
-  already diverged. It carries the measurement, the size, and the gate-by-gate
-  evidence that the refusal is drift rather than policy — the dispatch gate
-  already accepts link values; the outer gates never got the option.
-- [The verb input contract: one decision](verb-input-contract.md) frames the
-  single decision the references arc is gated on: a verb carries two input
-  schemas — the authored event and the handler body's usage summary — and
-  every surface that judges a caller's payload has picked one implicitly. It
-  rules the authored event the contract while the handler's grant stays
-  usage-derived and delivery follows the contract, names the four surfaces
-  that correct themselves the day emission serves it, and sequences the
-  emitted-address spelling and the detached-copy refusal behind that.
+  into the boundary every external caller crosses. An LLM and the CLI can
+  hand a pattern a reference — the CLI in both spellings, converting the
+  emitted address against the declared contract at its dispatch gate — while
+  the webhook and ingest paths still forward a payload unresolved. It carries
+  the measurement, the size, and the gate-by-gate evidence that the remaining
+  refusal is drift rather than policy. The ruling it was once gated on is
+  executed and archived:
+  [the verb input contract](../history/plans/verb-input-contract.md).
 - [Designing verbs so they can change](verb-evolution.md) records how verbs are
   declared so that adding to and changing them later is possible: verbs are
   promises and their names are stable by default — an owner may break their

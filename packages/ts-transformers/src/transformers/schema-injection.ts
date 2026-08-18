@@ -315,7 +315,7 @@ function applyCapabilitySummaryToArgument(
     return argumentNode;
   }
   if (mode === "contract") {
-    // The contract half of docs/plans/verb-input-contract.md: the authored
+    // The contract half of docs/history/plans/verb-input-contract.md: the authored
     // event serves verbatim in structure, with capabilities overlaid from
     // the body's usage and unobserved cell positions made opaque. The
     // body's observed paths still validate against the authored type — a
@@ -3407,7 +3407,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             );
 
             // The event is a verb's input contract: authored structure,
-            // usage-derived capability values (docs/plans/verb-input-contract.md).
+            // usage-derived capability values (docs/history/plans/verb-input-contract.md).
             // A synthetic event node has no authored structure to serve —
             // JSX handler events among them — so those keep the usage shrink.
             eventTypeNode = applyCapabilitySummaryToParameter(

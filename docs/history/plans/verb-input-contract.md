@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-08-17
+archived: 2026-08-18
+reason: "Executed decision record: the authored event ruled the verb input contract (#5955); all four unlocked steps landed — contract-mode emission (#5964), the judging surfaces following it, and the CLI's emitted-address conversion with the detached-copy refusal."
+---
+
 # The verb input contract: one decision
 
 A verb carries two input schemas, and they diverge by construction. Every
@@ -12,7 +19,7 @@ declared result is already the authored type, end to end.
 **The authored event.** The interface the pattern author wrote — field names,
 types, required-ness, and reference declarations such as a `Writable<>`
 position. It compiles in full: the pattern's durable `$defs` carry the whole
-declared event ([references as arguments](references-as-arguments.md),
+declared event ([references as arguments](../../plans/references-as-arguments.md),
 "A schema emission fix" — measured).
 
 **The body's usage summary.** The schema the deployed stream cell carries and
@@ -60,7 +67,7 @@ reference position still stores a detached copy and reports success (#5560).
 Refusing it needs the same answer to "is this position a reference", with the
 same two readings.
 
-**The evolution policy.** [Designing verbs so they can change](verb-evolution.md)
+**The evolution policy.** [Designing verbs so they can change](../../plans/verb-evolution.md)
 versions interfaces and holds compatibility judgments against them. A
 contract that shifts when a body is refactored is not versionable; the
 policy's checker needs the contract to be the thing an author edits
