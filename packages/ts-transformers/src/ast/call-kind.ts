@@ -50,6 +50,7 @@ import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts"
 import {
   getTypeAtLocationWithFallback,
   getVariableInitializer,
+  isSyntheticNode,
 } from "./utils.ts";
 import { isCollectionType } from "./type-inference.ts";
 
@@ -757,9 +758,21 @@ export function getLoweredArrayMethodName(
   return `${family}WithPattern`;
 }
 
+/**
+ * The `options` reach the receiver's provenance walk. Passing
+ * `syntheticReactiveCollectionRegistry` is how a stage that runs after the
+ * closure stage sees the collections that stage created rather than derived —
+ * a local whose initializer is site-lifted has no structural provenance to
+ * walk, so without the registry its ownership reads "plain" and the caller
+ * re-lowers a call the closure stage already rewrote. Callers that must NOT
+ * see those registrations — standalone-function validation, where the eager
+ * `<cell>.get().filter(...)` idiom is the supported spelling — stay on the
+ * bare form deliberately.
+ */
 export function classifyArrayMethodCallSite(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
+  options: ReactiveCollectionProvenanceOptions = {},
 ): ArrayMethodCallSiteInfo | undefined {
   const access = classifyArrayMethodCall(call);
   if (!access) {
@@ -779,6 +792,7 @@ export function classifyArrayMethodCallSite(
     ownership: hasReactiveCollectionProvenance(
         target.expression,
         checker,
+        options,
       )
       ? "reactive"
       : "plain",
@@ -1374,8 +1388,26 @@ function resolveExpressionKind(
     const name = target.name.text;
     if (isKnownArrayMethodName(name)) {
       // Fallback path: when symbol resolution doesn't already identify the
-      // array-method family, only treat it as such for reactive receivers.
-      if (isReactiveArrayMethodReceiverExpression(target.expression, checker)) {
+      // array-method family. A synthetic, symbol-less `*WithPattern`
+      // spelling needs no receiver check: the closure stage emits these
+      // calls against receivers whose static type is still the plain array
+      // type, so the method never resolves to a symbol and provenance walks
+      // see a plain binding — the emitted spelling itself testifies to the
+      // provenance the rewritten tree can no longer show structurally. The
+      // synthetic-node requirement is what scopes that testimony to calls
+      // the transformer actually produced: an AUTHORED `*WithPattern`
+      // spelling keeps its author's semantics whether its method resolves
+      // (their own declaration) or not (an untyped receiver). Authored
+      // spellings of every family stay gated on reactive receivers — a
+      // `.map`-named call whose symbol did not resolve is otherwise not
+      // evidence of the family.
+      if (
+        (
+          !symbol && isSyntheticNode(target) &&
+          getArrayMethodAccessKindByName(name)?.lowered
+        ) ||
+        isReactiveArrayMethodReceiverExpression(target.expression, checker)
+      ) {
         const result = { kind: "array-method" } as const;
         cache.set(expression, result);
         return result;

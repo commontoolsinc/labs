@@ -216,6 +216,29 @@ Deno.test("classifyArrayMethodCallSite does not mark custom lowered *WithPattern
   );
 });
 
+Deno.test("an authored *WithPattern call on an untyped receiver keeps no call kind", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare const collection: any;
+
+    const value = collection.mapWithPattern((n: number) => n + 1);
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isCallExpression(expression)) {
+    throw new Error("Expected call expression initializer");
+  }
+
+  // The method resolves to no symbol on \`any\`, but the node is authored
+  // (parser-ranged), so the synthetic-spelling fallback must not claim it —
+  // only calls the transformer itself emitted classify by spelling alone.
+  assertEquals(detectCallKind(expression, checker), undefined);
+  assertEquals(classifyArrayMethodCallSite(expression, checker), {
+    family: "map",
+    lowered: true,
+    ownership: "plain",
+  });
+});
+
 Deno.test("array method classification ignores prototype-key names", () => {
   const { sourceFile, checker } = createProgram(`
     declare function derive<T>(value: T): T;
