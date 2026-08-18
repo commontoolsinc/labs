@@ -312,6 +312,43 @@ gone.
 Same-named local helpers are not treated as reactive origins unless the call
 itself resolves through the Common Fabric provenance rules in §5.
 
+### 6.3a The event parameter serves the authored contract
+
+A verb's event parameter (handler/action first parameter) with an AUTHORED
+type — an explicit parameter annotation, or the builder call's own event
+type argument, which the action strategy now carries into the lowered
+`handler` call — is applied in `contract` mode
+(`CapabilitySummaryApplicationMode` in `type-shrinking.ts`). The authored
+TypeNode serves VERBATIM in structure — objects, unions, intersections,
+arrays, and primitives alike, `$defs` identities and prose intact — and
+`overlayContractCapabilities` (`type-shrinking.ts`) rewrites only
+capability-bearing positions: a cell-like wrapper takes the capability the
+body's usage earns (writable where it writes, read-only where it reads,
+comparable where it only compares, OPAQUE where it never touches the
+position), and an identity-only comparison of a plain-declared position adds
+the comparable marker the runtime materializes it through. A named reference
+whose subtree holds no cell-like position passes through untouched; one
+expands only when a capability inside it must change, and a self-referential
+type ends that expansion at the cycle with the node kept as authored — the
+accepted residual, since a literal cannot spell its own recursion. Observed
+paths still validate against the authored type via `validateShrinkCoverage`.
+
+A SYNTHETIC event node — JSX handler events among them — has no authored
+structure to serve and keeps the `full` usage shrink, as does a handler with
+no event type information at all: for those, the usage summary is the only
+contract there is. Reactive reads (`lift`, lift-applied, computed) stay in
+`full` mode always: there, shrinking is subscription semantics. The ruling
+this implements is
+[the verb input contract](../../plans/verb-input-contract.md); the
+`handler-schema/contract-authored-event`,
+`contract-nested-unread-reference`, and `contract-authored-shapes` fixtures
+pin the shapes.
+
+The type-driven shrink also guards its descent on (type, requested-paths): a
+pair already on the path falls back to the named type reference — no
+structural fallback — which schema generation resolves through `$defs`
+exactly as it does for an authored node.
+
 ### 6.4 Schema shrink validation
 
 Validates that property paths detected by capability analysis can actually

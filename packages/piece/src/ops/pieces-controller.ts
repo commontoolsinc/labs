@@ -47,6 +47,10 @@ import {
   setPatternSource,
   type SpaceCellContents,
 } from "@commonfabric/runner";
+import type {
+  CfcEnforcementMode,
+  CfcFlowLabelsMode,
+} from "@commonfabric/runner/cfc";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import {
@@ -239,7 +243,15 @@ export class PiecesController<T = unknown> {
   }
 
   static async initialize(
-    { apiUrl, identity, spaceName, moduleByteCache, patternCoverage }: {
+    {
+      apiUrl,
+      identity,
+      spaceName,
+      moduleByteCache,
+      patternCoverage,
+      cfcEnforcementMode,
+      cfcFlowLabels,
+    }: {
       apiUrl: URL;
       identity: Identity;
       spaceName: string;
@@ -253,6 +265,10 @@ export class PiecesController<T = unknown> {
       // coverage against the same space warm-loads them instead of recompiling
       // every pattern for itself.
       patternCoverage?: PatternCoverageCollector;
+      // Host-controlled CFC rollout dials, passed through to the remoteClient
+      // preset; unset means the preset's first-party posture.
+      cfcEnforcementMode?: CfcEnforcementMode;
+      cfcFlowLabels?: CfcFlowLabelsMode;
     },
   ): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
@@ -269,6 +285,8 @@ export class PiecesController<T = unknown> {
       experimental: experimentalOptionsFromEnv(readEnv),
       moduleByteCache,
       patternCoverage,
+      ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
+      ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),

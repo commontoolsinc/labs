@@ -204,6 +204,7 @@ An address a person can type, rather than a fid from a previous command.
 # not in the demo — the demo deploys straight against a live toolshed
 cf test tracker.test.tsx
 cf piece new packages/cli/integration/pattern/tracker.tsx --slug board
+cf piece slugs
 cf piece verbs --piece board
 ```
 
@@ -219,7 +220,11 @@ of root items and `$NAME` is its display name; both are data, and data is not
 callable, so neither is offered to a caller as something to call.
 
 Slug resolution sits on the shared path (`resolvePieceConfigWithPieces`,
-`packages/cli/lib/piece.ts`), so every command below takes `board` too.
+`packages/cli/lib/piece.ts`), so every command below takes `board` too. And
+the name is discoverable as well as resolvable: `cf piece slugs` lists the
+space's slug index, so a session in a space someone else populated starts
+from a listing rather than from folklore. The demo's act 1 runs it beside the
+deploy.
 
 The listing carries the deployed pattern's source identity, which is how a
 client tells it is talking to a newer pattern than it was written against.

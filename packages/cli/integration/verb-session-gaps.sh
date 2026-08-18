@@ -65,15 +65,23 @@ step "1. Arrive by name, not by fid"
 # --quiet makes the piece id stdout's only line; stderr is dropped and the
 # grep anchored so a compile warning carrying a fid1: token cannot be taken
 # for the deploy's id.
-BOARD=$($CF piece new --quiet "$FIXTURE" $ARGS 2>/dev/null |
+BOARD=$($CF piece new --quiet --slug board "$FIXTURE" $ARGS 2>/dev/null |
   grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
 if [ -n "$BOARD" ]; then ok "deployed $BOARD"; else
   bad "deploy failed"
   exit 1
 fi
-$CF piece set-slug board "$BOARD" $ARGS >/dev/null 2>&1
 SLUG_NAME=$($CF get --quiet --piece board $ARGS '$NAME' 2>/dev/null | tr -d '"')
 check "Work tracker" "$SLUG_NAME" "the slug resolves everywhere --piece is taken"
+# The arrival name is discoverable as well as resolvable: the slug index
+# lists what the deploy's --slug wrote — the same wiring the demo's act 1
+# rides, which a separate set-slug here would quietly stop covering: a
+# regression in the deploy's slug path would pass this harness while act 1's
+# listing came up empty. set-slug keeps its own coverage in integration.sh.
+$CF piece slugs $ARGS --json 2>/dev/null |
+  jq -e '[.[].slug] | index("board")' >/dev/null 2>&1 &&
+  ok "the slug index lists the arrival name" ||
+  bad "the slug index does not list 'board'"
 
 step "2. Ask what it is, and what it can do"
 VERBS=$($CF piece verbs --piece board $ARGS --json 2>/dev/null)

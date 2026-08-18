@@ -1898,6 +1898,8 @@ export type JSONSchemaObj = {
   readonly patternProperties?: Readonly<Record<string, JSONSchema>>; // not validated
   readonly additionalProperties?: JSONSchema;
   readonly propertyNames?: JSONSchema; // not validated
+  readonly unevaluatedProperties?: JSONSchema; // not validated
+  readonly unevaluatedItems?: JSONSchema; // not validated
 
   // Validation for any
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];

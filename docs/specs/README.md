@@ -36,6 +36,7 @@ decision is reversed or superseded).
 ### Data, storage, and execution
 
 - [JSON Schema](json_schema.md)
+- [Content-addressed schemas](content-addressed-schemas.md)
 - [Sigil data model](data-model/sigil.md)
 - [Sparse-array preservation](sparse-array-preservation.md)
 - [Space model](space-model/README.md)

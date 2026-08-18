@@ -26,6 +26,10 @@ import {
   selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
 import { forEachSubschema } from "./schema-walk.ts";
+import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
 import { isSchemaScope, narrowerScopeCap } from "./scope.ts";
 export {
   CFC_ATOM_TYPE,
@@ -46,7 +50,12 @@ type IFCAtom = JSONValue;
 // a fresh ContextualFlowControl per call (storage pull/watch, traversal
 // contexts), which would leave a per-instance cache permanently cold.
 // Mutable schemas are never cached (in-place edits must be observed).
-const schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+let schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+// Path derivations can embed registry content; the registry clear (last
+// lease out) swaps the cache so an epoch's derivations do not outlive it.
+onSchemaRegistryClear(() => {
+  schemaAtPathCache = new WeakMap();
+});
 const SCHEMA_AT_PATH_CACHE_MAX_ENTRIES = 2_048;
 
 type SymbolicSchemaAtPathClassifier = (part: string) => string;
@@ -546,6 +555,7 @@ export class ContextualFlowControl {
       // Intern the derivation so the cached result is the canonical frozen
       // instance: downstream identity-keyed caches (standardization, value
       // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
+      const missesBefore = externalResolutionMissCount();
       result = internSchema(ContextualFlowControl.schemaAtPathInternal(
         schema,
         path,
@@ -554,8 +564,15 @@ export class ContextualFlowControl {
         defaultEmptyProperties,
         defaultMissingProperty,
       ));
-      if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
-      byKey.set(key, result);
+      // Populate-only guard: a derivation during which a `cid:` resolution
+      // missed must not be memoized — the document can arrive later. The
+      // miss counter is exact and walk-free; a schema-content check here
+      // paid a full walk, dormant `$defs` bodies included, on the first
+      // lookup for every schema identity.
+      if (externalResolutionMissCount() === missesBefore) {
+        if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
+        byKey.set(key, result);
+      }
     }
     return result;
   }

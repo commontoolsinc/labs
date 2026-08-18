@@ -14,6 +14,10 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
+import {
   canBranchMatch,
   combineOptionalSchema,
   combineSchema,
@@ -108,10 +112,15 @@ const linkWithAsCellScope = (
 // Cache per deep-frozen schema identity; mutable schemas recompute per call.
 // The cached candidates are interned (combineSchema interns its results), so
 // downstream identity-keyed memos see stable references too.
-const compoundAsCellCandidatesCache = new WeakMap<
+let compoundAsCellCandidatesCache = new WeakMap<
   JSONSchemaObj,
   readonly JSONSchemaObj[]
 >();
+// Candidates embed resolved branch content, so a registry clear (last lease
+// out) swaps the cache — a resolution success must not outlive its epoch.
+onSchemaRegistryClear(() => {
+  compoundAsCellCandidatesCache = new WeakMap();
+});
 
 const asCellCompoundCandidates = (
   schema: JSONSchemaObj,
@@ -121,6 +130,7 @@ const asCellCompoundCandidates = (
     const cached = compoundAsCellCandidatesCache.get(schema);
     if (cached !== undefined) return cached;
   }
+  const missesBefore = externalResolutionMissCount();
   const branches = [
     ...(Array.isArray(schema.anyOf) ? schema.anyOf : []),
     ...(Array.isArray(schema.oneOf) ? schema.oneOf : []),
@@ -140,7 +150,10 @@ const asCellCompoundCandidates = (
       }
     }
   }
-  if (cacheable) {
+  // Populate only when no `cid:` resolution missed while building: a branch
+  // whose ref missed resolves to nothing and would be missing from a
+  // memoized candidate list forever, though the document can still arrive.
+  if (cacheable && externalResolutionMissCount() === missesBefore) {
     compoundAsCellCandidatesCache.set(schema, candidates);
   }
   return candidates;
@@ -523,7 +536,12 @@ export function resolveSchemaForValue(
 // A future contributor must not relax the populate guard to accept
 // non-deep-frozen inputs. `Object.isFrozen` is **not** sufficient; it
 // is shallow-only.
-const _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
+let _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
+// A verdict computed over registry content must not outlive the lease epoch
+// that made the content available; the clear swaps the cache.
+onSchemaRegistryClear(() => {
+  _hasIfcCache = new WeakMap();
+});
 
 interface SchemaHasIfcContext {
   seenByRoot: WeakMap<object, WeakSet<object>>;
@@ -556,10 +574,16 @@ export function schemaHasIfc(
     }
     context.seenByRoot.set(rootKey, initialSeen);
   }
+  const missesBefore = externalResolutionMissCount();
   const result = _schemaHasIfcUncached(schema, fullSchema, context);
-  // Populate only under a deep-frozen guard. See the invariant comment
-  // above `_hasIfcCache`.
-  if (isTopLevel && isDeepFrozen(schema)) {
+  // Populate only under a deep-frozen guard (see the invariant comment
+  // above `_hasIfcCache`), and only when no `cid:` resolution missed while
+  // computing — a verdict computed over an absent schema document must not
+  // outlive the document's arrival.
+  if (
+    isTopLevel && isDeepFrozen(schema) &&
+    externalResolutionMissCount() === missesBefore
+  ) {
     _hasIfcCache.set(schema, result);
   }
   return result;

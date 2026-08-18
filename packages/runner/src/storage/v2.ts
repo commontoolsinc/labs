@@ -41,6 +41,7 @@ import {
   toDocumentPath,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -51,8 +52,15 @@ import {
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
 import type { JSONSchema } from "../builder/types.ts";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
+import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import {
+  acquireSchemaRegistryLease,
+  registerSchemaDocument,
+} from "../schema-registry.ts";
+import { isSubschema } from "../schema-walk.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import {
   isPrimitiveCellLink,
@@ -161,6 +169,8 @@ const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
   level: "warn",
   logCountEvery: 0,
 });
+
+const EMPTY_OVERLAY: ReadonlyMap<string, unknown> = new Map();
 
 function withCommitTiming<T>(
   keys: string[],
@@ -767,6 +777,11 @@ export class StorageManager implements IStorageManager {
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+  // Schema-registry retention lease: held for the manager's open lifetime,
+  // released on close (idempotent), re-acquired when a closed manager is
+  // reused through open(). Last lease out clears the realm's registry — the
+  // session-lifetime retention contract in schema-registry.ts.
+  #schemaRegistryLease?: () => void;
   // Docs already offered a link-target pull via shouldPullDoc. One entry per
   // (space, scope, id) for the manager's lifetime: the first pull registers a
   // server-side watch that keeps the doc flowing afterwards, so a second kick
@@ -839,6 +854,7 @@ export class StorageManager implements IStorageManager {
   ) {
     this.id = options.id ?? crypto.randomUUID();
     this.#sessionId = this.id;
+    this.#schemaRegistryLease = acquireSchemaRegistryLease();
     this.as = options.as;
     this.#settings = options.settings ?? {};
     this.#sessionFactory = sessionFactory;
@@ -935,6 +951,9 @@ export class StorageManager implements IStorageManager {
   }
 
   open(space: MemorySpace): IStorageProvider {
+    // A manager reused after close() starts a new session; retention
+    // follows it.
+    this.#schemaRegistryLease ??= acquireSchemaRegistryLease();
     let provider = this.#providers.get(space);
     if (!provider) {
       // Session principal drives user/session scoped storage. Even when we have
@@ -1161,27 +1180,54 @@ export class StorageManager implements IStorageManager {
   }
 
   async close(): Promise<void> {
-    if (this.#providers.size === 0) {
-      return;
+    // The lease releases AFTER teardown drains: a queued sync frame applied
+    // during provider destruction still registers its schema documents
+    // inside this session's epoch, not after the clear.
+    try {
+      if (this.#providers.size === 0) {
+        return;
+      }
+      // allSettled: one rejecting teardown must not release the lease (the
+      // finally below) while sibling teardowns are still draining frames.
+      const outcomes = await Promise.allSettled(
+        [...this.#providers.values()].map((provider) => provider.destroy()),
+      );
+      const rejected = outcomes.find(
+        (outcome) => outcome.status === "rejected",
+      );
+      if (rejected !== undefined) {
+        throw (rejected as PromiseRejectedResult).reason;
+      }
+      this.#providers.clear();
+      this.#dataURISyncs.clear();
+      this.#sessionId = crypto.randomUUID();
+    } finally {
+      this.#schemaRegistryLease?.();
+      this.#schemaRegistryLease = undefined;
     }
-    await Promise.all(
-      [...this.#providers.values()].map((provider) => provider.destroy()),
-    );
-    this.#providers.clear();
-    this.#dataURISyncs.clear();
-    this.#sessionId = crypto.randomUUID();
   }
 
   async closeNow(): Promise<void> {
-    if (this.#providers.size === 0) {
-      return;
+    try {
+      if (this.#providers.size === 0) {
+        return;
+      }
+      const outcomes = await Promise.allSettled(
+        [...this.#providers.values()].map((provider) => provider.destroyNow()),
+      );
+      const rejected = outcomes.find(
+        (outcome) => outcome.status === "rejected",
+      );
+      if (rejected !== undefined) {
+        throw (rejected as PromiseRejectedResult).reason;
+      }
+      this.#providers.clear();
+      this.#dataURISyncs.clear();
+      this.#sessionId = crypto.randomUUID();
+    } finally {
+      this.#schemaRegistryLease?.();
+      this.#schemaRegistryLease = undefined;
     }
-    await Promise.all(
-      [...this.#providers.values()].map((provider) => provider.destroyNow()),
-    );
-    this.#providers.clear();
-    this.#dataURISyncs.clear();
-    this.#sessionId = crypto.randomUUID();
   }
 
   edit(): IStorageTransaction {
@@ -1473,7 +1519,7 @@ export class StorageManager implements IStorageManager {
     space: MemorySpace,
     document: EntityDocument | undefined,
   ): Promise<Error | undefined> {
-    const cfc = isObjectOrArray(document?.cfc) ? document.cfc : undefined;
+    const cfc = isObjectNotArray(document?.cfc) ? document.cfc : undefined;
     const schemaHash = cfc?.schemaHash;
     if (typeof schemaHash !== "string" || schemaHash.length === 0) {
       return undefined;
@@ -2911,7 +2957,15 @@ class SpaceReplica implements ISpaceReplica {
       }
 
       this.#watchView = view;
-      this.applySessionSync(sync, type);
+      try {
+        this.applySessionSync(sync, type);
+      } catch (error) {
+        // The frame failed validation, so this refresh's view never gets a
+        // consumer; without a close it leaks when a later refresh
+        // overwrites `#watchView`.
+        view.close();
+        throw error;
+      }
       if (this.#updatePromises.size === 0) {
         this.#subscribedWatchView = view;
         const updates = this.consumeUpdates(view.subscribeSync())
@@ -4127,6 +4181,130 @@ class SpaceReplica implements ISpaceReplica {
     };
   }
 
+  /**
+   * Validates the read-side delivery guarantee over a whole frame BEFORE
+   * any of it is applied (`docs/specs/content-addressed-schemas.md`), and
+   * registers the frame's schema documents: every schema ref a delivered
+   * document embeds — a registered schema document's own refs, or a link
+   * schema anywhere in an ordinary document's value — must reach a
+   * VERIFIED schema document delivered by this frame (the prospective
+   * overlay) or already stored. A broken ref throws with the replica
+   * untouched, because it is a delivery consistency bug to surface, never
+   * a hole to quietly repair.
+   * Direct refs suffice: a stored verified dependency was itself validated
+   * when it arrived, and a locally written one carried its closure in its
+   * own transaction. Registration is safe pre-apply — it is hash-verified
+   * and realm-global, so a rejected frame leaves only true content behind.
+   *
+   * Which `cid:` documents are schema documents is decided by
+   * content-addressed identity, the classifier the server's assembly pass
+   * also uses: a document is a schema document exactly when its id is the
+   * schema interning of its value. Validation applies the same identity
+   * check to each dependency — mere presence under the id is not delivery,
+   * and a forged local copy fails even when the realm registry holds a
+   * valid twin from another space.
+   */
+  #validateArrivedSchemaDocuments(sync: SessionSync): void {
+    const registered: [string, JSONSchema][] = [];
+    // Dependency hash → the id of the first delivered document that
+    // embeds it, for the violation report.
+    const embedded = new Map<string, string>();
+    // The prospective frame: what the replica will hold once this frame
+    // applies. Dependencies resolve against it first.
+    const overlay = new Map<string, unknown>();
+    const deletedInFrame = new Set<string>();
+    for (const remove of sync.removes) {
+      if (typeof remove.id === "string") deletedInFrame.add(remove.id);
+    }
+    for (const upsert of sync.upserts) {
+      const id = upsert.id;
+      if (typeof id !== "string") continue;
+      if (upsert.deleted === true) {
+        deletedInFrame.add(id);
+        continue;
+      }
+      const doc = upsert.doc;
+      if (!isObjectNotArray(doc)) continue;
+      overlay.set(id, doc);
+      deletedInFrame.delete(id);
+      if (id.startsWith("cid:")) {
+        const value = (doc as { value?: unknown }).value;
+        const hash = id.slice("cid:".length);
+        if (
+          isSubschema(value) &&
+          internSchemaAsTaggedHashString(value as JSONSchema) === hash
+        ) {
+          registered.push([
+            id,
+            registerSchemaDocument(hash, value as JSONSchema),
+          ]);
+          // A schema document's own refs are collected below from its
+          // registered form; schema keywords such as `default` may carry
+          // link-shaped DATA, so it is not link-scanned.
+          continue;
+        }
+        // Content addressing forbids the content under an id to change:
+        // when the replica already stores content that IS the schema
+        // document this id names — however it got here, an earlier frame
+        // or a local write — an arriving copy that fails the identity
+        // check is a forged replacement, not another document class.
+        if (this.#isVerifiedSchemaDocDelivered(hash, EMPTY_OVERLAY)) {
+          throw new Error(
+            `Schema document ${id} was replaced with content that does ` +
+              `not hash to its id — content under a content-addressed id ` +
+              `must never change.`,
+          );
+        }
+      }
+      mapLinkSchemas(doc as FabricValue, (schema) => {
+        for (
+          const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+        ) {
+          if (!embedded.has(hash)) embedded.set(hash, id);
+        }
+        return schema;
+      });
+    }
+    for (const [id, document] of registered) {
+      for (const dep of collectExternalSchemaRefHashes(document)) {
+        if (!embedded.has(dep)) embedded.set(dep, id);
+      }
+    }
+    // Validation runs after the whole frame is collected: a dependency may
+    // follow its dependent within the frame, and intra-frame order must
+    // not matter.
+    for (const [dep, referrer] of embedded) {
+      if (
+        deletedInFrame.has(`cid:${dep}`) ||
+        !this.#isVerifiedSchemaDocDelivered(dep, overlay)
+      ) {
+        throw new Error(
+          `Document ${referrer} was delivered with a broken schema ref: ` +
+            `cid:${dep} is not delivered and verified in this replica. ` +
+            `Every delivered document's refs must resolve within the ` +
+            `delivered set (docs/specs/content-addressed-schemas.md).`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Whether the prospective frame (`overlay`) or the stored replica holds
+   * content under `cid:<hash>` that IS the schema document that id names —
+   * the identity check, not presence.
+   */
+  #isVerifiedSchemaDocDelivered(
+    hash: string,
+    overlay: ReadonlyMap<string, unknown>,
+  ): boolean {
+    const doc = overlay.get(`cid:${hash}`) ??
+      this.getDocument(`cid:${hash}` as URI);
+    if (!isObjectNotArray(doc)) return false;
+    const value = (doc as { value?: unknown }).value;
+    return isSubschema(value) &&
+      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
+  }
+
   private applySessionSync(
     sync: SessionSync,
     type: "pull" | "integrate",
@@ -4143,6 +4321,10 @@ class SpaceReplica implements ISpaceReplica {
       this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
+
+    // Validation precedes every record mutation: a frame that fails the
+    // delivery guarantee is rejected whole, never half-installed.
+    this.#validateArrivedSchemaDocuments(sync);
 
     const touched = [
       ...sync.upserts.map((upsert) => ({

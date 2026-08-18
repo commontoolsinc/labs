@@ -1,6 +1,12 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import { isObjectNotArray } from "@commonfabric/utils/types";
+import type { JSONSchema } from "../../runner/src/builder/types.ts";
+import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
+import { isSubschema } from "../../runner/src/schema-walk.ts";
+import { mapLinkSchemas } from "./schema-table-links.ts";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatchToDocument,
@@ -5051,6 +5057,26 @@ function schedulerActionKey(entry: {
   }\0${entry.pieceId}\0${entry.processGeneration}\0${entry.actionId}\0${entry.executionContextKey}`;
 }
 
+// Per-version record of stored schema documents whose content verified and
+// whose refs were collected during commit-time closure validation, so a
+// writer re-referencing the same closure pays map lookups, not re-hashes.
+// Bounded; wholesale eviction on overflow.
+const COMMIT_SCHEMA_REF_CACHE_MAX_ENTRIES = 4096;
+const commitSchemaRefCaches = new WeakMap<
+  Engine,
+  Map<string, { seq: number; refs: ReadonlySet<string> }>
+>();
+const commitVerifiedSchemaDocRefs = (
+  engine: Engine,
+): Map<string, { seq: number; refs: ReadonlySet<string> }> => {
+  let cache = commitSchemaRefCaches.get(engine);
+  if (cache === undefined) {
+    cache = new Map();
+    commitSchemaRefCaches.set(engine, cache);
+  }
+  return cache;
+};
+
 const applyCommitTransaction = (
   engine: Engine,
   {
@@ -5140,6 +5166,191 @@ const applyCommitTransaction = (
     principal,
     sessionId,
   });
+
+  // Content-addressed documents are immutable: the content under a `cid:`
+  // id can never change, so deleting or patching one is a protocol
+  // violation regardless of document class — a deleted or altered
+  // dependency would invalidate every document referencing it — and a
+  // `set` must be the first installation or content-identical to what is
+  // stored (an idempotent re-`set` is how writers install closures).
+  // Equality is `valueEqual`, canonical content-hash equality: a special
+  // object's state lives in private fields a structural walk cannot see.
+  // Conflicting sets of one id within a single commit are equally
+  // rejected. `SessionSync.removes` are watch-result removals, not
+  // deletions, and are unaffected.
+  //
+  // The same pass collects every schema reference the commit's content
+  // introduces — a link schema anywhere in a set's document, a patch's
+  // own values, and an installed schema document's own refs — for the
+  // closure validation below. Known gap: a patch that edits INSIDE an
+  // existing link's schema (replacing a `$ref` string at a sub-path, say)
+  // introduces a reference no patch value carries as a whole link, so
+  // only a scan of the post-patch document would see it — a cost this
+  // validation deliberately does not pay. The gap closes when links
+  // become opaque FabricPrimitive Link objects instead of patchable
+  // plain JSON; until then such a reference escapes commit-time
+  // validation and read-side assembly catches it. The scan is also
+  // conservative the other way: a reference in an operand that does not
+  // survive to the final document (a remove-by-value operand, an
+  // add-then-remove within one commit) is still validated.
+  let cidSetsInCommit: Map<string, unknown> | null = null;
+  const requiredSchemaRefs = new Set<string>();
+  const collectLinkSchemaRefs = (content: unknown): void => {
+    if (content === null || typeof content !== "object") return;
+    mapLinkSchemas(content as FabricValue, (schema) => {
+      for (
+        const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
+      ) {
+        requiredSchemaRefs.add(hash);
+      }
+      return schema;
+    });
+  };
+  for (const operation of commit.operations) {
+    if (operation.op === "sqlite") continue;
+    if (operation.op === "patch") {
+      for (const patch of operation.patches ?? []) {
+        if ("value" in patch) collectLinkSchemaRefs(patch.value);
+        if ("add" in patch) collectLinkSchemaRefs(patch.add);
+        if ("values" in patch) collectLinkSchemaRefs(patch.values);
+      }
+    }
+    if (!operation.id.startsWith("cid:")) {
+      if (operation.op === "set") collectLinkSchemaRefs(operation.value);
+      continue;
+    }
+    if (operation.op === "delete" || operation.op === "patch") {
+      throw new ProtocolError(
+        `memory v2 commit cannot ${operation.op} content-addressed document ${operation.id}`,
+      );
+    }
+    // Content-addressed documents live at space scope only: a scoped
+    // partition could hold a divergent copy under the same id (the
+    // immutability check reads at the operation's scope, so a scoped set
+    // reads an empty partition and passes as a first installation), and
+    // every reader resolves `cid:` documents at space scope. One id, one
+    // content, one partition.
+    if (normalizeScope(operation.scope) !== DEFAULT_SCOPE) {
+      throw new ProtocolError(
+        `memory v2 commit cannot write content-addressed document ${operation.id} at ${operation.scope} scope`,
+      );
+    }
+    // A `cid:` set that IS a schema document (by content-addressed
+    // identity — `cid:` also holds blobs) contributes its own refs;
+    // anything else is scanned like an ordinary document. Schema content
+    // is never link-scanned: keywords such as `default` may carry
+    // link-shaped DATA.
+    const installedInner = (operation.value as { value?: unknown })?.value;
+    if (
+      isSubschema(installedInner) &&
+      internSchemaAsTaggedHashString(installedInner as JSONSchema) ===
+        operation.id.slice("cid:".length)
+    ) {
+      for (const hash of collectExternalSchemaRefHashes(installedInner)) {
+        requiredSchemaRefs.add(hash);
+      }
+    } else {
+      collectLinkSchemaRefs(operation.value);
+    }
+    // `has()`, not a `get() !== undefined` check: a malformed set can carry
+    // an omitted value, and treating it as absent would let a later set of
+    // the same id skip the conflict comparison.
+    if (cidSetsInCommit?.has(operation.id)) {
+      if (
+        !valueEqual(
+          cidSetsInCommit.get(operation.id) as FabricValue,
+          operation.value as FabricValue,
+        )
+      ) {
+        throw new ProtocolError(
+          `memory v2 commit carries conflicting sets of content-addressed document ${operation.id}`,
+        );
+      }
+      continue;
+    }
+    const stored = read(engine, {
+      id: operation.id,
+      branch,
+      scope: operation.scope,
+      principal,
+      sessionId,
+    });
+    if (
+      stored !== null &&
+      !valueEqual(stored as FabricValue, operation.value as FabricValue)
+    ) {
+      throw new ProtocolError(
+        `memory v2 commit cannot change content-addressed document ${operation.id}`,
+      );
+    }
+    (cidSetsInCommit ??= new Map()).set(operation.id, operation.value);
+  }
+
+  // Commit-time closure validation: every schema reference the scan
+  // above collects must be backed by a VERIFIED schema document —
+  // installed by this same commit or already stored in the space — and
+  // so must the whole closure behind it. With this, the commit API
+  // cannot create a broken or forged closure for any reference the scan
+  // sees: an assembly failure downstream means the patch gap documented
+  // above, out-of-band tampering, or a store that predates this
+  // validation.
+  if (requiredSchemaRefs.size > 0) {
+    const verified = commitVerifiedSchemaDocRefs(engine);
+    const pending = [...requiredSchemaRefs];
+    const walked = new Set<string>();
+    while (pending.length > 0) {
+      const hash = pending.pop()!;
+      if (walked.has(hash)) continue;
+      walked.add(hash);
+      const id = `cid:${hash}`;
+      const included = cidSetsInCommit?.has(id)
+        ? (cidSetsInCommit.get(id) as { value?: unknown })?.value
+        : undefined;
+      if (included !== undefined) {
+        if (
+          !isSubschema(included) ||
+          internSchemaAsTaggedHashString(included as JSONSchema) !== hash
+        ) {
+          throw new ProtocolError(
+            `memory v2 commit references schema document ${id} whose included content does not verify`,
+          );
+        }
+        for (const dep of collectExternalSchemaRefHashes(included)) {
+          pending.push(dep);
+        }
+        continue;
+      }
+      const state = readState(engine, { id, branch });
+      const cached = verified.get(id);
+      if (cached !== undefined && cached.seq === state?.seq) {
+        for (const dep of cached.refs) pending.push(dep);
+        continue;
+      }
+      const storedInner =
+        state?.document === null || state?.document === undefined
+          ? undefined
+          : (state.document as { value?: unknown }).value;
+      if (storedInner === undefined) {
+        throw new ProtocolError(
+          `memory v2 commit references schema document ${id} that is neither included in the commit nor stored in the space`,
+        );
+      }
+      if (
+        !isSubschema(storedInner) ||
+        internSchemaAsTaggedHashString(storedInner as JSONSchema) !== hash
+      ) {
+        throw new ProtocolError(
+          `memory v2 commit references schema document ${id} whose stored content does not verify`,
+        );
+      }
+      const refs = collectExternalSchemaRefHashes(storedInner);
+      if (verified.size >= COMMIT_SCHEMA_REF_CACHE_MAX_ENTRIES) {
+        verified.clear();
+      }
+      verified.set(id, { seq: state!.seq, refs });
+      for (const dep of refs) pending.push(dep);
+    }
+  }
 
   if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
     return applySchedulerObservationBatchCommit(engine, {

@@ -176,6 +176,8 @@ const CLI_STRING_FLAGS = [
   "fabric-api-url",
   "fabric-identity",
   "fabric-space",
+  "fabric-cfc-enforcement-mode",
+  "fabric-cfc-flow-labels",
   "host-mount",
   "browser-access-lease-id",
   "browser-access-cdp-url",
@@ -512,6 +514,11 @@ Options:
   --fabric-identity <path>      PKCS#8 identity keyfile for the run_pattern fabric session
   --fabric-space <space>        Target space (name or did:key) for the run_pattern tool;
                                 all three --fabric-* session flags go together
+  --fabric-cfc-enforcement-mode <mode> enforce-explicit | enforce-strict for the fabric
+                                session's runtime (raise-only; distinct from
+                                --cfc-enforcement-mode, which governs the harness)
+  --fabric-cfc-flow-labels <mode> off | observe | persist flow-label propagation on
+                                the fabric session's runtime
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -533,6 +540,8 @@ Environment:
   CF_HARNESS_FABRIC_API_URL     Default value for --fabric-api-url
   CF_HARNESS_FABRIC_IDENTITY    Default value for --fabric-identity
   CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
+  CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE Default value for --fabric-cfc-enforcement-mode
+  CF_HARNESS_FABRIC_CFC_FLOW_LABELS Default value for --fabric-cfc-flow-labels
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
@@ -1389,6 +1398,12 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_FABRIC_API_URL: Deno.env.get("CF_HARNESS_FABRIC_API_URL"),
       CF_HARNESS_FABRIC_IDENTITY: Deno.env.get("CF_HARNESS_FABRIC_IDENTITY"),
       CF_HARNESS_FABRIC_SPACE: Deno.env.get("CF_HARNESS_FABRIC_SPACE"),
+      CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE: Deno.env.get(
+        "CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE",
+      ),
+      CF_HARNESS_FABRIC_CFC_FLOW_LABELS: Deno.env.get(
+        "CF_HARNESS_FABRIC_CFC_FLOW_LABELS",
+      ),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
@@ -1566,7 +1581,12 @@ export const parseCfHarnessCliArgs = async (
     ? resolve(cwd, rawFabricMount)
     : undefined;
   const fabricSessionFlagValue = (
-    flag: "fabric-api-url" | "fabric-identity" | "fabric-space",
+    flag:
+      | "fabric-api-url"
+      | "fabric-identity"
+      | "fabric-space"
+      | "fabric-cfc-enforcement-mode"
+      | "fabric-cfc-flow-labels",
     envValue: string | undefined,
   ): string | undefined => {
     const raw = typeof args[flag] === "string"
@@ -1589,6 +1609,33 @@ export const parseCfHarnessCliArgs = async (
     "fabric-space",
     env.CF_HARNESS_FABRIC_SPACE,
   );
+  const fabricCfcEnforcementMode = fabricSessionFlagValue(
+    "fabric-cfc-enforcement-mode",
+    env.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE,
+  );
+  if (
+    fabricCfcEnforcementMode !== undefined &&
+    fabricCfcEnforcementMode !== "enforce-explicit" &&
+    fabricCfcEnforcementMode !== "enforce-strict"
+  ) {
+    // Raise-only: the fabric session's preset already pins enforce-explicit,
+    // so the dial admits that pin or a raise to strict, never a relaxation.
+    throw new Error(
+      `--fabric-cfc-enforcement-mode must be enforce-explicit or enforce-strict: ${fabricCfcEnforcementMode}`,
+    );
+  }
+  const fabricCfcFlowLabels = fabricSessionFlagValue(
+    "fabric-cfc-flow-labels",
+    env.CF_HARNESS_FABRIC_CFC_FLOW_LABELS,
+  );
+  if (
+    fabricCfcFlowLabels !== undefined && fabricCfcFlowLabels !== "off" &&
+    fabricCfcFlowLabels !== "observe" && fabricCfcFlowLabels !== "persist"
+  ) {
+    throw new Error(
+      `--fabric-cfc-flow-labels must be off, observe, or persist: ${fabricCfcFlowLabels}`,
+    );
+  }
   let fabricSession: HarnessFabricSessionConfig | undefined;
   if (
     fabricApiUrl !== undefined || fabricIdentity !== undefined ||
@@ -1615,7 +1662,19 @@ export const parseCfHarnessCliArgs = async (
       apiUrl: fabricApiUrl!,
       identityKeyPath: resolve(cwd, fabricIdentity!),
       space: fabricSpace!,
+      ...(fabricCfcEnforcementMode !== undefined
+        ? { cfcEnforcementMode: fabricCfcEnforcementMode }
+        : {}),
+      ...(fabricCfcFlowLabels !== undefined
+        ? { cfcFlowLabels: fabricCfcFlowLabels }
+        : {}),
     };
+  } else if (
+    fabricCfcEnforcementMode !== undefined || fabricCfcFlowLabels !== undefined
+  ) {
+    throw new Error(
+      "--fabric-cfc-enforcement-mode and --fabric-cfc-flow-labels configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
+    );
   }
   // An allowlisted `run_pattern` with no session to run it against is a
   // configuration contradiction, surfaced here rather than as a tool that is
@@ -2334,7 +2393,14 @@ export const formatCfHarnessCliResult = (
     `runId: ${result.runState.runId}`,
     `status: ${result.runState.status}`,
     `modelTurns: ${result.modelTurns}`,
+    `cfcMode: ${result.runState.cfcEnforcementMode} (harness)`,
   ];
+  if (result.runState.fabricSessionCfc !== undefined) {
+    const posture = result.runState.fabricSessionCfc;
+    lines.push(
+      `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})`,
+    );
+  }
   const reportedUsage = result.totalUsage ?? result.usage;
   if (reportedUsage !== undefined) {
     const usage = reportedUsage;
