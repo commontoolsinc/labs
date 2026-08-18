@@ -27,6 +27,7 @@ import {
 } from "@/codec-realm/interface.ts";
 import { RealmCodecEngine } from "@/codec-realm/RealmCodecEngine.ts";
 import { RealmDecodeContext } from "@/codec-realm/RealmDecodeContext.ts";
+import { RealmEncodeContext } from "@/codec-realm/RealmEncodeContext.ts";
 import {
   createDefaultRealmRegistry,
   fabricFromRealmValue,
@@ -99,6 +100,29 @@ async function crossRealm(value: FabricValue): Promise<EchoReport> {
 
 describe("RealmCodecEngine", () => {
   describe("encode()", () => {
+    it("leaves a container even when encoding a child throws", () => {
+      // The context belongs to the act, not the node, so a container left
+      // entered by a throw stays entered. A later visit to it then reports a
+      // cycle that is not there -- and says so, naming a circular reference
+      // where the real fault was the child. The differential is the message:
+      // both attempts must fail the same way the first did.
+      const engine = newDefaultRealmCodecEngine();
+      const ctx = new RealmEncodeContext(NULL_LIVE_ENVIRONMENT);
+      // A function is no kind of fabric value, so encoding the element throws
+      // from inside the array's own descent.
+      const holder = [() => 1] as unknown as FabricValue;
+      const probe = engine as unknown as {
+        encodeValue(value: FabricValue, ctx: RealmEncodeContext): unknown;
+      };
+
+      expect(() => probe.encodeValue(holder, ctx)).toThrow(
+        /Cannot encode function/,
+      );
+      expect(() => probe.encodeValue(holder, ctx)).toThrow(
+        /Cannot encode function/,
+      );
+    });
+
     it("mints a marker equal to every other call's and identical to none", () => {
       // Both halves of what `WIRE_MARKER` assumes about the engine, and it is
       // derived from one of these calls, so the pair is what says the

@@ -188,30 +188,33 @@ export class RealmCodecEngine extends BaseCodecEngine<
     const length = value.length;
     let result: RealmCodecValue[] | undefined;
 
-    for (let i = 0; i < length; i++) {
-      if (!(i in value)) {
-        continue;
-      }
-
-      const original = value[i]!;
-      const encoded = this.encodeValue(original, ctx);
-
-      if (result !== undefined) {
-        result[i] = encoded;
-      } else if (!Object.is(encoded, original)) {
-        // The first element that changed: copy what came before it, holes and
-        // all, and write into the copy from here on.
-        result = new Array<RealmCodecValue>(length);
-        for (let j = 0; j < i; j++) {
-          if (j in value) {
-            result[j] = value[j] as RealmCodecValue;
-          }
+    try {
+      for (let i = 0; i < length; i++) {
+        if (!(i in value)) {
+          continue;
         }
-        result[i] = encoded;
+
+        const original = value[i]!;
+        const encoded = this.encodeValue(original, ctx);
+
+        if (result !== undefined) {
+          result[i] = encoded;
+        } else if (!Object.is(encoded, original)) {
+          // The first element that changed: copy what came before it, holes and
+          // all, and write into the copy from here on.
+          result = new Array<RealmCodecValue>(length);
+          for (let j = 0; j < i; j++) {
+            if (j in value) {
+              result[j] = value[j] as RealmCodecValue;
+            }
+          }
+          result[i] = encoded;
+        }
       }
+    } finally {
+      ctx.leave(value);
     }
 
-    ctx.leave(value);
     return result ?? (value as RealmCodecValue);
   }
 
@@ -237,28 +240,31 @@ export class RealmCodecEngine extends BaseCodecEngine<
     const keys = Object.keys(value);
     let result: Record<string, RealmCodecValue> | undefined;
 
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i]!;
+    try {
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i]!;
 
-      // Checked on every object, not just the ones that get rebuilt, so that
-      // the answer does not depend on whether some sibling happened to change.
-      RealmCodecEngine.assertEncodableKey(key);
+        // Checked on every object, not just the ones that get rebuilt, so that
+        // the answer does not depend on whether some sibling happened to change.
+        RealmCodecEngine.assertEncodableKey(key);
 
-      const original = value[key]!;
-      const encoded = this.encodeValue(original, ctx);
+        const original = value[key]!;
+        const encoded = this.encodeValue(original, ctx);
 
-      if (result !== undefined) {
-        result[key] = encoded;
-      } else if (!Object.is(encoded, original)) {
-        result = {};
-        for (let j = 0; j < i; j++) {
-          result[keys[j]!] = value[keys[j]!] as RealmCodecValue;
+        if (result !== undefined) {
+          result[key] = encoded;
+        } else if (!Object.is(encoded, original)) {
+          result = {};
+          for (let j = 0; j < i; j++) {
+            result[keys[j]!] = value[keys[j]!] as RealmCodecValue;
+          }
+          result[key] = encoded;
         }
-        result[key] = encoded;
       }
+    } finally {
+      ctx.leave(value);
     }
 
-    ctx.leave(value);
     return result ?? (value as RealmCodecValue);
   }
 
