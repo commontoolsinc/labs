@@ -647,7 +647,7 @@ jobs:
       # probe here pins that this lane really is OFF (server not serving,
       # shell define unset), so a silent flip of the default cannot move the
       # REQUIRED lanes onto the ON posture unnoticed.
-      - name: ✅ Verify the server-execution posture (default: server OFF, shell define unset)
+      - name: ✅ Verify the server-execution posture (default posture — server OFF, shell define unset)
         timeout-minutes: *posture-probe-timeout
         env:
           TOOLSHED_PORT: 8000
@@ -1107,7 +1107,7 @@ jobs:
       # probe pins that this lane really is OFF (server not serving, shell
       # define unset), so a silent flip of the default cannot move the
       # REQUIRED lanes onto the ON posture unnoticed.
-      - name: ✅ Verify the server-execution posture (default: server OFF, shell define unset)
+      - name: ✅ Verify the server-execution posture (default posture — server OFF, shell define unset)
         timeout-minutes: *posture-probe-timeout
         run: |
           META=$(curl -fsS "http://localhost:8000/api/meta")
