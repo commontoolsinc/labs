@@ -18,6 +18,7 @@ import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 import { ProblematicStateError } from "./ProblematicStateError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
 import { UnknownValue } from "./UnknownValue.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 /**
  * Base class for a whole-value codec: the object that walks a fabric value
@@ -114,7 +115,14 @@ export abstract class BaseCodecEngine<
    *   `FabricSpecialObject` whose class no codec in the registry claims, a
    *   cycle, or an object that is no kind of `FabricValue` at all.
    */
-  abstract encode(value: FabricValue, env?: LiveEnvironment): SerializedForm;
+  encode(
+    value: FabricValue,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): SerializedForm {
+    const ctx = this.newEncodeContext(env);
+
+    return this.serializedFromEncoded(this.encodeValue(value, ctx), ctx);
+  }
 
   /**
    * Decodes this format's serialized form back into a fabric value.
@@ -138,10 +146,64 @@ export abstract class BaseCodecEngine<
    *   only tell from finding something it never emits -- or if a codec rejects
    *   a state and this instance is not lenient.
    */
-  abstract decode(
+  decode(
     data: SerializedForm,
-    env: LiveEnvironment,
-  ): FabricValue;
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  ): FabricValue {
+    const ctx = this.newDecodeContext(env, data);
+    let encoded: Encoded;
+
+    try {
+      encoded = this.encodedFromSerializedForm(data, ctx);
+    } catch (e) {
+      // A serialized form is data off a channel like any other, so being the
+      // wrong shape for this format settles against `lenient` exactly as a
+      // malformation inside a well-formed one does. Only this class's own
+      // refusal is caught: anything else a format's conversion throws is its
+      // own business and is left alone.
+      if (this.lenient && (e instanceof ProblematicStateError)) {
+        return deepFreeze(
+          new ProblematicValue(e.wireTypeTag, e.state, e.message),
+        );
+      }
+      throw e;
+    }
+
+    return this.decodeValue(encoded, ctx);
+  }
+
+  /**
+   * Converts the walk's finished tree into this format's serialized form --
+   * a stringify step, an envelope, or nothing at all for a format whose tree
+   * is what crosses.
+   *
+   * `ctx` is the act the tree was built by, for a format whose serialized form
+   * carries something minted per call.
+   */
+  protected abstract serializedFromEncoded(
+    encoded: Encoded,
+    ctx: EncCtx,
+  ): SerializedForm;
+
+  /**
+   * Converts this format's serialized form into the tree the walk decodes,
+   * which is where a format checks that what it was handed is its own: a parse
+   * step, an envelope check, or nothing at all.
+   *
+   * What arrives is data off a channel and is not to be assumed well-formed. A
+   * form that is not this format's is refused by throwing
+   * `ProblematicStateError`, which {@link #decode} settles against
+   * {@link #lenient} -- so a lenient decode answers a syntactic fault with a
+   * `ProblematicValue`, exactly as it does a fault found further in.
+   *
+   * `ctx` is the act being decoded, already built from this same data, so a
+   * format that reads something out of the form for its context has it there
+   * rather than reading it twice.
+   */
+  protected abstract encodedFromSerializedForm(
+    data: SerializedForm,
+    ctx: DecCtx,
+  ): Encoded;
 
   /**
    * Encodes an array, which is this format's business entirely.
@@ -214,10 +276,20 @@ export abstract class BaseCodecEngine<
 
   /**
    * Constructs the context for one act of decoding, around the live
-   * environment the caller gave. Called once per `decode()`, and where a
-   * format says whether its walk guards against cycles.
+   * environment the caller gave and the form about to be decoded. Called
+   * once per `decode()`.
+   *
+   * `data` is here so that a format whose walk needs something carried in
+   * the form itself -- a marker read off an envelope, say -- can take it
+   * now. It **sniffs rather than validates**: this runs before anything
+   * has checked that `data` is this format's at all, so an implementation
+   * reads defensively and leaves the refusing to
+   * {@link #encodedFromSerializedForm}.
    */
-  protected abstract newDecodeContext(env: LiveEnvironment): DecCtx;
+  protected abstract newDecodeContext(
+    env: LiveEnvironment,
+    data: SerializedForm,
+  ): DecCtx;
 
   //
   // Instance members

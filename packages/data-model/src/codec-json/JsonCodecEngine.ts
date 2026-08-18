@@ -4,6 +4,7 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
+import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { DecodeContext } from "@/codec-common/DecodeContext.ts";
 import { EncodeContext } from "@/codec-common/EncodeContext.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
@@ -65,7 +66,10 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * {@link #decode} gives, so the context's in-progress set is never
    * allocated.
    */
-  protected override newDecodeContext(env: LiveEnvironment): DecodeContext {
+  protected override newDecodeContext(
+    env: LiveEnvironment,
+    _data: string,
+  ): DecodeContext {
     return new DecodeContext(env);
   }
 
@@ -75,36 +79,42 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    * Walks the value into the `/<Type>@<Version>` tagged tree, stringifies it,
    * and prefixes the format tag.
    */
-  override encode(
-    value: FabricValue,
-    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
+  /**
+   * @inheritDoc
+   *
+   * Stringifies the walked tree and prefixes the format tag.
+   */
+  protected override serializedFromEncoded(
+    encoded: JsonCodecValue,
+    _ctx: EncodeContext,
   ): string {
-    return ENCODING_PREFIX_TAG +
-      JSON.stringify(this.encodeValue(value, this.newEncodeContext(env)));
+    return ENCODING_PREFIX_TAG + JSON.stringify(encoded);
   }
 
   /**
    * @inheritDoc
    *
-   * Checks the format tag, parses what follows it, and walks the resulting
-   * tree back into fabric values.
-   *
-   * The walk carries no cycle guard, and needs none: what it walks is the
-   * product of `JSON.parse()`, and a parse of text yields a tree. This format
-   * never receives a tree it did not build itself, which is the condition
-   * under which a decode can be handed a cycle at all.
+   * Checks the format tag and parses what follows it. A string without the tag
+   * is not this format's serialized form at all, which is refused here rather
+   * than walked -- and settles against `lenient` like any other malformation
+   * off a channel.
    */
-  override decode(data: string, env: LiveEnvironment): FabricValue {
+  protected override encodedFromSerializedForm(
+    data: string,
+    _ctx: DecodeContext,
+  ): JsonCodecValue {
     if (!JsonCodecEngine.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
-      throw new Error(
+      throw new ProblematicStateError(
+        "",
+        excerpt,
         `Not a JSON-encoded \`FabricValue\` string: ${backtickQuote(excerpt)}`,
       );
     }
 
-    const json = data.slice(ENCODING_PREFIX_TAG.length);
-    const parsed = JsonCodecEngine.#parseWireText(json);
-    return this.decodeValue(parsed, this.newDecodeContext(env));
+    return JsonCodecEngine.#parseWireText(
+      data.slice(ENCODING_PREFIX_TAG.length),
+    );
   }
 
   /** Encodes a fabric value to UTF-8 JSON bytes. */
@@ -124,10 +134,12 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    */
   decodeFromBytes(
     bytes: Uint8Array,
-    env: LiveEnvironment,
+    env: LiveEnvironment = NULL_LIVE_ENVIRONMENT,
   ): FabricValue {
-    const tree = JsonCodecEngine.#fromBytes(bytes);
-    return this.decodeValue(tree, this.newDecodeContext(env));
+    const text = JsonCodecEngine.#textDecoder.decode(bytes);
+    const ctx = this.newDecodeContext(env, text);
+
+    return this.decodeValue(JsonCodecEngine.#parseWireText(text), ctx);
   }
 
   /**

@@ -396,6 +396,30 @@ describe("JsonCodecEngine", () => {
     });
   });
 
+  describe("a string that is not this format's serialized form", () => {
+    const NOT_OURS = '{"a":1}';
+
+    it("throws when strict", () => {
+      expect(() =>
+        newDefaultJsonCodecEngine().decode(NOT_OURS, new TestLiveEnvironment())
+      )
+        .toThrow(/Not a JSON-encoded `FabricValue` string/);
+    });
+
+    it("returns a `ProblematicValue` when lenient", () => {
+      // A serialized form is data off a channel like any other, so being the
+      // wrong shape for this format settles against `lenient` exactly as a
+      // malformation inside a well-formed one does. Anything else would make
+      // the outermost check the one refusal `lenient` could not contain.
+      const decoded = newDefaultJsonCodecEngine({ lenient: true })
+        .decode(NOT_OURS, new TestLiveEnvironment());
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect((decoded as ProblematicValue).error)
+        .toMatch(/Not a JSON-encoded `FabricValue` string/);
+    });
+  });
+
   describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
     it("returns `Uint8Array` from `encodeToBytes()`", () => {
       const { jsonCodecEngine } = makeTestCodec();
