@@ -14,11 +14,14 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 // setup (here: set up for V1, then re-pointed at the handler-bearing V3 whose
 // `bump` stream marker the V1 doc never materialized), instantiation throws
 // "Handler used as lift … marker was never written". Runner.startCore's initial
-// instantiation re-runs the pinned pattern's OWN setup on that failure (gated by
-// systemPatternAutoUpdate) and retries — the same repair the home ROOT gets in
-// startEnsuredDefaultPattern, reachable at last for the nested pieces that never
-// pass through the PieceController. The root itself is EXCLUDED (the controller
-// owns it); a nested piece is never a space's defaultPattern, so it heals here.
+// instantiation re-runs the pinned pattern's OWN setup on that failure and
+// retries — the same repair the home ROOT gets in startEnsuredDefaultPattern,
+// here for the nested pieces that never pass through the PieceController.
+// The repair is not gated by `systemPatternAutoUpdate`: that flag governs
+// updates which move the durable identity pointer, while this setup replays
+// the pattern the pointer already names. The root itself is excluded because
+// its controller owns the repair; a nested piece is never a space's
+// `.defaultPattern`, so it heals here.
 
 const signer = await Identity.fromPassphrase("nested-piece-setup-repair");
 const space = signer.did();
@@ -159,11 +162,26 @@ describe("nested-piece cold-start setup repair", () => {
     return { cell, v3Ref };
   };
 
-  it("bricks on start when the repair flag is OFF (locks in the gap)", async () => {
+  it("heals with systemPatternAutoUpdate off (repair is not update)", async () => {
+    // Disabling pattern auto-update proves the same-identity repair is
+    // independent of the host's update posture.
     const rt = newRuntime(false);
     try {
-      const { cell } = await brickedNestedPiece(rt);
-      await expect(rt.start(cell)).rejects.toThrow("marker was never written");
+      const { cell, v3Ref } = await brickedNestedPiece(rt);
+      const started = await rt.start(cell);
+      expect(started).toBe(true);
+      await cell.pull();
+      // Same-identity self-repair, not an update: the pin stays at V3…
+      const idRaw = (cell as unknown as {
+        getMetaRaw: (k: string) => unknown;
+      }).getMetaRaw("patternIdentity") as { identity?: string } | undefined;
+      expect(idRaw?.identity).toBe(v3Ref.identity);
+      // …and the once-missing handler stream fires end to end.
+      const before = (cell.getAsQueryResult() as { count: number }).count;
+      (cell.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+      await cell.pull();
+      const after = (cell.getAsQueryResult() as { count: number }).count;
+      expect(after).toBe(before + 1);
     } finally {
       await rt.dispose();
     }

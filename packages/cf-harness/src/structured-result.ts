@@ -5,6 +5,7 @@ import {
   validateAndSanitizeStructuredResultValue,
   validateStructuredResultValue as validateCfcStructuredResultValue,
 } from "@commonfabric/runner/cfc";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 export const DEFAULT_STRUCTURED_RESULT_SCHEMA_MAX_BYTES = 32 * 1024;
 
@@ -44,8 +45,26 @@ const sha256Digest = async (input: Uint8Array): Promise<string> => {
 export const digestJsonValue = async (input: unknown): Promise<string> =>
   await sha256Digest(textBytes(JSON.stringify(input)));
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+/**
+ * Tells whether `value` is a sealed opaque-link object: the single-key
+ * `@link` object the sanitizer substitutes for a position it seals, whose
+ * target carries the `opaque:` scheme.
+ *
+ * A seal is a REDACTION rather than an address. It marks a position a
+ * structured result withheld, and it names nothing that can be read — the
+ * handle boundary deliberately leaves it alone, and no reader resolves it. Any
+ * code that receives a sanitized value back from a model, and would treat it
+ * as data, asks this first.
+ */
+export const isSealedOpaqueLinkObject = (value: unknown): boolean => {
+  if (!isObjectNotArray(value)) {
+    return false;
+  }
+  const target = value["@link"];
+  return Object.keys(value).length === 1 &&
+    typeof target === "string" &&
+    target.startsWith("opaque:");
+};
 
 export const parseStructuredResultSchema = (
   input: unknown,
@@ -63,10 +82,7 @@ export const parseStructuredResultSchema = (
       throw new Error(`${label} string must be valid JSON`);
     }
   }
-  if (
-    typeof parsed !== "boolean" &&
-    (!isRecord(parsed) || Array.isArray(parsed))
-  ) {
+  if (typeof parsed !== "boolean" && !isObjectNotArray(parsed)) {
     throw new Error(
       `${label} must be a JSON Schema object, boolean, or JSON string`,
     );

@@ -92,6 +92,12 @@ A schema document is a `cid:` document whose value is a JSON Schema:
   reference to it, written there by whichever writer first references it in
   that space. Content addressing makes concurrent installs collide
   harmlessly.
+- **Space scope only, by rule**: the commit boundary rejects a `cid:`
+  write at any other scope. A scoped partition could hold a divergent
+  copy under one content-addressed id, and the paths that read the
+  store — delivery, traversal, and commit validation — resolve `cid:`
+  documents at space scope. (Direct-registry reuse across spaces is
+  hash-verified, so a divergent copy could never enter it.)
 
 ### Decomposition
 
@@ -300,13 +306,37 @@ to warn about.
 Content-addressed documents are immutable at the commit boundary: the
 server rejects a `delete` or `patch` of any `cid:` document, whatever
 its class, and rejects a `set` that is neither the first installation
-nor byte-identical to the stored content — conflicting sets of one id
+nor content-identical to the stored document (canonical value equality,
+which compares special objects by content hash) — conflicting sets of one id
 within a single commit included — because a deleted or altered
 dependency would invalidate every document referencing it. An
 idempotent re-`set` of the same content is how writers install closures
 and stays legal, and a sync frame's removes are watch-result removals,
-not deletions. The commit API therefore cannot create a broken closure
-at all; one that exists anyway is database corruption.
+not deletions.
+
+The commit boundary also validates the closure a commit's content
+references: every schema ref introduced by a set's document, a patch's
+own values, or an installed schema document's own refs must be backed —
+in the same commit or already stored in the space — by a document whose
+content verifies against its id, transitively through the closure. A
+commit that references what it does not supply, or supplies content
+that does not hash to its id, is rejected. The commit API therefore
+cannot create a missing or forged closure for any reference this
+collection sees; readers treat a broken closure that exists anyway as
+the patch shape below, out-of-band tampering, or a store that predates
+this validation, and fail loudly on it. The
+writer's obligation to install the closure atomically with the referrer
+remains normative — the boundary is its enforcement, not a substitute
+for it.
+
+One patch shape escapes the collection: an edit INSIDE an existing
+link's schema (replacing a `$ref` string at a sub-path) introduces a
+reference no patch value carries as a whole link, and only a scan of
+the post-patch document would see it — a cost the validation
+deliberately does not pay. The gap closes when links become opaque
+`FabricPrimitive` Link objects instead of patchable plain JSON; until
+then such a reference is caught by read-side assembly rather than at
+commit time.
 
 Resolution demands the whole closure: a registered document whose
 transitive closure is not fully registered resolves as a miss, exactly
@@ -331,9 +361,10 @@ exactly two guarantees, both about delivery rather than about values:
   decomposed closure is written into the space that will hold the
   reference, in the same transaction as the reference itself. A
   transaction commits against one space's session, so the closure reaches
-  whichever server handles that space by construction, and
-  `decomposeSchema` refuses to emit a reference whose closure the writer
-  does not hold — the guarantee is the only path through the API.
+  whichever server handles that space by construction. `decomposeSchema`
+  refuses to emit a reference whose closure the writer does not hold,
+  and the commit boundary independently enforces the same obligation for
+  raw commits that never went through it.
 - **The read-side guarantee.** A query result is self-sufficient: every
   schema reference embedded in delivered documents resolves within the
   delivered set. Enforcement sits at the result-assembly boundary: after
@@ -365,9 +396,9 @@ changes under a previously verified `cid:` id fails outright. A broken
 ref rejects the frame whole, with the replica untouched. The repair
 paths that do exist serve callers, not arrival: the traversal loader's
 reads are tracked (arrival re-runs the reader), the missing-target kick
-requests the fetch, and `syncSchemaDocumentClosure` completes a closure
-by hash within its own space — never satisfied by realm-registry
-presence alone.
+requests the fetch, and any sync of a schema document delivers its
+whole closure through result assembly — never satisfied by
+realm-registry presence alone.
 
 Walking delivered values is a transitional cost: the intended end state
 moves each document's embedded-ref information into a meta field
@@ -383,8 +414,9 @@ repairs the write-side guarantee, a cold realm still fails closed, and a
 traversal deliberately does not take it — traversal is where the
 read-side guarantee is enforced, and its strictness only ever bites where
 the write-side guarantee was violated, which is exactly where a loud
-signal is wanted. The write gate under the server-enforcement open
-question would make the write-side guarantee server-checked as well.
+signal is wanted. The commit boundary's closure validation makes the
+write-side guarantee server-checked for every commit, up to the one
+patch shape documented under Resolution.
 
 ### Traversal and sync
 
@@ -403,14 +435,22 @@ delivery and traversal split the work in two layers:
   own store, and joins it to the delivered set and watch set — failing
   the query on a hole. A refresh revalidates the established delivery
   state too, so a corrupted dependency fails even under an unchanged
-  referrer. Because the commit boundary makes `cid:` documents
-  immutable, an assembly failure can only mean corruption outside the
-  commit API — a tampered store, a pre-immutability hole — never a
-  transient condition: an initial query fails with the error, an
-  established session's watch is terminated loudly (a terminal
-  `session/revoked`, its graph state discarded whole), every other
-  session's fan-out proceeds untouched, and nothing holds, retries, or
-  repairs automatically.
+  referrer. An assembly failure means the patch shape that escapes
+  commit-time validation (see Resolution), out-of-band tampering, or a
+  store predating that validation — never a transient condition, since
+  the commit boundary validates every closure it collects and preserves
+  every installed document. A
+  request-shaped evaluation (watch installation, an initial query)
+  answers its caller with the diagnostic as a QueryError; the fan-out
+  refresh logs the failure and skips the affected session's frame,
+  leaving the connection alone — the database was altered out of band
+  (or the store predates commit-time validation), and that has no
+  connection-level remedy. No frame from the failed pass is delivered
+  and other sessions' fan-out proceeds; the failed session's incremental
+  tracking state may be partially advanced, so it is marked for a full
+  re-evaluation, and its next successful pass re-diffs everything. Under
+  persistent corruption its delivery is simply suspended, with the log
+  as the signal.
 
 A client that syncs a document therefore receives the schema documents for
 every link it contains in the same round trip, keeping the "resolved means
@@ -456,6 +496,13 @@ phased on the op-migration playbook:
   traversal follows external refs out of schema documents. Readers can now
   handle references that nothing yet writes. The three memory walkers learn
   reference-only schema positions in the same change.
+- **Phase 0.5 — commit-boundary enforcement.** `cid:` immutability
+  (no delete, patch, or differing re-set) and commit-time closure
+  validation (every collected reference — all but the one patch shape
+  documented under Resolution — is backed, in the commit or the space's
+  store, by content that verifies against its id, transitively), landed
+  with the readers so no writer flag can ever produce a reference the
+  boundary would not accept.
 - **Phase 1 — write references on links (flag-gated).** Decomposition +
   same-transaction document installs; links carry references. Old inline
   links keep reading forever — links rewrite on every re-instantiation, so
@@ -500,14 +547,15 @@ phased on the op-migration playbook:
    measure, and only then consider an inline-below-N-bytes rule — a
    threshold changes document identity, so it must be part of the
    decomposition's versioned contract, not a tuning knob.
-2. **Server-side integrity enforcement.** Verification is client-side, as
-   for CFC schema documents today (the S5 / A2 items in the CFC audit).
-   Making the server the sole acceptor of `cid:` writes — rejecting content
-   that does not hash to the id — would cover schema documents and CFC
-   documents in one change. Accepted as non-urgent: a forged document is
-   confined to the space it was written into — every path into the shared
-   registry re-computes the hash before trusting a claim, so refs in that
-   space fail closed and no other space is affected.
+2. **Server-side integrity enforcement.** Partially resolved: the commit
+   boundary rejects mutations of `cid:` documents and validates the
+   referenced schema closure (presence and content identity, transitively)
+   for every commit, one documented patch shape excepted. What remains
+   open is generic first-install
+   verification for `cid:` documents nothing references — the boundary
+   cannot name an unreferenced document's class, so a forged blob-or-other
+   install is still confined to its space and fails closed when first
+   referenced.
 3. **Fetch-once for immutable documents.** Every pull is a watch add, so
    schema documents permanently grow the session watch set even though they
    can never change. Quiet but not free; a fetch-without-subscribe

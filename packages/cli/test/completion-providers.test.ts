@@ -141,6 +141,7 @@ Deno.test("live candidates: path-shaped slots defer to the shell", async () => {
     ["cf piece ls -i ", "files"],
     ["cf piece new --root ", "dirs"],
     ["cf piece new --test ", "files"],
+    ["cf piece new --datafile ", "files"],
     ["cf check ", "files"],
     ["cf space verify ", "dirs"],
     ["cf space clone --to ", "dirs"],

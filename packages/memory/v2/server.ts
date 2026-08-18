@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
 import type { FabricPlainObject } from "@commonfabric/api";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 import {
@@ -176,9 +177,6 @@ const recordSlowQueryDuration = (
 
 /** Returns the last N slow query/watch operations (>100ms). */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
@@ -476,7 +474,9 @@ class Connection {
 
   sessionOpenAuthContext(message: SessionOpenRequest): SessionOpenAuthContext {
     const audience = this.server.sessionOpenAudience();
-    const invocation = isRecord(message.invocation) ? message.invocation : null;
+    const invocation = isObjectNotArray(message.invocation)
+      ? message.invocation
+      : null;
     if (invocation === null || typeof invocation.aud !== "string") {
       throw authorizationError("memory session.open requires audience");
     }
@@ -875,13 +875,33 @@ class Connection {
       if (sessionSpace !== space) {
         continue;
       }
-      const effect = await this.server.syncSessionForConnection(
-        space,
-        sessionId,
-        dirtyIds,
-        dirtyOrigins,
-        { adoptionObservations: this.#persistentSchedulerState },
-      );
+      let effect: SessionEffectMessage | null;
+      try {
+        effect = await this.server.syncSessionForConnection(
+          space,
+          sessionId,
+          dirtyIds,
+          dirtyOrigins,
+          { adoptionObservations: this.#persistentSchedulerState },
+        );
+      } catch (error) {
+        // A refresh evaluation failure means one of two things: a bad
+        // commit was accepted (the safeguards belong at the commit
+        // boundary) or an administrator altered the database, which has
+        // no reasonable handling. Log it — the diagnostic is the whole
+        // response — skip this session's frame, and keep fanning out.
+        // The failed pass may have partially advanced the session's
+        // incremental tracking state (an earlier graph's entities, a
+        // partly rebuilt tracker), so the session is marked for a full
+        // re-evaluation: the next successful pass re-diffs everything
+        // rather than trusting increments computed over the failure.
+        console.error(
+          `memory v2: watch refresh evaluation failed for session ${sessionId} in space ${space}; frame skipped`,
+          error,
+        );
+        this.server.markSessionForFullResync(space, sessionId);
+        continue;
+      }
       if (this.#closed) {
         // Evaluation already advanced the session cache past this content;
         // roll the delivery state back so a later pass (or a resumed
@@ -1389,6 +1409,18 @@ export class Server {
     ownerConnectionId: string,
   ): void {
     this.#sessions.detach(space, sessionId, ownerConnectionId);
+  }
+
+  /**
+   * Marks a session so its next evaluation runs the full path instead of
+   * an incremental refresh — the recovery for incremental tracking state
+   * a failed pass may have partially advanced.
+   */
+  markSessionForFullResync(space: string, sessionId: string): void {
+    const session = this.#sessions.get(space, sessionId);
+    if (session !== null) {
+      session.forceFullResync = true;
+    }
   }
 
   async close(): Promise<void> {
@@ -2000,6 +2032,12 @@ export class Server {
           "taken-over",
         );
       }
+      // INCOMPLETE: resume catch-up is not a working feature yet — its
+      // failure handling below falls into this handler's generic
+      // protocol-error mapping rather than any evaluation-failure design,
+      // and nothing validates the catch-up's delivery semantics. A working
+      // implementation is backlog work; sessions recover reliably today by
+      // opening fresh and re-adding watches.
       const catchup = opened.resumed === true
         ? await this.syncSessionForConnection(
           message.space,
@@ -2800,6 +2838,10 @@ export class Server {
         },
       };
     } catch (error) {
+      // Evaluation state is staged (the session's graphs and watches are
+      // assigned only on success), so a failure answers the requester —
+      // a malformed or unevaluable query is the caller's diagnostic, not
+      // a reason to tear the connection down.
       return respondTypedError<WatchSetResult>(
         message.requestId,
         toError(
@@ -2981,6 +3023,10 @@ export class Server {
         },
       };
     } catch (error) {
+      // Evaluation state is staged (the session's graphs and watches are
+      // assigned only on success), so a failure answers the requester —
+      // a malformed or unevaluable query is the caller's diagnostic, not
+      // a reason to tear the connection down.
       return respondTypedError<WatchAddResult>(
         message.requestId,
         toError(
@@ -3262,69 +3308,40 @@ export class Server {
             const fromSeq = session.lastSyncedSeq;
             const updates = new Map<string, SessionCacheEntry>();
 
-            try {
-              for (const graph of session.graphs.values()) {
-                const refreshed = tracer.startActiveSpan(
-                  "memory.watch.refresh",
-                  (watchSpan) => {
-                    watchSpan.setAttribute("space.did", space);
-                    try {
-                      return refreshTrackedGraph(
-                        space,
-                        engine,
-                        graph,
-                        dirtyIds,
-                      );
-                    } finally {
-                      watchSpan.end();
-                    }
-                  },
-                );
-                if (refreshed === null) {
-                  continue;
-                }
-                for (const entity of refreshed.updates.values()) {
-                  const entry = toCacheEntry(entity);
-                  updates.set(
-                    cacheKeyForEntity(
-                      entry.branch,
-                      entry.id,
-                      declaredScope(entry.scope),
-                    ),
-                    entry,
-                  );
-                }
-              }
-            } catch (error) {
-              // A schema-closure violation is database corruption: the
-              // commit boundary makes cid: documents immutable, so a
-              // missing or forged closure is a state normal operation can
-              // never create, not a transient condition to hold and
-              // retry. Terminate THIS session loudly — its graph state is
-              // discarded whole, which also discards any earlier graph's
-              // partial advance from this pass — and let every other
-              // session's fan-out proceed. The client sees a terminal
-              // session/revoked; a reopen's initial query fails against
-              // the same corruption.
-              if (
-                error instanceof Error && error.name === "SchemaClosureError"
-              ) {
-                console.error(
-                  `memory v2: schema-closure violation; terminating session ${sessionId} in space ${space}`,
-                  error,
-                );
-                this.#sessions.remove(space, sessionId);
-                if (session.ownerConnectionId !== null) {
-                  this.#connections.get(session.ownerConnectionId)
-                    ?.revokeSession(
+            // Evaluation exceptions — schema-closure corruption included —
+            // propagate to refreshDirty's catch, which logs, skips this
+            // session's frame, and marks it for a full re-evaluation.
+            for (const graph of session.graphs.values()) {
+              const refreshed = tracer.startActiveSpan(
+                "memory.watch.refresh",
+                (watchSpan) => {
+                  watchSpan.setAttribute("space.did", space);
+                  try {
+                    return refreshTrackedGraph(
                       space,
-                      sessionId,
-                      "schema-closure-violation",
+                      engine,
+                      graph,
+                      dirtyIds,
                     );
-                }
-                return null;
+                  } finally {
+                    watchSpan.end();
+                  }
+                },
+              );
+              if (refreshed === null) {
+                continue;
               }
-              throw error;
+              for (const entity of refreshed.updates.values()) {
+                const entry = toCacheEntry(entity);
+                updates.set(
+                  cacheKeyForEntity(
+                    entry.branch,
+                    entry.id,
+                    declaredScope(entry.scope),
+                  ),
+                  entry,
+                );
+              }
             }
 
             if (updates.size === 0) {
@@ -4170,7 +4187,7 @@ const parseSchedulerSnapshotQuery = (
   let cursor: SchedulerActionSnapshotQuery["cursor"];
   if (value.cursor !== undefined) {
     if (
-      !isRecord(value.cursor) ||
+      !isObjectNotArray(value.cursor) ||
       (value.cursor.ownerSpace !== undefined &&
         typeof value.cursor.ownerSpace !== "string") ||
       typeof value.cursor.pieceId !== "string" ||
@@ -4225,7 +4242,7 @@ export const parseClientMessage = (
     return null;
   }
 
-  if (!isRecord(parsed)) {
+  if (!isObjectNotArray(parsed)) {
     return null;
   }
 
@@ -4247,7 +4264,7 @@ export const parseClientMessage = (
     parsed.type === "session.open" &&
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
-    isRecord(parsed.session)
+    isObjectNotArray(parsed.session)
   ) {
     return {
       type: "session.open",
@@ -4264,7 +4281,9 @@ export const parseClientMessage = (
           ? parsed.session.sessionToken
           : undefined,
       },
-      invocation: isRecord(parsed.invocation) ? parsed.invocation : undefined,
+      invocation: isObjectNotArray(parsed.invocation)
+        ? parsed.invocation
+        : undefined,
       authorization: parsed
         .authorization as SessionOpenRequest["authorization"],
     };
@@ -4275,7 +4294,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isRecord(parsed.commit)
+    isObjectNotArray(parsed.commit)
   ) {
     return {
       type: "transact",
@@ -4291,7 +4310,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isRecord(parsed.query) &&
+    isObjectNotArray(parsed.query) &&
     Array.isArray(parsed.query.roots)
   ) {
     return {
@@ -4352,21 +4371,21 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     typeof parsed.sql === "string" &&
     parsed.sql.length <= 100_000 &&
-    isRecord(parsed.db) &&
+    isObjectNotArray(parsed.db) &&
     typeof parsed.db.id === "string" &&
     parsed.db.id.length > 0 && parsed.db.id.length <= 256 &&
     (parsed.db.tables === undefined ||
-      (isRecord(parsed.db.tables) &&
+      (isObjectNotArray(parsed.db.tables) &&
         Object.keys(parsed.db.tables).length <= 256)) &&
     (parsed.db.scope === undefined || parsed.db.scope === "space" ||
       parsed.db.scope === "user" || parsed.db.scope === "session")
   ) {
     const db = {
       id: parsed.db.id,
-      tables: isRecord(parsed.db.tables) ? parsed.db.tables : undefined,
+      tables: isObjectNotArray(parsed.db.tables) ? parsed.db.tables : undefined,
       scope: parsed.db.scope as CellScope | undefined,
     };
-    const params = Array.isArray(parsed.params) || isRecord(parsed.params)
+    const params = isObjectOrArray(parsed.params)
       ? parsed.params as SqliteParamsWire
       : undefined;
     return {
@@ -4437,7 +4456,7 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    isRecord(parsed.query)
+    isObjectNotArray(parsed.query)
   ) {
     const query = parseSchedulerSnapshotQuery(parsed.query);
     if (query === undefined) return null;

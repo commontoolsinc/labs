@@ -22,6 +22,7 @@
  * these numbers reads them before it commits.
  */
 
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { IAttestation } from "../src/storage/interface.ts";
 
 /** One top-level write: a document, a path in it, and the value written. */
@@ -67,10 +68,6 @@ function emptyNode(): PathNode {
   return { written: false, value: undefined, children: new Map() };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** Builds the container the keys of `children` describe. */
 function containerFor(children: Map<string, PathNode>): unknown {
   for (const key of children.keys()) {
@@ -89,9 +86,7 @@ function containerFor(children: Map<string, PathNode>): unknown {
 function materialize(node: PathNode, inherited: unknown): unknown {
   const base = node.written ? node.value : inherited;
   if (node.children.size === 0) return base;
-  const container = Array.isArray(base) || isRecord(base)
-    ? base
-    : containerFor(node.children);
+  const container = isObjectOrArray(base) ? base : containerFor(node.children);
   if (Array.isArray(container)) {
     const out = [...container];
     for (const [index, child] of node.children) {

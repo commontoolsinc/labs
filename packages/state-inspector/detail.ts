@@ -12,6 +12,11 @@
 // Built in one reconstruction pass over the space (buildAllDetails) so link
 // targets and owner→child names resolve against the whole space.
 
+import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
+
 import type { SpaceDb } from "./db.ts";
 import {
   annotate,
@@ -112,14 +117,10 @@ export interface EntityDetail {
   code?: string;
 }
 
-function isObj(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
 /** A `{ link, specifier }` cell is a module-import entry. */
 function importSpecifier(v: unknown): string | undefined {
   if (
-    isObj(v) && typeof v.specifier === "string" && "link" in v &&
+    isObjectNotArray(v) && typeof v.specifier === "string" && "link" in v &&
     Object.keys(v).length === 2
   ) return v.specifier;
   return undefined;
@@ -132,7 +133,7 @@ function importSpecifier(v: unknown): string | undefined {
  * note at the top of model.ts for the full removal checklist.
  */
 function legacyResultId(v: unknown): string | undefined {
-  if (isObj(v) && "$TYPE" in v && "resultRef" in v) {
+  if (isObjectNotArray(v) && "$TYPE" in v && "resultRef" in v) {
     return parseSigilLink(v.resultRef)?.id;
   }
   return undefined;
@@ -148,13 +149,15 @@ function legacyName(
 ): string | undefined {
   const rid = legacyResultId(v);
   const rv = rid ? docs.get(rid)?.value : undefined;
-  return isObj(rv) && typeof rv.$NAME === "string" ? rv.$NAME : undefined;
+  return isObjectNotArray(rv) && typeof rv.$NAME === "string"
+    ? rv.$NAME
+    : undefined;
 }
 
 /** Render a CFC atom (string sigil, or an object atom) to a short string. */
 function atomLabel(a: unknown): string {
   if (typeof a === "string") return a;
-  if (isObj(a)) {
+  if (isObjectNotArray(a)) {
     const t = typeof a.type === "string" ? a.type.split("/").pop() : "atom";
     const extra = a.name ?? a.subject ?? a.class ?? a.symbol;
     return extra ? `${t}:${extra}` : String(t);
@@ -163,16 +166,18 @@ function atomLabel(a: unknown): string {
 }
 
 function parseCfc(cfc: unknown): CfcSummary | undefined {
-  if (!isObj(cfc)) return undefined;
+  if (!isObjectNotArray(cfc)) return undefined;
   const out: CfcSummary = {
     schemaHash: typeof cfc.schemaHash === "string" ? cfc.schemaHash : undefined,
     entries: [],
   };
   const lm = cfc.labelMap;
-  const entries = isObj(lm) && Array.isArray(lm.entries) ? lm.entries : [];
+  const entries = isObjectNotArray(lm) && Array.isArray(lm.entries)
+    ? lm.entries
+    : [];
   for (const e of entries) {
-    if (!isObj(e)) continue;
-    const label = isObj(e.label) ? e.label : {};
+    if (!isObjectNotArray(e)) continue;
+    const label = isObjectNotArray(e.label) ? e.label : {};
     out.entries.push({
       path: Array.isArray(e.path) ? (e.path as string[]).join("/") : "",
       confidentiality: Array.isArray(label.confidentiality)
@@ -200,14 +205,14 @@ function declaredSchemaFor(
   key: string,
 ): { schema: unknown; keys?: string[]; via: string } | undefined {
   // 1. inline schema carried on the naming link.
-  const linkRaw = isObj(ownerDoc?.value)
+  const linkRaw = isObjectNotArray(ownerDoc?.value)
     ? (ownerDoc!.value as Record<string, unknown>)[key]
     : undefined;
-  if (isObj(linkRaw) && isObj(linkRaw["/"])) {
+  if (isObjectNotArray(linkRaw) && isObjectNotArray(linkRaw["/"])) {
     const slash = linkRaw["/"] as Record<string, unknown>;
     const linkKey = Object.keys(slash).find((k) => k.startsWith("link@"));
     const inner = linkKey ? slash[linkKey] : undefined;
-    if (isObj(inner) && isObj(inner.schema)) {
+    if (isObjectNotArray(inner) && isObjectNotArray(inner.schema)) {
       return {
         schema: annotate(inner.schema),
         keys: Object.keys(inner.schema),
@@ -224,14 +229,14 @@ function declaredSchemaFor(
   // here would pull a heavy live-runtime dep into the offline tool; until that's
   // worth it, a nested/escaped ref simply shows its raw `{ $ref }`.
   const osch = ownerDoc?.schema;
-  if (isObj(osch) && isObj(osch.properties)) {
+  if (isObjectNotArray(osch) && isObjectNotArray(osch.properties)) {
     const prop = osch.properties[key];
-    if (isObj(prop)) {
-      let resolved: Record<string, unknown> = prop;
+    if (isObjectNotArray(prop)) {
+      let resolved: ReadonlyRecord = prop;
       const ref = typeof prop.$ref === "string" ? prop.$ref : undefined;
-      if (ref?.startsWith("#/$defs/") && isObj(osch.$defs)) {
+      if (ref?.startsWith("#/$defs/") && isObjectNotArray(osch.$defs)) {
         const def = osch.$defs[ref.slice("#/$defs/".length)];
-        if (isObj(def)) resolved = def;
+        if (isObjectNotArray(def)) resolved = def;
       }
       return {
         schema: annotate(resolved),
@@ -256,7 +261,7 @@ function linksWithPaths(
     out.push({ link, at: base.join("/") });
     return out;
   }
-  if (isObj(v)) {
+  if (isObjectNotArray(v)) {
     for (const [k, val] of Object.entries(v)) {
       linksWithPaths(val, [...base, k], out, depth - 1);
     }
@@ -323,7 +328,7 @@ function detailFromDoc(
   }
   if (c.lineage.owner) lineage.owner = refTo(c.lineage.owner, ctx);
   // Legacy: surface the result cell + the owned-cell manifest from the value.
-  if (c.kind === "piece" && c.regime === "legacy" && isObj(value)) {
+  if (c.kind === "piece" && c.regime === "legacy" && isObjectNotArray(value)) {
     const rid = legacyResultId(value);
     if (rid) lineage.result = refTo(rid, ctx);
     const internalIds = linksWithPaths(value.internal)
@@ -373,7 +378,9 @@ function detailFromDoc(
 
   // --- schema / ifc / cfc ------------------------------------------------
   let schema = doc.schema !== undefined ? annotate(doc.schema) : undefined;
-  let schemaKeys = isObj(doc.schema) ? Object.keys(doc.schema) : undefined;
+  let schemaKeys = isObjectNotArray(doc.schema)
+    ? Object.keys(doc.schema)
+    : undefined;
   let schemaSource: string | undefined;
   let streamPayload: boolean | undefined;
   // A stream / named owned cell has no own schema — resolve the DECLARED one
@@ -389,7 +396,9 @@ function detailFromDoc(
         : `declared in owner schema · ${named.key}`;
     }
   }
-  const ifc = isObj(value) && "ifc" in value ? annotate(value.ifc) : undefined;
+  const ifc = isObjectNotArray(value) && "ifc" in value
+    ? annotate(value.ifc)
+    : undefined;
   const cfc = parseCfc(doc.cfc);
 
   return {
@@ -494,7 +503,9 @@ export function buildAllDetails(
     // Only MODERN piece result values carry semantic names as keys (createProfile,
     // profiles, …). A legacy PROCESS cell's top-level keys are control-plane
     // ($TYPE/resultRef/internal/argument) — naming children by those is noise.
-    if (c.kind === "piece" && c.regime === "modern" && isObj(doc.value)) {
+    if (
+      c.kind === "piece" && c.regime === "modern" && isObjectNotArray(doc.value)
+    ) {
       for (const [key, val] of Object.entries(doc.value)) {
         const tid = parseSigilLink(val)?.id;
         if (tid && !nameOf.has(tid)) nameOf.set(tid, { owner: id, key });

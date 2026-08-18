@@ -11,7 +11,7 @@ import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   JSON_CODEC,
-  ReconstructionContext,
+  LiveEnvironment,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 
@@ -129,7 +129,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       decode(
         typeTag: string,
         state: JsonCodecValue,
-        _context: ReconstructionContext,
+        _env: LiveEnvironment,
       ): FabricBytes | ProblematicValue {
         if (typeof state !== "string") {
           return new ProblematicValue(

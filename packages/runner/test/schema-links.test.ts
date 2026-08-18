@@ -1963,8 +1963,11 @@ describe("Schema - Link Resolution", () => {
       expect(resultInnerContentsCellLink.id).toBe(secondCellLink.id);
       expect(resultInnerContentsCellLink.path).toEqual([]);
 
-      // Test that unknown type from object turns into undefined
-      expect(resultInnerContents!.test).toBeUndefined();
+      // A `type: unknown` property is not descended into, so it projects to a
+      // reference: truthy and comparable, carrying none of the target's
+      // content. See `createOpaquePresence()` in schema.ts.
+      expect(resultInnerContents!.test).toBeTruthy();
+      expect(Object.keys(resultInnerContents!.test as object)).toEqual([]);
 
       // resultInnerContents was returned from outer's inner.get(), and
       // inner->redir->first are all writeRedirect, so its toCell() returns

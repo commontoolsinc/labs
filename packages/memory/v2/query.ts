@@ -377,10 +377,10 @@ const scanSnapshotSchemaRefs = (
  * Thrown when a query result's schema-document closure cannot be
  * assembled from the delivering space's own store: a referenced document
  * is missing, or its stored content does not hash to its id. The commit
- * boundary makes `cid:` documents immutable, so this is database
- * corruption, not a transient condition: an initial query fails with it,
- * and the server terminates an established session's watch loudly rather
- * than holding or retrying.
+ * boundary preserves installed documents, so this is a violated writer
+ * or storage invariant, never a transient condition. A request-shaped
+ * evaluation answers its caller with the diagnostic (a QueryError); the
+ * fan-out refresh logs it and skips the affected session's frame.
  */
 export class SchemaClosureError extends Error {
   constructor(message: string) {
@@ -403,9 +403,10 @@ export class SchemaClosureError extends Error {
  * Two-phase: the walk verifies everything into staging and returns the
  * tracker keys and snapshots to add — the caller commits them only after
  * the whole closure verified, so the walk itself mutates nothing. A
- * refresh caller whose traversal already advanced its tracker relies on
- * session termination instead: the failed session's graph state is
- * discarded whole. `established` extends validation over previously
+ * refresh whose traversal already advanced its tracker before a failure
+ * is healed by the session's forced full re-evaluation instead (the
+ * server marks it on the skipped frame). `established` extends
+ * validation over previously
  * delivered snapshots (a refresh): a corrupted dependency fails the
  * refresh even when its referrer did not change, and the per-version scan
  * and verification caches make an unchanged established set cost map
@@ -817,9 +818,10 @@ export const refreshTrackedGraph = (
 
   // `established` extends validation over the whole previously delivered
   // state, so a corrupted dependency fails the refresh even when its
-  // referrer did not change. A throw here corrupts nothing durable: the
-  // caller terminates the session and discards its graph state whole,
-  // partial tracker advances included.
+  // referrer did not change. A throw here can leave this graph's tracker
+  // partially advanced; the caller marks the session for a full
+  // re-evaluation, which re-diffs everything on the next successful pass
+  // rather than trusting increments computed over the failure.
   const staged = assembleSchemaDocClosures(
     space,
     engine,

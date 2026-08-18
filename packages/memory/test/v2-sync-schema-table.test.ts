@@ -1423,3 +1423,50 @@ Deno.test("stored-document validation ignores schema-document references", () =>
   );
   assertEquals(containsSyncSchemaRefString(linkWithTransportRef), true);
 });
+
+Deno.test("sync schema table compresses boolean link schemas", () => {
+  // The schema-document carve-out asks its ref-only question of every
+  // compressible schema, booleans included; a boolean is not a ref-only
+  // position, so it compresses like any other schema and round-trips.
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:boolean-schema-source",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          open: {
+            "/": {
+              [LINK_V1_TAG]: {
+                id: "of:boolean-target",
+                path: [],
+                schema: true,
+              },
+            },
+          },
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  const compressed = compressSessionSyncSchemas(sync) as SchemaTableSessionSync;
+  const booleanHash = internSchema(true, true).taggedHashString;
+  assertExists(compressed.schemaTable);
+  assertEquals(Object.keys(compressed.schemaTable), [booleanHash]);
+
+  const expanded = expandSessionSyncSchemas(compressed);
+  const value = expanded.upserts[0].doc?.value as Record<string, unknown>;
+  const envelope = (value.open as Record<string, unknown>)["/"] as Record<
+    string,
+    unknown
+  >;
+  assertEquals(
+    (envelope[LINK_V1_TAG] as Record<string, unknown>).schema,
+    true,
+  );
+});

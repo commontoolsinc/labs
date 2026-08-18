@@ -225,6 +225,69 @@ Deno.bench("array element resolution in circular structures", () => {
   storageManager.close();
 });
 
+// A list scanned through the reactive proxy: what a lift does when it reads a
+// collection of linked entries, and the shape the transaction-scoped memo
+// exists for. `elements per pass` is the per-element cost; `whole array` is
+// one pass over the whole thing. The unmemoized cost of both is linear in the
+// number of resolutions, so a scan that touches each element more than once
+// pays it again per touch.
+const LIST_LENGTH = 50;
+
+const listBoardSetup = () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+  const entries = [];
+  for (let index = 0; index < LIST_LENGTH; index++) {
+    const entry = runtime.getCell<{ title: string }>(
+      space,
+      `bench-list-entry-${index}`,
+      undefined,
+      tx,
+    );
+    entry.set({ title: `Entry ${index}` });
+    entries.push(entry);
+  }
+  const board = runtime.getCell<unknown[]>(
+    space,
+    "bench-list-board",
+    undefined,
+    tx,
+  );
+  board.set(entries as never);
+  return { storageManager, runtime, tx, board };
+};
+
+Deno.bench("reactive list: one element read", () => {
+  const { storageManager, runtime, tx, board } = listBoardSetup();
+  const list = board.get() as unknown[];
+
+  for (let index = 0; index < LIST_LENGTH; index++) void list[index];
+
+  tx.commit();
+  runtime.dispose();
+  storageManager.close();
+});
+
+Deno.bench("reactive list: whole array read per element", () => {
+  const { storageManager, runtime, tx, board } = listBoardSetup();
+  const list = board.get() as unknown[];
+
+  // Every `filter` materializes every element, so this touches each element
+  // once per element -- the scan an author writes when a row needs to know
+  // about the other rows.
+  for (let index = 0; index < LIST_LENGTH; index++) {
+    void list.filter((_entry, other) => other !== index);
+  }
+
+  tx.commit();
+  runtime.dispose();
+  storageManager.close();
+});
+
 Deno.bench("resolveLink with infinitely growing path (A->A/foo)", () => {
   const storageManager = StorageManager.emulate({
     as: signer,

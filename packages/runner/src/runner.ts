@@ -2763,7 +2763,9 @@ export class Runner {
     // repair the home ROOT got in startEnsuredDefaultPattern, reachable at last
     // for the nested pieces that never pass through it.
     //
-    // Gated on the systemPatternAutoUpdate experimental flag. On EXACTLY that
+    // The repair is not gated by `systemPatternAutoUpdate`: that flag governs
+    // updates which move the durable identity pointer, while this setup replays
+    // the pattern the pointer already names. On exactly that
     // failure, re-run the pinned pattern's OWN setup state (samePattern=true:
     // materializes the missing internal cells but leaves the existing argument
     // — the piece's data — untouched; no roll-forward, no user-data rewrite),
@@ -2783,7 +2785,6 @@ export class Runner {
         if (
           useTx !== undefined ||
           ref === undefined ||
-          !this.runtime.experimental.systemPatternAutoUpdate ||
           !isMissingStreamMarkerFailure(instantiateError) ||
           // The root/default pattern is the PieceController's to repair (it has
           // the richer roll-forward + clear-error path); defer to it there.
@@ -5270,13 +5271,13 @@ export class Runner {
     module: Module,
     inputsCell: Cell<any>,
     tx: IExtendedStorageTransaction,
-    options: { bindTxToSchema?: boolean; writableProxy?: boolean } = {},
+    options: { bindTxToSchema?: boolean } = {},
   ): { argument: any; isValidArgument: boolean } {
     const argument = module.argumentSchema !== undefined
       ? options.bindTxToSchema
         ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
         : inputsCell.asSchema(module.argumentSchema).get()
-      : inputsCell.getAsQueryResult([], tx, options.writableProxy);
+      : inputsCell.getAsQueryResult([], tx);
 
     return {
       argument,
@@ -5886,15 +5887,7 @@ export class Runner {
         logger.timeStart("stream", "readInputs");
         const { argument, isValidArgument } = (() => {
           try {
-            return this.readJavaScriptArgument(
-              module,
-              inputsCell,
-              tx,
-              {
-                writableProxy:
-                  (module as { writableProxy?: boolean }).writableProxy,
-              },
-            );
+            return this.readJavaScriptArgument(module, inputsCell, tx);
           } finally {
             logger.timeEnd("stream", "readInputs");
           }

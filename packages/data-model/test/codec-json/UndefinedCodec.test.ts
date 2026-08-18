@@ -13,12 +13,12 @@ import { expect } from "@std/expect";
 
 import { UndefinedCodec } from "@/codec-json/UndefinedCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 
 describe("UndefinedCodec", () => {
   const codec = new UndefinedCodec();
   const expectedTag = CODEC_TYPE_TAGS.Undefined;
-  const context = EMPTY_RECONSTRUCTION_CONTEXT;
+  const env = NULL_LIVE_ENVIRONMENT;
 
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {
@@ -29,7 +29,7 @@ describe("UndefinedCodec", () => {
 
     describe("canEncode()", () => {
       it("claims `undefined`, rejects `null` (and other values)", () => {
-        // `undefined` serializes to the `Undefined@1` tag with `null` state,
+        // `undefined` encodes to the `Undefined@1` tag with `null` state,
         // whereas `null` is a JSON-native value that is not codec-handled.
         expect(codec.canEncode(undefined)).toBe(true);
         expect(codec.canEncode(null)).toBe(false);
@@ -45,12 +45,12 @@ describe("UndefinedCodec", () => {
 
     describe("decode()", () => {
       it("decodes `null` state back to `undefined`", () => {
-        const decoded = codec.decode(expectedTag, null, context);
+        const decoded = codec.decode(expectedTag, null, env);
         expect(decoded).toBe(undefined);
       });
 
       it("throws when decoding non-`null` state", () => {
-        expect(() => codec.decode(expectedTag, 42, context)).toThrow(
+        expect(() => codec.decode(expectedTag, 42, env)).toThrow(
           "expected `null` state",
         );
       });
@@ -61,7 +61,7 @@ describe("UndefinedCodec", () => {
         const decoded = codec.decode(
           expectedTag,
           codec.encode(undefined),
-          context,
+          env,
         );
         expect(decoded).toBe(undefined);
       });

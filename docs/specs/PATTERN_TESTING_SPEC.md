@@ -18,7 +18,7 @@ primitive), and are run via `cf test`.
 
 1. **Patterns all the way down** - Tests are patterns, proving the system works
 2. **Fast feedback loops** - Tests run with emulated storage (~10ms setup)
-3. **Debuggability** - Inspect test patterns via CLI (`cf piece inspect`, `cf piece get`)
+3. **Debuggability** - Inspect test patterns via CLI (`cf piece inspect`, `cf get`)
 4. **Minimal infrastructure** - Reuse existing `piece step` machinery
 5. **Self-contained tests** - Test logic lives inside actions, not external scripts
 
@@ -448,16 +448,16 @@ const action_add_expense = action(() => {
 
 ### Do: Meaningful Assertion Names
 
-Use descriptive computed cell names:
+Use descriptive assertion names:
 
 ```tsx
 // Shown inside a pattern body.
 // ✅ Good - name describes what's being tested
-const assert_total_equals_45 = computed(() => subject.result.total === 45);
-const assert_items_sorted_by_date = computed(() => isSorted(subject.items));
+const assert_total_equals_45 = assert(() => subject.result.total === 45);
+const assert_items_sorted_by_date = assert(() => isSorted(subject.items));
 
 // ❌ Bad - generic names
-const test1 = computed(() => subject.result.total === 45);
+const test1 = assert(() => subject.result.total === 45);
 ```
 
 ### Do: Use Discriminated Union Format

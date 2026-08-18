@@ -59,6 +59,7 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
+import { isOpaqueReference, opaqueReference } from "./back-to-cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import type { LastNode } from "./link-resolution.ts";
@@ -1369,6 +1370,14 @@ export interface IObjectCreator<T> {
   ): T;
 
   /**
+   * The value an opaque (`type: "unknown"`) position projects to when the
+   * traversal found something there. The traverser is the only place that
+   * knows presence, since it deliberately does not descend. Query traversal
+   * leaves this unimplemented and keeps projecting `undefined`.
+   */
+  createOpaquePresence?(link: NormalizedFullLink): T;
+
+  /**
    * Creates a value whose schema has already been proven to contain only exact
    * `type`, `properties`, and `items` keywords. Implementations may skip the
    * generic asCell/default/schema-shape checks; the result must otherwise have
@@ -1458,7 +1467,45 @@ export function mergeAnyOfMatches<T>(
     if (matches.every((v) => isObjectNotArray(v))) {
       const unified: Record<string, T> = {};
       for (const match of matches) {
-        Object.assign(unified, match);
+        for (const [key, value] of Object.entries(match as object)) {
+          // A branch that declined to look never overrides one that looked.
+          // An opaque position projects to a reference carrying nothing of
+          // what it names, so letting it land on a key another branch
+          // materialized would replace that branch's answer with silence —
+          // which is what an `additionalProperties: {type: "unknown"}` branch
+          // beside a branch declaring the same property used to do.
+          if (
+            isOpaqueReference(value) && Object.hasOwn(unified, key) &&
+            !isOpaqueReference(unified[key])
+          ) {
+            continue;
+          }
+          unified[key] = value as T;
+        }
+      }
+      // `Object.assign` copies enumerable string keys, so it leaves behind the
+      // back-to-cell annotation each match carries — a non-enumerable symbol —
+      // and the merged value stops naming the position it was read from:
+      // `equals()` refuses it, and writing it back stores an inline copy where
+      // a link belongs. Every match describes the same position, so the first
+      // annotation is the one to carry, and the descriptor travels with it to
+      // keep the symbol off `Object.keys` and out of a spread.
+      for (const match of matches) {
+        for (const key of Object.getOwnPropertySymbols(match as object)) {
+          // Not the opaque brand: it describes the match it came from, not the
+          // merge. Carrying it would mark a merged value that holds another
+          // branch's properties as one that holds nothing, and the rule below
+          // would then let a later opaque branch overwrite it.
+          if (key === opaqueReference) continue;
+          if (Object.hasOwn(unified, key)) continue;
+          const descriptor = Object.getOwnPropertyDescriptor(
+            match as object,
+            key,
+          );
+          if (descriptor !== undefined) {
+            Object.defineProperty(unified, key, descriptor);
+          }
+        }
       }
       return unified;
     }
@@ -2547,7 +2594,7 @@ function loadSchemaDocClosure(
     }
     context.schemaTracker.add(key, REJECTING_SELECTOR);
     const doc = result.ok.value;
-    if (!isObjectOrArray(doc) || !("value" in doc)) continue;
+    if (!isObjectNotArray(doc) || !("value" in doc)) continue;
     const schemaValue = (doc as { value?: FabricValue }).value;
     try {
       const interned = registerSchemaDocument(
@@ -3817,7 +3864,29 @@ export class SchemaObjectTraverser<V extends FabricValue>
         : this.isValidType(schemaObj, "undefined")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
-    } else if (doc.value === null) {
+    }
+
+    // An opaque (`type: "unknown"`) position answers presence and identity for
+    // whatever is there, whatever shape it has: the declaration names a
+    // reference rather than a value, so a stored string is as opaque as a
+    // stored object, and one uniform answer is what lets a reader test,
+    // compare and pass on any of them the same way. A link is exempt — it is
+    // followed first, because the reference is to what it names and not to the
+    // link. Answering here descends into nothing, so it is also not part of a
+    // cycle and registers nothing with the tracker.
+    const jsonType = getJsonType(doc.value);
+    if (
+      jsonType !== null && !isSigilLink(doc.value) &&
+      this.isValidType(schemaObj, jsonType) === TypeValidity.Unknown
+    ) {
+      const opaqueLink = link ?? getNormalizedLink(doc.address, schemaObj);
+      return {
+        ok: this.objectCreator.createOpaquePresence?.(opaqueLink) ??
+          this.objectCreator.createObject(opaqueLink, undefined),
+      };
+    }
+
+    if (doc.value === null) {
       return isPlainTypeSchema(schemaObj, "null") ||
           this.isValidType(schemaObj, "null")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
@@ -3850,20 +3919,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
         return fail(TRAVERSE_FAILURES.invalidType);
       }
 
-      const newValue: FabricValue[] = [];
       // Our link is based on the last link in the chain and not the first.
       const newLink = link ?? getNormalizedLink(
         doc.address,
         schemaObj,
       );
+      const newValue: FabricValue[] = [];
       using t = this.tracker.include(doc.value, schema, newValue, doc);
       if (t === null) {
         // newValue will be converted to a createObject result by the
         // function that added it to the tracker, so don't do that here
         return { ok: this.tracker.getExisting(doc.value, schema) };
-      }
-      if (valid === TypeValidity.Unknown) {
-        return { ok: this.objectCreator.createObject(newLink, undefined) };
       }
       const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
       if (!Array.isArray(entries)) {
@@ -3914,17 +3980,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (valid === TypeValidity.False) {
         return fail(TRAVERSE_FAILURES.invalidType);
       }
-      const newValue: Record<string, FabricValue> = {};
       // Our link is based on the last link in the chain and not the first.
       const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
+      const newValue: Record<string, FabricValue> = {};
       using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
       if (t === null) {
         // newValue will be converted to a createObject result by the
         // function that added it to the tracker, so don't do that here
         return { ok: this.tracker.getExisting(doc.value, schemaObj) };
-      }
-      if (valid === TypeValidity.Unknown) {
-        return { ok: this.objectCreator.createObject(newLink, undefined) };
       }
       const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
       if (entries === undefined || entries === null) {
@@ -5297,17 +5360,24 @@ function schemaTypeValidity(
   if ("type" in schemaObj) {
     if (Array.isArray(schemaObj["type"])) {
       const types = schemaObj["type"];
-      // type unknown matches anything
+      const concreteMatch = types.some((type) =>
+        type !== "unknown" && schemaTypeMatchesValueType(type, valueType)
+      );
+      // `unknown` admits anything, so it decides only when nothing else in the
+      // list does. A concrete type beside it is a reader asking for the value
+      // — including the shape a declaration takes once combined with an
+      // `unknown` carried on a link — and answering that opaquely would
+      // discard a declaration somebody made.
       if (types.includes("unknown")) {
-        typeValidity = TypeValidity.Unknown;
-      } else if (
-        !types.some((type) => schemaTypeMatchesValueType(type, valueType))
-      ) {
+        if (!concreteMatch) typeValidity = TypeValidity.Unknown;
+      } else if (!concreteMatch) {
         return TypeValidity.False;
       }
     } else if (isString(schemaObj["type"])) {
       const type = schemaObj["type"];
-      // type unknown matches anything
+      // `unknown` admits anything, and alone in the scalar form it is the whole
+      // declaration, so it decides. The list form above is where a concrete
+      // type can sit beside it and win.
       if (type === "unknown") {
         typeValidity = TypeValidity.Unknown;
       } else if (!schemaTypeMatchesValueType(type, valueType)) {
@@ -5413,6 +5483,20 @@ function schemaTypeValidity(
     return TypeValidity.True;
   }
   return TypeValidity.Unknown;
+}
+
+/**
+ * Whether `schema` answers a value of `valueType` opaquely — the position
+ * declares a reference, and nothing in the declaration asks for the value.
+ *
+ * Exported so the lazy view decides it the same way traversal does; a reader
+ * must not be able to tell which path answered.
+ */
+export function isOpaquePosition(
+  schema: JSONSchema,
+  valueType: JSONSchemaTypes,
+): boolean {
+  return schemaTypeValidity(schema, valueType) === TypeValidity.Unknown;
 }
 
 /**

@@ -15,7 +15,7 @@ import { applyPatch } from "@commonfabric/memory/v2/patch";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/api";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isPlainObject } from "@commonfabric/utils/types";
+import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 
 import type { SpaceDb } from "./db.ts";
 import {
@@ -75,10 +75,6 @@ export interface ExactValueChange extends ValueChange {
   pathSegments: string[];
 }
 
-function isObj(v: unknown): v is Record<string, unknown> {
-  return isPlainObject(v);
-}
-
 // The data-model hash defines equality for Fabric leaves, including BigInt,
 // symbols, and Fabric instances.
 function canonical(v: unknown): string {
@@ -92,7 +88,7 @@ function storedValueKind(value: unknown): StoredValueKind {
   if (parseEntityRef(value) !== null) return "reference";
   if (Array.isArray(value)) return "array";
   if (typeof value === "object") {
-    return isObj(value) ? "object" : "fabric";
+    return isPlainObject(value) ? "object" : "fabric";
   }
   return typeof value;
 }
@@ -134,8 +130,8 @@ function valuesEqual(a: unknown, b: unknown): boolean {
       }
       continue;
     }
-    const leftIsObject = isObj(left);
-    const rightIsObject = isObj(right);
+    const leftIsObject = isPlainObject(left);
+    const rightIsObject = isPlainObject(right);
     if (leftIsObject || rightIsObject) {
       if (!leftIsObject || !rightIsObject) return false;
       const leftKeys = Object.keys(left);
@@ -242,7 +238,7 @@ function diffSelectedValues(
       });
       return;
     }
-    if (isObj(a) && isObj(b)) {
+    if (isPlainObject(a) && isPlainObject(b)) {
       for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
         const aHasKey = Object.hasOwn(a, key);
         const bHasKey = Object.hasOwn(b, key);
@@ -508,7 +504,7 @@ export function entityTimeline(
       }
     }
     const exists = stateKnown && doc !== undefined;
-    const hasValue = exists && typeof doc === "object" && doc !== null &&
+    const hasValue = exists && isObjectOrArray(doc) &&
       Object.hasOwn(doc, "value");
     const docValue = hasValue ? (doc as { value: unknown }).value : undefined;
     const value = { present: hasValue, value: docValue };

@@ -1,5 +1,6 @@
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -617,35 +618,6 @@ Deno.bench(
     }
 
     await cleanup(runtime, storageManager, tx);
-  },
-);
-
-Deno.bench(
-  "Cell proxy - property writes schemaless (100x)",
-  async () => {
-    const { runtime, storageManager } = setup();
-
-    const cell = runtime.getCell<{
-      x: number;
-      y: number;
-    }>(space, "bench-proxy-write", undefined);
-
-    // Initialize with a committed value first
-    const initTx = runtime.edit();
-    cell.withTx(initTx).set({ x: 1, y: 2 });
-    initTx.commit();
-
-    // Measure proxy writes; proxies are read-only by default, so request a
-    // writable view.
-    for (let i = 0; i < 100; i++) {
-      const tx = runtime.edit();
-      const proxy = cell.withTx(tx).getAsQueryResult([], tx, true);
-      proxy.x = i;
-      proxy.y = i * 2;
-      tx.commit();
-    }
-
-    await cleanup(runtime, storageManager);
   },
 );
 
@@ -1422,12 +1394,9 @@ Deno.bench("Notebook read - 100 notes, 1000 reads", async () => {
 // ============================================================================
 
 Deno.bench(
-  "Overhead - isRecord check (10000x)",
+  "Overhead - isObjectNotArray check (10000x)",
   { group: "overhead" },
   () => {
-    const isRecord = (v: unknown): v is Record<string, unknown> =>
-      typeof v === "object" && v !== null && !Array.isArray(v);
-
     const values = [
       42,
       "string",
@@ -1438,7 +1407,7 @@ Deno.bench(
       { key: "value" },
     ];
     for (let i = 0; i < 10000; i++) {
-      isRecord(values[i % values.length]);
+      isObjectNotArray(values[i % values.length]);
     }
   },
 );

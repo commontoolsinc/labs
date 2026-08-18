@@ -2541,9 +2541,22 @@ export type PatternToolFunction = <
 // `__cfHelpers.lift(...)` is untyped (`__cfHelpers: any`), so it does not depend
 // on these overloads; only authored `lift(...)` calls resolve against them.
 export interface LiftFunction {
+  // A BARE function type, and it has to be one. A generic implementation —
+  // `<T extends { … what the body reads … }>(input) => T` — declares that its
+  // result is the very value it was handed, so a caller passing the whole
+  // document gets the whole document back rather than the narrow shape the
+  // body read. TypeScript carries that type parameter out to the caller only
+  // when the outer signature's return is a function type with a single call
+  // signature and no members at all (`getSingleSignature(…, allowMembers:
+  // false)`); an intersection like `ModuleFactory` fails that test, and the
+  // parameter collapses to its constraint at the `lift(…)` call instead.
+  //
+  // The cost is that a lift's declared type no longer says it is also a
+  // `Module` — the factory object still is one, and `isModule()` narrows to it
+  // where a module record is what's wanted (the module registry, say).
   <T, R>(
     implementation: (input: T) => R,
-  ): ModuleFactory<StripCell<T>, R>;
+  ): (inputs: FactoryInput<StripCell<T>>) => Reactive<R>;
 
   <T>(
     implementation: (input: T) => any,
@@ -2573,12 +2586,6 @@ export interface HandlerFunction {
     handler: (event: E, props: HandlerState<T>) => any,
   ): HandlerFactory<E, T>;
 
-  // Without schemas
-  <E, T>(
-    handler: (event: E, props: T) => any,
-    options: { proxy: true },
-  ): HandlerFactory<E, T>;
-
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
   ): HandlerFactory<E, T>;
@@ -2591,11 +2598,6 @@ export interface HandlerFunction {
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => R,
-  ): HandlerFactory<E, T, R>;
-
-  <E, T, R>(
-    handler: (event: E, props: T) => R,
-    options: { proxy: true },
   ): HandlerFactory<E, T, R>;
 
   <E, T, R>(
@@ -2663,7 +2665,8 @@ export type AssertRawPart = {
  *
  * It is one record on both paths rather than `true | AssertPart[]`, because a
  * union return infers as `unknown`, and a field whose schema is
- * `{ type: "unknown" }` reads back as `undefined`.
+ * `{ type: "unknown" }` is not materialized: it reads back as an opaque
+ * reference carrying none of the value's properties.
  */
 export type AssertRecord = {
   ok: boolean;
@@ -2926,6 +2929,22 @@ export type StreamDataFunction = <T>(
 export type CompileAndRunFunction = <T = any, S = any>(
   params: FactoryInput<BuiltInCompileAndRunParams<T>>,
 ) => Reactive<BuiltInCompileAndRunState<S>>;
+
+/**
+ * Read an attached data file's text.
+ *
+ * `path` is the file's root-relative path within the deployed source package —
+ * the same spelling `cf piece getsrc` writes it at, and the same one passed to
+ * `--datafile`. A data file belongs to the package rather than to any one
+ * module, so the path is absolute within the package and does not resolve
+ * relative to the caller.
+ *
+ * The bytes travel with the pattern's code in the same content-addressed
+ * closure, so this reads memory rather than storage: it is synchronous, it
+ * cannot fail part-way, and it returns the same bytes on every load of a given
+ * source revision. A path naming no attached data file throws.
+ */
+export type DataFileFunction = (path: string) => string;
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
@@ -3501,6 +3520,7 @@ export declare const fetchJsonUnchecked: FetchJsonUncheckedFunction;
 export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
+export declare const dataFile: DataFileFunction;
 export declare const sqliteDatabase: SqliteDatabaseFunction;
 export declare const sqliteQuery: SqliteQueryFunction;
 export declare const table: SqliteTableFunction;

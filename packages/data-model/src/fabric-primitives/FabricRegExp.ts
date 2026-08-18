@@ -11,8 +11,8 @@ import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts"
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   JSON_CODEC,
+  type LiveEnvironment,
   type NonterminalCodec,
-  type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import type { FabricValue } from "@/interface.ts";
 
@@ -188,7 +188,7 @@ export class FabricRegExp extends BaseFabricPrimitive
       decode(
         typeTag: string,
         state: FabricValue,
-        _context: ReconstructionContext,
+        _env: LiveEnvironment,
       ): FabricValue {
         if (!isPlainObject(state)) {
           return new ProblematicValue(

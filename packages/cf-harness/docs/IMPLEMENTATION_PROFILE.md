@@ -52,9 +52,10 @@ model turn.
   surfaces exist beside the sandbox: the browser child profile's constrained
   command/script policy, bound to an explicit local CDP lease, and the
   `run_pattern` tool, which compiles model-authored pattern source and runs it
-  against the configured Fabric space over a trusted host-side session. Neither
-  admits arbitrary host commands, and `run_pattern` is present only when a
-  fabric session is configured.
+  against the configured Fabric space over a trusted host-side session, and on
+  request registers the piece it creates in that space's piece list under a
+  caller-chosen slug. Neither admits arbitrary host commands, and `run_pattern`
+  is present only when a fabric session is configured.
 - Network: explicit in configuration but still provisional. Sandboxed `bash`
   applies a direct-`curl` destination guard; `web_fetch` and web child profiles
   have their own bounded request policies.

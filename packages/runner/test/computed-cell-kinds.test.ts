@@ -160,19 +160,21 @@ describe("computed cell kinds", () => {
       expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
     });
 
-    it("disqualifies captures of a schema-less writable-proxy handler", () => {
+    it("tags a capture of a handler whose `$ctx` schema is `true` as computed", () => {
       const double = lift((x: number) => x * 2);
-      const bumpProxy = handler(
+      const bump = handler(
+        true,
+        true,
         (_event: unknown, _ctx: { target: number }) => {},
-        { proxy: true },
       );
       const testPattern = pattern<{ x: number }>(({ x }) => {
         const doubled = double(x);
-        return { doubled, onBump: bumpProxy({ target: doubled }) };
+        return { doubled, onBump: bump({ target: doubled }) };
       });
-      // The legacy writable proxy makes every capture writable — no schema
-      // exists to prove otherwise, so all bound roots disqualify.
-      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+      // A `true` `$ctx` schema grants no `asCell` handle, so the binding
+      // arrives as a read-only view the body cannot write through, and the
+      // root it covers stays eligible.
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBe("computed");
     });
 
     it("disqualifies outputs of unknown builtin refs", () => {
@@ -447,18 +449,6 @@ describe("computed cell kinds", () => {
       });
       expect(descriptorFor(testPattern, "out")?.kind).toBeUndefined();
       expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
-    });
-
-    it("writable-proxy modules disqualify as writers", () => {
-      const proxyNode = mkModule({
-        type: "javascript",
-        implementation: () => 0,
-        writableProxy: true,
-      });
-      const testPattern = pattern<{ x: number }>(({ x }) => ({
-        out: proxyNode({ v: x }),
-      }));
-      expect(descriptorFor(testPattern, "out")?.kind).toBeUndefined();
     });
 
     it("handler-wrapped modules disqualify as writers (hand-built shape)", () => {

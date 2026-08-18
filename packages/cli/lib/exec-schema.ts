@@ -1,6 +1,10 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { schemaToTypeString } from "@commonfabric/runner";
+import {
+  isObjectNotArray,
+  type ReadonlyRecord,
+} from "@commonfabric/utils/types";
 import { cliCommand } from "./cli-name.ts";
 // A value import back to callable.ts, whose own import of this module is
 // type-only and therefore erased — so this creates no runtime cycle.
@@ -77,9 +81,8 @@ interface ParsedInputMode {
   usedJsonInput: boolean;
 }
 
-function isSchemaObject(schema: JSONSchema): schema is Record<string, unknown> {
-  return typeof schema === "object" && schema !== null &&
-    !Array.isArray(schema);
+function isSchemaObject(schema: JSONSchema): schema is ReadonlyRecord {
+  return isObjectNotArray(schema);
 }
 
 /**
@@ -916,18 +919,45 @@ function genericFlagLines(schema: JSONSchema): string[] {
   );
 }
 
+/** One line per output property — `name <placeholder>`, then the author's own
+ * doc comment where the declared result carries one. The description is a
+ * ref-site sibling on the property itself, so no resolution is needed to read
+ * it: this is the same sentence `--help --json` serves beside the field.
+ * Aligned the way the flag lines are, and a multi-line comment continues
+ * indented under its own first line. */
+function outputPropertyEntries(
+  properties: Record<string, JSONSchema>,
+): string[] {
+  const descriptors = Object.entries(properties).map(([key, schema]) => ({
+    usage: `${key} ${valuePlaceholder(schema)}`,
+    description: schemaDescription(schema),
+  }));
+  const maxUsage = descriptors.reduce(
+    (width, descriptor) => Math.max(width, descriptor.usage.length),
+    0,
+  );
+  const lines: string[] = [];
+  for (const descriptor of descriptors) {
+    if (descriptor.description === undefined) {
+      lines.push(`    ${descriptor.usage}`);
+      continue;
+    }
+    const [first, ...rest] = descriptor.description.split("\n");
+    lines.push(`    ${descriptor.usage.padEnd(maxUsage)}  ${first}`);
+    for (const line of rest) {
+      lines.push(`    ${" ".repeat(maxUsage)}  ${line}`);
+    }
+  }
+  return lines;
+}
+
 function outputPropertyLines(schema: JSONSchema): string[] {
   const properties = objectProperties(schema);
   if (!properties || Object.keys(properties).length === 0) {
     return ["  JSON on success."];
   }
 
-  return [
-    "  JSON on success:",
-    ...Object.entries(properties).map(([key, propertySchema]) =>
-      `    ${key} ${valuePlaceholder(propertySchema)}`
-    ),
-  ];
+  return ["  JSON on success:", ...outputPropertyEntries(properties)];
 }
 
 /** A handler's declared result, named at the position a caller reads it from:
@@ -944,12 +974,7 @@ function invocationResultLines(schema: JSONSchema): string[] {
     ];
   }
 
-  return [
-    "  The invocation's `result`:",
-    ...Object.entries(properties).map(([key, propertySchema]) =>
-      `    ${key} ${valuePlaceholder(propertySchema)}`
-    ),
-  ];
+  return ["  The invocation's `result`:", ...outputPropertyEntries(properties)];
 }
 
 /** The `Output:` section of a help page, or nothing at all.

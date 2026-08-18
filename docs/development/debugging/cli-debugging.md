@@ -44,7 +44,7 @@ deno task cf piece new -i "$CF_IDENTITY" --api-url URL --space SPACE \
 
 # Set test data
 echo '{"title": "Test", "done": false}' | \
-  deno task cf piece set -i "$CF_IDENTITY" --api-url URL --space SPACE --piece ID testItem
+  deno task cf set -i "$CF_IDENTITY" --api-url URL --space SPACE --piece ID testItem
 ```
 
 Write automated tests for new or changed pattern behavior and run every entry
@@ -73,13 +73,13 @@ packages and type-checks attached tests but does not run them.
 
 ```bash
 # WRONG: Returns stale computed values
-echo '[...]' | deno task cf piece set --piece ID expenses ...
-deno task cf piece get --piece ID totalSpent ...  # May return old value!
+echo '[...]' | deno task cf set --piece ID expenses ...
+deno task cf get --piece ID totalSpent ...  # May return old value!
 
 # CORRECT: Run piece step to trigger recompute
-echo '[...]' | deno task cf piece set --piece ID expenses ...
+echo '[...]' | deno task cf set --piece ID expenses ...
 deno task cf piece step --piece ID ...  # Runs scheduling step, triggers recompute
-deno task cf piece get --piece ID totalSpent ...  # Now correct
+deno task cf get --piece ID totalSpent ...  # Now correct
 ```
 
 ## Inspect Transformed Output
@@ -113,17 +113,19 @@ deno task cf check \
 # 1. What's the full state?
 deno task cf piece inspect --piece <piece-id> -i "$CF_IDENTITY" -a URL -s space
 
-# 2. What are the inputs?
-deno task cf piece get --piece <piece-id> /input -i "$CF_IDENTITY" -a URL -s space
+# 2. What are the inputs? (--input selects the arguments cell; a positional
+# /input would read a result field of that name)
+deno task cf get --piece <piece-id> --input -i "$CF_IDENTITY" -a URL -s space
 
 # 3. What's a specific computed value?
-deno task cf piece get --piece <piece-id> myComputedField -i "$CF_IDENTITY" -a URL -s space
+deno task cf get --piece <piece-id> myComputedField -i "$CF_IDENTITY" -a URL -s space
 
-# 4. Set known input, trigger recompute, verify output
+# 4. Set known input, trigger recompute, verify output ("" writes the whole
+# input cell; --input selects it)
 echo '{"items":[{"title":"test","done":false}]}' | \
-  deno task cf piece set --piece <piece-id> /input -i "$CF_IDENTITY" -a URL -s space
+  deno task cf set --piece <piece-id> "" --input -i "$CF_IDENTITY" -a URL -s space
 deno task cf piece step --piece <piece-id> -i "$CF_IDENTITY" -a URL -s space
-deno task cf piece get --piece <piece-id> itemCount -i "$CF_IDENTITY" -a URL -s space
+deno task cf get --piece <piece-id> itemCount -i "$CF_IDENTITY" -a URL -s space
 ```
 
 ## Common CLI Debugging Patterns
@@ -162,7 +164,7 @@ deno task cf piece setsrc --piece <piece-id> pattern.tsx \
   --test pattern.test.tsx -i "$CF_IDENTITY" -a URL -s space
 
 # Test again
-deno task cf piece get --piece <piece-id> brokenField -i "$CF_IDENTITY" -a URL -s space
+deno task cf get --piece <piece-id> brokenField -i "$CF_IDENTITY" -a URL -s space
 ```
 
 This keeps you working with the same piece instance, preserving any test data you've set up.

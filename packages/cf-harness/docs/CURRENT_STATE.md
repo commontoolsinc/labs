@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-08-14
+Last verified: 2026-08-18
 
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
@@ -82,30 +82,58 @@ The current package provides:
   carry the schema of its referent — a `run_pattern` result reference records
   the compiled pattern's result schema, marked `schemaSource: "harness"` — while
   no mint takes a schema off the reference it is handed or reads a cell to fill
-  one in, so an entry without one means the shape was never free to capture;
-- a `describe_handle` tool, available in any run that has handles and gated on
-  no fabric session: given a token it reports the harness-derived schema and the
-  path segments of the referent, never the value, and reports an unknown token
-  as unknown rather than as an error. It never dereferences the cell. Disclosing
-  shape is a policy-governed read whose current default is permissive; a schema
-  without harness provenance is not disclosed, closing the encoding channel a
-  data-carried schema would open;
+  one in, so an entry without one is one whose shape was never free to capture
+  and is answered from the fabric instead;
+- a `describe_handle` tool, available in any run that has handles: given a token
+  it reports the shape of the referent and its path segments, never the value,
+  and reports an unknown token as unknown rather than as an error. The shape is
+  what the referent declares in the session's fabric when the run has one — a
+  piece's document schema is the result schema of the pattern behind it, which
+  is what an agent building over that piece needs — and otherwise the
+  harness-derived schema the mint recorded. Whatever the source, the reported
+  schema is rebuilt from an allowlist of structural keywords at every depth, so
+  `const`, `enum`, `default`, `examples`, and free-text annotations never leave
+  the tool. Property names do cross, since code cannot be written over data
+  without them, so they are bounded in count and length and the model-facing
+  reply is scrubbed of bare fabric identifiers at every depth, keys included.
+  Disclosure is permissive and fixed rather than configurable — no setting
+  narrows it — and is bounded to addresses in the session's own space; that
+  bound is on the handle's own address rather than on everything the document
+  reaches from it. Answering from the fabric establishes the run's fabric
+  session despite the tool's `read` effect class;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
   environment fallbacks): compiles and runs an inline `sourceText` pattern
   (capped at 256 KiB) against a deployed Fabric space from the trusted host side
   over a lazy per-run session that caches only a healthy, authorized
   construction; passes whole-string LLM-friendly link inputs as live cells,
-  refusing links into another space and live-cell values that mismatch the
-  compiled argument schema before any piece exists; honors the run's abort
-  signal by stopping the created piece and returning a structured `cancelled`
-  error; scrubs bare fabric identifiers from model-facing diagnostics; returns
-  the result cell's canonical reference plus an optionally schema-sanitized
-  value, and leaves the piece detached (no recorded origin) and out of the
+  refusing links into another space, inputs the compiled pattern declares no
+  argument for, input values that carry a sealed opaque link anywhere within
+  them, values that mismatch the compiled argument schema whether a live cell or
+  plain JSON supplies them, and a `register` slug that is unusable, that already
+  names a piece in the space, or whose availability the space could not
+  establish, all before any piece exists; honors the run's abort signal by
+  stopping the created piece, removing it from the space's piece list if it had
+  joined, and returning a structured `cancelled` error that names a slug the
+  assignment had already begun taking — that assignment is not withdrawn,
+  because its redirect carries no per-assignment identity a withdrawal could
+  match, so the message says the name may still resolve to the created piece and
+  reports the piece list as that path left it; scrubs bare fabric identifiers
+  from model-facing diagnostics; returns the result cell's canonical reference
+  plus an optionally schema-sanitized value, and leaves the piece detached (no
+  recorded origin) and, unless `register` asked for a named address, out of the
   space's registered piece list, with run→piece provenance carried by the run's
   persisted artifacts; without the session configuration the tool is absent from
   the tool surface, for a `default`- or `pattern-author`-profile subagent as
   much as for the parent — a child shares the one session the parent built;
+  `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
+  `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
+  set the session runtime's CFC dials, so with labels persisted a
+  confidentiality-tainted pattern write is refused at commit under strict —
+  these are the fabric session's dials, independent of the harness's own
+  `--cfc-enforcement-mode`, and the resolved posture (each dial's value and
+  source) is recorded as `fabricSessionCfc` in run state and printed in the
+  operator summary;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable
@@ -171,12 +199,13 @@ mode.
 - Package-default sandbox networking is a provisional bridge-oriented posture,
   not the final destination policy model. Product adapters may narrow it.
 - Delegation is serial: only one child runs at a time.
-- Every `run_pattern` invocation persists an unlisted piece in the configured
-  space. An aborted run stops its piece, but no piece is ever deleted, and each
-  piece's source-history revision is a storage-retention root the piece list
-  does not reveal. Tooling that enumerates a space's contents from the piece
-  list must not assume the list is exhaustive; there is no garbage collection
-  for these pieces yet.
+- Every `run_pattern` invocation persists a piece in the configured space, which
+  joins the space's registered piece list only when the call's `register` asks
+  for a named address. An aborted run stops its piece, but no piece is ever
+  deleted, and each piece's source-history revision is a storage-retention root
+  the piece list does not reveal. Tooling that enumerates a space's contents
+  from the piece list must not assume the list is exhaustive; there is no
+  garbage collection for these pieces yet.
 - Model-driven dynamic skill activation is not implemented. Skills are
   explicitly preloaded by the caller; child skills are profile-controlled.
 - Resume is transcript-oriented and does not recover an arbitrary partially

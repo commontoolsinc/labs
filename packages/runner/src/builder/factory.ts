@@ -24,7 +24,6 @@ import {
   toCompactDebugString,
   toIndentedDebugString,
 } from "@commonfabric/data-model/value-debug";
-import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import {
   all as rowLabelAll,
   any as rowLabelAny,
@@ -73,6 +72,7 @@ import {
   wish,
 } from "./built-in.ts";
 import { getPatternEnvironment } from "./env.ts";
+import { h, UiAction, UiDisclosure, UiPromptSlot } from "./h.ts";
 import {
   action,
   assert,
@@ -218,6 +218,16 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     fetchProgram,
     streamData,
     compileAndRun,
+    // Placeholder for the per-load binding. Each compiled graph replaces this
+    // with a reader closed over that load's attached data files (see
+    // `Engine.compileToRecordGraph`), so reaching this body means the module is
+    // running outside a graph that carries any.
+    dataFile: (path: string): string => {
+      throw new Error(
+        `No attached data file "${path}": this pattern was loaded without a ` +
+          `data-file closure.`,
+      );
+    },
     sqliteDatabase,
     sqliteQuery,
     table,

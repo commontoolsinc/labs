@@ -5,7 +5,7 @@ import {
   selectGeneratedPatternFiles,
 } from "./select-generated-pattern-files.ts";
 
-const TOTAL_SHARDS = 3;
+const TOTAL_SHARDS = 2;
 
 Deno.test("parseShard parses shard notation", () => {
   assertEquals(parseShard("2/4"), { index: 2, total: 4 });

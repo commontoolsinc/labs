@@ -24,8 +24,10 @@ import { toCell } from "../../runner/src/back-to-cell.ts";
 import { setResultCell } from "../../runner/src/result-utils.ts";
 import {
   checkPieceSourceFromCommand,
+  dataCommandAction,
   formatPatternIdentity,
   formatPatternRef,
+  getCellValueFromCommand,
   localPatternEntry,
   mergePiecePath,
   normalizeApiUrl,
@@ -33,7 +35,13 @@ import {
   parsePieceOptions,
   parseSpaceOptions,
   piece,
+  PIECE_DATA_SPELLING_END_DATE,
+  readCallTarget,
+  readTargetPositionals,
+  setCellValueFromCommand,
   setPieceSourceFromCommand,
+  warnDeprecatedPieceSpelling,
+  withDeprecatedSpellingWarning,
 } from "../commands/piece.ts";
 import {
   CellSelectionError,
@@ -417,6 +425,248 @@ describe("cli piece parsing", () => {
       .toThrow(/--space/);
   });
 
+  it('parsePieceOptions() honors "#argument" only where a command takes --input', () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    expect(parsePieceOptions(
+      { ...base, piece: `/${LLM_HANDLE}#argument` },
+      { acceptsArgument: true },
+    )).toMatchObject({
+      piece: LLM_HANDLE,
+      pieceInput: true,
+    });
+    expect(() =>
+      parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}#argument` })
+    )
+      .toThrow(/does not take "--input"/);
+    // The alias grammar has no fragments; refusing loudly beats burying the
+    // suffix inside an id that later fails as unknown.
+    expect(() => parseSpaceOptions({ ...base, piece: `${PIECE}#argument` }))
+      .toThrow(/canonical reference form/);
+  });
+
+  it("readTargetPositionals() reads a leading canonical reference as the address", () => {
+    expect(readTargetPositionals({}, undefined, undefined)).toEqual({});
+    expect(readTargetPositionals({}, "items/0", undefined)).toEqual({
+      pathString: "items/0",
+    });
+    expect(readTargetPositionals({}, `/${LLM_HANDLE}`, "items/0")).toEqual({
+      address: `/${LLM_HANDLE}`,
+      pathString: "items/0",
+    });
+    // Naming the target twice is refused, like --space beside --url.
+    expect(() => readTargetPositionals({ piece: PIECE }, `/${LLM_HANDLE}`))
+      .toThrow(/"--piece" cannot be provided/);
+    // Only an address earns a second positional.
+    expect(() => readTargetPositionals({}, "items/0", "title"))
+      .toThrow(/Unexpected argument "title"/);
+  });
+
+  it("readCallTarget() lets a canonical reference precede the callable name", () => {
+    expect(readCallTarget({}, "addItem", ["{}"])).toEqual({
+      callableName: "addItem",
+      tail: ["{}"],
+    });
+    expect(readCallTarget({}, `/${LLM_HANDLE}`, ["addItem", "{}"])).toEqual({
+      piece: `/${LLM_HANDLE}`,
+      callableName: "addItem",
+      tail: ["{}"],
+    });
+    expect(() =>
+      readCallTarget({ piece: PIECE }, `/${LLM_HANDLE}`, ["addItem"])
+    )
+      .toThrow(/"--piece" cannot be provided/);
+    expect(() => readCallTarget({}, `/${LLM_HANDLE}`, []))
+      .toThrow(/callable name/);
+  });
+
+  it('parseLink() rejects the "#argument" suffix on a link endpoint', () => {
+    expect(() => parseLink(`/${LLM_HANDLE}#argument`))
+      .toThrow(/does not apply to a link endpoint/);
+  });
+
+  it("warnDeprecatedPieceSpelling() names the short spelling and the end date", () => {
+    const lines: string[] = [];
+    warnDeprecatedPieceSpelling("piece get", {
+      writeError: (text) => lines.push(text),
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("'cf piece get' is deprecated");
+    expect(lines[0]).toContain("spell it 'cf get'");
+    expect(lines[0]).toContain(
+      `stops working on ${PIECE_DATA_SPELLING_END_DATE}`,
+    );
+  });
+
+  it("withDeprecatedSpellingWarning() warns once, then delegates with `this` intact", () => {
+    const calls: Array<{ self: unknown; args: unknown[] }> = [];
+    const warned: string[] = [];
+    const original = console.error;
+    console.error = (...parts: unknown[]) => {
+      warned.push(parts.join(" "));
+    };
+    try {
+      const wrapped = withDeprecatedSpellingWarning(
+        "piece call",
+        function (this: unknown, ...args: unknown[]) {
+          calls.push({ self: this, args });
+          return "delegated";
+        },
+      );
+      const self = { marker: true };
+      expect(wrapped.call(self, "a", 1)).toBe("delegated");
+    } finally {
+      console.error = original;
+    }
+    // `this` passes through untouched: `call`'s action reads
+    // `this.getLiteralArgs()` off the Cliffy command it runs under.
+    expect(calls).toEqual([{ self: { marker: true }, args: ["a", 1] }]);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain("'cf piece call' is deprecated");
+  });
+
+  it("dataCommandAction() wraps only the piece-mounted spellings", () => {
+    const action = () => "ran";
+    // The top-level spelling mounts the action untouched — identity, not a
+    // silent wrapper — so the two mounts differ in nothing but the notice.
+    expect(dataCommandAction("get", action)).toBe(action);
+    expect(dataCommandAction("piece get", action)).not.toBe(action);
+  });
+
+  it("parseSpaceOptions() refuses a piece reference beside a URL that names a piece", () => {
+    // Silently preferring either target is how a caller reads a piece they
+    // did not name; before this rule the URL's piece won without a word.
+    expect(() =>
+      parseSpaceOptions({ url: FULL_URL, identity: ID, piece: PIECE })
+    ).toThrow(/cannot be provided when the "--url" names a piece/);
+    expect(() =>
+      parseSpaceOptions({
+        url: FULL_URL,
+        identity: ID,
+        piece: `/${LLM_HANDLE}`,
+      })
+    ).toThrow(/cannot be provided when the "--url" names a piece/);
+  });
+
+  it("parseSpaceOptions() composes a piece-less URL with a piece reference", () => {
+    expect(parsePieceOptions({
+      url: NO_PIECE_FULL_URL,
+      identity: ID,
+      piece: PIECE,
+    })).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      piece: PIECE,
+    });
+    // The canonical reference keeps its whole grammar in this position: the
+    // embedded path and scope ride along, and an embedded space DID defers
+    // to the session check because the URL names the space as a name.
+    expect(parsePieceOptions(
+      {
+        url: NO_PIECE_FULL_URL,
+        identity: ID,
+        piece: `/@${SPACE_DID}/${LLM_HANDLE}@user/items/0`,
+      },
+      { acceptsPath: true },
+    )).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      piece: LLM_HANDLE,
+      pieceScope: "user",
+      piecePath: ["items", 0],
+      embeddedSpaces: [SPACE_DID],
+    });
+  });
+
+  it("getCellValueFromCommand() reads through a positional address, honoring #argument", async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const reads: unknown[][] = [];
+    const rendered: unknown[] = [];
+    const deps = {
+      getCellValue: ((...args: unknown[]) => {
+        reads.push(args);
+        return Promise.resolve({ ok: true });
+      }) as never,
+      render: ((value: unknown) => {
+        rendered.push(value);
+      }) as never,
+    };
+    await getCellValueFromCommand(
+      base,
+      `/${LLM_HANDLE}/items/0`,
+      "title",
+      deps,
+    );
+    expect(reads[0]?.[0]).toMatchObject({ piece: LLM_HANDLE });
+    expect(reads[0]?.slice(1)).toEqual([
+      ["items", 0, "title"],
+      { input: undefined, step: undefined },
+    ]);
+    await getCellValueFromCommand(
+      base,
+      `/${LLM_HANDLE}#argument`,
+      undefined,
+      deps,
+    );
+    expect(reads[1]?.slice(1)).toEqual([[], { input: true, step: undefined }]);
+    expect(rendered).toEqual([{ ok: true }, { ok: true }]);
+  });
+
+  it("setCellValueFromCommand() writes through a positional address and requires a path", async () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const writes: unknown[][] = [];
+    const hints: string[] = [];
+    const deps = {
+      drainStdin: (() => Promise.resolve("Milk")) as never,
+      setCellValue: ((...args: unknown[]) => {
+        writes.push(args);
+        return Promise.resolve();
+      }) as never,
+      render: (() => {}) as never,
+      hint: ((text: string) => {
+        hints.push(text);
+      }) as never,
+    };
+    // The embedded path alone satisfies the path requirement.
+    await setCellValueFromCommand(
+      base,
+      `/${LLM_HANDLE}/title`,
+      undefined,
+      deps,
+    );
+    expect(writes[0]?.slice(1)).toEqual([
+      ["title"],
+      "Milk",
+      { input: undefined },
+    ]);
+    expect(hints[0]).toContain("cf piece step");
+    // An explicit empty positional has always named the root — the fuse
+    // integration writes a whole input cell with `piece set "" --input` —
+    // so it stays a valid spelling, in both target forms.
+    await setCellValueFromCommand(
+      { ...base, piece: `/${LLM_HANDLE}`, input: true },
+      "",
+      undefined,
+      deps,
+    );
+    expect(writes[1]?.slice(1)).toEqual([[], "Milk", { input: true }]);
+    await setCellValueFromCommand(base, `/${LLM_HANDLE}`, "", deps);
+    expect(writes[2]?.slice(1)).toEqual([[], "Milk", { input: undefined }]);
+    // What stays refused is no path in any spelling: a bare pasted address
+    // must not silently overwrite a whole cell.
+    await expect(
+      setCellValueFromCommand(base, `/${LLM_HANDLE}`, undefined, deps),
+    )
+      .rejects.toThrow(/A path is required/);
+    await expect(
+      setCellValueFromCommand(
+        { ...base, piece: `/${LLM_HANDLE}` },
+        undefined,
+        undefined,
+        deps,
+      ),
+    ).rejects.toThrow(/A path is required/);
+  });
+
   it("parsePieceOptions() throws on incomplete input", () => {
     expect(() =>
       parsePieceOptions({
@@ -749,6 +999,7 @@ describe("cli piece parsing", () => {
     expect(newFlags).toContain("--root");
     expect(newFlags).toContain("--repository");
     expect(newFlags).toContain("--test");
+    expect(newFlags).toContain("--datafile");
     expect(newFlags).toContain("--dangerously-allow-incompatible-schema");
 
     for (const command of ["setsrc", "set-home"]) {
@@ -756,6 +1007,7 @@ describe("cli piece parsing", () => {
       expect(flags).toContain("--root");
       expect(flags).toContain("--repository");
       expect(flags).toContain("--test");
+      expect(flags).toContain("--datafile");
     }
     expect(optionFlags("setsrc")).toContain(
       "--dangerously-allow-incompatible-schema",
@@ -1746,18 +1998,33 @@ describe("cli piece parsing", () => {
     ])).rejects.toThrow("Cannot use --test with --reset");
   });
 
+  it("rejects attached data files when resetting the home pattern", async () => {
+    const { piece: command } = await import(
+      "../commands/piece.ts?test-reset-datafile"
+    );
+    command.throwErrors();
+    await expect(command.parse([
+      "set-home",
+      "--reset",
+      "--datafile",
+      "/repo/data/cities.json",
+    ])).rejects.toThrow("Cannot use --datafile with --reset");
+  });
+
   it("builds repository-aware entries from deployment flags", () => {
     expect(localPatternEntry("/repo/pattern.tsx", {
       mainExport: "named",
       repository: "https://github.com/commontoolsinc/labs",
       root: "/repo",
       test: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
+      datafile: ["/repo/data/cities.json"],
     })).toEqual({
       mainPath: "/repo/pattern.tsx",
       mainExport: "named",
       repository: "https://github.com/commontoolsinc/labs",
       rootPath: "/repo",
       testPaths: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
+      dataFilePaths: ["/repo/data/cities.json"],
     });
   });
 

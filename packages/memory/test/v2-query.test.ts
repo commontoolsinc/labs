@@ -1335,3 +1335,311 @@ Deno.test("memory v2 schema-closure assembly fails loudly on a corrupted depende
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 extendTrackedGraph delivers the schema closure a new root introduces", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-extend-closure";
+  try {
+    const schema = { type: "string", title: "extend-leaf" } as const;
+    const hash = internSchemaAsTaggedHashString(schema);
+    applyCommit(engine, {
+      sessionId: "session:extend-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:extend-plain", value: { value: { n: 1 } } },
+          { op: "set", id: `cid:${hash}`, value: { value: schema } },
+          {
+            op: "set",
+            id: "of:extend-carrier",
+            value: {
+              value: {
+                linked: {
+                  "/": {
+                    "link@1": {
+                      id: "of:extend-target",
+                      path: [],
+                      schema: { $ref: `cid:${hash}` },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [{ id: "of:extend-plain", selector: { path: [], schema: false } }],
+    });
+    const docKey = `${space}/space/cid:${hash}` as const;
+    assert(!tracked.state.entities.has(docKey));
+
+    // Extension pulls the carrier in, and assembly joins the schema
+    // document it references to the delivered set and the tracker.
+    const extended = extendTrackedGraph(space, engine, tracked.state, {
+      roots: [{
+        id: "of:extend-carrier",
+        selector: { path: [], schema: false },
+      }],
+    });
+    assert(extended.updates.has(docKey));
+    assert(tracked.state.entities.has(docKey));
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 refreshTrackedGraph delivers the schema closure a new document version introduces", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-refresh-closure";
+  try {
+    applyCommit(engine, {
+      sessionId: "session:refresh-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:refresh-carrier", value: { value: { n: 1 } } },
+        ],
+      },
+    });
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:refresh-carrier",
+        selector: { path: [], schema: false },
+      }],
+    });
+    const schema = { type: "string", title: "refresh-leaf" } as const;
+    const hash = internSchemaAsTaggedHashString(schema);
+    const docKey = `${space}/space/cid:${hash}` as const;
+    assert(!tracked.state.entities.has(docKey));
+
+    // The next version of the carrier references a schema document its
+    // commit installs alongside it.
+    applyCommit(engine, {
+      sessionId: "session:refresh-writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: `cid:${hash}`, value: { value: schema } },
+          {
+            op: "set",
+            id: "of:refresh-carrier",
+            value: {
+              value: {
+                linked: {
+                  "/": {
+                    "link@1": {
+                      id: "of:refresh-target",
+                      path: [],
+                      schema: { $ref: `cid:${hash}` },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    // The refresh delivers the new version AND the schema document its
+    // reference requires, in the same frame.
+    const refreshed = refreshTrackedGraph(
+      space,
+      engine,
+      tracked.state,
+      new Set([toDirtyKey("of:refresh-carrier")]),
+    );
+    assertExists(refreshed);
+    assert(refreshed.updates.has(docKey));
+    assert(tracked.state.entities.has(docKey));
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 assembly catches a reference patched inside an existing link schema", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-patch-gap";
+  try {
+    const schema = { type: "string", title: "patch-gap-leaf" } as const;
+    const hash = internSchemaAsTaggedHashString(schema);
+    const absentHash = internSchemaAsTaggedHashString({
+      type: "null",
+      title: "never-installed",
+    });
+    applyCommit(engine, {
+      sessionId: "session:patch-gap-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: `cid:${hash}`, value: { value: schema } },
+          {
+            op: "set",
+            id: "of:patch-gap-carrier",
+            value: {
+              value: {
+                linked: {
+                  "/": {
+                    "link@1": {
+                      id: "of:patch-gap-target",
+                      path: [],
+                      schema: { $ref: `cid:${hash}` },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const query = {
+      roots: [{
+        id: "of:patch-gap-carrier",
+        selector: { path: [], schema: false },
+      }],
+    };
+    const tracked = trackGraph(space, engine, query);
+    assert(tracked.state.entities.has(`${space}/space/cid:${hash}`));
+
+    // The documented commit-validation gap: a patch that edits INSIDE an
+    // existing link's schema introduces a reference no patch value carries
+    // as a whole link, so the commit boundary accepts it. Read-side
+    // assembly is the layer that catches it.
+    applyCommit(engine, {
+      sessionId: "session:patch-gap-writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:patch-gap-carrier",
+          patches: [{
+            op: "replace",
+            path: "/value/linked/~1/link@1/schema/$ref",
+            value: `cid:${absentHash}`,
+          }],
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        refreshTrackedGraph(
+          space,
+          engine,
+          tracked.state,
+          new Set([toDirtyKey("of:patch-gap-carrier")]),
+        ),
+      Error,
+      "is not stored in this space",
+    );
+    assertThrows(
+      () =>
+        trackGraph(space, engine, query, undefined, {
+          sessionId: "session:patch-gap-fresh",
+        }),
+      Error,
+      "is not stored in this space",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 schema scan and verification caches stay bounded at scale", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-cache-bounds";
+  try {
+    // One past each cache's 4096-entry bound, so the insert AT the bound
+    // clears it and the passes both fill and evict. Three caches wrap in
+    // this test: the commit boundary's per-engine verification cache (the
+    // second commit re-verifies every stored document), and result
+    // assembly's per-version scan and verification caches (the query
+    // delivers every carrier and its schema document).
+    const count = 4097;
+    const schemas = Array.from(
+      { length: count },
+      (_, i) => ({ type: "string", title: `bounded-${i}` } as const),
+    );
+    const hashes = schemas.map((schema) =>
+      internSchemaAsTaggedHashString(schema)
+    );
+    applyCommit(engine, {
+      sessionId: "session:bounds-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: schemas.map((schema, i) => ({
+          op: "set" as const,
+          id: `cid:${hashes[i]}`,
+          value: { value: schema },
+        })),
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:bounds-writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: hashes.map((hash, i) => ({
+          op: "set" as const,
+          id: `of:bounded-carrier-${i}`,
+          value: {
+            value: {
+              linked: {
+                "/": {
+                  "link@1": {
+                    id: `of:bounded-target-${i}`,
+                    path: [],
+                    schema: { $ref: `cid:${hash}` },
+                  },
+                },
+              },
+            },
+          },
+        })),
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: hashes.map((_, i) => ({
+        id: `of:bounded-carrier-${i}`,
+        selector: { path: [], schema: false as const },
+      })),
+    });
+    // Every closure still delivers; the bound trades re-scans for memory,
+    // never correctness.
+    assert(tracked.state.entities.has(`${space}/space/cid:${hashes[0]}`));
+    assert(
+      tracked.state.entities.has(`${space}/space/cid:${hashes[count - 1]}`),
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

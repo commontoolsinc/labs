@@ -156,6 +156,15 @@ for `wish({ query: "#profile" })`:
   resolves to the ordered best (MRU-or-first) immediately; picking a profile is
   what changes it.
 
+The create surface and the picker are patterns the runtime fetches and runs
+behind the `[UI]` it has already sent, so both slots start empty and fill in
+once that launch lands. The launch counts as scheduler work while it is in
+flight, so `runtime.idle()` — and every settle built on it, including the
+shell's `commonfabric.viewSettled()` — covers it: a settled view is one whose
+wish surfaces have arrived, not one that is about to grow them. A launch that
+cannot load its pattern writes that into the same slot rather than leaving it
+blank.
+
 When rendering profile data from a shared piece, use a user-scoped result schema
 for the rendered output so each viewer sees their own home profile projection.
 

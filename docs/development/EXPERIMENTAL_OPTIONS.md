@@ -370,7 +370,7 @@ value is ignored with a warning rather than coerced. See
   `computed:` URI scheme replacing `of:`) for derived internal cells. The
   builder classifies written internals as computed by default, then applies
   conservative writer- and input-side disqualifiers. These include streams;
-  handler, writable-proxy, effect, opaque, and non-replayable writers; and roots
+  handler, effect, opaque, and non-replayable writers; and roots
   handed writable to handlers, sub-patterns, sub-pattern operations, or
   non-replayable builtins. The linked spec is the exhaustive classifier
   reference. The flag gates minting only; readers accept both id forms
@@ -458,8 +458,13 @@ with a comment marking `coreOptions` as the one place to flip a dial when a
 first-party rollout begins. So the place to advance a CFC rollout across the
 whole fleet is that one function, not each call site. A few presets accept
 per-environment overrides: `patternTest` and `unitTest` take a laxer
-`cfcEnforcementMode`, and `browserWorker` takes host-controlled
-`cfcEnforcementMode` and `cfcFlowLabels` from the shell's initialization data.
+`cfcEnforcementMode`, and `browserWorker` and `remoteClient` take
+host-controlled `cfcEnforcementMode` and `cfcFlowLabels` — the shell supplies
+the former's from its initialization data, and cf-harness supplies the
+latter's for its fabric session from `--fabric-cfc-enforcement-mode`
+(raise-only: `enforce-explicit` or `enforce-strict`) and
+`--fabric-cfc-flow-labels`, with `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` and
+`CF_HARNESS_FABRIC_CFC_FLOW_LABELS` as their environment defaults.
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file
@@ -472,7 +477,9 @@ the per-epic implementation notes).
 
 - **Toggle via.** `RuntimeOptions.cfcEnforcementMode`, pinned for first-party
   processes in `coreOptions` (see the category note). The cf-harness and fuse
-  read `CF_CFC_MODE` as an override.
+  read `CF_CFC_MODE` as an override, and cf-harness's fabric session can raise
+  its own runtime to `enforce-strict` through
+  `--fabric-cfc-enforcement-mode` / `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE`.
 - **Added by.** Bernhard Seefeld, in "Implement runner commit-boundary" (#3263,
   2026-04-14).
 - **Purpose.** The master strictness ladder for commit-boundary CFC enforcement.
@@ -499,7 +506,10 @@ the per-epic implementation notes).
 
 ### `cfcFlowLabels`
 
-- **Toggle via.** `RuntimeOptions.cfcFlowLabels`.
+- **Toggle via.** `RuntimeOptions.cfcFlowLabels`; per-environment through the
+  `remoteClient` and `browserWorker` preset params (cf-harness's fabric
+  session exposes the former as `--fabric-cfc-flow-labels` /
+  `CF_HARNESS_FABRIC_CFC_FLOW_LABELS`).
 - **Added by.** Bernhard Seefeld, in "S16 default transition — flow-label
   propagation" (#4011, 2026-06-10).
 - **Purpose.** Controls flow-label propagation at the commit boundary. Values

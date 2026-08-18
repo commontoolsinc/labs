@@ -9,10 +9,7 @@
     "bench": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check bench/*.bench.ts"
   },
   "exports": {
-    ".": "./src/index.ts",
     "./client": "./src/client.ts",
-    "./jsx-runtime": "./src/jsx-runtime.ts",
-    "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts",
     "./mock-doc": "./src/mock-doc.ts",
     "./in-process": "./src/in-process.ts",
     "./worker": "./src/worker/mod.ts",

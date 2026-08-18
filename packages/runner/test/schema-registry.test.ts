@@ -8,10 +8,12 @@ import {
 } from "@commonfabric/data-model/schema-hash";
 import {
   acquireSchemaRegistryLease,
+  isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
   registerSchemaDocument,
   SchemaDocumentHashMismatchError,
 } from "../src/schema-registry.ts";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   containsExternalSchemaRef,
   type DecomposedSchema,
@@ -400,6 +402,114 @@ describe("schema-registry", () => {
       })).toBe(false);
       expect(containsExternalSchemaRef(true)).toBe(false);
       expect(containsExternalSchemaRef(undefined)).toBe(false);
+    });
+  });
+
+  describe("closure walks and fragment views", () => {
+    it("confirms a diamond closure, meeting the shared dependency once", () => {
+      const shared: JSONSchema = { type: "string", title: "diamond-shared" };
+      const sharedHash = internSchemaAsTaggedHashString(shared);
+      const left: JSONSchema = {
+        type: "object",
+        properties: { l: { $ref: `cid:${sharedHash}` } },
+      };
+      const leftHash = internSchemaAsTaggedHashString(left);
+      const right: JSONSchema = {
+        type: "object",
+        properties: { r: { $ref: `cid:${sharedHash}` } },
+      };
+      const rightHash = internSchemaAsTaggedHashString(right);
+      const root: JSONSchema = {
+        type: "object",
+        properties: {
+          a: { $ref: `cid:${leftHash}` },
+          b: { $ref: `cid:${rightHash}` },
+        },
+      };
+      const rootHash = internSchemaAsTaggedHashString(root);
+      registerSchemaDocument(sharedHash, shared);
+      registerSchemaDocument(leftHash, left);
+      registerSchemaDocument(rightHash, right);
+      registerSchemaDocument(rootHash, root);
+      expect(isSchemaDocumentClosureComplete(rootHash)).toBe(true);
+    });
+
+    it("logs the miss for an unregistered document and an incomplete closure", () => {
+      const cfcLogger = getLogger("cfc");
+      const previousLevel = cfcLogger.level;
+      cfcLogger.level = "debug";
+      try {
+        const absent = internSchemaAsTaggedHashString({
+          type: "string",
+          title: "never-registered-log",
+        });
+        expect(resolveSchema({ $ref: `cid:${absent}` })).toBe(false);
+
+        const leaf: JSONSchema = {
+          type: "string",
+          title: "incomplete-log-leaf",
+        };
+        const leafHash = internSchemaAsTaggedHashString(leaf);
+        const root: JSONSchema = {
+          type: "object",
+          properties: { x: { $ref: `cid:${leafHash}` } },
+        };
+        const rootHash = internSchemaAsTaggedHashString(root);
+        registerSchemaDocument(rootHash, root);
+        expect(resolveSchema({ $ref: `cid:${rootHash}` })).toBe(false);
+      } finally {
+        cfcLogger.level = previousLevel;
+      }
+    });
+
+    it("serves a repeated fragment resolution from the member-view cache", () => {
+      const group: JSONSchema = {
+        $defs: { CachedMember: { type: "string", title: "member-cache" } },
+      };
+      const groupHash = internSchemaAsTaggedHashString(group);
+      registerSchemaDocument(groupHash, group);
+      const first = resolveSchema({
+        $ref: `cid:${groupHash}#/$defs/CachedMember`,
+      });
+      const second = resolveSchema({
+        $ref: `cid:${groupHash}#/$defs/CachedMember`,
+        description: "a distinct referrer, the same member view",
+      });
+      expect(first).not.toBe(false);
+      expect(second).not.toBe(false);
+    });
+
+    it("closes resolution for a fragment naming no member", () => {
+      const cfcLogger = getLogger("cfc");
+      const previousLevel = cfcLogger.level;
+      cfcLogger.level = "debug";
+      try {
+        const group: JSONSchema = {
+          $defs: { OnlyMember: { type: "string", title: "only-member" } },
+        };
+        const groupHash = internSchemaAsTaggedHashString(group);
+        registerSchemaDocument(groupHash, group);
+        expect(resolveSchema({ $ref: `cid:${groupHash}#/$defs/AbsentMember` }))
+          .toBe(false);
+      } finally {
+        cfcLogger.level = previousLevel;
+      }
+    });
+
+    it("resolves a boolean member of a schema-document group", () => {
+      const group: JSONSchema = {
+        $defs: {
+          AlwaysTrue: true,
+          BooleanAnchor: { type: "string", title: "boolean-member-anchor" },
+        },
+      };
+      const groupHash = internSchemaAsTaggedHashString(group);
+      registerSchemaDocument(groupHash, group);
+      // A `true` member view resolves as the unconstrained schema, which
+      // `resolveSchema` reports as `undefined` — distinct from the `false`
+      // that closes resolution.
+      expect(resolveSchema({ $ref: `cid:${groupHash}#/$defs/AlwaysTrue` }))
+        .toBe(undefined);
     });
   });
 });

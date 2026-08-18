@@ -903,6 +903,30 @@ describe("cf piece verbs rendering", () => {
     ]);
   });
 
+  it("prints each row's description beneath its grid line", () => {
+    const lines = verbListingLines(
+      listingOf([
+        {
+          ...ADD_TOPIC_ROW,
+          description: "File a new topic.\nAppend-only; nothing rewrites one.",
+        },
+        { name: "clear", kind: "handler", on: "result", inputSchema: true },
+      ]),
+      false,
+    );
+
+    // The grid stays one line per row; the prose rides beneath its own row
+    // and nowhere else — a row without a description stays bare.
+    const addTopicAt = lines.findIndex((line) => line.startsWith("addTopic"));
+    expect(lines[addTopicAt + 1]).toBe("    File a new topic.");
+    expect(lines[addTopicAt + 2]).toBe(
+      "    Append-only; nothing rewrites one.",
+    );
+    const clearAt = lines.findIndex((line) => line.startsWith("clear"));
+    expect(clearAt).toBe(addTopicAt + 3);
+    expect(lines[clearAt + 1]).toBeUndefined();
+  });
+
   it("shows a wrapper row under --all, with no hidden note and the pattern line", () => {
     const lines = verbListingLines(
       listingOf([{ ...ADD_TOPIC_ROW, tier: "wrapper" }], {

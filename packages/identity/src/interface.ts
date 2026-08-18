@@ -1,4 +1,4 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 export type DID = `did:${string}:${string}`;
 export type DIDKey = `did:key:${string}`;
@@ -128,7 +128,7 @@ export type KeyPairRaw = CryptoKeyPair | InsecureCryptoKeyPair;
 export function isCryptoKeyPair(input: unknown): input is CryptoKeyPair {
   return !!(
     globalThis.CryptoKey &&
-    isObjectOrArray(input) &&
+    isObjectNotArray(input) &&
     input.privateKey instanceof globalThis.CryptoKey &&
     input.publicKey instanceof globalThis.CryptoKey
   );

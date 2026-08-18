@@ -51,7 +51,6 @@ const _visit = handler<
   (_, state) => {
     return navigateTo(state.piece);
   },
-  { proxy: true },
 );
 
 const removePiece = handler<

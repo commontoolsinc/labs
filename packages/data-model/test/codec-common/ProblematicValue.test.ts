@@ -19,7 +19,7 @@ import {
   IS_DEEP_FROZEN,
 } from "@/codec-common/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
@@ -198,13 +198,13 @@ describe("ProblematicValue", () => {
       });
 
       describe("decode()", () => {
-        const CONTEXT = EMPTY_RECONSTRUCTION_CONTEXT;
+        const ENV = NULL_LIVE_ENVIRONMENT;
 
-        it("reconstructs the tag, state, and error", () => {
+        it("decodes the tag, state, and error", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             { tag: "Weird@7", state: { x: 1 }, error: "oops" },
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Weird@7");
@@ -216,7 +216,7 @@ describe("ProblematicValue", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             { tag: "Weird@7", state: undefined, error: "oops" },
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Weird@7");
@@ -231,7 +231,7 @@ describe("ProblematicValue", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             { tag: "Weird@7", error: "oops" },
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Problematic@1");
@@ -242,7 +242,7 @@ describe("ProblematicValue", () => {
           const result = ProblematicValue[CODEC].decode(
             "Problematic@1",
             "nope",
-            CONTEXT,
+            ENV,
           ) as ProblematicValue;
 
           expect(result.wireTypeTag).toBe("Problematic@1");

@@ -411,6 +411,47 @@ describe("handle-table", () => {
       expect(swapTokensForRefs(swapped.table, swapped.value)).toEqual(input);
     });
 
+    it("restores a token standing alone in an object key to the canonical ref", async () => {
+      const swapped = await swapLinksForTokens(
+        createHarnessHandleTable("run-1"),
+        { [LINK_A]: { note: "keyed" } },
+      );
+      const swappedValue = swapped.value as Record<string, unknown>;
+      // The outbound swap really tokenised the key, so the restoration below
+      // is a round trip rather than a key that was never touched.
+      expect(Object.keys(swappedValue)).toEqual([
+        swapped.table.entries[0].token,
+      ]);
+      expect(swapTokensForRefs(swapped.table, swappedValue)).toEqual({
+        [LINK_A]: { note: "keyed" },
+      });
+    });
+
+    it("restores a token embedded in a longer object key alongside surrounding text", async () => {
+      const { table, token } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      expect(swapTokensForRefs(table, { [`see ${token} now`]: 1 })).toEqual({
+        [`see ${LINK_A} now`]: 1,
+      });
+    });
+
+    it("keeps the last entry walked when a restored key collides with a literal key of the same object", async () => {
+      const { table, token } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      // Both spellings name one address, so one key is the honest answer; the
+      // last one walked is the one that survives.
+      const restored = swapTokensForRefs(table, {
+        [LINK_A]: "literal",
+        [token]: "tokenised",
+      }) as Record<string, unknown>;
+      expect(Object.keys(restored)).toEqual([LINK_A]);
+      expect(restored[LINK_A]).toBe("tokenised");
+    });
+
     it("leaves a well-formed token the table does not hold untouched", async () => {
       const { table } = await mintAddressHandle(
         createHarnessHandleTable("run-1"),

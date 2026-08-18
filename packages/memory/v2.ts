@@ -7,7 +7,7 @@ import {
   type EntityRef,
   getModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
+import { NullLiveEnvironment } from "@commonfabric/data-model/codec-common";
 import {
   fabricFromJsonValue,
   jsonFromFabricValue,
@@ -860,9 +860,9 @@ export type ServerMessage =
   | SessionEffectMessage
   | SessionRevokedMessage;
 
-const memoryReconstructionContext = new EmptyReconstructionContext(
+const memoryLiveEnvironment = new NullLiveEnvironment(
   true,
-  "no cell reconstruction at the memory boundary",
+  "no cell decoding at the memory boundary",
 );
 
 // These ambient flags and the memory protocol flags below are catalogued, with
@@ -1134,7 +1134,7 @@ export const decodeMemoryBoundary = <Value extends FabricValue = FabricValue>(
 ): Value & FabricValue => {
   const decoded = fabricFromJsonValue(
     source,
-    memoryReconstructionContext,
+    memoryLiveEnvironment,
   );
 
   return decoded as Value;

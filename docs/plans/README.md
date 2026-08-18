@@ -75,6 +75,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
   already diverged. It carries the measurement, the size, and the gate-by-gate
   evidence that the refusal is drift rather than policy — the dispatch gate
   already accepts link values; the outer gates never got the option.
+- [The verb input contract: one decision](verb-input-contract.md) frames the
+  single decision the references arc is gated on: a verb carries two input
+  schemas — the authored event and the handler body's usage summary — and
+  every surface that judges a caller's payload has picked one implicitly. It
+  rules the authored event the contract while the handler's grant stays
+  usage-derived and delivery follows the contract, names the four surfaces
+  that correct themselves the day emission serves it, and sequences the
+  emitted-address spelling and the detached-copy refusal behind that.
 - [Designing verbs so they can change](verb-evolution.md) records how verbs are
   declared so that adding to and changing them later is possible: verbs are
   promises and their names are stable by default — an owner may break their

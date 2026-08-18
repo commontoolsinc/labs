@@ -341,12 +341,14 @@ Deno.test("memory v2 server: a failed fan-out requeues the batch and the schedul
   assertEquals(verdict.ok?.seq, 2);
 
   // Fail INSIDE the fan-out — after refreshLoop has consumed the dirty
-  // state — unlike a stubbed flushSessions, which never consumes it.
-  const original = server.syncSessionForConnection.bind(server);
+  // state — at the CONNECTION delivery layer, below the evaluation
+  // boundary (an evaluation failure is logged and its frame skipped
+  // rather than requeued; this pin is about transport-class failures).
+  const original = committer.refreshDirty.bind(committer);
   let calls = 0;
-  (server as unknown as {
-    syncSessionForConnection: typeof original;
-  }).syncSessionForConnection = (...args) => {
+  (committer as unknown as {
+    refreshDirty: typeof original;
+  }).refreshDirty = (...args) => {
     calls += 1;
     if (calls === 1) {
       return Promise.reject(new Error("synthetic fan-out failure"));
@@ -640,7 +642,7 @@ Deno.test("memory v2 server: a failed send rolls back delivery state; the next f
   assertEquals(committerMessages.length, 0);
 });
 
-Deno.test("memory v2 server: a throwing evaluation restores the consumed marker obligation", async () => {
+Deno.test("memory v2 server: a throwing refresh evaluation skips that session's frame; a fresh session sees current state", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-eval-rollback",
@@ -686,23 +688,42 @@ Deno.test("memory v2 server: a throwing evaluation restores the consumed marker 
     }
     return originalAttach(...args);
   };
-  let threw = false;
-  try {
-    await server.flushSessions([space]);
-  } catch {
-    threw = true;
-  }
-  assertEquals(threw, true);
+  // The evaluation failure is logged and the session's frame skipped —
+  // no throw surfaces, nothing is delivered to it, and the connection is
+  // left alone (a broken evaluation means a bad commit slipped past the
+  // commit boundary or the database was altered out of band; neither has
+  // a connection-level remedy).
+  await server.flushSessions([space]);
   assertEquals(committerMessages.length, 0);
 
-  // The requeued batch AND the restored obligation deliver together.
-  await server.flushSessions([space]);
-  const effect = assertEffect(shiftMessage(committerMessages));
-  const sync = effect.effect as SessionSync;
-  assertEquals(sync.caughtUpLocalSeq, 1);
+  // A fresh session's own watch evaluation sees the current state, parked
+  // novelty included.
+  const freshMessages: ServerMessage[] = [];
+  const fresh = server.connect((message) => freshMessages.push(message));
+  await fresh.receive(encodeMemoryBoundary(HELLO));
+  const freshOpen = expectHelloOk(freshMessages);
+  await fresh.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "fresh-open",
+    space,
+    session: {},
+    invocation: authInvocation(freshOpen),
+  }));
+  const freshSessionId =
+    assertResponse<{ sessionId: string }>(shiftMessage(freshMessages))
+      .ok!.sessionId;
+  await fresh.receive(
+    encodeMemoryBoundary({
+      ...watchBoth(space, freshSessionId),
+      requestId: "fresh-watch",
+    }),
+  );
+  const watched = assertResponse<{ sync: SessionSync }>(
+    shiftMessage(freshMessages),
+  );
   assertEquals(
-    sync.upserts.map((upsert) => upsert.id),
-    ["of:doc:b"],
+    watched.ok?.sync.upserts.map((upsert) => upsert.id).toSorted(),
+    ["of:doc:a", "of:doc:b"],
   );
 });
 
@@ -770,7 +791,7 @@ Deno.test("memory v2 server: a failing timer-driven flush warns and leaves recov
   );
 });
 
-Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", async () => {
+Deno.test("memory v2 server: an evaluation failure skips only that session's frame; later spaces deliver in the same pass", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-multi-space",
@@ -824,30 +845,11 @@ Deno.test("memory v2 server: a mid-batch failure does not strand later spaces", 
     return original(...args);
   };
 
-  let threw = false;
-  try {
-    await server.flushSessions([space, spaceB]);
-  } catch {
-    threw = true;
-  }
-  assertEquals(threw, true);
-  // The failing pass delivered NOTHING: the rejected sync sent no frame,
-  // and the pass aborted before reaching the other space.
+  // The evaluation failure skips ONLY the failed session's frame; the
+  // same pass still reaches the other space's observer — nothing is
+  // stranded and nothing throws.
+  await server.flushSessions([space, spaceB]);
   assertEquals(committerMessages.length, 0);
-  assertEquals(observerMessages.length, 0);
-
-  // Recovery must reach BOTH spaces: the failed space's consumed batch was
-  // requeued, and the unreached space was never removed from the dirty set
-  // (spaces leave it at their own processing turn). Pre-fix the whole
-  // selection was deleted up front, so whichever space the failure skipped
-  // stayed stranded and its observer never heard the parked novelty.
-  await server.flushSessions();
-  const committerSync = assertEffect(shiftMessage(committerMessages))
-    .effect as SessionSync;
-  assertEquals(
-    committerSync.upserts.map((upsert) => upsert.id),
-    ["of:doc:b"],
-  );
   const observerSync = assertEffect(shiftMessage(observerMessages))
     .effect as SessionSync;
   assertEquals(
@@ -861,17 +863,20 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-requeue-origin",
   });
-  const { server, space, committerMessages, committerSessionId } = context;
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
 
   // First fan-out consumes the batch (doc:b unattributed) and, BEFORE
   // failing, doc:b is re-dirtied WITH an origin — as a concurrent own
-  // write would. The requeue merge must not let the newer origin win:
-  // provenance survives only when both batches agree.
-  const original = server.syncSessionForConnection.bind(server);
+  // write would. The failure is at the CONNECTION delivery layer (below
+  // the evaluation boundary), so the requeue merge runs, and it must not
+  // let the newer origin win: provenance survives only when both batches
+  // agree.
+  const original = committer.refreshDirty.bind(committer);
   let failed = false;
-  (server as unknown as {
-    syncSessionForConnection: typeof original;
-  }).syncSessionForConnection = (...args) => {
+  (committer as unknown as {
+    refreshDirty: typeof original;
+  }).refreshDirty = (...args) => {
     if (!failed) {
       failed = true;
       server.markSpaceDirty(space, ["space of:doc:b"], {

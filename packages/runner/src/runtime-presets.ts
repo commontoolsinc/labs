@@ -47,8 +47,10 @@
  * |                            | an explicit `{}`; requiredness is the seal)      |
  * | cfcEnforcementMode         | core-pinned `"enforce-explicit"`; overridable in |
  * |                            | patternTest/unitTest (per-test laxer mode) and   |
- * |                            | browserWorker (host-controlled rollout)          |
- * | cfcFlowLabels              | core-default (off); browserWorker delta          |
+ * |                            | remoteClient/browserWorker (host-controlled      |
+ * |                            | rollout)                                         |
+ * | cfcFlowLabels              | core-default (off); remoteClient / browserWorker |
+ * |                            | delta (host-controlled rollout)                  |
  * | cfcWriteFloor              | core-default (off) — flip in coreOptions when a  |
  * |                            | first-party rollout begins                       |
  * | cfcTriggerReadGating       | core-default (off) — same                        |
@@ -304,6 +306,14 @@ export interface RemoteClientPresetParams extends CoreParams {
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   /** Statement-coverage collector for the pattern integration harness. */
   patternCoverage?: PatternCoverageCollector;
+  /**
+   * Host-controlled rollout dials, the browserWorker precedent: a client
+   * host (cf-harness's fabric session) may raise enforcement and turn on
+   * flow-label persistence for one session without moving the fleet posture
+   * in `coreOptions`.
+   */
+  cfcEnforcementMode?: CfcEnforcementMode;
+  cfcFlowLabels?: CfcFlowLabelsMode;
 }
 
 export interface PatternTestPresetParams extends CoreParams {
@@ -378,6 +388,12 @@ export const runtimePresets = {
     return {
       ...coreOptions(params),
       patternEnvironment: { apiUrl: params.apiUrl },
+      ...(params.cfcEnforcementMode !== undefined
+        ? { cfcEnforcementMode: params.cfcEnforcementMode }
+        : {}),
+      ...(params.cfcFlowLabels !== undefined
+        ? { cfcFlowLabels: params.cfcFlowLabels }
+        : {}),
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }
         : {}),

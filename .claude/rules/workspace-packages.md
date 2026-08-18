@@ -39,3 +39,18 @@ before you push:
 - `deno task check-unused-deps` — nothing declared that nothing imports.
 - `deno task check-deno-pins` — the accepted Deno range in `tasks/check.sh`
   still contains the pin in `mise.toml`.
+
+## Two packages may not import each other
+
+`deno task check-package-cycles` fails when a package's production source can
+reach back to itself through another package. It counts an import by package
+name and a relative path that climbs into another package alike, and it ignores
+test code, which reaches wherever it needs to. It is the mechanical floor under
+"Dependencies run downward" in `AGENTS.md`, and only the floor: a cycle is
+caught, an import that merely runs up the stack is not. That paragraph's worked
+example is where to put a module each side seems to want.
+
+The cycles that predate the gate are listed in `ALLOWLIST` in
+`tasks/check-package-cycles.ts`, each with what the two sides take from each
+other. That list may only shrink: break one of those cycles and the gate fails
+until its entry is deleted.

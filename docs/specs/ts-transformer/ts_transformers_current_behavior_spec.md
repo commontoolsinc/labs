@@ -458,6 +458,13 @@ Diagnostics emitted in all modes:
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks
+  - the allowed-callback determination reads the callback's call-argument
+    position through parentheses, so `toSorted(((a, b) => ...))` classifies
+    like `toSorted((a, b) => ...)` — target-language spec §5.7
+    paren-invariance (`test/validation.test.ts` "allows a parenthesized
+    inline callback argument"); parentheses grant nothing outside argument
+    position ("still errors on a parenthesized arrow function in pattern
+    body")
   - class expression or declaration in pattern context unless inside compute
     wrappers; the whole class is flagged once with a class-specific message
 - **Error** `pattern-context:object-member`
@@ -497,13 +504,26 @@ Diagnostics emitted in all modes:
     `computed(() => ...)` or module-scope `lift()`
 - **Error** `pattern-context:optional-chaining`
   - optional property / element access that appears outside a supported
-    lowerable expression site
+    lowerable expression site — including inside a lowered array-method
+    callback (`map`/`filter`/`flatMap`) and inside a callback whose owning
+    call has no lowerable site
+  - an optional access inside an inline callback argument is carried by the
+    callback's owning call when that call is outside the lowered array-method
+    families and itself sits at a lowerable expression site: the site's lift
+    absorbs the callback, so the access runs on resolved values
+    (`rows.get().toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))`);
+    parentheses around the inline callback change neither the carrier nor
+    the callback allowance (`test/validation.test.ts` "allows optional
+    access inside a parenthesized inline comparator" pins the spelling at
+    zero diagnostics)
   - optional calls do not receive this diagnostic merely because they are
     optional: their underlying call root is classified by the same policy as a
     non-optional call
   - at supported expression sites, receiver optionality (`value?.method()`),
     invocation optionality (`value.method?.()`), and combined chains lower as
     whole calls with JavaScript short-circuit and receiver semantics intact
+  - message instructs the author to wrap the computation in
+    `computed(() => ...)` or move it to a site that lowers
 - **Error** `pattern-context:computation`
   - binary/unary/conditional computations using opaque dependencies outside
     wrappers
@@ -575,8 +595,9 @@ structurally representable.
   `pattern:any-result-schema`
 - individual inferred-result **fields** whose type is `unknown` emit **Error**
   `pattern-result:unknown-type`, naming the offending paths — the schema would
-  carry `{ type: "unknown" }` there and a consumer reading the field back
-  would materialize `undefined` (`schema-injection.ts:2621`)
+  carry `{ type: "unknown" }` there, which a consumer does not materialize: it
+  reads the field back as an opaque reference carrying no properties
+  (`schema-injection.ts:2621`)
 - authors who intentionally want a permissive/opaque output boundary must make
   it explicit with `pattern<Input, Output>(...)`
 
@@ -737,8 +758,9 @@ report these through the same collector (deduplicated via §2.2's
   §6.6
 - **Error** `reactive-capture:unknown-type` (`src/ast/type-building.ts:681`) —
   a captured reactive value's inferred type is `unknown`, so its schema would
-  be `{ type: "unknown" }` and the runner would read it back as `undefined`;
-  the message directs authors to add an explicit type
+  be `{ type: "unknown" }` and the runner would not materialize it, reading it
+  back as an opaque reference carrying no properties; the message directs
+  authors to add an explicit type
 - **Error** `reactive:call-argument-computation`
   (`expression-rewrite/emitters/compute-wrap-invariants.ts:112`) — an authored
   reactive computation (e.g. `profile ?? profileWish.result` or
@@ -1117,8 +1139,8 @@ structurally representable top-level result:
   declared result into this third type-argument slot (§7). An absent third
   argument, and an explicit `void`, emit no options object at all: a declared
   result is opt-in and never inferred, so a concise body whose completion
-  value happens to be a cell declares nothing. A call that already passes
-  options (the `{ proxy: true }` form) keeps them, spread into the same object.
+  value happens to be a cell declares nothing. A call that already passes an
+  options object keeps it, spread into the same object.
   The runtime reads `resultSchema` off that slot onto the node's
   `Module.resultSchema` (`packages/runner/src/builder/module.ts`); it does NOT
   reach the pattern's own `resultSchema`, which is what the piece update gate
@@ -1523,7 +1545,7 @@ not yet `.for(...)`-wrapped.
 For each `pattern(cb, argumentSchema, resultSchema)` call it marks
 result-schema stream properties `tier: "wrapper"` — the verb-listing mark
 `cf piece verbs` hides by default (verb contract WS-F; everything stays
-callable, `cf piece call` never consults marks). A property is marked when its
+callable, `cf call` never consults marks). A property is marked when its
 returned value resolves (identifier → nearest const initializer, callback body
 first then module scope) to an applied handler factory that:
 

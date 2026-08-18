@@ -7,7 +7,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "./interface.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
@@ -44,7 +44,7 @@ export class BigIntCodec extends BaseTerminalCodec<JsonCodecValue> {
   decode(
     typeTag: string,
     state: JsonCodecValue,
-    _context: ReconstructionContext,
+    _env: LiveEnvironment,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(

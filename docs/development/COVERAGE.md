@@ -271,7 +271,7 @@ condition's own count. See
 
 ### Paths reached only when something happens twice
 
-The other common shape is a line that runs only on the second occurrence of
+A second common shape is a line that runs only on the second occurrence of
 something within one process: a cache that is populated the second time it is
 asked, a guard that turns away a duplicate, a retry that only a second failure
 reaches. Whether a suite produces that second occurrence is often decided by
@@ -292,6 +292,28 @@ An assertion that only counts the outcome would pass either way and would leave
 the line's coverage exactly as environment-dependent as it was.
 [The August 2026 record](../history/development/coverage-flake-idempotency-dedup-2026-08-12.md)
 follows one such line from a group-level `+2` down to the guard and the test.
+
+### Rejection paths reached only when two writes race
+
+The third shape is a branch that runs only when one write lands on a base
+another write already changed: a merge that finds the key it removes already
+gone, a precondition only a loser fails, a replay that has to drop a layer. The
+surrounding code runs constantly. What decides whether the branch runs is the
+order frames arrive in, which nothing in an integration suite asserts, so the
+line is covered on some runs and not on others.
+
+Reaching such a line does not take a race, and that is the way out of it. What
+the branch responds to is the value the operation was handed, so a test that
+constructs that value reaches the branch directly. `applyPatch()` is a pure
+function over a value tree: its `missing object key` rejection, which the
+client's pending-layer replay reaches when a `remove` names a key a winning
+writer already dropped, is one call over a base object without the key.
+`packages/memory/test/v2-patch-errors.test.ts` is the worked example, and it
+states one case per rejection the module raises rather than only the line that
+moved — a sibling branch in the same file is the next one to flap.
+[The investigation record](../history/development/coverage-flake-patch-remove-missing-key-2026-08-17.md)
+follows that line from a group-level `+2` down to the two integration hits that
+covered it in one run and not the next.
 
 ### What the check says when the regression is not the pull request's
 
@@ -323,12 +345,52 @@ ancestor of it that has one (see "Which `main` run the ratchet compares
 against"). Debt in unchanged groups is still reported, but does not block the
 PR.
 
-Accept one metric's increase with the narrow per-metric marker in the PR
-description:
+Accept one group's increase with the narrow per-group marker in the PR
+description, on a line of its own and flush against the left margin:
 
 ```text
-ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines
+ACCEPT_COVERAGE_DEBT: packages/runner +12 lines
 ```
+
+The marker names the source group — `workspace`, a top-level directory such as
+`tasks`, or a package as `packages/runner` — rather than the metric that group's
+lines are counted in. Only `packages` splits into a second level, because that is
+where the collection stops rolling a file up; `tasks/foo` names no group.
+
+A name can have the shape of a group and still name none — a package that is not
+there, or a misspelling of one that is. Nothing would ever consult such a line,
+so rather than let it pass for an acceptance that had no effect, the check fails
+the job and lists the groups the run did measure.
+
+The number is how far above the baseline the group may rise, not the total it
+may reach. The gate passes the group when its uncovered-line count is at most
+the baseline plus that number, so a run whose baseline is 5746 accepts 5758 and
+fails at 5759. A group with no baseline yet is held to zero, and the whole of
+the accepted rise is available to it.
+
+Stating the rise is what makes the marker survive a rebase. The baseline the
+ratchet compares against is the `main` run for whatever base-branch commit the
+pull request is merged with, so it moves whenever the pull request is rebased. A
+total written for one baseline says something different against the next one:
+too generous when the base branch covered lines in the meantime, and short by the
+difference when it uncovered some, which fails the pull request for debt it did
+not add. A rise says the same thing against every baseline, so the marker keeps
+accepting exactly the debt its author accepted and no more.
+
+The check prints the line to paste, with the rise it measured already filled in,
+under `---BEGIN COPY-PASTE---` at the end of the Coverage Check job's log. A line
+that starts with `ACCEPT_COVERAGE_DEBT:` and that the check cannot read fails the
+job and says what form to write instead, rather than being passed over as though
+it were not there.
+
+The left margin is what tells an acceptance from a mention of one. A description
+can name the marker in a sentence, and can indent an example of it into a code
+block, without either being read as accepting anything — or as a malformed
+attempt at it. Indent the line to show the form, and write it flush to use it. A
+pull request description often starts life as a commit message body, so a line
+indented there arrives indented, and stays an example. The check names each
+indented marker it passed over in its log, so an author who indented one meaning
+it as an acceptance can see why the gate carried on without it.
 
 Use the broad reset marker only to bootstrap coverage data for the first time,
 or when the `main` baseline is known to be bogus and should be re-seeded for one

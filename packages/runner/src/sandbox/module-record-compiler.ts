@@ -38,6 +38,13 @@ export function sourceRootSpecifier(path: string): string {
   return `${SOURCE_ROOT_SPECIFIER}${path.replace(/^\/+/, "")}`;
 }
 
+/** Identity-only import edge for an attached data file. */
+export const DATA_FILE_SPECIFIER = "cf:data-file/";
+
+export function dataFileSpecifier(path: string): string {
+  return `${DATA_FILE_SPECIFIER}${path.replace(/^\/+/, "")}`;
+}
+
 /**
  * Memo of the two pure derivations {@link buildRecordsFromCompiled} extracts
  * from a module's compiled body: its direct export surface (names + `export *`
@@ -368,6 +375,12 @@ export interface CompileSourcesOptions {
   runtimeModules?: Record<string, string[]>;
   runtimeFingerprint?: string;
   /**
+   * Attached data files as `[authored path, bytes]`, carried onto the graph for
+   * the modules that read them. They are not sources: nothing here compiles,
+   * parses, or records them.
+   */
+  dataFiles?: Iterable<readonly [string, string]>;
+  /**
    * Pre-compiled CommonJS body per source name. When provided (e.g. from
    * `TypeScriptCompiler.compileToModules`, which runs the full CF transformer
    * pipeline), the adapter uses it instead of the bare `ts.transpileModule`
@@ -431,6 +444,15 @@ export interface CompiledModuleGraph {
    * missed fails closed at runtime instead of registering attacker values.
    */
   registrationApproved: Set<string>;
+  /**
+   * Verbatim bytes of every attached data file in this graph, keyed by the
+   * data entry's authored path. These are carried alongside the records rather
+   * than as records: a data file is never a module, so it has no specifier, no
+   * exports, and nothing to execute. The graph carries them so the bytes a
+   * pattern reads come from the same content-addressed closure its code came
+   * from, on the warm load path as much as the cold one.
+   */
+  dataByPath: Map<string, string>;
 }
 
 /**
@@ -445,6 +467,19 @@ function stripIdentityPrefix(name: string, idPrefix?: string): string {
 }
 
 /**
+ * The parts of a deployed source package that bind to the entry module's
+ * identity without being reachable from it through an import. `rootPaths` are
+ * attached source entry points such as tests; `dataPaths` are attached data
+ * files. Each contributes one identity-only edge from `entryPath`, so adding,
+ * changing, or removing any of them yields a distinct entry identity.
+ */
+export interface SourcePackageIdentity {
+  entryPath: string;
+  rootPaths: readonly string[];
+  dataPaths?: readonly string[];
+}
+
+/**
  * Per-module content-addressed identity (`cf:module/<hash>` minus the `cf:module/`
  * scheme) for every source path, computed prefix-free so identities dedupe
  * across programs. Shared by {@link compileSourcesToRecords} and the Engine's
@@ -456,7 +491,7 @@ export function computeModuleIdentities(
   options: {
     idPrefix?: string;
     runtimeFingerprint?: string;
-    sourcePackage?: { entryPath: string; rootPaths: readonly string[] };
+    sourcePackage?: SourcePackageIdentity;
   } = {},
 ): Map<string, string> {
   const stripPath = (path: string) =>
@@ -465,20 +500,30 @@ export function computeModuleIdentities(
     string,
     { specifier: string; target: string }[]
   >();
+  const dataFiles = new Set<string>();
   if (options.sourcePackage !== undefined) {
     const entryPath = stripPath(options.sourcePackage.entryPath);
     const rootPaths = [
       ...new Set(options.sourcePackage.rootPaths.map(stripPath)),
     ]
       .filter((rootPath) => rootPath !== entryPath);
-    if (rootPaths.length > 0) {
-      additionalInternalDeps.set(
-        entryPath,
-        rootPaths.map((rootPath) => ({
-          specifier: sourceRootSpecifier(rootPath),
-          target: rootPath,
-        })),
-      );
+    const dataPaths = [
+      ...new Set((options.sourcePackage.dataPaths ?? []).map(stripPath)),
+    ]
+      .filter((dataPath) => dataPath !== entryPath);
+    for (const dataPath of dataPaths) dataFiles.add(dataPath);
+    const entryDeps = [
+      ...rootPaths.map((rootPath) => ({
+        specifier: sourceRootSpecifier(rootPath),
+        target: rootPath,
+      })),
+      ...dataPaths.map((dataPath) => ({
+        specifier: dataFileSpecifier(dataPath),
+        target: dataPath,
+      })),
+    ];
+    if (entryDeps.length > 0) {
+      additionalInternalDeps.set(entryPath, entryDeps);
     }
   }
   const hashes = computeModuleHashes(
@@ -494,6 +539,7 @@ export function computeModuleIdentities(
         ? { runtimeFingerprint: options.runtimeFingerprint }
         : {}),
       ...(additionalInternalDeps.size === 0 ? {} : { additionalInternalDeps }),
+      ...(dataFiles.size === 0 ? {} : { dataFiles }),
     },
   );
   const identityByPath = new Map<string, string>();
@@ -528,7 +574,7 @@ export function computeFabricModuleIdentities(
   options: {
     idPrefix?: string;
     runtimeFingerprint?: string;
-    sourcePackage?: { entryPath: string; rootPaths: readonly string[] };
+    sourcePackage?: SourcePackageIdentity;
   } = {},
 ): Map<string, string> {
   const authored: Source[] = [];
@@ -823,6 +869,7 @@ export function compileSourcesToRecords(
     moduleSourceMaps,
     registrationSink,
     registrationApproved,
+    dataByPath: new Map(options.dataFiles ?? []),
   };
 }
 
@@ -832,10 +879,15 @@ export interface CachedCompiledModule {
   identity: string;
   /** Normalized authored path (e.g. `/main.tsx`); used for the eval sourceURL. */
   filename: string;
-  /** Compiled CommonJS body. */
+  /** Compiled CommonJS body, or the verbatim bytes of a data entry. */
   code: string;
   /** Internal import edges: require specifier → dependency module identity. */
   imports: { specifier: string; targetIdentity: string }[];
+  /**
+   * This entry carries data rather than code, so `code` is its authored bytes.
+   * A data entry never becomes a module record and is never parsed as one.
+   */
+  isData?: boolean;
   /** Per-module source map, if cached. */
   sourceMap?: SourceMap;
   /**
@@ -908,8 +960,16 @@ export function buildRecordsFromCompiled(
 ): CompiledModuleGraph {
   const runtimeModules = options.runtimeModules ?? {};
   const specifierOf = (identity: string) => `cf:module/${identity}`;
-  const byIdentity = new Map(modules.map((m) => [m.identity, m]));
-  const sourceNames = cachedModuleSourceNames(modules);
+  // Data entries leave before anything reads `code` as JavaScript. Their bytes
+  // are the payload, not a body, so they never gain a specifier or a record.
+  const dataByPath = new Map<string, string>();
+  const moduleEntries = modules.filter((m) => {
+    if (!m.isData) return true;
+    dataByPath.set(m.filename, m.code);
+    return false;
+  });
+  const byIdentity = new Map(moduleEntries.map((m) => [m.identity, m]));
+  const sourceNames = cachedModuleSourceNames(moduleEntries);
 
   // Fix B: use the record surface persisted on the compiled doc; parse the body
   // only when it wasn't precomputed. A module carries the full surface (a warm
@@ -943,7 +1003,7 @@ export function buildRecordsFromCompiled(
     string,
     { names: Set<string>; starTargets: string[] }
   >();
-  for (const m of modules) {
+  for (const m of moduleEntries) {
     const parsed = persistedSurface(m) ?? parseCompiledExports(m.code);
     const names = new Set<string>(parsed.exportNames);
     const starTargets: string[] = [];
@@ -986,7 +1046,7 @@ export function buildRecordsFromCompiled(
   const registrationSink: HoistRegistrationSink = new Map();
   const registrationApproved = new Set<string>();
 
-  for (const m of modules) {
+  for (const m of moduleEntries) {
     const specifier = specifierOf(m.identity);
     specifierByPath.set(sourceNames.get(m.identity)!, specifier);
     compiledBodies.set(specifier, m.code);
@@ -1061,6 +1121,7 @@ export function buildRecordsFromCompiled(
     moduleSourceMaps,
     registrationSink,
     registrationApproved,
+    dataByPath,
   };
 }
 

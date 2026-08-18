@@ -201,7 +201,7 @@ deno task cf piece new packages/patterns/my-pattern/main.tsx \
   --test packages/patterns/my-pattern/main.test.tsx -s dev-space
 # 5. Mount
 deno task cf fuse mount /tmp/cf
-# 6. Set input via filesystem (faster than cf piece set for complex data)
+# 6. Set input via filesystem (faster than cf set for complex data)
 cat test-data.json > /tmp/cf/dev-space/pieces/my-pattern/input.json
 # 7. Read result
 cat /tmp/cf/dev-space/pieces/my-pattern/result.json | jq '.'
@@ -225,8 +225,8 @@ ls /tmp/cf/2026-03-09-ben/pieces/   # connects on demand
 
 ### No `step` Needed via FUSE
 
-Unlike `cf piece set` which requires `cf piece step` to trigger recomputation,
-FUSE writes go through `cell.set()` directly, which triggers reactive updates
+Unlike `cf set` which requires `cf piece step` to trigger recomputation, FUSE
+writes go through `cell.set()` directly, which triggers reactive updates
 automatically.
 
 ### Writes Are Fire-and-Forget
@@ -377,8 +377,13 @@ understand how a piece works; write to modify it live.
 MOUNT/SPACE/pieces/My Piece/
   .src/
     main.tsx       ← pattern source — readable and writable
+    data/
+      cities.json  ← an attached data file — readable and writable
     error.log      ← synthetic, read-only — pattern execution errors
 ```
+
+Every file of the deployed source package appears here at its stored path: the
+entry, its imports, any attached test entries, and any attached data files.
 
 **Read source:**
 
@@ -397,11 +402,13 @@ open(path, "w").write(modified_src)
 # Write triggers setsrc automatically — no cf piece setsrc needed
 ```
 
-FUSE preserves the existing attached test roots during this write, but it does
-not run them and cannot change which entries are attached. Treat the live edit
-as a diagnostic experiment. Before completing the change, make it in the
-repository checkout, run every test against that changed source, and deploy it
-with explicit `cf piece setsrc` plus the complete set of `--test` flags.
+FUSE preserves the existing attached test roots and data files during this
+write, but it does not run the tests and cannot change which entries are
+attached or which files are data. Editing a data file this way replaces its
+bytes and leaves it a data file. Treat the live edit as a diagnostic experiment.
+Before completing the change, make it in the repository checkout, run every test
+against that changed source, and deploy it with explicit `cf piece setsrc` plus
+the complete set of `--test` and `--datafile` flags.
 
 **Check for errors after modifying:**
 

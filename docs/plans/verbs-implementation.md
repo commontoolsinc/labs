@@ -684,9 +684,9 @@ this document stops being read.
 [The CLI surface](cli-surface-implementation.md), already sequenced. Its first
 two stages add positional addresses and the top-level names, and they can start
 as soon as the read layer has merged; they touch the same commands, so starting
-earlier means resolving the same files twice. Its deprecation stage carries an
-unanswered question of its own — what "carries traffic" means, given nothing
-measures it — and that wants an answer before the stage rather than during it.
+earlier means resolving the same files twice. Its deprecation stage is now
+dated rather than conditional: each warning names the day its spelling stops
+working, two weeks after the warnings land.
 
 **Retention and CFC execution provenance** —
 [its own plan](retention-and-provenance.md). Gated on a CFC review that has not
@@ -717,7 +717,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5589 | a click's `detail` and a `cf-select`'s `target.value` reach a handler as types no pattern declares | carried alongside — it belongs to whoever next touches `packages/html`. The ruling that closed item 9b also removed the only thing that ever compared the renderer's output against an author's declared type, so this has no detector left |
 | #5560 | an address a call returns cannot be passed back as a verb argument | item 11, and **row 14** — it had no ordering row until one was added. Not to be confused with ordering step 11, "one piece, one address", which is #5632 and decided |
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
-| #5685 | no CI job runs any verb integration script, and one of them says it does | **unscheduled, and the sharpest of these.** `verbs-over-the-cli.sh` and `verb-session-gaps.sh` are the arc's honesty checks and gate nothing; a claim that one runs is worse than the gap, because it is why nobody looked |
+| #5685 | no CI job runs any verb integration script, and one of them says it does | **fixed** — `integration.sh`'s `piece-call` section runs both scripts (`verbs-over-the-cli.sh` since #5289, `verb-session-gaps.sh` since #5793), and CI's `cli-integration-test` matrix runs that section on every pull request. The arc's honesty checks gate |
 | #5663 | the compat checker admits a newly required verb event field, breaking every existing caller | **unscheduled.** It sits in `packages/piece/src/schema-compatibility.ts`, the set item 2 derives its tolerated tier from, so a change there meets this |
 | #5689 | `cf piece call` accepts any name into dispatch; a non-verb fails with no diagnostic | unscheduled. The listing now refuses to offer a non-verb (#5683, #5794); the dispatcher still accepts one |
 | #5684 | `cf piece get --select` returns `{}` for a field path that cannot match | unscheduled. Item 2's shape on the concise path, which item 2 puts out of scope — a projection that answers nothing rather than refusing |
@@ -728,12 +728,11 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5760 | an indirect reference has no contract | runner-owned. A rendered address cannot declare itself indirect: replacing a cell's contents with a link is an ordinary write, so indirectness is a property of what the target holds at read time rather than of the reference. What survives is provenance — whether an address can say it names a spot rather than a canonical cell. The other two answers are @seefeldb's, given in review and reported here rather than cited, so they want his statement on the issue before it closes on that basis |
 | #5761 | the projection derivation cannot express conjunction; `allOf` refuses | filed out of item 2 and **relied on by it**: `sourceProvesContainer` refuses to prove a container through `allOf` for this reason |
 
-**Filed against neighboring subsystems, and not sequenced here.** `{ proxy:
-true }` never reaching `module.writableProxy` for a transformed pattern
-(#5502), an unnormalized external piece id upserting twice (#5499), and a
-create that drops its navigation (#5530). Each is real and none is about the
-verb surface; they are recorded so that reading this plan does not imply they
-were triaged away.
+**Filed against neighboring subsystems, and not sequenced here.** An
+unnormalized external piece id upserting twice (#5499), and a create that
+drops its navigation (#5530). Each is real and none is about the verb surface;
+they are recorded so that reading this plan does not imply they were triaged
+away.
 
 ## Out of scope
 

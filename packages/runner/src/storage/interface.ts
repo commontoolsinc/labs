@@ -1626,6 +1626,38 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     sets: number;
     entries: number;
   };
+
+  /**
+   * Answers this transaction's snapshot has already computed, or `undefined`
+   * while it must not serve any.
+   *
+   * A transaction is a consistent snapshot, so a derivation that reads only
+   * through it gives the same answer every time until something is written.
+   * Link resolution and CFC label-view derivation both do exactly that, and
+   * both are driven per element of a collection, so a scan recomputes them
+   * once per element per pass. Each user owns its own key prefix and entry
+   * shape; the transaction owns when the map may be used and when it is
+   * dropped. It is replaced wholesale on any write — same rule as the
+   * `Cell.get()` cache above — so an entry is only ever served when nothing
+   * has been written since it was made.
+   *
+   * A user must be a derivation whose only observable effect is its result, or
+   * must reproduce the rest itself: the reads a memoized derivation skips were
+   * journaled by the one that filled the entry, so the transaction's read set
+   * is unchanged, but anything consumed positionally (CFC dereference traces)
+   * still has to be recorded on every call.
+   *
+   * `undefined` is returned where a derivation is not a pure function of the
+   * snapshot: once CFC is prepared, where the read path's read-after-prepare
+   * invalidation is load-bearing, and inside a `runWithAmbientReadMeta()`
+   * scope, where the reads carry metadata that a call outside the scope would
+   * not.
+   *
+   * Optional: transactions that must not memoize (the non-reactive `sample()`
+   * wrapper, whose reads are excluded from scheduling) leave it undefined, and
+   * their callers derive for real.
+   */
+  getSnapshotMemo?(): Map<string, unknown> | undefined;
 }
 
 /**

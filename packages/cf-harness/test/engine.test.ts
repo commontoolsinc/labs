@@ -156,6 +156,45 @@ Deno.test("CfHarnessEngine constructs in enforce mode without CFC transports", (
   assertEquals(engine.getRunState().cfcEnforcementMode, "enforce-strict");
 });
 
+Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in run state", () => {
+  const configured = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+    },
+  });
+  assertEquals(configured.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-strict",
+    enforcementModeSource: "configured",
+    flowLabels: "persist",
+    flowLabelsSource: "configured",
+  });
+
+  const pinned = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+  });
+  assertEquals(pinned.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "off",
+    flowLabelsSource: "default",
+  });
+
+  const sessionless = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+  });
+  assertEquals(sessionless.getRunState().fabricSessionCfc, undefined);
+});
+
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {
   const resumedState = (
     modelProvider: "openai-codex" | "openai-compatible-gateway",

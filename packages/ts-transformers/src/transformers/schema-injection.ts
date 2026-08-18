@@ -1544,8 +1544,10 @@ function visitReactiveConditional(
 
   const argTypes = args.map(typeOf);
   // Only the condition is checked. It is materialized here to choose a branch,
-  // so an unknown condition silently reads back as undefined at this boundary.
-  // The branches are result values that flow outward unmaterialized — an unknown
+  // so an unknown condition silently reads back as a reference at this
+  // boundary — which is truthy whenever the position holds anything, so a
+  // condition that was meant to be `false` picks the other branch. The
+  // branches are result values that flow outward unmaterialized — an unknown
   // branch is not lost here; it propagates as the call's unknown result and is
   // reported where that result is consumed (captured).
   reportUnknownReactiveType(context, args[0]!, argTypes[0], "condition");
@@ -2698,8 +2700,9 @@ function reportAnyResultSchema(
  * Reports on a pattern's inferred result schema. A top-level `any`/`unknown`
  * result is an error (the whole output is permissive). A concrete result that
  * nests `unknown` fields is also an error: those fields lower to
- * `{ type: "unknown" }`, which a consumer reading them back materializes as
- * `undefined` — the producer-side form of the unknown-capture bug.
+ * `{ type: "unknown" }`, which a consumer does not materialize — it reads
+ * them back as opaque references carrying no properties, the producer-side
+ * form of the unknown-capture bug.
  */
 function reportUnknownPatternResult(
   context: TransformationContext,
@@ -2723,8 +2726,9 @@ function reportUnknownPatternResult(
       `${
         paths.length > 1 ? "have" : "has"
       } inferred type \`unknown\`, so the ` +
-      `output schema carries \`{ type: "unknown" }\` there. A consumer that ` +
-      `reads such a field back materializes it as \`undefined\`. Add an ` +
+      `output schema carries \`{ type: "unknown" }\` there. A consumer does ` +
+      `not materialize such a field: it reads back as an opaque reference ` +
+      `carrying no properties. Add an ` +
       `explicit Output type, e.g. pattern<Input, { /* shape */ }>(...).`,
     node: node.expression,
   });
@@ -3092,9 +3096,9 @@ function handlePatternSchemaInjection(
  * on `handler<Event, State, Result>`, or carried there by the `action<Event,
  * Result>` lowering (`closures/strategies/action-strategy.ts`).
  *
- * A call that already passes options — the `{ proxy: true }` form — keeps
- * them, spread into the same object, so one slot holds every option. A verb
- * that declares no result gets its arguments back untouched.
+ * A call that already passes an options object keeps it, spread into the same
+ * object, so one slot holds every option. A verb that declares no result gets
+ * its arguments back untouched.
  */
 function withDeclaredResultSchema(
   args: readonly ts.Expression[],

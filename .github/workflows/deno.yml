@@ -16,8 +16,10 @@ concurrency:
 # aliases at each job and each work step, so the numbers live here and nowhere
 # else. Most jobs take the first pair. The CLI integration suites take the
 # `cli-` ones, which are tighter because a wedged suite there is what they were
-# sized against. The environment variables holding the numbers are how a
-# workflow declares a value an anchor can name; nothing reads them.
+# sized against. See "Step And Job Timeouts" in
+# docs/development/CI_PERFORMANCE.md for the sizing rule. The environment
+# variables holding the numbers are how a workflow declares a value an anchor
+# can name; nothing reads them.
 env:
   WORK_TIMEOUT_MINUTES: &work-timeout 30
   JOB_TIMEOUT_MINUTES: &job-timeout 40
@@ -31,20 +33,22 @@ env:
 # vocabulary and which emoji belongs to which phase.
 #
 # Every work step carries a bound of its own, and the bound on the job around it
-# is the longer of the two by ten minutes. GitHub ends a job that runs past the
-# bound on the job by cancelling it, and the job's conclusion is then
-# `cancelled`, which is the conclusion a run stopped by hand or by a newer push
-# also gets. A step that runs past the bound on the step fails, and its job
-# fails with it. So the bound that a wedged test hits first is the one on the
-# step, and a wedge is reported as a failure. tasks/ci-workflow.test.ts holds
-# every work step here to that shape, and refuses a bound written as anything
-# but an alias.
+# is at least ten minutes longer. GitHub ends a job that runs past its bound by
+# cancelling it, while a step that reaches its own bound fails. An individual
+# wedged step normally reaches its bound first; the job bound remains the final
+# limit when several sequential steps take unusually long.
+# tasks/ci-workflow.test.ts holds every work step here to that shape, and
+# refuses a bound written as anything but an alias.
 #
 # The deploy jobs at the end carry no bound. Each hands the work to a script
 # that lives elsewhere, and how long that takes is not this workflow's to say.
 jobs:
   # ---------------------------------------------------------------------------
   # Tier 0 – These jobs all start immediately with no dependencies
+  # GitHub allows this organization 60 parallel hosted runners. Keep this
+  # dependency-free wave below that shared limit so overlapping runs leave
+  # capacity for one another and for jobs whose dependencies have completed.
+  # See "Current Posture" in docs/development/CI_PERFORMANCE.md.
   # ---------------------------------------------------------------------------
   check:
     name: "Check"
@@ -100,6 +104,10 @@ jobs:
         timeout-minutes: *work-timeout
         run: deno task check-conflict-markers
 
+      - name: 🚧 Guard the verb-session walkthrough against its demo
+        timeout-minutes: *work-timeout
+        run: deno task check-verb-session-sync
+
       - name: 🔎 Check for unused import map dependencies
         timeout-minutes: *work-timeout
         run: deno task check-unused-deps
@@ -112,6 +120,10 @@ jobs:
         timeout-minutes: *work-timeout
         run: deno task check-single-copy-deps
 
+      - name: 🚧 Guard against new import cycles between packages
+        timeout-minutes: *work-timeout
+        run: deno task check-package-cycles
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         timeout-minutes: *work-timeout
         working-directory: packages/static
@@ -123,14 +135,9 @@ jobs:
         run: deno task check-withheld-globals
 
   cfcheck:
-    name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
+    name: "CFC Pattern Check"
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-        total: [2]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -143,8 +150,6 @@ jobs:
 
       - name: 🔎 Check Common Fabric patterns
         timeout-minutes: *work-timeout
-        env:
-          CFCHECK_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
         run: deno task cfcheck
 
   pattern-compat:
@@ -177,12 +182,16 @@ jobs:
         run: deno task pattern-compat
 
   pattern-vintage:
-    name: "Pattern Update State Continuity"
+    name: "Pattern Update State and Baseline Integrity"
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
+        # The baseline check diffs against the merge base and needs real
+        # history. The replay step reads the same full checkout.
+        with:
+          fetch-depth: 0
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -224,29 +233,12 @@ jobs:
         timeout-minutes: *work-timeout
         run: deno task pattern-vintage
 
-  baselines-append-only:
-    name: "Pattern Baselines Append-Only"
-    runs-on: ubuntu-latest
-    timeout-minutes: *job-timeout
-    steps:
-      # Needs real history: the check diffs against the merge base, and the
-      # default shallow checkout has none.
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: 🦕 Setup Deno
-        uses: ./.github/actions/deno-setup
-
-      - name: 🔍 Verify lock file & install dependencies
-        uses: ./.github/actions/deno-install
-
       # The gate's safety argument is that `--update` can only ADD a baseline.
       # `rm` is not `--update`, and one deleted file hides easily in a diff full
       # of recorded JSON — so deleting a baseline without retiring its pattern
       # is refused here.
       - name: 🔎 Check pattern baselines are append-only
+        if: ${{ !cancelled() }}
         timeout-minutes: *work-timeout
         run: deno task check-baselines-append-only origin/${{ github.base_ref || 'main' }}
 
@@ -455,8 +447,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
-        total: [3]
+        shard: [1, 2]
+        total: [2]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -644,30 +636,26 @@ jobs:
       matrix:
         include:
           - suite_name: core-piece-values
-            script: integration.sh
-            section: piece-values
+            core_section: piece-values
+            timing_name: core-piece-values
             toolshed_port: 8000
             install_fuse_deps: false
-          - suite_name: core-piece-links
-            script: integration.sh
-            section: piece-links
-            toolshed_port: 8001
-            install_fuse_deps: false
+            run_acl: false
+            run_fuse: false
           - suite_name: core-piece-call
-            script: integration.sh
-            section: piece-call
+            core_section: piece-call
+            timing_name: core-piece-call
             toolshed_port: 8002
             install_fuse_deps: false
-          - suite_name: acl
-            script: acl.sh
-            section: ""
-            toolshed_port: 8004
-            install_fuse_deps: false
-          - suite_name: fuse
-            script: fuse-exec.sh
-            section: ""
-            toolshed_port: 8003
+            run_acl: false
+            run_fuse: false
+          - suite_name: core-piece-links-acl-fuse
+            core_section: piece-links
+            timing_name: core-piece-links
+            toolshed_port: 8001
             install_fuse_deps: true
+            run_acl: true
+            run_fuse: true
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -712,34 +700,33 @@ jobs:
           packages: ${{ matrix.install_fuse_deps && 'jq fuse3 libfuse3-dev' || 'jq' }}
           cache-key: cli-integration
 
-      - name: 🔧 Enable FUSE device access
-        if: ${{ matrix.suite_name == 'fuse' }}
-        run: sudo chmod 666 /dev/fuse
-
       - name: 🧪 Run CLI integration suite
-        if: ${{ startsWith(matrix.suite_name, 'core-') }}
         timeout-minutes: *cli-work-timeout
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
-          CF_CLI_INTEGRATION_SECTION: ${{ matrix.section }}
+          CF_CLI_INTEGRATION_SECTION: ${{ matrix.core_section }}
           CF_CLI_INTEGRATION_TIMINGS: "1"
-          CF_CLI_INTEGRATION_TIMINGS_FILE: "../../test-results/cli-${{ matrix.suite_name }}-cf-timings.log"
+          CF_CLI_INTEGRATION_TIMINGS_FILE: "../../test-results/cli-${{ matrix.timing_name }}-cf-timings.log"
         run: |
           mkdir -p ../../test-results
           : > "$CF_CLI_INTEGRATION_TIMINGS_FILE"
-          API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
+          API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/integration.sh
 
       # Space ACL grant/revoke against a real server. Needs the toolshed's
       # default MEMORY_ACL_MODE=enforce, so it deliberately sets no override.
       - name: 🧪 Run CLI ACL integration suite
-        if: ${{ matrix.suite_name == 'acl' }}
+        if: ${{ !cancelled() && matrix.run_acl }}
         timeout-minutes: *cli-work-timeout
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
         run: |
-          API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
+          API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/acl.sh
+
+      - name: 🔧 Enable FUSE device access
+        if: ${{ !cancelled() && matrix.run_fuse }}
+        run: sudo chmod 666 /dev/fuse
 
       # Deno-based integration tests against the same toolshed. Type checking
       # of the CLI package is done by `deno task check`, so this run skips it.
@@ -757,7 +744,8 @@ jobs:
             --allow-run test/piece-integration.test.ts
 
       - name: 🧪 Run CLI FUSE integration suite
-        if: ${{ matrix.suite_name == 'fuse' }}
+        id: fuse-suite
+        if: ${{ !cancelled() && matrix.run_fuse }}
         timeout-minutes: *cli-fuse-work-timeout
         working-directory: packages/cli
         env:
@@ -772,7 +760,7 @@ jobs:
           set +e
           API_URL="http://localhost:${TOOLSHED_PORT}" \
             FUSE_EXEC_OVERALL_TIMEOUT_SECONDS="${FUSE_STEP_TIMEOUT_SECONDS}" \
-            timeout "${FUSE_STEP_TIMEOUT_SECONDS}" ./integration/${{ matrix.script }}
+            timeout "${FUSE_STEP_TIMEOUT_SECONDS}" ./integration/fuse-exec.sh
           rc=$?
           set -e
           if [ "$rc" -eq 124 ]; then
@@ -781,7 +769,7 @@ jobs:
           exit "$rc"
 
       - name: 📋 FUSE daemon log (on failure)
-        if: ${{ failure() && matrix.suite_name == 'fuse' }}
+        if: ${{ failure() && steps.fuse-suite.outcome == 'failure' }}
         # `cf fuse mount --background` writes its log to /tmp/cf-fuse-<mountpoint>.log
         # (see packages/cli/commands/fuse.ts), not ~/.cf/fuse — the old path always
         # printed "No daemon log found", hiding the real daemon error. The mountpoint
@@ -799,11 +787,11 @@ jobs:
           fi
 
       - name: 📤 Upload CLI integration timing data
-        if: ${{ always() && startsWith(matrix.suite_name, 'core-') }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
-          name: test-timing-cli-${{ matrix.suite_name }}
-          path: test-results/cli-${{ matrix.suite_name }}-cf-timings.log
+          name: test-timing-cli-${{ matrix.timing_name }}
+          path: test-results/cli-${{ matrix.timing_name }}-cf-timings.log
           retention-days: 90
           if-no-files-found: ignore
 
@@ -1011,8 +999,8 @@ jobs:
     needs: ["build-cf"]
     strategy:
       matrix:
-        chunk: [1, 2, 3, 4, 5]
-        total: [5]
+        chunk: [1, 2, 3, 4]
+        total: [4]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -1028,9 +1016,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
-          key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/integration.ts') }}
+          key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/integration.ts') }}
           restore-keys: |
-            cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
+            cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.chunk }}-
 
       - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
@@ -1166,7 +1154,6 @@ jobs:
       - cfcheck
       - pattern-compat
       - pattern-vintage
-      - baselines-append-only
       - test
       - runner-test
       - build-toolshed
@@ -1212,7 +1199,6 @@ jobs:
         "check",
         "pattern-compat",
         "pattern-vintage",
-        "baselines-append-only",
         "build-toolshed",
         "build-bg-piece-service",
         "build-cf",
