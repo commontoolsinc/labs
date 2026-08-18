@@ -211,11 +211,9 @@ Expected implementation and test files:
 - `packages/data-model/src/codec-common/CodecRegistry.ts`
 - `packages/data-model/src/codec-json/JsonCodecEngine.ts`
 - `packages/data-model/src/codecs.ts`
-- `packages/data-model/src/codec-json/impl.ts`
 - `packages/data-model/test/codec-common/FactoryCodec.test.ts`
 - `packages/data-model/test/codec-common/CodecRegistry.test.ts`
 - `packages/data-model/test/codec-json/JsonCodecEngine.test.ts`
-- `packages/data-model/test/codec-json/impl.test.ts`
 - a focused `packages/data-model/test/fabric-factory.test.ts`
 
 ### WP1.3 — Make every Fabric operation see the same factory state
