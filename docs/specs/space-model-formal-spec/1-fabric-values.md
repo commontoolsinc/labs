@@ -2519,31 +2519,40 @@ export type JsonCodecValue =
 Every engine exposes `encode()` and `decode()`, parameterized by the boundary
 type — `string` for JSON, `Uint8Array` for a binary format — and an engine may
 add a pair for a second boundary type, as `JsonCodecEngine` does for bytes.
-Both are supplied by the base class and are not overridden: they mint the
-act, run the walk, and hand off to the format at each end. What a format
-supplies is those two ends and the act factories, all `protected`
-— the surface a second engine extends rather than one a caller reaches.
+Both are supplied by the base class and are not overridden: they mint the act
+and hand the work to it. An engine is otherwise its configuration — the codec
+registry and the leniency setting — and the two factories that say which act
+classes this format uses.
+
+The walk itself, and the format's account of how a container is written down,
+belong to the acts. That is what lets the walk be written without a threaded
+parameter: the state one call carries and the methods that consult it are the
+same object.
 
 ```typescript
 // Shown at module scope.
 // file: packages/data-model/codec-common/BaseCodecEngine.ts
 
 abstract class ExampleEngine {
-  protected abstract newEncodeAct(
-    env: LiveEnvironment,
-  ): EncodeAct;
+  protected abstract newEncodeAct(env: LiveEnvironment): ExampleEncodeAct;
   protected abstract newDecodeAct(
     env: LiveEnvironment,
     data: string,
-  ): DecodeAct;
+  ): ExampleDecodeAct;
+}
 
-  protected abstract serializedFromEncoded(
-    encoded: JsonCodecValue,
-    act: EncodeAct,
-  ): string;
-  protected abstract encodedFromSerializedForm(
-    data: string,
+abstract class ExampleEncodeAct {
+  abstract serializedFromEncoded(encoded: JsonCodecValue): string;
+  protected abstract encodeArray(value: readonly FabricValue[]): JsonCodecValue;
+  protected abstract encodePlainObject(
+    value: Record<string, FabricValue>,
   ): JsonCodecValue;
+  protected abstract wrapTag(tag: string, state: JsonCodecValue): JsonCodecValue;
+}
+
+abstract class ExampleDecodeAct {
+  abstract encodedFromSerializedForm(data: string): JsonCodecValue;
+  abstract decodeValue(data: JsonCodecValue): FabricValue;
 }
 ```
 
@@ -2777,9 +2786,9 @@ error** — every wire form is explicitly represented; there is no implicit
 fallback for fabric classes. Arrays and plain objects (the structural
 types) are handled by the walker itself after no codec matches.
 
-#### Internal encode walker (`encodeValue()`)
+#### The encode walk (`encodeValue()`)
 
-`JsonCodecEngine`'s internal encode walker processes the `FabricValue` tree:
+The encoding act's walk processes the `FabricValue` tree:
 
 1. **Codec dispatch** — `codecFromValue()` finds how to encode the value.
    A `SELF_REP` result means the value is its own wire form (emitted
@@ -2855,11 +2864,11 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 > and carries the preserved one as data, that tag being possibly no tag at all
 > (Section 3.2).
 
-> **Why the walkers are internal.** `encodeValue()` and `decodeValue()` are
-> internal to the engine, which keeps the public API to
-> `encode()`/`decode()` and lets the engine hold its own state — registry,
-> codec view, lenient mode — instead of threading it through every recursive
-> call.
+> **Why the walks belong to an act.** `encodeValue()` and `decodeValue()` are
+> the act's rather than the engine's, which keeps an engine's public API to
+> `encode()`/`decode()` and puts the state one call carries on the same object
+> as the methods that consult it — so no recursive call threads it. What an act
+> needs of its engine, it reads through `CodecEngineConfig`.
 
 ### 4.6 Separation of Concerns
 

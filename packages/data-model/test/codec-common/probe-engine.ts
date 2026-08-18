@@ -14,7 +14,7 @@ import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
-  FabricCodec,
+  CodecForFormat,
   LiveEnvironment,
   WireFormat,
 } from "@/codec-interface/interface.ts";
@@ -287,92 +287,68 @@ export class MarkerCodec extends BaseTerminalCodec<ProbeValue> {
  * The engine. Its containers do the least a container can do, so that what a
  * test observes is the base class and not this.
  */
-export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
-  //
-  // Instance members
-  //
-
-  /**
-   * @inheritDoc
-   *
-   * The tree is what crosses, so there is nothing to convert.
-   */
-  protected override serializedFromEncoded(
-    encoded: ProbeValue,
-    _act: EncodeAct,
-  ): ProbeValue {
+/**
+ * One act of encoding in the probe format, whose transport tree is what
+ * crosses: there is nothing to convert on the way out.
+ */
+export class ProbeEncodeAct extends EncodeAct<ProbeValue> {
+  /** @inheritDoc */
+  override serializedFromEncoded(encoded: ProbeValue): ProbeValue {
     return encoded;
   }
 
+  /** @inheritDoc */
+  protected override wrapTag(tag: string, state: ProbeValue): ProbeValue {
+    return new Tagged(tag, state);
+  }
+
+  /** @inheritDoc */
+  protected override encodeArray(value: readonly FabricValue[]): ProbeValue {
+    this.enter(value);
+    try {
+      return value.map((v) => this.encodeValue(v));
+    } finally {
+      this.leave(value);
+    }
+  }
+
+  /** @inheritDoc */
+  protected override encodePlainObject(
+    value: Record<string, FabricValue>,
+  ): ProbeValue {
+    this.enter(value);
+    try {
+      const result: Record<string, ProbeValue> = {};
+      for (const [k, v] of Object.entries(value)) {
+        result[k] = this.encodeValue(v);
+      }
+      return result;
+    } finally {
+      this.leave(value);
+    }
+  }
+}
+
+/**
+ * One act of decoding in the probe format.
+ *
+ * Cycles are guarded, unlike the JSON format's: this format's transport is the
+ * tree itself, so a caller can hand `decode()` a graph with a cycle in it, and
+ * the guard is what refuses one.
+ */
+export class ProbeDecodeAct extends DecodeAct<ProbeValue> {
   /**
    * @inheritDoc
    *
    * The tree is what arrives, so there is nothing to convert and nothing this
    * format can tell is not its own: any value at all is a candidate.
    */
-  protected override encodedFromSerializedForm(data: ProbeValue): ProbeValue {
+  override encodedFromSerializedForm(data: ProbeValue): ProbeValue {
     return data;
   }
 
   /** @inheritDoc */
-  protected override newEncodeAct(env: LiveEnvironment): EncodeAct {
-    return new EncodeAct(this, env);
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Cycles are guarded, unlike `JsonCodecEngine`: this format's transport is
-   * the tree itself, so a caller can hand `decode()` a graph with a cycle in
-   * it, and the base's guard is what refuses one.
-   */
-  protected override newDecodeAct(
-    env: LiveEnvironment,
-    _data: ProbeValue,
-  ): DecodeAct {
-    return new DecodeAct(this, env);
-  }
-
-  protected override wrapTag(
-    tag: string,
-    state: ProbeValue,
-    _act: EncodeAct,
-  ): ProbeValue {
-    return new Tagged(tag, state);
-  }
-
-  protected override encodeArray(
-    value: readonly FabricValue[],
-    act: EncodeAct,
-  ): ProbeValue {
-    act.enter(value);
-    try {
-      return value.map((v) => this.encodeValue(v, act));
-    } finally {
-      act.leave(value);
-    }
-  }
-
-  protected override encodePlainObject(
-    value: Record<string, FabricValue>,
-    act: EncodeAct,
-  ): ProbeValue {
-    act.enter(value);
-    try {
-      const result: Record<string, ProbeValue> = {};
-      for (const [k, v] of Object.entries(value)) {
-        result[k] = this.encodeValue(v, act);
-      }
-      return result;
-    } finally {
-      act.leave(value);
-    }
-  }
-
-  protected override decodeValue(
-    data: ProbeValue,
-    act: DecodeAct,
-  ): FabricValue {
+  override decodeValue(data: ProbeValue): FabricValue {
     if ((data === null) || (typeof data !== "object")) {
       return data as FabricValue;
     }
@@ -380,26 +356,46 @@ export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
     // Every object node goes through the guard, the tagged form included: this
     // format's transport is the tree itself, so a `Tagged` can hold a
     // reference back to a node above it with no container in between.
-    const cycle = act.enterOrReport(data);
+    const cycle = this.enterOrReport(data);
     if (cycle !== null) {
       return cycle;
     }
 
     try {
       if (data instanceof Tagged) {
-        return this.decodeTagged(data.tag, data.state, act);
+        return this.decodeTagged(data.tag, data.state);
       } else if (Array.isArray(data)) {
-        return data.map((d) => this.decodeValue(d, act));
+        return data.map((d) => this.decodeValue(d));
       }
 
       const result: Record<string, FabricValue> = {};
       for (const [k, v] of Object.entries(data)) {
-        result[k] = this.decodeValue(v as ProbeValue, act);
+        result[k] = this.decodeValue(v as ProbeValue);
       }
       return result;
     } finally {
-      act.leave(data);
+      this.leave(data);
     }
+  }
+}
+
+export class ProbeEngine extends BaseCodecEngine<
+  ProbeValue,
+  ProbeValue,
+  ProbeEncodeAct,
+  ProbeDecodeAct
+> {
+  /** @inheritDoc */
+  protected override newEncodeAct(env: LiveEnvironment): ProbeEncodeAct {
+    return new ProbeEncodeAct(this, env);
+  }
+
+  /** @inheritDoc */
+  protected override newDecodeAct(
+    env: LiveEnvironment,
+    _data: ProbeValue,
+  ): ProbeDecodeAct {
+    return new ProbeDecodeAct(this, env);
   }
 }
 
@@ -419,7 +415,7 @@ export function newProbeEngine(
   options?: {
     lenient?: boolean;
     record?: HostRecord;
-    extraCodecs?: readonly FabricCodec<ProbeValue>[];
+    extraCodecs?: readonly CodecForFormat<ProbeValue>[];
   },
 ): {
   engine: ProbeEngine;
