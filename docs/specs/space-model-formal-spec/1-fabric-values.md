@@ -2584,8 +2584,9 @@ wire marker minted per call, subclasses the act and carries it there.
   tagged wire format, then stringifies the result.
 - `decode(data, env)` parses a JSON string, then decodes tagged
   forms back into runtime types.
-- `encodeToBytes(value, env?)` and `decodeFromBytes(bytes, env)` are the same
-  two walks against UTF-8 bytes rather than a string.
+
+A caller wanting bytes encodes the string itself. The format's boundary is the
+string, and a second entry point for the same walk was API without a purpose.
 
 > **Why the boundary is this narrow.** Tag wrapping and unwrapping belong to
 > the acts rather than to an engine's public surface, leaving only
