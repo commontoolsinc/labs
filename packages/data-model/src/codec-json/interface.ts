@@ -26,8 +26,8 @@ export const ENCODING_PREFIX_TAG = "fvj1:" as const;
  * (which is `string`). Internal to the JSON implementation.
  *
  * Deep-frozen invariant: every such tree that *enters decoding* is
- * deep-frozen. This is enforced at the two construction sites that feed
- * the decode walk, in `parseWireText()`, and is what lets `unwrapTag()` /
+ * deep-frozen. This is enforced at the one construction site that feeds the
+ * decode walk, `parseWireText()`, and is what lets `unwrapTag()` /
  * the `/quote` arm hand back extracted sub-trees directly (see their
  * contracts). The transient trees built on the *encode* side are not covered
  * by this invariant: they are `JSON.stringify`-ed and discarded by `encode()`

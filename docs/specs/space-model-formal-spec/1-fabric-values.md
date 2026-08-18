@@ -2496,10 +2496,9 @@ is not part of the public boundary interface.
  * serialized form (which is `string`). Internal to the JSON implementation.
  *
  * Deep-frozen invariant on the decode side: every such tree that
- * enters decoding is deep-frozen, enforced at the two construction
- * site that feeds it, `parseWireText()`. This is what lets the tag-unwrap and
- * `/quote` arms
- * hand back extracted sub-trees directly without further copying. The
+ * enters decoding is deep-frozen, enforced at the one construction site that
+ * feeds it, `parseWireText()`. This is what lets the tag-unwrap and `/quote`
+ * arms hand back extracted sub-trees directly without further copying. The
  * encode-side trees are transient (`JSON.stringify`-ed and discarded)
  * and are not covered by this invariant. The `readonly` on the array and
  * object arms of the union expresses the decode-side contract at the
