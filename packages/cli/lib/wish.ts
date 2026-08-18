@@ -173,7 +173,7 @@ export async function resolveWish(
  * absent target is an ordinary outcome of a query, and a selection must not
  * turn it into an error. A selection that materializes nothing over a target
  * that DID resolve is refused rather than reported as an absent target, on the
- * same grounds `cf piece get` and `cf piece call` refuse it — "the wish
+ * same grounds `cf get` and `cf call` refuse it — "the wish
  * matched nothing" and "your projection kept nothing" are different facts.
  */
 async function selectWishValue(

@@ -465,7 +465,7 @@ export class ObjectFormatter implements TypeFormatter {
  * `@deprecated` JSDoc lowers to standard JSON Schema `deprecated: true`.
  * Annotation-class (classified in the piece compat checker), so it adds and
  * removes freely; `cf piece verbs` hides marked verbs by default while
- * `cf piece call` never consults it. Applied only where the property schema is
+ * `cf call` never consults it. Applied only where the property schema is
  * stream-marked — deprecation of non-verb data is out of this mark's scope.
  */
 function attachDeprecatedStreamMark(

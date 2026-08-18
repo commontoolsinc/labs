@@ -474,7 +474,7 @@ export function localPatternEntry(
  * a path that doesn't resolve, a result schema that can't project stored data
  * (PieceResultProjectionError), a filter/projection that doesn't fit the
  * selected value (CellSelectionError), or a path that lands on a verb
- * (PieceVerbReadError — the read-path guard's redirect at `cf piece call`).
+ * (PieceVerbReadError — the read-path guard's redirect at `cf call`).
  * Reported as a plain error on stderr with exit 1, never as a Cliffy
  * ValidationError (which would dump the usage screen and read as an arg-parse
  * failure).
@@ -492,7 +492,7 @@ export function isPieceGetDataError(error: unknown): error is Error {
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
  * already carries its own `--step` guidance, selection errors stand alone,
- * a verb refusal already carries its `cf piece call` redirect, and an
+ * a verb refusal already carries its `cf call` redirect, and an
  * input-mode read has nothing more to suggest — only a result-mode
  * unresolved path gets the `--input` tip.
  */
@@ -609,7 +609,7 @@ export function reportVerbInputErrorOrRethrow(
 }
 
 /**
- * The failure exit for `cf piece call`: closes the verbose in-flight span as
+ * The failure exit for `cf call`: closes the verbose in-flight span as
  * `failed` (idempotent — a span already closed elsewhere stays closed),
  * rethrows Cliffy validation errors so usage failures still render the usage
  * screen — with their span closed first — and reports everything else as the
@@ -844,7 +844,7 @@ export function invocationPhaseReporter(
 }
 
 /**
- * Phase observer for `cf piece call`: always advances the furthest-phase
+ * Phase observer for `cf call`: always advances the furthest-phase
  * tracker the failure report prints; under --verbose it also streams one
  * wall-clock span per observed phase transition (verb contract WS-D, phase
  * timings). Spans are bounded by the phases the `onPhase` callback already
@@ -893,7 +893,7 @@ export function pieceCallPhaseObserver(
 }
 
 /**
- * The success tail of `cf piece call`, extracted from the command action so
+ * The success tail of `cf call`, extracted from the command action so
  * it is unit-coverable — command action bodies never execute under the unit
  * suite, the same convention that keeps `cf test` out of its action body
  * (docs/development/COVERAGE.md). Help output returns BEFORE the observer
@@ -1026,7 +1026,7 @@ export function invocationJson(
   };
 }
 
-/** How long `cf piece call` waits for a handler invocation (verb contract
+/** How long `cf call` waits for a handler invocation (verb contract
  * WS-F, F3). `settle` is the default: await this handling's commit
  * acknowledgment plus receipt readback, optionally bounded by the caller's
  * patience (`--wait <seconds>`). `commit` (`--no-wait`) awaits the
@@ -1040,7 +1040,7 @@ export interface PieceCallWaitControl {
   boundSeconds?: number;
 }
 
-/** The `cf piece call` flags whose answer needs the receipt readback. */
+/** The `cf call` flags whose answer needs the receipt readback. */
 export interface PieceCallReadbackFlags {
   showLinks?: boolean;
   filter?: string;
@@ -1115,8 +1115,8 @@ function listFlags(flags: readonly string[]): string {
 }
 
 /**
- * Parse `cf piece call`'s selection flags into the shape the result should
- * arrive in, through the same parser `cf piece get` uses — one grammar, one
+ * Parse `cf call`'s selection flags into the shape the result should
+ * arrive in, through the same parser `cf get` uses — one grammar, one
  * set of error messages, whichever command a caller reaches for.
  *
  * The one combination refused here is `--filter` with `--show-links`. A link
@@ -1683,7 +1683,7 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
       setQuietMode(!!options.quiet);
       // Read outside the invocation's failure wrapper below. Nothing is
       // dispatched here — no callable resolved, no id spent — so a malformed
-      // selection is a data error about the flags, the same one `cf piece get`
+      // selection is a data error about the flags, the same one `cf get`
       // reports. Inside the wrapper it would name an id and a phase to retry
       // from for a call that was never made; a selection that fails against a
       // RESULT does sit inside it, and does name one.
@@ -2491,7 +2491,7 @@ updated effective label view.`),
     // Default view: wrapper-tier (session-UI affordances) and deprecated
     // verbs are omitted, LOUDLY — the hidden counts always print, so nothing
     // is silently invisible. Rows carry their marks in both views, and
-    // `cf piece call` never consults them. The same rule covers the other way
+    // `cf call` never consults them. The same rule covers the other way
     // this listing can be short, which `verbListingNotes` prints beside them.
     if (options.json) {
       render(verbListingJson(listing, !!options.all), { json: true });
@@ -2711,7 +2711,7 @@ export interface PieceCellCommandDependencies {
 }
 
 /**
- * The `cf piece get` action: the target may ride `--piece` or sit in the
+ * The `cf get` action: the target may ride `--piece` or sit in the
  * first positional as a canonical address ({@link readTargetPositionals}
  * decides which the positionals name), and either spelling may end in
  * `#argument`, which reads the arguments cell the way `--input` does.
@@ -2763,7 +2763,7 @@ export async function getCellValueFromCommand(
 }
 
 /**
- * The `cf piece set` action, with the same positional-address intake as
+ * The `cf set` action, with the same positional-address intake as
  * {@link getCellValueFromCommand}. The write needs a path spelled somewhere
  * — embedded in the address, positionally, or both — and an explicit empty
  * positional (`""`) is a spelling: it has always named the root, and the
@@ -3102,7 +3102,7 @@ export function readTargetPositionals(
 }
 
 /**
- * `cf piece call`'s positional intake: when the first positional is a
+ * `cf call`'s positional intake: when the first positional is a
  * canonical address it replaces `--piece`, and the callable name follows
  * it. The same `/`-leading grammar decides as in
  * {@link readTargetPositionals}; a bare callable name can never match it.

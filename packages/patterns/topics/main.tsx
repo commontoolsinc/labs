@@ -76,7 +76,7 @@ export interface AddTopicEvent {
 export interface AddTopicResult {
   /** The topic this call created — the piece itself, not a manufactured
    * identifier. It reaches the caller as a link to the child, which the CLI
-   * renders as an address (`cf piece call --show-links`). A caller therefore
+   * renders as an address (`cf call --show-links`). A caller therefore
    * addresses the new topic straight from the create, instead of filing it and
    * then searching the board's index for the topic it just made. */
   topic: TopicPiece;

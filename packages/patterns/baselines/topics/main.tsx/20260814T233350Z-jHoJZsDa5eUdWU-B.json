@@ -604,7 +604,7 @@
             }
           },
           "fid": {
-            "description": "The topic's canonical address in tagged form (`fid1:…`); \"\" until known.\n\nThe row's `topic` is the reference itself, and `cf piece get --select\ntopic@` resolves that reference's own address — so this field is a\nconvenience rather than the only way through. It earns its place by\ncomposing with `--filter`, which `@` does not: a filtered array's survivors\nno longer say which positions they came from, so finding one topic by title\nand learning its address is one read with this field and two without.\n\nDerived from runtime-only cell surface, so it reads \"\" for a topic whose\nown entity has not resolved yet.",
+            "description": "The topic's canonical address in tagged form (`fid1:…`); \"\" until known.\n\nThe row's `topic` is the reference itself, and `cf get --select\ntopic@` resolves that reference's own address — so this field is a\nconvenience rather than the only way through. It earns its place by\ncomposing with `--filter`, which `@` does not: a filtered array's survivors\nno longer say which positions they came from, so finding one topic by title\nand learning its address is one read with this field and two without.\n\nDerived from runtime-only cell surface, so it reads \"\" for a topic whose\nown entity has not resolved yet.",
             "type": "string"
           },
           "lastActivityAt": {

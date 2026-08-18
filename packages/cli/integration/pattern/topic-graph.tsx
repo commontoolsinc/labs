@@ -76,7 +76,7 @@ interface TopicGraphOutput {
 /** A topics-like board whose verbs DECLARE results (verb contract C1
  * surface): `createTopic` returns the created child's reference and
  * `reviseBody` returns the revised topic's. Results flow schema-free
- * through the handling's receipt (the C3 deferral), where `cf piece call`
+ * through the handling's receipt (the C3 deferral), where `cf call`
  * reads them back under `plainResultReceipts`. */
 export default pattern<TopicGraphInput, TopicGraphOutput>(({ topics }) => {
   const createTopic = action<CreateTopicEvent, CreateTopicResult>(

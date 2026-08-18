@@ -245,7 +245,7 @@ Deno.test("`which` names CF_LABS_ROOT as the reason when it applies", async () =
 });
 
 Deno.test("`which` is only intercepted as the first argument", async () => {
-  // `cf piece call ... which` must still reach the CLI.
+  // `cf call ... which` must still reach the CLI.
   await withTempDir(async (dir) => {
     const labs = join(dir, "labs");
     await makeCheckout(labs);

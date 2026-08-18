@@ -1134,7 +1134,7 @@ describe("cli piece parsing", () => {
   it("prefers the verb refusal over a selection error on a stream path", async () => {
     // A --filter against a handler fails inside the selector with a shape
     // error ("--filter can only be applied to an array") that sends the
-    // caller to their schema, when the answer is `cf piece call`. The stored
+    // caller to their schema, when the answer is `cf call`. The stored
     // {$stream: true} sentinel is a definite signal, so the verb refusal
     // wins over whatever the selector threw.
     const targetCell = {};
@@ -1689,7 +1689,7 @@ describe("cli piece parsing", () => {
     });
 
     it("refuses a nested verb path without suggesting an uncallable command", async () => {
-      // `cf piece call` resolves root-level names only, so `cf piece call
+      // `cf call` resolves root-level names only, so `cf call
       // removeItem` would fail — the refusal must not suggest it. It says
       // why the read refused and where to go instead.
       const deps = guardDeps(guardPiece(RESULT_VALUE));

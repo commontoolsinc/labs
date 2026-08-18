@@ -59,7 +59,7 @@ describe("main command", () => {
     );
     const commands = [main];
     const mismatchedUsage: string[] = [];
-    const customUsageCommands = new Set(["cf piece call", "cf call"]);
+    const customUsageCommands = new Set(["cf call", "cf call"]);
 
     for (const command of commands) {
       commands.push(...command.getCommands());

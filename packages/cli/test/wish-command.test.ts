@@ -309,7 +309,7 @@ describe("cf wish command action", () => {
     );
 
     // The parsed selection, not the raw flag text: `cf wish` reads the same
-    // grammar `cf piece get` and `cf piece call` read, through the same
+    // grammar `cf get` and `cf call` read, through the same
     // parser, so a caller learns it once.
     expect(calls[0].selection?.projection?.source).toBe("name,bio");
     expect(calls[0].selection?.projection?.flag).toBe("--select");

@@ -648,7 +648,7 @@ function suggestionForCommandSegment(words: string[]): string {
     if (!hasTestOption && main && /\.test\.[cm]?[jt]sx?$/.test(main)) {
       return "Test pattern deployed as the executable diagnostic entry. Next, inspect its action and assertion cells.";
     }
-    return `${testSuggestion} Next, use 'cf piece inspect' to view state or 'cf piece call' to test handlers.`;
+    return `${testSuggestion} Next, use 'cf piece inspect' to view state or 'cf call' to test handlers.`;
   }
   if (pieceCommand === "setsrc") {
     return `${testSuggestion} Next, use 'cf piece step' to trigger re-evaluation, then 'cf piece inspect' to verify.`;
@@ -660,7 +660,7 @@ function suggestionForCommandSegment(words: string[]): string {
     return "State set. Run 'cf piece step' to trigger re-evaluation before reading computed values.";
   }
   if (pieceCommand === "inspect") {
-    return "State inspected. Use 'cf piece call handlerName' to test handlers or 'cf piece set' to modify state.";
+    return "State inspected. Use 'cf call handlerName' to test handlers or 'cf set' to modify state.";
   }
   return "";
 }

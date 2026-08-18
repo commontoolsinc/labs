@@ -265,11 +265,11 @@ function cfcLabelViewForCommand(
     : redactCaveatSourcesForDisplay(effectiveView);
 }
 
-/** A `cf piece get` path that lands ON a verb. Reading a verb returns the
+/** A `cf get` path that lands ON a verb. Reading a verb returns the
  * stream's serialization — never what the caller wanted — so the read refuses
  * and redirects instead, mirroring the llm-dialog read tool's "Path resolves
  * to a handler; use invoke() instead." (verb contract WS-F, read-path guard).
- * `callable` is whether `cf piece call <verb>` actually resolves the verb —
+ * `callable` is whether `cf call <verb>` actually resolves the verb —
  * the dispatcher resolves root-level names only — so the refusal never
  * suggests a command that would fail: a nested verb points at reading the
  * parent object or the root-level verbs listing instead. */
@@ -1647,7 +1647,7 @@ async function tryResolvePieceCallableAt(
 
 /** The forced-stream cast: assert `name` on `cell` is a stream, then ask the
  * runtime whether it answers as one. The third and last resolution path of
- * `cf piece call` (tryResolvePieceHandler), where a handler whose stored
+ * `cf call` (tryResolvePieceHandler), where a handler whose stored
  * schema lost the stream marker still answers.
  *
  * It proves nothing, and belongs ONLY here. The cast's stream schema survives
@@ -1757,7 +1757,7 @@ async function tryResolveLivePieceToolCallable(
 
 /** Load the target piece and its pieces controller for callable
  * resolution/listing —
- * one shared path so `cf piece call` and `cf piece verbs` always see the same
+ * one shared path so `cf call` and `cf piece verbs` always see the same
  * piece state. */
 async function loadPieceForCallables(
   config: PieceConfig,
@@ -1909,7 +1909,7 @@ export interface PieceCallableListing {
   name: string;
   kind: "handler" | "tool";
   /** Which cell the callable lives on. `result` shadows `input` on a name
-   * collision, matching `cf piece call`'s resolution order. */
+   * collision, matching `cf call`'s resolution order. */
   on: "result" | "input";
   /** The verb's input schema — the same schema `call <verb> --help --json`
    * serves. `true` means unconstrained. */
@@ -2826,7 +2826,7 @@ async function declaredVerbEventFor(
  *
  * Candidate names come from the result cell, then the input cell, then the
  * piece root and the compiled pattern's result properties; every one of them
- * is put to the same classification `cf piece call` resolves through, so the
+ * is put to the same classification `cf call` resolves through, so the
  * listing and the dispatcher can never disagree about what is callable. The
  * two halves are deliberately asymmetric — enumeration is generous because a
  * name it never proposes can never be listed, and classification is strict
@@ -2919,7 +2919,7 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
 
   const listings = new Map<string, PieceCallableListing>();
   // Names ordinary detection rejected: candidates for the forced-stream
-  // fallback below, so the listing covers every path `cf piece call` resolves.
+  // fallback below, so the listing covers every path `cf call` resolves.
   const rejected = new Set<string>();
   let resultRoot: any;
   for (const cellProp of ["result", "input"] as const) {
@@ -2981,7 +2981,7 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
   // result cell reads through the pattern's declared result type, so a verb
   // that type omits is absent from the schema-filtered value and from the
   // durable schema alike, and no amount of classification reaches a name
-  // nothing proposed. `cf piece call` never had this problem — a dispatcher is
+  // nothing proposed. `cf call` never had this problem — a dispatcher is
   // handed the name — which is how a piece answers "no verbs" and then accepts
   // one.
   //
@@ -3051,7 +3051,7 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
       if (existing?.on === "result") continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
       // `detectCallableKind`, not an assumed "handler": the walk above uses it,
-      // `cf piece call` resolves through it, and a candidate proposed by the
+      // `cf call` resolves through it, and a candidate proposed by the
       // graph arrives with no evidence of its kind at all — a tool sits in the
       // pattern's result exactly as a handler's stream does. Assuming here
       // would list a tool as a handler and hand a caller `invoke` and the
@@ -3077,7 +3077,7 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
       const spec = callableCommandSpec(callableCell, kind);
       const outputSchema = spec.outputSchemaSummary ?? handlerResults.get(name);
       // `result`, because that is where the row was reached and where
-      // `cf piece call` reaches it: a graph candidate is a property of the
+      // `cf call` reaches it: a graph candidate is a property of the
       // PATTERN's result, and a piece-root candidate is dispatched on the
       // result cell too. Neither is on the input cell, whose same-named verb
       // would be a different stream.
@@ -3257,7 +3257,7 @@ export async function linkPieces(
     const errors: string[] = [];
 
     // Check source piece exists by verifying it has a pattern cell
-    // (i.e., was created via cf piece new, not just written to with cf piece set)
+    // (i.e., was created via cf piece new, not just written to with cf set)
     const sourcePiece = await timeCliPhase(
       "linkPieces.getSourcePiece",
       () =>
@@ -3717,14 +3717,14 @@ export function formatViewTree(view: unknown): string {
 }
 
 /** A read path's last segment classified as a verb: the name, and whether
- * `cf piece call <name>` actually resolves it (root-level names only). */
+ * `cf call <name>` actually resolves it (root-level names only). */
 interface ReadPathVerb {
   verb: string;
   callable: boolean;
 }
 
 /**
- * Classify a `cf piece get` path whose last segment CERTAINLY lands on a
+ * Classify a `cf get` path whose last segment CERTAINLY lands on a
  * verb. The guard refuses only on the two definite stored signals: the
  * link-derived schema answers as a stream (`isHandlerCell` on the
  * `asSchemaFromLinks` cell — that schema comes from stored links, never from
@@ -3777,7 +3777,7 @@ async function classifyReadPathVerb(
  * projection check as a matter of course — and that error tells the caller to
  * retry with `--step`, which sends them to re-run a read that cannot succeed
  * at any number of steps. Classify before surrendering to the projection
- * error so the refusal naming `cf piece call` wins. Returns null when the path
+ * error so the refusal naming `cf call` wins. Returns null when the path
  * is not certainly a verb, leaving the projection error exactly as it was.
  */
 async function verbReadRefusalOrNull(
@@ -3981,7 +3981,7 @@ export async function getCellValue(
         // The verb refusal wins over every selection error, not only the
         // "Cannot access path" family: a real `--filter` against a handler
         // fails inside the selector with a shape error that sends the caller
-        // to their schema, when the answer is `cf piece call`. Classification
+        // to their schema, when the answer is `cf call`. Classification
         // fails open, so an uncertain path keeps its original error.
         const verbRefusal = await verbReadRefusalOrNull(
           piece,

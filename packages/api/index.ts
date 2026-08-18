@@ -1955,7 +1955,7 @@ export type JSONSchemaObj = {
   // Verb listing mark on stream properties: a UI affordance outside the
   // headless contract (inferred at compile time from session-scoped handler
   // bindings + a void event). Hidden from the default `cf piece verbs`
-  // listing; always callable; never consulted by `cf piece call`.
+  // listing; always callable; never consulted by `cf call`.
   readonly tier?: "wrapper";
   // Discovery hashtags from the doc comment (lowercased, without the leading
   // `#`). Populated by the schema generator; mirrors the description text.

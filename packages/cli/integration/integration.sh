@@ -75,7 +75,7 @@ new_invocation_id() {
   fi
 }
 
-# The session this run's invocation ids are chosen within. `cf piece call`
+# The session this run's invocation ids are chosen within. `cf call`
 # takes it from CF_INVOCATION_SESSION, and an id addresses an outcome only
 # within its session — so every retry below has to name the session its
 # original call named. Minted the way an invocation id is: a session is an
