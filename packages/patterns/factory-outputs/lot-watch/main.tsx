@@ -187,9 +187,7 @@ export interface LotWatchOutput {
   people: PersonWithVehicles[];
   captureSighting: Stream<{
     spotNumber: string;
-    /** The light blob reference this verb persists — its contract, not the
-     * full `ImageData` (see `SightingImage`). */
-    image: SightingImage;
+    image: ImageData;
     description: string;
     plateNumber: string;
     plateState: string;
@@ -732,11 +730,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     const captureSighting = action<{
       spotNumber: string;
-      // The light reference, not the full `ImageData`: the event's contract is
-      // what a caller owes (verb-input-contract.md), and this verb asks for
-      // the blob reference alone — the same shape it persists. A caller may
-      // hand a full `ImageData`; only these fields are the contract.
-      image: SightingImage;
+      image: ImageData;
       description: string;
       plateNumber: string;
       plateState: string;
