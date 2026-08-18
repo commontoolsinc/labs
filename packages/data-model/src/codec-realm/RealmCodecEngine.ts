@@ -35,8 +35,8 @@ import { type RealmCodecValue, type RealmEncodedValue } from "./interface.ts";
  * TODO(danfuzz): A memo from each visited object to its encoded counterpart
  * closes cycles and sharing at once: a repeat visit yields the node already
  * built for it, which preserves sharing through a rebuild and lets a back-edge
- * resolve instead of recursing. It belongs on `EncodeContext` and
- * `DecodeContext`, beside the in-progress set, since a cycle can run through
+ * resolve instead of recursing. It belongs on `EncodeAct` and `DecodeAct`,
+ * beside the in-progress set, since a cycle can run through
  * a codec-matched object as readily as through a container and both walks
  * need it.
  */
@@ -65,7 +65,7 @@ export class RealmCodecEngine extends BaseCodecEngine<
    *
    * Sniffs rather than validates, as the contract says: this runs before
    * anything has established that `data` is this format's, so a form
-   * carrying no recognizable marker yields a context holding none -- one
+   * carrying no recognizable marker yields an act holding none -- one
    * that recognizes nothing -- and {@link #encodedFromSerializedForm} does
    * the refusing.
    */

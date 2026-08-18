@@ -37,7 +37,7 @@ export class RealmEncodeAct
    * @inheritDoc
    *
    * Wraps the walked tree in this act's outer envelope. The marker is the
-   * act's own, minted when its context was, which is what Section 2.2
+   * act's own, minted when the act was, which is what Section 2.2
    * requires: created after the value exists, so nothing already assembled can
    * hold a reference to it.
    */
@@ -51,9 +51,8 @@ export class RealmEncodeAct
    * @inheritDoc
    *
    * The marker comes from the act this form belongs to, so a form built
-   * without one is not a state this can reach: an encode context has a
-   * marker from the moment it exists, and only an encode context arrives
-   * here.
+   * without one is not a state this can reach: an encode act has a marker
+   * from the moment it exists, and only an encode act arrives here.
    */
   protected override wrapTag(
     tag: string,

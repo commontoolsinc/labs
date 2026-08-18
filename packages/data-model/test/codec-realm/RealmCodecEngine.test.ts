@@ -101,7 +101,7 @@ async function crossRealm(value: FabricValue): Promise<EchoReport> {
 describe("RealmCodecEngine", () => {
   describe("encode()", () => {
     it("leaves a container even when encoding a child throws", () => {
-      // The context belongs to the act, not the node, so a container left
+      // The in-progress set belongs to the act, not the node, so a container left
       // entered by a throw stays entered. A later visit to it then reports a
       // cycle that is not there -- and says so, naming a circular reference
       // where the real fault was the child. The differential is the message:
@@ -444,8 +444,8 @@ describe("RealmCodecEngine", () => {
     });
 
     it("returns three slots headed by `undefined` as data, with no marker adopted", () => {
-      // A decode context holds no marker until `decode()` adopts one off the
-      // envelope, and a walk driven with such a context recognizes no tagged
+      // A decode act holds no marker until `decode()` adopts one off the
+      // envelope, and a walk driven with such an act recognizes no tagged
       // form at all. That is the safe answer rather than a degenerate one:
       // `undefined` is a value this format carries directly, so a payload can
       // put one in slot zero for free, and identity against an absent marker
@@ -905,7 +905,7 @@ describe("RealmCodecEngine", () => {
     });
 
     it("leaves an outer encode its own marker when a codec re-enters it", () => {
-      // Each act mints its own marker, on its own context, so an encode
+      // Each act mints its own marker, so an encode
       // reached from inside another cannot disturb the outer one's. The way
       // to reach that with input the model admits is a codec calling back
       // through a public entry point -- a getter would do it in fewer lines
