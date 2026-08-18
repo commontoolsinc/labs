@@ -53,20 +53,6 @@ describe("schema-doc-sync", () => {
     await server.close();
   });
 
-  const writeDocs = async (
-    values: Record<string, FabricValue>,
-  ): Promise<void> => {
-    const tx = writer.edit();
-    for (const [id, value] of Object.entries(values)) {
-      tx.writeValueOrThrow(
-        { space, id: id as URI, scope: "space", path: [] },
-        value,
-      );
-    }
-    const result = await tx.commit();
-    expect(result.ok).toBeDefined();
-  };
-
   const writeDocsResult = async (
     values: Record<string, FabricValue>,
   ) => {
@@ -78,6 +64,13 @@ describe("schema-doc-sync", () => {
       );
     }
     return await tx.commit();
+  };
+
+  const writeDocs = async (
+    values: Record<string, FabricValue>,
+  ): Promise<void> => {
+    const result = await writeDocsResult(values);
+    expect(result.ok).toBeDefined();
   };
 
   const writeSchemaDocs = (decomposed: DecomposedSchema): Promise<void> =>

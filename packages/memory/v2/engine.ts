@@ -5193,7 +5193,10 @@ const applyCommitTransaction = (
   // validation deliberately does not pay. The gap closes when links
   // become opaque FabricPrimitive Link objects instead of patchable
   // plain JSON; until then such a reference escapes commit-time
-  // validation and read-side assembly catches it.
+  // validation and read-side assembly catches it. The scan is also
+  // conservative the other way: a reference in an operand that does not
+  // survive to the final document (a remove-by-value operand, an
+  // add-then-remove within one commit) is still validated.
   let cidSetsInCommit: Map<string, unknown> | null = null;
   const requiredSchemaRefs = new Set<string>();
   const collectLinkSchemaRefs = (content: unknown): void => {

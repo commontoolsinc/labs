@@ -355,9 +355,10 @@ exactly two guarantees, both about delivery rather than about values:
   decomposed closure is written into the space that will hold the
   reference, in the same transaction as the reference itself. A
   transaction commits against one space's session, so the closure reaches
-  whichever server handles that space by construction, and
-  `decomposeSchema` refuses to emit a reference whose closure the writer
-  does not hold — the guarantee is the only path through the API.
+  whichever server handles that space by construction. `decomposeSchema`
+  refuses to emit a reference whose closure the writer does not hold,
+  and the commit boundary independently enforces the same obligation for
+  raw commits that never went through it.
 - **The read-side guarantee.** A query result is self-sufficient: every
   schema reference embedded in delivered documents resolves within the
   delivered set. Enforcement sits at the result-assembly boundary: after
@@ -487,6 +488,12 @@ phased on the op-migration playbook:
   traversal follows external refs out of schema documents. Readers can now
   handle references that nothing yet writes. The three memory walkers learn
   reference-only schema positions in the same change.
+- **Phase 0.5 — commit-boundary enforcement.** `cid:` immutability
+  (no delete, patch, or differing re-set) and commit-time closure
+  validation (every reference a commit's content introduces is backed,
+  in the commit or the space's store, by content that verifies against
+  its id, transitively), landed with the readers so no writer flag can
+  ever produce a reference the boundary would not accept.
 - **Phase 1 — write references on links (flag-gated).** Decomposition +
   same-transaction document installs; links carry references. Old inline
   links keep reading forever — links rewrite on every re-instantiation, so
