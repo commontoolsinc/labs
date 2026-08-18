@@ -2087,7 +2087,7 @@ function handlerVerbResults(
  * builder/pattern.ts), while a module's schemas ride through
  * `moduleToEncodableForm` verbatim. The `$event` property inside it is the
  * authored event as the transformer emitted it — the input contract of
- * docs/plans/verb-input-contract.md, `asCell` markers intact.
+ * docs/history/plans/verb-input-contract.md, `asCell` markers intact.
  *
  * The returned schema is self-contained: a `$ref` event is resolved against
  * the module schema's own root, and an inline one carries that root's

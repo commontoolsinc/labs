@@ -118,7 +118,7 @@ export function transformActionCall(
   // - action(() => ...) → event schema is `false` (never type)
   // - action((e) => ...) → event schema is inferred from the parameter
   // `action<Event, Result>`'s first type argument is the authored event —
-  // the contract the served schema must carry (docs/plans/verb-input-contract.md)
+  // the contract the served schema must carry (docs/history/plans/verb-input-contract.md)
   // — so it is preferred over inference from the parameter, which loses the
   // authored node for annotation-free callbacks. The node is registered with
   // its resolved type: it travels into a synthesized handler call, and an

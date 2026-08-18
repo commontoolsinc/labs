@@ -559,7 +559,7 @@ That spelling — the address exactly as a read printed it — dispatches where
 the verb declares a reference, and the edge that lands is the target rather
 than a copy: the graph read shows one item under two paths. The dispatch gate
 reads the DECLARED contract ([verb input
-contract](../plans/verb-input-contract.md)) to know which positions declare
+contract](../history/plans/verb-input-contract.md)) to know which positions declare
 references, and the same contract refuses the two payloads that could only
 ever be mistakes at one:
 
@@ -597,7 +597,7 @@ spelling a caller is actually holding, since every `$link` and `receipt` in
 this session emits exactly that form. The positions it converts at come from
 the DECLARED contract read off the compiled pattern, because the schema a
 dispatch cell carries keeps only stream markers; the [verb input
-contract](../plans/verb-input-contract.md) is what makes that declaration
+contract](../history/plans/verb-input-contract.md) is what makes that declaration
 authoritative.
 
 A tree mostly hides the argument half, because the natural shape is to call
@@ -622,6 +622,6 @@ through its own path rather than the one `--piece` uses.
 
 Two rows, and two that used to sit beside them are gone the way this table
 intends: the served input schema now carries every declared event field —
-the [verb input contract](../plans/verb-input-contract.md) ruled the
+the [verb input contract](../history/plans/verb-input-contract.md) ruled the
 authored event authoritative — and the address a read emits dispatches as an
 argument, with the detached-copy refusal standing guard beside it (step 7).

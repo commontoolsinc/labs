@@ -339,7 +339,7 @@ no event type information at all: for those, the usage summary is the only
 contract there is. Reactive reads (`lift`, lift-applied, computed) stay in
 `full` mode always: there, shrinking is subscription semantics. The ruling
 this implements is
-[the verb input contract](../../plans/verb-input-contract.md); the
+[the verb input contract](../../history/plans/verb-input-contract.md); the
 `handler-schema/contract-authored-event`,
 `contract-nested-unread-reference`, and `contract-authored-shapes` fixtures
 pin the shapes.

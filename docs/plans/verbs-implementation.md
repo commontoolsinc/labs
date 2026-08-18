@@ -53,7 +53,7 @@ without reconstructing it.
 | 2. an unrecognized projection key is refused | on main (#5817); design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
 | 5. `cf wish` and `cf exec` take the read options | on main (#5844) |
-| 11. a caller may name a reference | **capability on main** (#5880); the refusal that protects it is not built |
+| 11. a caller may name a reference | on main — envelope #5880; the emitted-address spelling and the protective refusals via the contract ruling (ordering row 14) |
 
 Item 9 is split because its two halves have different fates: the marks landed,
 the emission is parked.
@@ -501,7 +501,7 @@ its own track.
 | 12 | An unrecognized projection key is refused | **on main** (#5817) — item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md) |
 | 12a | `cf` refuses an undeclared field on a call | **on main** (#5835) — item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says. Built against #5817's wording rather than its code, since that branch is unmerged |
 | 13 | `cf wish` and `cf exec` take the read options | **on main** (#5844) — item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
-| 14 | A caller may name a reference | **on main** — item 11, #5560; envelope #5880, emitted spelling and refusals via the contract ruling | — | A caller names an existing cell where a verb declares a reference in either spelling — the link envelope (#5880) or the address exactly as a read emits it — and the edge that lands is the target rather than a copy. The refusals that protect the position are built with it: a string that is no address, and the shape-matching payload that would have **stored a detached copy and reported success**, are both refused naming the position. The reference marker reaches the CLI through the handler module in the compiled pattern — the one serialized surface link sanitization leaves it on — read at the dispatch gate per [the input contract](verb-input-contract.md) |
+| 14 | A caller may name a reference | **on main** — item 11, #5560; envelope #5880, emitted spelling and refusals via the contract ruling | — | A caller names an existing cell where a verb declares a reference in either spelling — the link envelope (#5880) or the address exactly as a read emits it — and the edge that lands is the target rather than a copy. The refusals that protect the position are built with it: a string that is no address, and the shape-matching payload that would have **stored a detached copy and reported success**, are both refused naming the position. The reference marker reaches the CLI through the handler module in the compiled pattern — the one serialized surface link sanitization leaves it on — read at the dispatch gate per [the input contract](../history/plans/verb-input-contract.md) |
 
 **`--show-links` is not redundant, and nothing should schedule its removal
 yet.** [Verb result selection](verb-result-selection.md) prices it as a stopgap

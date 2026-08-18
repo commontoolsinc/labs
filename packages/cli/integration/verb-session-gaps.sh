@@ -328,7 +328,7 @@ step "10. A reference argument dispatches — the envelope, and the address as e
 # edge that comes back is the target, not a copy. The round-trip spelling
 # docs/plans/references-as-arguments.md held out for — the address exactly as
 # a read emits it — landed with the dispatch gate reading the declared
-# contract (docs/plans/verb-input-contract.md), and the same contract is what
+# contract (docs/history/plans/verb-input-contract.md), and the same contract is what
 # refuses the two payloads that could only ever be mistakes at a reference
 # position. Every spelling is asserted apart, so none can hide behind
 # another.

@@ -34,7 +34,7 @@ import { getCellKind } from "./cell-type.ts";
  * as opaque; `contract` serves the authored structure — every declared
  * top-level field is retained, with the summary's usage-derived capability
  * values where the body reads — per the ruling in
- * docs/plans/verb-input-contract.md. Only a verb's event parameter uses
+ * docs/history/plans/verb-input-contract.md. Only a verb's event parameter uses
  * `contract`: for reactive reads, shrinking is subscription semantics and
  * stays `full`.
  */
@@ -2111,7 +2111,7 @@ function contractCapabilityAt(
 }
 
 /**
- * The contract half of docs/plans/verb-input-contract.md, applied to a verb's
+ * The contract half of docs/history/plans/verb-input-contract.md, applied to a verb's
  * event: the authored TypeNode is served VERBATIM in structure — objects,
  * unions, intersections, arrays, and primitives alike — and only cell-like
  * positions are rewritten, to the capability the body's usage earns:

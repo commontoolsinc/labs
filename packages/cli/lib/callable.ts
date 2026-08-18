@@ -78,7 +78,7 @@ export interface CallableResolution {
    * cell, `asCell: ["cell"]` on a declared reference position is gone. This
    * thunk reads the compiled pattern's handler node instead, where the
    * marker survives — the authored declaration the contract ruling made
-   * authoritative (docs/plans/verb-input-contract.md). The gate consults it
+   * authoritative (docs/history/plans/verb-input-contract.md). The gate consults it
    * ONLY to decide which positions declare references; the payload's shape
    * is still judged against the published schema.
    *

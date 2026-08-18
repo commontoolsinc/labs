@@ -8,7 +8,7 @@ pass one:** the LLM dialog builtin resolves `{"@link": "…"}` into a live cell
 before dispatch (`traverseAndCellify`), and the CLI's dispatch gate accepts
 the link envelope and converts the address a read emits into it, reading
 reference positions off the declared contract
-([verb input contract](verb-input-contract.md)) — refusing, at those
+([verb input contract](../history/plans/verb-input-contract.md)) — refusing, at those
 positions, the shape-matching payload that would have **stored a detached
 copy instead of an edge and reported success**. The webhook and ingest paths
 reach the same handler and still resolve nothing — the payload goes through
@@ -144,7 +144,7 @@ payload unresolved.
 **The schema questions this document once held open are ruled.** Which of a
 verb's two event schemas is the input contract — the body's usage summary or
 the authored event — was decided for the authored event
-([verb input contract](verb-input-contract.md)), and emission now serves it:
+([verb input contract](../history/plans/verb-input-contract.md)), and emission now serves it:
 a declared reference field the body never reads stays in the served
 `properties` and `required`, carrying the capability its usage earned as its
 `asCell` marker. Resolution at the CLI became schema-DIRECTED off that
