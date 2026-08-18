@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { parse as parseYaml } from "jsr:@std/yaml@^1.0.5";
+import { parse as parseYaml } from "@std/yaml";
 import { phaseOf } from "./ci-step-phases.ts";
 import { EXPECTED_COVERAGE_ARTIFACT_NAMES } from "./coverage-check.ts";
 import { PATTERN_INTEGRATION_SHARD_COUNT } from "./select-pattern-integration-files.ts";
