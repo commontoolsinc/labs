@@ -1,10 +1,7 @@
 import { Identity } from "@commonfabric/identity";
 import type { CompiledModuleGraph } from "../src/sandbox/module-record-compiler.ts";
 
-export {
-  FileSystemProgramResolver,
-  InMemoryProgram,
-} from "@commonfabric/js-compiler";
+export { InMemoryProgram } from "@commonfabric/js-compiler";
 export { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 export { StorageManager } from "../src/storage/cache.deno.ts";
 export { Runtime } from "../src/runtime.ts";

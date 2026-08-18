@@ -74,6 +74,12 @@ export interface MultiRuntimeHarnessOptions {
   programPath: string;
   /** Module-resolution root, usually the `packages/patterns` directory. */
   rootPath: string;
+  /**
+   * Data files the pattern reads with `dataFile()`, as paths on disk. The
+   * bootstrap worker compiles the pattern in its own process, so these travel
+   * with the request rather than being attached here.
+   */
+  dataFilePaths?: readonly string[];
   /** Optional initial pattern input for the bootstrap-created piece. */
   input?: Record<string, unknown>;
   /** Enable scheduler graph/stats/action diagnostics for this harness run. */
@@ -384,6 +390,7 @@ export class MultiRuntimeHarness {
       const { pieceId } = await bootstrap.call("createPiece", {
         programPath: options.programPath,
         rootPath: options.rootPath,
+        dataFilePaths: options.dataFilePaths,
         input: options.input,
       }) as { pieceId: string };
       await bootstrap.call("dispose");

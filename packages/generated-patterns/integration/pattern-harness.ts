@@ -40,7 +40,12 @@ export interface PatternIntegrationScenario<TArgument = any> {
    * addresses it by.
    */
   dataFiles?: readonly string[];
-  /** Root grounding `dataFiles`. Defaults to the module's own directory. */
+  /**
+   * Root grounding `dataFiles`, and so the paths the pattern addresses them by.
+   * Omitted, it is the common directory containing the module and every data
+   * file — which is the module's own directory only when the data sits beside
+   * or beneath it. Given explicitly, it must contain the module.
+   */
   dataRoot?: string;
 }
 

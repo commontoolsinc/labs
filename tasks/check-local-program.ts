@@ -17,6 +17,11 @@
  * that the only route: reaching for the resolver directly is the mistake, and
  * it is caught here rather than in a pattern that reads a file months later.
  *
+ * Detection is on the resolver's name anywhere in a file, not on a `new`
+ * expression. Constructing it through an alias or a namespace import spells the
+ * construction differently but still names it to import it, so the name is the
+ * one spelling every route shares.
+ *
  * Usage: deno run --allow-read --allow-run=git ./tasks/check-local-program.ts
  */
 
@@ -42,6 +47,10 @@ const ALLOWLIST = new Map<string, string>([
     "declares the resolver",
   ],
   [
+    "packages/js-compiler/mod.ts",
+    "re-exports the resolver its own package declares",
+  ],
+  [
     "packages/js-compiler/test/program.test.ts",
     "tests the resolver's own containment rules",
   ],
@@ -49,19 +58,22 @@ const ALLOWLIST = new Map<string, string>([
     "packages/cli/commands/deps.ts",
     "walks imports to rewrite pins; compiles nothing, so has no data files",
   ],
-  [
-    "packages/cli/lib/dev.ts",
-    "scans for fabric specifiers before resolving, to report them better",
-  ],
-  [
-    "packages/runner/test/engine-test-support.ts",
-    "builds programs for engine unit tests, which supply files in memory",
-  ],
-  [
-    "packages/runner/test/manual-compile-wedge.ts",
-    "a hand-run debugging script, not part of any suite",
-  ],
 ]);
+
+/**
+ * Blank out comments, so the scan reads code rather than prose. Documents and
+ * doc comments name the resolver when explaining why not to reach for it, and
+ * a check that counted those would make writing the explanation an offense.
+ *
+ * Approximate by design: a `//` or `/* *\/` sequence inside a string literal
+ * blanks from there to the line or comment end. That can only hide code from
+ * the scan, never invent an offender, and no file here puts one in a string.
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ");
+}
 
 const tracked = new TextDecoder().decode(
   (await new Deno.Command("git", {
@@ -86,7 +98,7 @@ for (const path of tracked) {
     if (error instanceof Deno.errors.NotFound) continue;
     throw error;
   }
-  if (!source.includes("new FileSystemProgramResolver")) continue;
+  if (!/\bFileSystemProgramResolver\b/.test(stripComments(source))) continue;
   offenders.push(path);
 }
 
