@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -94,7 +112,12 @@ const __cfHandler_1 = __cfHelpers.handler({
         },
         required: ["count"]
     } as const satisfies __cfHelpers.JSONSchema });
-export default pattern((__cf_pattern_input) => {
+__cfBindVerifiedBinding(__cfHandler_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 45, col: 46 },
+    bindingName: "add"
+});
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const add = __cfHandler_1({
         entries: entries
@@ -167,7 +190,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["name", "next"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 44, col: 2 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

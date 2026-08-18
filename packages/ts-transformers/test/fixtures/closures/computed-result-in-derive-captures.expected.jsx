@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -66,6 +84,11 @@ const __cfLift_1 = __cfHelpers.lift<{
     },
     required: ["count", "total"]
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 25 },
+    bindingName: "stats"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     stats: {
         count: number;
@@ -91,6 +114,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 18 }
+});
 // FIXTURE: computed-result-in-derive-captures
 // Verifies: computed() result properties captured in a subsequent lift-applied computation use .key() access
 //   computed(() => `${stats.count} of ${stats.total} done`) → lift(({ stats }) => ...)({ stats: { count: stats.key("count"), total: stats.key("total") } })
@@ -98,7 +125,7 @@ const __cfLift_2 = __cfHelpers.lift<{
 //   When the second computed() captures stats.count and stats.total, the
 //   transform rewrites them to stats.key("count") and stats.key("total") in
 //   the captures object because stats is a Reactive.
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     const stats = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("stats", true);
@@ -159,7 +186,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 21, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

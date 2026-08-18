@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -63,6 +81,11 @@ const selectTask = handler({
     },
     required: ["selectedTaskId", "hoveredSectionId", "sectionId", "taskId", "sectionIndex", "taskIndex"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
+__cfBindVerifiedBinding(selectTask, {
+    sourceFile: "/test.tsx",
+    position: { line: 40, col: 3 },
+    bindingName: "selectTask"
+});
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         sections: __cfHelpers.ReadonlyCell<unknown[]>;
@@ -88,6 +111,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 53, col: 31 },
+    bindingName: "hasSections"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     task: {
         note?: string | undefined;
@@ -108,6 +136,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 97, col: 30 }
+});
 const __cfLift_3 = __cfHelpers.lift<{
     tagIndex: number;
     taskIndex: number;
@@ -125,6 +157,10 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 107, col: 29 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const tag = __cf_pattern_input.key("element");
     const tagIndex = __cf_pattern_input.key("index");
@@ -228,6 +264,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 105, col: 39 }
+});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const task = __cf_pattern_input.key("element");
     const taskIndex = __cf_pattern_input.key("index");
@@ -392,6 +432,10 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 80, col: 39 }
+});
 const __cfLift_4 = __cfHelpers.lift<{
     section: {
         tasks: {
@@ -449,6 +493,10 @@ section.tasks.length > 0
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 120, col: 18 }
+});
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const section = __cf_pattern_input.key("element");
     const sectionIndex = __cf_pattern_input.key("index");
@@ -613,8 +661,12 @@ const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 64, col: 32 }
+});
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
     const selectedTaskId = new Writable<string | undefined>(undefined, {
         type: ["string", "undefined"]
@@ -764,7 +816,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 47, col: 3 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

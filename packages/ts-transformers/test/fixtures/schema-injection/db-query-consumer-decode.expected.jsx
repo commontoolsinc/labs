@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -75,7 +93,12 @@ const readAuthor = lift((qv: {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-export default pattern(() => {
+__cfBindVerifiedBinding(readAuthor, {
+    sourceFile: "/test.tsx",
+    position: { line: 19, col: 2 },
+    bindingName: "readAuthor"
+});
+export default __cfBindVerifiedBinding(pattern(() => {
     const db = sqliteDatabase().for("db", true);
     const q = db.query<{
         author_cf_link: Cell<User>;
@@ -127,7 +150,10 @@ export default pattern(() => {
             required: ["name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 23, col: 23 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

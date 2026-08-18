@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -63,6 +81,11 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 18, col: 15 },
+    bindingName: "view"
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const r = __cf_pattern_input.key("element");
     return r.key("keep");
@@ -91,6 +114,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 18, col: 33 },
+    bindingName: "view"
+});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const v = __cf_pattern_input.key("element");
     return <li>{v.key("label")}</li>;
@@ -137,6 +165,10 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 18 }
+});
 // FIXTURE: cell-get-derived-collection-map-paren-builder
 // Verifies: parentheses around the pattern builder callback do not change the
 //   site-lifted-collection admission — the derived local still registers, and
@@ -145,7 +177,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
 // Context: the admission locates the builder call through
 //   getCallArgumentPosition, which reads argument positions through
 //   transparent parens (§5.7 paren-invariance).
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const rows = __cf_pattern_input.key("rows");
     const view = __cfLift_1({ rows: rows }).filterWithPattern(__cfPattern_1, {}).for("view", true);
     return {
@@ -227,7 +259,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 17, col: 51 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

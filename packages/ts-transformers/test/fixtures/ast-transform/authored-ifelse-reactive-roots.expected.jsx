@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -25,6 +43,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 19, col: 16 },
+    bindingName: "upper"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     count: number;
 }, number>(({ count }) => count + 1, {
@@ -38,6 +61,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 21, col: 24 }
+});
 const __cfLift_3 = __cfHelpers.lift<{
     cell: __cfHelpers.Writable<number>;
 }, number>(({ cell }) => cell.get(), {
@@ -52,6 +79,10 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 28 }
+});
 const __cfLift_4 = __cfHelpers.lift<{
     name: string;
 }, string>(({ name }) => name.trim(), {
@@ -65,6 +96,10 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 23, col: 26 }
+});
 const __cfLift_5 = __cfHelpers.lift<{
     name: string;
 }, string>(({ name }) => name.trim(), {
@@ -78,6 +113,10 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_5, {
+    sourceFile: "/test.tsx",
+    position: { line: 25, col: 17 }
+});
 // FIXTURE: authored-ifelse-reactive-roots
 // Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively
 //   ifElse(show, count + 1, 0)         → compute-wrapped branch
@@ -85,7 +124,7 @@ const __cfLift_5 = __cfHelpers.lift<{
 //   ifElse(show, name.trim(), "x")     → reactive receiver-method branch
 //   name.trim()                        → top-level receiver-method root lowered to lift-applied
 //   identity(name.trim())             → lift-applied local-helper root
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     const show = __cf_pattern_input.key("show");
     const name = __cf_pattern_input.key("name");
@@ -160,7 +199,10 @@ export default pattern((__cf_pattern_input) => {
         }
     },
     required: ["value", "cellValue", "trimmed", "upper", "upperDirect"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 18, col: 3 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -99,6 +117,11 @@ const __cfHandler_1 = __cfHelpers.handler({
         },
         required: ["ok"]
     } as const satisfies __cfHelpers.JSONSchema });
+__cfBindVerifiedBinding(__cfHandler_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 23, col: 52 },
+    bindingName: "addUnion"
+});
 const __cfHandler_2 = __cfHelpers.handler({
     type: "array",
     items: {
@@ -118,6 +141,11 @@ const __cfHandler_2 = __cfHelpers.handler({
         },
         required: ["n"]
     } as const satisfies __cfHelpers.JSONSchema });
+__cfBindVerifiedBinding(__cfHandler_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 27, col: 49 },
+    bindingName: "addArr"
+});
 const __cfHandler_3 = __cfHelpers.handler({
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -134,6 +162,11 @@ const __cfHandler_3 = __cfHelpers.handler({
         },
         required: ["n"]
     } as const satisfies __cfHelpers.JSONSchema });
+__cfBindVerifiedBinding(__cfHandler_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 47 },
+    bindingName: "addStr"
+});
 const __cfHandler_4 = __cfHelpers.handler({
     type: "object",
     properties: {
@@ -179,7 +212,12 @@ const __cfHandler_4 = __cfHelpers.handler({
         },
         required: ["ok"]
     } as const satisfies __cfHelpers.JSONSchema });
-export default pattern((__cf_pattern_input) => {
+__cfBindVerifiedBinding(__cfHandler_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 33, col: 56 },
+    bindingName: "addSection"
+});
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const log = __cf_pattern_input.key("log");
     const addUnion = __cfHandler_1({
         log: log
@@ -282,7 +320,10 @@ export default pattern((__cf_pattern_input) => {
                 }]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 58 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

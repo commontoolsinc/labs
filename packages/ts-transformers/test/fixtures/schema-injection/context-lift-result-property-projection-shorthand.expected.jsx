@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -47,6 +65,11 @@ const liftSummary = lift(({ primary, secondary }) => {
     },
     required: ["primary", "secondary", "difference"]
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(liftSummary, {
+    sourceFile: "/test.tsx",
+    position: { line: 6, col: 2 },
+    bindingName: "liftSummary"
+});
 const __cfLift_1 = __cfHelpers.lift<{
     summary: {
         difference: any;
@@ -64,10 +87,15 @@ const __cfLift_1 = __cfHelpers.lift<{
     },
     required: ["summary"]
 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 32 },
+    bindingName: "difference"
+});
 // FIXTURE: context-lift-result-property-projection-shorthand
 // Verifies: shorthand object returns preserve the projected computed() result type
 //   return { difference } → result schema difference: number
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const primary = __cf_pattern_input.key("primary");
     const secondary = __cf_pattern_input.key("secondary");
     const summary = liftSummary({ primary: primary.for(["summary", "primary"], true), secondary: secondary.for(["summary", "secondary"], true) }).for("summary", true);
@@ -94,7 +122,10 @@ export default pattern((__cf_pattern_input) => {
         difference: true
     },
     required: ["difference"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 20, col: 2 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

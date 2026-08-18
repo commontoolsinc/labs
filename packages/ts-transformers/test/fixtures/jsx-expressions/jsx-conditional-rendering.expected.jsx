@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -40,6 +58,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 27, col: 15 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         score: number;
@@ -61,6 +83,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 28, col: 15 }
+});
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         score: number;
@@ -82,6 +108,10 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 28, col: 41 }
+});
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -103,6 +133,10 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 11 }
+});
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -124,6 +158,10 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_5, {
+    sourceFile: "/test.tsx",
+    position: { line: 32, col: 14 }
+});
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         userType: string;
@@ -145,6 +183,10 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_6, {
+    sourceFile: "/test.tsx",
+    position: { line: 44, col: 11 }
+});
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         userType: string;
@@ -166,6 +208,10 @@ const __cfLift_7 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_7, {
+    sourceFile: "/test.tsx",
+    position: { line: 46, col: 14 }
+});
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -187,6 +233,10 @@ const __cfLift_8 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_8, {
+    sourceFile: "/test.tsx",
+    position: { line: 58, col: 11 }
+});
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -208,6 +258,10 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_9, {
+    sourceFile: "/test.tsx",
+    position: { line: 58, col: 30 }
+});
 const __cfLift_10 = __cfHelpers.lift<{
     state: {
         score: number;
@@ -229,6 +283,10 @@ const __cfLift_10 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_10, {
+    sourceFile: "/test.tsx",
+    position: { line: 61, col: 30 }
+});
 const __cfLift_11 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -250,12 +308,16 @@ const __cfLift_11 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_11, {
+    sourceFile: "/test.tsx",
+    position: { line: 74, col: 10 }
+});
 // FIXTURE: jsx-conditional-rendering
 // Verifies: ternary expressions and ifElse() calls in JSX are transformed to reactive ifElse()
 //   cond ? a : b             → ifElse(schema, schema, schema, schema, cond, a, b)
 //   ifElse(cond, <jsx>, <jsx>) → ifElse(schema..., cond, <jsx>, <jsx>)
 // Context: Basic, nested, and complex ternaries plus explicit ifElse calls
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Basic Ternary</h3>
@@ -524,7 +586,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 18, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

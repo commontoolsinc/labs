@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -40,6 +58,11 @@ const readOnly = lift((input: Writable<State>) => input.key("foo").get(), {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(readOnly, {
+    sourceFile: "/test.tsx",
+    position: { line: 25, col: 22 },
+    bindingName: "readOnly"
+});
 const setOnly = lift((input: Writable<State>) => {
     input.key("foo").set("updated");
     return 1;
@@ -55,6 +78,11 @@ const setOnly = lift((input: Writable<State>) => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(setOnly, {
+    sourceFile: "/test.tsx",
+    position: { line: 27, col: 21 },
+    bindingName: "setOnly"
+});
 const updateOnly = lift((input: Writable<State>) => {
     input.key("profile").update({ name: "Ada" });
     return 1;
@@ -84,6 +112,11 @@ const updateOnly = lift((input: Writable<State>) => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(updateOnly, {
+    sourceFile: "/test.tsx",
+    position: { line: 32, col: 24 },
+    bindingName: "updateOnly"
+});
 const pushOnly = lift((input: Writable<State>) => {
     input.key("items").push({ id: "1", label: "First" });
     return 1;
@@ -116,6 +149,11 @@ const pushOnly = lift((input: Writable<State>) => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(pushOnly, {
+    sourceFile: "/test.tsx",
+    position: { line: 37, col: 22 },
+    bindingName: "pushOnly"
+});
 const readWrite = lift((input: Writable<State>) => {
     input.key("foo").set(input.key("foo").get().toUpperCase());
     return 1;
@@ -131,12 +169,22 @@ const readWrite = lift((input: Writable<State>) => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(readWrite, {
+    sourceFile: "/test.tsx",
+    position: { line: 42, col: 23 },
+    bindingName: "readWrite"
+});
 const comparable = lift((input: Writable<State>) => input.equals(input), {
     type: "unknown",
     asCell: ["comparable"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(comparable, {
+    sourceFile: "/test.tsx",
+    position: { line: 47, col: 24 },
+    bindingName: "comparable"
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return item.key("id");
@@ -165,6 +213,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 50, col: 12 }
+});
 const opaqueMap = lift((input: Writable<Item[]>) => input.mapWithPattern(__cfPattern_1, {}), {
     type: "array",
     items: {
@@ -191,6 +243,11 @@ const opaqueMap = lift((input: Writable<Item[]>) => input.mapWithPattern(__cfPat
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(opaqueMap, {
+    sourceFile: "/test.tsx",
+    position: { line: 49, col: 23 },
+    bindingName: "opaqueMap"
+});
 export { comparable, opaqueMap, pushOnly, readOnly, readWrite, setOnly, updateOnly, };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

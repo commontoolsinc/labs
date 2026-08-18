@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -76,6 +94,11 @@ const removePiece = handler({
     const idx = current.findIndex((c) => equals(c, piece));
     if (idx >= 0)
         pieceRegistry.set(current.toSpliced(idx, 1));
+});
+__cfBindVerifiedBinding(removePiece, {
+    sourceFile: "/test.tsx",
+    position: { line: 20, col: 2 },
+    bindingName: "removePiece"
 });
 // FIXTURE: identity-only-handler-default-array
 // Verifies: a `Writable<T[] | Default<[]>>` array used only for identity removal

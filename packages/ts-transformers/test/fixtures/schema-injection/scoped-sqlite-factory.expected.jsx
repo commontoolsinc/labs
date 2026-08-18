@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -20,7 +38,7 @@ interface Input {
 // `(...) => Reactive<SqliteDb>` plus an `asScope` method, with no
 // argumentSchema/resultSchema), so this exercises the asScope-method path of
 // the contextual-scope lowering.
-export default pattern(() => {
+export default __cfBindVerifiedBinding(pattern(() => {
     const userDb: PerUser<SqliteDb> = sqliteDatabase.asScope("user")({
         tables: { notes: table({ id: "integer primary key", body: "text" }) },
     }).for("userDb", true);
@@ -63,7 +81,10 @@ export default pattern(() => {
             properties: {}
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 21, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

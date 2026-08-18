@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -36,12 +54,17 @@ const __cfLift_1 = __cfHelpers.lift<{
         type: "number"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 14, col: 26 },
+    bindingName: "result"
+});
 // FIXTURE: computed-nested-callback
 // Verifies: capture extraction works with a nested .map() over a captured cell's array value
 //   computed(() => numbers.get().map(n => n * multiplier.get())) → lift(...)({ numbers, multiplier })
 //   inner numbers.get().map(fn) runs on a plain array → NOT rewritten to mapWithPattern
 // Context: both `numbers` and `multiplier` are captured cells; the inner map reads `multiplier`
-export default pattern(() => {
+export default __cfBindVerifiedBinding(pattern(() => {
     const numbers = new Writable([1, 2, 3], {
         type: "array",
         items: {
@@ -62,7 +85,10 @@ export default pattern(() => {
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 9, col: 23 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1543,13 +1543,15 @@ no originals, so the `schemaInjected` flag's deliberate lack of a
 including `sourceMapRange` — verified on TS 5.9.2 and 6.0.3).
 
 Recovery precedence is: own text range → explicit source-map range →
-original-chain terminal. `test/lineage-regression.test.ts` pins it end to end:
-it drives the full pipeline over a five-origin fixture and asserts every
-builder call AND callback recovers to its distinctive authored snippet
-(content is the ground truth, not merely `pos >= 0`). This is the read path
-for transform-time source annotation (A′, CT-1870), and the same fallback
-family §16.2's coverage spans use. Rationale, per-site table, and the probe
-rig: `packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
+original-chain terminal (`recoverAuthoredPosition`, `src/ast/utils.ts`).
+`test/lineage-regression.test.ts` pins it end to end: it drives the full
+pipeline over a five-origin fixture and asserts every builder call AND
+callback recovers to its distinctive authored snippet (content is the ground
+truth, not merely `pos >= 0`). This is the read path for transform-time source
+annotation — the stage-25 `position` / `bindingName` metadata of §17.3 — and
+the same fallback family §16.2's coverage spans use. Rationale, per-site
+table, and the probe rig:
+`packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
 
 ## 12. Schema Generation
 
@@ -2609,8 +2611,9 @@ counters.
 
 `ModuleScopeFunctionHardeningTransformer` (stage 25, **last**) rewrites a
 module's top level so that every surviving module-scope function value is
-frozen at module-evaluation time, and so that CFC trusted bindings carry a
-machine-readable binding identity. It emits up to two module-local helper
+frozen at module-evaluation time, so that CFC trusted bindings carry a
+machine-readable binding identity, and so that every function-bearing builder
+artifact carries where its function was AUTHORED. It emits up to two module-local helper
 function declarations and wraps or annotates top-level bindings with calls to
 them (`src/transformers/module-scope-function-hardening.ts`). It extends the
 base `Transformer` with no `filter` override, so it runs on every source file
@@ -2732,14 +2735,17 @@ Four shapes are rewritten:
    `export default __cfHardenFn((x: number) => x + 1);` (verified by direct
    pipeline run).
 
-Everything else at top level is exempt: builder-call initializers
-(`const h = handler(…)` — the builder layer hardens implementations at
-runtime instead, `packages/runner/src/builder/module.ts`), `__cf_data`
-wrappers and other call results, literals, classes, interfaces/type aliases
-(erased at emit), `export default pattern(…)` (a call, not a direct
-function), and the stage-16 hoisted `const __cfLift_N = __cfHelpers.lift(…)`
-consts (call initializers; see the negative assertions in
-`test/closures/module-scope-helper-hoisting.test.ts`).
+Everything else at top level is exempt from HARDENING: builder-call
+initializers (`const h = handler(…)` — the builder layer hardens
+implementations at runtime instead, `packages/runner/src/builder/module.ts`),
+`__cf_data` wrappers and other call results, literals, classes,
+interfaces/type aliases (erased at emit), `export default pattern(…)` (a call,
+not a direct function), and the stage-16 hoisted
+`const __cfLift_N = __cfHelpers.lift(…)` consts (call initializers; see the
+negative assertions in `test/closures/module-scope-helper-hoisting.test.ts`).
+The builder-call shapes among those — authored builder consts, the hoisted
+consts, and `export default <builder call>` — do receive the verified-binding
+ANNOTATION when they carry a function argument (§17.3).
 
 Helper emission is demand-driven: each helper declaration is prepended (in
 order: binding-identity helper, then hardening helper) **before every other
@@ -2756,11 +2762,20 @@ Helper names are `createUniqueName`-minted, so they print as bare
 `__cfHardenFn`/`__cfBindVerifiedBinding` unless the printer must
 disambiguate — and a suffixed name would no longer verify (§17.6).
 
-### 17.3 Verified-binding annotation (CT-1665)
+### 17.3 Verified-binding annotation (CT-1665, CT-1870)
 
-The same stage stamps CFC **trusted bindings** with their authoring identity,
-so a `WriteAuthorizedBy` claim embedded in a schema can later be matched to
-the live handler that performs the write.
+The same stage stamps two overlapping sets of module-scope values with a
+`__cfBindVerifiedBinding(value, metadata)` call:
+
+- CFC **trusted bindings**, with their authoring identity, so a
+  `WriteAuthorizedBy` claim embedded in a schema can later be matched to the
+  live handler that performs the write (CT-1665);
+- every top-level **function-bearing builder artifact**, with where its
+  function was authored, so debug source resolution reads a transform-time
+  constant instead of walking runtime stack frames (CT-1870).
+
+A value in both sets takes ONE annotation carrying the union of the two
+metadata sets.
 
 **Which bindings are trusted.** `collectWriteAuthorizedByBindingNames` scans
 the stage-22 AST for type references to `WriteAuthorizedBy`,
@@ -2781,33 +2796,83 @@ pipeline run — such a module gets a plain `__cfHardenFn` wrap and no
 annotation), whereas references surviving in `interface`/type-alias
 declarations or un-lowered type arguments do.
 
-**What is emitted.** For a trusted binding whose initializer is a call
-expression or a direct function (`isTrustedCallable`), the transformer emits
+**Which builder artifacts are annotated.** `resolveBuilderArtifact` accepts a
+top-level value whose initializer — seen through `unwrapExpression`'s
+parenthesis / `as` / `satisfies` / assertion / non-null wrappers — is a call
+that `detectCallKind` classifies as `kind: "builder"` AND that carries an
+arrow-function or function-expression argument. That is the same builder test
+`collectTopLevelBuilderArtifactNames` uses for `__cfReg` registration (§11.4),
+and on this stage's fully lowered AST it covers the stage-16 hoisted
+`__cfLift_N` / `__cfHandler_N` / `__cfPattern_N` consts as well as authored
+builder consts, because `detectCallKind` recognizes the pipeline's
+`__cfHelpers.*` spelling alongside the authored imports. `export default
+<builder call>` is annotated on the exported expression
+(`transformExportAssignment`); `export = …` is not. The function-argument
+requirement is what the annotation is FOR: a builder call with no function
+argument has no authored function whose position to report, and is left alone.
+
+**What is emitted.** The transformer emits
 `__cfBindVerifiedBinding(value, metadata)` where metadata is
 
 ```ts
 // Shown for illustration only.
 {
-    sourceFile: "/test.tsx",       // normalizeWriterIdentityFile(fileName)
-    bindingPath: ["saveTitle"]     // single-element: the binding name
+    sourceFile: "/test.tsx",         // normalizeWriterIdentityFile(fileName)
+    bindingPath: ["saveTitle"],      // trusted bindings ONLY
+    position: { line: 21, col: 59 }, // where the function was authored
+    bindingName: "saveTitle"         // the name it was declared under
 }
 ```
 
-(`annotateBindingIdentifier` / `createBindingIdentityMetadata`). Placement
-depends on export-ness (`transformVariableStatement`, guarded by
+(`annotateBindingIdentifier` / `createBindingIdentityMetadata`). Field by
+field:
+
+- `sourceFile` is always present.
+- `bindingPath` — the binding's own name as a one-element path — is present
+  ONLY for a trusted binding. Together with `sourceFile` it IS the verified
+  binding identity that authorizes writes (`readBindingIdentity` requires
+  both), so an artifact annotated only for its position must not carry it.
+- `position` is `{ line, col }` with `line` 1-based and `col` 0-based —
+  TypeScript's own line/character pair with 1 added to the line, taken at the
+  first authored character of the construct (leading trivia skipped). Both
+  index into the file the pipeline transformed, which is the authored file
+  plus the one-line helper-import prelude the pre-transform injects (§2.1);
+  a reader wanting authored coordinates subtracts that prelude's line, which
+  the runner computes from the authored bytes (`helperInjectionLineOffset`,
+  `packages/runner/src/harness/engine.ts` — the same correction §16.2's
+  coverage spans take). The position is recovered through §11.5's lineage
+  channels (`recoverAuthoredPosition`, `src/ast/utils.ts`) from the builder's
+  FUNCTION argument, falling back to the builder call as a whole; it is
+  omitted when neither recovers.
+- `bindingName` is the authored name enclosing that position: the nearest
+  variable or function declaration reached by walking the parsed authored file
+  down to it, dropped on the way down through a function
+  (`findAuthoredNodeAt`). So a lift hoisted out of
+  `const doubled = computed(() => count * 2)` reports `doubled`, while one
+  hoisted out of a JSX expression in the same pattern's body reports nothing —
+  the declaration a pattern is assigned to does not name what is written
+  inside its callback. The field is omitted when no such declaration exists.
+
+Placement depends on export-ness (`transformVariableStatement`, guarded by
 `test/cfc-authoring.test.ts`):
 
-- **Exported** trusted binding — annotated **inline**, and when the
-  initializer is a direct function the hardener nests outermost:
+- **Exported** binding — annotated **inline**, and when the initializer is a
+  direct function the hardener nests outermost:
   `export const writeFn = __cfHardenFn(__cfBindVerifiedBinding((value:
   string) => value, {…}));` (verified by direct pipeline run; builder-call
-  case asserted in "lowers exported trusted builder bindings inline").
-- **Non-exported** trusted binding — declaration left untouched, followed by
-  a statement-form annotation `__cfBindVerifiedBinding(saveTitle, {…});`,
-  and, for direct-function initializers, a statement-form
-  `__cfHardenFn(writeFn);` **after** the annotation. Named function
-  declarations that are trusted get the same post-statement pair
-  (declaration, annotation, hardening — verified by direct pipeline run).
+  case asserted in "lowers exported trusted builder bindings inline"). Inline
+  is not a preference for exported bindings but a requirement: CommonJS emit
+  turns a reference to an exported binding into `exports.<name>`, and the
+  verifier's statement grammar admits only a bare identifier target (§17.6).
+  `export default <builder call>` is annotated inline for the same reason it
+  has no alternative — there is no local binding to name.
+- **Non-exported** binding — declaration left untouched, followed by a
+  statement-form annotation `__cfBindVerifiedBinding(saveTitle, {…});`, and,
+  for direct-function initializers, a statement-form `__cfHardenFn(writeFn);`
+  **after** the annotation. Named function declarations that are trusted get
+  the same post-statement pair (declaration, annotation, hardening — verified
+  by direct pipeline run). Every hoisted builder artifact takes this form, so
+  its initializer text — and its inferred type — are untouched.
 
 The annotation-before-hardening order is load-bearing: the emitted binding
 helper only stamps `Object.isExtensible` values
@@ -2892,9 +2957,12 @@ non-exported case reaches provenance through the `__cfReg` registration sink
 > unstamped-adoption branch in `reconcileWriterClaimStamp`, the `bundleId`
 > arm, and this note. (Berni's ask on the labs#4871 review.)
 
-No fixture in `test/fixtures/**` exercises `__cfBindVerifiedBinding` as of
-this writing; the annotation paths are covered by `test/cfc-authoring.test.ts`
-and the runner tests above.
+The annotation appears in essentially every fixture that declares a builder
+artifact (344 of the 376 `*.expected.*` files; the remainder declare none),
+so the emitted shapes are pinned by the golden corpus. The trusted-binding
+paths are additionally covered by `test/cfc-authoring.test.ts` and the runner
+tests above; the position and `bindingName` fields are pinned per authored
+origin by `test/lineage-regression.test.ts`.
 
 ### 17.4 Before/after example
 
@@ -2944,9 +3012,17 @@ const saveTitle = handler(/* …injected schemas… */, (_event, { title, savedT
 });
 __cfBindVerifiedBinding(saveTitle, {
     sourceFile: "/test.tsx",
-    bindingPath: ["saveTitle"]
+    bindingPath: ["saveTitle"],
+    position: { line: 6, col: 8 },
+    bindingName: "saveTitle"
 });
 ```
+
+`saveTitle` is in both sets — a trusted binding AND a function-bearing builder
+artifact — so its one annotation carries all four fields. A hoisted lift, in
+the same statement form, carries `sourceFile`, `position`, and (where the
+authored expression sits under a declaration) `bindingName`, but no
+`bindingPath`.
 
 ### 17.5 Why it runs last
 
@@ -2965,9 +3041,11 @@ The stage-22 slot (after everything, and specifically after
   (`isPatternCoverageHitStatement`, `compiled-bundle-verifier.ts`).
 - **After hoisting (stage 16) and schema generation (stage 17):** the
   module-scope surface it freezes/annotates is final — hoisted
-  `__cfLift_N`/`__cfPattern_N` consts exist (and stay unwrapped, being call
-  initializers), and trusted-name discovery sees the post-lowering AST
-  (§17.3).
+  `__cfLift_N`/`__cfPattern_N` consts exist (unhardened, being call
+  initializers, and each followed by its own binding annotation), and
+  trusted-name discovery sees the post-lowering AST (§17.3). Running last is
+  also what makes the authored positions available: every builder call and
+  callback reaches this stage carrying the §11.5 lineage.
 - **Nothing downstream re-analyzes wrapped functions.** Within one pipeline
   run no stage follows it; for analysis code that may encounter hardened
   output, call-kind resolution can see through `__cfHardenFn*(…)` wrappers

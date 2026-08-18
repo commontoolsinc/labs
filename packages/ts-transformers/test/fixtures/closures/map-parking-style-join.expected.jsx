@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -61,6 +79,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 49, col: 37 },
+    bindingName: "isEditing"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         removePersonConfirmTarget: string | null;
@@ -90,6 +113,11 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 52, col: 43 },
+    bindingName: "isRemoveConfirm"
+});
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         spots: {
@@ -147,6 +175,11 @@ const __cfLift_3 = __cfHelpers.lift<{
         required: ["label", "value"]
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 55, col: 42 },
+    bindingName: "activeSpotOpts"
+});
 const __cfLift_4 = __cfHelpers.lift<{
     activeSpotOpts: {
         length: number;
@@ -168,6 +201,10 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 75, col: 15 }
+});
 const __cfLift_5 = __cfHelpers.lift<{
     spotPreferences: string[];
 }, boolean>(({ spotPreferences }) => spotPreferences.length > 0, {
@@ -184,6 +221,10 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_5, {
+    sourceFile: "/test.tsx",
+    position: { line: 76, col: 15 }
+});
 const __cfLift_6 = __cfHelpers.lift<{
     spotPreferences: string[];
 }, string>(({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "), {
@@ -200,6 +241,10 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_6, {
+    sourceFile: "/test.tsx",
+    position: { line: 79, col: 30 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const person = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
@@ -459,13 +504,17 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 38, col: 26 }
+});
 // FIXTURE: map-parking-style-join
 // Verifies: nested plain-array joins inside a reactive map callback stay plain in complex branches
 //   state.people.map(fn)                    -> state.key("people").mapWithPattern(pattern(...), ...)
 //   state.spots.filter(...).map(... )       -> lift(...)(...).filter(...).map(...) stays plain inside computed()
 //   spotPreferences.map((n) => "#" + n)     -> nested plain-array callback stays plain and does not capture n
 // Context: Realistic callback body mixing computed aliases, destructuring, conditional JSX, and joined plain-array labels
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     return {
         [UI]: (<div>
         {state.key("people").mapWithPattern(__cfPattern_1, {
@@ -587,7 +636,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 34, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

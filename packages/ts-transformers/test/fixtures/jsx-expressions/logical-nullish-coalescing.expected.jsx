@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -35,6 +53,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 24 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
 }, boolean>(({ config }) => (config.get().retries ?? 3) > 0, {
@@ -54,6 +76,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 25, col: 15 }
+});
 const __cfLift_3 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
 }, string | false>(({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty"), {
@@ -76,6 +102,10 @@ const __cfLift_3 = __cfHelpers.lift<{
             "enum": [false]
         }]
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 29, col: 11 }
+});
 // Tests nullish coalescing (??) interaction with && and ||
 // ?? should NOT be transformed to when/unless (different semantics)
 // FIXTURE: logical-nullish-coalescing
@@ -83,7 +113,7 @@ const __cfLift_3 = __cfHelpers.lift<{
 //   (config.get().timeout ?? 30) || "disabled" → lift(...)({ config })
 //   (config.get().retries ?? 3) > 0 && "text"  → lift(...)({ config })
 // Context: ?? has different semantics from || and must not be transformed to unless
-export default pattern((_state) => {
+export default __cfBindVerifiedBinding(pattern((_state) => {
     const config = cell<{
         timeout: number | null;
         retries: number | undefined;
@@ -173,7 +203,10 @@ export default pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 11, col: 23 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

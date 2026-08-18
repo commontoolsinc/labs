@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -37,6 +55,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 30 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const r = __cf_pattern_input.key("element");
     return __cfLift_1({ r: {
@@ -79,6 +101,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 23 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     r: {
         active?: boolean | undefined;
@@ -103,6 +129,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 33, col: 30 }
+});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const r = __cf_pattern_input.key("element");
     return __cfLift_2({ r: {
@@ -145,6 +175,10 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 33, col: 23 }
+});
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const r = __cf_pattern_input.key("element");
     return <i>{r.key("name")}</i>;
@@ -203,6 +237,10 @@ const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 33, col: 52 }
+});
 const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
     const r = __cf_pattern_input.key("element");
     return r.key("primary") ?? r.key("fallback");
@@ -253,6 +291,10 @@ const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
             }
         }]
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 36, col: 23 }
+});
 // FIXTURE: array-method-scalar-nullish-lift
 // Verifies (CT-1779): a SCALAR nullish-coalescing `??` with a reactive operand in the
 // return / predicate position of a reactive map/filter/flatMap callback is value-lifted,
@@ -267,7 +309,7 @@ const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
 // filter-flatmap-fallback-chain; here the heterogeneous `r.primary ?? r.fallback`
 // (`string[] | number[]`, a union of array members a bare isArrayType misses) stays
 // structural too.
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const rows = __cf_pattern_input.key("rows");
     return {
         [UI]: (<div>
@@ -347,7 +389,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 25, col: 40 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

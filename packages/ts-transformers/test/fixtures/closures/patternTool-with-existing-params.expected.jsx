@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -41,6 +59,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 22 }
+});
 const __cfPattern_1 = pattern((__cf_pattern_input: {
     value: number;
     offset: number;
@@ -65,6 +87,11 @@ const __cfPattern_1 = pattern((__cf_pattern_input: {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 21, col: 12 },
+    bindingName: "tool"
+});
 // FIXTURE: patternTool-with-existing-params
 // Verifies: patternTool's first arg is an explicit pattern() (CT-1655). The
 //   author supplies `offset` via extraParams (a genuine per-call input); the
@@ -73,7 +100,7 @@ const __cfPattern_1 = pattern((__cf_pattern_input: {
 //   extraParams — auto-capture-into-extraParams was removed when patternTool
 //   began requiring an explicit pattern.
 //   patternTool(pattern(({ value, offset }) => …multiplier.get()…), { offset })
-export default pattern(() => {
+export default __cfBindVerifiedBinding(pattern(() => {
     const tool = patternTool(__cfPattern_1, { offset: offset.for(["tool", 1, "offset"], true) });
     return { tool };
 }, {
@@ -122,7 +149,10 @@ export default pattern(() => {
             "enum": ["space", "user", "session"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 19, col: 54 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

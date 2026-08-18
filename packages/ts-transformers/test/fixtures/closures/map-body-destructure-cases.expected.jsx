@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -66,6 +84,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 27 }
+});
 const __cfLift_1 = __cfHelpers.lift<{
     spotPreferences: string[];
 }, boolean>(({ spotPreferences }) => spotPreferences.length > 0, {
@@ -82,6 +104,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 42, col: 17 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     spotPreferences: string[];
 }, string>(({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "), {
@@ -98,6 +124,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 43, col: 27 }
+});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const person = __cf_pattern_input.key("element");
     const name = person.key("name"), spotPreferences = person.key("spotPreferences");
@@ -167,6 +197,10 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 37, col: 28 }
+});
 // FIXTURE: map-body-destructure-cases
 // Verifies: body-local destructuring inside reactive .map() callbacks lowers to key() access
 //   const { spotNumber: sn } = spot        -> sn bound from spot.key("spotNumber")
@@ -174,7 +208,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
 //   spotPreferences.length                 -> spotPreferences.key("length")
 //   spotPreferences.map(...).join(", ")    -> nested plain-array callback stays plain
 // Context: Covers destructuring aliases declared inside the callback body, not only in the parameter list
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     return {
         [UI]: (<section>
         <ul>
@@ -258,7 +292,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 25, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

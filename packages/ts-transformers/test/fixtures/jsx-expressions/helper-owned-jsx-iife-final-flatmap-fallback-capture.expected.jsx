@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -72,6 +90,11 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 24 },
+    bindingName: "visible"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     entry: {
         name: string;
@@ -97,6 +120,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 32, col: 10 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element");
     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
@@ -155,6 +182,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 31, col: 39 },
+    bindingName: "labels"
+});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const label = __cf_pattern_input.key("element");
     return <button type="button">{label}</button>;
@@ -187,7 +219,11 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-export default pattern((__cf_pattern_input) => {
+__cfBindVerifiedBinding(__cfPattern_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 34, col: 26 }
+});
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const prefix = __cf_pattern_input.key("prefix");
     const labelPrefix = __cf_pattern_input.key("labelPrefix");
@@ -276,7 +312,10 @@ export default pattern((__cf_pattern_input) => {
         }
     },
     required: ["$UI"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 26, col: 38 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
