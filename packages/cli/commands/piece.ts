@@ -1274,7 +1274,7 @@ const pieceDescription = cliText(`Interact with pieces running on a server.
 COMMON WORKFLOWS:
   Deploy:    cf piece new ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
   Update:    cf piece setsrc --piece <ID> ./pattern.tsx -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
-  Test:      cf call --piece <ID> callableName -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
+  Test:      cf call --piece <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space callableName
   Inspect:   cf piece inspect --piece <ID> -i ./claude.key -a http://localhost:${ports.toolshed} -s my-space
 ${pieceEnvStatus()}
 TIPS:
