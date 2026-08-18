@@ -413,7 +413,25 @@ patterns) and the full fixture suite green.
 ## 9. The A′ line proper — shape of remaining work (post-lineage)
 
 1. **Lineage fix lands** (§5–§8). Everything below reads positions through it.
-2. **Transform-time injection design** (the next design conversation):
+2. **Transform-time injection design — DECIDED (Option D) and PR-1 SHIPPED**
+   (CT-1870, approved by the runner owner 2026-08-18; emit-side implemented on
+   the `gideon/ct-1870-…` branch): the module-scope hardening stage's CT-1665
+   `__cfBindVerifiedBinding` metadata gained `position: {line, col}` (line
+   1-based, col 0-based; indexes the transformed file = authored file + the
+   one-line helper-import prelude — readers subtract via the runner's
+   `helperInjectionLineOffset`) and `bindingName` (authored declaration name,
+   absent for inline-expression origins), and its coverage widened from the
+   trusted-binding set to every function-bearing builder artifact (hoisted,
+   authored, exported, export-default). The helper stamps the metadata onto the
+   value AND its `.implementation`, so the annotation rides the very function
+   `fn.src` is asked about. Security guard: `bindingPath` stays
+   trusted-scope-only (with `sourceFile` it mints verified binding identity —
+   `cfc/implementation-identity.ts`). No sandbox-verifier change was needed (it
+   checks the helper's canonical source and matches wrapper calls by
+   name/classification, never metadata fields — probe-verified through
+   `Engine.compileToRecordGraph`). Behavior-spec §17.3 carries the field
+   contract; the lineage-regression test pins per-origin position + name. The
+   original design conversation, for the record:
    - _Where to inject_: at `BuilderCallHoistingTransformer`, which already
      visits every hoisted builder AND every in-place/authored builder
      (`collectTopLevelBuilderArtifactNames`) AND `export default pattern(…)`;
@@ -433,9 +451,19 @@ patterns) and the full fixture suite green.
      rendezvous.
    - _What content_: file + line:col of the authored callback (and the authored
      binding name — closes the empty-`fn.name` debug-name gap).
-3. **Runtime read side**: `fn.src` lazy getter reads injected data instead of
-   eval-frame resolution (CT-1754 machinery in `harness/engine.ts` becomes dead
-   on this path).
+3. **Runtime read side (PR-2, NEXT)**: `fn.src` lazy getter reads the annotation
+   instead of eval-frame resolution (CT-1754 machinery in `harness/engine.ts`
+   becomes dead on this path). Simplification available: the metadata is an
+   own-property on the implementation function itself
+   (`fn[__cfVerifiedBindingIdentity].position`), so the read may need no WeakMap
+   at all; apply the `helperInjectionLineOffset` line correction on this side
+   (the transformer cannot — a legacy stored envelope is byte-indistinguishable
+   from a fresh injection at transform time). Re-verify the
+   `recordModuleProvenance` region against #5927's engine rework before wiring.
+   Context note: stack traces never needed this — emitted sourcemaps were
+   already line-correct pre-1868 (verified empirically, 2026-07-21); the
+   annotation exists because `fn.src` needs function→position, which maps cannot
+   answer.
 4. **Delete the dev-build eager resolution**:
    `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` and `setEagerSourceAnnotation` gate
    (~25ms dev cold-boot, historical — re-derive).
