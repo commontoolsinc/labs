@@ -21,7 +21,11 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
-import { Runtime, spaceCellSchema } from "../src/runtime.ts";
+import {
+  Runtime,
+  type ServerRunInfo,
+  spaceCellSchema,
+} from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import type {
   IExtendedStorageTransaction,
@@ -908,9 +912,9 @@ describe("Phase 5 cross-space serving", () => {
         () =>
           echoSpaceOf(aliceSidecar) !== undefined &&
           echoSpaceOf(bobSidecar) !== undefined,
-        `both sidecar runs to land (alice: ${
-          echoSpaceOf(aliceSidecar)
-        }, bob: ${echoSpaceOf(bobSidecar)})`,
+        `both sidecar runs to land (alice: ${echoSpaceOf(aliceSidecar)}, bob: ${
+          echoSpaceOf(bobSidecar)
+        })`,
       );
       expect(echoSpaceOf(aliceSidecar)).toBe(aliceDid);
       expect(echoSpaceOf(bobSidecar)).toBe(bobDid);
@@ -920,6 +924,282 @@ describe("Phase 5 cross-space serving", () => {
       setPatternEnvironment(originalEnvironment);
       for (const cancel of cancels) cancel();
       await serving.idle();
+      await serving.dispose();
+      await manager.close();
+    }
+  });
+
+  it("a wish sidecar's OWN actions are demanded through the wish's OWNING piece root (fan-out stage B, design §B4 / the panel's Lens 5): the served per-user wish child runs as the outer root's demanders, never as the service identity", async () => {
+    // The sidecar demand-root chain (`builtins/wish.ts` `sidecarRunOptions`
+    // → `RunnerRunOptions.parentPieceRootId`, the map/filter/flatMap
+    // shape): a sidecar piece is instantiated by the wish's run with its
+    // OWN result doc as piece root, which no client watches — chained to
+    // the wish's owning piece, its actions are demanded through the OUTER
+    // root and run as that root's demanders. Cut the chain (mutation
+    // MWISH: `sidecarRunOptions = {}`) and the sidecar's actions resolve
+    // NO demanders and fall to the wave-level (service) identity — the
+    // scoped state of a served `#profile` create surface keyed under the
+    // service, unread by anyone.
+    //
+    // Harness: the F2 test's direct drive above (a serving runtime, the
+    // wish node run per demander with stamped txs) plus the run-supply
+    // seam `executor-run-supply.test.ts` pins the nested / list-builtin
+    // chains with — a pass-through seal destination whose stamper records
+    // every scheduler run's demanded identity and whose demander resolver
+    // knows ONLY the outer (wish parent) root. Real clock: the sidecar's
+    // fetch → compile → run continuation must actually land. Derivations
+    // are pull-based (serving-loop.md §1: the sink is the demand), so the
+    // test PULLS each sidecar's result — the client's read-through of the
+    // served surface — to run them.
+    //
+    // NOT pinned (flagged in the register, OW29's row): whether a
+    // per-demander sidecar's instance SET is exactly its own demander or
+    // every demander of the outer root — the assertions hold under either.
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+      servingHomeSpace: homeSpace,
+    });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+
+    // Both users' home spaces: a defaultPattern link with no profiles, so
+    // a #profile wish falls to the create surface (the sidecar).
+    const seedHome = async (signer: Identity) => {
+      const did = signer.did() as MemorySpace;
+      const m = SharedServerStorageManager.connectTo(server, { as: signer });
+      const r = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: m,
+      });
+      const tx = r.edit();
+      const homeCell = r.getCell(did, did, spaceCellSchema, tx);
+      const defaultCell = r.getCell(
+        did,
+        "x-space-chain-home-default",
+        undefined,
+        tx,
+      );
+      (homeCell as Cell<Record<string, unknown>>).key("defaultPattern").set(
+        defaultCell as never,
+      );
+      const committed = await tx.commit();
+      expect(committed.error).toBeUndefined();
+      await r.storageManager.synced();
+      await r.dispose();
+      await m.close();
+      return did;
+    };
+    const aliceDid = await seedHome(aliceSigner);
+    const bobDid = await seedHome(bobSigner);
+    const alice = { principal: aliceDid, sessionId: "sess-a" as never };
+    const bob = { principal: bobDid, sessionId: "sess-b" as never };
+
+    // The sidecar SOURCE: a derivation that reads a per-user slot of the
+    // sidecar's own argument (the ordinary PerUser shape — reading it is
+    // what narrows the node to user scope, D11: learned by running).
+    const sidecarSource = [
+      "import { computed, pattern, PerUser, Writable } from 'commonfabric';",
+      "type Mine = Writable<number | undefined>;",
+      "export default pattern<{ profiles: unknown; mine?: PerUser<Mine> }, { echo: unknown; probe: number }>(",
+      "  ({ profiles, mine }) => ({ echo: profiles, probe: computed(() => 1 + ((mine!.get() as number | undefined) ?? 0)) }),",
+      ");",
+    ].join("\n");
+    const originalFetch = globalThis.fetch;
+    const originalEnvironment = getPatternEnvironment();
+    setPatternEnvironment({
+      apiUrl: new URL("https://x-space-sidecar-chain.test/"),
+    });
+    globalThis.fetch = ((input: Request | URL | string) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/api/patterns/system/profile-create.tsx")) {
+        return Promise.resolve(new Response(sidecarSource, { status: 200 }));
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    }) as typeof fetch;
+
+    const cancels: (() => void)[] = [];
+    try {
+      for (const did of [aliceDid, bobDid]) {
+        const home = serving.getCell(did, did, spaceCellSchema);
+        await home.sync();
+        await (home as Cell<Record<string, unknown>>).key("defaultPattern")
+          .resolveAsCell().sync();
+      }
+
+      const seedTx = serving.edit();
+      const inputsCell = serving.getCell<{ query: string }>(
+        homeSpace,
+        "x-space-chain-wish-inputs",
+        undefined,
+        seedTx,
+      );
+      inputsCell.set({ query: "#profile" });
+      // The wish's OWNING piece root — what a client watches, and the
+      // root `sidecarRunOptions` chains the sidecar to.
+      const parentCell = serving.getCell<Record<string, unknown>>(
+        homeSpace,
+        "x-space-chain-wish-parent",
+        undefined,
+        seedTx,
+      );
+      const parentRootId = parentCell.getAsNormalizedFullLink().id;
+      const causeCell = serving.getCell<Record<string, unknown>>(
+        homeSpace,
+        "x-space-chain-wish-cause",
+        undefined,
+        seedTx,
+      );
+      const seedCommitted = await seedTx.commit();
+      expect(seedCommitted.error).toBeUndefined();
+
+      // The run-supply seam: every scheduler run's stamp (its demanded
+      // identity; undefined = the wave-level service fallback) and every
+      // demander query. The registry knows ONLY the outer root.
+      const stamped: ServerRunInfo[] = [];
+      const resolverQueries: string[][] = [];
+      serving.installSealDestination(
+        { seal: (tx: IExtendedStorageTransaction) => tx.tx.commit() },
+        {
+          runStamper: (tx, info) => {
+            stamped.push(info);
+            stampWaveRunContext(tx, {
+              actionId: info.actionId,
+              kind: info.kind,
+              ...(info.scopeKeyIdentity !== undefined
+                ? { scopeKeyIdentity: info.scopeKeyIdentity }
+                : {}),
+              ...(info.actionScopeKey !== undefined
+                ? { actionScopeKey: info.actionScopeKey }
+                : {}),
+            });
+          },
+          runDemanderResolver: (pieceRootIds) => {
+            resolverQueries.push([...pieceRootIds]);
+            return pieceRootIds.includes(parentRootId) ? [alice, bob] : [];
+          },
+        },
+      );
+
+      const sent: { tx: IExtendedStorageTransaction; state: Cell<unknown> }[] =
+        [];
+      const action = wishBuiltin(
+        inputsCell as never,
+        (tx, result) => {
+          sent.push({ tx, state: result as Cell<unknown> });
+        },
+        (cancel) => cancels.push(cancel),
+        [causeCell as never],
+        parentCell as never,
+        serving,
+      );
+      const runAs = async (
+        principal: string,
+        sessionId: string,
+        actionId: string,
+      ): Promise<Cell<unknown>> => {
+        const tx = serving.edit();
+        stampWaveRunContext(tx, {
+          actionId,
+          kind: "derivation",
+          scopeKeyIdentity: { principal, sessionId },
+          acting: { user: principal, session: sessionId },
+        });
+        sent.length = 0;
+        action(tx);
+        expect(sent.length).toBe(1);
+        const sidecar = sent[0].state.key(UI as never).key("props").key("$cell")
+          .resolveAsCell();
+        const committed = await tx.commit();
+        expect(committed.error).toBeUndefined();
+        return sidecar;
+      };
+      // Each demander's wish run launches THAT demander's create surface
+      // (the F2 slots): two sidecar pieces, each chained to the outer root.
+      const aliceSidecar = await runAs(aliceDid, "sess-a", "wish/x-chain-a");
+      const bobSidecar = await runAs(bobDid, "sess-b", "wish/x-chain-b");
+
+      // The sidecar's derivation (`computed` lifts to a `__cfLift_*`
+      // derivation) — the runs the stamper saw, with each run's demanded
+      // principal.
+      const sidecarDerivations = () =>
+        stamped.filter((info) =>
+          info.kind === "derivation" &&
+          (info.actionId.includes("__cfLift") ||
+            info.actionId.includes("computed"))
+        );
+      const sidecarPrincipals = () =>
+        sidecarDerivations().map((info) => info.scopeKeyIdentity?.principal);
+      // Both sidecar pieces instantiated (the fetch → compile → run
+      // continuation landed): the piece's setup-time `echo` link resolves
+      // through the run's input `profiles` into the DEMANDER's home space;
+      // before the run lands the key is unset and resolves within the
+      // served space (the F2 test's idiom).
+      const landed = (sidecar: Cell<unknown>): boolean => {
+        try {
+          const echo = (sidecar as Cell<Record<string, unknown>>)
+            .key("echo").resolveAsCell();
+          return echo.getAsNormalizedFullLink().space !== homeSpace;
+        } catch {
+          return false;
+        }
+      };
+      await waitUntil(
+        () => landed(aliceSidecar) && landed(bobSidecar),
+        "both sidecar pieces to instantiate",
+      );
+      // The DEMAND (serving-loop.md §1's pull-based laziness): the
+      // client's read-through of each served surface. The pull runs the
+      // sidecar's derivation through the scheduler — the run supply
+      // resolves its instances from the demand roots.
+      await Promise.all([aliceSidecar.pull(), bobSidecar.pull()]);
+      await waitUntil(
+        () => {
+          const principals = new Set(sidecarPrincipals());
+          return sidecarDerivations().length >= 2 &&
+            (principals.has(undefined) ||
+              (principals.has(aliceDid) && principals.has(bobDid)));
+        },
+        `the sidecar derivations to run (seen ${
+          JSON.stringify(sidecarPrincipals())
+        })`,
+      );
+      await serving.idle();
+      const runs = sidecarDerivations();
+      const principals = sidecarPrincipals();
+
+      // 1. The chain: the sidecar's actions were resolved THROUGH the
+      //    outer root — a demander query carrying the wish parent's root
+      //    beside another (the sidecar's own) root. Chain cut → every
+      //    query is the sidecar's own root alone.
+      expect(
+        resolverQueries.some((ids) =>
+          ids.includes(parentRootId) && ids.length > 1
+        ),
+      ).toBe(true);
+      // 2. Never the service identity: every sidecar derivation run is
+      //    stamped with a demanded identity of the outer root. Chain cut
+      //    → no demanders → the stamps carry no identity (the fallback).
+      expect(runs.length).toBeGreaterThanOrEqual(2);
+      expect(principals.every((p) => p !== undefined)).toBe(true);
+      expect(
+        principals.every((p) => p === aliceDid || p === bobDid),
+      ).toBe(true);
+      // 3. Per demander: both demanding principals of the outer root ran
+      //    the per-user wish child (the union across the sidecar pieces —
+      //    true whether a per-demander sidecar's instance set is its own
+      //    demander only or every demander of the outer root).
+      expect(principals).toContain(aliceDid);
+      expect(principals).toContain(bobDid);
+    } finally {
+      globalThis.fetch = originalFetch;
+      setPatternEnvironment(originalEnvironment);
+      for (const cancel of cancels) cancel();
+      await serving.idle();
+      serving.clearSealDestination();
       await serving.dispose();
       await manager.close();
     }
