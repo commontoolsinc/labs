@@ -3953,7 +3953,6 @@ class SpaceReplica implements ISpaceReplica {
         (this.#rejectedRepairDocuments.get(key) ?? 0) + 1,
       );
     }
-    let releasedRepairDocumentKeys: Set<string> | undefined;
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
     // Mark the layer dead for that window so no new commit is minted and sent
@@ -3970,6 +3969,8 @@ class SpaceReplica implements ISpaceReplica {
       }
       const shouldNotifySubscribers = hasSemanticOperations &&
         this.hasNotificationSubscribers();
+      const shouldNotifySinks = hasSemanticOperations &&
+        this.hasSinkSubscribers(touched);
       const before = shouldNotifySubscribers
         ? Differential.checkout(
           this,
@@ -3985,76 +3986,41 @@ class SpaceReplica implements ISpaceReplica {
       // localSeq).
       this.cascadeDroppedDependency(localSeq);
       await this.refreshConflictReads(rejection, hasSemanticOperations);
-      const released = this.releaseRejectedRepairDocuments(
-        repairDocumentKeys,
-      );
-      releasedRepairDocumentKeys = released;
-      const notificationTouched = repairDocumentKeys.size === 0
-        ? touched
-        : touched.filter(({ id, scope }) => released.has(docKey(id, scope)));
       if (before !== undefined) {
         const changes = before.compare(this);
-        const publishableChanges = repairDocumentKeys.size === 0
-          ? changes
-          : (() => {
-            const filtered = Differential.create();
-            for (const change of changes) {
-              if (
-                released.has(
-                  docKey(change.address.id as URI, change.address.scope),
-                )
-              ) {
-                filtered.add(change);
-              }
-            }
-            return filtered;
-          })();
         // The revert snapshots CURRENT confirmed state (which already includes
         // any newer seq received by subscription since this commit started)
         // and drops only this commit's pending write — so it should not stomp
         // newer data. Counted to verify reverts stay bounded.
-        if (notificationTouched.length > 0) {
-          logger.debug("commit-revert", () => [
-            `revert after ${rejection.name ?? "rejection"}`,
-          ]);
-          this.#subscription.next({
-            type: "revert",
-            space: this.#space,
-            changes: publishableChanges,
-            reason: rejection,
-            source,
-          });
-          if (this.hasSinkSubscribers(notificationTouched)) {
-            this.notifySinks(publishableChanges);
-          }
+        logger.debug("commit-revert", () => [
+          `revert after ${rejection.name ?? "rejection"}`,
+        ]);
+        this.#subscription.next({
+          type: "revert",
+          space: this.#space,
+          changes,
+          reason: rejection,
+          source,
+        });
+        if (shouldNotifySinks) {
+          this.notifySinks(changes);
         }
-      } else if (this.hasSinkSubscribers(notificationTouched)) {
-        this.notifySinksForIds(notificationTouched);
+      } else if (shouldNotifySinks) {
+        this.notifySinksForIds(touched);
       }
       return { error: rejection };
     } finally {
       this.#rejectedPendingLayers.delete(localSeq);
-      if (releasedRepairDocumentKeys === undefined) {
-        this.releaseRejectedRepairDocuments(repairDocumentKeys);
+      for (const key of repairDocumentKeys) {
+        const count = this.#rejectedRepairDocuments.get(key);
+        if (count === undefined || count <= 1) {
+          this.#rejectedRepairDocuments.delete(key);
+        } else {
+          this.#rejectedRepairDocuments.set(key, count - 1);
+        }
       }
       dropped.resolve();
     }
-  }
-
-  private releaseRejectedRepairDocuments(
-    documentKeys: ReadonlySet<string>,
-  ): Set<string> {
-    const released = new Set<string>();
-    for (const key of documentKeys) {
-      const count = this.#rejectedRepairDocuments.get(key);
-      if (count === undefined || count <= 1) {
-        this.#rejectedRepairDocuments.delete(key);
-        released.add(key);
-      } else {
-        this.#rejectedRepairDocuments.set(key, count - 1);
-      }
-    }
-    return released;
   }
 
   private buildReads(

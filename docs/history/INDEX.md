@@ -35,6 +35,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [2026-08-cfc-conflict-selector-repair.md](plans/2026-08-cfc-conflict-selector-repair.md) — the conflict-selector repair required by strict CFC persistence under concurrent shared writes, August 2026.
 - [2026-08-cfc-conflict-selector-repair-review.md](plans/2026-08-cfc-conflict-selector-repair-review.md) — the read-only conflict notification correction for CFC selector repair, August 2026.
 - [2026-08-cfc-overlapping-conflict-repair-review.md](plans/2026-08-cfc-overlapping-conflict-repair-review.md) — the overlapping-rejection notification correction for CFC selector repair, August 2026.
+- [2026-08-cfc-overlap-coalescing-review.md](plans/2026-08-cfc-overlap-coalescing-review.md) — the final review correction restoring live per-rejection conflict notifications, August 2026.
 - [2026-08-cfc-lot-watch-admin-registry.md](plans/2026-08-cfc-lot-watch-admin-registry.md) — the Lot Watch admin-registry schema correction required by strict CFC defaults, August 2026.
 - [cf-harness implementation plan](packages/cf-harness/docs/IMPLEMENTATION_PLAN.md) — April 2026 package bootstrap plan and implementation checkpoint.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md) and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) — `cf exec` and mounted callable files.
