@@ -37,8 +37,9 @@ get_pids_on_port() {
     } | grep -E '^[0-9]+$' || true
 }
 
-# Read base ports from ports.json at repo root
-read_base_ports() {
+# Locate ports.json at repo root, requiring the jq used to read it
+# Usage: ports_json_path
+ports_json_path() {
     if ! command -v jq &>/dev/null; then
         echo "Error: jq is required but not found. Install with: brew install jq" >&2
         exit 1
@@ -49,7 +50,38 @@ read_base_ports() {
         echo "Error: $ports_file not found" >&2
         exit 1
     fi
+    echo "$ports_file"
+}
+
+# Read base ports from ports.json at repo root
+read_base_ports() {
+    local ports_file
+    ports_file="$(ports_json_path)"
     BASE_TOOLSHED_PORT=$(jq -e '.toolshed' "$ports_file") || { echo "Error: ports.json missing .toolshed" >&2; exit 1; }
     BASE_SHELL_PORT=$(jq -e '.shell' "$ports_file") || { echo "Error: ports.json missing .shell" >&2; exit 1; }
     BASE_INSPECTOR_PORT=$(jq -e '.inspector' "$ports_file") || { echo "Error: ports.json missing .inspector" >&2; exit 1; }
+}
+
+# Read the ports clients refuse to connect to into BLOCKED_PORTS, space
+# separated. Browsers and Deno's fetch both implement the WHATWG bad-port list
+# and reject a request to one of these before opening a connection, so a server
+# that binds one starts and answers a curl health check while the browser and
+# every server-to-server hop cannot reach it.
+read_blocked_ports() {
+    local ports_file
+    ports_file="$(ports_json_path)"
+    BLOCKED_PORTS=$(jq -er '.blockedPorts | join(" ")' "$ports_file") || { echo "Error: ports.json missing .blockedPorts" >&2; exit 1; }
+}
+
+# Report whether a port is one clients refuse to connect to
+# Usage: port_is_blocked <port>
+port_is_blocked() {
+    local port=$1
+    local blocked
+    for blocked in $BLOCKED_PORTS; do
+        if (( port == blocked )); then
+            return 0
+        fi
+    done
+    return 1
 }
