@@ -2432,6 +2432,15 @@ class SpaceReplica implements ISpaceReplica {
   // ACCEPTED origins had no client-side wake. Guarded at the call
   // site — an observer throw must not corrupt accept settlement.
   speculationAckObserver: (() => void) | undefined;
+  // The overlay destination's retirement WAKE for authoritative ARRIVALS
+  // (ISpaceReplica.speculationArrivalObserver, stage C tuning T2 —
+  // speculation.md §4's owed arrival re-sweep): fired at the end of
+  // applySessionSync with the docs whose confirmed seq a frame moved
+  // forward. Guarded at the call site — an observer throw must not
+  // corrupt frame integration.
+  speculationArrivalObserver:
+    | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
+    | undefined;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -4926,6 +4935,12 @@ class SpaceReplica implements ISpaceReplica {
       )
       : undefined;
 
+    // Docs whose CONFIRMED seq this frame moved FORWARD — the arrival
+    // wake's payload (stage C tuning T2). Collected only while an
+    // observer is installed (a client overlay's), so every other replica
+    // pays one undefined check.
+    const arrived: LocalDocAddress[] | undefined =
+      this.speculationArrivalObserver !== undefined ? [] : undefined;
     for (const upsert of sync.upserts) {
       const record = this.record(
         upsert.id as URI,
@@ -4944,6 +4959,15 @@ class SpaceReplica implements ISpaceReplica {
         upsert.deleted === true ? undefined : upsert.doc,
       );
       record.materialized = undefined;
+      if (arrived !== undefined && upsert.seq > previousConfirmedSeq) {
+        arrived.push({
+          id: upsert.id as URI,
+          scope: upsert.scope,
+          ...(upsert.scopeKey !== undefined
+            ? { scopeKey: upsert.scopeKey }
+            : {}),
+        });
+      }
       const key = docKey(
         upsert.id as URI,
         this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
@@ -5036,6 +5060,24 @@ class SpaceReplica implements ISpaceReplica {
       }
     } else if (shouldNotifySinks) {
       this.notifySinksForIds(touched);
+    }
+    // The arrival wake (stage C tuning T2, speculation.md §4): AFTER the
+    // frame's own notifications, on a consistent replica — the overlay's
+    // sweep resolves verdicts (dropping its retired layers through the
+    // ordinary rollback path), which must not interleave with the
+    // integration above. Same containment posture as the ack observer.
+    if (
+      arrived !== undefined && arrived.length > 0 &&
+      this.speculationArrivalObserver !== undefined
+    ) {
+      try {
+        this.speculationArrivalObserver(arrived);
+      } catch (error) {
+        logger.error("speculation-arrival-observer-error", () => [
+          "speculationArrivalObserver threw during frame integration",
+          error,
+        ]);
+      }
     }
   }
 

@@ -104,6 +104,7 @@ import {
   type SettlingTracker,
 } from "./execution.ts";
 import { runPullSchedulerSettleLoop } from "./settle.ts";
+import { CooperativeYield } from "./cooperative-yield.ts";
 import { collectPullIterationSeeds as collectPullIterationSeedsState } from "./settle.ts";
 import {
   type DirtyPullRunnableState,
@@ -424,6 +425,12 @@ export class Scheduler {
   private graphSnapshotState!: SchedulerGraphSnapshotState;
   private settleLoopState!: SchedulerSettleLoopState;
   private executeContinuationState!: ExecuteContinuationState;
+  // The serving posture's cooperative macrotask yield (server-execution
+  // v2 stage C tuning T3, cooperative-yield.ts): constructed ONLY for a
+  // serving runtime, so the OFF arm and flag-ON clients keep their
+  // settle loops' exact microtask shape. Its observer is the runtime's
+  // `servingYieldObserver` seam — the SpaceServer's mid-wave lease renew.
+  private readonly cooperativeYield: CooperativeYield | undefined;
 
   // ============================================================
   // Public API
@@ -434,6 +441,11 @@ export class Scheduler {
     consoleHandler?: ConsoleHandler,
     errorHandlers?: ErrorHandler[],
   ) {
+    if (runtime.servingPosture) {
+      const yielder = new CooperativeYield();
+      yielder.onYield = () => runtime.servingYieldObserver?.();
+      this.cooperativeYield = yielder;
+    }
     this.initializeSchedulerState();
 
     this.consoleHandler = consoleHandler ||
@@ -988,6 +1000,18 @@ export class Scheduler {
       instanceKeys: [...state.instances.keys()],
       cleanKeys: [...state.clean],
     };
+  }
+
+  /** The bound yield hook handed to the settle loop and the fan-out loop
+   * (stage C tuning T3): a promise to await when the slice is spent, else
+   * undefined. Defined only when `cooperativeYield` exists. */
+  private readonly cooperativeYieldBetweenRuns = (): Promise<void> | undefined =>
+    this.cooperativeYield?.maybeYield();
+
+  /** DIAGNOSTIC (tests): the serving posture's cooperative yielder, if
+   * this scheduler has one. */
+  get servingYield(): CooperativeYield | undefined {
+    return this.cooperativeYield;
   }
 
   queueExecution(): void {
@@ -1597,6 +1621,10 @@ export class Scheduler {
   private async execute(): Promise<void> {
     if (this.disposed) return;
     logger.timeStart("scheduler", "execute");
+    // Each execute pass starts in a fresh macrotask (queueTask): restart
+    // the serving posture's yield slice so idle time between passes never
+    // reads as spent work (stage C tuning T3).
+    this.cooperativeYield?.noteMacrotaskBoundary();
 
     // In case a directly invoked `run` is still running, wait for it to finish.
     if (this.runningPromise) await this.runningPromise;
@@ -2127,6 +2155,10 @@ export class Scheduler {
         this.gates.clearComputationDebounceState(action),
       isLiveAction: (action) => this.isLiveAction(action),
       runAction: (action) => this.run(action),
+      // Stage C tuning T3: only a serving runtime yields between runs.
+      ...(this.cooperativeYield !== undefined
+        ? { yieldBetweenRuns: this.cooperativeYieldBetweenRuns }
+        : {}),
     };
   }
 
@@ -2295,6 +2327,11 @@ export class Scheduler {
         this.executingAction = null;
         this.currentActionId = undefined;
       },
+      // Stage C tuning T3: only a serving runtime yields between a fanned-out
+      // node's instance runs.
+      ...(this.cooperativeYield !== undefined
+        ? { yieldBetweenRuns: this.cooperativeYieldBetweenRuns }
+        : {}),
     };
   }
 

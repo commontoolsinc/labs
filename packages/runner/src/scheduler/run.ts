@@ -368,6 +368,13 @@ export interface SchedulerActionRunState {
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
+  /** The serving posture's cooperative macrotask yield between a
+   * fanned-out node's INSTANCE runs (server-execution v2 stage C tuning
+   * T3, cooperative-yield.ts; same seam the settle loop uses between
+   * actions). Installed only on a serving runtime; the fan-out loop
+   * itself is reachable only there (demanders exist only under the
+   * SpaceServer's resolver), so this is inert everywhere else. */
+  readonly yieldBetweenRuns?: () => Promise<void> | undefined;
 }
 
 export async function runSchedulerAction(
@@ -592,6 +599,16 @@ export async function runSchedulerAction(
         (instance) => !deferred.has(instance.key),
       );
       if (toRun.length === 0) break;
+      // Stage C tuning T3: the per-demander walk is where a serving wave
+      // spends its settle (20–250 ms per instance run × demanders ×
+      // roots — the attribution's dominant server term), and this loop
+      // had no macrotask boundary between instances. Yield once the
+      // slice is spent, so the flush deadline, the lease renew and the
+      // push flush can fire between one demander's run and the next.
+      if (ran && state.yieldBetweenRuns !== undefined) {
+        const turn = state.yieldBetweenRuns();
+        if (turn !== undefined) await turn;
+      }
       const instance = toRun[0];
       const startGen = fanOutRunStarted(fanOut, instance);
       const causes = invalidCauses === undefined

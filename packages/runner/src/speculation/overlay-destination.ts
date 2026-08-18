@@ -41,6 +41,24 @@
 // SUCCESS-shaped withdrawal (`superseded`), the authoritative value
 // replaces the echo in the same render path, and nothing cascades.
 //
+// Retirement TRIGGERS (speculation.md §4; stage C tuning T2): the sweep
+// runs from the watermark-doc sink, the origin-ack observer, chained
+// settlements, the post-seal microtask — and, since stage C, from the
+// replica's ARRIVAL observer: a frame that moves the confirmed seq of a
+// doc some entry WROTE re-sweeps at once. Before that wake, "a served node
+// retires the moment its derived value arrives" held only because the
+// derived doc and the covering watermark advance rode ONE frame; an
+// EXHAUSTED wave carries no watermark movement (its derivedThrough is
+// frozen — serving-loop.md §3), so its derived values arrive DECOUPLED
+// from W and the echo stood until the next unrelated commit lifted W (the
+// attribution's 48-s lockdown-chip stall). The gate itself is unchanged —
+// the arrival is a second, earlier TRIGGER, never a relaxation of the
+// coverage or arrival predicates. Its soundness argument: the sweep's
+// predicates are evaluated afresh on replica state at every trigger, so
+// an extra trigger can only retire an entry the gate would have retired
+// at the next watermark event anyway; the arrival of the authoritative
+// value IS the landing the gate waits for.
+//
 // Post-commit effects of a speculative run follow the egress rule
 // (README §1): "speculate on anything you can throw away; never on
 // anything you can't take back." Reversible, client-enacted effects —
@@ -209,6 +227,23 @@ export class SpeculationOverlayDestination
    * blocked, and the covering watermark event has already passed — the
    * ack wake re-sweeps so a then-quiet space cannot strand them. */
   readonly #ackObserverReleases = new Map<MemorySpace, () => void>();
+  /** space -> release fn for the ARRIVAL wake installed on the replica
+   * (ISpaceReplica.speculationArrivalObserver; stage C tuning T2): a
+   * frame that moves the confirmed seq of a doc some entry wrote
+   * re-sweeps the space. */
+  readonly #arrivalObserverReleases = new Map<MemorySpace, () => void>();
+  /** Intents whose TERMINAL consequence this overlay has observed
+   * (consequenced / errored / dropped / refused), keyed by eventId (a
+   * per-fire mint — event-identity.ts — unique across spaces), bounded and
+   * insertion-ordered (oldest pruned). Stage C tuning T2's
+   * LATE-ECHO rule reads it at seal: an event-handler echo whose intent is
+   * already terminal has no job — the authoritative consequences exist
+   * (speculation.md §4 step 2) — and is not registered. */
+  readonly #terminalIntents = new Set<string>();
+  static readonly #MAX_TERMINAL_INTENTS = 4096;
+  /** DIAGNOSTIC counters (tests). */
+  #arrivalSweeps = 0;
+  #lateEchoDrops = 0;
   /** space -> last observed watermark (for registration-time sweeps). */
   readonly #watermarks = new Map<MemorySpace, number>();
   /** Fired-intent notice watch (events.md §5, speculation.md §5):
@@ -264,6 +299,18 @@ export class SpeculationOverlayDestination
     return this.#eventEchoSeals;
   }
 
+  /** DIAGNOSTIC (tests): sweeps the ARRIVAL wake ran (stage C tuning T2). */
+  get arrivalSweepCount(): number {
+    return this.#arrivalSweeps;
+  }
+
+  /** DIAGNOSTIC (tests): event-handler echoes dropped at seal because
+   * their intent was already terminal (stage C tuning T2's late-echo
+   * rule). */
+  get lateEchoDropCount(): number {
+    return this.#lateEchoDrops;
+  }
+
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>> {
     const kind = speculationRunContextOf(tx)?.kind;
     if (kind !== "derivation" && kind !== "event-handler") {
@@ -309,6 +356,39 @@ export class SpeculationOverlayDestination
           reason: new Error("speculation-event-handler-without-event"),
         },
       };
+    }
+    // The LATE-ECHO rule (stage C tuning T2; speculation.md §4 step 2
+    // read as the state it names): an event-handler echo whose intent's
+    // TERMINAL consequence has ALREADY arrived — the client's local
+    // dispatch ran after the served round trip (a load-parked head event,
+    // a busy worker) — has no job: the authoritative consequences (or the
+    // dropped/refused notice) exist, which is exactly the condition under
+    // which `retireIntent` withdraws such an echo the moment the mark
+    // arrives. Ordering alone made the difference: the mark was consumed
+    // before this echo existed, so nothing would ever retire it, and a
+    // NON-IDEMPOTENT handler run over the already-served state is
+    // divergent by construction (the lockdown toggle read the served
+    // `everyoneIsAdmin=false` and toggled it BACK; #5969's castVote echo,
+    // the same). Such an entry's floor also sits at the served commit's
+    // seq — above every W reachable until the next authored input — so it
+    // stood indefinitely, hiding the served value (the attribution's E2:
+    // 48 s until an unrelated draft lifted W). Disposition: the run's
+    // writes are DROPPED before any layer is sealed (the closed-overlay
+    // arm's shape — the results are re-derivable, and here already
+    // derived authoritatively); the seal reports ok so the scheduler's
+    // run completes normally. Same-tick soundness: an intent is terminal
+    // only through a store signal or an admission refusal, both of which
+    // this overlay recorded before this seal ran.
+    if (
+      context?.kind === "event-handler" && context.eventId !== undefined &&
+      this.#terminalIntents.has(context.eventId)
+    ) {
+      this.#lateEchoDrops += 1;
+      logger.debug("late-echo-dropped", () => [
+        `late event echo ${context.eventId} dropped at seal: its intent ` +
+        "already reached a terminal consequence (speculation.md §4 step 2)",
+      ]);
+      return { ok: {} };
     }
     const inner = tx.tx;
     if (inner.sealInto === undefined) {
@@ -701,6 +781,17 @@ export class SpeculationOverlayDestination
     outcome: IntentConsequence,
   ): void {
     const key = `${space}\0${eventId}`;
+    // The late-echo rule's memory (stage C tuning T2): every terminal
+    // signal — consequenced, errored, dropped, refused — makes a later
+    // echo of this intent jobless. Bounded like the replica's ack record.
+    this.#terminalIntents.add(eventId);
+    if (
+      this.#terminalIntents.size >
+        SpeculationOverlayDestination.#MAX_TERMINAL_INTENTS
+    ) {
+      const oldest = this.#terminalIntents.values().next();
+      if (!oldest.done) this.#terminalIntents.delete(oldest.value);
+    }
     const waiters = this.#intentConsequenceWaiters.get(key);
     if (waiters !== undefined && waiters.length > 0) {
       this.#intentConsequenceWaiters.delete(key);
@@ -887,6 +978,7 @@ export class SpeculationOverlayDestination
 
   #ensureWatermarkSink(space: MemorySpace): void {
     this.#ensureAckObserver(space);
+    this.#ensureArrivalObserver(space);
     if (this.#watermarkSinks.has(space)) return;
     try {
       // Constructed INLINE from the wire-module constant rather than
@@ -915,6 +1007,64 @@ export class SpeculationOverlayDestination
       logger.warn("watermark-sink-failed", () => [
         `watermark sink for ${space} failed; overlay retirement for the ` +
         "space will rely on entry re-runs",
+        error,
+      ]);
+    }
+  }
+
+  /** Install the ARRIVAL wake (ISpaceReplica.speculationArrivalObserver;
+   * stage C tuning T2, speculation.md §4's owed arrival re-sweep): a
+   * frame that moves the confirmed seq of a doc some live entry WROTE
+   * re-sweeps the space off the freshest observed W. Filtered to written
+   * docs — the ack observer and the watermark sink already cover the
+   * read-side triggers — so a busy space's unrelated frames cost one set
+   * lookup per upsert. Sweeps synchronously: the replica fires it AFTER
+   * the frame's own notifications, on a consistent replica (the ack
+   * observer's precedent). */
+  #ensureArrivalObserver(space: MemorySpace): void {
+    if (this.#arrivalObserverReleases.has(space)) return;
+    try {
+      const replica = this.#runtime.storageManager.open(space).replica;
+      if (!("speculationArrivalObserver" in replica)) return;
+      const observable = replica as {
+        speculationArrivalObserver:
+          | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
+          | undefined;
+      };
+      observable.speculationArrivalObserver = (arrived) => {
+        if (this.#closed) return;
+        const entries = this.#entries.get(space);
+        if (entries === undefined || entries.size === 0) return;
+        const arrivedKeys = new Set(
+          arrived.map((doc) => `${doc.scope ?? ""}\0${doc.id}`),
+        );
+        let relevant = false;
+        for (const entry of entries.values()) {
+          if (
+            entry.writtenDocs.some((doc) =>
+              arrivedKeys.has(`${doc.scope ?? ""}\0${doc.id}`)
+            )
+          ) {
+            relevant = true;
+            break;
+          }
+        }
+        if (!relevant) return;
+        this.#arrivalSweeps += 1;
+        logger.debug("arrival-sweep", () => [
+          `authoritative value arrived for a speculated doc in ${space}; ` +
+          "re-sweeping the overlay (stage C tuning T2)",
+        ]);
+        this.#sweep(space, this.#watermarks.get(space) ?? 0);
+      };
+      this.#arrivalObserverReleases.set(space, () => {
+        observable.speculationArrivalObserver = undefined;
+      });
+    } catch (error) {
+      logger.warn("arrival-observer-failed", () => [
+        `arrival observer for ${space} failed; retirement of entries whose ` +
+        "served value arrives decoupled from W will rely on later " +
+        "watermark events",
         error,
       ]);
     }
@@ -1105,5 +1255,14 @@ export class SpeculationOverlayDestination
       }
     }
     this.#ackObserverReleases.clear();
+    for (const release of this.#arrivalObserverReleases.values()) {
+      try {
+        release();
+      } catch {
+        // observer release is best-effort during teardown
+      }
+    }
+    this.#arrivalObserverReleases.clear();
+    this.#terminalIntents.clear();
   }
 }

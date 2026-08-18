@@ -1369,6 +1369,22 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void;
   /**
+   * The flow-label relevance probe (`cfc/prepare.ts`'s
+   * `flowLabelWorkExists`) evaluated ONCE per transaction activity epoch
+   * (server-execution v2 stage C tuning, T1). The commit chokepoint and
+   * `Runtime.prepareTxForCommit` both ask "did this tx observe or write a
+   * labeled doc?" on the same unprepared, not-yet-relevant transaction, and
+   * the probe is O(reads × dereference traces) — evaluated twice back to
+   * back it was 65 % of a saturated client worker in the stage-C
+   * attribution. A NEGATIVE verdict is memoized on the transaction and
+   * stays valid until the transaction journals any further read, write,
+   * dereference trace or trigger read (each bumps an activity epoch); a
+   * positive verdict marks the tx relevant, after which neither caller
+   * probes again. Optional so hand-built transactions keep working — a
+   * caller falls back to the free function.
+   */
+  probeFlowLabelWork?(): boolean;
+  /**
    * Run `fn` with `meta` merged into every read issued within (explicit
    * per-read meta wins). Lets scheduling machinery tag its reads without
    * threading metadata through intermediate APIs.
@@ -2200,6 +2216,28 @@ export interface ISpaceReplica extends ISpace {
    * one had no client-side wake, so the entry stayed pending forever.
    */
   speculationAckObserver?: (() => void) | undefined;
+
+  /**
+   * The overlay's retirement WAKE for AUTHORITATIVE ARRIVALS
+   * (server-execution v2 stage C tuning T2 — speculation.md §4's owed
+   * "arrival re-sweep"): when set, invoked at the end of integrating a
+   * session sync frame whose upserts moved at least one doc's CONFIRMED
+   * seq forward, with exactly those docs. The speculation overlay
+   * destination installs it beside its watermark sink: the arrival gate
+   * retires an entry only once every doc it wrote holds a confirmed value
+   * at seq ≥ its floor, and until this wake existed the sweep ran only
+   * from the watermark sink, the origin-ack observer and chained
+   * settlements — so a derived value that arrived DECOUPLED from a
+   * watermark advance (an exhausted wave carries no watermark movement;
+   * a doc arriving in a later frame than the covering W) kept its echo
+   * standing until the next unrelated commit lifted W. Fired regardless of
+   * whether the value is VISIBLE through materialization (an arrival under
+   * the entry's own pending layer is invisible to the change
+   * notification, which is why the notification cannot carry this).
+   */
+  speculationArrivalObserver?:
+    | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
+    | undefined;
 }
 
 /**

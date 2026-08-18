@@ -68,6 +68,7 @@ import {
 import type { NormalizedFullLink } from "../link-types.ts";
 import {
   EXECUTION_LEASE_RENEW_INTERVAL_MS,
+  EXECUTION_LEASE_TTL_MS,
   ExecutionLeaseCycle,
   executionLeaseHolder,
 } from "@commonfabric/memory/v2/execution-lease";
@@ -144,6 +145,12 @@ export type SpaceServerPolicy = {
   /** serving-loop.md §1's IDLE_PARK_MS. */
   idleParkMs?: number;
   renewIntervalMs?: number;
+  /** The execution lease's TTL (serving-loop.md §2; production takes the
+   * wire default EXECUTION_LEASE_TTL_MS). A knob so tests can pin the
+   * mid-wave renew (stage C tuning T3) with a short tenure instead of
+   * waiting out the 15-s default; the mid-wave renew fires once a wave
+   * has run longer than TTL/3 without a renewal. */
+  leaseTtlMs?: number;
   /** Deadline on the park's runtime dispose (park LIVENESS): a serving
    * runtime killed mid-wave can hang `runtime.dispose()` forever, and a
    * park gated on it never resolves `whenParked` — wedging every
@@ -285,6 +292,11 @@ export class SpaceServer implements TransactionSealDestination {
   #disposeRuntime: (() => Promise<void>) | undefined;
   #sink: EngineWaveCommitSink | undefined;
   #renewTimer: ReturnType<typeof setInterval> | undefined;
+  /** Wall-clock of the last successful acquire/renew (stage C tuning T3):
+   * the mid-wave renew fires from the scheduler's cooperative yield once
+   * `now − lastRenewAt ≥ TTL/3`, i.e. exactly when the interval timer
+   * would have fired had the wave's settle let it. */
+  #lastRenewAt = 0;
   #currentWave: WaveAccumulator | undefined;
   #sealChain: Promise<unknown> = Promise.resolve();
   #feed: AdmittedCommitNotice[] = [];
@@ -505,12 +517,16 @@ export class SpaceServer implements TransactionSealDestination {
       engine,
       space,
       holder: this.#holder,
+      ...(this.#options.policy?.leaseTtlMs !== undefined
+        ? { ttlMs: this.#options.policy.leaseTtlMs }
+        : {}),
     });
     if (!lease.acquire()) {
       this.#options.onParked?.("lease-unavailable");
       return false;
     }
     this.#lease = lease;
+    this.#lastRenewAt = Date.now();
     this.#options.stats.lease.held += 1;
 
     let runtime: Runtime;
@@ -756,6 +772,16 @@ export class SpaceServer implements TransactionSealDestination {
     const renewMs = this.#options.policy?.renewIntervalMs ??
       EXECUTION_LEASE_RENEW_INTERVAL_MS;
     this.#renewTimer = setInterval(() => this.#renew(), renewMs);
+    // The MID-WAVE renew (stage C tuning T3, serving-loop.md §2): the
+    // renew timer above rides the macrotask queue a long settle used to
+    // starve (the attribution's t2: renew gaps to 10 s against the 15-s
+    // TTL, then `lease-lost` on every active space at once). The serving
+    // scheduler now yields a macrotask between runs (cooperative-yield.ts)
+    // — which already lets the timer fire — and reports every such yield
+    // here, where a renew is issued directly once the wave has run TTL/3
+    // without one: a belt that does not depend on the timer queue being
+    // serviced, only on the scheduler reaching a run boundary.
+    runtime.servingYieldObserver = () => this.#renewIfDue();
 
     this.#active = true;
     this.#options.stats.activeSpaces += 1;
@@ -1484,9 +1510,26 @@ export class SpaceServer implements TransactionSealDestination {
     return { ok: {} };
   }
 
+  /** The mid-wave renew (stage C tuning T3): called from the serving
+   * scheduler's cooperative yield; renews once the tenure has gone TTL/3
+   * without a renewal (the interval timer's own cadence), otherwise a
+   * no-op — so a wave shorter than TTL/3 costs nothing here and a wave
+   * longer than TTL/3 renews at the same cadence the timer would have. */
+  #renewIfDue(): void {
+    const lease = this.#lease;
+    if (lease === undefined || !this.#active) return;
+    const ttlMs = this.#options.policy?.leaseTtlMs ?? EXECUTION_LEASE_TTL_MS;
+    if (Date.now() - this.#lastRenewAt < ttlMs / 3) return;
+    this.#renew();
+  }
+
   #renew(): void {
     const lease = this.#lease;
     if (lease === undefined || !this.#active) return;
+    // Stamped before the outcome is known: a FAILED renew ends the tenure
+    // (park or reacquire below), and a reacquire is itself a fresh
+    // tenure start.
+    this.#lastRenewAt = Date.now();
     if (!lease.renew()) {
       // Stop committing immediately (serving-loop.md §2's MUST): the
       // tenure ended inside renew(), so an in-flight wave aborts at its
@@ -3197,6 +3240,7 @@ export class SpaceServer implements TransactionSealDestination {
         this.#runtime.connectedSessionProbe = undefined;
         this.#runtime.notifyServedIntentSealFailure = undefined;
         this.#runtime.pieceStartCommitFailureObserver = undefined;
+        this.#runtime.servingYieldObserver = undefined;
         // The shadow-flip wake dies with the tenure (a late flip on a
         // disposing replica must not poke a parked loop's stale wait).
         this.#runtime.storageManager.open(this.#options.space).replica

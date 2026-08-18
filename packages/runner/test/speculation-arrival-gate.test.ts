@@ -30,6 +30,22 @@
 //   entry of the same writer whose whole-doc ops cover an older entry's
 //   docs retires the older one at seal; a PATCH does not; another writer
 //   does not.
+//
+// Stage C tuning T2 (speculation.md §4's owed ARRIVAL RE-SWEEP + the
+// LATE-ECHO rule; stage-c-attribution-report §4):
+// - the E2 shape: a served derived value that arrives DECOUPLED from a
+//   watermark advance (an exhausted wave carries none; W already covers
+//   the entry's floor) retires the echo and renders — without waiting for
+//   an unrelated commit to lift W (mutation: the arrival observer removed
+//   → the entry stands until the next watermark event);
+// - the arrival wake is FILTERED to docs some entry wrote and never
+//   relaxes the gate (scripted: an arrival for an unrelated doc sweeps
+//   nothing; an arrival while W < floor retires nothing);
+// - a LATE echo — an event-handler echo sealed after its intent's
+//   TERMINAL consequence already arrived — is dropped at seal, never
+//   registered (its writes render nothing); a fresh intent's echo still
+//   registers (mutation: the check removed → the late echo registers and
+//   its divergent write renders).
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -51,6 +67,7 @@ import {
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
+import { readWatermarkSeq as readWatermark } from "../src/executor/watermark.ts";
 
 const spaceSigner = await Identity.fromPassphrase("arrival gate space");
 const space = spaceSigner.did() as MemorySpace;
@@ -501,6 +518,354 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     // superseded (dropping a patch layer under a whole-doc set is
     // invisible); B's entry stays.
     expect((await seal(writerA, [set])).ok).toBeDefined();
+    expect(destination.entryCount(space)).toBe(2);
+    destination.close();
+  });
+
+  it("stage C T2, the E2 shape: a served value arriving DECOUPLED from a watermark advance (W already covers the floor; the arrival's own seq is above W) retires the echo and renders at once — no unrelated commit needed (mutation: arrival observer removed → the entry stands)", async () => {
+    // Same substrate as the OW32 pin above: alice's per-user echo, a
+    // watermark covering its basis, the instance not yet served.
+    const alice = openClient(aliceSigner);
+    const engine = await server.engineForSpace(space);
+    const compiled = await alice.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: PER_USER_PATTERN }],
+    }, { space });
+    const arg = alice.getCell<Record<string, unknown>>(
+      space,
+      "ag-arrival-arg",
+      undefined,
+    );
+    const result = alice.getCell<{ echo: string }>(
+      space,
+      "ag-arrival-result",
+      compiled.resultSchema,
+    );
+    await arg.sync();
+    await result.sync();
+    {
+      const tx = alice.edit();
+      arg.withTx(tx).set({});
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = alice.edit();
+      alice.run(tx, compiled, arg, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await alice.idle();
+    await alice.storageManager.synced();
+    const cancelDemand = result.sink(() => {});
+    const typedArg = alice.getCell<{ draft: string }>(
+      space,
+      "ag-arrival-arg",
+      compiled.argumentSchema,
+    );
+    {
+      const tx = alice.edit();
+      typedArg.key("draft").withTx(tx).set("A");
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await alice.idle();
+    await alice.storageManager.synced();
+    await waitUntil(
+      () => result.key("echo").get() === "echo:A",
+      "the speculative echo to render",
+    );
+    const overlay = alice.speculationOverlay!;
+    expect(overlay.entryCount(space)).toBeGreaterThanOrEqual(1);
+
+    // W covers the basis; the instance is unserved → the entry stands.
+    const writer = openClient(spaceSigner);
+    await pushWatermark(writer, Engine.serverSeq(engine));
+    await alice.idle();
+    await alice.storageManager.synced();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(overlay.entryCount(space)).toBeGreaterThanOrEqual(1);
+    expect(result.key("echo").get()).toBe("echo:A");
+    const arrivalSweepsBefore = overlay.arrivalSweepCount;
+
+    // The ARRIVAL, decoupled: the authoritative value for BOTH written
+    // docs lands at a seq ABOVE the covering W — an exhausted wave's
+    // derived commit carries no watermark movement — and NO further
+    // watermark write follows. Pre-fix nothing re-swept: the entry stood
+    // (hiding the served value) until the next unrelated commit lifted W
+    // (the attribution's E2: 48 s, released by another user's draft).
+    const echoLink = result.key("echo").getAsNormalizedFullLink();
+    const echoTarget = alice.getCellFromLink<unknown>({
+      ...echoLink,
+      schema: undefined,
+    }).getRaw({ lastNode: "writeRedirect" }) as
+      | { "/": { "link@1": { id?: string } } }
+      | undefined;
+    const echoDocId = echoTarget?.["/"]?.["link@1"]?.id ??
+      (() => {
+        const raw = alice.getCellFromLink<unknown>({
+          ...result.getAsNormalizedFullLink(),
+          schema: undefined,
+        }).getRaw() as { echo?: { "/": { "link@1": { id?: string } } } };
+        return raw?.echo?.["/"]?.["link@1"]?.id;
+      })();
+    expect(echoDocId).toBeDefined();
+    const aliceAgain = openClient(aliceSigner);
+    const authoritative = aliceAgain.getCellFromLink<unknown>({
+      space,
+      id: echoDocId as never,
+      scope: "user",
+      path: [],
+    });
+    const authoritativeSlot = aliceAgain.getCellFromLink<unknown>({
+      space,
+      id: echoDocId as never,
+      scope: "space",
+      path: [],
+    });
+    await authoritative.sync();
+    await authoritativeSlot.sync();
+    const watermarkAtArrival = readWatermark(engine);
+    {
+      const tx = aliceAgain.edit();
+      authoritative.withTx(tx).set("echo:server" as never);
+      authoritativeSlot.withTx(tx).set(
+        {
+          "/": {
+            "link@1": {
+              id: echoDocId,
+              overwrite: "redirect",
+              path: [],
+              scope: "user",
+            },
+          },
+        } as never,
+      );
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await aliceAgain.storageManager.synced();
+    // The arrival's seq is above W and W does not move.
+    expect(Engine.serverSeq(engine)).toBeGreaterThan(watermarkAtArrival);
+    // THE PIN: retired and rendered off the arrival alone.
+    await waitUntil(
+      () => overlay.entryCount(space) === 0,
+      "the entry to retire on the decoupled arrival",
+      10_000,
+    );
+    await waitUntil(
+      () => result.key("echo").get() === "echo:server",
+      "the authoritative value to render",
+      10_000,
+    );
+    expect(overlay.arrivalSweepCount).toBeGreaterThan(arrivalSweepsBefore);
+    expect(readWatermark(engine)).toBe(watermarkAtArrival);
+    await alice.idle();
+    expect(alice.scheduler.isNonSettling()).toBe(false);
+    cancelDemand();
+  });
+
+  it("stage C T2, the arrival wake is a TRIGGER, not a relaxation (scripted): an arrival for a doc no entry wrote sweeps nothing; an arrival while W < floor retires nothing; an arrival with W ≥ floor retires the entry", async () => {
+    const doc = "of:arrival-scripted" as never;
+    const other = "of:arrival-unrelated" as never;
+    let nextLocalSeq = 10;
+    let confirmedSeq = 0;
+    const replica = {
+      sealNative: (
+        native: { operations: Array<Record<string, unknown>> },
+        _source: unknown,
+        verdict: Promise<unknown>,
+      ) => {
+        const localSeq = nextLocalSeq++;
+        return {
+          localSeq,
+          commit: {
+            localSeq,
+            // A confirmed read at seq 40: the entry's floor.
+            reads: {
+              confirmed: [{ id: "of:input", seq: 40 }],
+              pending: [],
+            },
+            operations: native.operations,
+          },
+          settled: verdict.then(() => undefined, () => undefined),
+        };
+      },
+      speculationRetirementView: () => ({
+        confirmedSeq,
+        pendingLocalSeqs: [] as number[],
+      }),
+      ackedSeqOf: () => undefined,
+      speculationAckObserver: undefined as (() => void) | undefined,
+      speculationArrivalObserver: undefined as
+        | ((arrived: readonly { id: string; scope?: string }[]) => void)
+        | undefined,
+    };
+    const watermarkSinks: Array<(value: unknown) => void> = [];
+    const runtime = {
+      storageManager: { open: () => ({ replica }) },
+      getCellFromLink: (link: { id: string }) => ({
+        sink: (cb: (value: unknown) => void) => {
+          if (link.id === SERVER_EXECUTION_WATERMARK_DOC_ID) {
+            watermarkSinks.push(cb);
+          }
+          return () => {};
+        },
+      }),
+    } as unknown as Runtime;
+    const destination = new SpeculationOverlayDestination(runtime);
+    const tx = {
+      tx: {
+        sourceAction: { name: "writer" },
+        sealInto: (collector: {
+          sealSpaceCommit: (
+            space: MemorySpace,
+            native: unknown,
+            source: unknown,
+          ) => Promise<unknown>;
+        }) =>
+          collector.sealSpaceCommit(
+            space,
+            {
+              operations: [{
+                op: "set",
+                id: doc,
+                scope: "user",
+                value: { value: 1 },
+              }],
+              preconditions: [],
+            },
+            { sourceAction: { name: "writer" } },
+          ).then(() => ({ ok: {} })),
+      },
+    } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(tx, { actionId: "arrival", kind: "derivation" });
+    expect((await destination.seal(tx)).ok).toBeDefined();
+    expect(destination.entryCount(space)).toBe(1);
+    // The overlay installed its arrival wake beside the watermark sink.
+    expect(replica.speculationArrivalObserver).toBeDefined();
+    const arrive = (id: string) =>
+      replica.speculationArrivalObserver!([{ id, scope: "user" }]);
+    // W < floor (30 < 40): an arrival of the written doc retires NOTHING
+    // — the coverage rule stands; the wake is not a relaxation.
+    for (const sink of watermarkSinks) sink({ seq: 30 });
+    confirmedSeq = 45;
+    arrive(doc);
+    expect(destination.entryCount(space)).toBe(1);
+    expect(destination.arrivalSweepCount).toBe(1);
+    // W ≥ floor, but the arrival names a doc no entry wrote: no sweep.
+    for (const sink of watermarkSinks) sink({ seq: 40 });
+    // (the watermark sink itself swept — and retired nothing? It would
+    // retire now: W 40 ≥ floor 40 and confirmedSeq 45 ≥ 40. Re-seal a
+    // fresh entry to test the filter on a live one.)
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(destination.entryCount(space)).toBe(0);
+    confirmedSeq = 0;
+    expect((await destination.seal(tx)).ok).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(destination.entryCount(space)).toBe(1);
+    const sweepsBefore = destination.arrivalSweepCount;
+    arrive(other);
+    expect(destination.arrivalSweepCount).toBe(sweepsBefore);
+    expect(destination.entryCount(space)).toBe(1);
+    // The arrival of the WRITTEN doc with W ≥ floor: retired.
+    confirmedSeq = 46;
+    arrive(doc);
+    expect(destination.arrivalSweepCount).toBe(sweepsBefore + 1);
+    expect(destination.entryCount(space)).toBe(0);
+    destination.close();
+    expect(replica.speculationArrivalObserver).toBeUndefined();
+  });
+
+  it("stage C T2, the LATE-ECHO rule (scripted): an event-handler echo sealed AFTER its intent reached a terminal consequence is dropped at seal — never registered, its writes render nothing; a fresh intent's echo still registers (mutation: check removed → the late echo registers)", async () => {
+    let nextLocalSeq = 10;
+    const sealed: Array<Record<string, unknown>[]> = [];
+    const replica = {
+      sealNative: (
+        native: { operations: Array<Record<string, unknown>> },
+        _source: unknown,
+        verdict: Promise<unknown>,
+      ) => {
+        sealed.push(native.operations);
+        const localSeq = nextLocalSeq++;
+        return {
+          localSeq,
+          commit: {
+            localSeq,
+            reads: { confirmed: [], pending: [] },
+            operations: native.operations,
+          },
+          settled: verdict.then(() => undefined, () => undefined),
+        };
+      },
+      speculationRetirementView: () => ({
+        confirmedSeq: 0,
+        pendingLocalSeqs: [] as number[],
+      }),
+      ackedSeqOf: () => undefined,
+      speculationAckObserver: undefined as (() => void) | undefined,
+      speculationArrivalObserver: undefined,
+    };
+    const runtime = {
+      storageManager: { open: () => ({ replica }) },
+      getCellFromLink: () => ({ sink: () => () => {} }),
+    } as unknown as Runtime;
+    const destination = new SpeculationOverlayDestination(runtime);
+    const sidecarId = "of:late-echo-sidecar";
+    const echoOf = (eventId: string) => {
+      const tx = {
+        tx: {
+          sourceAction: { name: "handler" },
+          sealInto: (collector: {
+            sealSpaceCommit: (
+              space: MemorySpace,
+              native: unknown,
+              source: unknown,
+            ) => Promise<unknown>;
+          }) =>
+            collector.sealSpaceCommit(
+              space,
+              {
+                operations: [{
+                  op: "set",
+                  id: "of:toggle",
+                  scope: "space",
+                  value: { everyoneIsAdmin: true },
+                }],
+                preconditions: [],
+              },
+              { sourceAction: { name: "handler" } },
+            ).then(() => ({ ok: {} })),
+        },
+      } as unknown as IExtendedStorageTransaction;
+      stampSpeculationRunContext(tx, {
+        actionId: "handler",
+        kind: "event-handler",
+        eventId,
+      });
+      return tx;
+    };
+    // Intent 1: fired, then its TERMINAL consequence arrives (a refused
+    // delivery — the same `#settleIntentConsequence` seam the consequenced
+    // mark, the dropped notice and the served error all reach) BEFORE the
+    // client's local dispatch seals its echo.
+    destination.trackIntent(space, sidecarId, "evt-late");
+    destination.resolveIntent(space, sidecarId, "evt-late", {
+      kind: "refused",
+      reason: "test: terminal before the echo",
+    });
+    expect((await destination.seal(echoOf("evt-late"))).ok).toBeDefined();
+    // Dropped: nothing sealed into the replica, no entry, counted.
+    expect(sealed.length).toBe(0);
+    expect(destination.entryCount(space)).toBe(0);
+    expect(destination.lateEchoDropCount).toBe(1);
+    // Intent 2: fired and still pending — its echo registers as before.
+    destination.trackIntent(space, sidecarId, "evt-fresh");
+    expect((await destination.seal(echoOf("evt-fresh"))).ok).toBeDefined();
+    expect(sealed.length).toBe(1);
+    expect(destination.entryCount(space)).toBe(1);
+    expect(destination.lateEchoDropCount).toBe(1);
+    // An untracked eventId (a client cascade's minted id) is never
+    // terminal: it registers too.
+    expect((await destination.seal(echoOf("evt-cascade-minted"))).ok)
+      .toBeDefined();
+    expect(sealed.length).toBe(2);
     expect(destination.entryCount(space)).toBe(2);
     destination.close();
   });

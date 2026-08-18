@@ -128,6 +128,10 @@ const createOnlyMarkKey = (
 
 type CfcInstrumentationHooks = {
   onRelevantTx?(): void;
+  /** Stage C tuning T1: one flow-label probe was evaluated (`computed`) or
+   * answered from the memoized negative verdict (`memo`). Measurement
+   * only. */
+  onFlowLabelProbe?(outcome: "computed" | "memo"): void;
   onPreparedTx?(): void;
   onPrepareReject?(reasons: readonly string[]): void;
   onDigestInvalidation?(reason: string): void;
@@ -393,10 +397,42 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #sealDestination: TransactionSealDestination | undefined;
   #sealDestinationPinned = false;
 
+  // Stage C tuning T1 (see IExtendedStorageTransaction.probeFlowLabelWork):
+  // the activity epoch counts every journaled read, write, dereference
+  // trace and trigger read; the memo holds the last NEGATIVE probe verdict
+  // with the epoch it was taken at (stamped AFTER the probe, whose own
+  // metadata reads are internal-verifier reads that never change the
+  // verdict but do move the epoch).
+  #cfcActivityEpoch = 0;
+  #flowLabelProbeMemo: { epoch: number } | undefined;
+
   constructor(
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
   ) {}
+
+  /** Stage C tuning T1: any transaction activity that could change the
+   * flow-label probe's answer moves the epoch. */
+  #noteCfcActivity(): void {
+    this.#cfcActivityEpoch += 1;
+  }
+
+  probeFlowLabelWork(): boolean {
+    if (this.#flowLabelProbeMemo?.epoch === this.#cfcActivityEpoch) {
+      this.cfcInstrumentation.onFlowLabelProbe?.("memo");
+      return false;
+    }
+    this.cfcInstrumentation.onFlowLabelProbe?.("computed");
+    const verdict = flowLabelWorkExists(this);
+    // Only the negative verdict is worth remembering: a positive one makes
+    // the caller mark the tx relevant, and a relevant tx is never probed
+    // again. Stamped with the epoch as it stands AFTER the probe (its own
+    // metadata reads moved it).
+    this.#flowLabelProbeMemo = verdict
+      ? undefined
+      : { epoch: this.#cfcActivityEpoch };
+    return verdict;
+  }
 
   /**
    * One-shot configuration of the seal destination, called by the Runtime
@@ -694,6 +730,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
+    this.#noteCfcActivity();
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("trigger-reads-after-prepare");
     }
@@ -979,6 +1016,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private prepareRead(address: Pick<IMemorySpaceAddress, "scope">): void {
+    this.#noteCfcActivity();
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("read-after-prepare");
     }
@@ -1047,6 +1085,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    */
   private noteWrite(): void {
     this.#hasWrites = true;
+    this.#noteCfcActivity();
   }
 
   private invalidateReadResultCache(): void {
@@ -1058,6 +1097,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
+    this.#noteCfcActivity();
     // Freeze on entry: from this point on the record is owned by the tx and
     // identity-stable. Mirrors the chokepoint pattern on
     // `recordCfcWritePolicyInput()`; together they ensure every CfcAddress
@@ -2025,12 +2065,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // exactly the txs nobody marked). Probe only while unprepared: the
       // probe reads metadata, and a read after prepare would invalidate the
       // digest of a transaction that already did its flow work.
+      // Stage C tuning T1: `Runtime.prepareTxForCommit` usually asked the
+      // same question a moment ago on this very transaction; the memoized
+      // negative verdict answers here unless the tx journaled anything
+      // since (see probeFlowLabelWork).
       if (
         !this.#cfcState.relevant &&
         this.#cfcState.prepare.status === "unprepared" &&
         this.#cfcState.flowLabelsMode !== "off" &&
         this.#cfcState.enforcementMode !== "disabled" &&
-        flowLabelWorkExists(this)
+        this.probeFlowLabelWork()
       ) {
         this.markCfcRelevant("flow-labels");
       }
@@ -2378,6 +2422,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
     this.wrapped.addCfcTriggerReads(reads);
+  }
+
+  probeFlowLabelWork(): boolean {
+    return this.wrapped.probeFlowLabelWork?.() ??
+      flowLabelWorkExists(this.wrapped);
   }
 
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T {

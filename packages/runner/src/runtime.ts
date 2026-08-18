@@ -604,6 +604,11 @@ export interface RuntimeOptions {
 
 export interface CfcRuntimeStats {
   cfcRelevantTx: number;
+  /** Stage C tuning T1: flow-label relevance probes actually EVALUATED
+   * (`flowLabelWorkExists`) vs answered from the transaction's memoized
+   * negative verdict. Measurement only. */
+  flowLabelProbesComputed: number;
+  flowLabelProbeMemoHits: number;
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -636,6 +641,8 @@ export interface CfcRuntimeStats {
 
 const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   cfcRelevantTx: 0,
+  flowLabelProbesComputed: 0,
+  flowLabelProbeMemoHits: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -1480,6 +1487,20 @@ export class Runtime {
     | undefined;
 
   /**
+   * Server-execution v2 stage C tuning (T3; serving-loop.md §2/§3): the
+   * serving scheduler's mid-wave hook. A SERVING runtime's scheduler
+   * yields one macrotask between runs whenever its slice of continuous
+   * work is spent (scheduler/cooperative-yield.ts — that is what makes the
+   * wave's flush deadline honest and lets the lease-renew and push-flush
+   * timers fire mid-settle), and calls this observer synchronously at
+   * every such yield. The SpaceServer installs it at activation to renew
+   * the lease mid-wave once the wave has run longer than TTL/3 — a renew
+   * that never depends on the timer queue being serviced. Undefined
+   * everywhere else (the OFF arm and clients construct no yielder at all).
+   */
+  servingYieldObserver: (() => void) | undefined;
+
+  /**
    * Register an in-flight async builtin operation so `settled()` waits for it
    * instead of racing the post-commit flush. The scheduler registers an
    * effect-bearing commit's promise here (a race-free barrier — the flush runs
@@ -1827,6 +1848,10 @@ export class Runtime {
         this.installCfcPolicyManifest(space, reference, tx),
       onRelevantTx: () => {
         this.cfcStats.cfcRelevantTx += 1;
+      },
+      onFlowLabelProbe: (outcome) => {
+        if (outcome === "memo") this.cfcStats.flowLabelProbeMemoHits += 1;
+        else this.cfcStats.flowLabelProbesComputed += 1;
       },
       onPreparedTx: () => {
         this.cfcStats.cfcPreparedTx += 1;
@@ -2299,10 +2324,13 @@ export class Runtime {
     }
     // Flow-label relevance is computed, not caller-marked (S16): the
     // laundering txs are exactly the ones nothing marked relevant.
+    // Stage C tuning T1: probed ONCE per transaction activity epoch — the
+    // commit chokepoint re-uses this call's negative verdict (see
+    // IExtendedStorageTransaction.probeFlowLabelWork).
     if (
       !state.relevant &&
       state.flowLabelsMode !== "off" &&
-      flowLabelWorkExists(tx)
+      (tx.probeFlowLabelWork?.() ?? flowLabelWorkExists(tx))
     ) {
       tx.markCfcRelevant("flow-labels");
     }
