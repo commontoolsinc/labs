@@ -19,6 +19,7 @@ import {
   gzipText,
   type HeldSpool,
   listSpools,
+  listStagingSpools,
   localObjectName,
   readEnv,
   readSpool,
@@ -228,6 +229,20 @@ export async function sweepSpools(
     if (adopted === undefined) continue;
     try {
       await shipSpool(dir, key, env, transport);
+    } finally {
+      adopted.close();
+    }
+  }
+  // A staging directory is a spool whose owner died before renaming it
+  // into place; no producer ever pointed at it, so it holds nothing to
+  // ship and is deleted.
+  for (const dir of await listStagingSpools(root)) {
+    const adopted = await tryAdoptSpool(dir);
+    if (adopted === undefined) continue;
+    try {
+      await deleteSpool(dir);
+    } catch (error) {
+      warn(`deleting abandoned ${dir} failed: ${error}`);
     } finally {
       adopted.close();
     }

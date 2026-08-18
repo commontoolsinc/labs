@@ -322,18 +322,27 @@ async function runPatternTests(
       const testFile = testFiles[nextIndex++];
       const p = (async () => {
         const startMs = performance.now();
-        const result = await runCommand(
-          [
-            ...cfCmd,
-            "test",
-            "--timeout",
-            "180000",
-            "--root",
-            patternsDir,
-            testFile,
-          ],
-          { cwd: rootDir, env: { CF_TEST_RECORDS_DIR: "" } },
-        );
+        // A child that cannot even spawn is that file's failure, kept
+        // inside the pool promise: a rejection here would escape the
+        // Promise.race below, skip the fragment close, and leave the
+        // remaining children running unawaited.
+        let result: Awaited<ReturnType<typeof runCommand>>;
+        try {
+          result = await runCommand(
+            [
+              ...cfCmd,
+              "test",
+              "--timeout",
+              "180000",
+              "--root",
+              patternsDir,
+              testFile,
+            ],
+            { cwd: rootDir, env: { CF_TEST_RECORDS_DIR: "" } },
+          );
+        } catch (error) {
+          result = { success: false, code: 127, stderr: String(error) };
+        }
         const durationMs = performance.now() - startMs;
 
         testTimings.push({

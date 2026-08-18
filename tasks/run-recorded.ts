@@ -34,7 +34,16 @@ async function main(): Promise<void> {
   const kind = args.shift();
   const scope = args.shift();
   const name = args.shift();
-  if (kind === undefined || scope === undefined || name === undefined) usage();
+  // Empty identity components are rejected here, loudly: the record schema
+  // requires non-empty parts, so a record built from one would be dropped
+  // by every reader and the command would silently vanish from history.
+  if (
+    kind === undefined || kind.length === 0 ||
+    scope === undefined || scope.length === 0 ||
+    name === undefined || name.length === 0
+  ) {
+    usage();
+  }
   if (args.shift() !== "--") usage();
   if (args.length === 0) usage();
 

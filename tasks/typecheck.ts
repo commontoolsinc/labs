@@ -115,14 +115,16 @@ const UI_EXCLUDED_TRAILING = new Set("outliner");
 
 async function uiComponentFiles(): Promise<string[]> {
   const files: string[] = [];
-  let directories: Deno.DirEntry[] = [];
+  const directories: Deno.DirEntry[] = [];
   try {
-    directories = [];
     for await (const entry of Deno.readDir(UI_COMPONENTS_DIR)) {
       directories.push(entry);
     }
-  } catch {
-    return files;
+  } catch (error) {
+    // This task is the single type-checking point for these paths, so a
+    // component tree that cannot be enumerated fails the task rather than
+    // silently dropping the whole ui group from coverage.
+    throw new Error(`cannot enumerate ${UI_COMPONENTS_DIR}: ${error}`);
   }
   for (const entry of directories) {
     if (!entry.isDirectory) continue;

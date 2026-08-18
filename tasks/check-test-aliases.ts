@@ -5,109 +5,26 @@
  * (docs/plans/test-run-telemetry.md). Each line maps an old identity — or
  * a whole scope, for package renames — to its replacement, with the date
  * of the rename; readers resolve aliases transitively and apply one only
- * to records older than its date.
+ * to records older than its date. The parsing and resolution live in
+ * @commonfabric/test-support/records; this gate holds the file itself to
+ * history's rules.
  *
- * The file is history, so this gate holds it to history's rules: existing
- * lines are never edited or removed (the committed content must be a
- * prefix of the new content), every line must parse, no identity may be
- * mapped twice, and the mapping graph must have no cycle — a cycle would
- * send resolution around forever and means someone renamed something back,
- * which is a new rename with its own line, not an edit to an old one.
+ * The file is history, so existing lines are never edited or removed (the
+ * committed content must be a prefix of the new content), every line must
+ * parse, no identity may be mapped twice, and the mapping graph must have
+ * no cycle — a cycle would send resolution around forever and means
+ * someone renamed something back, which is a new rename with its own
+ * line, not an edit to an old one.
  *
  * Usage: check-test-aliases.ts [base-ref]   (default: origin/main)
  */
 
-const ALIAS_FILE = "tasks/test-identity-aliases.jsonl";
-
-/** One alias line: a full-identity mapping or a whole-scope mapping. */
-export interface AliasLine {
-  /** ISO date of the rename; readers apply the alias to older records. */
-  date: string;
-  from: { k: string; s: string; n?: string };
-  to: { k: string; s: string; n?: string };
-}
-
-function isIdentityPart(value: unknown, wholeScope: boolean): boolean {
-  if (typeof value !== "object" || value === null) return false;
-  const part = value as Record<string, unknown>;
-  if (typeof part.k !== "string" || part.k.length === 0) return false;
-  if (typeof part.s !== "string" || part.s.length === 0) return false;
-  if (wholeScope) return part.n === undefined;
-  return typeof part.n === "string" && part.n.length > 0;
-}
-
-/** Parses one line; returns an error message instead of a value when bad. */
-export function parseAliasLine(line: string): AliasLine | string {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    return "is not JSON";
-  }
-  if (typeof value !== "object" || value === null) return "is not an object";
-  const alias = value as Record<string, unknown>;
-  if (
-    typeof alias.date !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(alias.date)
-  ) {
-    return "has no ISO date";
-  }
-  const wholeScope = (alias.from as Record<string, unknown> | null)?.n ===
-    undefined;
-  if (!isIdentityPart(alias.from, wholeScope)) {
-    return "has a malformed `from`";
-  }
-  if (!isIdentityPart(alias.to, wholeScope)) {
-    return wholeScope
-      ? "maps a whole scope to a single identity"
-      : "has a malformed `to`";
-  }
-  return value as AliasLine;
-}
-
-function keyOf(part: { k: string; s: string; n?: string }): string {
-  // A JSON array: printable, and unambiguous for names with any content.
-  return JSON.stringify([part.k, part.s, part.n ?? null]);
-}
-
-/**
- * Structural problems across the whole file: a second mapping from one
- * identity, and cycles under transitive resolution.
- */
-export function aliasGraphProblems(aliases: readonly AliasLine[]): string[] {
-  const problems: string[] = [];
-  const byFrom = new Map<string, AliasLine>();
-  for (const alias of aliases) {
-    const from = keyOf(alias.from);
-    if (byFrom.has(from)) {
-      problems.push(
-        `two mappings from ${JSON.stringify(alias.from)}; an identity is ` +
-          "mapped at most once",
-      );
-      continue;
-    }
-    byFrom.set(from, alias);
-  }
-  for (const alias of byFrom.values()) {
-    const start = keyOf(alias.from);
-    const seen = new Set<string>([start]);
-    let cursor = byFrom.get(keyOf(alias.to));
-    while (cursor !== undefined) {
-      const from = keyOf(cursor.from);
-      if (from === start) {
-        problems.push(
-          `cycle through ${JSON.stringify(alias.from)}; a rename back is a ` +
-            "new rename with its own line",
-        );
-        break;
-      }
-      if (seen.has(from)) break;
-      seen.add(from);
-      cursor = byFrom.get(keyOf(cursor.to));
-    }
-  }
-  return problems;
-}
+import {
+  ALIAS_FILE,
+  aliasGraphProblems,
+  type AliasLine,
+  parseAliasLine,
+} from "@commonfabric/test-support/records";
 
 async function git(...args: string[]): Promise<string> {
   const { code, stdout, stderr } = await new Deno.Command("git", {
@@ -139,8 +56,17 @@ async function main(): Promise<void> {
   let committed = "";
   try {
     committed = await git("show", `${mergeBase}:${ALIAS_FILE}`);
-  } catch {
-    // The file did not exist at the merge base; everything present is new.
+  } catch (error) {
+    // Only a path that did not exist at the merge base reads as empty
+    // history. Any other git failure fails the gate: treating it as an
+    // absent file would approve a rewrite on an error.
+    const message = String(error);
+    const absent = message.includes("does not exist") ||
+      message.includes("exists on disk, but not in");
+    if (!absent) {
+      console.error(`Cannot read ${ALIAS_FILE} at the merge base: ${error}`);
+      Deno.exit(2);
+    }
   }
   const current = await Deno.readTextFile(ALIAS_FILE);
 

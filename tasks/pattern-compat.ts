@@ -144,8 +144,11 @@ async function main() {
       const reason = formatError(error);
       unavailable.set(key, reason);
       evaluationErrors.push({ pattern: key, error: reason });
+    } finally {
+      // In a finally so a file without a pattern export is timed too; its
+      // record below still carries the compile it cost.
+      timings.push({ key, ms: performance.now() - started });
     }
-    timings.push({ key, ms: performance.now() - started });
   }
   if (timingEnabled) {
     console.log("\nSlowest compiles:");
@@ -184,6 +187,30 @@ async function main() {
   // caught: it has baselines but no contract, which `checkPattern` reports.
   const keys = [...new Set([...contracts.keys(), ...unavailable.keys()])]
     .sort();
+  const compileMsByKey = new Map(
+    timings.map((timing) => [timing.key, timing.ms]),
+  );
+  const unexpectedKeys = new Set(
+    evaluationErrors
+      .filter((failure) => !UNEVALUABLE_PATTERNS.has(failure.pattern))
+      .map((failure) => failure.pattern),
+  );
+  // One gate-kind record per file, appended the moment its verdict is
+  // known so a killed run keeps every finished file's record. The
+  // retirement findings of an unfiltered shard 1 concern patterns outside
+  // this shard's file set; they fail the run-level record the CI step's
+  // run-recorded wrapper emits, not a per-file one.
+  const appendRecord = (key: string) =>
+    recordsFragment?.append({
+      line: "record",
+      test: { k: "gate", s: "repo", n: `pattern-compat ${key}` },
+      outcome: failedKeys.has(key) || unexpectedKeys.has(key)
+        ? "fail"
+        : "pass",
+      durationMs: Math.round(
+        (compileMsByKey.get(key) ?? 0) + (checkMsByKey.get(key) ?? 0),
+      ),
+    });
   for (const key of keys) {
     const current = contracts.get(key);
     const baselines = await readBaselines(BASELINES_DIR, key);
@@ -226,40 +253,17 @@ async function main() {
       const kept = patternFindings.filter((f) => f.kind !== "missing-baseline");
       if (kept.length > 0) failedKeys.add(key);
       findings.push(...kept);
+      appendRecord(key);
       continue;
     }
 
     if (patternFindings.length > 0) failedKeys.add(key);
     findings.push(...patternFindings);
+    appendRecord(key);
   }
 
   await runtime.dispose();
-
-  // The retirement findings of an unfiltered shard 1 concern patterns
-  // outside this shard's file set; they fail the run-level record, not a
-  // per-file one. Every file this shard processed gets its own record.
-  if (recordsFragment !== undefined) {
-    const compileMsByKey = new Map(
-      timings.map((timing) => [timing.key, timing.ms]),
-    );
-    const unexpectedKeys = new Set(
-      evaluationErrors
-        .filter((failure) => !UNEVALUABLE_PATTERNS.has(failure.pattern))
-        .map((failure) => failure.pattern),
-    );
-    for (const key of keys) {
-      const durationMs = (compileMsByKey.get(key) ?? 0) +
-        (checkMsByKey.get(key) ?? 0);
-      const failed = failedKeys.has(key) || unexpectedKeys.has(key);
-      recordsFragment.append({
-        line: "record",
-        test: { k: "gate", s: "repo", n: `pattern-compat ${key}` },
-        outcome: failed ? "fail" : "pass",
-        durationMs: Math.round(durationMs),
-      });
-    }
-    recordsFragment.close();
-  }
+  recordsFragment?.close();
 
   if (recorded.length > 0) {
     console.log(`\nRecorded ${recorded.length} contract(s):`);

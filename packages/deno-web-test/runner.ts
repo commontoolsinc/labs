@@ -14,8 +14,9 @@ import { TestFileResults, TestResultError } from "./interface.ts";
 
 // The record scope of the harnessed package: the last segment of its
 // manifest's name, or the directory's own name when no manifest names it.
+// deno.json is read first because Deno resolves it first when both exist.
 async function packageScope(): Promise<string> {
-  for (const manifest of ["deno.jsonc", "deno.json"]) {
+  for (const manifest of ["deno.json", "deno.jsonc"]) {
     try {
       const parsed = parseJsonc(await Deno.readTextFile(manifest)) as {
         name?: string;

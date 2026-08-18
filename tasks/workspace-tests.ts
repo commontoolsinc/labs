@@ -28,7 +28,7 @@ export function parseDisabledPackageList(raw: string | undefined): string[] {
   return (raw ?? "").split(/[,\s]+/).filter((name) => name.length > 0);
 }
 
-export async function initializeDb(cwd: string = Deno.cwd()): Promise<void> {
+export async function initializeDb(cwd: string = Deno.cwd()): Promise<boolean> {
   console.log("Initializing database dependencies...");
   const result = await new Deno.Command(Deno.execPath(), {
     args: ["task", "initialize-db"],
@@ -41,8 +41,9 @@ export async function initializeDb(cwd: string = Deno.cwd()): Promise<void> {
     console.error("Failed to initialize database dependencies.");
     console.log(decode(result.stdout));
     console.error(decode(result.stderr));
-    Deno.exit(result.code);
+    return false;
   }
+  return true;
 }
 
 export async function testPackage(
@@ -193,7 +194,7 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
 // through a runner that forwards trailing flags to one), so an appended
 // --junit-path lands on it whole. The runner threads the flag to these and
 // ingests the XML into the spool as unit-kind records when recording is on.
-// The exceptions and why they stay out: patterns and ui run two test
+// The exceptions and why they stay out: api, patterns, and ui run two test
 // commands in one task line, so the flag reaches only the second; cli's
 // run-tests.ts runs three deno test invocations per slice, which would each
 // overwrite the file; static, content-hash, data-model, memory, pure-json,
@@ -202,7 +203,6 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
 // browser harnesses that record through the deno-web-test reporter instead;
 // home-schemas, generated-patterns, and patterns/auth have no tests.
 const JUNIT_CAPABLE_MEMBERS = new Set([
-  "./packages/api",
   "./packages/background-piece-service",
   "./packages/cf-harness",
   "./packages/connectors/agents",
@@ -335,12 +335,18 @@ export async function runTests(
   // temporary directory, and each leaf's XML is ingested into the spool as
   // unit-kind records under the package's own scope. The runner stays
   // plumbing: it forwards the flag and moves the results; the reported
-  // names come from the leaves.
+  // names come from the leaves. A temporary directory that cannot be
+  // created turns recording off with a warning; it never fails the suite.
   const spoolDir = recordsDir();
-  const junitRoot = spoolDir !== undefined
-    ? await Deno.makeTempDir({ prefix: "workspace-junit-" })
-    : undefined;
-  const fragment = spoolDir !== undefined
+  let junitRoot: string | undefined;
+  if (spoolDir !== undefined) {
+    try {
+      junitRoot = await Deno.makeTempDir({ prefix: "workspace-junit-" });
+    } catch (error) {
+      console.warn(`test records: no JUnit directory: ${error}`);
+    }
+  }
+  const fragment = spoolDir !== undefined && junitRoot !== undefined
     ? FragmentWriter.open(spoolDir)
     : undefined;
 
@@ -417,7 +423,9 @@ export async function main(): Promise<boolean> {
   const shardRaw = Deno.env.get("TEST_SHARD");
   const shard = shardRaw ? parseShard(shardRaw) : undefined;
   assertTaskTestsIncluded(await readWorkspaceMembers());
-  await initializeDb();
+  // A failure here returns rather than exits: the entry point's recording
+  // teardown runs in a finally that an exit would skip.
+  if (!await initializeDb()) return false;
   return await runTests(
     [
       ...ALL_DISABLED,

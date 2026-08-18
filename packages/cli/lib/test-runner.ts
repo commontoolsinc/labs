@@ -1978,6 +1978,7 @@ export async function runTests(
   for (const testPath of paths) {
     console.log(`\n${basename(testPath)}`);
     const failedBefore = totalFailed;
+    const fileStarted = performance.now();
 
     // `runTestPattern` RAISES a teardown that did not complete, which is the
     // right contract for a direct caller — the vintage capture is about to read
@@ -1991,7 +1992,7 @@ export async function runTests(
     } catch (error) {
       totalFailed++;
       console.log(`  ✗ ${formatError(error)}`);
-      recordFile(testPath, true, 0);
+      recordFile(testPath, true, performance.now() - fileStarted);
       continue;
     }
     allResults.push(result);

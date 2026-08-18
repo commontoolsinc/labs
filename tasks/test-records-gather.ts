@@ -102,16 +102,24 @@ export async function gather(options: GatherOptions): Promise<void> {
       for await (const entry of expandGlob(spec.glob)) {
         if (!entry.isFile) continue;
         matched++;
-        const xml = await Deno.readTextFile(entry.path);
-        const ingestOptions: Parameters<typeof ingestJUnit>[1] = {
-          kind: spec.kind,
-          scope: spec.scope,
-        };
-        if (spec.prefix !== undefined) ingestOptions.filePrefix = spec.prefix;
-        records.push(...ingestJUnit(xml, ingestOptions));
+        // Caught per file: one unreadable or malformed report costs only
+        // itself, not the records of every later file the glob matched.
+        try {
+          const xml = await Deno.readTextFile(entry.path);
+          const ingestOptions: Parameters<typeof ingestJUnit>[1] = {
+            kind: spec.kind,
+            scope: spec.scope,
+          };
+          if (spec.prefix !== undefined) ingestOptions.filePrefix = spec.prefix;
+          records.push(...ingestJUnit(xml, ingestOptions));
+        } catch (error) {
+          console.warn(
+            `test records: ingesting ${entry.path} failed: ${error}`,
+          );
+        }
       }
     } catch (error) {
-      console.warn(`test records: ingesting ${spec.glob} failed: ${error}`);
+      console.warn(`test records: expanding ${spec.glob} failed: ${error}`);
     }
     if (matched === 0) {
       console.warn(`test records: no JUnit files matched ${spec.glob}`);
@@ -185,7 +193,14 @@ async function main(): Promise<void> {
         shard = value;
         break;
       case "--junit":
-        junit.push(parseJUnitSpec(value));
+        // A malformed specification skips itself with a warning: the spool
+        // and the other specifications still gather, so one bad flag does
+        // not cost the job's whole record set.
+        try {
+          junit.push(parseJUnitSpec(value));
+        } catch (error) {
+          console.warn(`test records: ignoring --junit ${value}: ${error}`);
+        }
         break;
       default:
         usage();
