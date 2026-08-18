@@ -325,7 +325,7 @@ function stringValue(value: string | null | undefined, fallback = "—"): string
   return value && value.length > 0 ? value : fallback;
 }
 
-function numberValue(value: number | undefined): number {
+function numberValue(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
@@ -1497,14 +1497,15 @@ const commandCellPageFromNewest = lift(
   (
     {
       values,
+      length,
       page,
     }: {
       values: OpaqueCell<AgentCommandValue[] | undefined>;
+      length: number;
       page: number;
     },
   ): Array<OpaqueCell<AgentCommandValue>> => {
-    const materialized = materializeOpaqueCell(values);
-    const length = Array.isArray(materialized) ? materialized.length : 0;
+    if (values === undefined) return [];
     const end = Math.max(0, length - page * DEBUG_TABLE_PAGE_SIZE);
     const start = Math.max(0, end - DEBUG_TABLE_PAGE_SIZE);
     return Array.from(
@@ -1643,7 +1644,9 @@ const DebugView = pattern<DebugInput, DebugOutput>(
 
     const recentIndexState = computed(() => sessionIndexState(recentIndex));
     const completeIndexState = computed(() => sessionIndexState(allIndex));
-    const commandActionValues = computed(() => commands.get() ?? []);
+    const commandActionCount = computed(() =>
+      numberValue(commands.key("length").get())
+    );
     const receiptEntries = computed(() => receipts?.receipts ?? []);
     const activityEntries = computed(() => health?.activity ?? []);
     const sources = computed(() => materializedCells(health?.sources ?? []));
@@ -1750,13 +1753,14 @@ const DebugView = pattern<DebugInput, DebugOutput>(
       );
     });
     const commandHistoryPageCount = computed(() =>
-      pageCountFor(commandActionValues.length)
+      pageCountFor(numberValue(commandActionCount))
     );
     const currentCommandHistoryPage = computed(() =>
       currentPageFor(commandHistoryPage.get(), commandHistoryPageCount)
     );
     const commandPageValues = commandCellPageFromNewest({
       values: commandsCell,
+      length: commandActionCount,
       page: currentCommandHistoryPage,
     });
     // deno-lint-ignore no-explicit-any
@@ -1800,7 +1804,7 @@ const DebugView = pattern<DebugInput, DebugOutput>(
     const sessionCount = computed(() =>
       numberValue(sessionIndexJson(allIndex)?.totalSessionCount)
     );
-    const commandCount = computed(() => commandActionValues.length);
+    const commandCount = computed(() => numberValue(commandActionCount));
     const receiptCount = computed(() => receiptEntries.length);
     const activityCount = computed(() => activityEntries.length);
     const titleSortLabel = computed(() =>

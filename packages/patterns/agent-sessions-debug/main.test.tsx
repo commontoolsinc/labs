@@ -217,7 +217,11 @@ const IndexFixture = pattern<
   totalSessionCount: sessionCount,
   olderSessionCount: 0,
   sources: [source],
-  sessions: sessionCount === 1 ? [firstSession] : [firstSession, secondSession],
+  sessions: sessionCount === 0
+    ? bucket === "all" ? [firstSession] : []
+    : sessionCount === 1
+    ? [firstSession]
+    : [firstSession, secondSession],
 }));
 
 const HealthFixture = pattern<
