@@ -71,8 +71,15 @@ export interface MentionEvent {
    * referenced piece, deliberately. This field's schema reaches every topic in
    * `mentionable`, so naming one would demand it of pieces deployed before this
    * verb existed and refuse their update (`deno task pattern-vintage` catches
-   * exactly that). Nothing reads through it anyway: it is stored and
-   * compared. */
+   * exactly that). Nothing reads through it anyway: it is stored and compared.
+   *
+   * A NON-REFERENCE IS STORED INERT, and the verb does not currently catch it.
+   * `mention` rejects a missing payload and nothing else, so a caller that
+   * sends an address as text — which an inline CLI call argument produces,
+   * being parsed as plain JSON — stores that text. It resolves to no piece, so
+   * it forms no edge and appears in no topic's `referencedBy`: a dead entry
+   * rather than a wrong one. Reaching a mention through the References card's
+   * picker is what avoids it, because the picker hands over the piece. */
   topic: Writable<unknown>;
 }
 
@@ -299,9 +306,14 @@ export interface TopicPiece extends TopicSummary {
    *
    * The board's pivot is declared over this and nothing else, so what one topic
    * costs a full-board scan is exactly this list of identities. Declared
-   * `unknown[]` for the same reason the pivot is: these are references, and
-   * comparing them never reads what is behind them. Declared as cells, because
-   * that is what a consumer has to read them as to compare them at all.
+   * `unknown[]` because these are references, and comparing them never reads
+   * what is behind them.
+   *
+   * The cell annotation that makes them comparable belongs to the READER, not
+   * here: the pivot declares its own view of this list as
+   * `TopicMentionSource.mentions: ComparableCell<unknown>[]`, and that is what
+   * makes its graph settle rather than depend on load order. A published
+   * `unknown[]` is what each reader annotates for itself.
    *
    * The default stands alone: a declared default and `| undefined` collide,
    * and the default is what a topic deployed before this path existed
