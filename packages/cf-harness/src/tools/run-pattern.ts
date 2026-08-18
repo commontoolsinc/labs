@@ -674,10 +674,13 @@ export const runPatternTool: HarnessToolDefinition<
     // closed set of names to measure against. `additionalProperties` admits
     // them both when it is `true` and when it is a schema: a schema there is an
     // index signature, which names what an undeclared key is allowed to hold
-    // rather than forbidding one.
-    const additionalArguments =
-      (argumentSchema as { additionalProperties?: unknown })
-        .additionalProperties;
+    // rather than forbidding one. A plain-function pattern compiles with no
+    // argument schema at all — not even a boolean one — so the read is
+    // guarded rather than assumed.
+    const additionalArguments = isObjectNotArray(argumentSchema)
+      ? (argumentSchema as { additionalProperties?: unknown })
+        .additionalProperties
+      : undefined;
     const admitsUndeclaredArguments = additionalArguments === true ||
       isObjectNotArray(additionalArguments);
     if (

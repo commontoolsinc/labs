@@ -278,6 +278,25 @@ describe("run-pattern", () => {
       expect(output.linkedStringCount).toBe(0);
     });
 
+    it("returns a structured error for a plain-function pattern whose compiled argument schema is undefined, rather than throwing out of the run", async () => {
+      const engine = createEngine();
+      // A bare default function compiles to a pattern with no argument
+      // schema at all — not even the boolean schema `pattern()` synthesizes
+      // — so the undeclared-input check must not assume one exists. The
+      // source itself is not a runnable pattern; what this pins is that its
+      // failure comes back as a tool output the model can read and correct.
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          'export const NAME = "Probe";',
+          "export default function({}: {}) { return { ok: true }; }",
+          "",
+        ].join("\n"),
+      });
+      const output = result.output as { status: string; message?: string };
+      expect(output.status).toBe("error");
+      expect((output.message ?? "").length).toBeGreaterThan(0);
+    });
+
     it("keeps a computed number when the result carries framework keys the schema does not declare", async () => {
       // Every pattern result carries the framework's own keys, and a schema
       // describing only what the pattern computes declares none of them. The
