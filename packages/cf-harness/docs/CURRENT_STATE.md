@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-08-14
+Last verified: 2026-08-18
 
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
@@ -42,8 +42,10 @@ The current package provides:
 - workspace, Fabric, and explicit host mounts with path containment;
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
-- one child at a time through `default`, `browser`, `web_fetch`, and
-  `web_search` profiles;
+- one child at a time through `default`, `browser`, `web_fetch`, `web_search`,
+  and `pattern-author` profiles, the last with its own turn budget, no
+  file-write tools, and a discriminated-union return contract whose failure arm
+  is a fixed inert vocabulary;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;
@@ -67,7 +69,13 @@ The current package provides:
   run for cell addresses, recorded in `run-state.json`, and carried across
   resume; the prompt loop swaps addresses to tokens in model-bound tool output
   and resolves tokens in model-authored tool arguments before policy evaluation
-  and dispatch, `delegate_task` arguments excepted;
+  and dispatch, `delegate_task` and `describe_handle` arguments excepted;
+- delegation-scoped cross-agent references: tokens the parent names in a
+  delegation's goal or context seed the child's handle table with exactly those
+  entries, a child-discovered reference returns as a parent-minted token, and
+  unheld token-shaped text in a child return is scrubbed; a `describe_handle`
+  parent tool reports a held token's harness-derived schema and piece path
+  without reading its value;
 - bounded request-attribution headers on OpenAI-compatible gateway traffic,
   using persisted operational provenance rather than request content or personal
   identifiers;
@@ -156,8 +164,10 @@ mode.
   tool messages are not swapped, and interactive restore does not persist the
   handle table.
 - The session-local handle table covers cell addresses only. Value handles
-  (`cfh:v:`) are reserved in the token grammar but not implemented, and there is
-  no explicit dereference/release mechanism.
+  (`cfh:v:`) are reserved in the token grammar but not implemented.
+  `describe_handle` discloses a held token's shape, never its value; there is
+  still no value dereference or release mechanism, and cross-agent transfer
+  exists only as delegation-scoped seeding.
 - `estimatedCostUsd` is available only for known GPT-5.6 gateway models when the
   response includes cache reads and writes. It uses public OpenAI pricing;
   gateway markup, subscription quota accounting, and provider invoices remain

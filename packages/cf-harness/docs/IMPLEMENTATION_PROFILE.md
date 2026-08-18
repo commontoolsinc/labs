@@ -1,8 +1,8 @@
 # cf-harness Implementation Profile
 
 Status: draft conformance statement\
-Profile date: 2026-08-14\
-Implementation revision: Labs `114f8af286d16203a0fa7356fa6f1da1af6d57d2`
+Profile date: 2026-08-18\
+Implementation revision: Labs `093006b5a72c0235c9c9b4a76aac985fc4ce1f41`
 
 This document describes `@commonfabric/cf-harness` against the draft Common
 Fabric
@@ -76,12 +76,17 @@ readiness.
 
 Current selectable parent tools are `bash`, `read_file`, `view_image`,
 `web_fetch`, `read_skill_resource`, `run_skill_script`, `edit_file`,
-`write_file`, `delegate_task`, and the conditional `run_pattern`. Individual
-runs receive only their configured subset; `web_fetch` and `run_skill_script`
-are not in the ordinary default surface. `run_pattern` is absent unless its API
-URL, identity, and space are all configured. `bash-no-sandbox` exists only as a
-built-in used by authorized child profiles and cannot be selected as a parent
-CLI tool.
+`write_file`, `delegate_task`, `describe_handle`, and the conditional
+`run_pattern`. Individual runs receive only their configured subset; `web_fetch`
+and `run_skill_script` are not in the ordinary default surface. `run_pattern` is
+absent unless its API URL, identity, and space are all configured.
+`bash-no-sandbox` exists only as a built-in used by authorized child profiles
+and cannot be selected as a parent CLI tool.
+
+`describe_handle` reports the shape of a held handle token — the harness-derived
+schema and the referent's path within its piece — without dereferencing the cell
+or reading a value. An unknown or unheld token gets a typed not-known answer,
+not an error and not authority.
 
 `run_pattern` accepts at most 256 KiB of inline source. It resolves whole-string
 LLM-friendly link inputs to live cells only within the configured space and
@@ -92,12 +97,21 @@ artifact. The shared Common Fabric CLI parser accepts the same LLM-friendly
 reference grammar at piece-intake seams, including validated embedded paths for
 commands that operate on paths.
 
-Current child profiles are `default`, `browser`, `web_fetch`, and `web_search`.
-Each profile supplies an exact tool/network/skill policy. Parent skills and
-authority do not transfer implicitly. Sandboxed children inherit the parent's
-working directory within their host-backed mounts; host-command children begin
-at the engine workspace rather than inheriting a parent directory they cannot
-resolve.
+Current child profiles are `default`, `browser`, `web_fetch`, `web_search`, and
+`pattern-author`. Each profile supplies an exact tool/network/skill policy.
+Parent skills and authority do not transfer implicitly. Sandboxed children
+inherit the parent's working directory within their host-backed mounts;
+host-command children begin at the engine workspace rather than inheriting a
+parent directory they cannot resolve.
+
+The `pattern-author` profile moves pattern authoring out of the orchestrating
+parent: it carries its own larger turn budget, receives `bash`, `read_file`,
+`read_skill_resource`, `describe_handle`, and the fabric-gated `run_pattern` —
+no file-write tools, because its deliverable is a result reference rather than a
+file — and returns through a discriminated-union contract whose failure arm uses
+a fixed inert vocabulary, so a failure cannot pass as a success and carries
+nothing read out of a space. Authoring-guide skills are preloaded best-effort
+when the run has a skill registry.
 
 ## Lifecycle and evidence
 
@@ -121,9 +135,18 @@ compaction disablement is the exception.
 The session-local address handle table maps positively identified cell addresses
 to deterministic per-run `cfh:a:` tokens. Model-bound tool output and
 model-authored tool arguments pass through the table before policy evaluation
-and dispatch. Bare Fabric IDs are not converted, delegation arguments carry
-tokens only as inert text, raw artifacts retain canonical references, and the
-table is persisted across batch resume.
+and dispatch. Bare Fabric IDs are not converted, raw artifacts retain canonical
+references, and the table is persisted across batch resume.
+
+Delegation is the cross-agent handle boundary. Tokens the parent wrote into a
+delegation's goal or context reach the child verbatim and seed the child's own
+table with exactly those entries — a token the parent did not name is absent
+from the child's table and cannot resolve there. A reference the child
+discovered for itself returns to the parent as a freshly minted parent token; a
+seeded address mints back to the token the parent already holds; and
+token-shaped text the child's own table cannot resolve is irreversibly scrubbed
+rather than passed through, so a child cannot name a parent entry the delegation
+withheld.
 
 Resume preserves recorded transcript/run configuration and rejects unsupported
 new inputs such as image or skill changes. The local Loom host additionally
@@ -154,12 +177,13 @@ in-flight external side effect.
    web tools.
 4. **Incomplete opaque-reference boundary.** Address handles cover cell
    addresses but not the reserved value-handle form. Denial-path messages are
-   not swapped, interactive restore does not persist the table, and there is no
-   cross-agent transfer, dereference, release, or garbage-collection contract.
-   Raw operator reports may expose artifact paths and canonical references.
-   Owner: `cf-harness`. Retirement: every model-facing path uses held opaque
-   handles with explicit lifetime and release/readback semantics while operator
-   tooling retains resolvable provenance.
+   not swapped, and interactive restore does not persist the table. Cross-agent
+   transfer exists only as delegation-scoped seeding, and `describe_handle`
+   discloses only shape; there is still no value dereference, release, or
+   garbage-collection contract. Raw operator reports may expose artifact paths
+   and canonical references. Owner: `cf-harness`. Retirement: every model-facing
+   path uses held opaque handles with explicit lifetime and release/readback
+   semantics while operator tooling retains resolvable provenance.
 5. **Durable trusted-host pattern execution.** Each `run_pattern` call creates
    an unlisted, detached Fabric piece whose source revision remains a retention
    root. Abort stops the piece, but there is no deadline, resource ceiling,
@@ -172,10 +196,11 @@ in-flight external side effect.
 
 - `deno task test` — package contract suite.
 - `deno task test:integration` — environment-gated real `runsc-cfc` paths.
-- Handle-table, prompt-loop-handle, image-attachment, compaction, provenance,
-  provider/auth, `run_pattern`, and local-Loom-host suites — model boundary,
-  observation integrity, context continuity, request attribution, external side
-  effects, and exact resume binding.
+- Handle-table, prompt-loop-handle, subagent-handle, `describe_handle`,
+  image-attachment, compaction, provenance, provider/auth, `run_pattern`, and
+  local-Loom-host suites — model boundary, delegation-scoped handle seeding and
+  scrubbing, observation integrity, context continuity, request attribution,
+  external side effects, and exact resume binding.
 - Loom `tests/harness/` and dispatch tests — capability skew, commands,
   cancellation, mounts, structured results, interactive translation, and run
   review.
