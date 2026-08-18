@@ -5156,11 +5156,15 @@ export class Runner {
         return implementation as (...args: any[]) => any;
       }
     }
-    // Eviction insurance: the artifact index is FIFO-bounded and can roll a
-    // running pattern's module out mid-session, and a post-flip graph has no
-    // legacy ref (and no body when the writer proved resolvability). The
-    // engine's content-addressed implementation index is strong for the
-    // session, so the `$implRef` keeps resolving.
+    // Second-chance resolution through the engine's content-addressed
+    // implementation index, which is strong for the whole session. The
+    // artifact index consulted above is also session-lifetime and never
+    // evicted — the pattern manager's bounded FIFO covers only the
+    // module-namespace reuse cache — so this arm exists for the cases where
+    // the two indexes genuinely diverge: a module verified-evaluated by the
+    // engine without passing through the pattern manager's registration
+    // (a standalone-Engine compile), and a post-flip graph that carries no
+    // legacy ref and no body.
     return this.runtime.harness.getVerifiedImplementation?.(
       ref.identity,
       ref.symbol,
@@ -6569,6 +6573,27 @@ export class Runner {
         "Verified function resolution missed; running SES-recompiled," +
         " CFC-unverified fallback",
         { $implRef: implRef },
+      ]);
+    } else {
+      // No `$implRef` at all: the module carries neither provenance nor a
+      // verified entry ref, so the bare-SES re-evaluation below is the only
+      // resolution left. Module-scope references do not exist under that
+      // evaluator, so when a module that needs them lands here, helpers fail
+      // at call time with no upstream signal — this counter is the tell.
+      // Counts increment even while the logger is disabled, so a live
+      // worker's logger ledger always exposes how often unverified source is
+      // executing.
+      logger.debug("unverified-source-fallback", () => [
+        "Module reached resolution with no $implRef; running SES-recompiled," +
+        " CFC-unverified fallback from stringified source",
+        {
+          preview: typeof module.implementation === "function"
+            ? Function.prototype.toString.call(module.implementation).slice(
+              0,
+              80,
+            )
+            : String(module.implementation).slice(0, 80),
+        },
       ]);
     }
     if (typeof module.implementation === "function") {

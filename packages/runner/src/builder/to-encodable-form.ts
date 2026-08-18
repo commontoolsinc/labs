@@ -1,4 +1,5 @@
 import { isObjectOrArray } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
 import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
@@ -43,6 +44,15 @@ export type CellAliasResolver = (
   path: readonly PropertyKey[],
   ignoreSelfAliases: boolean,
 ) => AliasBinding | null | undefined;
+
+// Ledger-visible counter for the body-only module write (see
+// `moduleToEncodableForm`): counts increment even while the logger is
+// disabled, so the volume of function implementations serialized with neither
+// provenance nor an entry ref is always observable from the logger ledger.
+const serializeShapeLogger = getLogger("builder.serialize-shape", {
+  enabled: false,
+  logCountEvery: 0,
+});
 
 /**
  * The refusal a `FabricInstance` gets from the binding walks. Nothing reaches
@@ -326,6 +336,24 @@ export function moduleToEncodableForm(module: Module): FabricExecPlainObject {
     const implRefValue = (provenance?.symbol
       ? { identity: provenance.identity, symbol: provenance.symbol }
       : undefined) ?? entryRefValue;
+    if (module.type === "javascript" && implRefValue === undefined) {
+      // This module serializes body-only with no `$implRef` — a shape a
+      // reader can resolve only through the bare-SES stringified-source
+      // fallback, where module-scope references do not exist. Test-built and
+      // never-verified modules produce it legitimately, so this stays at
+      // debug; the ledger count still fires while the logger is disabled, so
+      // the write volume is always observable.
+      serializeShapeLogger.debug("noref-body-write", () => [
+        "Serializing a function implementation with neither provenance nor a" +
+        " verified entry ref (body-only, no $implRef)",
+        {
+          preview: Function.prototype.toString.call(implementation).slice(
+            0,
+            80,
+          ),
+        },
+      ]);
+    }
     const implRef = implRefValue ? { $implRef: implRefValue } : {};
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);
