@@ -129,6 +129,11 @@ const pingDeclared = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
+__cfBindVerifiedBinding(pingDeclared, {
+    sourceFile: "/test.tsx",
+    position: { line: 67, col: 0 },
+    bindingName: "echoDeclared"
+});
 // A callback reached through property access — the spelling no syntax list
 // anticipated. Callback-ness is the checker's call signatures, so any
 // callable expression recognizes the form; a schema is never callable.

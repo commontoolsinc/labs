@@ -423,8 +423,9 @@ patterns) and the full fixture suite green.
    absent for inline-expression origins), and its coverage widened from the
    trusted-binding set to every function-bearing builder artifact (hoisted,
    authored, exported, export-default). The helper stamps the metadata onto the
-   value AND its `.implementation`, so the annotation rides the very function
-   `fn.src` is asked about. Security guard: `bindingPath` stays
+   value; the implementation-stamp branch is skipped for builders whose
+   implementations `hardenVerifiedFunction` froze during the call, so the read
+   path in step 3 goes through the value. Security guard: `bindingPath` stays
    trusted-scope-only (with `sourceFile` it mints verified binding identity —
    `cfc/implementation-identity.ts`). No sandbox-verifier change was needed (it
    checks the helper's canonical source and matches wrapper calls by

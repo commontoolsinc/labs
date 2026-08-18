@@ -100,6 +100,14 @@ const onReset = (_: unknown, state: { count: Writable<number> }) => {
 };
 const reset = handler<unknown, { count: Writable<number> }>(onReset);
 
+// ORIGIN-I: builder whose callback is a same-file FUNCTION DECLARATION,
+// declared below its use (declarations hoist — mirrors the live
+// generated-pattern form lift(sanitizeTickets)).
+const zero = handler<unknown, { count: Writable<number> }>(onZero);
+function onZero(_: unknown, state: { count: Writable<number> }) {
+  state.count.set(0 * 1);
+}
+
 export default pattern<ProbeInput>(({ count, flag, label, items, task }) => {
   // ORIGIN-A: authored computed with a capture
   const doubled = computed(() => count * 2);
@@ -122,6 +130,7 @@ export default pattern<ProbeInput>(({ count, flag, label, items, task }) => {
         </ul>
         <cf-button onClick={bump({ count })}>bump</cf-button>
         <cf-button onClick={reset({ count })}>reset</cf-button>
+        <cf-button onClick={zero({ count })}>zero</cf-button>
         {/* ORIGIN-E: inline captured action */}
         <cf-button onClick={action(() => count * 4)}>quad</cf-button>
       </div>
@@ -192,7 +201,8 @@ function collectBuilderSites(root: ts.SourceFile): BuilderSite[] {
           const name = decl.name.text;
           // Hoisted synthetics plus the authored module-scope `bump` handler.
           if (
-            HOISTED_NAME.test(name) || name === "bump" || name === "reset"
+            HOISTED_NAME.test(name) || name === "bump" || name === "reset" ||
+            name === "zero"
           ) {
             sites.push({
               tag: name,
@@ -424,6 +434,11 @@ const ORIGIN_ANNOTATIONS = new Map<string, {
     anchor: "(_: unknown, state: { count: Writable<number> }) => {",
     bindingName: "onReset",
   }],
+  // ORIGIN-I: a declaration-form callback anchors at the declaration itself.
+  ["state.count.set(0 * 1)", {
+    anchor: "function onZero",
+    bindingName: "onZero",
+  }],
   [
     "count, flag, label, items, task",
     { anchor: "({ count, flag, label, items, task }) => {" },
@@ -462,6 +477,10 @@ Deno.test(
     assert(
       tags.includes("reset"),
       "expected the referenced-callback `reset` handler (ORIGIN-H)",
+    );
+    assert(
+      tags.includes("zero"),
+      "expected the declaration-callback `zero` handler (ORIGIN-I)",
     );
     assert(
       tags.includes("export-default"),
@@ -528,7 +547,10 @@ Deno.test(
       // ORIGIN-H's builder call carries its callback as an IDENTIFIER
       // (`handler(…, onReset)`), so there is no function argument to recover
       // here; its authored position is pinned through the annotation check.
-      if (site.tag !== "export-default" && site.tag !== "reset") {
+      if (
+        site.tag !== "export-default" && site.tag !== "reset" &&
+        site.tag !== "zero"
+      ) {
         assert(site.callback, `${site.tag}: expected a callback argument`);
       }
       const callbackText = site.callback
@@ -571,6 +593,8 @@ Deno.test(
           `${site.tag}: expected the ORIGIN-D map callback, got: ${callText}`,
         );
         checkAnnotation(site.tag, "(item) =>");
+      } else if (site.tag === "zero") {
+        checkAnnotation(site.tag, "state.count.set(0 * 1)");
       } else if (site.tag === "reset") {
         assert(
           callbackText === undefined ||

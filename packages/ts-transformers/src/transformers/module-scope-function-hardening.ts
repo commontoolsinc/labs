@@ -359,7 +359,10 @@ function wrapWithFunctionHardener(
  */
 interface BuilderArtifact {
   readonly call: ts.CallExpression;
-  readonly fn: ts.ArrowFunction | ts.FunctionExpression;
+  readonly fn:
+    | ts.ArrowFunction
+    | ts.FunctionExpression
+    | ts.FunctionDeclaration;
 }
 
 /**
@@ -390,8 +393,37 @@ function resolveBuilderArtifact(
   for (const argument of call.arguments) {
     const fn = resolveCallbackFunctionExpression(argument, checker);
     if (fn) return { call, fn };
+    const declaration = resolveSameFileFunctionDeclaration(argument, checker);
+    if (declaration) return { call, fn: declaration };
   }
   return undefined;
+}
+
+/**
+ * The same-file `function` declaration an identifier argument names, if any —
+ * `lift(sanitizeTickets)` with `function sanitizeTickets(…)` below it (the
+ * declaration may follow the use; function declarations hoist). Resolved here
+ * rather than in the shared callback resolver so its other callers keep their
+ * behavior. An identifier whose declaration lives in ANOTHER file resolves to
+ * nothing: a position is same-file by contract (`sourceFile` names this
+ * module), so an imported callback carries no annotation from the importing
+ * module.
+ */
+function resolveSameFileFunctionDeclaration(
+  argument: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.FunctionDeclaration | undefined {
+  const target = unwrapExpression(argument);
+  if (!ts.isIdentifier(target)) return undefined;
+  const symbol = checker.getSymbolAtLocation(target);
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (!declaration || !ts.isFunctionDeclaration(declaration)) return undefined;
+  if (
+    declaration.getSourceFile().fileName !== target.getSourceFile().fileName
+  ) {
+    return undefined;
+  }
+  return declaration;
 }
 
 /** What a binding-identity annotation describes. */
