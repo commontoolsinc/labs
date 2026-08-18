@@ -156,7 +156,7 @@ export abstract class BaseCodecEngine<
     try {
       return this.decodeValue(this.encodedFromSerializedForm(data), act);
     } catch (e) {
-      return act.settleSyntacticRefusal(e);
+      return act.settleThrown(e);
     }
   }
 

@@ -63,27 +63,31 @@ export class DecodeAct extends BaseCodecAct {
   }
 
   /**
-   * Settles a refusal of the serialized form itself against leniency: strictly
-   * it raises, and leniently it becomes a `ProblematicValue`.
+   * Settles a thrown value against leniency: strictly it re-raises, and
+   * leniently a `ProblematicStateError` becomes a `ProblematicValue`.
    *
-   * A serialized form is data off a channel like any other, so being the wrong
-   * shape for this format -- or the right shape around a payload that will not
-   * parse -- is a malformation of the same kind as a bad state inside a
-   * well-formed one, and settles the same way.
+   * Only that one error type is settled. Anything else is somebody's bug
+   * rather than a report about wire data, and is re-raised untouched -- so a
+   * fault in the code doing the decoding does not come back to a caller
+   * disguised as malformed input.
    *
-   * Only this class's own refusal is settled. Anything else thrown while
-   * converting a form is the format's own business and is re-raised untouched,
-   * so a bug in a conversion does not come back as a `ProblematicValue`.
-   *
-   * Available to a format's own entry points, which reach a conversion without
-   * passing through `decode()` -- `JsonCodecEngine`'s byte pair, for one.
+   * The commonest thing to hand this is a refusal of the serialized form
+   * itself, from a format's own entry points, which reach a conversion without
+   * passing through `decode()` -- `JsonCodecEngine`'s byte pair, for one. Such
+   * a form is data off a channel like any other, so being the wrong shape for
+   * this format is a malformation of the same kind as a bad state inside a
+   * well-formed one, and settles the same way. Nothing here is specific to
+   * that case.
    *
    * @throws Whatever it was given, if this act is not lenient or the throw was
-   *   not a refusal.
+   *   not a `ProblematicStateError`.
    */
-  settleSyntacticRefusal(e: unknown): FabricValue {
+  settleThrown(e: unknown): FabricValue {
     if (this.config.lenient && (e instanceof ProblematicStateError)) {
-      return this.reportMalformed(e.wireTypeTag, e.state, e.message);
+      // The error renders itself rather than being taken apart and rebuilt:
+      // it already holds the three facts, normalized the way this class would
+      // normalize them.
+      return deepFreeze(e.asProblematicValue());
     }
 
     // Rethrown rather than rebuilt, strictly: the refusal already names its

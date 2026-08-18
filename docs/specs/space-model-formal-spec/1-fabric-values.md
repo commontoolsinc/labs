@@ -2555,8 +2555,8 @@ never gets to decide when one is made.
 handed is its own. What arrives there is data off a channel like anything
 else, so a form that is not this format's is refused by throwing, and
 `decode()` settles that against the engine's `lenient` setting — a lenient
-decode answers a syntactic fault with a `ProblematicValue`, exactly as it
-does a fault found further in. `newDecodeAct()` sees the same form and
+decode returns a `ProblematicValue` for a syntactic fault, exactly as it
+does for a fault found further in. `newDecodeAct()` sees the same form and
 may read something out of it for the act, but it *sniffs rather than
 validates*: it runs before anything has established that the form is this
 format's at all.

@@ -437,8 +437,20 @@ describe("JsonCodecEngine", () => {
         .decode("fvj1:{not json", new TestLiveEnvironment());
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
-      expect((decoded as ProblematicValue).error)
+
+      const problem = decoded as ProblematicValue;
+
+      // All three facts, not just the message: the tag and state are what
+      // carry the refusal's account of what arrived, and a settlement that
+      // dropped them would still match on the message alone.
+      expect(problem.error)
         .toMatch(/Malformed JSON in an encoded `FabricValue` string/);
+      expect(problem.wireTypeTag).toBe("");
+      expect(problem.state).toBe("{not json");
+
+      // Deep-frozen like any other decoded result, so a caller cannot alter
+      // the account it was handed.
+      expect(Object.isFrozen(problem)).toBe(true);
     });
   });
 

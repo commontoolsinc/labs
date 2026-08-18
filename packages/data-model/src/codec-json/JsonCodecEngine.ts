@@ -134,7 +134,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     try {
       tree = JsonCodecEngine.#parseWireText(text);
     } catch (e) {
-      return act.settleSyntacticRefusal(e);
+      return act.settleThrown(e);
     }
 
     return this.decodeValue(tree, act);
