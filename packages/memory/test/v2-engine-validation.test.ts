@@ -460,7 +460,12 @@ Deno.test("rejects incomplete or forged closures included in a commit", async ()
 
 Deno.test("serves a repeat schema reference from the per-engine verification cache", async () => {
   await withEngine((engine) => {
-    const schema = { type: "string", title: "cache-hit-leaf" } as const;
+    const leaf = { type: "string", title: "cache-hit-leaf" } as const;
+    const leafHash = internSchemaAsTaggedHashString(leaf);
+    const schema = {
+      type: "object",
+      properties: { x: { $ref: `cid:${leafHash}` } },
+    } as const;
     const hash = internSchemaAsTaggedHashString(schema);
     const carrier = (target: string) => ({
       linked: {
@@ -476,7 +481,10 @@ Deno.test("serves a repeat schema reference from the per-engine verification cac
     applyCommit(engine, {
       sessionId: "s:a",
       commit: commit(1, {
-        operations: [setOp(`cid:${hash}`, schema)],
+        operations: [
+          setOp(`cid:${hash}`, schema),
+          setOp(`cid:${leafHash}`, leaf),
+        ],
       }),
     });
     // The first stored-backed reference verifies by re-hashing the stored
@@ -488,7 +496,8 @@ Deno.test("serves a repeat schema reference from the per-engine verification cac
       }),
     });
     // ...and a repeat reference is served from that cache: the document is
-    // immutable, so its unchanged seq revalidates it without re-hashing.
+    // immutable, so its unchanged seq revalidates it without re-hashing,
+    // and the cached entry re-enqueues its own dependencies.
     applyCommit(engine, {
       sessionId: "s:a",
       commit: commit(3, {

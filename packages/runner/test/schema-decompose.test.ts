@@ -737,4 +737,143 @@ describe("schema-decompose", () => {
       });
     }
   });
+
+  describe("refusals and recomposition errors", () => {
+    it("passes boolean subschemas through scan and rewrite untouched", () => {
+      const decomposed = decomposeSchema({
+        type: "object",
+        properties: {
+          flag: true,
+          named: { $ref: "#/$defs/BoolPassLeaf" },
+        },
+        $defs: { BoolPassLeaf: { type: "string" } },
+      });
+      const root = parseExternalSchemaRef(decomposed.rootRef)!;
+      const rootDoc = decomposed.documents.get(
+        root.taggedHash,
+      ) as JSONSchemaObj;
+      expect((rootDoc.properties as Record<string, unknown>).flag).toBe(true);
+    });
+
+    it("refuses the deprecated definitions keyword in a subschema", () => {
+      expect(() =>
+        decomposeSchema(
+          {
+            type: "object",
+            properties: {
+              nested: {
+                type: "object",
+                definitions: { Old: { type: "number" } },
+              },
+              l: { $ref: "#/$defs/DefinitionsLeaf" },
+            },
+            $defs: { DefinitionsLeaf: { type: "string" } },
+          } as JSONSchemaObj,
+        )
+      ).toThrow("the deprecated `definitions` keyword is present");
+    });
+
+    it("recomposes a bare document with a boolean subschema untouched", () => {
+      const doc: JSONSchema = {
+        type: "object",
+        properties: { flag: true, s: { type: "string" } },
+      };
+      const hash = internSchemaAsTaggedHashString(doc);
+      const recomposed = recomposeSchema(
+        `cid:${hash}`,
+        (taggedHash) => taggedHash === hash ? doc : undefined,
+      ) as JSONSchemaObj;
+      expect((recomposed.properties as Record<string, unknown>).flag).toBe(
+        true,
+      );
+    });
+
+    it("refuses a definition that is not a schema", () => {
+      expect(() =>
+        decomposeSchema(
+          {
+            type: "object",
+            properties: { g: { $ref: "#/$defs/GoodLeaf" } },
+            $defs: {
+              GoodLeaf: { type: "string" },
+              BadLeaf: 42,
+            },
+          } as never,
+        )
+      ).toThrow("definition `BadLeaf` is not a schema");
+    });
+
+    it("includes a repeated pre-existing external ref's closure once", () => {
+      const leaf: JSONSchema = { type: "string", title: "repeated-external" };
+      const leafHash = internSchemaAsTaggedHashString(leaf);
+      const decomposed = decomposeSchema({
+        type: "object",
+        properties: {
+          direct: { $ref: `cid:${leafHash}` },
+          named: { $ref: "#/$defs/RepeatLeafCarrier" },
+        },
+        $defs: {
+          RepeatLeafCarrier: {
+            type: "object",
+            properties: { nested: { $ref: `cid:${leafHash}` } },
+          },
+        },
+      }, { resolveDocument: (hash) => hash === leafHash ? leaf : undefined });
+      expect(decomposed.documents.has(leafHash)).toBe(true);
+    });
+
+    it("rejects recomposing a non-reference root", () => {
+      expect(() => recomposeSchema("not-a-ref", () => undefined)).toThrow(
+        "Not an external schema reference",
+      );
+    });
+
+    it("rejects an unresolvable local ref inside a schema document", () => {
+      const doc: JSONSchema = {
+        type: "object",
+        properties: { broken: { $ref: "#/$defs/MissingMember" } },
+      };
+      const hash = internSchemaAsTaggedHashString(doc);
+      expect(() =>
+        recomposeSchema(
+          `cid:${hash}`,
+          (taggedHash) => taggedHash === hash ? doc : undefined,
+        )
+      ).toThrow("Unresolvable local ref in schema document");
+    });
+
+    it("rejects a bare root reference to a cyclic-group document", () => {
+      const doc: JSONSchema = { $defs: { GroupMember: { type: "string" } } };
+      const hash = internSchemaAsTaggedHashString(doc);
+      expect(() =>
+        recomposeSchema(
+          `cid:${hash}`,
+          (taggedHash) => taggedHash === hash ? doc : undefined,
+        )
+      ).toThrow("A bare root reference must not target a cyclic-group");
+    });
+
+    it("rejects a fragment reference to a missing member during the drain", () => {
+      const group: JSONSchema = {
+        $defs: { PresentMember: { type: "string" } },
+      };
+      const groupHash = internSchemaAsTaggedHashString(group);
+      const root: JSONSchema = {
+        type: "object",
+        properties: { frag: { $ref: `cid:${groupHash}#/$defs/AbsentMember` } },
+      };
+      const rootHash = internSchemaAsTaggedHashString(root);
+      expect(() =>
+        recomposeSchema(
+          `cid:${rootHash}`,
+          (taggedHash) =>
+            taggedHash === rootHash
+              ? root
+              : taggedHash === groupHash
+              ? group
+              : undefined,
+        )
+      ).toThrow("Schema document has no member `AbsentMember`");
+    });
+  });
 });

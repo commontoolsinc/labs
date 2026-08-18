@@ -476,4 +476,150 @@ describe("schema-doc-sync", () => {
     expect(resolved).not.toBe(false);
     expect((resolved as JSONSchemaObj).type).toBe("object");
   });
+
+  it("rejects a frame that replaces a stored schema document's content", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { replacedTarget: { type: "string" } },
+    };
+    const hash = internSchemaAsTaggedHashString(schema);
+    await writeDocs({ [`cid:${hash}`]: schema as FabricValue });
+
+    const provider = readerStorage.open(space);
+    const result = await provider.sync(`cid:${hash}` as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(result.error).toBeUndefined();
+    await readerStorage.synced();
+
+    // A frame no compliant server sends: the stored, verified document's id
+    // re-delivered with different content. Arrival validation rejects the
+    // frame whole before anything applies.
+    const forged = {
+      type: "sync",
+      fromSeq: 900_000,
+      toSeq: 900_001,
+      upserts: [{
+        branch: "",
+        id: `cid:${hash}`,
+        scope: "space",
+        seq: 900_000,
+        doc: { value: { type: "number", title: "forged replacement" } },
+      }],
+      removes: [],
+    };
+    expect(() =>
+      (provider.replica as unknown as {
+        applySessionSync(sync: unknown, type: string): void;
+      }).applySessionSync(forged, "integrate")
+    ).toThrow("was replaced with content that does not hash to its id");
+  });
+
+  it("rejects a frame carrying a broken schema ref, skipping malformed entries", () => {
+    const absent = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "never-delivered-dep",
+    });
+    const provider = readerStorage.open(space);
+    // Malformed entries (a non-string id, a non-object doc) are skipped by
+    // the validation scan; the broken embedded ref in the well-formed
+    // carrier still rejects the frame.
+    const frame = {
+      type: "sync",
+      fromSeq: 800_000,
+      toSeq: 800_001,
+      upserts: [
+        { branch: "", id: 42, scope: "space", seq: 1, doc: { value: {} } },
+        {
+          branch: "",
+          id: "of:frame-junk",
+          scope: "space",
+          seq: 1,
+          doc: "junk",
+        },
+        {
+          branch: "",
+          id: "of:frame-carrier",
+          scope: "space",
+          seq: 1,
+          doc: {
+            value: {
+              linked: {
+                "/": {
+                  [LINK_V1_TAG]: {
+                    id: "of:frame-target",
+                    path: [],
+                    schema: { $ref: `cid:${absent}` },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+      removes: [],
+    };
+    expect(() =>
+      (provider.replica as unknown as {
+        applySessionSync(sync: unknown, type: string): void;
+      }).applySessionSync(frame, "integrate")
+    ).toThrow("was delivered with a broken schema ref");
+  });
+
+  it("closes the staged watch view when a frame fails validation", async () => {
+    const provider = readerStorage.open(space);
+    const replica = provider.replica as unknown as {
+      applySessionSync(sync: unknown, type: string): void;
+    };
+    const original = replica.applySessionSync.bind(replica);
+    replica.applySessionSync = () => {
+      throw new Error("synthetic frame validation failure");
+    };
+    try {
+      const result = await provider.sync("of:view-close-probe" as URI, {
+        path: [],
+        schema: false,
+      });
+      expect(String(result.error?.message)).toContain(
+        "synthetic frame validation failure",
+      );
+    } finally {
+      replica.applySessionSync = original;
+    }
+  });
+
+  it("propagates a provider teardown failure out of close", async () => {
+    const signer = await Identity.fromPassphrase("schema-doc-sync");
+    const storage = EmulatedStorageManager.connectTo(server, { as: signer });
+    const provider = storage.open(space) as unknown as {
+      destroy(): Promise<void>;
+    };
+    const originalDestroy = provider.destroy.bind(provider);
+    provider.destroy = () => {
+      provider.destroy = originalDestroy;
+      return Promise.reject(new Error("synthetic destroy failure"));
+    };
+    await expect(storage.close()).rejects.toThrow("synthetic destroy failure");
+    // The rejection left the providers in place; a second close tears them
+    // down for real.
+    await storage.close();
+  });
+
+  it("propagates a provider teardown failure out of closeNow", async () => {
+    const signer = await Identity.fromPassphrase("schema-doc-sync");
+    const storage = EmulatedStorageManager.connectTo(server, { as: signer });
+    const provider = storage.open(space) as unknown as {
+      destroyNow(): Promise<void>;
+    };
+    const originalDestroyNow = provider.destroyNow.bind(provider);
+    provider.destroyNow = () => {
+      provider.destroyNow = originalDestroyNow;
+      return Promise.reject(new Error("synthetic destroyNow failure"));
+    };
+    await expect(storage.closeNow()).rejects.toThrow(
+      "synthetic destroyNow failure",
+    );
+    await storage.closeNow();
+  });
 });
