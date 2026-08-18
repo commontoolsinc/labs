@@ -63,11 +63,12 @@ permanently growing implementation plan.
   with the hosted-pattern-authoring prerequisite that an agent session runs
   under configured limits on model tokens, tool invocations, CPU, memory, and
   disk. What bounds an invocation today is the run's abort signal, plus the
-  scheduler's own convergence budget, which defers a reactive graph that will
-  not settle and reports each deferring pass through the
-  `scheduler.non-settling` telemetry marker. That covers reactive
-  non-convergence only: a loop inside a single computation body, or an async
-  builtin that never resolves, is bounded by neither.
+  scheduler's own convergence budget, which defers a reactive graph whose pass
+  exhausted its budget — converging-but-slow and never-settling alike — and
+  reports each deferring pass through the `scheduler.non-settling` telemetry
+  marker. That covers reactive non-convergence only: a loop inside a single
+  computation body, or an async builtin that never resolves, is bounded by
+  neither.
 - Define a retention and deletion story for the pieces `run_pattern` persists
   and for the run-state handle table. Each invocation leaves a
   stopped-but-never-deleted piece whose source-history revision is a
