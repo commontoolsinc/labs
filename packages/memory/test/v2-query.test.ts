@@ -1643,3 +1643,69 @@ Deno.test("memory v2 schema scan and verification caches stay bounded at scale",
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 delivers a meta-linked document that arrives after its referrer", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-meta-arrival";
+  try {
+    // The referrer's `pattern` meta link points at a document nothing has
+    // written yet. The absent target must still enter the tracker — the
+    // tracker is what makes the graph reactive — or its arrival would
+    // never reach this watch.
+    applyCommit(engine, {
+      sessionId: "session:meta-arrival-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:meta-arrival-referrer",
+          value: {
+            value: { n: 1 },
+            pattern: {
+              "/": {
+                "link@1": { id: "of:meta-arrival-target", path: [] },
+              },
+            },
+          },
+        }],
+      },
+    });
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-arrival-referrer",
+        selector: { path: [], schema: false },
+      }],
+    });
+    const targetKey = `${space}/space/of:meta-arrival-target` as const;
+    assert(tracked.state.tracker.has(targetKey));
+
+    applyCommit(engine, {
+      sessionId: "session:meta-arrival-writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:meta-arrival-target",
+          value: { value: { arrived: true } },
+        }],
+      },
+    });
+    const refreshed = refreshTrackedGraph(
+      space,
+      engine,
+      tracked.state,
+      new Set([toDirtyKey("of:meta-arrival-target")]),
+    );
+    assertExists(refreshed);
+    assert(refreshed.updates.has(targetKey));
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

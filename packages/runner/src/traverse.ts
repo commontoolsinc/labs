@@ -2537,14 +2537,18 @@ function loadMetaLinkedDocFromLink(
   if (address === undefined) {
     return undefined;
   }
-  // This read only loads the linked metadata doc so traversal can inspect it.
-  // The schema-guided traversal below records the real scheduling reads.
+  // Track the target before reading it: the tracker entry is what makes
+  // the graph reactive to this document — a change or a later arrival
+  // dirties a tracked key — so an absent-at-evaluation target must be
+  // tracked too, or nothing would re-run this load when it arrives. The
+  // read itself is deliberately not a scheduling read: delivery
+  // reactivity rides the tracker, not the runner scheduler.
+  const docKey = getTrackerKey(address);
+  schemaTracker.add(docKey, REJECTING_SELECTOR);
   const result = tx.read(address, { meta: ignoreReadForScheduling });
   if (result.error) {
     return undefined;
   }
-  const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, REJECTING_SELECTOR);
   return { address, value: result.ok.value };
 }
 
