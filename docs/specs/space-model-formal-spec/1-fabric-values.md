@@ -2497,8 +2497,8 @@ is not part of the public boundary interface.
  *
  * Deep-frozen invariant on the decode side: every such tree that
  * enters decoding is deep-frozen, enforced at the two construction
- * sites that feed it (`decode()` and `#fromBytes()`, unified in
- * `#parseWireText()`). This is what lets the tag-unwrap and `/quote` arms
+ * site that feeds it, `parseWireText()`. This is what lets the tag-unwrap and
+ * `/quote` arms
  * hand back extracted sub-trees directly without further copying. The
  * encode-side trees are transient (`JSON.stringify`-ed and discarded)
  * and are not covered by this invariant. The `readonly` on the array and
@@ -2517,8 +2517,10 @@ export type JsonCodecValue =
 ### 4.3 Public Boundary
 
 Every engine exposes `encode()` and `decode()`, parameterized by the boundary
-type — `string` for JSON, `Uint8Array` for a binary format — and an engine may
-add a pair for a second boundary type, as `JsonCodecEngine` does for bytes.
+type — `string` for JSON, `Uint8Array` for a binary format. An engine may add a
+pair for a second boundary type, though none does: a second pair over the same
+walk is API a caller can write for itself, and it invites the two forms to
+drift.
 Both are supplied by the base class and are not overridden: they mint the act
 and hand the work to it. An engine is otherwise its configuration — the codec
 registry and the leniency setting — and the two factories that say which act
@@ -2578,7 +2580,7 @@ running — the inner act gets its own bookkeeping instead of corrupting the
 outer one's. A format needing more than the base class knows about, such as a
 wire marker minted per call, subclasses the act and carries it there.
 
-`JsonCodecEngine` supplies both directions at both of its boundary types:
+`JsonCodecEngine` supplies both directions at its one boundary type:
 
 - `encode(value, env?)` encodes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
@@ -2591,8 +2593,7 @@ string, and a second entry point for the same walk was API without a purpose.
 > **Why the boundary is this narrow.** Tag wrapping and unwrapping belong to
 > the acts rather than to an engine's public surface, leaving only
 > `encode(value, env?) -> SerializedForm` and
-> `decode(data, env) -> FabricValue` — one such pair per boundary type the
-> engine offers — as public API. The engine owns the full pipeline rather than
+> `decode(data, env) -> FabricValue` — as public API. The engine owns the full pipeline rather than
 > the tag step alone, and its public surface says so by exposing no step of
 > it.
 
@@ -4007,8 +4008,8 @@ values cross from internal codec machinery to callers:
   each call site, so a caller reaching it outside the walker gets the same
   guarantee.
 
-- **`JsonCodecValue` parse boundary.** The `#parseWireText()` helper
-  (invoked by `decode()` and `#fromBytes()`) deep-freezes the parsed tree
+- **`JsonCodecValue` parse boundary.** The `parseWireText()` helper
+  (invoked by `decode()`) deep-freezes the parsed tree
   before handing it to the decode walker. This is what makes the
   decode-side `JsonCodecValue` invariant load-bearing: tag-unwrap and
   the `/quote` arm can hand back extracted sub-trees directly without

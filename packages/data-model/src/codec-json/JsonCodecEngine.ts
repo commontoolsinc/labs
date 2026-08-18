@@ -25,9 +25,8 @@ import type { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
  * `JsonDecodeAct`'s, which this class mints through the two `protected`
  * factories -- that pair being the surface a second engine extends. What both
  * an engine and an act need of the wire text is in `wire-text.ts`, so that
- * neither imports the other. Byte conversion is this class's own and stays
- * `#`-private. Per-type encoding and decoding is delegated to the
- * `FabricCodec`s in the `CodecRegistry`.
+ * neither imports the other. Per-type encoding and decoding is delegated to
+ * the `FabricCodec`s in the `CodecRegistry`.
  *
  * Three statics are public besides: `seemsLikeEncoded()`, and the
  * `wrapEncodedValueForTesting()` / `unwrapEncodedValueForTesting()` pair
