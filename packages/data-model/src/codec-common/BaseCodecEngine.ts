@@ -369,11 +369,11 @@ export abstract class BaseCodecEngine<
    */
   protected settleSyntacticRefusal(e: unknown): FabricValue {
     if (this.lenient && (e instanceof ProblematicStateError)) {
-      return deepFreeze(
-        new ProblematicValue(e.wireTypeTag, e.state, e.message),
-      );
+      return this.reportMalformed(e.wireTypeTag, e.state, e.message);
     }
 
+    // Rethrown rather than rebuilt, strictly: the refusal already names its
+    // tag and state, and re-raising it keeps whatever `cause` it carries.
     throw e;
   }
 
@@ -511,12 +511,10 @@ export abstract class BaseCodecEngine<
 
       // Report over the state the codec was actually handed, so that it says
       // what the codec choked on.
-      return deepFreeze(
-        new ProblematicValue(
-          tag,
-          state as FabricValue,
-          e instanceof Error ? e.message : String(e),
-        ),
+      return this.reportMalformed(
+        tag,
+        state,
+        e instanceof Error ? e.message : String(e),
       );
     }
 
