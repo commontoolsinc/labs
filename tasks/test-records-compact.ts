@@ -125,6 +125,13 @@ async function main(): Promise<void> {
       recordCount += report.records.length;
       body += buildObjectBody(report.context, report.records);
     }
+    // A day with no records gets no rollup: the write-once rollup would
+    // permanently exclude anything that later lands in that day — an old
+    // run re-run, a late orphan — for nothing.
+    if (recordCount === 0) {
+      console.log(`${day}: no records yet; leaving the day open`);
+      continue;
+    }
     if (plan) {
       console.log(
         `would compact ${day}: ${raw.length} object(s), ${reportCount} ` +

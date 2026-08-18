@@ -203,14 +203,13 @@ export function composeCiContext(
   return context;
 }
 
+// The gather step always writes records.ndjson, empty or not, so an
+// artifact without a readable one is truncated; the raised error lands the
+// artifact in the failed list rather than shipping a context-only object
+// that would read as a run with no tests.
 async function readArtifactRecords(dir: string): Promise<TestRecord[]> {
   const records: TestRecord[] = [];
-  let text: string;
-  try {
-    text = await Deno.readTextFile(join(dir, "records.ndjson"));
-  } catch {
-    return records;
-  }
+  const text = await Deno.readTextFile(join(dir, "records.ndjson"));
   for (const line of text.split("\n")) {
     if (line.length === 0) continue;
     const record = parseRecordLine(line);

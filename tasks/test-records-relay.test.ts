@@ -250,6 +250,10 @@ describe("test-records-relay", () => {
 
     it("returns the names of artifacts whose create failed", async () => {
       await Deno.mkdir(join(dir, "test-records-bad"));
+      await Deno.writeTextFile(
+        join(dir, "test-records-bad", "records.ndjson"),
+        "",
+      );
       const failed = await relayArtifacts({
         artifactsDir: dir,
         run: runFactsOfPayload(PAYLOAD),
@@ -264,8 +268,30 @@ describe("test-records-relay", () => {
       expect(failed).toEqual(["test-records-bad"]);
     });
 
+    it("fails an artifact with no records file rather than ship it empty", async () => {
+      await Deno.mkdir(join(dir, "test-records-truncated"));
+      let fetched = 0;
+      const failed = await relayArtifacts({
+        artifactsDir: dir,
+        run: runFactsOfPayload(PAYLOAD),
+        bucket: "b",
+        prefix: "p",
+        token: "t",
+        fetch: (() => {
+          fetched++;
+          return Promise.resolve(new Response("{}", { status: 200 }));
+        }) as typeof fetch,
+      });
+      expect(failed).toEqual(["test-records-truncated"]);
+      expect(fetched).toBe(0);
+    });
+
     it("treats an existing object as shipped", async () => {
       await Deno.mkdir(join(dir, "test-records-dup"));
+      await Deno.writeTextFile(
+        join(dir, "test-records-dup", "records.ndjson"),
+        "",
+      );
       const failed = await relayArtifacts({
         artifactsDir: dir,
         run: runFactsOfPayload(PAYLOAD),

@@ -12,8 +12,10 @@
  */
 
 import {
+  type AliasResolver,
   datePartition,
   listObjects,
+  loadAliasResolver,
   readObject,
 } from "@commonfabric/test-support/records";
 import { dashboardCacheFile } from "./history-files.ts";
@@ -46,20 +48,48 @@ export interface DayAggregate {
 export function isDayAggregate(value: unknown): value is DayAggregate {
   if (typeof value !== "object" || value === null) return false;
   const aggregate = value as Record<string, unknown>;
-  return typeof aggregate.key === "string" &&
-    typeof aggregate.day === "string" &&
-    /^\d{4}\/\d{2}\/\d{2}$/.test(aggregate.day) &&
-    typeof aggregate.runs === "number" && aggregate.runs >= 1 &&
-    typeof aggregate.failures === "number" && aggregate.failures >= 0 &&
-    typeof aggregate.skips === "number" && aggregate.skips >= 0 &&
-    typeof aggregate.totalDurationMs === "number" &&
-    typeof aggregate.maxDurationMs === "number";
+  if (
+    typeof aggregate.key !== "string" ||
+    typeof aggregate.day !== "string" ||
+    !/^\d{4}\/\d{2}\/\d{2}$/.test(aggregate.day) ||
+    !Number.isInteger(aggregate.runs) || (aggregate.runs as number) < 1 ||
+    !Number.isInteger(aggregate.failures) ||
+    (aggregate.failures as number) < 0 ||
+    !Number.isInteger(aggregate.skips) || (aggregate.skips as number) < 0 ||
+    (aggregate.failures as number) + (aggregate.skips as number) >
+      (aggregate.runs as number) ||
+    typeof aggregate.totalDurationMs !== "number" ||
+    !Number.isFinite(aggregate.totalDurationMs) ||
+    aggregate.totalDurationMs < 0 ||
+    typeof aggregate.maxDurationMs !== "number" ||
+    !Number.isFinite(aggregate.maxDurationMs) || aggregate.maxDurationMs < 0
+  ) {
+    return false;
+  }
+  // The key is the JSON form of the [kind, scope, name] identity triple.
+  try {
+    const identity = JSON.parse(aggregate.key);
+    return Array.isArray(identity) && identity.length === 3 &&
+      identity.every((part) => typeof part === "string" && part.length > 0);
+  } catch {
+    return false;
+  }
 }
 
-/** Fetches one day of the store and aggregates it per identity. */
+/**
+ * Fetches one day of the store and aggregates it per identity.
+ * Fork-authored reports are excluded — these aggregates feed decisions —
+ * and identities resolve through the alias file as of the day, so a
+ * renamed test keeps one continuous series.
+ */
 export async function collectDay(
   day: string,
-  options: { bucket?: string; prefix?: string; fetchImpl?: typeof fetch } = {},
+  options: {
+    bucket?: string;
+    prefix?: string;
+    fetchImpl?: typeof fetch;
+    aliases?: AliasResolver;
+  } = {},
 ): Promise<DayAggregate[]> {
   const bucket = options.bucket ?? TEST_RECORDS_BUCKET;
   const prefix = options.prefix ?? TEST_RECORDS_CI_PREFIX;
@@ -71,29 +101,38 @@ export async function collectDay(
   const names = await listObjects(listOptions);
   const byKey = new Map<string, DayAggregate>();
   for (const objectName of names) {
-    const readOptions: Parameters<typeof readObject>[0] = { bucket, objectName };
+    const readOptions: Parameters<typeof readObject>[0] = {
+      bucket,
+      objectName,
+    };
     if (options.fetchImpl !== undefined) readOptions.fetch = options.fetchImpl;
     const report = await readObject(readOptions);
-    for (const record of report.records) {
-      const key = JSON.stringify([record.test.k, record.test.s, record.test.n]);
-      let entry = byKey.get(key);
-      if (entry === undefined) {
-        entry = {
-          key,
-          day,
-          runs: 0,
-          failures: 0,
-          skips: 0,
-          totalDurationMs: 0,
-          maxDurationMs: 0,
-        };
-        byKey.set(key, entry);
+    for (const group of report.reports) {
+      if (group.context?.ci?.fork === true) continue;
+      for (const record of group.records) {
+        const test = options.aliases !== undefined
+          ? options.aliases.resolve(record.test, day)
+          : record.test;
+        const key = JSON.stringify([test.k, test.s, test.n]);
+        let entry = byKey.get(key);
+        if (entry === undefined) {
+          entry = {
+            key,
+            day,
+            runs: 0,
+            failures: 0,
+            skips: 0,
+            totalDurationMs: 0,
+            maxDurationMs: 0,
+          };
+          byKey.set(key, entry);
+        }
+        entry.runs++;
+        if (record.outcome === "fail") entry.failures++;
+        if (record.outcome === "skip") entry.skips++;
+        entry.totalDurationMs += record.durationMs;
+        entry.maxDurationMs = Math.max(entry.maxDurationMs, record.durationMs);
       }
-      entry.runs++;
-      if (record.outcome === "fail") entry.failures++;
-      if (record.outcome === "skip") entry.skips++;
-      entry.totalDurationMs += record.durationMs;
-      entry.maxDurationMs = Math.max(entry.maxDurationMs, record.durationMs);
     }
   }
   return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
@@ -110,9 +149,12 @@ function isStoredHistory(value: unknown): value is StoredHistory {
   const stored = value as Record<string, unknown>;
   if (stored.version !== 1) return false;
   if (typeof stored.days !== "object" || stored.days === null) return false;
-  return Object.values(stored.days as Record<string, unknown>).every(
-    (aggregates) =>
-      Array.isArray(aggregates) && aggregates.every(isDayAggregate),
+  return Object.entries(stored.days as Record<string, unknown>).every(
+    ([day, aggregates]) =>
+      Array.isArray(aggregates) &&
+      aggregates.every(
+        (aggregate) => isDayAggregate(aggregate) && aggregate.day === day,
+      ),
   );
 }
 
@@ -166,7 +208,9 @@ export class TestRecordsHistoryStore {
   /**
    * Fetches whatever the window needs: every missing closed day, and
    * today, whose partition is still being written. One pass, no retries;
-   * a day that fails to fetch stays absent until the next refresh.
+   * a day that fails to fetch stays absent until the next refresh. With
+   * no resolver given, the repository's alias file is loaded, so renamed
+   * tests keep continuous series by default.
    */
   async refresh(
     now: number,
@@ -175,9 +219,14 @@ export class TestRecordsHistoryStore {
       prefix?: string;
       fetchImpl?: typeof fetch;
       windowDays?: number;
+      aliases?: AliasResolver;
     } = {},
   ): Promise<void> {
     const windowDays = options.windowDays ?? TEST_RECORDS_HISTORY_DAYS;
+    const collectOptions = {
+      ...options,
+      aliases: options.aliases ?? await loadAliasResolver(),
+    };
     for (let back = windowDays - 1; back >= 0; back--) {
       const day = datePartition(
         new Date(now - back * 24 * 60 * 60 * 1000).toISOString(),
@@ -186,7 +235,7 @@ export class TestRecordsHistoryStore {
         continue;
       }
       try {
-        this.#days.set(day, await collectDay(day, options));
+        this.#days.set(day, await collectDay(day, collectOptions));
       } catch (error) {
         console.warn(`test records history: ${day} failed: ${error}`);
       }

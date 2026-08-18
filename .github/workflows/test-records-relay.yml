@@ -41,8 +41,11 @@ jobs:
       github.event.workflow_run.conclusion == 'timed_out'
     runs-on: ubuntu-latest
     steps:
+      # Every third-party action in this credentialed workflow is pinned to
+      # an immutable commit, so a moved tag cannot alter the one privileged
+      # write path.
       - name: 📥 Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -70,6 +73,15 @@ jobs:
             run_id="$EVENT_RUN_ID"
           fi
           echo "id=${run_id}" >> "$GITHUB_OUTPUT"
+          # A run cancelled before any upload has no test-records
+          # artifacts, which is a benign no-op; the count lets the
+          # download step run only when there is something to download,
+          # so its failure always means records were lost.
+          count=$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
+            --jq '.artifacts[].name' \
+            | { grep -c '^test-records-' || true; })
+          echo "artifact-count=${count}" >> "$GITHUB_OUTPUT"
 
       - name: 🔑 Authenticate to Google Cloud
         id: auth
@@ -82,8 +94,8 @@ jobs:
           create_credentials_file: false
 
       - name: 📥 Download test-records artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v8
+        if: steps.run.outputs.artifact-count != '0'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: test-records-*
           path: test-records-artifacts

@@ -14,8 +14,10 @@
  */
 
 import {
+  type AliasResolver,
   datePartition,
   listObjects,
+  loadAliasResolver,
   readObject,
   type StoredReport,
 } from "@commonfabric/test-support/records";
@@ -41,14 +43,25 @@ export function formatIdentity(key: string): string {
   return `[${k}] ${s}: ${n}`;
 }
 
-/** Aggregates every record of every report by identity. */
+/**
+ * Aggregates every record of every report by identity. Identities are
+ * resolved through the alias file as of each report's own start day, so a
+ * renamed test's history aggregates under its current name.
+ */
 export function aggregate(
   reports: readonly StoredReport[],
+  aliases?: AliasResolver,
 ): Map<string, IdentityAggregate> {
   const byIdentity = new Map<string, IdentityAggregate>();
   for (const report of reports) {
+    const day = report.context !== undefined
+      ? datePartition(report.context.startedAt)
+      : undefined;
     for (const record of report.records) {
-      const key = identityKey(record.test);
+      const test = aliases !== undefined && day !== undefined
+        ? aliases.resolve(record.test, day)
+        : record.test;
+      const key = identityKey(test);
       let entry = byIdentity.get(key);
       if (entry === undefined) {
         entry = { key, runs: 0, failures: 0, skips: 0, maxDurationMs: 0 };
@@ -164,13 +177,24 @@ async function main(): Promise<void> {
     `${names.length} object(s) under ${prefix} in the last ${days} day(s).`,
   );
   const reports: StoredReport[] = [];
+  let forkReports = 0;
   for (const objectName of names) {
-    reports.push(await readObject({ bucket, objectName }));
+    const report = await readObject({ bucket, objectName });
+    // Fork-authored reports never feed decisions — this report's numbers
+    // and its ratchet gate among them (docs/specs/test-records.md).
+    if (report.context?.ci?.fork === true) {
+      forkReports++;
+      continue;
+    }
+    reports.push(report);
+  }
+  if (forkReports > 0) {
+    console.log(`${forkReports} fork-authored object(s) excluded.`);
   }
   const runs = new Set(
     reports.map((report) => report.context?.ci?.workflowRunId ?? ""),
   ).size;
-  const byIdentity = aggregate(reports);
+  const byIdentity = aggregate(reports, await loadAliasResolver());
   console.log(
     `${byIdentity.size} distinct identities across ${runs} workflow run(s).`,
   );

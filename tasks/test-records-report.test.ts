@@ -8,9 +8,11 @@ import {
   identityKey,
   overSixtySeconds,
 } from "./test-records-report.ts";
-import type {
-  StoredReport,
-  TestRecord,
+import {
+  AliasResolver,
+  type RunContext,
+  type StoredReport,
+  type TestRecord,
 } from "@commonfabric/test-support/records";
 
 function record(
@@ -27,7 +29,28 @@ function record(
 }
 
 function report(objectName: string, records: TestRecord[]): StoredReport {
-  return { objectName, context: undefined, records };
+  return {
+    objectName,
+    context: undefined,
+    records,
+    reports: [{ context: undefined, records }],
+  };
+}
+
+function contextOn(startedAt: string): RunContext {
+  return {
+    schema: 1,
+    line: "context",
+    reportId: "01REPORTTEST000000000000",
+    repo: "commontoolsinc/labs",
+    commit: "c".repeat(40),
+    dirty: false,
+    env: "local",
+    os: "linux",
+    arch: "x86_64",
+    denoVersion: "2.9.4",
+    startedAt,
+  };
 }
 
 describe("test-records-report", () => {
@@ -49,6 +72,26 @@ describe("test-records-report", () => {
         skips: 0,
         maxDurationMs: 90,
       });
+    });
+
+    it("joins a renamed test's history under its current name", () => {
+      const resolver = new AliasResolver([{
+        date: "2026-08-15",
+        from: { k: "unit", s: "bakery", n: "old name" },
+        to: { k: "unit", s: "bakery", n: "new name" },
+      }]);
+      const before = report("a", [record("old name", "pass", 5)]);
+      before.context = contextOn("2026-08-10T00:00:00.000Z");
+      const after = report("b", [record("new name", "fail", 7)]);
+      after.context = contextOn("2026-08-16T00:00:00.000Z");
+      const byIdentity = aggregate([before, after], resolver);
+      const entry = byIdentity.get(identityKey({
+        k: "unit",
+        s: "bakery",
+        n: "new name",
+      }));
+      expect(entry?.runs).toBe(2);
+      expect(byIdentity.size).toBe(1);
     });
   });
 
