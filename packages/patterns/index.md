@@ -1378,6 +1378,10 @@ inputs and produces a focused output.
 
 Generates a concise summary of provided context using an LLM.
 
+An instance with no `topic` has nothing to summarize. Its prompt stays empty, so
+no model request opens: `pending` stays `false` and `summary` stays `""`. The
+first `topic` a caller supplies is what starts the request.
+
 **Keywords:** summary, generateText, suggestion-fuel
 
 ### Input Schema
@@ -1402,6 +1406,10 @@ type SummaryOutput = {
 ## `suggestable/checklist.tsx`
 
 Generates a checklist of actionable steps from a topic and context.
+
+An instance with no `topic` has no steps to draw up. Its prompt stays empty, so
+no model request opens: `pending` stays `false` and `items` stays empty. The
+first `topic` a caller supplies is what starts the request.
 
 **Keywords:** checklist, generateObject, suggestion-fuel
 
@@ -1433,6 +1441,11 @@ type ChecklistOutput = {
 
 Generates a clarifying question with optional multiple-choice options.
 
+An instance with no `topic` has nothing to ask about. Its prompt stays empty, so
+no model request opens: `pending` stays `false`, `question` stays `""` and
+`options` stays empty. The first `topic` a caller supplies is what starts the
+request.
+
 **Keywords:** question, generateObject, suggestion-fuel
 
 ### Input Schema
@@ -1461,6 +1474,10 @@ type QuestionOutput = {
 Generates an ASCII diagram illustrating relationships, flows, or structures.
 Rendered in a `<pre>` tag with monospace styling.
 
+An instance with no `topic` has nothing to draw. Its prompt stays empty, so no
+model request opens: `pending` stays `false` and `diagram` stays `""`. The first
+`topic` a caller supplies is what starts the request.
+
 **Keywords:** diagram, ASCII, generateText, suggestion-fuel
 
 ### Input Schema
@@ -1486,6 +1503,10 @@ type DiagramOutput = {
 
 Generates an SVG diagram illustrating relationships, flows, or structures.
 Rendered via `<cf-svg>` web component for scalable vector output.
+
+An instance with no `topic` has nothing to draw. Its prompt stays empty, so no
+model request opens: `pending` stays `false` and `diagram` stays `""`. The first
+`topic` a caller supplies is what starts the request.
 
 **Keywords:** diagram, SVG, generateText, suggestion-fuel, cf-svg
 
