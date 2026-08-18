@@ -987,12 +987,17 @@ export const runPatternTool: HarnessToolDefinition<
       // deferred actions, so a wide episode can omit this pattern and
       // under-report, which falls back to the plain ok-with-valueError
       // rather than misattributing.
+      // The scheduler composes deferred-action ids as
+      // `cf:module/<identity>:<symbol>:<instanceKey>` from the same entry
+      // ref this meta stamp stores, so the match is on that composed prefix
+      // rather than a bare substring — a representation drift on either
+      // side fails the settle-cause test that drives this path, loudly.
       const patternIdentity = getPatternIdentityRef(resultCell)?.identity;
       const ownEpisodes = patternIdentity === undefined
         ? []
         : observations.episodesSince(observationStart).filter((episode) =>
           episode.deferredActions.some((label) =>
-            label.includes(patternIdentity)
+            label.includes(`cf:module/${patternIdentity}:`)
           )
         );
       if (ownEpisodes.length > 0) {
