@@ -5,6 +5,7 @@ import {
   closedDays,
   compactDays,
   COMPACTION_LAG_DAYS,
+  parseCompactArgs,
   rollupName,
 } from "./test-records-compact.ts";
 import {
@@ -167,6 +168,20 @@ describe("test-records-compact", () => {
         fetchImpl: storeFetch(state),
       });
       expect(state.created).toEqual([]);
+    });
+  });
+
+  describe("parseCompactArgs()", () => {
+    it("returns the defaults and the given flags", () => {
+      expect(parseCompactArgs([])).toEqual({ days: 14, plan: false });
+      expect(parseCompactArgs(["--plan", "--days", "3"]))
+        .toEqual({ days: 3, plan: true });
+    });
+
+    it("returns undefined for malformed command lines", () => {
+      expect(parseCompactArgs(["--days", "0"])).toBeUndefined();
+      expect(parseCompactArgs(["--days", "x"])).toBeUndefined();
+      expect(parseCompactArgs(["--mystery"])).toBeUndefined();
     });
   });
 });

@@ -4,8 +4,11 @@ import { join } from "@std/path";
 
 import {
   composeCiContext,
+  memberActorIdsOf,
+  parseRelayArgs,
   relayArtifacts,
   runFactsOfPayload,
+  runRelay,
   shouldShipRun,
 } from "./test-records-relay.ts";
 import { gunzipToText } from "@commonfabric/test-support/records";
@@ -304,6 +307,118 @@ describe("test-records-relay", () => {
           )) as typeof fetch,
       });
       expect(failed).toEqual([]);
+    });
+  });
+
+  describe("parseRelayArgs()", () => {
+    it("returns the directories of a full command line", () => {
+      expect(parseRelayArgs(["--artifacts", "d", "--run-json", "r.json"]))
+        .toEqual({ artifactsDir: "d", runJson: "r.json" });
+      expect(parseRelayArgs(["--artifacts", "d"]))
+        .toEqual({ artifactsDir: "d" });
+    });
+
+    it("returns undefined for malformed command lines", () => {
+      expect(parseRelayArgs([])).toBeUndefined();
+      expect(parseRelayArgs(["--artifacts"])).toBeUndefined();
+      expect(parseRelayArgs(["--mystery", "x"])).toBeUndefined();
+      expect(parseRelayArgs(["--run-json", "r.json"])).toBeUndefined();
+    });
+  });
+
+  describe("memberActorIdsOf()", () => {
+    it("splits, trims, and drops empty entries", () => {
+      const ids = memberActorIdsOf((name) =>
+        name === "TEST_RECORDS_MEMBER_ACTOR_IDS" ? " 1, 22 ,,333 " : undefined
+      );
+      expect([...ids].sort()).toEqual(["1", "22", "333"]);
+      expect(memberActorIdsOf(() => undefined).size).toBe(0);
+    });
+  });
+
+  describe("runRelay()", () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await Deno.makeTempDir({ prefix: "test-records-relay-run-" });
+    });
+
+    afterEach(async () => {
+      await Deno.remove(dir, { recursive: true }).catch(() => {});
+    });
+
+    async function writePayload(payload: unknown): Promise<string> {
+      const path = join(dir, "payload.json");
+      await Deno.writeTextFile(path, JSON.stringify(payload));
+      return path;
+    }
+
+    it("ships a same-repository run and returns zero", async () => {
+      const artifacts = join(dir, "artifacts");
+      await Deno.mkdir(join(artifacts, "test-records-check"), {
+        recursive: true,
+      });
+      await Deno.writeTextFile(
+        join(artifacts, "test-records-check", "records.ndjson"),
+        "",
+      );
+      let created = 0;
+      const code = await runRelay({
+        artifactsDir: artifacts,
+        runJson: await writePayload(PAYLOAD),
+        env: (name) =>
+          name === "TEST_RECORDS_GCS_TOKEN" ? "token-1" : undefined,
+        fetchImpl: (() => {
+          created++;
+          return Promise.resolve(new Response("{}", { status: 200 }));
+        }) as typeof fetch,
+      });
+      expect(code).toBe(0);
+      expect(created).toBe(1);
+    });
+
+    it("ships nothing for a fork run by an unlisted actor", async () => {
+      const forkPayload = structuredClone(PAYLOAD) as {
+        workflow_run: Record<string, unknown>;
+      };
+      forkPayload.workflow_run.head_repository = { full_name: "fork/labs" };
+      forkPayload.workflow_run.actor = { id: 999 };
+      const code = await runRelay({
+        artifactsDir: join(dir, "absent"),
+        runJson: await writePayload(forkPayload),
+        env: (name) =>
+          name === "TEST_RECORDS_MEMBER_ACTOR_IDS" ? "1,2" : undefined,
+        fetchImpl: (() => {
+          throw new Error("nothing must ship");
+        }) as unknown as typeof fetch,
+      });
+      expect(code).toBe(0);
+    });
+
+    it("returns one when an artifact fails to ship", async () => {
+      const artifacts = join(dir, "artifacts");
+      await Deno.mkdir(join(artifacts, "test-records-truncated"), {
+        recursive: true,
+      });
+      const code = await runRelay({
+        artifactsDir: artifacts,
+        runJson: await writePayload(PAYLOAD),
+        env: (name) =>
+          name === "TEST_RECORDS_GCS_TOKEN" ? "token-1" : undefined,
+      });
+      expect(code).toBe(1);
+    });
+
+    it("throws without a payload or a token", async () => {
+      await expect(runRelay({
+        artifactsDir: dir,
+        env: () => undefined,
+      })).rejects.toThrow("no event payload");
+      await expect(runRelay({
+        artifactsDir: dir,
+        runJson: await writePayload(PAYLOAD),
+        env: () => undefined,
+      })).rejects.toThrow("TEST_RECORDS_GCS_TOKEN");
     });
   });
 });

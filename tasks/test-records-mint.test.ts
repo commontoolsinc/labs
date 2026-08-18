@@ -9,6 +9,7 @@ import {
   ensureServiceAccount,
   isGitHubUsername,
   mintKey,
+  parseMintArgs,
   runMint,
   usernameOfDisplayName,
 } from "./test-records-mint.ts";
@@ -356,6 +357,130 @@ describe("test-records-mint", () => {
         client: { token: "t", fetchImpl: mintFetch(log) },
       })).rejects.toThrow("not a GitHub username");
       expect(log).toEqual([]);
+    });
+  });
+
+  describe("parseMintArgs()", () => {
+    it("returns the trimmed inputs of a full command line", () => {
+      expect(parseMintArgs([
+        "--recipient",
+        " cfr1abc ",
+        "--username",
+        " octocat ",
+        "--out",
+        "delivery",
+      ])).toEqual({
+        recipient: "cfr1abc",
+        username: "octocat",
+        out: "delivery",
+      });
+    });
+
+    it("returns undefined for malformed command lines", () => {
+      expect(parseMintArgs([])).toBeUndefined();
+      expect(parseMintArgs(["--recipient"])).toBeUndefined();
+      expect(parseMintArgs(["--mystery", "x"])).toBeUndefined();
+      expect(parseMintArgs(["--recipient", "r", "--out", "o"]))
+        .toBeUndefined();
+    });
+  });
+
+  describe("error paths", () => {
+    it("throws when reading the account fails outright", async () => {
+      await expect(ensureServiceAccount(
+        { token: "t", fetchImpl: sequenceFetch([{ status: 500 }], []) },
+        "octocat",
+      )).rejects.toThrow("reading");
+    });
+
+    it("throws when creating the account fails", async () => {
+      await expect(ensureServiceAccount(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([{ status: 404 }, { status: 403 }], []),
+        },
+        "octocat",
+      )).rejects.toThrow("creating");
+    });
+
+    it("throws when re-enabling the account fails", async () => {
+      await expect(ensureServiceAccount(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            { status: 200, json: { disabled: true } },
+            { status: 500 },
+          ], []),
+        },
+        "octocat",
+      )).rejects.toThrow("enabling");
+    });
+
+    it("throws when the folder cannot be created", async () => {
+      await expect(ensurePersonFolder(
+        { token: "t", fetchImpl: sequenceFetch([{ status: 403 }], []) },
+        "b",
+        "p",
+        "octocat",
+        "sa@x",
+      )).rejects.toThrow("creating folder");
+    });
+
+    it("throws when the folder policy cannot be read or written", async () => {
+      await expect(ensurePersonFolder(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([{ status: 200 }, { status: 500 }], []),
+        },
+        "b",
+        "p",
+        "octocat",
+        "sa@x",
+      )).rejects.toThrow("reading IAM");
+      await expect(ensurePersonFolder(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            { status: 200 },
+            { status: 200, json: { bindings: [], etag: "e" } },
+            { status: 409 },
+          ], []),
+        },
+        "b",
+        "p",
+        "octocat",
+        "sa@x",
+      )).rejects.toThrow("granting");
+    });
+
+    it("throws when the key listing or the mint itself fails", async () => {
+      await expect(mintKey(
+        { token: "t", fetchImpl: sequenceFetch([{ status: 500 }], []) },
+        "sa@x",
+        "octocat",
+      )).rejects.toThrow("listing the keys");
+      await expect(mintKey(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            { status: 200, json: { keys: [] } },
+            { status: 429 },
+          ], []),
+        },
+        "sa@x",
+        "octocat",
+      )).rejects.toThrow("minting a key");
+      await expect(mintKey(
+        {
+          token: "t",
+          fetchImpl: sequenceFetch([
+            { status: 200, json: { keys: [] } },
+            { status: 200, json: {} },
+          ], []),
+        },
+        "sa@x",
+        "octocat",
+      )).rejects.toThrow("no privateKeyData");
     });
   });
 });

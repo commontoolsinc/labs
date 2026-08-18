@@ -339,15 +339,18 @@ export async function runMint(options: MintRunOptions): Promise<string> {
   return path;
 }
 
-async function main(): Promise<void> {
+/** Parses the command line; undefined means a malformed one. */
+export function parseMintArgs(
+  argsIn: readonly string[],
+): { recipient: string; username: string; out: string } | undefined {
   let recipient: string | undefined;
   let username: string | undefined;
   let out: string | undefined;
-  const args = [...Deno.args];
+  const args = [...argsIn];
   while (args.length > 0) {
     const flag = args.shift()!;
     const value = args.shift();
-    if (value === undefined) usage();
+    if (value === undefined) return undefined;
     switch (flag) {
       case "--recipient":
         recipient = value.trim();
@@ -359,20 +362,24 @@ async function main(): Promise<void> {
         out = value;
         break;
       default:
-        usage();
+        return undefined;
     }
   }
   if (recipient === undefined || username === undefined || out === undefined) {
-    usage();
+    return undefined;
   }
+  return { recipient, username, out };
+}
+
+async function main(): Promise<void> {
+  const parsed = parseMintArgs(Deno.args);
+  if (parsed === undefined) usage();
   const token = readEnv("TEST_RECORDS_GCP_TOKEN");
   if (token === undefined || token.length === 0) {
     throw new Error("TEST_RECORDS_GCP_TOKEN is not set");
   }
   const runOptions: MintRunOptions = {
-    recipient,
-    username,
-    out,
+    ...parsed,
     client: { token, fetchImpl: fetch },
   };
   const githubOutput = readEnv("GITHUB_OUTPUT");

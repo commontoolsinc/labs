@@ -146,10 +146,13 @@ export async function compactDays(options: CompactOptions): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+/** Parses the command line; undefined means a malformed one. */
+export function parseCompactArgs(
+  argsIn: readonly string[],
+): { days: number; plan: boolean } | undefined {
   let days = 14;
   let plan = false;
-  const args = [...Deno.args];
+  const args = [...argsIn];
   while (args.length > 0) {
     const flag = args.shift()!;
     if (flag === "--plan") {
@@ -158,13 +161,20 @@ async function main(): Promise<void> {
       days = Number(args.shift());
       if (!Number.isInteger(days) || days < 1) {
         console.error("--days takes a positive integer");
-        Deno.exit(2);
+        return undefined;
       }
     } else {
       console.error(`unknown flag ${flag}`);
-      Deno.exit(2);
+      return undefined;
     }
   }
+  return { days, plan };
+}
+
+async function main(): Promise<void> {
+  const parsed = parseCompactArgs(Deno.args);
+  if (parsed === undefined) Deno.exit(2);
+  const { days, plan } = parsed;
 
   const options: CompactOptions = {
     days,

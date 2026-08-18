@@ -188,17 +188,19 @@ interface GroupResult {
   output: string;
 }
 
-async function checkGroup(
+/** Runs one scope's `deno check`; a spawn failure is that group's failure. */
+export async function checkGroup(
   scope: string,
   paths: string[],
   reload: boolean,
+  execPath: string = Deno.execPath(),
 ): Promise<GroupResult> {
   const startedAt = performance.now();
   const args = ["check", ...(reload ? ["--reload"] : []), ...paths];
   let success = false;
   let output = "";
   try {
-    const result = await new Deno.Command(Deno.execPath(), {
+    const result = await new Deno.Command(execPath, {
       args,
       env: { DENO_V8_FLAGS: "--max-old-space-size=8192" },
       stdout: "piped",
@@ -218,9 +220,21 @@ async function checkGroup(
   };
 }
 
-export async function main(): Promise<void> {
-  const byScope = await collectPathsByScope();
-  if (Deno.args.includes("--list")) {
+export interface TypecheckOptions {
+  list?: boolean;
+  reload?: boolean;
+  check?: typeof checkGroup;
+}
+
+/**
+ * Checks every group over a bounded worker pool, recording each scope's
+ * verdict, and returns whether all of them passed.
+ */
+export async function runTypecheck(
+  byScope: ReadonlyMap<string, string[]>,
+  options: TypecheckOptions = {},
+): Promise<boolean> {
+  if (options.list === true) {
     // Prints every checked path with its scope, for auditing what the
     // groups cover.
     for (const [scope, paths] of byScope) {
@@ -228,17 +242,18 @@ export async function main(): Promise<void> {
         console.log(`${scope}\t${checkPath}`);
       }
     }
-    return;
+    return true;
   }
+  const check = options.check ?? checkGroup;
+  const reload = options.reload === true;
   const total = [...byScope.values()].reduce(
     (sum, group) => sum + group.length,
     0,
   );
   if (total === 0) {
     console.error("No files to check?! (Project is in an odd state.)");
-    Deno.exit(1);
+    return false;
   }
-  const reload = (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "";
   if (reload) {
     console.log("Reloading Deno dependencies before checking...");
   }
@@ -260,7 +275,7 @@ export async function main(): Promise<void> {
   const workers = Array.from({ length: workerCount }, async () => {
     while (next < scopes.length) {
       const scope = scopes[next++]!;
-      const result = await checkGroup(scope, byScope.get(scope)!, reload);
+      const result = await check(scope, byScope.get(scope)!, reload);
       results.push(result);
       recordsFragment?.append({
         line: "record",
@@ -286,9 +301,18 @@ export async function main(): Promise<void> {
     console.error(
       `\nType check failed in ${failed.length} of ${results.length} groups.`,
     );
-    Deno.exit(1);
+    return false;
   }
   console.log("Type check complete.");
+  return true;
+}
+
+export async function main(): Promise<void> {
+  const passed = await runTypecheck(await collectPathsByScope(), {
+    list: Deno.args.includes("--list"),
+    reload: (Deno.env.get("DENO_CHECK_RELOAD") ?? "") !== "",
+  });
+  if (!passed) Deno.exit(1);
 }
 
 if (import.meta.main) {

@@ -7,6 +7,7 @@ import {
   collisions,
   identityKey,
   overSixtySeconds,
+  parseReportArgs,
   recentDatePrefixes,
   runReport,
 } from "./test-records-report.ts";
@@ -244,6 +245,19 @@ describe("test-records-report", () => {
         }),
       });
       expect(gateFailed).toBe(false);
+    });
+  });
+
+  describe("parseReportArgs()", () => {
+    it("returns the defaults and the given flags", () => {
+      expect(parseReportArgs([])).toEqual({ days: 7, gate: false });
+      expect(parseReportArgs(["--gate", "--days", "30"]))
+        .toEqual({ days: 30, gate: true });
+    });
+
+    it("returns undefined for malformed command lines", () => {
+      expect(parseReportArgs(["--days", "-1"])).toBeUndefined();
+      expect(parseReportArgs(["--mystery"])).toBeUndefined();
     });
   });
 });

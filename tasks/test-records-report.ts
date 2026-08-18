@@ -240,10 +240,13 @@ export async function runReport(options: ReportOptions): Promise<boolean> {
   return false;
 }
 
-async function main(): Promise<void> {
+/** Parses the command line; undefined means a malformed one. */
+export function parseReportArgs(
+  argsIn: readonly string[],
+): { days: number; gate: boolean } | undefined {
   let days = 7;
   let gate = false;
-  const args = [...Deno.args];
+  const args = [...argsIn];
   while (args.length > 0) {
     const flag = args.shift()!;
     if (flag === "--gate") {
@@ -252,17 +255,22 @@ async function main(): Promise<void> {
       days = Number(args.shift());
       if (!Number.isInteger(days) || days < 1) {
         console.error("--days takes a positive integer");
-        Deno.exit(2);
+        return undefined;
       }
     } else {
       console.error(`unknown flag ${flag}`);
-      Deno.exit(2);
+      return undefined;
     }
   }
+  return { days, gate };
+}
 
+async function main(): Promise<void> {
+  const parsed = parseReportArgs(Deno.args);
+  if (parsed === undefined) Deno.exit(2);
   const gateFailed = await runReport({
-    days,
-    gate,
+    days: parsed.days,
+    gate: parsed.gate,
     bucket: storeBucket(),
     prefix: ciSubmissionsPrefix(),
   });

@@ -26,6 +26,7 @@ import {
   buildObjectBody,
   ciObjectName,
   createObject,
+  type Environment,
   gzipText,
   parseRecordLine,
   readEnv,
@@ -292,14 +293,17 @@ function usage(): never {
   Deno.exit(2);
 }
 
-async function main(): Promise<void> {
+/** Parses the command line; undefined means a malformed one. */
+export function parseRelayArgs(
+  argsIn: readonly string[],
+): { artifactsDir: string; runJson?: string } | undefined {
   let artifactsDir: string | undefined;
   let runJson: string | undefined;
-  const args = [...Deno.args];
+  const args = [...argsIn];
   while (args.length > 0) {
     const flag = args.shift()!;
     const value = args.shift();
-    if (value === undefined) usage();
+    if (value === undefined) return undefined;
     switch (flag) {
       case "--artifacts":
         artifactsDir = value;
@@ -308,47 +312,81 @@ async function main(): Promise<void> {
         runJson = value;
         break;
       default:
-        usage();
+        return undefined;
     }
   }
-  if (artifactsDir === undefined) usage();
-  const payloadPath = runJson ?? readEnv("GITHUB_EVENT_PATH");
+  if (artifactsDir === undefined) return undefined;
+  const parsed: { artifactsDir: string; runJson?: string } = { artifactsDir };
+  if (runJson !== undefined) parsed.runJson = runJson;
+  return parsed;
+}
+
+/** The member list an environment carries: comma-separated numeric ids. */
+export function memberActorIdsOf(
+  env: Environment = Deno.env.get,
+): Set<string> {
+  return new Set(
+    (readEnv("TEST_RECORDS_MEMBER_ACTOR_IDS", env) ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0),
+  );
+}
+
+export interface RelayRunOptions {
+  artifactsDir: string;
+  runJson?: string;
+  env?: Environment;
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * The whole relay run: reads the payload, applies the member gate, and
+ * ships every artifact. Returns the process's exit code.
+ */
+export async function runRelay(options: RelayRunOptions): Promise<number> {
+  const env = options.env ?? Deno.env.get;
+  const payloadPath = options.runJson ?? readEnv("GITHUB_EVENT_PATH", env);
   if (payloadPath === undefined) {
     throw new Error("no event payload: set GITHUB_EVENT_PATH or --run-json");
   }
   const run = runFactsOfPayload(
     JSON.parse(await Deno.readTextFile(payloadPath)),
   );
-  const memberActorIds = new Set(
-    (readEnv("TEST_RECORDS_MEMBER_ACTOR_IDS") ?? "")
-      .split(",")
-      .map((id) => id.trim())
-      .filter((id) => id.length > 0),
-  );
-  if (!shouldShipRun(run, memberActorIds)) {
+  if (!shouldShipRun(run, memberActorIdsOf(env))) {
     console.log(
       `test records: run ${run.workflowRunId} is a fork run whose actor ` +
         "is not on the team member list; nothing ships.",
     );
-    return;
+    return 0;
   }
-  const token = readEnv("TEST_RECORDS_GCS_TOKEN");
+  const token = readEnv("TEST_RECORDS_GCS_TOKEN", env);
   if (token === undefined || token.length === 0) {
     throw new Error("TEST_RECORDS_GCS_TOKEN is not set");
   }
-  const failed = await relayArtifacts({
-    artifactsDir,
+  const relayOptions: RelayOptions = {
+    artifactsDir: options.artifactsDir,
     run,
-    bucket: storeBucket(),
-    prefix: ciSubmissionsPrefix(),
+    bucket: storeBucket(env),
+    prefix: ciSubmissionsPrefix(env),
     token,
-  });
+  };
+  if (options.fetchImpl !== undefined) relayOptions.fetch = options.fetchImpl;
+  const failed = await relayArtifacts(relayOptions);
   if (failed.length > 0) {
     console.error(
       `test records: ${failed.length} artifact(s) failed: ${failed.join(", ")}`,
     );
-    Deno.exit(1);
+    return 1;
   }
+  return 0;
+}
+
+async function main(): Promise<void> {
+  const parsed = parseRelayArgs(Deno.args);
+  if (parsed === undefined) usage();
+  const code = await runRelay(parsed);
+  if (code !== 0) Deno.exit(code);
 }
 
 if (import.meta.main) {

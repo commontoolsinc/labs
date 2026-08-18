@@ -222,3 +222,43 @@ Deno.test("the store ignores a cache whose day keys disagree", async () => {
     await Deno.remove(directory, { recursive: true });
   }
 });
+
+Deno.test("refresh prunes days that fell out of the window and survives a failing day", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "test-records-history-" });
+  try {
+    const file = join(directory, "history.json");
+    const store = new TestRecordsHistoryStore(file);
+    const day1 = Date.parse("2026-08-17T12:00:00Z");
+    await store.refresh(day1, {
+      fetchImpl: storeFetch([PASS]),
+      windowDays: 2,
+      aliases: new AliasResolver([]),
+    });
+    assertEquals(store.days(), ["2026/08/16", "2026/08/17"]);
+
+    // A week later with a two-day window: both cached days age out, and
+    // the store fetching nothing but failures keeps no stale days.
+    const failing = (() =>
+      Promise.reject(new Error("store down"))) as unknown as typeof fetch;
+    await store.refresh(day1 + 7 * 24 * 60 * 60 * 1000, {
+      fetchImpl: failing,
+      windowDays: 2,
+      aliases: new AliasResolver([]),
+    });
+    assertEquals(store.days(), []);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("series returns an empty shape for an unknown identity", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "test-records-history-" });
+  try {
+    const store = new TestRecordsHistoryStore(join(directory, "h.json"));
+    const series = store.series('["unit","bakery","never-ran"]');
+    assertEquals(series.times, []);
+    assertEquals(series.passRates, []);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});

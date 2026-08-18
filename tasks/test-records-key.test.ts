@@ -385,5 +385,138 @@ describe("test-records-key", () => {
         "no completed minting run",
       );
     });
+
+    it("skips a run whose artifact listing fails, then reports no delivery", async () => {
+      await storeIdentity();
+      withFetch(
+        ((input: URL | RequestInfo) => {
+          const url = String(input);
+          if (url.endsWith("/user")) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ login: "octocat" }), {
+                status: 200,
+              }),
+            );
+          }
+          if (url.includes("/runs?")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  workflow_runs: [{ id: 42, status: "completed" }],
+                }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(new Response("down", { status: 500 }));
+        }) as typeof fetch,
+      );
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "no completed minting run",
+      );
+    });
+
+    it("throws when the delivery download fails", async () => {
+      const identity = await storeIdentity();
+      const fingerprint = await recipientFingerprint(identity.recipient);
+      withFetch(
+        ((input: URL | RequestInfo) => {
+          const url = String(input);
+          if (url.endsWith("/user")) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ login: "octocat" }), {
+                status: 200,
+              }),
+            );
+          }
+          if (url.includes("/runs?")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  workflow_runs: [{ id: 42, status: "completed" }],
+                }),
+                { status: 200 },
+              ),
+            );
+          }
+          if (url.includes("/artifacts?")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  artifacts: [{
+                    id: 7,
+                    name: `test-records-key-${fingerprint}`,
+                  }],
+                }),
+                { status: 200 },
+              ),
+            );
+          }
+          return Promise.resolve(new Response("gone", { status: 410 }));
+        }) as typeof fetch,
+      );
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "downloading the delivery failed",
+      );
+    });
+
+    it("throws when the delivery zip holds no sealed key", async () => {
+      const identity = await storeIdentity();
+      const fingerprint = await recipientFingerprint(identity.recipient);
+      const zip = storedZip("readme.txt", new TextEncoder().encode("hi"));
+      withFetch(
+        ((input: URL | RequestInfo) => {
+          const url = String(input);
+          if (url.endsWith("/user")) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ login: "octocat" }), {
+                status: 200,
+              }),
+            );
+          }
+          if (url.includes("/runs?")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  workflow_runs: [{ id: 42, status: "completed" }],
+                }),
+                { status: 200 },
+              ),
+            );
+          }
+          if (url.includes("/artifacts?")) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  artifacts: [{
+                    id: 7,
+                    name: `test-records-key-${fingerprint}`,
+                  }],
+                }),
+                { status: 200 },
+              ),
+            );
+          }
+          if (url.endsWith("/zip")) {
+            return Promise.resolve(
+              new Response(zip as unknown as BodyInit, { status: 200 }),
+            );
+          }
+          return Promise.resolve(new Response("unexpected", { status: 500 }));
+        }) as typeof fetch,
+      );
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "holds no sealed key",
+      );
+    });
+
+    it("throws without any usable token", async () => {
+      await storeIdentity();
+      withFetch(fetch);
+      deps.githubToken = () => Promise.resolve(undefined);
+      await expect(collectCommand(deps)).rejects.toThrow(
+        "a GitHub token is needed",
+      );
+    });
   });
 });
