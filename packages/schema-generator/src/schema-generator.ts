@@ -29,6 +29,7 @@ import {
   safeGetTypeOfSymbolAtLocation,
 } from "./type-utils.ts";
 import { attachDocTags, extractDocFromType } from "./doc-utils.ts";
+import { assertScopeDeclarationsAreReachable } from "./scope-placement.ts";
 
 /**
  * Main schema generator that uses a chain of formatters
@@ -148,6 +149,7 @@ export class SchemaGenerator {
 
     // Auto-detect: Should we use node-based or type-based analysis?
     let schema: MutableJSONSchema;
+    let result: MutableJSONSchema;
     if (this.shouldUseNodeBasedAnalysis(type, typeNode, checker)) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
       schema = this.analyzeTypeNodeStructure(
@@ -157,18 +159,21 @@ export class SchemaGenerator {
       );
       schema = this.applyNodeSchemaHints(schema, context);
       // Build final schema with $schema and $defs
-      return this.buildFinalSchemaForSynthetic(schema, context);
+      result = this.buildFinalSchemaForSynthetic(schema, context);
+    } else {
+      // Use type-based analysis (normal path)
+      schema = this.formatType(type, context, true);
+      schema = this.applyNodeSchemaHints(schema, context);
+
+      // Attach root-level description from JSDoc if available
+      schema = this.attachRootDescription(schema, type, context);
+
+      // Build final schema with definitions if needed
+      result = this.buildFinalSchema(schema, type, context, typeNode);
     }
 
-    // Use type-based analysis (normal path)
-    schema = this.formatType(type, context, true);
-    schema = this.applyNodeSchemaHints(schema, context);
-
-    // Attach root-level description from JSDoc if available
-    schema = this.attachRootDescription(schema, type, context);
-
-    // Build final schema with definitions if needed
-    return this.buildFinalSchema(schema, type, context, typeNode);
+    assertScopeDeclarationsAreReachable(result);
+    return result;
   }
 
   /**

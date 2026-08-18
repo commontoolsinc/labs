@@ -31,6 +31,7 @@ import {
 import { numberFromExpression } from "../typescript/numeric-expression.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import { dedupeByValueEqual } from "../value-equality.ts";
+import { scopeInsideUnionError } from "../scope-placement.ts";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
@@ -2148,6 +2149,18 @@ export class CommonFabricFormatter implements TypeFormatter {
     for (let i = 0; i < members.length; i++) {
       const memberType = members[i]!;
       const memberNode = unionNode?.types[i];
+
+      // A scope wrapper around a cell formats as the cell alone, dropping the
+      // scope before it reaches the schema — so the structural check on the
+      // finished schema would have nothing left to reject. Catch it here,
+      // where the wrapper is still visible.
+      const memberScope = resolveScopeWrapperNode(memberNode)?.scope ??
+        scopeForWrapperName(
+          (memberType as TypeWithInternals).aliasSymbol?.name,
+        );
+      if (memberScope !== undefined) {
+        throw scopeInsideUnionError(memberScope);
+      }
 
       // Include undefined as an explicit type in the schema
       if (this.isUndefinedType(memberType)) {
