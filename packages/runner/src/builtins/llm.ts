@@ -1009,10 +1009,17 @@ export function generateText(
     // If neither prompt nor messages is provided, don't make a request
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
     if (!hasPrompt && !messages) {
+      // Advancing the run abandons a request already in flight, so the response
+      // it eventually produces fails its guard and writes nothing. Dropping the
+      // remembered hash lets the same prompt, if it comes back, go out again
+      // rather than match the in-flight check and never be sent.
+      currentRun++;
+      previousCallHash = undefined;
       resultWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
+      requestHashWithLog.set(undefined);
       return;
     }
 
@@ -1310,11 +1317,18 @@ export function generateObject<T extends Record<string, unknown>>(
       (!hasPrompt && (!messages || messages.length === 0)) ||
       schema === undefined
     ) {
+      // Advancing the run abandons a request already in flight, so the response
+      // it eventually produces fails its guard and writes nothing. Dropping the
+      // remembered hash lets the same prompt, if it comes back, go out again
+      // rather than match the in-flight check and never be sent.
+      currentRun++;
+      previousCallHash = undefined;
       resultWithLog.set(undefined);
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
+      requestHashWithLog.set(undefined);
       return;
     }
 

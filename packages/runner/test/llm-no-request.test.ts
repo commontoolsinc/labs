@@ -10,6 +10,13 @@
  * Each test spies the client method the builtin would call and asserts it never
  * fires, then confirms the cell settled with no result. The wait resolves on the
  * `pending` the early return writes, the same signal a real response would clear.
+ *
+ * A prompt can also become empty after having been set, which a pattern that
+ * gates its prompt on an input does every time that input is cleared. Two
+ * further tests cover that transition. Entering the no-request state has to
+ * abandon a request already in flight, so a response that lands afterwards
+ * writes nothing; and it has to forget the request it remembered, so the same
+ * prompt coming back is sent again rather than suppressed as a duplicate.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -145,6 +152,186 @@ describe("LLM builtin no-request paths", () => {
       expect(calls).toBe(0);
       expect(settled.pending).toBe(false);
       expect(result.key("result").get()).toBeUndefined();
+    } finally {
+      LLMClient.prototype.generateObject = original;
+    }
+  });
+  it("`generateText` leaves no trace of a request a cleared prompt abandoned", async () => {
+    const original = LLMClient.prototype.sendRequest;
+    let release: (() => void) | undefined;
+    const arrived = Promise.withResolvers<void>();
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    LLMClient.prototype.sendRequest = async () => {
+      arrived.resolve();
+      await held;
+      return { content: "a summary of cats" } as never;
+    };
+    try {
+      const testPattern = builder.pattern<{ prompt: string }>(({ prompt }) =>
+        builder.generateText({ prompt })
+      );
+      const promptCell = runtime.getCell<string>(
+        space,
+        "cleared-prompt-input",
+        undefined,
+        tx,
+      );
+      promptCell.set("summarize cats");
+      const resultCell = runtime.getCell(
+        space,
+        "cleared-prompt",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { prompt: promptCell },
+        resultCell,
+      );
+      tx.commit();
+      tx = runtime.edit();
+
+      // The request is out and parked inside the client; the response has not
+      // been produced yet.
+      await arrived.promise;
+
+      const clear = runtime.edit();
+      promptCell.withTx(clear).set("");
+      clear.commit();
+      await runtime.idle();
+
+      release!();
+      await runtime.settled();
+
+      // `requestHash` is what tells an applied response from an abandoned one.
+      // Reading `result` alone cannot: the builtin's action reads the cell it
+      // writes, so a response applied after the prompt went empty re-triggers
+      // the action, which clears `result` again and hides that anything
+      // landed. Only the stamp is left behind, and a hash here means the
+      // answer to a prompt that no longer exists was written to the cell.
+      expect(result.key("requestHash").get()).toBeUndefined();
+      expect(result.key("result").get()).toBeUndefined();
+      expect(result.key("partial").get()).toBeUndefined();
+      expect(result.key("pending").get()).toBe(false);
+    } finally {
+      LLMClient.prototype.sendRequest = original;
+    }
+  });
+
+  it("`generateText` sends again when a cleared prompt comes back", async () => {
+    const original = LLMClient.prototype.sendRequest;
+    let calls = 0;
+    LLMClient.prototype.sendRequest = () => {
+      calls++;
+      return Promise.resolve({ content: "a summary of cats" } as never);
+    };
+    try {
+      const testPattern = builder.pattern<{ prompt: string }>(({ prompt }) =>
+        builder.generateText({ prompt })
+      );
+      const promptCell = runtime.getCell<string>(
+        space,
+        "restored-prompt-input",
+        undefined,
+        tx,
+      );
+      promptCell.set("summarize cats");
+      const resultCell = runtime.getCell(
+        space,
+        "restored-prompt",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { prompt: promptCell },
+        resultCell,
+      );
+      tx.commit();
+      tx = runtime.edit();
+
+      await waitForLlmSettled(runtime, result);
+      expect(calls).toBe(1);
+      expect(result.key("result").get()).toBe("a summary of cats");
+
+      const clear = runtime.edit();
+      promptCell.withTx(clear).set("");
+      clear.commit();
+      await runtime.settled();
+      expect(result.key("result").get()).toBeUndefined();
+
+      const restore = runtime.edit();
+      promptCell.withTx(restore).set("summarize cats");
+      restore.commit();
+      await runtime.settled();
+
+      // The same prompt is a new request, not a duplicate of one whose result
+      // was thrown away.
+      expect(calls).toBe(2);
+      expect(result.key("result").get()).toBe("a summary of cats");
+    } finally {
+      LLMClient.prototype.sendRequest = original;
+    }
+  });
+
+  it("`generateObject` sends again when a cleared prompt comes back", async () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { answer: { type: "string" } },
+    };
+    const original = LLMClient.prototype.generateObject;
+    let calls = 0;
+    LLMClient.prototype.generateObject = () => {
+      calls++;
+      return Promise.resolve({ object: { answer: "cats" } } as never);
+    };
+    try {
+      const testPattern = builder.pattern<{ prompt: string }>(({ prompt }) =>
+        builder.generateObject({ prompt, schema })
+      );
+      const promptCell = runtime.getCell<string>(
+        space,
+        "restored-object-prompt-input",
+        undefined,
+        tx,
+      );
+      promptCell.set("name an animal");
+      const resultCell = runtime.getCell(
+        space,
+        "restored-object-prompt",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { prompt: promptCell },
+        resultCell,
+      );
+      tx.commit();
+      tx = runtime.edit();
+
+      await waitForLlmSettled(runtime, result);
+      expect(calls).toBe(1);
+      expect(result.key("result").get()).toEqual({ answer: "cats" });
+
+      const clear = runtime.edit();
+      promptCell.withTx(clear).set("");
+      clear.commit();
+      await runtime.settled();
+      expect(result.key("result").get()).toBeUndefined();
+
+      const restore = runtime.edit();
+      promptCell.withTx(restore).set("name an animal");
+      restore.commit();
+      await runtime.settled();
+
+      expect(calls).toBe(2);
+      expect(result.key("result").get()).toEqual({ answer: "cats" });
     } finally {
       LLMClient.prototype.generateObject = original;
     }
