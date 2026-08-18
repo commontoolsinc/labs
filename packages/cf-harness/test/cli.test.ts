@@ -3881,6 +3881,7 @@ Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
       "runId: run-policy",
       "status: completed",
       "modelTurns: 1",
+      "cfcMode: observe (harness)",
       "policyEvents: 1",
       "- warning bash: bash would require direct-command authorization in enforce modes",
       "",

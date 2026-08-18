@@ -2393,7 +2393,14 @@ export const formatCfHarnessCliResult = (
     `runId: ${result.runState.runId}`,
     `status: ${result.runState.status}`,
     `modelTurns: ${result.modelTurns}`,
+    `cfcMode: ${result.runState.cfcEnforcementMode} (harness)`,
   ];
+  if (result.runState.fabricSessionCfc !== undefined) {
+    const posture = result.runState.fabricSessionCfc;
+    lines.push(
+      `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})`,
+    );
+  }
   const reportedUsage = result.totalUsage ?? result.usage;
   if (reportedUsage !== undefined) {
     const usage = reportedUsage;

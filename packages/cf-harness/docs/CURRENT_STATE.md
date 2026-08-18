@@ -131,7 +131,9 @@ The current package provides:
   set the session runtime's CFC dials, so with labels persisted a
   confidentiality-tainted pattern write is refused at commit under strict —
   these are the fabric session's dials, independent of the harness's own
-  `--cfc-enforcement-mode`;
+  `--cfc-enforcement-mode`, and the resolved posture (each dial's value and
+  source) is recorded as `fabricSessionCfc` in run state and printed in the
+  operator summary;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable

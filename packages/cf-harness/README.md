@@ -817,6 +817,12 @@ read visible to that refusal. These dials govern the fabric session's runtime
 only — `--cfc-enforcement-mode` remains the harness's own dial for tool policy
 and the sandbox, and the two are set independently.
 
+A run states both postures rather than leaving them to be inferred: the resolved
+fabric-session posture — each dial's value and whether the operator configured
+it or the preset supplied it — is recorded as `fabricSessionCfc` in
+`run-state.json` and the run report, and the operator summary prints it beside
+the harness's own `cfcMode`.
+
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, an
 optional `resultSchema`, and an optional `register`. An `inputs` string value
