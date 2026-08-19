@@ -8,8 +8,8 @@ reason: "Stage-C build W3 — (α): events.md §4's RULED one-durable-entry-one-
 
 Date: 2026-08-19. Base: the W1 (d′) tip `19c6448ab`
 (`claude/server-exec-v2-w1-dprime`). Branch `claude/server-exec-v2-w3-alpha`
-— a STACKED PR off W1 (no CI; every green below is a local run, said with
-counts). Worktree `/Users/berni/labs-worktrees/w3-alpha`; durable copy of
+— a STACKED PR off W1, #6043 (no CI; every green below is a local run,
+said with counts). Worktree `/Users/berni/labs-worktrees/w3-alpha`; durable copy of
 this report `/Users/berni/labs-worktrees/w3-alpha-build-report.md`. Every
 deno invocation `--no-lock`. Commits: `a8f9ff61a` (the mechanisms),
 `c3732e50b` (the pins), `9b843b4e3` (spec + register + skip list), plus
