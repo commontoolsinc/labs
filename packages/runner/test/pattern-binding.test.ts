@@ -7,6 +7,10 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import {
+  linkCfcLabelView,
+  setLinkCfcLabelView,
+} from "../src/cfc/link-label-view.ts";
 import { isCell } from "../src/cell.ts";
 import {
   areLinksSame,
@@ -24,6 +28,7 @@ import {
   unwrapOneLevelAndBindToDoc,
 } from "../src/pattern-binding.ts";
 import { Runtime } from "../src/runtime.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
@@ -772,6 +777,38 @@ describe("pattern-binding", () => {
       expect(reduced.length).toBe(3);
       expect(1 in reduced).toBe(false);
       expect(reduced[2]).toBe("third");
+    });
+
+    it("returns a link carrying only addressing members by identity", () => {
+      const link = runtime
+        .getCell(space, `bare ${crypto.randomUUID()}`, undefined, tx)
+        .getAsLink();
+      const binding = { x: link };
+      expect(reduce(binding)).toBe(binding);
+    });
+
+    it("drops a cfc label view riding on a link", () => {
+      // The label view is a flow-control side channel, and cfc's own module
+      // calls it no part of a link's addressing identity -- so it is no part
+      // of what names a node either.
+      const link = runtime
+        .getCell(space, `labeled ${crypto.randomUUID()}`, undefined, tx)
+        .getAsLink();
+      setLinkCfcLabelView(link, {} as never);
+      expect(linkCfcLabelView(link)).not.toBeUndefined();
+
+      const reduced = reduce({ x: link }).x;
+      expect(linkCfcLabelView(reduced)).toBeUndefined();
+      expect(areNormalizedLinksSame(parseLink(reduced)!, parseLink(link)!))
+        .toBe(true);
+    });
+
+    it("returns a link envelope holding no payload record as it stands", () => {
+      // `isSigilLink()` vets the envelope, not what sits inside it, so a
+      // payload that is not a record reaches the reduction. It addresses
+      // nothing and there is nothing to read off it.
+      const binding = { x: { "/": { [LINK_V1_TAG]: null } } };
+      expect(reduce(binding)).toBe(binding);
     });
 
     it("leaves a deferred `$alias` as it stands", () => {

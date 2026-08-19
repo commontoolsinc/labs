@@ -28,7 +28,7 @@ import {
   type NormalizedFullLink,
   parseLink,
   sanitizeSchemaForLinks,
-  sigilLinkWithoutSchema,
+  sigilLinkAddressOnly,
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
@@ -397,6 +397,10 @@ function sendValueToBindingInner<T>(
  * thing in the tree: a schema drags its whole `$defs` closure along, running
  * to kilobytes against a cause otherwise measured in hundreds of bytes.
  *
+ * The reduction is to the address, not away from the schema specifically, so
+ * anything else riding a link is left out too -- cfc's `cfcLabelView` being
+ * the one that exists today. See `sigilLinkAddressOnly()`.
+ *
  * So the reduction happens here rather than in the binding itself, and the two
  * trees part company at this call: what the node reads through keeps its
  * schema, what names the node does not.
@@ -409,7 +413,7 @@ function sendValueToBindingInner<T>(
  */
 export function causalFormOfBinding<T extends FabricExecValue>(binding: T): T {
   function reduce(value: FabricExecValue): FabricExecValue {
-    if (isSigilLink(value)) return sigilLinkWithoutSchema(value);
+    if (isSigilLink(value)) return sigilLinkAddressOnly(value);
 
     // A `FabricPrimitive` is a leaf, and a `FabricInstance` holds its contents
     // behind a codec this walk cannot read. Neither can hold a link the walk

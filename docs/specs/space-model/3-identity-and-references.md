@@ -121,7 +121,9 @@ lives in `hashStringForEntityAddress()`, which any other address intake shares.
 derived id follows is settled by whoever builds the cause. A node's cause is
 built from its bound inputs, and those links carry the schema the node reads
 through, so `causalFormOfBinding()` reduces each of them to the cell it names
-first. A link's identity is its address — what
+first — down to the addressing members alone (`LINK_ADDRESS_KEYS`), so that
+anything else riding a link, such as cfc's `cfcLabelView`, stays out along
+with the schema. A link's identity is its address — what
 [link equality](#internal-representation) compares — so an id derived through
 one stays put when a pattern's type signature widens, and the `$defs` closure a
 schema drags along stays out of the digest entirely. A deferred `$alias` keeps
