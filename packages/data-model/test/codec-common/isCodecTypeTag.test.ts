@@ -62,6 +62,16 @@ describe("isCodecTypeTag", () => {
     expect(isCodecTypeTag("link@1")).toBe(false);
   });
 
+  it("returns `false` for a name holding a non-ASCII letter", () => {
+    // The alphabet is ASCII, which Section 2 of `3-json-encoding.md` states
+    // and a Unicode-property spelling of the same syntax would not honor. A
+    // tag crosses between systems, so the set of names it can carry cannot
+    // depend on which alphabet a decoder reads it with.
+    expect(isCodecTypeTag("\u00c9clair@1")).toBe(false);
+    expect(isCodecTypeTag("Caf\u00e9@1")).toBe(false);
+    expect(isCodecTypeTag("\u0411ytes@1")).toBe(false);
+  });
+
   it("returns `false` for a tag padded with whitespace or a newline", () => {
     // The syntax is anchored at both ends and is not multiline, so padding a
     // tag does not make the string one. The newline pair is the only case in

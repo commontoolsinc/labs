@@ -54,8 +54,29 @@ All special types in JSON use a single convention: single-key objects where the
 key follows the pattern `/<Type>@<Version>`.
 
 - `/` — sigil prefix (nodding to IPLD heritage)
-- `<Type>` — `UpperCamelCase` type name
-- `@<Version>` — version number (natural number, starting at 1)
+- `<Type>` — type name
+- `@<Version>` — version number
+
+The tag is the key without its sigil, and its syntax is exact, because that
+syntax is what separates an unrecognized type from a malformation. A name is an
+uppercase ASCII letter followed by any number of ASCII letters and digits —
+`UpperCamelCase`. A version is a decimal integer with no leading zero, so the
+lowest version is 1. A tag is a name, `@`, and a version, with nothing before
+or after. `Bytes@1` and `Abc123@1234` are tags; `bytes@1`, `By-tes@1`,
+`Bytes@0`, `Bytes@01` and `Bytes@1.0` are not, and neither is any of those
+padded with whitespace or a newline.
+
+A string outside that syntax is not an unrecognized tag; it is not a tag at
+all. A key naming one is a structural violation under Section 9 rather than an
+`UnknownValue` under Section 8, and that is what lets an `UnknownValue` always
+hold a real tag. The escapes `/quote`, `/hole` and `/object` (Section 6) fall
+outside the syntax deliberately, each being a structural marker the format
+handles itself rather than a type anything encodes.
+
+The syntax is not particular to JSON. It is the type-tag syntax the whole codec
+system shares: a registry refuses a codec that declares a fixed tag outside it,
+so no codec can claim a tag the decoder would reject, and a format that lays
+its tags out differently on the wire still writes tags of this syntax.
 
 This convention does **not** prohibit storing plain objects that happen to have
 `/`-prefixed keys. The escaping mechanism in Section 6 (`/object` and
