@@ -253,16 +253,22 @@ fixes the uncompressed client→server surface: a watch spec for a document
 whose schema is already persisted carries `{ "$ref": "cid:…" }` instead of
 the full schema, and reconnect re-sends references, not bodies.
 
-The server side of this needs no new machinery: selector schemas flow
-through the shared traversal, whose loader collects referenced documents
-from the requesting space's own storage and whose entry gate keeps an
-uncollectable schema from selecting anything (see Space boundaries). What remains
-for clients is the sending half: a client may send a reference only for a
-schema whose documents it knows are persisted in that space — one it
-wrote, or one it received by sync — and sends the schema inline otherwise,
-as today. A reference the server cannot resolve fails the query loudly
-(protocol error), not silently as an empty match: an unresolvable selector
-is a client bug, and matching nothing would mask it.
+The server validates root selector references BEFORE traversal begins:
+every referenced document, transitively through its closure, must be
+stored in the requesting space with content that verifies against its
+id, and the validation reads through the query's manager, so a
+historical query (`atSeq`) requires the closure to exist and verify at
+that same sequence. A reference that fails this validation fails the
+query loudly (a QueryError), never silently as an empty match — the
+lenient selects-nothing gate is for LINK schemas inside delivered
+documents, where a hole is a wait-for-arrival state; an unresolvable
+selector reference is a client bug, and matching nothing would mask
+it. Past validation, resolution flows through the shared traversal
+with the documents already registered. What remains for clients is
+the sending half: a client may send a reference only for a schema
+whose documents it knows are persisted in that space — one it wrote,
+or one it received by sync — and sends the schema inline otherwise,
+as today.
 
 ### Resolution
 
