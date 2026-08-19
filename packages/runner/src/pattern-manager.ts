@@ -72,6 +72,49 @@ const logger = getLogger("pattern-manager");
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
 const PATTERN_COVERAGE_CACHE_VARIANT = "pattern-coverage";
 
+/**
+ * The compiler's hoist namespace. `builder-call-hoisting` mints
+ * `__cfPattern_<n>` (n counting from 1) for the anonymous sub-patterns it
+ * derives, and registers them through `__cfReg` — never as exports.
+ * Registration refuses an AUTHORED builder-artifact export under these names,
+ * which is what lets everything downstream that must tell a derived hoist
+ * from an authored artifact — the pattern-update gates among them — read
+ * provenance from the spelling alone: a `__cfPattern_<n>` in the artifact
+ * index can only be the transformer's.
+ */
+const RESERVED_HOIST_EXPORT = /^__cfPattern_\d+$/;
+
+/**
+ * Throw if any module in an evaluated bundle exports a builder artifact in
+ * the reserved hoist namespace.
+ *
+ * A whole-bundle pre-pass rather than a check inside the registration loop,
+ * so a refused bundle registers nothing at all: a module rejected after its
+ * neighbors were indexed would leave the session holding half a bundle.
+ * Only artifacts are checked — `indexArtifact` admits nothing else, so a
+ * plain value under such a name can never be resolved as a hoist.
+ */
+function assertNoReservedHoistExports(
+  exportsByIdentity: ReadonlyMap<string, Record<string, unknown>>,
+): void {
+  for (const [identity, exports] of exportsByIdentity) {
+    for (const exportName of Object.keys(exports)) {
+      if (
+        RESERVED_HOIST_EXPORT.test(exportName) &&
+        isTrustedBuilderArtifact(exports[exportName])
+      ) {
+        throw new Error(
+          `module ${identity} exports the builder artifact ` +
+            `"${exportName}": the __cfPattern_<n> names are the compiler's ` +
+            `own hoist namespace, and an authored artifact under one reads ` +
+            `as a derived hoist wherever provenance matters — export it ` +
+            `under another name`,
+        );
+      }
+    }
+  }
+}
+
 /** Whether copying source bytes would discard a meaningful stored CFC label. */
 export function sourceCfcMetadataProhibitsCrossSpaceCopy(
   metadata: CfcMetadata | undefined,
@@ -1528,6 +1571,7 @@ export class PatternManager {
   registerEvaluatedModules(result: EvaluateResult): void {
     const byId = result.exportsByIdentity;
     if (byId) {
+      assertNoReservedHoistExports(byId);
       for (const [identity, exports] of byId) {
         // `modulesByIdentity` keeps the whole namespace for MODULE reuse on a
         // by-identity reload (a separate concern from artifact addressing).

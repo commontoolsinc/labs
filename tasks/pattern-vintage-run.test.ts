@@ -1899,6 +1899,60 @@ describe("the vintage gate, end to end", () => {
     });
   });
 
+  describe("an authored export squatting on the hoist namespace", () => {
+    const SQUATTER_KEY = "vintage-gate-squatter.tsx";
+    const SQUATTER_TEST_KEY = SQUATTER_KEY.replace(/\.tsx$/, ".test.tsx");
+
+    // The capture/rename hazard: were this captured, its manifest entry would
+    // be spelled exactly like a derived hoist, and a later rename would be
+    // held back as supersession instead of failing as a retirement. The
+    // runner's registration seam refuses the module outright, so the
+    // sequence can no longer be constructed — which is the regression this
+    // pins end to end.
+    const SQUATTER = [
+      "import { pattern } from 'commonfabric';",
+      "interface RowOut { shout: string }",
+      "export const __cfPattern_1 = pattern<{ word: string }, RowOut>(",
+      "  ({ word }) => ({ shout: word }),",
+      ");",
+      "export default pattern<Record<string, never>, { out: string }>(",
+      "  () => ({ out: 'x' }),",
+      ");",
+      "",
+    ].join("\n");
+
+    const SQUATTER_TEST = [
+      "import { assert, pattern, TESTS } from 'commonfabric';",
+      `import Subject from './${SQUATTER_KEY}';`,
+      "export default pattern(() => {",
+      "  const subject = Subject({});",
+      "  const present = assert(() => subject.out === 'x');",
+      "  return { [TESTS]: [{ assertion: present }], subject };",
+      "});",
+      "",
+    ].join("\n");
+
+    beforeEach(async () => {
+      await Deno.writeTextFile(`${dir}/patterns/${SQUATTER_KEY}`, SQUATTER);
+      await Deno.writeTextFile(
+        `${dir}/patterns/${SQUATTER_TEST_KEY}`,
+        SQUATTER_TEST,
+      );
+    });
+
+    it("REFUSES the capture, so the fixture never exists to mislead", async () => {
+      const { problems, captured } = await captureMissing(
+        roots,
+        [SQUATTER_TEST_KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+      expect(captured).toEqual([]);
+      expect(
+        problems.some((p) => p.includes("hoist namespace")),
+      ).toBe(true);
+    });
+  });
+
   describe("a key the declared output type never names", () => {
     const STAMP = new Date("2026-07-29T12:00:00.000Z");
 

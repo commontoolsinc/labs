@@ -133,7 +133,11 @@ Per fixture:
   error on a hoist fails, an authored export that disappeared fails as the
   retirement it is, and a hoist that applies is compared like everything else,
   which is what keeps a row-allocated cell's cause-stability (the
-  moved-`.for()` class) gated;
+  moved-`.for()` class) gated. Telling the two apart is spelling, and spelling
+  is decisive because the namespace is reserved: the runner refuses a module
+  that exports a builder artifact named `__cfPattern_<n>`, so a recorded
+  instantiation with that shape can only be the compiler's own
+  (`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` §11.3);
 - the root then **reads as something** rather than nothing;
 - every value the vintage held is **still readable** afterwards.
 

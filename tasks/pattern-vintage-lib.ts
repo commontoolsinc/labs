@@ -1202,13 +1202,12 @@ export function isClean(
  * may be addressed by it. The per-file counter starts at 1, so
  * `__cfPattern_0` is not a name the transformer mints.
  *
- * Spelling is the only evidence available here. The artifact index registers
- * hoists and exports through one path and keeps no provenance, and the
- * missing-artifact face asks about a symbol today's module does not even
- * define — so an authored export squatting on the reserved spelling would be
- * classified as derived, and its refusals held back. Reserving the namespace
- * at emission is the transformer-side fix; this gate cannot tell the
- * squatter from the hoist.
+ * Spelling IS provenance, because registration enforces it: the runner
+ * refuses an authored builder-artifact export in this namespace
+ * (`RESERVED_HOIST_EXPORT`, `pattern-manager.ts`), and every path that runs
+ * a pattern — the runtime's, and this gate's own capture and replay
+ * compiles — goes through that seam. A symbol with this shape in a manifest
+ * or the artifact index is the transformer's.
  */
 export function isDerivedHoistSymbol(symbol: string): boolean {
   return /^__cfPattern_[1-9]\d*$/.test(symbol);

@@ -280,15 +280,19 @@ export interface ReplayReport {
    */
   dropsApplied: Set<string>;
   /**
-   * Derived-hoist targets whose STORED ARGUMENTS today's schema refused —
-   * held back from failing, because a hoist's arguments are the captures of a
-   * derivation the updated source re-runs and re-supplies wholesale. The real
-   * update channel (`setPattern`) validates only the root contract, so
-   * failing here held vintages to a stricter rule than any deployed piece
-   * experiences. Only the stored-argument refusal is held back: any other
-   * error on a hoist still fails, and so does the readback comparison for
-   * every hoist that applies — which is what keeps a row-allocated cell's
-   * cause-stability (the moved-`.for()` class) gated.
+   * Derived-hoist targets held back from failing, each entry tagged with the
+   * rule that held it. Two refusal shapes qualify: STORED ARGUMENTS today's
+   * schema refused ("stored arguments superseded"), because a hoist's
+   * arguments are the captures of a derivation the updated source re-runs
+   * and re-supplies wholesale; and a recorded hoist today's source no longer
+   * emits ("hoist no longer emitted"), because hoist ids are builder node
+   * ids an ordinary edit renumbers — the same supersession wearing its
+   * second face. The real update channel (`setPattern`) validates only the
+   * root contract, so failing on either held vintages to a stricter rule
+   * than any deployed piece experiences. Nothing else is held back: any
+   * other error on a hoist still fails, and so does the readback comparison
+   * for every hoist that applies — which is what keeps a row-allocated
+   * cell's cause-stability (the moved-`.for()` class) gated.
    */
   capturesSuperseded: string[];
   failures: ReplayFailure[];
@@ -950,7 +954,10 @@ export async function replayAll(
     perVintage: VintageOutcome[];
     /** Accepted-drop entries that forgave something somewhere in this run. */
     dropsApplied: Set<string>;
-    /** Derived-hoist targets held back from stored-argument validation. */
+    /**
+     * Derived-hoist targets held back, each tagged with the rule that held
+     * it — a superseded stored argument, or a hoist no longer emitted.
+     */
     capturesSuperseded: string[];
     failures: ReplayFailure[];
   }
