@@ -2066,10 +2066,10 @@ export const piece = targetOptions(
   )
   .option(
     "-c,--piece <piece:string>",
-    `${PIECE_OPTION_HELP} Repeatable with the --space form: every named ` +
+    `${PIECE_OPTION_HELP} Repeatable with --api-url/--space or a piece-less ` +
+      `--url: every named ` +
       `piece receives the same source, applied serially in the order given, ` +
-      `stopping at the first failure. A piece already running the candidate ` +
-      `source is reported and skipped.`,
+      `stopping at the first failure.`,
     { collect: true },
   )
   .option(
@@ -3099,20 +3099,13 @@ export interface SetSrcCLIOptions extends Omit<PieceCLIOptions, "piece"> {
  *
  * Each `--piece` value goes through the parse the single-piece form uses, so
  * every spelling — id, slug, canonical reference — and every validation keeps
- * its one-piece meaning. The `--url` form stays single-piece: a URL names at
- * most one piece, so repeating `--piece` beside one is refused rather than
- * resolved.
+ * its one-piece meaning. A piece-less `--url` supplies the host and space for
+ * every repeated `--piece`; a URL that already names a piece is still refused
+ * by the one-piece parser.
  */
 export function parseBatchPieceConfigs(
   options: SetSrcCLIOptions,
 ): PieceConfig[] {
-  if (options.url !== undefined) {
-    throw new ValidationError(
-      `"--url" names a single piece; to update several pieces, repeat ` +
-        `"--piece" with "--api-url" and "--space".`,
-      { exitCode: 1 },
-    );
-  }
   return (options.piece ?? []).map((value) =>
     parsePieceOptions({ ...options, piece: value })
   );
@@ -3125,9 +3118,7 @@ export function formatBatchOutcomeLine(
   total: number,
 ): string {
   const position = `(${index + 1}/${total})`;
-  return outcome.status === "updated"
-    ? `Updated source for piece ${outcome.piece} ${position}`
-    : `Source already current for piece ${outcome.piece} — skipped ${position}`;
+  return `Updated source for piece ${outcome.piece} ${position}`;
 }
 
 /**
@@ -3142,23 +3133,16 @@ export function formatBatchStopReport(context: {
   total: number;
   outcomes: BatchPieceOutcome[];
 }): string {
-  const updated =
-    context.outcomes.filter((outcome) => outcome.status === "updated").length;
-  const skipped = context.outcomes.length - updated;
   const remaining = context.total - context.index - 1;
   return `Stopped at piece ${context.piece} (${
     context.index + 1
-  } of ${context.total}): ${updated} updated and ${skipped} already ` +
-    `current before the stop; ${remaining} not attempted.`;
+  } of ${context.total}): ${context.outcomes.length} updated before the stop; ` +
+    `${remaining} not attempted.`;
 }
 
 /** The closing line of a completed batch, totaling the per-piece lines. */
 export function formatBatchSummary(outcomes: BatchPieceOutcome[]): string {
-  const updated =
-    outcomes.filter((outcome) => outcome.status === "updated").length;
-  return `Processed ${outcomes.length} pieces: ${updated} updated, ${
-    outcomes.length - updated
-  } already current.`;
+  return `Updated ${outcomes.length} pieces.`;
 }
 
 /** NEXT STEPS hint after a completed batch apply. */

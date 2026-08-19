@@ -20,7 +20,6 @@ import {
   type BatchPieceOutcome,
   checkPiecePatternBatch,
   type PieceConfig,
-  resolveCandidatePatternRef,
   setPiecePatternBatch,
   type SpaceConfig,
 } from "../lib/piece.ts";
@@ -54,7 +53,7 @@ function configFor(piece: string, extra: Partial<PieceConfig> = {}) {
   } as PieceConfig;
 }
 
-/** What one fake piece looks like to the batch: its deployed ref and fate. */
+/** What one fake piece looks like to the batch. */
 interface FakePieceSpec {
   deployed?: { identity: string; symbol: string };
   setPatternError?: Error;
@@ -79,8 +78,7 @@ function newBatchCallLog(): BatchCallLog {
 
 /**
  * A fake `PiecesController` covering exactly the surface the batch functions
- * touch: `get()` for the per-piece controllers, and (via the real
- * `getPatternIdentityRef`) each controller's cell meta.
+ * touch: `get()` for the per-piece controllers and each piece operation.
  */
 function fakePieces(
   specs: Record<string, FakePieceSpec>,
@@ -127,7 +125,6 @@ function batchDeps(
       log.pinnedEntries.push(entry);
       return Promise.resolve(PROGRAM);
     },
-    resolveCandidatePatternRef: () => Promise.resolve(CANDIDATE),
     resolvePieceAddress: (_pieces: PiecesController, token: string) =>
       Promise.resolve(token),
     ...overrides,
@@ -164,14 +161,14 @@ describe("piece-setsrc-batch", () => {
       );
 
       expect(result).toEqual([
-        { piece: "p1", status: "updated" },
-        { piece: "p2", status: "updated" },
-        { piece: "p3", status: "updated" },
+        { piece: "p1" },
+        { piece: "p2" },
+        { piece: "p3" },
       ]);
       expect(outcomes).toEqual([
-        [{ piece: "p1", status: "updated" }, 0, 3],
-        [{ piece: "p2", status: "updated" }, 1, 3],
-        [{ piece: "p3", status: "updated" }, 2, 3],
+        [{ piece: "p1" }, 0, 3],
+        [{ piece: "p2" }, 1, 3],
+        [{ piece: "p3" }, 2, 3],
       ]);
       expect(log.setPatternCalls.map((call) => call.piece)).toEqual([
         "p1",
@@ -187,7 +184,7 @@ describe("piece-setsrc-batch", () => {
       }
     });
 
-    it("reports a piece already running the candidate as already-current without re-applying it", async () => {
+    it("applies a piece already running the candidate so setPattern owns its lifecycle and repository updates", async () => {
       const log = newBatchCallLog();
       const result = await setPiecePatternBatch(
         [configFor("p1"), configFor("p2")],
@@ -197,38 +194,16 @@ describe("piece-setsrc-batch", () => {
       );
 
       expect(result).toEqual([
-        { piece: "p1", status: "already-current" },
-        { piece: "p2", status: "updated" },
+        { piece: "p1" },
+        { piece: "p2" },
       ]);
-      expect(log.setPatternCalls.map((call) => call.piece)).toEqual(["p2"]);
-    });
-
-    it("applies when the deployed identity matches but the export symbol differs", async () => {
-      const log = newBatchCallLog();
-      const result = await setPiecePatternBatch(
-        [configFor("p1")],
-        ENTRY,
-        {},
-        batchDeps({
-          p1: { deployed: { identity: CANDIDATE.identity, symbol: "other" } },
-        }, log),
-      );
-
-      expect(result).toEqual([{ piece: "p1", status: "updated" }]);
-      expect(log.setPatternCalls.length).toBe(1);
-    });
-
-    it("applies when the piece carries no pattern identity", async () => {
-      const log = newBatchCallLog();
-      const result = await setPiecePatternBatch(
-        [configFor("p1")],
-        ENTRY,
-        {},
-        batchDeps({ p1: { deployed: undefined } }, log),
-      );
-
-      expect(result).toEqual([{ piece: "p1", status: "updated" }]);
-      expect(log.setPatternCalls.length).toBe(1);
+      expect(log.setPatternCalls.map((call) => call.piece)).toEqual([
+        "p1",
+        "p2",
+      ]);
+      for (const call of log.setPatternCalls) {
+        expect(call.options).toEqual({ repository: ENTRY.repository });
+      }
     });
 
     it("stops at the first failing piece, reports what landed, and rethrows that piece's own error", async () => {
@@ -255,7 +230,7 @@ describe("piece-setsrc-batch", () => {
         piece: "p2",
         index: 1,
         total: 3,
-        outcomes: [{ piece: "p1", status: "updated" }],
+        outcomes: [{ piece: "p1" }],
       });
       // The stop is immediate: the third piece is never attempted.
       expect(log.setPatternCalls.map((call) => call.piece)).toEqual([
@@ -355,46 +330,6 @@ describe("piece-setsrc-batch", () => {
     });
   });
 
-  describe("resolveCandidatePatternRef()", () => {
-    it("derives the candidate reference from one compile in the target space", async () => {
-      const compiled = { kind: "pattern" };
-      const compileContexts: unknown[] = [];
-      const pieces = {
-        runtime: {
-          patternManager: {
-            compilePattern: (_program: unknown, context: unknown) => {
-              compileContexts.push(context);
-              return Promise.resolve(compiled);
-            },
-            getArtifactEntryRef: (pattern: unknown) =>
-              pattern === compiled ? CANDIDATE : undefined,
-          },
-        },
-        getSpace: () => SPACE_DID,
-      } as unknown as PiecesController;
-
-      const ref = await resolveCandidatePatternRef(pieces, PROGRAM);
-
-      expect(ref).toEqual(CANDIDATE);
-      expect(compileContexts).toEqual([{ space: SPACE_DID }]);
-    });
-
-    it("throws when the compiled candidate has no pattern identity", async () => {
-      const pieces = {
-        runtime: {
-          patternManager: {
-            compilePattern: () => Promise.resolve({ kind: "pattern" }),
-            getArtifactEntryRef: () => undefined,
-          },
-        },
-        getSpace: () => SPACE_DID,
-      } as unknown as PiecesController;
-
-      await expect(resolveCandidatePatternRef(pieces, PROGRAM)).rejects
-        .toThrow("the candidate source has no pattern identity");
-    });
-  });
-
   describe("parseBatchPieceConfigs()", () => {
     it("parses each `--piece` value with the shared space options", () => {
       const configs = parseBatchPieceConfigs({
@@ -410,14 +345,15 @@ describe("piece-setsrc-batch", () => {
       ]);
     });
 
-    it("refuses `--url` beside repeated `--piece`", () => {
-      expect(() =>
-        parseBatchPieceConfigs({
-          url: `${API_URL}/${SPACE}`,
-          identity: IDENTITY,
-          piece: ["p1", "p2"],
-        })
-      ).toThrow('"--url" names a single piece');
+    it("combines a piece-less `--url` with every repeated `--piece`", () => {
+      expect(parseBatchPieceConfigs({
+        url: `${API_URL}/${SPACE}`,
+        identity: IDENTITY,
+        piece: ["p1", "p2"],
+      })).toEqual([
+        { apiUrl: API_URL, space: SPACE, identity: IDENTITY, piece: "p1" },
+        { apiUrl: API_URL, space: SPACE, identity: IDENTITY, piece: "p2" },
+      ]);
     });
   });
 
@@ -438,8 +374,8 @@ describe("piece-setsrc-batch", () => {
           setPiecePatternBatch: (configs, entry, options, deps) => {
             forwarded = { configs, entry, options };
             const landed: BatchPieceOutcome[] = [
-              { piece: "p1", status: "updated" },
-              { piece: "p2", status: "already-current" },
+              { piece: "p1" },
+              { piece: "p2" },
             ];
             landed.forEach((outcome, index) =>
               deps?.onOutcome?.(outcome, index, landed.length)
@@ -452,8 +388,8 @@ describe("piece-setsrc-batch", () => {
 
       expect(lines).toEqual([
         "Updated source for piece p1 (1/2)",
-        "Source already current for piece p2 — skipped (2/2)",
-        "Processed 2 pieces: 1 updated, 1 already current.",
+        "Updated source for piece p2 (2/2)",
+        "Updated 2 pieces.",
       ]);
       expect(outcomes.length).toBe(2);
       expect(forwarded).toEqual({
@@ -484,12 +420,12 @@ describe("piece-setsrc-batch", () => {
         "/repo/pattern.tsx",
         {
           setPiecePatternBatch: (_configs, _entry, _options, deps) => {
-            deps?.onOutcome?.({ piece: "p1", status: "updated" }, 0, 3);
+            deps?.onOutcome?.({ piece: "p1" }, 0, 3);
             deps?.onFailure?.({
               piece: "p2",
               index: 1,
               total: 3,
-              outcomes: [{ piece: "p1", status: "updated" }],
+              outcomes: [{ piece: "p1" }],
             });
             return Promise.reject(failure);
           },
@@ -501,8 +437,8 @@ describe("piece-setsrc-batch", () => {
       await expect(attempt).rejects.toBe(failure);
       expect(lines).toEqual(["Updated source for piece p1 (1/3)"]);
       expect(stops).toEqual([
-        "Stopped at piece p2 (2 of 3): 1 updated and 0 already current " +
-        "before the stop; 1 not attempted.",
+        "Stopped at piece p2 (2 of 3): 1 updated before the stop; " +
+        "1 not attempted.",
       ]);
     });
   });
@@ -590,18 +526,8 @@ describe("piece-setsrc-batch", () => {
   describe("reporting", () => {
     it("formats an updated piece's line with its position in the batch", () => {
       expect(
-        formatBatchOutcomeLine({ piece: "p7", status: "updated" }, 6, 106),
+        formatBatchOutcomeLine({ piece: "p7" }, 6, 106),
       ).toBe("Updated source for piece p7 (7/106)");
-    });
-
-    it("formats an already-current piece's line as skipped", () => {
-      expect(
-        formatBatchOutcomeLine(
-          { piece: "p1", status: "already-current" },
-          0,
-          2,
-        ),
-      ).toBe("Source already current for piece p1 — skipped (1/2)");
     });
 
     it("totals the stop report from the landed outcomes", () => {
@@ -610,22 +536,22 @@ describe("piece-setsrc-batch", () => {
         index: 3,
         total: 6,
         outcomes: [
-          { piece: "p1", status: "updated" },
-          { piece: "p2", status: "already-current" },
-          { piece: "p3", status: "updated" },
+          { piece: "p1" },
+          { piece: "p2" },
+          { piece: "p3" },
         ],
       })).toBe(
-        "Stopped at piece p4 (4 of 6): 2 updated and 1 already current " +
-          "before the stop; 2 not attempted.",
+        "Stopped at piece p4 (4 of 6): 3 updated before the stop; " +
+          "2 not attempted.",
       );
     });
 
-    it("counts updated and already-current pieces distinctly in the summary", () => {
+    it("totals the updated pieces in the summary", () => {
       expect(formatBatchSummary([
-        { piece: "p1", status: "updated" },
-        { piece: "p2", status: "already-current" },
-        { piece: "p3", status: "updated" },
-      ])).toBe("Processed 3 pieces: 2 updated, 1 already current.");
+        { piece: "p1" },
+        { piece: "p2" },
+        { piece: "p3" },
+      ])).toBe("Updated 3 pieces.");
     });
 
     it("points the apply hint at the batch's space", () => {
@@ -658,8 +584,8 @@ describe("piece-setsrc-batch", () => {
         {
           setPiecePatternBatch: () =>
             Promise.resolve([
-              { piece: "p1", status: "updated" },
-              { piece: "p2", status: "updated" },
+              { piece: "p1" },
+              { piece: "p2" },
             ]),
           report: (line) => reported.push(line),
           hint: (message) => hints.push(message),
@@ -667,7 +593,7 @@ describe("piece-setsrc-batch", () => {
       );
 
       expect(reported).toEqual([
-        "Processed 2 pieces: 2 updated, 0 already current.",
+        "Updated 2 pieces.",
       ]);
       expect(hints.length).toBe(1);
       expect(hints[0]).toContain(`${API_URL}/${SPACE}`);
@@ -716,12 +642,12 @@ describe("piece-setsrc-batch", () => {
       return command;
     }
 
-    it("refuses `--url` with repeated `--piece` through the full command parse", async () => {
+    it("rejects a piece-naming `--url` with repeated `--piece` through the full command parse", async () => {
       const command = await freshPieceCommand("setsrc-batch-url");
       await expect(command.parse([
         "setsrc",
         "--url",
-        `${API_URL}/${SPACE}`,
+        `${API_URL}/${SPACE}/${"abcdefghijklmnopqrstuvwxyz"}`,
         "--piece",
         "p1",
         "--piece",
@@ -729,7 +655,9 @@ describe("piece-setsrc-batch", () => {
         "--identity",
         IDENTITY,
         "/repo/pattern.tsx",
-      ])).rejects.toThrow('"--url" names a single piece');
+      ])).rejects.toThrow(
+        'cannot be provided when the "--url" names a piece',
+      );
     });
 
     it("routes repeated `--piece` with `--check` through the batch preflight", async () => {
@@ -738,7 +666,7 @@ describe("piece-setsrc-batch", () => {
         "setsrc",
         "--check",
         "--url",
-        `${API_URL}/${SPACE}`,
+        `${API_URL}/${SPACE}/${"abcdefghijklmnopqrstuvwxyz"}`,
         "--piece",
         "p1",
         "--piece",
@@ -746,7 +674,9 @@ describe("piece-setsrc-batch", () => {
         "--identity",
         IDENTITY,
         "/repo/pattern.tsx",
-      ])).rejects.toThrow('"--url" names a single piece');
+      ])).rejects.toThrow(
+        'cannot be provided when the "--url" names a piece',
+      );
     });
 
     it("keeps a single `--piece` on the one-piece path through the full command parse", async () => {

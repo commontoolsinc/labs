@@ -27,7 +27,6 @@ import {
 } from "@commonfabric/piece/ops";
 import {
   Cell,
-  compileAndSavePattern,
   deepEqual,
   encodeJsonPointer,
   entityIdFrom,
@@ -1540,7 +1539,6 @@ export async function checkPiecePattern(
 export interface BatchPieceOutcome {
   /** The resolved piece id (slug and scoped spellings resolved). */
   piece: string;
-  status: "updated" | "already-current";
 }
 
 /** Per-piece verdict of {@link checkPiecePatternBatch}. */
@@ -1573,28 +1571,6 @@ export interface BatchPieceProgress {
 }
 
 /**
- * Compile the candidate program once in the target space and return its
- * `{ identity, symbol }` entry ref. The identity is content-derived, so this
- * one compile names the pattern every piece in a batch would end up running —
- * which is what makes "already current" decidable before any piece is
- * touched. The write-back it performs is content-addressed and attached to
- * nothing, the same one `checkPattern` documents.
- */
-export async function resolveCandidatePatternRef(
-  pieces: PiecesController,
-  program: RuntimeProgram,
-): Promise<{ identity: string; symbol: string }> {
-  const candidate = await compileAndSavePattern(pieces.runtime, program, {
-    space: pieces.getSpace(),
-  });
-  const ref = pieces.runtime.patternManager.getArtifactEntryRef(candidate);
-  if (ref === undefined) {
-    throw new Error("the candidate source has no pattern identity");
-  }
-  return ref;
-}
-
-/**
  * The session config a batch opens once: the shared space fields of the
  * per-piece configs, with every embedded space DID collected so the deferred
  * check in `loadPieces` covers each piece reference that carried one.
@@ -1624,27 +1600,23 @@ function batchSessionConfig(configs: PieceConfig[]): SpaceConfig {
  * and persists that piece's predecessor update-authority delegations, which
  * a shared precompiled pattern would silently drop.
  *
- * A piece already running the candidate — deployed `{ identity, symbol }`
- * equal to the candidate's — is reported "already-current" and not
- * re-executed, so an interrupted batch is resumable by re-invocation. Only
- * the batch path skips; the single-piece path always applies.
+ * Every piece still goes through `setPattern`, even when it is already
+ * running the candidate pattern. Pattern identity alone does not capture the
+ * source transition, revision history, or repository metadata that
+ * `setPattern` owns, so skipping that call would make the batch path differ
+ * from serial `setsrc`.
  */
 export async function setPiecePatternBatch(
   configs: PieceConfig[],
   entry: EntryConfig,
   options: SetPiecePatternOptions = {},
-  deps:
-    & PieceOperationDependencies
-    & BatchPieceProgress
-    & { resolveCandidatePatternRef?: typeof resolveCandidatePatternRef } = {},
+  deps: PieceOperationDependencies & BatchPieceProgress = {},
 ): Promise<BatchPieceOutcome[]> {
   const pieces = await (deps.loadPieces ?? loadPieces)(
     batchSessionConfig(configs),
   );
   const program = await (deps.getPinnedProgramFromFile ??
     getPinnedProgramFromFile)(pieces, entry);
-  const candidate = await (deps.resolveCandidatePatternRef ??
-    resolveCandidatePatternRef)(pieces, program);
   const outcomes: BatchPieceOutcome[] = [];
   for (const [index, config] of configs.entries()) {
     try {
@@ -1659,23 +1631,13 @@ export async function setPiecePatternBatch(
         undefined,
         resolvedConfig.pieceScope,
       );
-      const deployed = getPatternIdentityRef(piece.getCell());
-      let outcome: BatchPieceOutcome;
-      if (
-        deployed !== undefined &&
-        deployed.identity === candidate.identity &&
-        deployed.symbol === candidate.symbol
-      ) {
-        outcome = { piece: resolvedConfig.piece, status: "already-current" };
-      } else {
-        await piece.setPattern(program, {
-          repository: entry.repository,
-          ...(options.dangerouslyAllowIncompatibleSchema
-            ? { dangerouslyAllowIncompatibleSchema: true }
-            : {}),
-        });
-        outcome = { piece: resolvedConfig.piece, status: "updated" };
-      }
+      await piece.setPattern(program, {
+        repository: entry.repository,
+        ...(options.dangerouslyAllowIncompatibleSchema
+          ? { dangerouslyAllowIncompatibleSchema: true }
+          : {}),
+      });
+      const outcome: BatchPieceOutcome = { piece: resolvedConfig.piece };
       outcomes.push(outcome);
       deps.onOutcome?.(outcome, index, configs.length);
     } catch (error) {
