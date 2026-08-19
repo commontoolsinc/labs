@@ -37,11 +37,18 @@ gate is 6/6 green at the W2.1 tip (no (α)) with the join step at
 visible in the store as W3 predicted; on the local W2.1 + (α) scratch it
 is 4/4 green at loads ≤ 12 (join 253–255 ms, every event in exactly one
 derived commit, `users` spliced exactly twice, 3 vote adds / 0 removes)
-and load-dominated after that (§6 — reported, not excused). The flicker
-case (the server's cascade child landing a wave after its parent's
-consequence) is COUNTED, observed live on both configurations, and
-flagged as the known cost of (a); shape (b) — deterministic cascade ids
-on both sides — is recorded as the owner-level alternative (§7).
+but RED at the swatch step in 5 of 12 runs there — and the bisect
+(W3 alone 3/3 green under higher load; W2 on W3 without W2.1 2/2 green
+under far higher load) attributes that stall to W2.1 in the (α)
+configuration (§6b): the voter's own vote echo is retired at the
+click's mark (the designed flicker) and the CONFIRMED own vote, durable
+in the store, then fails to render its swatch within 60 s on that
+browser — a BLOCKER-class finding for the LIFT configuration, flagged,
+not root-caused. The flicker case itself is COUNTED and observed live
+on both configurations; shape (b) — deterministic cascade ids on both
+sides — is recorded as the owner-level alternative (§7) and would also
+remove the exposure above (the echo would stand until the child's own
+landing).
 
 ## 1. The mechanism, exactly (what (a) does)
 
@@ -244,30 +251,66 @@ from `36701427c` (s5–s10).
 | s9 | 21:06:53 | 10.73/11.06/9.57 (**25.17**) | 82 s | ✗ at **both join lands** (60 s) | ✗ 60 142 | — | 6 / 6 (0); 42 / 23 | users 45, 57 (both joins DURABLE); {1: 8} | 1/0 ; 1/0 |
 | s10 | 21:08:23 | 21.90/14.60/11.08 (20.79) | 83 s | ✗ at **swatches** (60 s) | 255 ms | 346 / ✗ / — | 9 / 10 (1); 47 / 25 | add 65, add 67; {1: 13} | 2/1 ; 2/0 |
 
-Reading, honestly. **At loads ≤ 12 (s1–s4, s6, s7): 6/6 GREEN**, the
-join step **253–255 ms** on every run (≥ a server round trip; the old
-step read 7–16 ms), `events appended 11 / processed 11–12` (the 12th the
-purged LT1 leftover the drain delivers — W3's shape), **every event in
-exactly ONE derived commit**, `users` spliced exactly twice, 3 vote adds
-/ 0 removes — the configuration the skip lift needs, green, with the
-join step honest. s1's merge step (104.8 s at the session's first load
-peak 11.9; the next three 172–396 ms, W3's own 236–323 ms) is a load
-outlier, not a store defect (3 adds / 0 removes, every event once). The
-four reds are at loads 11.9–25.2 with the box running other agents'
-work: s5 / s8 / s10 at "both voters' swatches visible on both
-browsers" (the `data-vote-swatch-name` chips — `ranked` ← `todaysVotes`
-← `nowTick`; a step W2.1 does NOT touch, 1 ms in every green run;
-"2 love it" had rendered on BOTH browsers 350 ms before, both votes
-durable in the store, every event once), and s9 at the join step at
-peak 25 with BOTH joins durable in the store (45, 57) — the browsers
-starved, not the serving loop. FLAGGED, not claimed either way: before
-W2.1 a voter's OWN swatch was carried by its stranded vote echo
-forever; now it depends on the CONFIRMED vote arriving and rendering —
-if the swatch reds recur on a QUIET box, W2.1 has exposed a confirmed-
-vote render latency the echo used to mask (an owner / W3 / W4 item — the
-skip entry is W3's, and the lift rule is W3's "≥ 3/3 fresh-store"); a
-quiet re-run is the first thing a successor does (the driver and
-binaries are in the session scratchpad, §8).
+Three later quiet-ish runs at the final scratch tip: s11 (21:23:12Z,
+load 9.52 → peak 17.8) ✗ at **swatches** (join 254 ms, merge 271 ms;
+store clean, 2 vote adds); s12 (21:24:39Z, 15.02 → 14.4) ✗ at
+**swatches** (join 255, merge 472); s13 (21:26:07Z, 9.98 → 10.3) ✓
+6 545 ms (join 255, merge 728, swatches 1 ms, `appended 11 / processed
+12`, {1: 16}, 3 adds).
+
+**The bisect (the honest part).** Because the swatch reds tracked load
+only loosely (s5 red at 11.9 beside s7 green at 12.2; s11 red at 9.5 →
+17.8), two baselines were built and run under the SAME or HIGHER load
+— neither pushed: **(i) W3's own tip** `0b8156c09` (no W2, no W2.1;
+binary `ee789d9fb563abc3`; its own test file, the old join step):
+b1/b2/b3 at loads 20.1 / 21.7 / 20.1 → peaks 26.0 / 20.3 / 18.8 —
+**3/3 GREEN**, swatches **505 / 1 010 / 1 009 ms**, merge 404 / 377 /
+393 ms, `appended 11 / processed 12`, every event once, 3 adds; **(ii)
+W2 on W3 WITHOUT W2.1** (`0f951a239` in the scratch's history — the
+cherry-picked W2 tip on `4f2bda2d7`; binary `2d2272d2d0cd6f65`): c2/c3
+at loads 116 / 70 → peaks 108 / 65 — **2/2 GREEN**, swatches 504 / 1
+ms, merge 315 / 218 ms (c1 was killed by the box at load 350 before
+voting — no result). Against that: **W2.1 on W3**: 7 GREEN (s1–s4, s6,
+s7, s13; loads 6–12) / **5 RED at the swatch step** (s5, s8, s10, s11,
+s12; loads 9.5–21) + 1 RED at the join step at peak 25 (s9, both joins
+durable). **So the swatch-step stall is attributable to W2.1 in the
+(α) configuration, not to load and not to W2.** Reading the mechanism
+from the evidence (NOT root-caused — flagged): the voter's own castVote
+is a cascade child of its click; under (α) its LT1 copy is purged at
+the deadline in about one run in two (`lt1LeftoversPurged 1`) and the
+drain delivers it a wave after the click's mark; W2.1 retires the
+voter's own vote ECHO at the click's mark (the designed flicker), and
+then the CONFIRMED own vote — durable in the store at the next commit,
+and counted by "2 love it" on both browsers 300–700 ms after the clicks
+— does not render its swatch on that browser within 60 s in those
+runs. Before W2.1 the stranded echo carried the own swatch forever, so
+every baseline is green by masking. Candidates a successor should look
+at first: the confirmed own-vote ENTITY doc (a NEW doc id the client
+never read — the echo's entity had the client-derived id) not reaching
+the voter's replica after the echo's entity layer dropped (closure /
+structural-growth push timing), or the swatch/`ranked` re-derivation
+after the superseded flip racing the next frame; the OFF arm and the
+(α)-less tip (6/6 green, merge 7–10 s) do not show it. This is a
+BLOCKER-class finding for the LIFT configuration (W2.1 + (α)), not for
+W2.1 alone, and not a store defect (every store clean). Until it is
+understood, the skip lift should NOT proceed on W2.1 + (α) on the
+strength of these runs; the worktrees `/Users/berni/labs-worktrees/
+w2-1-scratch` (W2.1 on W3), `…/w2-1-w3base` (W3 alone), `…/w2-1-w2onw3`
+(W2 on W3), the four binaries under `…/scratchpad/w21bench/`, the
+driver, and the per-run stores are left in place for the successor.
+
+Reading the rest, honestly. **At loads ≤ 12 with the join step: 7/7
+green on the W2.1 + (α) scratch** — join **253–255 ms** on every run
+(≥ a server round trip; the old step read 7–16 ms), `events appended 11
+/ processed 11–12` (the 12th the purged LT1 leftover the drain
+delivers — W3's shape), **every event in exactly ONE derived commit**,
+`users` spliced exactly twice, 3 vote adds / 0 removes — the JOIN half
+of the lift condition, green and honest; the swatch-step stall above is
+the other half. s1's merge step (104.8 s at the session's first load
+peak 11.9; the next runs 172–728 ms, W3's own 236–404 ms) is the same
+stall surfacing in the merge step rather than the swatch step (both
+browsers rendered after ~100 s); s9's join-step red at peak 25 (both
+joins durable; the browsers starved) is load.
 
 ### 6c. OFF, once (the step change's OFF witness)
 
