@@ -1842,3 +1842,92 @@ Deno.test("memory v2 treats an $alias-shaped record as plain data in delivery", 
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 selector validation meets a shared dependency once and rejects forged storage", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-selector-diamond";
+  try {
+    const shared = {
+      type: "string",
+      title: "selector-diamond-shared",
+    } as const;
+    const sharedHash = internSchemaAsTaggedHashString(shared);
+    const left = {
+      type: "object",
+      properties: { l: { $ref: `cid:${sharedHash}` } },
+    } as const;
+    const leftHash = internSchemaAsTaggedHashString(left);
+    const right = {
+      type: "object",
+      properties: { r: { $ref: `cid:${sharedHash}` } },
+    } as const;
+    const rightHash = internSchemaAsTaggedHashString(right);
+    const root = {
+      type: "object",
+      properties: {
+        a: { $ref: `cid:${leftHash}` },
+        b: { $ref: `cid:${rightHash}` },
+      },
+    } as const;
+    const rootHash = internSchemaAsTaggedHashString(root);
+    const forgedTarget = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "selector-forged-claim",
+    });
+    applyCommit(engine, {
+      sessionId: "session:selector-diamond-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: `cid:${sharedHash}`, value: { value: shared } },
+          { op: "set", id: `cid:${leftHash}`, value: { value: left } },
+          { op: "set", id: `cid:${rightHash}`, value: { value: right } },
+          { op: "set", id: `cid:${rootHash}`, value: { value: root } },
+          {
+            op: "set",
+            id: "of:selector-diamond-doc",
+            value: { value: { a: {}, b: {} } },
+          },
+          // An unreferenced forged install is admitted (the boundary cannot
+          // name its class) — the selector validation below must still
+          // reject a reference to it.
+          {
+            op: "set",
+            id: `cid:${forgedTarget}`,
+            value: { value: { type: "number", title: "not-the-claim" } },
+          },
+        ],
+      },
+    });
+    // The diamond walk meets the shared dependency once and validates the
+    // whole closure from the space's own storage.
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:selector-diamond-doc",
+        selector: { path: [], schema: { $ref: `cid:${rootHash}` } },
+      }],
+    });
+    assert(
+      tracked.state.entities.has(`${space}/space/of:selector-diamond-doc`),
+    );
+    // A selector reference backed by stored content that does not hash to
+    // its id fails loudly at validation, before any traversal.
+    assertThrows(
+      () =>
+        trackGraph(space, engine, {
+          roots: [{
+            id: "of:selector-diamond-doc",
+            selector: { path: [], schema: { $ref: `cid:${forgedTarget}` } },
+          }],
+        }),
+      Error,
+      "did not verify in this space",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

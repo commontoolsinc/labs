@@ -100,6 +100,15 @@ describe("v2-watch", () => {
       expect(emitted.schema).toEqual(doc);
     });
 
+    it("propagates a failing persistence probe instead of reading it as a refusal", () => {
+      setContentAddressedSchemasConfig(true);
+      expect(() =>
+        externalizeSyncSelector({ path: [], schema }, () => {
+          throw new Error("synthetic persistence probe failure");
+        })
+      ).toThrow("synthetic persistence probe failure");
+    });
+
     it("keeps a selector whose decomposition refuses inline", () => {
       setContentAddressedSchemasConfig(true);
       const refused = {
