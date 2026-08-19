@@ -4332,8 +4332,25 @@ export class Server {
   demandSetSizesForSpace(
     space: string,
     options: { excludePrincipal?: string } = {},
-  ): { perSession: Array<{ sessionId: string; principal?: string; tracked: number; watches: number }>; unionKeys: number } {
-    const perSession: Array<{ sessionId: string; principal?: string; tracked: number; watches: number }> = [];
+  ): {
+    perSession: Array<
+      {
+        sessionId: string;
+        principal?: string;
+        tracked: number;
+        watches: number;
+      }
+    >;
+    unionKeys: number;
+  } {
+    const perSession: Array<
+      {
+        sessionId: string;
+        principal?: string;
+        tracked: number;
+        watches: number;
+      }
+    > = [];
     const union = new Set<string>();
     for (const session of this.#sessions.sessionsForSpace(space)) {
       if (
@@ -4344,7 +4361,9 @@ export class Server {
       }
       perSession.push({
         sessionId: session.id,
-        ...(session.principal === undefined ? {} : { principal: session.principal }),
+        ...(session.principal === undefined
+          ? {}
+          : { principal: session.principal }),
         tracked: session.trackedIds.size,
         watches: session.watches.length,
       });
