@@ -283,10 +283,13 @@ export type Immutable<T> = T extends ReadonlyArray<infer U>
 export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
 
 // TODO(danfuzz): The wire formats accept a plain object with any keys, that
-// being the rule a cross-language format has to hold to; this implementation
-// refuses these three, and the set is what stands between the two positions.
-// `unsafeObjectKeyIn()` below states the local reason for each and what would
-// let it go. Emptying this set is what closes the gap.
+// being the rule a cross-language format has to hold to. This implementation
+// refuses these names instead, and closing that gap means learning to carry
+// them: reconstructing records through mechanisms that preserve the name, and
+// keeping a record that carries `then` clear of promise resolution. That code
+// reads this same list -- as the names needing care rather than the names
+// refused -- so the list stays and what reading it means is what changes.
+// `unsafeObjectKeyIn()` below states what makes each name awkward.
 const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "then"]);
 
 /**
@@ -332,14 +335,18 @@ export function isUnsafeObjectKey(key: string): boolean {
  *   rather than the record, or nothing at all, and no boundary reports a fault
  *   because none occurred.
  *
- * A name leaves this set when what makes it awkward is dealt with, and what
- * that takes differs. `__proto__` needs the copy loops rebuilt on a mechanism
- * that carries the name. `constructor` needs the later boundaries that drop it
- * changed to keep it. `then` needs nothing here, and can be dealt with
- * nowhere: what makes it awkward is how the host resolves promises, so it
- * stays reserved for as long as this system runs on such a host. While a name
- * is in the set, the reservation is what keeps a record from being corrupted
- * in transit or quietly consumed after it.
+ * Refusing them is what this implementation does today, and it is not the end
+ * state: the format asks that these records be carried, and carrying them is
+ * work this implementation has to grow. `__proto__` needs records rebuilt
+ * through a mechanism that preserves the name. `constructor` needs the later
+ * boundaries that drop it to keep it instead. `then` needs a record carrying
+ * it kept clear of promise resolution, the host being what makes that name
+ * awkward and the host not being ours to change.
+ *
+ * None of that empties this list. Handling a name with care needs the same
+ * knowledge of which names need it, so what such work changes is what reading
+ * this list means, not whether it is read. Until then, refusal is what keeps a
+ * record from being corrupted in transit or quietly consumed after it.
  *
  * The check is one `Object.hasOwn()` call per reserved name rather than a walk
  * over the object's own keys, so it costs nothing per property and can sit on
