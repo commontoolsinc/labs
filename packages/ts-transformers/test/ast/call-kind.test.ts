@@ -553,3 +553,20 @@ Deno.test("resolveCallbackFunctionExpression sees through a `satisfies`-wrapped 
     findFirstArrowFunction(sourceFile),
   );
 });
+
+Deno.test("resolveCallbackFunctionExpression takes the shared helper's whole wrapper set", () => {
+  // A PartiallyEmittedExpression cannot arise here — the pipeline transforms
+  // authored source through `ts.transform`, never as part of TypeScript's
+  // emit — so this pins a choice rather than guards a reachable path:
+  // classification reads the same wrapper set as every other resolver in the
+  // package, and narrowing it back to a local subset fails here first. The
+  // node is built directly because nothing in the corpus produces one.
+  const { sourceFile, checker } = createProgram(`
+    const value = (event, state) => {};
+  `);
+
+  const arrow = findFirstArrowFunction(sourceFile);
+  const wrapped = ts.factory.createPartiallyEmittedExpression(arrow);
+
+  assertEquals(resolveCallbackFunctionExpression(wrapped, checker), arrow);
+});

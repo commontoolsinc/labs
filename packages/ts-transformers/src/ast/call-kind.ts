@@ -1531,13 +1531,14 @@ function isMultiApplicationChain(outerCall: ts.CallExpression): boolean {
  *
  * Delegates to the shared {@link unwrapExpression} so the wrapper list has a
  * single definition and a wrapper spelling cannot be handled in one resolver
- * and missed in another. `includePartiallyEmitted` stays off: a
- * PartiallyEmittedExpression marks a node the emit pipeline has already
- * rewritten, which is a different question from the authored shapes classified
- * here.
+ * and missed in another. It takes that helper's full wrapper set, including
+ * PartiallyEmittedExpression: the pipeline runs over authored source through
+ * `ts.transform`, never as part of TypeScript's emit, so a partially emitted
+ * node cannot reach classification and there is nothing here for a narrower
+ * set to protect.
  */
 function stripWrappers(expression: ts.Expression): ts.Expression {
-  return unwrapExpression(expression, { includePartiallyEmitted: false });
+  return unwrapExpression(expression);
 }
 
 function stripInitializerAccess(expression: ts.Expression): ts.Expression {
