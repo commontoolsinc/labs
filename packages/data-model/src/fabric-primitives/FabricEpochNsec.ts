@@ -11,9 +11,11 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import {
   JSON_CODEC,
   type LiveEnvironment,
+  REALM_CODEC,
   type TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
@@ -88,9 +90,46 @@ export class FabricEpochNsec extends BaseFabricPrimitive
     })(),
   );
 
+  static #realmCodec = Object.freeze(
+    new (class EpochNsecCodec extends BaseTerminalCodec<RealmCodecValue> {
+      /** Constructs an instance. */
+      constructor() {
+        super(CODEC_TYPE_TAGS.EpochNsec, FabricEpochNsec);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricEpochNsec): RealmCodecValue {
+        return value.#value;
+      }
+
+      /** @inheritDoc */
+      canDecode(state: RealmCodecValue): state is bigint {
+        return typeof state === "bigint";
+      }
+
+      /** @inheritDoc */
+      decode(
+        _typeTag: string,
+        state: bigint,
+        _env: LiveEnvironment,
+      ): FabricValue {
+        return new FabricEpochNsec(state);
+      }
+    })(),
+  );
+
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
     return this.#jsonCodec;
+  }
+
+  /**
+   * The codec for instances of this class in the realm-crossing format. The
+   * `bigint` travels as itself, where JSON has to encode it as base64url text
+   * over its two's-complement bytes.
+   */
+  static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
+    return this.#realmCodec;
   }
 }
 

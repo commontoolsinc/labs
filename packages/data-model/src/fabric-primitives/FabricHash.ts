@@ -13,12 +13,16 @@ import { isPlainObject } from "@commonfabric/utils/types";
 import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   JSON_CODEC,
   type LiveEnvironment,
   type NonterminalCodec,
+  REALM_CODEC,
+  type TerminalCodec,
 } from "@/codec-interface/interface.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
 
 /**
@@ -167,9 +171,88 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     })(),
   );
 
+  static #realmCodec = Object.freeze(
+    new (class HashCodec extends BaseTerminalCodec<RealmCodecValue> {
+      /** Constructs an instance. */
+      constructor() {
+        super(CODEC_TYPE_TAGS.Hash, FabricHash);
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * The buffer covers exactly these bytes and is nobody else's: a
+       * transfer hands over the whole of one, so a state covering more than
+       * the value would cede bytes that are not part of it, and one shared
+       * with this instance would leave a transferred value hollow.
+       */
+      encode(value: FabricHash): RealmCodecValue {
+        return { tag: value.tag, hash: value.#hash.buffer.slice(0) };
+      }
+
+      /** @inheritDoc */
+      canDecode(
+        state: RealmCodecValue,
+      ): state is { readonly tag: string; readonly hash: ArrayBuffer } {
+        return isPlainObject(state) &&
+          (typeof (state as { tag?: unknown }).tag === "string") &&
+          ((state as { hash?: unknown }).hash instanceof ArrayBuffer);
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * A detached buffer throws rather than being reported. It is not a
+       * malformed state -- it is a well-formed one this tree already spent --
+       * so it is not {@link #canDecode}'s to refuse, and it is caught rather
+       * than tested for, the constructor being what discovers it.
+       */
+      decode(
+        _typeTag: string,
+        state: { readonly tag: string; readonly hash: ArrayBuffer },
+        _env: LiveEnvironment,
+      ): FabricValue {
+        const { tag, hash } = state;
+
+        // Taken over rather than copied, as `FabricBytes` does: the buffer
+        // arrived either by being cloned, making it this realm's own, or by
+        // being transferred, which detached the sender's.
+        try {
+          return new FabricHash(new Uint8Array(hash), tag, true);
+        } catch (e) {
+          // A detached buffer, for the reason `FabricBytes` states: it
+          // detaches by having been taken over, so this tree was decoded
+          // before.
+          throw new Error(
+            "The state's buffer is detached, this tree having been decoded " +
+              "already.",
+            { cause: e },
+          );
+        }
+      }
+    })(),
+  );
+
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): NonterminalCodec {
     return this.#jsonCodec;
+  }
+
+  /**
+   * The codec for instances of this class in the realm-crossing format.
+   *
+   * Terminal, and it is the hash bytes that make it so rather than the record
+   * around them. An `ArrayBuffer` is in this format's domain and is not a
+   * `FabricValue`, so a state holding one has no nonterminal reading. The
+   * record being a plain object decides nothing either way.
+   *
+   * The `hash` is a bare `ArrayBuffer` for the reason `FabricBytes` encodes to
+   * one: that is the form `postMessage()` can *transfer*, so a caller
+   * assembling a transfer list finds a transferable object here rather than a
+   * view it would have to reach through.
+   */
+  static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
+    return this.#realmCodec;
   }
 
   /**

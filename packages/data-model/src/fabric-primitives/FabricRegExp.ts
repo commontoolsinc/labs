@@ -8,12 +8,16 @@ import { isPlainObject } from "@commonfabric/utils/types";
 import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   JSON_CODEC,
   type LiveEnvironment,
   type NonterminalCodec,
+  REALM_CODEC,
+  type TerminalCodec,
 } from "@/codec-interface/interface.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
@@ -224,9 +228,96 @@ export class FabricRegExp extends BaseFabricPrimitive
     })(),
   );
 
+  static #realmCodec = Object.freeze(
+    new (class RegExpCodec extends BaseTerminalCodec<RealmCodecValue> {
+      /** Constructs an instance. */
+      constructor() {
+        super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricRegExp): RealmCodecValue {
+        return {
+          source: value.#source,
+          flags: value.#flags,
+          flavor: value.#flavor,
+        };
+      }
+
+      /** @inheritDoc */
+      canDecode(state: RealmCodecValue): state is FabricRegExpState {
+        if (!isPlainObject(state)) {
+          return false;
+        }
+
+        // `Object.hasOwn()` rather than a comparison against `undefined`: a
+        // field present and `undefined` is not an absent one, and this format
+        // carries `undefined` faithfully, so both shapes genuinely arrive.
+        for (const key of ["flavor", "source", "flags"] as const) {
+          if (
+            Object.hasOwn(state, key) &&
+            (typeof (state as Record<string, unknown>)[key] !== "string")
+          ) {
+            return false;
+          }
+        }
+
+        return true;
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * As on the JSON side, regex syntax is not enforced as part of wire
+       * participation beyond what the constructor validates eagerly for the
+       * `es2025` flavor, which is why a pattern that fails to build is
+       * reported here rather than refused by {@link #canDecode}.
+       */
+      decode(
+        typeTag: string,
+        state: FabricRegExpState,
+        _env: LiveEnvironment,
+      ): FabricValue {
+        const flavor = state.flavor ?? DEFAULT_FLAVOR;
+        const source = state.source ?? "";
+        const flags = state.flags ?? "";
+
+        try {
+          return new FabricRegExp(flavor, source, flags);
+        } catch (e) {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            (e instanceof Error) ? e.message : String(e),
+          );
+        }
+      }
+    })(),
+  );
+
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): NonterminalCodec {
     return this.#jsonCodec;
+  }
+
+  /**
+   * The codec for instances of this class in the realm-crossing format.
+   *
+   * Terminal, where JSON's is nonterminal, and the essential state is the same
+   * `{ source, flags, flavor }` either way. A record of strings sits in both
+   * domains at once -- it is a `FabricValue`, and it is also a value this
+   * format carries as it stands -- so the shape of the state does not decide
+   * the kind, and each format says which it means. Terminal is what this one
+   * has to gain by: the walk hands the record to the transport rather than
+   * descending into three strings whose shape it already knows.
+   *
+   * Structured cloning carrying a native `RegExp` is not the reason, and would
+   * not have been a good one. `flavor` has no native carrier, and a flavor
+   * other than `es2025` has no native `RegExp` at all, so a state of that
+   * shape would drop the first and be unreachable for the second.
+   */
+  static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
+    return this.#realmCodec;
   }
 }
 

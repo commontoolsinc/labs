@@ -6,6 +6,7 @@ export {
   JSON_CODEC,
   type LiveEnvironment,
   type NonterminalCodec,
+  REALM_CODEC,
   type TerminalCodec,
   type WireFormat,
 } from "./interface.ts";

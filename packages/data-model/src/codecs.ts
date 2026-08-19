@@ -3,10 +3,11 @@
  * decode with this package's own set of fabric classes, for callers that want
  * the standard answer rather than a configured one.
  *
- * This sits above `codec-json` and `codec-common`, which carry the format and
- * the mechanism and know nothing about which classes participate. Nothing in
- * either of those directories may import from here; the dependency runs one
- * way, and a convenience import in the other direction would make it a cycle.
+ * This sits above `codec-json`, `codec-realm` and `codec-common`, which carry
+ * the formats and the mechanism and know nothing about which classes
+ * participate. Nothing in those directories may import from here; the
+ * dependency runs one way, and a convenience import in the other direction
+ * would make it a cycle.
  *
  * Both class rosters are imported at module scope and the registry is built at
  * first import, so this module pulls in every class that participates in the
@@ -23,6 +24,12 @@ import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodecEngine } from "./codec-json/JsonCodecEngine.ts";
 import { createBaseJsonRegistry } from "./codec-json/createBaseJsonRegistry.ts";
+import type {
+  RealmCodecValue,
+  RealmEncodedValue,
+} from "./codec-realm/interface.ts";
+import { RealmCodecEngine } from "./codec-realm/RealmCodecEngine.ts";
+import { createBaseRealmRegistry } from "./codec-realm/createBaseRealmRegistry.ts";
 import { codecClasses as primitiveClasses } from "./fabric-primitives/index.ts";
 import { codecClasses as instanceClasses } from "./fabric-instances/index.ts";
 
@@ -120,4 +127,74 @@ export function fabricFromJsonValue(
   env?: LiveEnvironment | undefined,
 ): FabricValue {
   return jsonCodecEngine.decode(json, env ?? NULL_LIVE_ENVIRONMENT);
+}
+
+/**
+ * Creates a registry pairing the realm-crossing format with the fabric classes
+ * this package defines. The counterpart to {@link createDefaultJsonRegistry},
+ * drawing on the same two curated lists: which classes participate is a
+ * question about the classes rather than about the format, so both formats
+ * read the same roster and each class supplies whichever codec it has for the
+ * format asking.
+ */
+export function createDefaultRealmRegistry(): CodecRegistry<RealmCodecValue> {
+  return createBaseRealmRegistry().extend(
+    primitiveClasses(),
+    instanceClasses(),
+  );
+}
+
+/**
+ * Constructs a `RealmCodecEngine` over {@link createDefaultRealmRegistry}, for
+ * a caller that wants this package's classes rather than a set of its own.
+ * `options.lenient` is passed through.
+ */
+export function newDefaultRealmCodecEngine(
+  options?: { lenient?: boolean },
+): RealmCodecEngine {
+  return new RealmCodecEngine({
+    registry: createDefaultRealmRegistry(),
+    lenient: options?.lenient ?? false,
+  });
+}
+
+/** Shared realm-crossing codec engine. */
+const realmCodecEngine = newDefaultRealmCodecEngine();
+
+/**
+ * Encodes a fabric value into the realm-crossing transport form: a value that
+ * `structuredClone()` or `postMessage()` carries to another realm without
+ * loss. The result is `[marker, tree]`, and the tree inside shares whatever
+ * structure of `value` needed no encoding.
+ *
+ * If no live environment is given, {@link NULL_LIVE_ENVIRONMENT} is
+ * substituted, which throws if anything asks it for a cell.
+ *
+ * Named for the `<target>From<Source>Value` family that
+ * `fabricFromNativeValue()` and `nativeFromFabricValue()` establish. Both
+ * sides being qualified is what keeps `realm` readable only as a modifier on
+ * `value` -- a *realm value* is this transport form, as a *native value* is a
+ * plain JavaScript one -- rather than as the boundary being crossed.
+ */
+export function realmFromFabricValue(
+  value: FabricValue,
+  env?: LiveEnvironment,
+): RealmEncodedValue {
+  return realmCodecEngine.encode(value, env ?? NULL_LIVE_ENVIRONMENT);
+}
+
+/**
+ * Decodes a value in the realm-crossing transport form. If no live
+ * environment is given, {@link NULL_LIVE_ENVIRONMENT} is substituted, which
+ * throws if anything asks it for a cell.
+ *
+ * `data` is ceded to this function, which retains what it likes of it and
+ * freezes whatever it retains; a caller must not use it afterwards.
+ * `4-realm-encoding.md` Section 5.2 states the whole of that contract.
+ */
+export function fabricFromRealmValue(
+  data: RealmEncodedValue,
+  env?: LiveEnvironment | undefined,
+): FabricValue {
+  return realmCodecEngine.decode(data, env ?? NULL_LIVE_ENVIRONMENT);
 }
