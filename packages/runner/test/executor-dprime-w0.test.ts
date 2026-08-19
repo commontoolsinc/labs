@@ -81,6 +81,37 @@ const FAN_OUT_PATTERN = [
   "});",
 ].join("\n");
 
+/** P-arrival-closure (MAJOR-1 of the W1 review): an OUTER piece that
+ * instantiates a NESTED child with a per-user `echo`, and a `publish`
+ * handler that writes a LINK to the CHILD'S RESULT doc into a plain
+ * holder doc. A principal who watches the HOLDER (never the outer root,
+ * never the child's root) reaches the narrowed `echo` output doc only
+ * through NON-ROOT closure rows — the root-level arrival re-arm is
+ * structurally inert for her (her root is not a piece), so only the
+ * per-key currency check (design §2.2 step 3) can materialize her
+ * instance. */
+const NESTED_PUBLISH_PATTERN = [
+  "import { computed, Default, handler, pattern, PerUser, Stream, Writable } from 'commonfabric';",
+  "type Draft = Writable<string | Default<''>>;",
+  "const text = (cell: Draft): string => (cell.get() as string | undefined) ?? '';",
+  "const inner = pattern<{ draft: Draft; n?: number }, { echo: string; label: string }>(",
+  "  ({ draft, n }) => ({",
+  "    echo: computed(() => 'echo:' + text(draft)),",
+  "    label: computed(() => 'label:' + String(n ?? 0)),",
+  "  }),",
+  ");",
+  "const publish = handler<unknown, { slot: Writable<unknown>; target: Writable<unknown> }>(",
+  "  (_ev, { slot, target }) => { slot.set(target); },",
+  ");",
+  "export default pattern<",
+  "  { draft?: PerUser<Draft>; n?: number; slot?: Writable<unknown> },",
+  "  { slot: unknown; child: { echo: string; label: string }; publish: Stream<unknown> }",
+  ">(({ draft, n, slot }) => {",
+  "  const child = inner({ draft: draft!, n });",
+  "  return { slot, child, publish: publish({ slot: slot!, target: child }) };",
+  "});",
+].join("\n");
+
 /** T2′ (isolated): a HANDLER writes a LINK to a computed it never reads
  * (`slot.set(hiddenCell)` — the link-tool shape); `hidden` is exposed
  * nowhere else, so it is reachable only through the link the wave writes. */
@@ -249,6 +280,9 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     names: { arg: string; result: string };
     pattern?: string;
     clients: Identity[];
+    /** Extra ARGUMENT fields seeded beside `{ n: 1 }` (a pin that needs
+     * a holder cell or a cross-piece link in the outer piece's arg). */
+    argExtras?: (alice: Runtime) => Promise<Record<string, unknown>>;
   }) => {
     host = newHost();
     const aliceClient = openClient(aliceSigner);
@@ -274,8 +308,11 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     await aliceArg.sync();
     await aliceResult.sync();
     {
+      const extras = options.argExtras === undefined
+        ? {}
+        : await options.argExtras(alice);
       const seed = alice.edit();
-      aliceArg.withTx(seed).set({ n: 1 });
+      aliceArg.withTx(seed).set({ n: 1, ...extras });
       expect((await seed.commit()).error).toBeUndefined();
     }
     {
@@ -763,6 +800,17 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
         stats.demand.notCurrentRearms - rearmsBefore
       }, demandArrivals +${stats.demandArrivals - arrivalsBefore}`,
     );
+    // Bob arrived on the ROOT key, so BOTH re-arms fire for him: the
+    // root-level arrival re-arm (`demandArrivals`) and the per-key
+    // currency check on his new pair of the `echo` output doc's key
+    // (`notCurrentRearms`). Assert both moved — the per-key check's
+    // counter was unasserted before the W1 review (MAJOR-1), which left
+    // `rearmNotCurrentForDemander` returning 0 green here. The pin that
+    // makes the per-key check LOAD-BEARING (the landing itself) is
+    // P-arrival-closure below.
+    expect(stats.demandArrivals - arrivalsBefore).toBeGreaterThanOrEqual(1);
+    expect(stats.demand.notCurrentRearms - rearmsBefore)
+      .toBeGreaterThanOrEqual(1);
     await setup.writeDraft(bob.runtime, "B");
     await waitUntil(
       () => instanceHolds(engine, bobKey, '"echo:B"'),
@@ -770,6 +818,285 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     );
     expect(instanceHolds(engine, aliceKey, '"echo:B"')).toBe(false);
     setup.cancel();
+  });
+
+  it("P-arrival-closure: a second principal whose closure reaches a narrowed writer's OUTPUT doc only through NON-ROOT rows (her root is a plain holder doc linking to a nested child's result) gets her instance through the per-key currency check alone — no demanded root gains her pair, so the root-level arrival re-arm is inert; the first principal's instance untouched", async () => {
+    // The design §2.2 case the root-level re-arm cannot see: "a doc
+    // entering Alice's closure whose writer is already a root for Bob's
+    // sake and clean node-level, but has no instance for Alice". Here
+    // ALICE is the first principal (a NON-creator session watching the
+    // outer root; the nested child's `echo` narrows to `user:alice` and
+    // goes clean) and BOB is the late arrival: he watches ONLY the holder
+    // doc — a plain `of:` doc, not a piece — whose value the `publish`
+    // handler set to a link to the CHILD'S result doc. His closure
+    // therefore reaches the child's result and `echo`'s output doc as
+    // NON-root rows; no key in `#demandedRoots` gains his pair, so
+    // `invalidateActionsForDemandRoots` (the root arrival re-arm) has
+    // nothing to re-arm for him — `demandArrivals` stays flat — and only
+    // `rearmNotCurrentForDemander` on his new pair of the `echo` key can
+    // materialize `user:bob`'s instance.
+    //
+    // The CREATOR departs first (T2′-probe shape): a creator's session
+    // holds every doc its local run pulled as a watch ROOT, which would
+    // put the child's result into `#demandedRoots` and let the root
+    // re-arm serve Bob through it — the exact vacuity the W1 review found
+    // in P-arrival (MAJOR-1). Killing mutation (review M-C):
+    // `rearmNotCurrentForDemander` returning 0 → Bob's instance never
+    // lands (timeout).
+    host = newHost();
+    const creatorClient = openClient(aliceSigner);
+    const creator = creatorClient.runtime;
+    const engine = await server.engineForSpace(space);
+    const compiled = await creator.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: NESTED_PUBLISH_PATTERN }],
+    }, { space });
+    const holder = creator.getCell<unknown>(space, "dp-e-holder", undefined);
+    const cArg = creator.getCell<Record<string, unknown>>(
+      space,
+      "dp-e-arg",
+      undefined,
+    );
+    const cResult = creator.getCell<Record<string, unknown>>(
+      space,
+      "dp-e-result",
+      compiled.resultSchema,
+    );
+    await holder.sync();
+    await cArg.sync();
+    await cResult.sync();
+    {
+      const seed = creator.edit();
+      cArg.withTx(seed).set({ n: 1, slot: holder });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = creator.edit();
+      creator.run(tx, compiled, cArg, cResult);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await creator.idle();
+    await creator.storageManager.synced();
+    const resultId = cResult.getAsNormalizedFullLink().id;
+    const holderId = holder.getAsNormalizedFullLink().id;
+    // The creator departs (her session's every-doc-a-root tracked set
+    // leaves after the TTL) and a pass RETIRES her keys — so none of the
+    // piece's docs stays a demanded ROOT from her tenure (the registry's
+    // root set is sticky for a key that never departs).
+    await creator.dispose();
+    await creatorClient.manager.close();
+    runtimes.splice(runtimes.indexOf(creator), 1);
+    managers.splice(managers.indexOf(creatorClient.manager), 1);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space activation (creator's session)",
+    );
+    await waitUntil(
+      () => {
+        host!.spaceServer(space)!.noteDemandChanged();
+        return demandRows().length === 0;
+      },
+      "the creator's rows to leave the demand set",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Alice, a FRESH session: watches the outer root but by a NARROW
+    // schema that reaches `child.echo` (so the child's `echo` narrows to
+    // her and goes clean) and does NOT name `slot` — she does not root
+    // the holder doc, so the holder is NEW to `#demandedRoots` when Bob
+    // arrives on it (making Bob's arrival non-root — `arrivals` empty).
+    const aliceClient = openClient(aliceSigner);
+    const alice = aliceClient.runtime;
+    const aliceResult = alice.getCell<Record<string, unknown>>(
+      space,
+      "dp-e-result",
+      {
+        type: "object",
+        properties: {
+          child: {
+            type: "object",
+            properties: { echo: { type: "string" } },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      } as never,
+    );
+    await aliceResult.sync();
+    const aliceCancel = aliceResult.sink(() => {});
+    // A full-schema cell to FIRE the publish event (the stream lives
+    // under `publish`; firing pulls no holder demand into Alice's watch).
+    const aliceFull = alice.getCell<Record<string, unknown>>(
+      space,
+      "dp-e-result",
+      compiled.resultSchema,
+    );
+    await aliceFull.sync();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space activation",
+    );
+    await waitUntil(
+      () =>
+        (host!.spaceServer(space)?.demandedIdentitiesOf(resultId) ?? [])
+          .some((i) => i.principal === aliceSigner.did()),
+      "alice's demand on the outer root to register",
+    );
+    const aliceKey = resolveScopeKey("user", { principal: aliceSigner.did() });
+    const bobKey = resolveScopeKey("user", { principal: bobSigner.did() });
+    // The draft is written through a schema that names ONLY the per-user
+    // `draft` slot (so the writer's session roots nothing but the outer
+    // result — the full argument schema's `slot: Writable` would root the
+    // holder doc too, and a root-row holder would make Bob's arrival a
+    // root-level "arrival" of an inert root).
+    const argSchema = compiled.argumentSchema as {
+      properties?: Record<string, unknown>;
+    };
+    const draftOnlySchema = {
+      type: "object",
+      properties: { draft: argSchema.properties!.draft },
+    } as never;
+    const typedArg = (runtime: Runtime) =>
+      runtime.getCell<{ draft: string }>(space, "dp-e-arg", draftOnlySchema);
+    const writeDraft = async (runtime: Runtime, value: string) => {
+      const arg = typedArg(runtime);
+      await arg.sync();
+      const tx = runtime.edit();
+      arg.key("draft").withTx(tx).set(value);
+      expect((await tx.commit()).error).toBeUndefined();
+      await runtime.idle();
+      await runtime.storageManager.synced();
+    };
+    await writeDraft(alice, "A");
+    await waitUntil(
+      () => instanceHolds(engine, aliceKey, '"echo:A"'),
+      () =>
+        "alice's instance of the nested child's echo (rows=" +
+        JSON.stringify(
+          demandRows().map((
+            r,
+          ) => [
+            r.id.slice(0, 30),
+            r.scopeKey.slice(0, 14),
+            r.root,
+            r.identity?.principal?.slice(-6),
+          ]),
+        ) + " writers=" + servingRuntime!.scheduler.demandedWriterCount +
+        " label=" + instanceHolds(engine, "space", '"label:1"') +
+        " space rows=" +
+        JSON.stringify(
+          [...rowsUnder(engine, "space").entries()].map((
+            [k, v],
+          ) => [k.slice(0, 30), JSON.stringify(v).slice(0, 80)]),
+        ) +
+        ")",
+    );
+    // Alice fires publish: the served handler writes holder := link to
+    // the CHILD'S result doc.
+    aliceFull.key("publish").send({});
+    await alice.idle();
+    await alice.storageManager.synced();
+    await waitUntil(
+      () =>
+        JSON.stringify(rowsUnder(engine, "space").get(holderId) ?? null)
+          .includes("link"),
+      () =>
+        "the holder doc to carry the link to the child's result (holder=" +
+        JSON.stringify(rowsUnder(engine, "space").get(holderId) ?? null) +
+        ")",
+    );
+    // Quiesce.
+    await servingRuntime!.idle();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const traceBefore = servingRuntime!.scheduler.getActionRunTrace().length;
+    const rearmsBefore = host!.stats().demand.notCurrentRearms;
+    const arrivalsBefore = host!.stats().demandArrivals;
+    const writersBefore = servingRuntime!.scheduler.demandedWriterCount;
+    expect(instanceHolds(engine, bobKey, '"echo:"')).toBe(false);
+    // Bob arrives: watches the HOLDER doc only, by a schema that follows
+    // the link into `{ echo }`.
+    const bobClient = openClient(bobSigner);
+    const bob = bobClient.runtime;
+    const bobHolder = bob.getCell<Record<string, unknown>>(
+      space,
+      "dp-e-holder",
+      {
+        type: "object",
+        properties: { echo: { type: "string" } },
+        additionalProperties: false,
+      } as never,
+    );
+    await bobHolder.sync();
+    const bobCancel = bobHolder.sink(() => {});
+    const bobRowsNow = () =>
+      demandRows().filter((r) => r.identity?.principal === bobSigner.did());
+    await waitUntil(
+      () => instanceHolds(engine, bobKey, '"echo:"'),
+      () =>
+        "bob's instance of the child's echo to materialize through the " +
+        "per-key currency check (bob rows: " +
+        JSON.stringify(
+          bobRowsNow().map((
+            r,
+          ) => [r.id.slice(0, 24), r.scopeKey.slice(0, 12), r.root]),
+        ) + ")",
+    );
+    const stats = host!.stats();
+    const bobRows = bobRowsNow();
+    const bobEchoRows = bobRows.filter((r) => r.id.startsWith("computed:"));
+    console.log(
+      `[P-arrival-closure] notCurrentRearms +${
+        stats.demand.notCurrentRearms - rearmsBefore
+      }, demandArrivals +${stats.demandArrivals - arrivalsBefore}, ` +
+        `demandedWriters ${writersBefore} → ${
+          servingRuntime!.scheduler.demandedWriterCount
+        }; bob rows=${bobRows.length} [${
+          bobRows.map((r) =>
+            `${r.id.slice(0, 14)}…@${r.scopeKey.slice(0, 10)}:${
+              r.root ? "root" : "closure"
+            }`
+          ).join(", ")
+        }]`,
+    );
+    // Bob's ONLY space-scoped root row is the holder doc; every piece doc
+    // he reaches (the child's result, `echo`'s output doc) is a CLOSURE
+    // row. This is the isolation the pin exists for: the root-level
+    // arrival re-arm (`invalidateActionsForDemandRoots`) re-arms a
+    // narrowed node only when the node's `demandRootIds` (its piece's
+    // roots) intersect an ARRIVED key's id — and Bob roots ONLY the
+    // holder doc, which is no piece's root, so the echo node is not
+    // reachable from Bob's arrival by root at all. Only the per-key
+    // currency check on Bob's new pair of the `echo` output key can
+    // materialize `user:bob`'s instance. (The `demandArrivals` counter
+    // does tick — the holder is a demanded root that gained Bob's pair —
+    // but its re-arm reaches no echo node; the LANDING is the assertion
+    // that matters, and M-C makes it red.)
+    expect(
+      bobRows.filter((r) => r.root && r.scopeKey === "space").map((r) => r.id),
+    ).toEqual([holderId]);
+    expect(bobEchoRows.length).toBeGreaterThan(0);
+    expect(bobEchoRows.every((r) => !r.root)).toBe(true);
+    // The per-key check fired for Bob's pair (M-C — return 0 — makes the
+    // landing time out).
+    expect(stats.demand.notCurrentRearms - rearmsBefore)
+      .toBeGreaterThanOrEqual(1);
+    // Alice's instance untouched (no run under her key since).
+    const since = servingRuntime!.scheduler.getActionRunTrace().slice(
+      traceBefore,
+    );
+    expect(
+      since.filter((e) => e.instanceKey === aliceKey).map((e) => e.actionId),
+    ).toEqual([]);
+    // Bob's demand now serves him: his draft re-derives his instance only.
+    await writeDraft(bob, "B");
+    await waitUntil(
+      () => instanceHolds(engine, bobKey, '"echo:B"'),
+      "bob's instance to follow his draft",
+    );
+    expect(instanceHolds(engine, aliceKey, '"echo:B"')).toBe(false);
+    expect(walkRuns()).toBe(0);
+    bobCancel();
+    aliceCancel();
   });
 
   // T2′ (cross-piece) and T3′ (array growth): the ONE-PUSH-LATE structural
