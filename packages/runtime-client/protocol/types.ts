@@ -3,6 +3,7 @@ import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type {
   ActionRunTraceEntry,
@@ -218,8 +219,8 @@ export type InitializationData = {
   // (display-dischargeable classes). Undefined = no ceiling (current
   // behavior).
   renderConfidentialityCeiling?: {
-    atoms?: unknown[];
-    caveatKinds?: string[];
+    atoms?: readonly CfcConfClause[];
+    caveatKinds?: readonly string[];
   };
   // Static trust snapshot applied to worker-owned transactions.
   trustSnapshot?: {
