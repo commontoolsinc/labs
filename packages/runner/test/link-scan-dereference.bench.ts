@@ -27,9 +27,13 @@
  *
  * One runtime and one seeded list serve the whole file, and every iteration
  * aborts its transaction, so no iteration pays for a runtime, a store, or a
- * document write, and none leaves state behind for the next. Each body walks
- * once untimed before the bracket, so the timed window is never the one paying
- * for the transaction's first look at a document.
+ * document write, and none leaves state behind for the next.
+ *
+ * **repeat** and **past a write** each walk once untimed before the bracket,
+ * so their timed window finds every row already in the transaction and
+ * measures only what the interlude cost. **first** times its only walk, which
+ * is what makes it the cold baseline: the load is the thing it is there to
+ * report.
  *
  * Environment controls:
  * - LINK_SCAN_ROWS: rows in the list, default 50
