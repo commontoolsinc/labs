@@ -32,7 +32,7 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-18) — read this first
+## Coordination state (2026-08-19) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
@@ -43,8 +43,9 @@ dossier, the design-pass state, the process rules — is the frozen
 with the evidence files beside it; the owed rows are the register's
 (`verification-coverage.md` §3, the 2026-08-18 coordination delta).
 
-**The train — 21 PRs, all OPEN, none merged; one linear stack (each
-PR's base is the previous branch), merge-base with `origin/main`
+**The train — 26 PRs, all OPEN, none merged; one linear stack (each
+PR's base is the previous branch; the three stage-C siblings are the
+one parallel fan), merge-base with `origin/main`
 `30fdbb92f` (#5786; the handoff's `9d6c9fe00` is an earlier merge point
 on the same branch); stacked PRs get NO CI, every green is a local
 run:** A #5339 → B #5349 → C.1 #5356 → C.2 #5367 → C.3 #5369 → D #5371 →
@@ -56,7 +57,18 @@ siblings off fan-out B, to be STACKED (order the stacker's; all three
 append at the end of the register's §3): OW28 #5968
 (`463ea3887`), lunch #5969 (`eb64d8694`), the tuning trio #5991
 (`b54bf5215`); this docs PR #6009 (`claude/server-exec-v2-stage-c-docs`)
-rides the tuning tip. The full per-PR table is the closeout's §1.
+rides the tuning tip; the DESIGN-BUILD TRAIN rides the docs tip, in its
+FINAL stack order as of 2026-08-19: design #6017 (`461b01822`) → W1 (d′)
+#6029 @ `963ff600e`
+([ledger](https://github.com/commontoolsinc/labs/pull/6029#issuecomment-5347677089))
+→ W2 (e) #6039 @ `ac30dd233`
+([ledger](https://github.com/commontoolsinc/labs/pull/6039#issuecomment-5347134576);
+includes W2.1, the cascade-echo fix) → W3 (α) #6043 @ `42674af15`
+([ledger](https://github.com/commontoolsinc/labs/pull/6043#issuecomment-5348564970)).
+All three builds independently reviewed + fixed + ledgered; the
+2026-08-19 re-stack moved W2 onto W1 and W3 onto W2 (register: W2's
+OW41 renumbered OW42, W1 keeps OW41; every green a LOCAL run — stacked
+PRs get no CI). The full per-PR table is the closeout's §1.
 
 **The owner's landing posture (2026-08-18, verbatim intent):** *"get
 confidence that we're on the right track, then merge everything to main
@@ -216,33 +228,76 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   in stats. The fallback W1-F is NOT taken; the report's §4 flags 9–14
   are additional W1 inputs.
 
+- **The design build train W1/W2/W3 — BUILT, REVIEWED, FIXED,
+  LEDGERED, RE-STACKED (2026-08-19).** W1 (d′) #6029 @ `963ff600e`:
+  review 0 BLOCKER / 3 MAJOR / 9 MINOR / 6 NIT → ALL dispositioned
+  (the vacuous-pin MAJORs became real pins — P-arrival-closure,
+  P-release, the cross-piece/array-growth landing AS the assertion;
+  the push-growth notify principal-filtered; OW41 minted = the
+  O(closure)-per-wave demand pass, the incremental-delta exposure).
+  W2 (e) #6039 @ `ac30dd233`: review 0/1/7/6 → all dispositioned
+  (MAJ-1 — re-entrant `trackIntent` double-applying a retired id —
+  fixed with the per-entry LIVE tracked-set gate; OW42 minted = the
+  tracked-set drain, trigger OW24, RENUMBERED from OW41 at the
+  re-stack); plus **W2.1**, the cascade-echo fix, shape (a):
+  `retireIntent(P)` also retires P's client cascade descendants (pins
+  W2.1-1..4 + the e2e pin; the lunch gate's "both join lands" step now
+  asserts the CONFIRMED roster — exactly {Alice, Bob} chips on both
+  browsers — not the count the stranded echo satisfied in 7–16 ms).
+  W3 (α) #6043 @ `42674af15`: review 1 BLOCKER / 2 MAJOR / 3 MINOR /
+  4 NIT → B1, the α1b LOST-DELIVERY regression (a same-eventId
+  sibling's survival marked the entry processed; the drain never
+  re-delivered) FIXED + pinned (F1: only the LT1 copy's OWN run marks
+  its seq-less entry), F2 the orphan refusal folds same-eventId
+  siblings (neither half of an orphan lands), OW35 re-read honestly,
+  OW37's direction corrected with the loads.
+- **The OPEN critical-path item — the SWATCH STALL (blocker-class,
+  2026-08-19).** On the combined W2.1 + (α) configuration, 5 of 13
+  lunch runs never render the VOTER'S OWN swatch within 60 s (the
+  store clean in every one, both votes durable, "2 love it" rendered
+  on both browsers 300–700 ms after the clicks); W3-alone is 3/3
+  green under higher load and W2-on-W3 WITHOUT W2.1 is 2/2 green
+  under far higher load — the stall is W2.1's in the (α)
+  configuration, and pre-W2.1 every baseline was green by MASKING
+  (the stranded echo carried the own swatch forever). A root-cause
+  investigation is RUNNING (report expected at
+  `/Users/berni/labs-worktrees/swatch-stall-rootcause.md`);
+  candidates: the confirmed own-vote entity doc (an id the client
+  never read) not reaching the voter's replica after the echo's
+  entity layer dropped; the swatch re-derivation racing the
+  superseded flip; B1 instances — W3's F1 fix may move the rate. The
+  lunch ON skip STAYS (lift = the stall resolved + 3/3 green on the
+  train tip). **W4 — the settle-time re-benchmark — does NOT start
+  until the stall is understood.** The three re-stack lunch runs at
+  the train tip (recorded at the end of this bullet as they land) are
+  the first evidence on the TRUE combined configuration
+  (W2.1 + α + F1) — reds there are DATA for the investigation.
+
 **Ordered next actions:** (1) #5991's ledger comment — DONE 2026-08-18
 (posted; the second review round's report recovered on-branch); (2) the
-design BUILD stage per the design's §6 work order — the §5 rulings
-DONE (ruling set ACCEPTED 2026-08-18; the (d′) demand sentence landed),
-W0 DONE 2026-08-19 (PROCEED (d′), above) → **the build train LAUNCHED
-2026-08-19** — W1 (d′) proper on `claude/server-exec-v2-w1-dprime`
-(stacked on this branch) and W2 (e) on
-`claude/server-exec-v2-w2-intent-listener` (its first step is (e)'s
-own W0 gate — the one-line-schema sink probe, deferred so it did not
-load the box during (d′)'s settle measurements) in parallel — **W2 (e)
-BUILT 2026-08-19** (PR #6039, stacked on the design tip, to be
-re-stacked onto W1's tip): its W0 gate PASSED (the narrowed sink
-collapsed the per-note client `scheduler/run` from 0.84 → 14–20 s to a
-flat ~0.1 s; createToView p50 4.03 → 0.81 s), then (a) — the
-storage-notification listener keyed on the outstanding intent set —
-replaced the sink outright, the effects channel followed (item 13), the
-RULED sentences of items 5/6, 7, 8 landed; report
-`docs/history/plans/server-execution-v2/stage-c/w2-intent-build-report.md`;
-W3 (α) follows on W1's tip (root-causes the l3 duplicate join); each
-build → independent adversarial review → fixer → ledger; then W4 the
-settle-time re-benchmark, measuring server settle time; (3) the
-CONFIDENCE VERDICT to the owner; (4) on "no fundamental issue", land
-the train on main with the flag OFF (siblings stacked; default lanes
-OFF) and continue on main; (5) the flip's ordered gates as listed under
-Phase 7 (skip list EMPTY, deployed binaries exercised ON, OW31's ruled
-posture BUILT, the benchmark against the ruled bar), then the flip PR
-and the soak.
+design BUILD stage per the design's §6 work order — **DONE
+2026-08-19**: the §5 rulings DONE (ruling set ACCEPTED 2026-08-18; the
+(d′) demand sentence landed), W0 DONE (PROCEED (d′), above), then
+W1 (d′), W2 (e) — its own W0 gate PASSED (the narrowed sink collapsed
+the per-note client `scheduler/run` from 0.84 → 14–20 s to a flat
+~0.1 s; createToView p50 4.03 → 0.81 s), then (a) replaced the sink
+outright, the effects channel followed — plus W2.1 (the cascade-echo
+fix), and W3 (α) (the l3 duplicate join root-caused and closed at the
+three seats), EACH built → independently reviewed → fixed → ledgered
+(the train-map links above), and the train RE-STACKED into its final
+order design → W1 → W2 → W3 the same day (every suite green at the
+train tip `42674af15`; the tip counts in PR #6043's body); (3) the
+SWATCH-STALL root cause (the OPEN critical-path item above;
+investigation RUNNING); (4) its fix in the RIGHT seat (a W2.1 rider
+vs W3's B1/F1 class vs shape (b) — the root cause's call, with the
+owner where it re-rules identity); (5) W4 — the settle-time
+re-benchmark (server settle measured explicitly, `waitForSettled`) —
+**not before the stall is understood**; (6) the CONFIDENCE VERDICT to
+the owner; (7) on "no fundamental issue", land the train on main with
+the flag OFF (siblings stacked; default lanes OFF) and continue on
+main; (8) the flip's ordered gates as listed under Phase 7 (skip list
+EMPTY, deployed binaries exercised ON, OW31's ruled posture BUILT, the
+benchmark against the ruled bar), then the flip PR and the soak.
 
 **Owner rulings (state at 2026-08-18; recommendations on file for the
 open ones):** (1) served-handler DOUBLE-DISPATCH parity gap — **RULED
@@ -293,7 +348,21 @@ live completion failure, `plainProgramOf`), UNRULED;
 root watch demands the piece's whole internal graph; over-demand, never
 under-demand — the W0 report's §2(b)/§4) — RECOMMENDATION on file
 (accept the tracker's set as the demand set; filtering by id class a
-future row), awaiting the owner.
+future row), awaiting the owner;
+(7) **α1b ratification — PENDING (2026-08-19)**: events.md §4's DATED
+clarification (the late-seal refusal of in-flight LT1 copies) now
+includes the AMENDED sibling paragraph from W3's fix pass — the
+lt1-only survivor marking (B1/F1), the orphan refusal's same-eventId
+sibling fold, the late-seal SPLIT residual stated, and the
+named-not-built tightening — recommendation: ratify as written;
+(8) **cascade-id shape (b) — PENDING, owner-level** (deterministic
+cascade ids derived from the parent event id + the send ordinal, both
+sides; the register's FUTURE row beside W2.1): structurally removes
+the swatch-stall exposure — the echo stands until the child's own
+landing; its register trigger now names the stall;
+(9) **the lunch ON-skip lift — PENDING on evidence**: lift = the
+swatch stall resolved + 3/3 green on the train tip (the register's
+W2.1 row carries the blocker-class flag).
 
 ## Phase 0 — Rulings and guardrails
 

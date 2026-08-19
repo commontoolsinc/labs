@@ -4492,8 +4492,11 @@ supply; OW29/OW32/OW34 closed):
     for one cascade hop. Worse: a spec-level identity change (events.md
     §4), two code paths that must agree byte-for-byte, and a retry
     story to re-rule. Owner-level; the coordinator is putting it to the
-    owner. Trigger: if the flicker witness reads non-zero on the W4
-    acceptance workloads at a rate the owner will not accept, or when
+    owner. Trigger: the OPEN swatch stall (5/13 at the W2.1 + (α)
+    configuration, 2026-08-19 — (b) structurally removes the exposure:
+    the echo stands until the child's own landing) if the root cause
+    lands in this seat; the flicker witness reading non-zero on the W4
+    acceptance workloads at a rate the owner will not accept; or when
     per-hop intents are wanted.
 - **Stage C design build delta — W3 (α) LANDED (2026-08-19).** One
   durable stream entry is delivered to its handler exactly once as a
