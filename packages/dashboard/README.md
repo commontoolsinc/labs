@@ -313,7 +313,7 @@ surveillance tool.
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
-| ci spend | GitHub Actions billing, projected to month-end in USD. The 45-day chart labels the line with MTD spend, and the header shows the same total. A report that stopped being written more than four days ago is unavailable rather than a run of $0 days. A month whose report cannot be read breaks the line across those days rather than charting them as $0 | `GH_TOKEN` (with org billing read); optional `GH_BILLING_ORG` |
+| github spend | the organization's whole metered GitHub bill, projected to month-end in USD: every product its billing report carries, added into one figure. The 45-day chart labels the line with MTD spend, and the header shows the same total. A report that stopped being written more than four days ago is unavailable rather than a run of $0 days. A month whose report cannot be read breaks the line across those days rather than charting them as $0. "What the GitHub figure covers" below says which spend reaches the API | `GH_TOKEN` (with org billing read); optional `GH_BILLING_ORG` |
 | benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise from a CPU measured in the preceding twelve hours. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total; a provider whose cost report stopped being written more than four days ago is one of those | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
@@ -331,6 +331,59 @@ runs. Each duration starts when GitHub creates the workflow run for the landed
 commit and ends when that run finishes, so it includes runner queueing and
 reruns.
 
+### What the GitHub figure covers
+
+The **github spend** tile reads the organization's billing usage report, which
+carries one row per product, SKU, repository and day. The tile adds up every
+row, so the figure is the organization's whole metered GitHub bill rather than
+any one product's share of it. GitHub meters these products, and a product the
+organization does not use simply has no row:
+
+| product | what it bills for |
+|---|---|
+| `actions` | workflow minutes on every runner size, plus Actions and cache storage |
+| `packages` | Packages storage and bandwidth |
+| `codespaces` | Codespaces compute, storage, and prebuild storage |
+| `git_lfs` | Git LFS storage and bandwidth |
+| `copilot` | Copilot seats (`copilot_for_business`, `copilot_enterprise`, `copilot_standalone`) and the AI credits Copilot consumes |
+| `ghec` | GitHub Enterprise Cloud seat licenses (`ghec_licenses`) |
+| `ghas` | Advanced Security seat licenses, whole and by tier |
+| `models` | model inference |
+| `sandbox` | Copilot sandbox compute, memory, and snapshots |
+| `spark` | Spark AI credits |
+
+Seat licenses arrive as billed dollars in that same report, so Copilot seats
+and Enterprise Cloud licenses are inside the figure without any per-seat price
+having to be configured here.
+
+One caveat applies to the projection rather than to the figure. GitHub dates
+every row by the day the usage occurred, and the month-end projection carries
+the recent daily rate across the remaining days, which suits spend that accrues
+daily. A charge posted as a single lump instead of as a daily series would be
+carried across the month as though it recurred, overstating the projection
+while leaving month-to-date correct. No such charge has been observed here, and
+seat licenses are the products to watch for one: compare the headline with the
+month-to-date total beside it the first month a seat-licensed product appears.
+
+What the API does not expose, and the figure therefore excludes:
+
+- **A subscription billed outside the usage report.** An organization's plan
+  reaches the API only when its licensing is metered, as `ghec_licenses` rows.
+  An organization billed for its plan as a flat subscription — a **Team** plan,
+  which has no product or SKU of its own at all, or an **Enterprise** plan whose
+  licensing has not moved to metered billing — has no row for it, and its
+  seat cost is absent from the figure. `orgs/{org}` reports the seat counts
+  (`plan.name`, `plan.seats`, `plan.filled_seats`) but never a price, so there
+  is nothing to add up from.
+- **Anything billed at the enterprise account rather than the organization.**
+  The usage report is scoped to one organization. An enterprise account's own
+  report is a separate endpoint under `enterprises/{enterprise}`, needs
+  enterprise-level administration, and is not read here.
+
+Both gaps are silent: the figure is a true total of what GitHub reports, not a
+total of what GitHub charges. Check it against the billing page the tile links
+to before treating it as the whole bill.
+
 ## Credentials
 
 Every tile that reads a private source is gated on its own env var(s) and grays
@@ -346,9 +399,9 @@ if you lose it you have to regenerate.
 ### `GH_TOKEN` (or `GITHUB_TOKEN`)
 
 Powers **labs ci**, **labs ci trust**, **labs ci duration**, the **loom**
-counterparts, **recent main runs**, **ci spend**, and **github users**. Needs repo
-**Actions: read** on both `commontoolsinc/labs` and `commontoolsinc/loom`; the
-github-ci-spend tile additionally needs org **Administration: read** on
+counterparts, **recent main runs**, **github spend**, and **github users**. Needs
+repo **Actions: read** on both `commontoolsinc/labs` and `commontoolsinc/loom`;
+the github-ci-spend tile additionally needs org **Administration: read** on
 `commontoolsinc`. The **github users** tile needs org **Members: read**. One
 fine-grained token can carry all of these permissions:
 
@@ -364,7 +417,7 @@ organization member; other callers see only public memberships.
    and `commontoolsinc/loom`.
 4. **Repository permissions**: set **Actions** and **Contents** to **Read-only**.
 5. **Organization permissions**: set **Members** to **Read-only** for GitHub
-   users. Set **Administration** to **Read-only** for ci spend. Only an org
+   users. Set **Administration** to **Read-only** for github spend. Only an org
    owner or billing manager can grant the latter permission. Skip either
    permission when its tile is not needed.
 6. **Generate token** and copy it (`github_pat_…`, shown once).
@@ -372,7 +425,7 @@ organization member; other callers see only public memberships.
 If you only need the labs CI tiles, keep `commontoolsinc` as the resource owner,
 select only `commontoolsinc/labs`, and grant Actions/Contents read without any
 organization permissions. Classic PATs also work (use `read:org` for GitHub
-users and `admin:org` for ci spend). If the org requires approval for
+users and `admin:org` for github spend). If the org requires approval for
 fine-grained tokens, yours stays pending until an owner approves it.
 
 ### `SIGNOZ_URL` + `SIGNOZ_API_KEY`
@@ -545,7 +598,7 @@ it.
 
 | env var | tile | purpose |
 |---|---|---|
-| `GH_BILLING_ORG` | ci spend | org login for billing (default: the org from `DASHBOARD_REPO` — `commontoolsinc`). |
+| `GH_BILLING_ORG` | github spend | org login for billing (default: the org from `DASHBOARD_REPO` — `commontoolsinc`). |
 | `MODEL_MONTHLY_BUDGET` | model spend | combined monthly USD budget across providers. |
 | `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. The projected month is compared with this daily rate multiplied by the number of days in the month. |
@@ -594,15 +647,27 @@ Notes:
   read. A second token would not reduce exposure because the process would hold
   both, so there is just one. With Actions read alone, those two tiles gray out
   and the other GitHub tiles still work.
-- **`ci spend`** shows the **projected** full-month GitHub Actions total. Its
-  recent daily rate uses at least two weeks and reaches into last month early in
-  a month. Spend is net of discounts and included usage. The projection is
-  compared with the Actions budget configured in GitHub. A missing budget
-  leaves the projection uncompared. A source that has stopped reporting turns
-  the tile gray. The billing report is one pipeline across every product the
-  organization uses, so any product's row dates it. Four days without a row is
-  a stopped feed rather than a slow one. A classic-plan organization falls back
-  to minutes against its included allowance.
+- **`github spend`** shows the **projected** full-month GitHub total. Its recent
+  daily rate uses at least two weeks and reaches into last month early in a
+  month. Spend is net of discounts and included usage. The projection is
+  compared with the organization's product budgets added together, which is
+  what it has authorized itself to spend. Only the budgeted products' share of
+  the projection goes into that comparison: a product with no budget of its own
+  is taken to be spending within one, so it counts toward the headline without
+  moving the color. The light therefore turns on the products someone actually
+  set a limit for, and taking up a product nobody has budgeted cannot redden
+  the tile on its own. The budget printed beside the headline covers the same
+  products the headline does — the budgets that exist, plus each unbudgeted
+  product's own projection standing in for the budget it lacks — so the
+  headline sits at or under it exactly when the tile is green. Printing the
+  configured total alone would show a headline above its budget on a green
+  tile. An organization with no product budget at all leaves the projection
+  uncompared. A
+  source that has stopped reporting turns the tile gray. The billing report is
+  one pipeline across every product the organization uses, so any product's row
+  dates it. Four days without a row is a stopped feed rather than a slow one. A
+  classic-plan organization falls back to minutes against its included
+  allowance.
 - **`benchmarks`** trends one **scale-invariant index per CPU** on the
   `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json`
   over the bench files that workflow lists — micro-benchmarks across the runner,
@@ -895,9 +960,9 @@ Local-first: no build step, no deployment, a single process on `localhost`.
 
 Env knobs for the dev loop:
 
-- `GH_TOKEN` (or `GITHUB_TOKEN`) — required for the GitHub tiles. CI spend also
-  needs Administration read. GitHub users also needs Members read. Without the
-  token, those tiles stay gray.
+- `GH_TOKEN` (or `GITHUB_TOKEN`) — required for the GitHub tiles. GitHub spend
+  also needs Administration read. GitHub users also needs Members read. Without
+  the token, those tiles stay gray.
 - `DASHBOARD_PORT` — run several instances at once (e.g. one per branch) without clashing.
 - `DASHBOARD_REPO` — point the CI tiles at any repo. Its owner selects the
   organization for GitHub users.
@@ -975,7 +1040,7 @@ its embedded tsnet).
    ```
    The GitHub token is fine-grained and read-only. It has Actions read for the
    dashboard repositories. The GitHub users tile also needs org Members read;
-   CI spend also needs org Administration read.
+   GitHub spend also needs org Administration read.
 3. The infra manifests create separate 1 Gi `standard-rwo` PVCs for the Discord
    history file and Tailscale node state. The dashboard remains a one-replica
    `Recreate` Deployment; pod replacement reuses the same non-ephemeral

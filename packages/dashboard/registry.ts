@@ -29,7 +29,7 @@ export const TILES: Tile[] = [
   labsCiTrust,
   labsCiDuration,
   benchmark,
-  // Row 2: loom CI family + ci spend
+  // Row 2: loom CI family + github spend
   loomCi,
   loomCiTrust,
   loomCiDuration,
