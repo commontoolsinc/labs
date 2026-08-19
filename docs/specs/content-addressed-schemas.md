@@ -526,7 +526,15 @@ phased on the op-migration playbook:
   percent measured) — it is a representation fix: an embedded schema
   can carry `FabricValue` defaults, which puts special objects inside
   otherwise plain binding records; a reference keeps binding objects
-  plain JSON and confines schema content to schema documents.
+  plain JSON and confines schema content to schema documents. An alias
+  is a binding only by CONTEXT: to the storage layer an `$alias`-shaped
+  record is plain data, so no commit-boundary, materializer, arrival,
+  or assembly walk treats its `schema` member as a schema position — a
+  document that merely looks like a binding can neither fail a commit
+  nor fail a query over a reference inside it. A binding's reference is
+  emitted by the pattern serializer and resolves through the realm
+  registry; a reader that cannot resolve it degrades to the schemaless
+  binding it would have had before schemas were stamped at all.
 - **Phase 3 — retire transport compression for link positions.**
   `syncSchemaTableV2` stops matching
   anything on link positions once reference-bearing links dominate; the

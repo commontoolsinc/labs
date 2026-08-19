@@ -552,41 +552,35 @@ Deno.test("rejects a reference backed by a stored cid: document holding other co
   });
 });
 
-Deno.test("validates the schema closure an $alias binding references", async () => {
+Deno.test("treats an $alias-shaped record as plain data at the commit boundary", async () => {
   await withEngine((engine) => {
-    const schema = { type: "string", title: "alias-closure-leaf" } as const;
-    const hash = internSchemaAsTaggedHashString(schema);
-    const carrier = {
-      bound: {
-        $alias: {
-          cell: "argument",
-          path: ["field"],
-          schema: { $ref: `cid:${hash}` },
-        },
-      },
-    };
-    // A reference nothing backs is rejected in alias positions exactly as
-    // in link positions...
-    assertThrows(
-      () =>
-        applyCommit(engine, {
-          sessionId: "s:a",
-          commit: commit(1, {
-            operations: [setOp("of:alias-carrier", carrier)],
-          }),
-        }),
-      ProtocolError,
-      "neither included in the commit nor stored in the space",
-    );
-    // ...and the closure included in the same commit satisfies it.
+    // An alias is a binding only by context. To the commit boundary this
+    // record is plain data, so the `cid:` ref inside its `schema` member
+    // creates no closure obligation — a document that merely looks like a
+    // binding must never have its commit rejected over one.
+    const hash = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "alias-data-leaf",
+    });
     applyCommit(engine, {
       sessionId: "s:a",
-      commit: commit(2, {
+      commit: commit(1, {
         operations: [
-          setOp("of:alias-carrier", carrier),
-          setOp(`cid:${hash}`, schema),
+          setOp("of:alias-data-carrier", {
+            bound: {
+              $alias: {
+                cell: "argument",
+                path: ["field"],
+                schema: { $ref: `cid:${hash}` },
+              },
+            },
+          }),
         ],
       }),
     });
+    assertEquals(
+      read(engine, { id: "of:alias-data-carrier" } as never) !== null,
+      true,
+    );
   });
 });

@@ -31,10 +31,7 @@ import {
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
-import {
-  mapAliasBindingSchemas,
-  mapLinkSchemas,
-} from "./schema-table-links.ts";
+import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   type CellScope,
   type EntitySnapshot,
@@ -358,16 +355,18 @@ const scanSnapshotSchemaRefs = (
       }
     }
     if (!isSchemaDocument) {
-      const collect = (schema: FabricValue): FabricValue => {
+      // Link positions only: an `$alias`-shaped record in a document is
+      // plain data to this layer, so its `schema` member is never a
+      // delivery obligation — data that merely looks like a binding must
+      // not fail a query over an unresolvable ref inside it.
+      mapLinkSchemas(doc as FabricValue, (schema) => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
         ) {
           refs.add(hash);
         }
         return schema;
-      };
-      mapLinkSchemas(doc as FabricValue, collect);
-      mapAliasBindingSchemas(doc as FabricValue, collect);
+      });
     }
   }
   const result = refs.size === 0 ? EMPTY_SCHEMA_REFS : refs;

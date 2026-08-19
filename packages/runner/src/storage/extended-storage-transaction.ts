@@ -1,9 +1,6 @@
 import type { JSONSchema as SchemaDocJSONSchema } from "@commonfabric/api";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import {
-  mapAliasBindingSchemas,
-  mapLinkSchemas,
-} from "@commonfabric/memory/v2/schema-table-links";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import { lookupSchemaDocument } from "../schema-registry.ts";
@@ -1529,7 +1526,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         if (detail.address.id.startsWith("cid:")) continue;
         if (detail.value === undefined) continue;
         const hashes = new Set<string>();
-        const collect = (schema: unknown): typeof schema => {
+        // Link positions only: `$alias` records are binding vocabulary by
+        // CONTEXT — in a transaction's written values they are plain data,
+        // and scanning them here would treat data that merely looks like a
+        // binding as a schema carrier. Binding schemas externalized by the
+        // pattern serializer resolve through the realm registry.
+        mapLinkSchemas(detail.value, (schema) => {
           for (
             const hash of collectExternalSchemaRefHashes(
               schema as SchemaDocJSONSchema,
@@ -1538,9 +1540,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             hashes.add(hash);
           }
           return schema;
-        };
-        mapLinkSchemas(detail.value, collect as never);
-        mapAliasBindingSchemas(detail.value, collect as never);
+        });
         const pending = [...hashes];
         while (pending.length > 0) {
           const hash = pending.pop()!;

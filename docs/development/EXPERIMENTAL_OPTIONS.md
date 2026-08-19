@@ -124,10 +124,13 @@ value is ignored with a warning rather than coerced. See
 - **Added by.** Robin McCollum (PR #5833).
 - **Purpose.** Phases 1 and 2 of
   [content-addressed schemas](../specs/content-addressed-schemas.md), which
-  deploy together: link writers and `$alias` bindings replace inline
-  schemas with `{ "$ref": "cid:<hash>" }` references to content-addressed
-  schema documents, whose closure is installed into the destination space
-  in the same transaction as the reference; and watch/sync selectors
+  deploy together: link writers replace inline schemas with
+  `{ "$ref": "cid:<hash>" }` references to content-addressed schema
+  documents, whose closure is installed into the destination space in the
+  same transaction as the reference; `$alias` bindings stamp the same
+  references at pattern serialization, resolving through the realm
+  registry (an alias is a binding only by context — the storage layer
+  treats `$alias`-shaped records as plain data); and watch/sync selectors
   normalize for the wire — the reference form only when the client
   confirmed the whole closure persisted in the target space
   (server-confirmed replica presence implies server presence), and the

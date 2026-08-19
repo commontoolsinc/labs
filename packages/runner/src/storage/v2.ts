@@ -41,10 +41,7 @@ import {
   toDocumentPath,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import {
-  mapAliasBindingSchemas,
-  mapLinkSchemas,
-} from "@commonfabric/memory/v2/schema-table-links";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -4265,16 +4262,16 @@ class SpaceReplica implements ISpaceReplica {
           );
         }
       }
-      const collect = (schema: FabricValue): FabricValue => {
+      // Link positions only — an `$alias`-shaped record in an arriving
+      // document is plain data, never a delivery obligation.
+      mapLinkSchemas(doc as FabricValue, (schema) => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
         ) {
           if (!embedded.has(hash)) embedded.set(hash, id);
         }
         return schema;
-      };
-      mapLinkSchemas(doc as FabricValue, collect);
-      mapAliasBindingSchemas(doc as FabricValue, collect);
+      });
     }
     for (const [id, document] of registered) {
       for (const dep of collectExternalSchemaRefHashes(document)) {

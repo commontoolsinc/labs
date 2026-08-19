@@ -6,10 +6,7 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
-import {
-  mapAliasBindingSchemas,
-  mapLinkSchemas,
-} from "./schema-table-links.ts";
+import { mapLinkSchemas } from "./schema-table-links.ts";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatchToDocument,
@@ -5198,18 +5195,23 @@ const applyCommitTransaction = (
   // add-then-remove within one commit) is still validated.
   let cidSetsInCommit: Map<string, unknown> | null = null;
   const requiredSchemaRefs = new Set<string>();
+  // `$alias` records are NOT scanned: they are Pattern-binding vocabulary
+  // only by context, and to the storage layer an `$alias`-shaped record is
+  // plain data — treating its `schema` member as a schema position would
+  // let a data document that merely looks like a binding reject a commit.
+  // A reference a binding carries is therefore outside this boundary's
+  // guarantee; readers resolve it through the realm registry and fail
+  // closed when they cannot.
   const collectLinkSchemaRefs = (content: unknown): void => {
     if (content === null || typeof content !== "object") return;
-    const collect = (schema: FabricValue): FabricValue => {
+    mapLinkSchemas(content as FabricValue, (schema) => {
       for (
         const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
       ) {
         requiredSchemaRefs.add(hash);
       }
       return schema;
-    };
-    mapLinkSchemas(content as FabricValue, collect);
-    mapAliasBindingSchemas(content as FabricValue, collect);
+    });
   };
   for (const operation of commit.operations) {
     if (operation.op === "sqlite") continue;

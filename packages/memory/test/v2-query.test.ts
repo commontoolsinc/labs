@@ -1793,48 +1793,50 @@ Deno.test("memory v2 rejects a selector referencing a schema document the space 
   }
 });
 
-Deno.test("memory v2 delivers the closure behind an $alias binding's schema reference", async () => {
+Deno.test("memory v2 treats an $alias-shaped record as plain data in delivery", async () => {
   const { engine, path } = await createEngine();
-  const space = "did:key:z6Mk-memory-v2-alias-closure";
+  const space = "did:key:z6Mk-memory-v2-alias-data";
   try {
-    const schema = {
-      type: "object",
-      properties: { aliasLeaf: { type: "string" } },
-    } as const;
-    const hash = internSchemaAsTaggedHashString(schema);
+    // The ref inside this record points at NOTHING — and the query must
+    // not care: an alias is a binding only by context, and to result
+    // assembly an $alias-shaped record is plain data, neither a delivery
+    // obligation nor a failure.
+    const absent = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "alias-data-never-installed",
+    });
     applyCommit(engine, {
-      sessionId: "session:alias-writer",
+      sessionId: "session:alias-data-writer",
       invocation: invocationFor(1),
       authorization,
       commit: {
         localSeq: 1,
         reads: { confirmed: [], pending: [] },
-        operations: [
-          { op: "set", id: `cid:${hash}`, value: { value: schema } },
-          {
-            op: "set",
-            id: "of:alias-doc",
+        operations: [{
+          op: "set",
+          id: "of:alias-data-doc",
+          value: {
             value: {
-              value: {
-                bound: {
-                  $alias: {
-                    cell: "argument",
-                    path: ["field"],
-                    schema: { $ref: `cid:${hash}` },
-                  },
+              bound: {
+                $alias: {
+                  cell: "argument",
+                  path: ["field"],
+                  schema: { $ref: `cid:${absent}` },
                 },
               },
             },
           },
-        ],
+        }],
       },
     });
     const tracked = trackGraph(space, engine, {
-      roots: [{ id: "of:alias-doc", selector: { path: [], schema: false } }],
+      roots: [{
+        id: "of:alias-data-doc",
+        selector: { path: [], schema: false },
+      }],
     });
-    // Result assembly scans alias binding positions like link positions,
-    // so the schema document rides with its referrer.
-    assert(tracked.state.entities.has(`${space}/space/cid:${hash}`));
+    assert(tracked.state.entities.has(`${space}/space/of:alias-data-doc`));
+    assert(!tracked.state.entities.has(`${space}/space/cid:${absent}`));
   } finally {
     close(engine);
     await Deno.remove(path);
