@@ -1,6 +1,9 @@
 import type { MetaField } from "@commonfabric/api";
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type {
+  FabricPlainObject,
+  FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import type { CfcConfClause } from "@commonfabric/runner/cfc";
@@ -624,9 +627,15 @@ export type LoggerTimingData = Record<
   Record<string, TimingStats>
 >;
 
+/**
+ * Active logger flags, by logger name, flag name and id. A flag set without
+ * metadata is `null`, and so is one whose metadata does not survive vetting at
+ * the boundary -- the two are not distinguished here, the flag's presence
+ * being what this carries and the metadata being incidental to it.
+ */
 export type LoggerFlagsData = Record<
   string,
-  Record<string, Record<string, Record<string, unknown> | null>>
+  Record<string, Record<string, FabricPlainObject | null>>
 >;
 
 export type PageCreateRequest = BaseRequest & {

@@ -1,7 +1,10 @@
 import {
   FabricInstance,
+  type FabricPlainObject,
   FabricPrimitive,
   type FabricValue,
+  isFabricPlainObject,
+  isFabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import {
   Cell,
@@ -24,7 +27,7 @@ import {
 } from "@commonfabric/runner/shared";
 
 import { isCellRef } from "../protocol/mod.ts";
-import { CellRef, PageRef } from "../protocol/types.ts";
+import { CellRef, type LoggerFlagsData, PageRef } from "../protocol/types.ts";
 
 /**
  * Converts a value arriving over the connection into the form the worker
@@ -89,6 +92,44 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
     );
   }
   return value;
+}
+
+/**
+ * Vets a logger flag breakdown for the connection. A flag's metadata is
+ * whatever its caller passed -- `Logger` takes a `Record<string, unknown>` and
+ * constrains it no further -- so this is where it becomes a `FabricValue` or
+ * does not travel.
+ *
+ * Metadata that does not vet is carried as `null`, which is what a flag set
+ * without metadata carries: the flag's presence survives, its metadata does
+ * not. Vetting here rather than at the logger keeps the constraint on what
+ * crosses instead of on every caller that raises a flag.
+ */
+export function vetLoggerFlags(
+  breakdown: Record<
+    string,
+    Record<string, Record<string, Record<string, unknown> | null>>
+  >,
+): LoggerFlagsData {
+  const out: LoggerFlagsData = {};
+  for (const [logger, flags] of Object.entries(breakdown)) {
+    const byFlag: Record<string, Record<string, FabricPlainObject | null>> = {};
+    for (const [flag, byId] of Object.entries(flags)) {
+      const vetted: Record<string, FabricPlainObject | null> = {};
+      for (const [id, metadata] of Object.entries(byId)) {
+        // `isFabricValue()` is the validating half and runs first;
+        // `isFabricPlainObject()` takes a value it has already accepted, which
+        // is why the two are spelled together rather than either alone.
+        vetted[id] = (metadata !== null) && isFabricValue(metadata) &&
+            isFabricPlainObject(metadata)
+          ? metadata
+          : null;
+      }
+      byFlag[flag] = vetted;
+    }
+    out[logger] = byFlag;
+  }
+  return out;
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {

@@ -49,6 +49,7 @@ import {
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
+  vetLoggerFlags,
 } from "./utils.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
@@ -2876,6 +2877,38 @@ describe("runtime-client CellRef conversion", () => {
     // Nested too, the walk reaching it through the container rebuild.
     expect(() => mapCellRefsToSigilLinks({ e: error })).toThrow(message);
     expect(() => mapCellRefsToSigilLinks([error])).toThrow(message);
+  });
+});
+
+describe("vetLoggerFlags", () => {
+  it("carries metadata that vets, and nulls metadata that does not", () => {
+    // A `Logger` takes `Record<string, unknown>` and constrains it no further,
+    // so both of these are values a caller can legitimately have flagged with.
+    const fabric = { a: 1, b: ["x", null] };
+    const notFabric = { when: new Date(0) };
+
+    const vetted = vetLoggerFlags({
+      runner: {
+        "action invalid input": {
+          "action:ok": fabric,
+          "action:bad": notFabric,
+          "action:bare": null,
+        },
+      },
+    });
+
+    // The one that vets travels as itself rather than as a copy.
+    expect(vetted.runner["action invalid input"]["action:ok"]).toBe(fabric);
+    // The one that does not is indistinguishable from a flag set without
+    // metadata, which is the documented cost of carrying the flag anyway.
+    expect(vetted.runner["action invalid input"]["action:bad"]).toBe(null);
+    expect(vetted.runner["action invalid input"]["action:bare"]).toBe(null);
+    // Every id survives either way: the flag's presence is what this carries.
+    expect(Object.keys(vetted.runner["action invalid input"])).toEqual([
+      "action:ok",
+      "action:bad",
+      "action:bare",
+    ]);
   });
 });
 

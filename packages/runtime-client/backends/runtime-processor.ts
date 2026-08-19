@@ -184,6 +184,7 @@ import {
   createPageRef,
   getCell,
   mapCellRefsToSigilLinks,
+  vetLoggerFlags,
 } from "./utils.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
@@ -1572,7 +1573,7 @@ export class RuntimeProcessor {
     const counts = getLoggerCountsBreakdown();
     const metadata = this.#getLoggerMetadata();
     const timing = getTimingStatsBreakdown();
-    const flags = getLoggerFlagsBreakdown();
+    const flags = vetLoggerFlags(getLoggerFlagsBreakdown());
     return { counts, metadata, timing, flags };
   }
 
