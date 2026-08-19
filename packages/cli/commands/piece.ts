@@ -34,7 +34,10 @@ import type {
 } from "../lib/piece-describe.ts";
 import {
   applyPieceInput,
+  type BatchPieceCheck,
+  type BatchPieceOutcome,
   checkPiecePattern,
+  checkPiecePatternBatch,
   describePiece,
   type EntryConfig,
   executePieceCallable,
@@ -65,6 +68,7 @@ import {
   setCellValue,
   setHomePattern,
   setPiecePattern,
+  setPiecePatternBatch,
   setPieceSlug,
   SpaceConfig,
   stepPiece,
@@ -2043,7 +2047,7 @@ export const piece = targetOptions(
     savePiecePattern(parsePieceOptions(options), absPath(outPath))
   )
   /* piece setsrc */
-  .command("setsrc", "Update the pattern source for the given piece.")
+  .command("setsrc", "Update the pattern source for the given piece(s).")
   .usage(`${pieceUsage} <main>`)
   .example(
     cliText(`cf piece setsrc ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`),
@@ -2053,7 +2057,21 @@ export const piece = targetOptions(
     cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
-  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
+  .example(
+    cliText(
+      `cf piece setsrc ${EX_ID} ${EX_COMP} --piece ${RAW_EX_COMP
+        .piece!} --piece fid1:other ./main.tsx`,
+    ),
+    "Update several pieces to the same source through one session, serially, in the order given.",
+  )
+  .option(
+    "-c,--piece <piece:string>",
+    `${PIECE_OPTION_HELP} Repeatable with the --space form: every named ` +
+      `piece receives the same source, applied serially in the order given, ` +
+      `stopping at the first failure. A piece already running the candidate ` +
+      `source is reported and skipped.`,
+    { collect: true },
+  )
   .option(
     "--main-export <export:string>",
     'Named export from entry for pattern definition. Defaults to "default".',
@@ -2082,17 +2100,23 @@ export const piece = targetOptions(
   )
   .option(
     "--check",
-    "Report whether the source could replace the piece's current one, without updating the piece. Exits non-zero when it could not.",
+    "Report whether the source could replace each named piece's current one, without updating any piece. Exits non-zero when any could not.",
   )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
+    const targets = options.piece ?? [];
+    if (targets.length > 1) {
+      await setSrcBatchAction(options, mainPath);
+      return;
+    }
+    const single = { ...options, piece: targets[0] };
     if (options.check) {
       // A refusal exits 1 from inside the check (plain stderr, no usage
       // dump), so `--check` gates a deploy script as well as informing a
       // person.
       const { config, summary } = await checkPieceSourceFromCommand(
-        options,
+        single,
         mainPath,
       );
       render(summary);
@@ -2100,7 +2124,7 @@ export const piece = targetOptions(
   → Apply it: cf piece setsrc --piece ${config.piece} ${mainPath} ...`));
       return;
     }
-    const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
+    const pieceConfig = await setPieceSourceFromCommand(single, mainPath);
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
@@ -3063,6 +3087,221 @@ export async function setPieceSourceFromCommand(
     },
   );
   return pieceConfig;
+}
+
+/** Options for `piece setsrc`, whose `--piece` collects (repeatable). */
+export interface SetSrcCLIOptions extends Omit<PieceCLIOptions, "piece"> {
+  piece?: string[];
+}
+
+/**
+ * Parse the per-piece configs of a multi-piece `setsrc`.
+ *
+ * Each `--piece` value goes through the parse the single-piece form uses, so
+ * every spelling — id, slug, canonical reference — and every validation keeps
+ * its one-piece meaning. The `--url` form stays single-piece: a URL names at
+ * most one piece, so repeating `--piece` beside one is refused rather than
+ * resolved.
+ */
+export function parseBatchPieceConfigs(
+  options: SetSrcCLIOptions,
+): PieceConfig[] {
+  if (options.url !== undefined) {
+    throw new ValidationError(
+      `"--url" names a single piece; to update several pieces, repeat ` +
+        `"--piece" with "--api-url" and "--space".`,
+      { exitCode: 1 },
+    );
+  }
+  return (options.piece ?? []).map((value) =>
+    parsePieceOptions({ ...options, piece: value })
+  );
+}
+
+/** One unambiguous line per landed piece; operators count these. */
+export function formatBatchOutcomeLine(
+  outcome: BatchPieceOutcome,
+  index: number,
+  total: number,
+): string {
+  const position = `(${index + 1}/${total})`;
+  return outcome.status === "updated"
+    ? `Updated source for piece ${outcome.piece} ${position}`
+    : `Source already current for piece ${outcome.piece} — skipped ${position}`;
+}
+
+/**
+ * The stderr report printed when a batch stops: which piece failed, what had
+ * landed before it, and how many pieces were never attempted. The failing
+ * piece's own error follows separately, exactly as the single-piece form
+ * reports it.
+ */
+export function formatBatchStopReport(context: {
+  piece: string;
+  index: number;
+  total: number;
+  outcomes: BatchPieceOutcome[];
+}): string {
+  const updated =
+    context.outcomes.filter((outcome) => outcome.status === "updated").length;
+  const skipped = context.outcomes.length - updated;
+  const remaining = context.total - context.index - 1;
+  return `Stopped at piece ${context.piece} (${
+    context.index + 1
+  } of ${context.total}): ${updated} updated and ${skipped} already ` +
+    `current before the stop; ${remaining} not attempted.`;
+}
+
+/** The closing line of a completed batch, totaling the per-piece lines. */
+export function formatBatchSummary(outcomes: BatchPieceOutcome[]): string {
+  const updated =
+    outcomes.filter((outcome) => outcome.status === "updated").length;
+  return `Processed ${outcomes.length} pieces: ${updated} updated, ${
+    outcomes.length - updated
+  } already current.`;
+}
+
+/** NEXT STEPS hint after a completed batch apply. */
+export function batchApplyNextSteps(configs: PieceConfig[]): string {
+  const [first] = configs;
+  return cliText(`NEXT STEPS:
+  → Test in browser: ${first.apiUrl}/${first.space}
+  → Check state:     cf piece inspect --piece <piece> ...`);
+}
+
+/** NEXT STEPS hint after a batch `--check` in which every piece passed. */
+export function batchCheckNextSteps(
+  configs: PieceConfig[],
+  mainPath: string,
+): string {
+  const pieceFlags = configs.map((config) => `--piece ${config.piece}`)
+    .join(" ");
+  return cliText(`NEXT STEPS:
+  → Apply it: cf piece setsrc ${pieceFlags} ${mainPath} ...`);
+}
+
+/** Injectable dependencies for testing multi-piece `setsrc`. */
+export interface SetPieceSourceBatchCommandDependencies {
+  setPiecePatternBatch?: typeof setPiecePatternBatch;
+  /** Receives each per-piece line and the summary as they land. */
+  report?: (line: string) => void;
+  /** Receives the stop report when a piece fails (default stderr). */
+  reportError?: (line: string) => void;
+}
+
+/**
+ * Apply the parsed multi-piece `setsrc` command: one session, serial order,
+ * stop on first failure. Reporting streams through `deps.report` as pieces
+ * land, so an interrupted run still shows exactly what succeeded; the
+ * failing piece's error then propagates for the CLI's usual rendering and
+ * non-zero exit.
+ */
+export async function setPieceSourceBatchFromCommand(
+  options: SetSrcCLIOptions,
+  mainPath: string,
+  deps: SetPieceSourceBatchCommandDependencies = {},
+): Promise<{ configs: PieceConfig[]; outcomes: BatchPieceOutcome[] }> {
+  const configs = parseBatchPieceConfigs(options);
+  const report = deps.report ?? render;
+  const reportError = deps.reportError ?? console.error;
+  const outcomes = await (deps.setPiecePatternBatch ?? setPiecePatternBatch)(
+    configs,
+    localPatternEntry(mainPath, options),
+    {
+      dangerouslyAllowIncompatibleSchema:
+        options.dangerouslyAllowIncompatibleSchema,
+    },
+    {
+      onOutcome: (outcome, index, total) =>
+        report(formatBatchOutcomeLine(outcome, index, total)),
+      onFailure: (context) => reportError(formatBatchStopReport(context)),
+    },
+  );
+  report(formatBatchSummary(outcomes));
+  return { configs, outcomes };
+}
+
+/** Injectable dependencies for testing multi-piece `setsrc --check`. */
+export interface CheckPieceSourceBatchCommandDependencies {
+  checkPiecePatternBatch?: typeof checkPiecePatternBatch;
+  /** Receives each per-piece verdict line. */
+  report?: (line: string) => void;
+  /** `exitWithDataError`'s seam, so a test can observe the refusal. */
+  exit?: Parameters<typeof exitWithDataError>[1];
+}
+
+/**
+ * Run the multi-piece `setsrc --check` preflight. Applies nothing.
+ *
+ * Every piece is reviewed — a refused piece does not hide the verdicts
+ * behind it — and the verdicts report grouped by piece, in the order given.
+ * Any refusal exits 1 the same way the single-piece check does, so the
+ * batch form gates a migration script identically.
+ */
+export async function checkPieceSourceBatchFromCommand(
+  options: SetSrcCLIOptions,
+  mainPath: string,
+  deps: CheckPieceSourceBatchCommandDependencies = {},
+): Promise<{ configs: PieceConfig[]; checks: BatchPieceCheck[] }> {
+  const configs = parseBatchPieceConfigs(options);
+  const checks = await (deps.checkPiecePatternBatch ?? checkPiecePatternBatch)(
+    configs,
+    localPatternEntry(mainPath, options),
+  );
+  const report = deps.report ?? render;
+  for (const check of checks) {
+    report(
+      check.report.compatible
+        ? `${mainPath} can replace the source for piece ${check.piece}`
+        : `${mainPath} cannot replace the source for piece ${check.piece}:\n` +
+          `${check.report.message}`,
+    );
+  }
+  const refused = checks.filter((check) => !check.report.compatible).length;
+  if (refused > 0) {
+    exitWithDataError({
+      message:
+        `${mainPath} cannot replace the source for ${refused} of ${checks.length} pieces.`,
+    }, deps.exit);
+  }
+  return { configs, checks };
+}
+
+/** Injectable dependencies for testing the multi-piece `setsrc` action. */
+export interface SetSrcBatchActionDependencies
+  extends
+    SetPieceSourceBatchCommandDependencies,
+    CheckPieceSourceBatchCommandDependencies {
+  hint?: (message: string) => void;
+}
+
+/**
+ * The whole multi-piece `setsrc` action: apply or `--check`, then the
+ * closing hint. A named export with seams rather than an inline action body
+ * because action bodies never execute under the unit suite
+ * (docs/development/COVERAGE.md).
+ */
+export async function setSrcBatchAction(
+  options: SetSrcCLIOptions & { check?: boolean },
+  mainPath: string,
+  deps: SetSrcBatchActionDependencies = {},
+): Promise<void> {
+  const printHint = deps.hint ?? hint;
+  if (options.check) {
+    const { configs } = await checkPieceSourceBatchFromCommand(
+      options,
+      mainPath,
+      deps,
+    );
+    printHint(batchCheckNextSteps(configs, mainPath));
+    return;
+  }
+  const { configs } = await setPieceSourceBatchFromCommand(
+    options,
+    mainPath,
+    deps,
+  );
+  printHint(batchApplyNextSteps(configs));
 }
 
 /**
