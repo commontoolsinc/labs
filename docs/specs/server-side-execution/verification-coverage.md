@@ -4628,6 +4628,54 @@ supply; OW29/OW32/OW34 closed):
     `events appended 28 / processed 28`, purge/refusal/orphan 0/0/0 —
     (α) is passive on the chat path.
 
+- **Stage C coordination delta (2026-08-19) — the swatch stall
+  ROOT-CAUSED; one row minted (OW43; nothing renumbered).** The
+  blocker-class stall flagged in the W2.1 row above (5/13 at the
+  W2.1 + (α) configuration; "Not root-caused; candidates named") is
+  now root-caused and the candidates there are SUPERSEDED — report
+  [`stage-c/swatch-stall-rootcause.md`](../../history/plans/server-execution-v2/stage-c/swatch-stall-rootcause.md):
+  under (α) the purged castVote child makes the lagging voter's click
+  a mark-only commit; W2.1's cascade-echo retirement at that mark
+  visibly regresses the client; the re-derivation from the regressed
+  base seals a DIVERGED speculation layer — a literal
+  `splice remove@1` tombstone over the swatch VDOM doc — under which
+  the server's healed derivation ARRIVES (delivery fine) and stays
+  masked, because both convergence paths are dead: no re-run (the
+  swatch computed is an undemanded pull computation — a legal
+  scheduler idle; a settle does not run it) and no retirement (the
+  space-server's watermark freezes below the layer's floor on a quiet
+  space until the next authored commit — probe-verified: one
+  keystroke healed the stalled browser in one poll). All 5 builder
+  reds plus 7 instrumented reproductions ONE class
+  (delivered-but-masked); 0 never-delivered; 0 B1; F1 tested and
+  orthogonal (4/10 vs 5/13). Fix seats S1–S4 are with the owner —
+  the plan's coordination block carries them and the S1 ruling
+  request (its item (10)).
+  - **OW43 — the overlay sweep's accepted-lingering premise ("values
+    converge, rendering stays correct") is FALSE under regressed-base
+    re-derivation — a diverged layer can mask a DELIVERED value.**
+    The sweep's comment accepts entries lingering on a then-quiet
+    space under the premise that lingering layers hold CONVERGED
+    values; a re-derivation from a flip-regressed effective base
+    (W2.1's cascade-echo retirement at a mark-only commit is the
+    known producer; any regressed-base re-derivation racing an
+    arrival can mint one — e.g. a rejection-revert racing pushes)
+    seals a layer whose value DIVERGES, and the delivered, healed
+    confirmed value beneath it is masked indefinitely (the swatch
+    stall; report §§3–4). Owed: make the premise TRUE (S1 — the
+    watermark covers the tail derivations at drain-settle, so every
+    layer's floor is reachable on a quiet space) or make the sweep
+    handle the diverged case explicitly; S2/S3 remove the only known
+    producer but leave this hole open. The flicker witness
+    (`…/cascade-echo-retired-unarrived`) is the live, cheap predictor
+    of the poisonous window (5/5 on the builder's reds; marks the
+    stalled browser in every instrumented red) — necessary, not
+    sufficient (report §1). Trigger: the chosen fix seat's landing
+    (S1 closes this row; under S2/S3 the row STAYS until the
+    retirement hole is closed or explicitly accepted) — in any case
+    before the lunch ON skip lifts and before W4's `waitForSettled`
+    numbers are read at quiescence.
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row

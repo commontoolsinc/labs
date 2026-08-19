@@ -251,27 +251,59 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   its seq-less entry), F2 the orphan refusal folds same-eventId
   siblings (neither half of an orphan lands), OW35 re-read honestly,
   OW37's direction corrected with the loads.
-- **The OPEN critical-path item — the SWATCH STALL (blocker-class,
-  2026-08-19).** On the combined W2.1 + (α) configuration, 5 of 13
-  lunch runs never render the VOTER'S OWN swatch within 60 s (the
-  store clean in every one, both votes durable, "2 love it" rendered
-  on both browsers 300–700 ms after the clicks); W3-alone is 3/3
-  green under higher load and W2-on-W3 WITHOUT W2.1 is 2/2 green
-  under far higher load — the stall is W2.1's in the (α)
-  configuration, and pre-W2.1 every baseline was green by MASKING
-  (the stranded echo carried the own swatch forever). A root-cause
-  investigation is RUNNING (report expected at
-  `/Users/berni/labs-worktrees/swatch-stall-rootcause.md`);
-  candidates: the confirmed own-vote entity doc (an id the client
-  never read) not reaching the voter's replica after the echo's
-  entity layer dropped; the swatch re-derivation racing the
-  superseded flip; B1 instances — W3's F1 fix may move the rate. The
-  lunch ON skip STAYS (lift = the stall resolved + 3/3 green on the
-  train tip). **W4 — the settle-time re-benchmark — does NOT start
-  until the stall is understood.** The three re-stack lunch runs at
-  the train tip (recorded at the end of this bullet as they land) are
-  the first evidence on the TRUE combined configuration
-  (W2.1 + α + F1) — reds there are DATA for the investigation.
+- **The critical-path item — the SWATCH STALL — ROOT-CAUSED
+  2026-08-19** (report:
+  [`stage-c/swatch-stall-rootcause.md`](../history/plans/server-execution-v2/stage-c/swatch-stall-rootcause.md);
+  read-only investigation, mechanism reproduced instrumented on both
+  the builder's configuration and the F1-fixed tip,
+  heal-probe-confirmed). Mechanism (the report's §0): under (α) the
+  lagging voter's purged castVote child makes its click a MARK-ONLY
+  commit (the drained child's votes land one commit later); W2.1
+  retires the click's cascade echo at that mark, and with nothing
+  confirmed covering the echo's docs the flip visibly regresses the
+  client, whose re-derivation from the regressed base seals a
+  DIVERGED speculation layer — a literal `splice remove@1` tombstone
+  over the swatch VDOM doc, deleting the voter's own span; the
+  server's healed derivation ARRIVES under that layer (delivery is
+  fine — the doc's confirmedSeq advances past the healed write), and
+  BOTH convergence paths are dead: the swatch computed is an
+  UNDEMANDED pull computation the scheduler legally never re-runs
+  (liveRefs 0; an explicit settle does not run it — probe-verified),
+  and the tombstone cannot retire because the space-server's
+  watermark FREEZES below its floor on a quiet space (i10: W 71 vs
+  floor 72; f1: W 67 vs 68) until ANY authored commit advances it —
+  probe-verified: one keystroke in an unrelated input healed the
+  stalled browser within one 500 ms poll, while two explicit settles
+  did nothing. Classification: the builder's 5/5 reds plus 7
+  instrumented reproductions are ONE class — delivered-but-masked; 0
+  never-delivered; 0 B1; F1 tested and ORTHOGONAL (4/10 on the F1
+  arm vs 5/13 builder / 4/15 arm A — no movement). Named defect: **a
+  diverged speculation layer with no reachable retirement on a quiet
+  space** — W2.1 + (α) is the (currently only known) producer; the
+  retirement hole is general and pre-exists W2.1. Fix seats (report
+  §4), the choice OWNER-LEVEL: **S1** — advance the watermark over
+  the tail derivations at drain-settle (cheapest; the CLASS fix for
+  every producer, and it drains the 30–40-entry lingering stacks;
+  also makes W honest at quiescence, which W4's `waitForSettled`
+  metric needs; OWNER-LEVEL because W's "covers inputs" meaning is
+  RULED text — ruling request (10) below); **S2** — shape (b)
+  deterministic cascade ids (identity-level; removes the producer AND
+  the flicker; already owner-flagged, ruling (8)); **S3** —
+  arrival-gated cascade retirement inside W2.1 (the flicker witness's
+  existing predicate as the gate; buildable NOW without a ruling if
+  the rulings lag, but it changes stated W2.1 semantics — flagged,
+  not chosen unilaterally); **S4** — demand sink-rendered computeds
+  (NOT recommended: reverses the deliberate server-execution
+  narrowing; the OW32 re-derive-forever class). Coordinator
+  recommendation ON FILE: **S1 now (once ruled), S2 stays the flagged
+  follow-on, S3 only as a stopgap**; register row OW43 (the sweep's
+  accepted-lingering premise) minted with the report. The lunch ON
+  skip STAYS (lift rule unchanged: the stall resolved + 3/3 green on
+  the train tip). **W4 — the settle-time re-benchmark — remains
+  gated until the chosen seat lands and the lunch gate is 3/3 with
+  honest swatch walls.** The three re-stack lunch runs at the train
+  tip — the first evidence on the TRUE combined configuration
+  (W2.1 + α + F1) — are read by the report (§5).
   **Recorded (2026-08-19, tip `b2ecd93b0` = code `42674af15`; ON binary
   sha256 `66182d7638de4ea4…`, gitSha read back per run, `No default
   model available` per run, fresh store per run, ports 8975/8976/8977,
@@ -288,9 +320,10 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   invariant HELD; `users` spliced exactly twice; votes 3 adds / 0
   removes — NO toggle; flicker counters host 2/1, guest 2–3/0; the
   join step honest (confirmed roster) in all three. r3 is the stall
-  mechanism RECOVERING inside the 60-s timeout — evidence for the
-  investigation (F1 and/or load may be moving the rate/shape), not a
-  lift basis.
+  mechanism RECOVERING inside the 60-s timeout — read by the report's
+  §5 as an accidental layer-lifting path (the only run with commit
+  reverts: a rejection cascade drops speculation layers), consistent
+  with the §3 endgame; not a lift basis.
 
 **Ordered next actions:** (1) #5991's ledger comment — DONE 2026-08-18
 (posted; the second review round's report recovered on-branch); (2) the
@@ -306,12 +339,15 @@ three seats), EACH built → independently reviewed → fixed → ledgered
 (the train-map links above), and the train RE-STACKED into its final
 order design → W1 → W2 → W3 the same day (every suite green at the
 train tip `42674af15`; the tip counts in PR #6043's body); (3) the
-SWATCH-STALL root cause (the OPEN critical-path item above;
-investigation RUNNING); (4) its fix in the RIGHT seat (a W2.1 rider
-vs W3's B1/F1 class vs shape (b) — the root cause's call, with the
-owner where it re-rules identity); (5) W4 — the settle-time
-re-benchmark (server settle measured explicitly, `waitForSettled`) —
-**not before the stall is understood**; (6) the CONFIDENCE VERDICT to
+SWATCH-STALL root cause — **DONE 2026-08-19, ROOT-CAUSED** (the
+critical-path item above; report
+`stage-c/swatch-stall-rootcause.md`); (4) its fix in the RIGHT seat —
+NOW THE OWNER'S CALL: seats S1–S4 on file (the item above;
+recommendation S1 now (once ruled — request (10)), S2 the flagged
+follow-on (ruling (8)), S3 only as a stopgap); (5) W4 — the
+settle-time re-benchmark (server settle measured explicitly,
+`waitForSettled`) — **not before the chosen seat lands and the lunch
+gate is 3/3 with honest swatch walls**; (6) the CONFIDENCE VERDICT to
 the owner; (7) on "no fundamental issue", land the train on main with
 the flag OFF (siblings stacked; default lanes OFF) and continue on
 main; (8) the flip's ordered gates as listed under Phase 7 (skip list
@@ -381,7 +417,17 @@ the swatch-stall exposure — the echo stands until the child's own
 landing; its register trigger now names the stall;
 (9) **the lunch ON-skip lift — PENDING on evidence**: lift = the
 swatch stall resolved + 3/3 green on the train tip (the register's
-W2.1 row carries the blocker-class flag).
+W2.1 row carries the blocker-class flag);
+(10) **the S1 watermark ruling — REQUESTED 2026-08-19** (the
+swatch-stall report's fix seat S1; register OW43): amend the RULED
+"W covers inputs" sentence so the space-server's watermark also
+covers the TAIL DERIVATIONS at drain-settle on a quiet space —
+advance/emit W past the settled tail's derived seqs, making "each new
+input lifts the previous generation" hold without requiring a NEXT
+input; server-local and small, the CLASS fix for the diverged-layer
+retirement hole (and it makes W honest at quiescence, which W4's
+`waitForSettled` metric needs); recommendation on file: rule it and
+build S1 now.
 
 ## Phase 0 — Rulings and guardrails
 
