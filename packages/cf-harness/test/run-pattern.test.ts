@@ -278,6 +278,43 @@ describe("run-pattern", () => {
       expect(output.linkedStringCount).toBe(0);
     });
 
+    it("returns a sealed string position as the address of that position rather than an opaque link", async () => {
+      // The schema declares `label` as an unconstrained string, which the
+      // sanitizer withholds as text. The result is fabric-backed, so the
+      // withheld position goes over as its own address — resultRef plus the
+      // sealed path — which describe_handle answers and a later run_pattern
+      // wires by reference. Foreign seals are a different thing and stay
+      // refused at input; only seals this sanitization minted are addressed.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Input { n: number; }",
+          "interface Output { doubled: number; label: string; }",
+          "export default pattern<Input, Output>(({ n }) => ({",
+          "  doubled: computed(() => n * 2),",
+          "  label: computed(() => `doubled ${n}`),",
+          "}));",
+          "",
+        ].join("\n"),
+        inputs: { n: 21 },
+        resultSchema: {
+          type: "object",
+          properties: {
+            doubled: { type: "number" },
+            label: { type: "string" },
+          },
+          required: ["doubled", "label"],
+        },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      const value = output.value as { doubled: number; label: string };
+      expect(value.doubled).toBe(42);
+      expect(value.label).toBe(`${output.resultRef}/label`);
+      expect(output.linkedStringCount).toBe(1);
+    });
+
     it("returns a structured error for a plain-function pattern whose compiled argument schema is undefined, rather than throwing out of the run", async () => {
       const engine = createEngine();
       // A bare default function compiles to a pattern with no argument

@@ -56,6 +56,50 @@ export const digestJsonValue = async (input: unknown): Promise<string> =>
  * code that receives a sanitized value back from a model, and would treat it
  * as data, asks this first.
  */
+/**
+ * Replaces every position a sanitization sealed with the fabric address of
+ * that position, stated by `buildRef` from the path the seal sits at. Only
+ * seals carrying `opaqueHandleId` — the ones THIS sanitization minted — are
+ * replaced; a sealed link an author put in the value, or one lifted out of
+ * another output, names a different handle and passes through untouched.
+ *
+ * This is what makes a sealed position composable instead of terminal: a
+ * run_pattern result is fabric-backed by construction, so a position the
+ * schema could not release as text still has an address, and an address can
+ * be described and wired onward where an `opaque:` output link cannot.
+ */
+export const addressSealedPositions = (
+  value: unknown,
+  opaqueHandleId: string,
+  buildRef: (path: readonly (string | number)[]) => string,
+  path: readonly (string | number)[] = [],
+): unknown => {
+  if (isSealedOpaqueLinkObject(value)) {
+    const target = (value as Record<string, string>)["@link"];
+    const prefix = `opaque:${encodeURIComponent(opaqueHandleId)}`;
+    return target === prefix || target.startsWith(`${prefix}#`)
+      ? buildRef(path)
+      : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, index) =>
+      addressSealedPositions(item, opaqueHandleId, buildRef, [...path, index])
+    );
+  }
+  if (isObjectNotArray(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        addressSealedPositions(child, opaqueHandleId, buildRef, [
+          ...path,
+          key,
+        ]),
+      ]),
+    );
+  }
+  return value;
+};
+
 export const isSealedOpaqueLinkObject = (value: unknown): boolean => {
   if (!isObjectNotArray(value)) {
     return false;

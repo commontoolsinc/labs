@@ -26,6 +26,7 @@ import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { fabricRuntimeObservations } from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
+  addressSealedPositions,
   isSealedOpaqueLinkObject,
   parseStructuredResultSchema,
   validateAndSanitizeStructuredResult,
@@ -938,7 +939,26 @@ export const runPatternTool: HarnessToolDefinition<
           opaqueHandleId: outputId,
           reservedKeys: FRAMEWORK_RESULT_KEYS,
         });
-        value = sanitized.value;
+        // A position the schema could not release as text is fabric-backed
+        // by construction — the result reference plus the sealed path is its
+        // address — so it goes over as that address rather than as a dead
+        // output-scoped link. The outbound swap renders each one as a handle
+        // token, which describe_handle answers and a later run_pattern can
+        // wire by reference. `linkedStringCount` still counts the string
+        // positions withheld as text.
+        const resultLink = resultCell.getAsNormalizedFullLink();
+        value = addressSealedPositions(
+          sanitized.value,
+          outputId,
+          (path) =>
+            createLLMFriendlyLink(
+              {
+                ...resultLink,
+                path: [...resultLink.path, ...path.map(String)],
+              },
+              space,
+            ),
+        );
         linkedStringCount = sanitized.linkedStringCount;
       } catch (error) {
         valueError = errorMessage(error);
