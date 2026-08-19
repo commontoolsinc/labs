@@ -121,7 +121,23 @@ Per fixture:
 - the fixture actually **holds** each recorded root, checked per target before
   anything is applied to it;
 - the setup commit carrying the artifact onto that root is **not refused** and
-  completes;
+  completes — for every AUTHORED target. A transformer-derived hoist (a mapped
+  row's anonymous sub-pattern, `__cfPattern_N`) whose STORED ARGUMENTS today's
+  schema refuses is held back and reported instead of failing: a hoist's
+  arguments are the captures of a derivation the updated source re-runs and
+  re-supplies wholesale, and the real update channel validates only the root
+  contract, so a capture that drifted is not a stranded piece. A hoist today's
+  source no longer even defines is the same supersession — hoist ids are
+  builder node ids, renumbered by ordinary edits — and is held back the same
+  way. Only those two refusal shapes are held back, for hoists only: any other
+  error on a hoist fails, an authored export that disappeared fails as the
+  retirement it is, and a hoist that applies is compared like everything else,
+  which is what keeps a row-allocated cell's cause-stability (the
+  moved-`.for()` class) gated. Telling the two apart is spelling, and spelling
+  is decisive because the namespace is reserved: the runner refuses a module
+  that exports a builder artifact named `__cfPattern_<n>`, so a recorded
+  instantiation with that shape can only be the compiler's own
+  (`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` §11.3);
 - the root then **reads as something** rather than nothing;
 - every value the vintage held is **still readable** afterwards.
 

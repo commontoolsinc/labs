@@ -1513,6 +1513,18 @@ suffixes (`__cfLift_1`, `__cfPattern_1`, …), **not** `factory.createUniqueName
 would make every hoisted identifier share the same `.text` and break the
 identity-by-text lookups later stages rely on.
 
+`__cfPattern_<n>` is a **reserved namespace**, and the runner enforces it:
+registering an evaluated module (`PatternManager.registerEvaluatedModules`)
+refuses a module that EXPORTS a builder artifact under one of these names.
+Hoists reach the artifact index through `__cfReg` (§11.4) rather than through
+exports, so the reservation costs a compiled module nothing — and it is what
+lets a consumer of the index read provenance from the spelling. The
+pattern-update gates depend on exactly that: a recorded instantiation named
+`__cfPattern_<n>` is derivation the updated source re-runs, and is held to a
+different rule than an authored artifact
+(`docs/specs/pattern-update-testing.md`). Only artifacts are refused; a plain
+value under such a name is inert, since nothing but an artifact is indexable.
+
 ### 11.4 `__cfReg` content-addressed registration
 
 After visiting the whole file, the stage appends **one** trailing call:
