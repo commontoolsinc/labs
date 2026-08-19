@@ -147,13 +147,13 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Set field          | `echo '{"data":...}' \| deno task cf set --piece ID path ...`                                                                |
 | Call handler       | `deno task cf call --piece ID handlerName ...`                                                                               |
 | Shape a result     | `deno task cf call --piece ID --select topic.title addTopic ...`                                                             |
-| List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                                             |
+| List verbs         | `deno task cf piece verbs --piece ID --json ...` (`--all` adds wrapper/deprecated; `hidden` counts them)                     |
 | Trigger recompute  | `deno task cf piece step --piece ID ...`                                                                                     |
 | Mint a session     | `export CF_INVOCATION_SESSION="$(deno task cf invocation-session new)"` (once per run; ids deduplicate only within it)       |
 | Replayable call    | `deno task cf call --piece ID --invocation my-id-1 handlerName ...` (same pair retries settle on the original outcome)       |
 | Detached call      | `deno task cf call --piece ID --no-wait --invocation my-id-1 handlerName ...` (exits at commit with `receipt` address)       |
 | Collect a receipt  | `deno task cf get --piece <receipt> ...` (the envelope's `receipt` string, later, from any process)                          |
-| List pieces        | `deno task cf piece ls -i key -a url -s space` (registry only — a piece created inside a handler is absent)                  |
+| List pieces        | `deno task cf piece ls -i key -a url -s space` (registry only — a handler-created piece appears only if sent to `addPiece`)  |
 | Describe a piece   | `deno task cf piece describe --piece ID ...` (name, purpose, state, inputs, verbs; `--json`, `--all`)                        |
 | List slugs         | `deno task cf piece slugs ...`                                                                                               |
 | Search piece data  | `deno task cf piece search <query> ...` (registered pieces only)                                                             |

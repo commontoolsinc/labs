@@ -33,11 +33,13 @@ directions, so an empty result from one says nothing about the others.
 [Finding pieces](../concepts/piece-discovery.md) is the full account of the
 boundaries. One consequence is worth carrying into every session:
 
-> **A piece created inside a handler is not registered.** Top-level creation
-> normally registers a piece through the default pattern's `addPiece` handler;
-> instantiating a child pattern does not register the child. So `cf piece ls`
-> and `cf piece search` do not see the items a board created, however many
-> there are.
+> **A piece created inside a handler is not registered automatically.**
+> Registration happens by sending the piece to the default pattern's `addPiece`
+> handler, which a handler can do deliberately
+> ([adding pieces](../conventions/adding-pieces.md)) and which instantiating a
+> child pattern does not do on its own. So `cf piece ls` and `cf piece search`
+> may not see the items a board created, however many there are — whether they
+> do is the pattern author's decision, not something the listing reports.
 
 The collection that holds those pieces is the discovery path for them — read
 the board and follow its links, or read the index the pattern publishes for
@@ -87,13 +89,19 @@ it does not:
 | Read | Returns |
 | --- | --- |
 | `cf piece describe` | the whole piece in prose — purpose, state, inputs, one summary line per verb |
-| `cf piece verbs --json` | every verb's input schema, and its result schema where it declares one |
+| `cf piece verbs --json` | each shown verb's input schema, and its result schema where it declares one |
+| `cf piece verbs --json --all` | the same, plus the wrapper-tier and deprecated verbs the default view withholds |
 | `cf call <verb> --help --json` | one verb, in full |
 
 `describe` is where to start and rarely where to stop: it summarizes each verb
 in a line and does not carry the schema a payload has to satisfy. Build a
 payload from the `verbs` listing or from a verb's own help page, both of which
 report the schema the dispatcher will judge the payload against.
+
+**Both listings hide wrapper-tier and deprecated verbs by default**, and both
+say so rather than hiding them silently: `--json` carries a `hidden` object
+counting what it withheld, and the human view prints the same counts as a note.
+Hidden verbs stay callable. `--all` is what makes either listing exhaustive.
 
 ## Which pattern you are actually talking to
 
@@ -144,12 +152,18 @@ any verb that reaches outside its own space.
 Every command here can return an empty or absent answer for a reason other than
 the one a caller expects. These are the conclusions the surface does not support:
 
-**An empty verb listing is not proof that no such verb exists.** A handler whose
-stored schema carries no stream marker is callable but not listed, and a listing
-whose compiled pattern could not be read reports `incomplete` rather than
-passing a short list off as the surface. Absence from a listing that reports no
-`incomplete` means no *listable* verb of that name — enough to enumerate
-against, not enough to prove a named verb does not exist.
+**An empty verb listing is not proof that no such verb exists.** A listing can
+be short in three ways. A handler whose stored schema carries no stream marker
+is callable but not listed at all. A listing whose compiled pattern could not be
+read reports `incomplete` rather than passing a short list off as the surface.
+And the default view withholds wrapper-tier and deprecated verbs, reporting the
+count under `hidden`. Only the third is recoverable — `--all` lists those rows;
+nothing recovers a verb the pattern could not be read to name.
+
+So enumerate against a listing that reports **neither `incomplete` nor
+`hidden`**, or against `--all`. Even then it means no *listable* verb of that
+name, which is enough to work from and not enough to prove a named verb does not
+exist.
 
 **An absent `result` is not a failed write.** A verb that declares a result
 hands one back where the channel carrying it is enabled; where a plain record is
@@ -171,13 +185,15 @@ sends mail or spends a model call is not made idempotent by an invocation id.
 **A read that exits nonzero is not an empty value.** A result read whose
 required values have not materialized reports that stored data is present and
 points at `--step`; a projection that cannot render says so and states that it
-is not JSON `null`. A printed `null` is a projected null or an absent optional
-source — never proof of no matches.
+is not JSON `null`. A printed `null` has several origins — a projected null, an
+absent optional source, or a wish run under `--allow-empty`, which prints `null`
+and exits 0 where it would otherwise error — and no caller can tell them apart
+from the output. Read it as "no value here", never as proof of no matches.
 
 **An unregistered piece is not a missing piece.** Covered above, and repeated
 here because it is the failure that reads most like a definitive answer: `ls`
-and `search` returning nothing is consistent with a space full of pieces created
-inside handlers.
+and `search` returning nothing is consistent with a space full of pieces whose
+creating handler never sent them to `addPiece`.
 
 ## Building a domain guide on this
 
