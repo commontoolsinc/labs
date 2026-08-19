@@ -1068,6 +1068,62 @@ run_verb_session_gaps() {
   echo "Successfully ran the verb-session gap harness for ${API_URL}."
 }
 
+# The Topics content-safety drill: export a space's authored content, clobber a
+# topic the way a bad migration would, restore it, and prove the restore
+# byte-exact. docs/plans/topics-migration-rehearsal.md makes it part of every
+# clean rehearsal pass, and a restore mechanism nobody exercises is not a
+# mechanism — so it runs here rather than only by hand.
+#
+# Same delegation rationale as the two above: it deploys its own board into its
+# own fresh space. Unlike them it exercises the REAL topics pattern on purpose,
+# because its subject is content safety for that pattern; a topics change that
+# breaks export or restore SHOULD break this.
+#
+# It needs the serving toolshed's store, since a snapshot is `sqlite3 VACUUM
+# INTO` on the store file rather than an API call. MEMORY_DIR defaults to
+# `<the toolshed's cwd>/cache/memory`, and that cwd is NOT the same in both
+# places the suite runs: CI starts the binary from the workspace root, while
+# `start-local-dev.sh` starts it from `packages/toolshed`. So the store is
+# discovered rather than assumed, and an explicit CF_DRILL_STORE_DIR still
+# wins — pass it when serving from anywhere else.
+run_topics_restore_drill() {
+  echo "Running the topics restore drill..."
+  local repo_root store_dir=""
+  repo_root="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+  local root_store="$repo_root/cache/memory"
+  local toolshed_store="$repo_root/packages/toolshed/cache/memory"
+  if [ -n "${CF_DRILL_STORE_DIR:-}" ]; then
+    store_dir="$CF_DRILL_STORE_DIR"
+  else
+    local candidate found=()
+    for candidate in "$root_store" "$toolshed_store"; do
+      # The OUTER engine directory, which the server creates at startup. The
+      # inner one holds the per-space files and does not exist until a space
+      # is written, which on a fresh server has not happened yet.
+      [ -d "$candidate/engine-v3" ] && found+=("$candidate")
+    done
+    # Both existing means a previous run left one behind, and picking either
+    # is a guess: snapshot the store the server is NOT serving and the drill
+    # fails hunting for a space that was written elsewhere. Refuse instead —
+    # the operator knows which one is live and CF_DRILL_STORE_DIR says so.
+    if [ "${#found[@]}" -gt 1 ]; then
+      error "The topics restore drill found more than one candidate store \
+(${found[*]}) and cannot tell which the server is using. Set \
+CF_DRILL_STORE_DIR to the serving toolshed's MEMORY_DIR."
+    fi
+    [ "${#found[@]}" -eq 1 ] && store_dir="${found[0]}"
+  fi
+  if [ -z "$store_dir" ]; then
+    error "The topics restore drill needs the serving toolshed's store; \
+looked in $root_store and $toolshed_store. Set CF_DRILL_STORE_DIR."
+  fi
+  echo "  store: $store_dir"
+  API_URL="$API_URL" CF_DRILL_STORE_DIR="$store_dir" \
+    bash "$SCRIPT_DIR/topics-restore-drill.sh" ||
+    error "The topics restore drill failed."
+  echo "Successfully ran the topics restore drill for ${API_URL}."
+}
+
 # The top-level spellings are the same commands as their `cf piece`
 # counterparts (docs/plans/cli-surface-shape.md, step 5). The unit guard
 # (test/piece-data-spellings.test.ts) proves the two mounts share one
@@ -1269,6 +1325,8 @@ case "$SECTION" in
     run_verbs_walkthrough
     cf_test_step_begin verb-session-gaps
     run_verb_session_gaps
+    cf_test_step_begin topics-restore-drill
+    run_topics_restore_drill
     ;;
   piece-call-retry)
     cf_test_step_begin piece-call-retry
@@ -1289,6 +1347,10 @@ case "$SECTION" in
   verb-gaps)
     cf_test_step_begin verb-session-gaps
     run_verb_session_gaps
+    ;;
+  topics-drill)
+    cf_test_step_begin topics-restore-drill
+    run_topics_restore_drill
     ;;
   *)
     error "Unknown CLI integration section: $SECTION"
