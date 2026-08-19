@@ -190,42 +190,29 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
         return { tag: value.tag, hash: value.#hash.buffer.slice(0) };
       }
 
+      /** @inheritDoc */
+      canDecode(
+        state: RealmCodecValue,
+      ): state is { readonly tag: string; readonly hash: ArrayBuffer } {
+        return isPlainObject(state) &&
+          (typeof (state as { tag?: unknown }).tag === "string") &&
+          ((state as { hash?: unknown }).hash instanceof ArrayBuffer);
+      }
+
       /**
        * @inheritDoc
        *
-       * Reports a bad state by returning a `ProblematicValue`, as this
-       * class's JSON codec does. The two ways a codec can reject -- this and
-       * throwing -- are equivalent to a caller, the engine settling them
-       * against `lenient`, so what decides between them is consistency across
-       * the codecs a reader meets together.
-       *
-       * The one exception is a detached buffer, which throws. It is not a
+       * A detached buffer throws rather than being reported. It is not a
        * malformed state -- it is a well-formed one this tree already spent --
-       * and it is caught rather than tested for, the constructor being what
-       * discovers it. Reporting it by return would mean asking the same
-       * question twice, once here and once there.
+       * so it is not {@link #canDecode}'s to refuse, and it is caught rather
+       * than tested for, the constructor being what discovers it.
        */
       decode(
-        typeTag: string,
-        state: RealmCodecValue,
+        _typeTag: string,
+        state: { readonly tag: string; readonly hash: ArrayBuffer },
         _env: LiveEnvironment,
       ): FabricValue {
-        if (!isPlainObject(state)) {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `expected object state, got ${typeof state}`,
-          );
-        }
-
-        const { tag, hash } = state as { tag: any; hash: any };
-        if ((typeof tag !== "string") || !(hash instanceof ArrayBuffer)) {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `expected string \`tag\` and \`ArrayBuffer\` \`hash\``,
-          );
-        }
+        const { tag, hash } = state;
 
         // Taken over rather than copied, as `FabricBytes` does: the buffer
         // arrived either by being cloned, making it this realm's own, or by

@@ -410,7 +410,8 @@ describe("RealmCodecEngine", () => {
       );
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
-      expect((decoded as ProblematicValue).error).toMatch(/expected string/);
+      expect((decoded as ProblematicValue).error)
+        .toMatch(/state is not one this codec decodes/);
     });
 
     it("throws when given a `Map`, which is no form this format emits", () => {
@@ -492,20 +493,25 @@ describe("RealmCodecEngine", () => {
         return result as ProblematicValue;
       };
 
+      // The refusal is the engine's, `canDecode()` having declined the state,
+      // so every one of these carries the same wording. What each case
+      // establishes is that the codec declines its own kind of bad state, not
+      // how the decline is phrased.
+      const refused = /state is not one this codec decodes/;
+
       // Wrong primitive type where a `bigint` is required.
-      expect(bad("EpochDays@1", "7").error).toMatch(/expected `bigint`/);
-      expect(bad("EpochNsec@1", 7).error).toMatch(/expected `bigint`/);
+      expect(bad("EpochDays@1", "7").error).toMatch(refused);
+      expect(bad("EpochNsec@1", 7).error).toMatch(refused);
 
       // Not a record at all, then a record with the wrong field types.
-      expect(bad("Hash@1", 42).error).toMatch(/expected object state/);
-      expect(bad("Hash@1", { tag: 1, hash: 2 }).error)
-        .toMatch(/expected string `tag`/);
-      expect(bad("RegExp@1", 42).error).toMatch(/expected object state/);
+      expect(bad("Hash@1", 42).error).toMatch(refused);
+      expect(bad("Hash@1", { tag: 1, hash: 2 }).error).toMatch(refused);
+      expect(bad("RegExp@1", 42).error).toMatch(refused);
       expect(bad("RegExp@1", { source: 1, flags: 2, flavor: 3 }).error)
-        .toMatch(/expected string/);
+        .toMatch(refused);
 
       // Bytes wants the transport's own byte carrier and takes nothing else.
-      expect(bad("Bytes@1", "nope").error).toMatch(/expected `ArrayBuffer`/);
+      expect(bad("Bytes@1", "nope").error).toMatch(refused);
 
       // Well-typed fields that still do not make a value. `RegExp@1` is the
       // one codec here whose construction can fail on data that passed every
@@ -685,7 +691,8 @@ describe("RealmCodecEngine", () => {
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
       expect((decoded as ProblematicValue).wireTypeTag).toBe("Bytes@1");
-      expect((decoded as ProblematicValue).error).toMatch(/ArrayBuffer/);
+      expect((decoded as ProblematicValue).error)
+        .toMatch(/state is not one this codec decodes/);
     });
 
     it("raises a symbol's bad state without naming the tag twice", () => {
@@ -929,6 +936,10 @@ describe("RealmCodecEngine", () => {
           encode(): RealmCodecValue {
             nestedMarker = (engine.encode(7n) as unknown as unknown[])[0];
             return 1;
+          }
+
+          canDecode(state: RealmCodecValue): state is RealmCodecValue {
+            return state === 1;
           }
 
           decode(): FabricValue {

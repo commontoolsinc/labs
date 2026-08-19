@@ -96,28 +96,17 @@ export class FabricEpochDays extends BaseFabricPrimitive
         return value.#value;
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Reports a bad state by returning a `ProblematicValue`, as this
-       * class's JSON codec does. The two ways a codec can reject -- this and
-       * throwing -- are equivalent to a caller, the engine settling them
-       * against `lenient`, so what decides between them is consistency across
-       * the codecs a reader meets together.
-       */
+      /** @inheritDoc */
+      canDecode(state: RealmCodecValue): state is bigint {
+        return typeof state === "bigint";
+      }
+
+      /** @inheritDoc */
       decode(
-        typeTag: string,
-        state: RealmCodecValue,
+        _typeTag: string,
+        state: bigint,
         _env: LiveEnvironment,
       ): FabricValue {
-        if (typeof state !== "bigint") {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `expected \`bigint\` state, got ${typeof state}`,
-          );
-        }
-
         return new FabricEpochDays(state);
       }
     })(),

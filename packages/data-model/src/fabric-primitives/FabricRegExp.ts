@@ -244,42 +244,44 @@ export class FabricRegExp extends BaseFabricPrimitive
         };
       }
 
+      /** @inheritDoc */
+      canDecode(state: RealmCodecValue): state is FabricRegExpState {
+        if (!isPlainObject(state)) {
+          return false;
+        }
+
+        // `Object.hasOwn()` rather than a comparison against `undefined`: a
+        // field present and `undefined` is not an absent one, and this format
+        // carries `undefined` faithfully, so both shapes genuinely arrive.
+        for (const key of ["flavor", "source", "flags"] as const) {
+          if (
+            Object.hasOwn(state, key) &&
+            (typeof (state as Record<string, unknown>)[key] !== "string")
+          ) {
+            return false;
+          }
+        }
+
+        return true;
+      }
+
       /**
        * @inheritDoc
        *
-       * Reports a bad state by returning a `ProblematicValue`, as this
-       * class's JSON codec does. The two ways a codec can reject -- this and
-       * throwing -- are equivalent to a caller, the engine settling them
-       * against `lenient`, so what decides between them is consistency across
-       * the codecs a reader meets together.
-       *
        * As on the JSON side, regex syntax is not enforced as part of wire
        * participation beyond what the constructor validates eagerly for the
-       * `es2025` flavor.
+       * `es2025` flavor, which is why a pattern that fails to build is
+       * reported here rather than refused by {@link #canDecode}.
        */
       decode(
         typeTag: string,
-        state: RealmCodecValue,
+        state: FabricRegExpState,
         _env: LiveEnvironment,
       ): FabricValue {
-        if (!isPlainObject(state)) {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `expected object state, got ${typeof state}`,
-          );
-        }
+        const flavor = state.flavor ?? DEFAULT_FLAVOR;
+        const source = state.source ?? "";
+        const flags = state.flags ?? "";
 
-        const fields = FabricRegExp.#stateFields(state);
-        if (fields === null) {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            "expected string `flavor`, `source` and `flags`",
-          );
-        }
-
-        const { flavor, source, flags } = fields;
         try {
           return new FabricRegExp(flavor, source, flags);
         } catch (e) {
