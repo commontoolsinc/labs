@@ -46,6 +46,12 @@ the board and follow its links, or read the index the pattern publishes for
 exactly this purpose. Substituting `cf piece ls` for a pattern's own listing is
 the single most common way to conclude a space is empty when it is not.
 
+`packages/cli/integration/verb-session-gaps.sh` asserts both halves of this
+against a live host, under the step named "the registry does not list what a
+handler created", so the paragraph above fails in CI rather than going stale: a
+board deployed at the top level is listed, the item its handler created is not,
+and that unlisted item reads on its own address regardless.
+
 `cf wish` reaches collections a pattern publishes by convention rather than the
 registry: `#pieceRegistry` resolves the registry itself, `#mentionable`,
 `#favorites`, and `#recent` resolve the collections of those names, and the
