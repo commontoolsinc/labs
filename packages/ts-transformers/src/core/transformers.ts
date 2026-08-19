@@ -7,7 +7,7 @@ import { CrossStageState } from "./cross-stage-state.ts";
  * Used to communicate access patterns (like array-property-only access)
  * from capture analysis to schema generation.
  */
-export interface SchemaHint {
+export type SchemaHint = {
   /** Override for array items schema (e.g., false for items: false) */
   readonly items?: unknown;
   readonly cfcUiContract?: {
@@ -19,7 +19,7 @@ export interface SchemaHint {
     readonly trustedPattern?: string;
     readonly requiredEventIntegrity?: readonly string[];
   };
-}
+};
 
 export type ReactiveCapability =
   | "opaque"
@@ -28,12 +28,12 @@ export type ReactiveCapability =
   | "writeonly"
   | "writable";
 
-export interface CapabilityParamDefault {
+export type CapabilityParamDefault = {
   readonly path: readonly string[];
   readonly defaultType: ts.TypeNode;
-}
+};
 
-export interface CapabilityParamSummary {
+export type CapabilityParamSummary = {
   readonly name: string;
   readonly capability: ReactiveCapability;
   readonly readPaths: readonly (readonly string[])[];
@@ -59,7 +59,7 @@ export interface CapabilityParamSummary {
   readonly comparablePaths?: readonly (readonly string[])[];
   readonly comparableCellPaths?: readonly (readonly string[])[];
   readonly defaults?: readonly CapabilityParamDefault[];
-}
+};
 
 /**
  * A cell argument that flows to an out-of-file parameter whose declared type the
@@ -67,18 +67,18 @@ export interface CapabilityParamSummary {
  * generic, or a non-branded cell-like interface). The capability silently
  * degrades, so the caller surfaces this as a diagnostic.
  */
-export interface UnreadableCellArgument {
+export type UnreadableCellArgument = {
   readonly node: ts.Node;
   readonly message: string;
-}
+};
 
-export interface FunctionCapabilitySummary {
+export type FunctionCapabilitySummary = {
   readonly params: readonly CapabilityParamSummary[];
   /** True when analysis was short-circuited due to recursion. */
   readonly recursive?: boolean;
   /** Cell arguments passed to parameters the contract could not classify. */
   readonly unreadableCellArguments?: readonly UnreadableCellArgument[];
-}
+};
 
 export type PatternCoverageKind = "runtime";
 
@@ -86,7 +86,7 @@ export type PatternCoverageKind = "runtime";
 // without the compiler stack; re-exported here for the compile-side callers.
 export { PATTERN_COVERAGE_GLOBAL } from "./runtime-contract.ts";
 
-export interface PatternCoverageSpan {
+export type PatternCoverageSpan = {
   readonly fileName: string;
   readonly id: number;
   readonly kind: PatternCoverageKind;
@@ -94,15 +94,15 @@ export interface PatternCoverageSpan {
   readonly endLine: number;
   readonly startColumn: number;
   readonly endColumn: number;
-}
+};
 
-export interface PatternCoverageOptions {
+export type PatternCoverageOptions = {
   readonly fileName?: (sourceFileName: string) => string;
   readonly mapSpan?: (
     span: PatternCoverageSpan,
   ) => PatternCoverageSpan | undefined;
   readonly registerSpan: (span: PatternCoverageSpan) => void;
-}
+};
 
 /**
  * Registry for passing schema hints between transformer stages.
@@ -112,7 +112,7 @@ export interface PatternCoverageOptions {
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
 export type SyntheticReactiveCollectionRegistry = WeakSet<ts.Symbol>;
 
-export interface TransformationOptions {
+export type TransformationOptions = {
   /**
    * Single owner of the pipeline's cross-transformer communication registries
    * (typeRegistry, schemaHints, the marker sets, etc.). Replaces the formerly
@@ -151,11 +151,11 @@ export interface TransformationOptions {
    * verbatim (modulo path-separator normalization).
    */
   readonly canonicalWriterIdentityFile?: (fileName: string) => string;
-}
+};
 
 export type DiagnosticSeverity = "error" | "warning";
 
-export interface TransformationDiagnostic {
+export type TransformationDiagnostic = {
   readonly severity: DiagnosticSeverity;
   readonly type: string;
   readonly message: string;
@@ -164,14 +164,14 @@ export interface TransformationDiagnostic {
   readonly column: number;
   readonly start: number;
   readonly length: number;
-}
+};
 
-export interface DiagnosticInput {
+export type DiagnosticInput = {
   readonly severity?: DiagnosticSeverity;
   readonly type: string;
   readonly message: string;
   readonly node: ts.Node;
-}
+};
 
 /**
  * Registry for passing Type information between transformer stages.
