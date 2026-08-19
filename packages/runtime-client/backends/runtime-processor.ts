@@ -445,6 +445,21 @@ function sanitizedBody(
   // and has nothing to descend into, and an instance's codec contents are not
   // reachable by property name. Naming beats refusing here, because what a
   // debug dump was handed is the very thing being debugged.
+  //
+  // TODO(danfuzz): naming it is what the transport forces, not what the
+  // receiver wants. These args land in `console.log()` on the main thread
+  // (`RuntimeInternals.#onConsole` in `lib-shell`), so the reader is a
+  // devtools object inspector -- which renders a live `FabricBytes` as an
+  // expandable value and this string as a string. `codec-realm` carries the
+  // instance across whole, and the receiver decodes before logging.
+  //
+  // Two things stand in the way, and neither is this arm's doing.
+  // `codec-realm` refuses a cycle today, where this walk reports one and
+  // carries on, so its own memo `TODO` is a prerequisite. And a
+  // `console.log()` argument is whatever pattern code passed, which need not
+  // be a `FabricValue` at all -- so what replaces this is a walk that encodes
+  // the fabric it finds and goes on naming the functions, cells and cycles it
+  // finds, not an encode in place of a walk.
   if (obj instanceof FabricSpecialObject) {
     return toCompactDebugString(obj);
   }
@@ -928,6 +943,7 @@ export class RuntimeProcessor {
     // (`CellHandle.serialize`; see the `WireCellValue` marker in
     // `protocol/types.ts`) — this outbound direction loses silently. The
     // subscription-update path below posts the same conversion.
+    // `codec-realm` is the mechanism for both directions.
     const converted = redactSigilCfcLabelViewsForDisplay(
       convertCellsToLinks(value, {
         includeSchema: true,

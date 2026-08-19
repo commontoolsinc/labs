@@ -554,8 +554,8 @@ export class CellHandle<T = unknown> {
     //
     // TODO(danfuzz): carry the whole `FabricValue` domain across this
     // connection, at which point this becomes a conversion rather than a
-    // refusal. `JsonCodecEngine` is the mechanism, and the gap it closes is the one
-    // marked on `WireCellValue` in `protocol/types.ts`.
+    // refusal. `codec-realm` is the mechanism, and the gap it closes is the
+    // one marked on `WireCellValue` in `protocol/types.ts`.
     if (value instanceof FabricSpecialObject) {
       throw new Error(
         `Cannot yet handle \`${value.constructor.name}\` (a ` +

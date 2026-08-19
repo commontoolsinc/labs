@@ -194,7 +194,8 @@ function toDisplay(
   // Note this is the second place such a value is lost, not the first: it
   // reaches the client through `postMessage`, and structured clone drops the
   // prototype and private fields on the way. Fixing this alone changes a `{}`
-  // into a `{}` until the wire carries one.
+  // into a `{}` until the wire carries one, which `codec-realm` is the
+  // mechanism for.
   if (typeof value === "object" && value !== null) {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {

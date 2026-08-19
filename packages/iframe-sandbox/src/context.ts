@@ -9,6 +9,13 @@ export type Context = unknown;
 
 // An `IframeContextHandler` is used by consumers to
 // register how read/writing values from frames are handled.
+//
+// TODO(danfuzz): every `unknown` below that stands for a cell's value -- the
+// `read()` result, `write()`'s `value`, and the `callback` argument -- is a
+// `FabricValue`, and typing it so is what would let this seam carry the whole
+// domain, `codec-realm` being the mechanism. The values cross to the guest as
+// themselves; see the markers on `HostMessage` and `GuestMessage` in
+// `./ipc.ts` for what that costs.
 export interface IframeContextHandler {
   read(
     element: CommonIframeSandboxElement,

@@ -88,6 +88,12 @@ async function attachPiece(next: PieceController): Promise<void> {
  * stringify bigints (JSON.stringify throws on them).
  */
 function sanitizeForTransfer(value: unknown): unknown {
+  // TODO(danfuzz): most of what reaches here is a `FabricValue` read from a
+  // cell, and this narrows it to the JSON-compatible subset -- a
+  // `FabricPrimitive` becomes `{}`, a `bigint` becomes its own decimal text.
+  // A test that asserted on either would be asserting on the damage. The
+  // crossing is `postMessage`, so `codec-realm` carries the whole domain, and
+  // the harness decodes on the other side.
   if (value === undefined) return undefined;
   return JSON.parse(JSON.stringify(value, (_key, entry) => {
     if (typeof entry === "function") return undefined;

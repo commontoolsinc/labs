@@ -166,6 +166,11 @@ export interface InitializationData {
   // IPC boundary. Fixed for the connection's lifetime.
   spaceHostMap?: Record<string, string>;
   // Signer.
+  //
+  // TODO(danfuzz): this and `spaceIdentity` below are the other crossing the
+  // `InsecureCryptoKeyPair` marker in `@commonfabric/identity`'s
+  // `interface.ts` is about, and want the same `FabricBytes` for the same
+  // reason.
   identity: KeyPairRaw;
   // Identity of space.
   spaceDid: DID;
@@ -279,9 +284,10 @@ export interface CellGetRequest extends BaseRequest {
  * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
  * is `postMessage` rather than JSON, so that is a gap rather than a limit --
  * though structured clone alone does not close it, a class instance arriving
- * with its prototype and private fields gone. `JsonCodecEngine`
- * (`@commonfabric/data-model/codec-json`) is the mechanism, already used for
- * blob-upload bodies in `backends/runtime-processor.ts`. Until then
+ * with its prototype and private fields gone. `codec-realm` is the mechanism,
+ * being the format written for this crossing: a `bigint` travels as itself, a
+ * `symbol` under a tag, and a `FabricBytes` as an `ArrayBuffer` a send can
+ * transfer. Until then
  * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw
  * rather than silent loss.
  */
@@ -553,6 +559,11 @@ export interface UploadBlobRequest extends BaseRequest {
    * The blob's bytes. The type has to stay structured-clone-able, this being an
    * IPC payload: a class does not survive the crossing, where a typed array
    * does and carries whole rather than element by element.
+   *
+   * TODO(danfuzz): this wants to be a `FabricBytes`, which `codec-realm`
+   * carries across as a bare `ArrayBuffer` the send can transfer. The bytes
+   * would then be immutable end to end rather than a view a sender still
+   * holds.
    */
   body: Uint8Array;
   suffix?: string;
@@ -628,6 +639,11 @@ export interface PageCreateRequest extends BaseRequest {
   } | {
     program: Program;
   };
+  // TODO(danfuzz): a piece's argument is a `FabricValue`, and `JSONValue`
+  // narrows it to the JSON-compatible subset with nothing carrying the rest.
+  // The same gap `WireCellValue` is marked with, at the other request that
+  // sends a value into the worker, and closed by the same mechanism
+  // (`codec-realm`).
   argument?: JSONValue;
   cause?: string;
   run?: boolean;
@@ -1013,6 +1029,18 @@ export interface BooleanResponse {
   value: boolean;
 }
 
+/**
+ * A cell's value on its way _out_ of the worker, which `WireCellValue` is on
+ * its way in.
+ *
+ * TODO(danfuzz): the two directions want the same type and do not have it.
+ * `JSONValue` cannot carry the whole `FabricValue` domain either, and this
+ * direction loses where the inbound one throws: the producer hands over a
+ * value with its `FabricPrimitive`s intact and structured clone strips each to
+ * `{}` (see `handleCellGet` in `backends/runtime-processor.ts`).
+ * `codec-realm` is the mechanism, and closing this gap and `WireCellValue`'s
+ * is one change.
+ */
 export interface JSONValueResponse {
   value: JSONValue | undefined;
 }
@@ -1071,6 +1099,8 @@ export interface PatternCoverageResponse {
 export interface CellUpdateNotification {
   type: NotificationType.CellUpdate;
   cell: CellRef;
+  // TODO(danfuzz): the same gap `JSONValueResponse` is marked with. This is
+  // the push form of the same read, produced by the same conversion.
   value: JSONValue;
   // Present only for subscriptions that opted in via `includeCfcLabel`. Carries
   // the cell's current display label so the client re-renders on label changes
@@ -1082,6 +1112,12 @@ export interface ConsoleNotification {
   type: NotificationType.ConsoleMessage;
   metadata?: { pieceId?: string; patternId?: string; space?: string };
   method: string;
+  // TODO(danfuzz): these arrive pre-flattened to text by
+  // `sanitizeForPostMessage()` (`backends/runtime-processor.ts`), and the
+  // receiver hands them to `console.log()` -- a devtools inspector, which can
+  // show more of a value than a string of it can. A `codec-realm` arm here is
+  // what lets the fabric among them cross whole; see the marker at the producer
+  // for what else has to move first.
   args: JSONValue[];
 }
 

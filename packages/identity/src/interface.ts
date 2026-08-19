@@ -109,9 +109,10 @@ export interface AuthorizationError extends Error {
  * byte type: a value of this shape crosses worker boundaries as an IPC
  * payload, and structured cloning does not preserve a class.
  *
- * TODO(danfuzz): Change these properties to `FabricBytes` once `codec-realm`
- * exists and is used to carry this across that boundary. The bytes would then
- * be immutable end to end, instead of only within a signer.
+ * TODO(danfuzz): Change these properties to `FabricBytes`, carried across the
+ * boundary by `codec-realm`, which encodes one as a bare `ArrayBuffer` a send
+ * can transfer. The bytes would then be immutable end to end, instead of only
+ * within a signer.
  */
 export type InsecureCryptoKeyPair = {
   privateKey: Uint8Array;

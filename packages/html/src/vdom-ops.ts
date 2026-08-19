@@ -49,6 +49,13 @@ export interface SetPropOp {
   op: "set-prop";
   nodeId: number;
   key: string;
+  // TODO(danfuzz): a prop is whatever a pattern put on a render node, so its
+  // value is a `FabricValue`, and `JSONValue` narrows that to the
+  // JSON-compatible subset. The producer (`transformPropValue()` in
+  // `worker/reconciler.ts`) does not narrow to match: it hands over a
+  // `FabricPrimitive` whole, and structured clone strips one to `{}` on the
+  // way here. `codec-realm` is the mechanism, this batch crossing by
+  // `postMessage` rather than as JSON text.
   value: JSONValue;
 }
 
