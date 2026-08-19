@@ -29,7 +29,7 @@ import {
 import type { FabricValue } from "@/fabric-value.ts";
 import { isDeepFrozen, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -592,8 +592,8 @@ describe("cloneIfNecessary()", () => {
       deepCloneImplemented: false,
     },
     {
-      name: "FabricEpochDays",
-      factory: () => new FabricEpochDays(42n),
+      name: "FabricEpochDay",
+      factory: () => new FabricEpochDay(42n),
       deepCloneImplemented: false,
     },
     {

@@ -9,7 +9,7 @@ import {
 } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
-  FabricEpochDays,
+  FabricEpochDay,
   FabricEpochNsec,
   FabricHash,
   FabricRegExp,
@@ -317,7 +317,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricInstance,
     FabricPrimitive,
     FabricEpochNsec,
-    FabricEpochDays,
+    FabricEpochDay,
     FabricHash,
     FabricLink,
     FabricBytes,

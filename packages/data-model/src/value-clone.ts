@@ -195,7 +195,7 @@ export function cloneHelper(
     // needed regardless of force.
     case NATIVE_TAGS.Primitive:
     case NATIVE_TAGS.EpochNsec:
-    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.EpochDay:
     case NATIVE_TAGS.FabricBytes:
     case NATIVE_TAGS.FabricRegExp:
     case NATIVE_TAGS.Hash:

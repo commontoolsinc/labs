@@ -18,44 +18,44 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { JSON_CODEC } from "@/codec-interface/interface.ts";
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 
-describe("FabricEpochDays", () => {
+describe("FabricEpochDay", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (don't fit a single member, aren't construction mechanics).
   it("is an instance of `FabricPrimitive`", () => {
-    expect(new FabricEpochDays(0n) instanceof FabricPrimitive).toBe(
+    expect(new FabricEpochDay(0n) instanceof FabricPrimitive).toBe(
       true,
     );
   });
 
   it("is not a `FabricInstance` (it's a `FabricPrimitive`)", () => {
-    const sd = new FabricEpochDays(0n);
+    const sd = new FabricEpochDay(0n);
     expect(sd instanceof FabricInstance).toBe(false);
   });
 
   describe("constructor()", () => {
     it("produces an always-frozen instance", () => {
-      expect(Object.isFrozen(new FabricEpochDays(100n))).toBe(true);
+      expect(Object.isFrozen(new FabricEpochDay(100n))).toBe(true);
     });
   });
 
   describe("instance members", () => {
     describe(".value", () => {
       it("wraps a `bigint` value", () => {
-        const sd = new FabricEpochDays(19723n);
+        const sd = new FabricEpochDay(19723n);
         expect(sd.value).toBe(19723n);
       });
 
       it("wraps zero (epoch day)", () => {
-        const sd = new FabricEpochDays(0n);
+        const sd = new FabricEpochDay(0n);
         expect(sd.value).toBe(0n);
       });
 
       it("wraps negative values (pre-epoch)", () => {
-        const sd = new FabricEpochDays(-365n);
+        const sd = new FabricEpochDay(-365n);
         expect(sd.value).toBe(-365n);
       });
     });
@@ -63,26 +63,26 @@ describe("FabricEpochDays", () => {
 
   describe("static members", () => {
     describe("`[JSON_CODEC]`", () => {
-      const codec = FabricEpochDays[JSON_CODEC];
-      const expectedTag = CODEC_TYPE_TAGS.EpochDays;
+      const codec = FabricEpochDay[JSON_CODEC];
+      const expectedTag = CODEC_TYPE_TAGS.EpochDay;
       const env = NULL_LIVE_ENVIRONMENT;
 
       describe("recognizedTypeTag", () => {
-        it("is the `EpochDays` wire type tag", () => {
+        it("is the `EpochDay` wire type tag", () => {
           expect(codec.recognizedTypeTag).toBe(expectedTag);
         });
       });
 
       describe("canEncode()", () => {
-        it("claims a `FabricEpochDays`, rejecting other values", () => {
-          expect(codec.canEncode(new FabricEpochDays(0n))).toBe(true);
+        it("claims a `FabricEpochDay`, rejecting other values", () => {
+          expect(codec.canEncode(new FabricEpochDay(0n))).toBe(true);
           expect(codec.canEncode("not an epoch")).toBe(false);
         });
       });
 
       describe("encode()", () => {
         it("encodes to a flat base64 string (epoch zero)", () => {
-          const sd = new FabricEpochDays(0n);
+          const sd = new FabricEpochDay(0n);
           // Flat format: base64 string directly, not nested {"/BigInt@1": ...}.
           expect(codec.encode(sd)).toBe("AA");
         });
@@ -104,8 +104,8 @@ describe("FabricEpochDays", () => {
             expectedTag,
             "AA",
             env,
-          ) as unknown as FabricEpochDays;
-          expect(decoded).toBeInstanceOf(FabricEpochDays);
+          ) as unknown as FabricEpochDay;
+          expect(decoded).toBeInstanceOf(FabricEpochDay);
           expect(decoded.value).toBe(0n);
         });
 
@@ -121,37 +121,37 @@ describe("FabricEpochDays", () => {
 
       describe("round trip encode-decode", () => {
         it("round-trips at top level (epoch zero)", () => {
-          const sd = new FabricEpochDays(0n);
+          const sd = new FabricEpochDay(0n);
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sd),
             env,
-          ) as unknown as FabricEpochDays;
-          expect(decoded).toBeInstanceOf(FabricEpochDays);
+          ) as unknown as FabricEpochDay;
+          expect(decoded).toBeInstanceOf(FabricEpochDay);
           expect(decoded.value).toBe(0n);
         });
 
         it("round-trips positive day count", () => {
           const days = 19723n; // ~2024-01-01
-          const sd = new FabricEpochDays(days);
+          const sd = new FabricEpochDay(days);
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sd),
             env,
-          ) as unknown as FabricEpochDays;
-          expect(decoded).toBeInstanceOf(FabricEpochDays);
+          ) as unknown as FabricEpochDay;
+          expect(decoded).toBeInstanceOf(FabricEpochDay);
           expect(decoded.value).toBe(days);
         });
 
         it("round-trips negative day count (pre-epoch)", () => {
           const days = -365n;
-          const sd = new FabricEpochDays(days);
+          const sd = new FabricEpochDay(days);
           const decoded = codec.decode(
             expectedTag,
             codec.encode(sd),
             env,
-          ) as unknown as FabricEpochDays;
-          expect(decoded).toBeInstanceOf(FabricEpochDays);
+          ) as unknown as FabricEpochDay;
+          expect(decoded).toBeInstanceOf(FabricEpochDay);
           expect(decoded.value).toBe(days);
         });
       });
@@ -162,7 +162,7 @@ describe("FabricEpochDays", () => {
   // of the class, so it lives directly under the class `describe()`.
   describe("shallowFabricFromNativeValue() integration", () => {
     it("passes through unchanged even with `freeze=false`", () => {
-      const days = new FabricEpochDays(456n);
+      const days = new FabricEpochDay(456n);
       // freeze=false should still return the same instance (not a copy).
       expect(shallowFabricFromNativeValue(days, false)).toBe(days);
     });

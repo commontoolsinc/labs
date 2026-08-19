@@ -250,7 +250,7 @@ form.
 |---|---|---|
 | `FabricBytes` | `Bytes@1` | `ArrayBuffer` |
 | `FabricHash` | `Hash@1` | `{ tag: string, hash: ArrayBuffer }` |
-| `FabricEpochDays` | `EpochDays@1` | `bigint` |
+| `FabricEpochDay` | `EpochDay@1` | `bigint` |
 | `FabricEpochNsec` | `EpochNsec@1` | `bigint` |
 | `FabricRegExp` | `RegExp@1` | `{ source, flags, flavor }` |
 | `symbol` | `Symbol@1` | `string` (the registry key) |

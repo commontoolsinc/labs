@@ -1,6 +1,6 @@
 import type {
-  FabricEpochDays as ApiFabricEpochDays,
-  FabricEpochDaysConstructor as ApiFabricEpochDaysConstructor,
+  FabricEpochDay as ApiFabricEpochDay,
+  FabricEpochDayConstructor as ApiFabricEpochDayConstructor,
 } from "@commonfabric/api";
 import {
   bigintFromUnpaddedBase64url,
@@ -22,16 +22,16 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 
 /**
- * Temporal type representing days from the POSIX Epoch (1970-01-01).
- * Wraps a `bigint` value. Used for date-only (no time) values.
- * See Section 1.4.7 of the formal spec.
+ * Temporal type representing a particular day, as a count of days from the
+ * POSIX Epoch (1970-01-01). Wraps a `bigint` value. Used for date-only (no
+ * time) values. See Section 1.4.8 of the formal spec.
  */
-export class FabricEpochDays extends BaseFabricPrimitive
-  implements ApiFabricEpochDays {
+export class FabricEpochDay extends BaseFabricPrimitive
+  implements ApiFabricEpochDay {
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
   readonly #value: bigint;
 
-  /** Constructs an instance representing `value` days from the Epoch. */
+  /** Constructs an instance representing the day `value` days from the Epoch. */
   constructor(value: bigint) {
     super();
     this.#value = value;
@@ -48,15 +48,14 @@ export class FabricEpochDays extends BaseFabricPrimitive
   //
 
   static #jsonCodec = Object.freeze(
-    new (class EpochDaysCodec
-      extends BaseTerminalCodec<JsonCodecValue, string> {
+    new (class EpochDayCodec extends BaseTerminalCodec<JsonCodecValue, string> {
       /** Constructs an instance. */
       constructor() {
-        super(CODEC_TYPE_TAGS.EpochDays, FabricEpochDays);
+        super(CODEC_TYPE_TAGS.EpochDay, FabricEpochDay);
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochDays): string {
+      encode(value: FabricEpochDay): string {
         return bigintToUnpaddedBase64url(value.#value);
       }
 
@@ -72,12 +71,12 @@ export class FabricEpochDays extends BaseFabricPrimitive
         _env: LiveEnvironment,
       ): FabricValue {
         try {
-          return new FabricEpochDays(bigintFromUnpaddedBase64url(state));
+          return new FabricEpochDay(bigintFromUnpaddedBase64url(state));
         } catch {
           return new ProblematicValue(
             typeTag,
             state,
-            `EpochDays: invalid base64: ${state}`,
+            `EpochDay: invalid base64: ${state}`,
           );
         }
       }
@@ -85,14 +84,14 @@ export class FabricEpochDays extends BaseFabricPrimitive
   );
 
   static #realmCodec = Object.freeze(
-    new (class EpochDaysCodec extends BaseTerminalCodec<RealmCodecValue> {
+    new (class EpochDayCodec extends BaseTerminalCodec<RealmCodecValue> {
       /** Constructs an instance. */
       constructor() {
-        super(CODEC_TYPE_TAGS.EpochDays, FabricEpochDays);
+        super(CODEC_TYPE_TAGS.EpochDay, FabricEpochDay);
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochDays): RealmCodecValue {
+      encode(value: FabricEpochDay): RealmCodecValue {
         return value.#value;
       }
 
@@ -107,7 +106,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
         state: bigint,
         _env: LiveEnvironment,
       ): FabricValue {
-        return new FabricEpochDays(state);
+        return new FabricEpochDay(state);
       }
     })(),
   );
@@ -127,7 +126,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
   }
 }
 
-// Compile-time check that the exported `FabricEpochDays` constructor matches
-// the `FabricEpochDaysConstructor` declared in `@commonfabric/api`. This
+// Compile-time check that the exported `FabricEpochDay` constructor matches
+// the `FabricEpochDayConstructor` declared in `@commonfabric/api`. This
 // catches drift between the public type contract and this implementation.
-FabricEpochDays satisfies ApiFabricEpochDaysConstructor;
+FabricEpochDay satisfies ApiFabricEpochDayConstructor;

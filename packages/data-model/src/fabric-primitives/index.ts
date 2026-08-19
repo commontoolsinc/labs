@@ -17,7 +17,7 @@ import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 
 import type { FabricPrimitive } from "@/interface.ts";
 import { FabricBytes } from "./FabricBytes.ts";
-import { FabricEpochDays } from "./FabricEpochDays.ts";
+import { FabricEpochDay } from "./FabricEpochDay.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";
 import { FabricHash } from "./FabricHash.ts";
 import { FabricRegExp } from "./FabricRegExp.ts";
@@ -26,7 +26,7 @@ export { FabricBytes } from "./FabricBytes.ts";
 export { FabricRegExp } from "./FabricRegExp.ts";
 export { FabricHash } from "./FabricHash.ts";
 export { FabricEpochNsec } from "./FabricEpochNsec.ts";
-export { FabricEpochDays } from "./FabricEpochDays.ts";
+export { FabricEpochDay } from "./FabricEpochDay.ts";
 
 /**
  * The concrete primitive classes whose instances are available over the wire,
@@ -50,7 +50,7 @@ const CODEC_CLASSES: readonly Constructor[] = Object.freeze([
   FabricBytes,
   FabricHash,
   FabricEpochNsec,
-  FabricEpochDays,
+  FabricEpochDay,
   FabricRegExp,
 ]);
 
@@ -72,7 +72,7 @@ export function schemaTypeOfFabricPrimitive(
   value: FabricPrimitive,
 ): FabricPrimitiveSchemaType {
   if (value instanceof FabricBytes) return "FabricBytes";
-  if (value instanceof FabricEpochDays) return "FabricEpochDays";
+  if (value instanceof FabricEpochDay) return "FabricEpochDay";
   if (value instanceof FabricEpochNsec) return "FabricEpochNsec";
   if (value instanceof FabricHash) return "FabricHash";
   if (value instanceof FabricRegExp) return "FabricRegExp";

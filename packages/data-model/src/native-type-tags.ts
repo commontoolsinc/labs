@@ -13,7 +13,7 @@
  * alone.
  */
 
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
@@ -42,7 +42,7 @@ export const NATIVE_TAGS = Object.freeze(
     Uint8Array: "Uint8Array",
     RegExp: "RegExp",
     EpochNsec: "EpochNsec",
-    EpochDays: "EpochDays",
+    EpochDay: "EpochDay",
     Hash: "Hash",
     FabricBytes: "FabricBytes",
     FabricRegExp: "FabricRegExp",
@@ -111,8 +111,8 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.FabricBytes;
     case FabricEpochNsec:
       return NATIVE_TAGS.EpochNsec;
-    case FabricEpochDays:
-      return NATIVE_TAGS.EpochDays;
+    case FabricEpochDay:
+      return NATIVE_TAGS.EpochDay;
     case FabricHash:
       return NATIVE_TAGS.Hash;
     case FabricRegExp:

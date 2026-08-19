@@ -25,7 +25,7 @@ import { type FabricValue, valueEqual } from "@/fabric-value.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 
@@ -217,12 +217,12 @@ describe("valueEqual()", () => {
         .toBe(true);
     });
 
-    it("distinguishes FabricRegExp and FabricEpochDays by content", () => {
+    it("distinguishes FabricRegExp and FabricEpochDay by content", () => {
       expect(valueEqual(new FabricRegExp(/a/g), new FabricRegExp(/b/g)))
         .toBe(false);
       expect(valueEqual(new FabricRegExp(/a/g), new FabricRegExp(/a/g)))
         .toBe(true);
-      expect(valueEqual(new FabricEpochDays(1n), new FabricEpochDays(2n)))
+      expect(valueEqual(new FabricEpochDay(1n), new FabricEpochDay(2n)))
         .toBe(false);
     });
 
@@ -336,7 +336,7 @@ describe("valueEqual()", () => {
         ).toBe(false);
         expect(valueEqual(new FabricRegExp(/a/g), new FabricRegExp(/a/g)))
           .toBe(true);
-        expect(valueEqual(new FabricEpochDays(7n), new FabricEpochDays(7n)))
+        expect(valueEqual(new FabricEpochDay(7n), new FabricEpochDay(7n)))
           .toBe(true);
       });
     });
@@ -350,7 +350,7 @@ describe("valueEqual()", () => {
           ),
         )
           .toBe(false);
-        expect(valueEqual(new FabricEpochDays(1n), new FabricRegExp(/a/)))
+        expect(valueEqual(new FabricEpochDay(1n), new FabricRegExp(/a/)))
           .toBe(false);
       });
     });

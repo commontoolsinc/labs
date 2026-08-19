@@ -35,8 +35,8 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     /** Constant for class `FabricBytes`. */
     Bytes: "Bytes@1",
 
-    /** Constant for class `FabricEpochDays`. */
-    EpochDays: "EpochDays@1",
+    /** Constant for class `FabricEpochDay`. */
+    EpochDay: "EpochDay@1",
 
     /** Constant for class `FabricEpochNsec`. */
     EpochNsec: "EpochNsec@1",

@@ -43,7 +43,7 @@ import {
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
 } from "@/fabric-bases/BaseFabricInstance.ts";
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -636,21 +636,21 @@ describe("JsonCodecEngine", () => {
       expect(ts.value).toBe(42000000000n);
     });
 
-    it("round-trips `FabricEpochDays` at top level and in nested structures", () => {
+    it("round-trips `FabricEpochDay` at top level and in nested structures", () => {
       const top = roundTrip(
-        new FabricEpochDays(19723n),
-      ) as unknown as FabricEpochDays;
-      expect(top).toBeInstanceOf(FabricEpochDays);
+        new FabricEpochDay(19723n),
+      ) as unknown as FabricEpochDay;
+      expect(top).toBeInstanceOf(FabricEpochDay);
       expect(top.value).toBe(19723n);
 
       const obj = {
-        date: new FabricEpochDays(19723n),
+        date: new FabricEpochDay(19723n),
         label: "birthday",
       };
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result.label).toBe("birthday");
-      const d = result.date as unknown as FabricEpochDays;
-      expect(d).toBeInstanceOf(FabricEpochDays);
+      const d = result.date as unknown as FabricEpochDay;
+      expect(d).toBeInstanceOf(FabricEpochDay);
       expect(d.value).toBe(19723n);
     });
 
@@ -1142,10 +1142,10 @@ describe("JsonCodecEngine", () => {
         // Fabric type as value: `/object` with the epoch encoded as its tagged
         // form.
         const withEpoch = {
-          "/x": new FabricEpochDays(42n),
+          "/x": new FabricEpochDay(42n),
         };
         expect(toEncodedFormat(withEpoch)).toEqual({
-          "/object": { "/x": { "/EpochDays@1": expect.anything() } },
+          "/object": { "/x": { "/EpochDay@1": expect.anything() } },
         });
       });
 
@@ -1166,12 +1166,12 @@ describe("JsonCodecEngine", () => {
         );
       });
 
-      it("round-trips `FabricEpochDays` as value inside `/`-prefixed key object", () => {
-        const day = new FabricEpochDays(42n);
+      it("round-trips `FabricEpochDay` as value inside `/`-prefixed key object", () => {
+        const day = new FabricEpochDay(42n);
         const obj = { "/x": day };
         const result = roundTrip(obj) as Record<string, FabricValue>;
-        expect(result["/x"]).toBeInstanceOf(FabricEpochDays);
-        expect((result["/x"] as unknown as FabricEpochDays).value).toBe(42n);
+        expect(result["/x"]).toBeInstanceOf(FabricEpochDay);
+        expect((result["/x"] as unknown as FabricEpochDay).value).toBe(42n);
       });
 
       it("emits `/object` for mixed: literal and encoded values", () => {
