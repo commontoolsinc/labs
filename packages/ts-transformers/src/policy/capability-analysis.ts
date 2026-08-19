@@ -19,7 +19,7 @@ import {
   type UnreadableCellArgument,
 } from "../core/mod.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import { unwrapAssertCapture, unwrapExpression } from "../utils/expression.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import {
@@ -1782,7 +1782,11 @@ export function analyzeFunctionCapabilities(
     const resolveBinding = (
       expression: ts.Expression,
     ): AliasBinding | undefined => {
-      const current = unwrapExpression(expression);
+      // Reading through an `assert` body's operand recording is what keeps the
+      // receiver of a recorded method call — the `event.details` of
+      // `event.details.includes(text)` — attributed to the source it was read
+      // from, so the field survives into the schema the body is served.
+      const current = unwrapAssertCapture(expression);
       if (
         ts.isBinaryExpression(current) &&
         FALLBACK_OPERATORS.has(current.operatorToken.kind)
@@ -3092,7 +3096,14 @@ export function analyzeFunctionCapabilities(
           ts.isPropertyAccessExpression(node.expression) ||
           ts.isElementAccessExpression(node.expression)
         ) {
-          const directReceiver = resolveSourceRef(node.expression.expression);
+          // The expression the method is called on, with an `assert` body's
+          // operand recording read through, so cell-likeness is judged on the
+          // value the author wrote rather than on the recording helper's
+          // untyped result.
+          const receiverExpression = unwrapAssertCapture(
+            node.expression.expression,
+          );
+          const directReceiver = resolveSourceRef(receiverExpression);
           const receiver = directReceiver ??
             resolveConservativeCallReceiverRef(node);
           if (receiver) {
@@ -3106,7 +3117,7 @@ export function analyzeFunctionCapabilities(
               // like the unknown-named fallback below.
               if (
                 !checker ||
-                isCellLikeExpression(node.expression.expression)
+                isCellLikeExpression(receiverExpression)
               ) {
                 markUnverifiedCellUse(receiver.root);
               }
@@ -3209,7 +3220,7 @@ export function analyzeFunctionCapabilities(
               OPAQUE_DERIVATION_METHODS.has(methodName) &&
               (
                 !checker ||
-                isCellLikeExpression(node.expression.expression)
+                isCellLikeExpression(receiverExpression)
               )
             ) {
               // These methods are available on opaque cells and return opaque
@@ -3232,7 +3243,7 @@ export function analyzeFunctionCapabilities(
               // write through the cell and stay reads.
               if (
                 !checker ||
-                isCellLikeExpression(node.expression.expression)
+                isCellLikeExpression(receiverExpression)
               ) {
                 markUnverifiedCellUse(receiver.root);
               }

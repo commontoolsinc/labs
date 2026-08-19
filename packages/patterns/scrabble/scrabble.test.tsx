@@ -100,7 +100,7 @@ export default pattern(() => {
       scrabble.bagIndex === 9 &&
       player?.score === 4 &&
       lastEvent?.type === "word" &&
-      lastEvent?.details?.includes("AT (+4)") &&
+      lastEvent.details.includes("AT (+4)") &&
       scrabble.message.startsWith("Scored 4:");
   });
 

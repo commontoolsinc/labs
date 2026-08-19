@@ -1438,6 +1438,16 @@ adjustments:
   `table[indexes.findIndex(...)]?.mentionedBy ?? []` — marks the root wildcard,
   which disables shrinking for the whole parameter: its declared shape is
   emitted intact, without the capability wrappers a walked operand would derive
+- capability analysis reads through the operand recording an `assert(...)` body
+  wraps a value in. `AssertDiagnosticsTransformer` (stage 10) rewrites
+  `event.details.includes(text)` so that `includes` is called on
+  `__cfHelpers.assertCapture(parts, "event.details", event.details)` rather
+  than on `event.details`. The recording hands its third argument straight
+  back, and the analysis follows it there, so the read is still charged to
+  `event.details` and that field survives the shrink. An `assert(...)` body and
+  the same body under `computed(...)` therefore produce the same read schema
+  (`unwrapAssertCapture` in `utils/expression.ts`;
+  `test/assert-diagnostics.test.ts`)
 - node-driven shrinking can still shrink the inner type of cell-like wrappers
   when `.get()` contributes an empty path but coexists with more specific
   non-empty paths
