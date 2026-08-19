@@ -22,7 +22,6 @@
  *   GH_TOKEN                          GitHub tiles; read access to the
  *                                     organization's members also powers the
  *                                     organization-users tile
- *   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
  */
 
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";

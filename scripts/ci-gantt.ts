@@ -264,10 +264,10 @@ function latestJobsByName(jobs: Job[]): Job[] {
 // table is docs/development/CI_PERFORMANCE.md ("Step phase markers"); keep them
 // in sync. A step whose name carries no known marker lands in "other" and is
 // reported to stderr so a missing marker is easy to spot. In a normal run the
-// only unmarked steps are the ones the runner injects: "Set up job", "Post …"
-// and "Complete job" from GitHub, plus "Set up runner" and "Complete runner"
-// from Blacksmith. Those are classified by name in that module, because their
-// wording is not ours to set.
+// only unmarked steps are the ones the runner injects: "Set up job", "Post …",
+// and "Complete job". The phase classifier also recognizes the "runner" pair
+// present in retained records. Those are classified by name in that module,
+// because their wording is not ours to set.
 // ---------------------------------------------------------------------------
 
 // Chart order, left to right (matches the order steps run in). "other" trails so
