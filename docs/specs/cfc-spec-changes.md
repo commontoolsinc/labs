@@ -300,8 +300,45 @@ string) under every lower mode, with the stable SC-18c reason
 <offending clauses>`. Contract text in
 `docs/specs/cfc-enforcement-matrix.md` §4; implementation in
 `prepareBoundaryCommit` (runner `cfc/prepare.ts`) sharing the egress gates'
-clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Only (a) — the
-standard-profile default — stays open on the confidentiality side.
+clause-subsumption predicate; tests `cfc-writer-fit.test.ts`. Two items stay
+open on the confidentiality side: (a) the standard-profile default, and (d)
+the residency half of the write ceiling, recorded next.
+
+(d) **[normative] Residency fit — the ceiling a document carries by living
+where it lives.** The fit measurement joins the target's declared policy with
+one RESIDENCY clause, `Space(<the space the document resides in>)`. A flow
+clause listing that space among its alternatives therefore fits the document
+whatever it declares. The soundness argument is that writing into the space
+the clause already names discloses nothing: the `Space` atom's audience is
+that space's reader set — §4.9.3 resolves it by dereferencing its id against
+the space's ACL, the same document that decides who receives a replica — so
+every principal holding the target is inside the audience the alternative
+names, and the write reaches no reader the data had not already reached. The
+guarantee is therefore exactly as strong as the deployment's ACL posture, the
+same bound the §4.9.3 membership lookup carries.
+
+The rule is confined to `Space` deliberately. `PersonalSpace`, `User`, and the
+bare DID-string spelling gate by equality against a single acting reader —
+§4.6.4.2 field classification groups `PersonalSpace.owner` with `User.subject`
+for that reason, while only `Space.id` stays public so it can be dereferenced
+— so their audience is a person rather than the container. A space grants
+reader roles its owner does not hold in person, so admitting those forms would
+place data readable by one principal into a store its co-readers sync. Reading
+back is unaffected in every case: the derived stamp persists the full join, so
+the egress and display ceilings fit the unchanged label, and the space
+principal there resolves to a reader only through the §4.3.3
+`SpaceReaderAccess` exchange rule on verified `HasRole` membership. The
+ungrantable read-failed marker stays outside the residency clause as it stays
+outside every ceiling.
+
+Spec home: §8.12.4's `canWrite`, alongside the declared-policy measurement.
+Two points the spec should settle explicitly. Residency is a property of the
+store rather than a carve-out for an atom family: a store satisfies a clause
+whose audience already contains everyone the store's bytes reach. And
+residency holds over a declared policy rather than only in its absence — a
+declaration narrower than the physical audience of the space cannot be
+enforced by the store anyway, and making residency a fallback would mean that
+adding a narrow declaration newly breaks space-internal flows.
 
 The **integrity direction** is genuinely unstated (§8.12.4's `canWrite`
 checks confidentiality only; §8.10.3's `requiredIntegrity` is consume-side)

@@ -195,9 +195,21 @@ The strict-only delta is:
   join landing as a target's `derived` value component is measured against the
   target's DECLARED store-policy component (declared + legacy entries, resolved
   by the same per-component longest-prefix rule reads use; absent declarations
-  are the empty "public" ceiling, fail-closed) at each path where the component
-  lands, with the shared clause-subsumption predicate of the egress gates
-  (`atomsOutsideCeiling`). Under `enforce-strict` a misfit records a prepare
+  are the empty "public" ceiling, fail-closed) joined with the target's
+  RESIDENCY clause at each path where the component lands, with the shared
+  clause-subsumption predicate of the egress gates (`atomsOutsideCeiling`).
+  The residency clause is `Space(<the space the document lives in>)`. That
+  atom's audience is the space's reader set — §4.9.3 resolves it by
+  dereferencing its id against the space's ACL, the same document that decides
+  who receives a replica — so every principal holding the bytes is inside the
+  audience it names, and a flow clause listing the target's own space among
+  its alternatives fits a document there whatever that document declares. The
+  measurement admits the write; it does not drop the clause. The stamp
+  persists the full join, so the egress and display ceilings gate reads on the
+  unchanged label, and the space principal there reaches a concrete reader
+  only through the verified `HasRole` exchange rule. Residency inherits the
+  bound the render membership lookup carries: it is exactly as strong as the
+  deployment's ACL posture. Under `enforce-strict` a misfit records a prepare
   reason and the commit rejects; every mode below persists the measurement and
   flags a `writer-fit(persist-and-flag)` diagnostic carrying the same reason
   string — so `enforce-explicit` keeps the shipped persist-and-flag posture
@@ -207,7 +219,13 @@ The strict-only delta is:
   <clauses>`. Scope note (v1): link-covered writes carry per-slot link labels
   instead of the join and are outside the check, as is the pure-link-structure
   shape channel; grown existence atoms (SC-4) are historical and deliberately
-  never measured — only the current join is. Implementation in
+  never measured — only the current join is; `Space` is the only principal
+  form residency admits, because `PersonalSpace`, `User`, and the bare
+  DID-string spelling all gate by equality against one acting reader, making
+  their audience a person rather than the container and so narrower than the
+  set of principals a space grants reader roles to; and the ungrantable
+  read-failed marker sits outside every ceiling, the residency clause
+  included, so a poisoned measurement never proves fit. Implementation in
   [prepare.ts](../../packages/runner/src/cfc/prepare.ts) (`prepareBoundaryCommit`
   flow-persist stamping), asserted both ways in
   [cfc-writer-fit.test.ts](../../packages/runner/test/cfc-writer-fit.test.ts).
@@ -232,6 +250,14 @@ four-dial matrix, the "no consuming enforcement ahead of its producing dial"
 ordering constraint, and the `enforce-strict` reject set. File it once H4's code
 step lands and the strict rejects have concrete reason contracts to cite.
 Tracked in [`cfc-spec-changes.md`](./cfc-spec-changes.md) SC-13.
+
+The residency half of the writer-fit ceiling is owed to the spec as well:
+§8.12.4 states the fit against the declared policy and says nothing about the
+space a document lives in widening it. The same PR should make residency part
+of the write ceiling, state that only the container-naming `Space` form
+counts, and record that residency admits the write without altering the
+persisted label. Tracked in
+[`cfc-spec-changes.md`](./cfc-spec-changes.md) SC-18(d).
 
 ## Provenance
 

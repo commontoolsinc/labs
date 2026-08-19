@@ -6107,7 +6107,8 @@ export const prepareBoundaryCommit = (
       // H4 writer-fit (SC-18b, §8.12.4 `canWrite`): the per-tx join landing
       // below as this target's `derived` value component is the measurement
       // of the written value's actual taint, and canWrite demands it fit the
-      // store's DECLARED policy component at each path where it lands. The
+      // target's write ceiling at each path where it lands — the store's
+      // DECLARED policy component joined with the residency clause below. The
       // policy component is the declared + legacy entries only — link/
       // derived/structure entries are per-value data components (§8.12.8),
       // not store policy — and of those, only the entries a VALUE read
@@ -6121,10 +6122,28 @@ export const prepareBoundaryCommit = (
       // (SC-4 freeze-at-creation) and measuring them would permanently
       // misfit clean overwrites of a store created under taint.
       // A schema declaring a covering policy in this same tx passes by
-      // construction — §8.12.5's monotone-safe upgrade route; the other two
-      // outs are writing to a fitting store or not writing. Link-covered
-      // writes carry per-slot link labels instead of the join and are
-      // outside this v1 check, as is the pure-link-structure shape channel.
+      // construction — §8.12.5's monotone-safe upgrade route; the other outs
+      // are writing to a fitting store, writing to a store whose space the
+      // clause already names, and not writing. Link-covered writes carry
+      // per-slot link labels instead of the join and are outside this v1
+      // check, as is the pure-link-structure shape channel.
+      // §8.12.4 residency: `Space(<this space>)` joins each path's declared
+      // ceiling, so a flow clause listing the target's own space among its
+      // alternatives fits a document stored there, and a clause without such
+      // an alternative measures against the declared policy alone. The atom's
+      // audience is the space's reader set — §4.9.3 resolves it against the
+      // space's ACL, the same document that decides who receives a replica —
+      // so it already contains every principal the stored bytes reach, and
+      // the guarantee is as strong as the deployment's ACL posture. The flow
+      // stamp below persists the full join, leaving the egress and display
+      // gates the unchanged label.
+      //
+      // `Space` is the only form admitted here. `PersonalSpace` and the bare
+      // DID-string spelling gate by equality against one acting reader
+      // (`label-field-classification.ts` classes their subject fields with
+      // `User.subject`), so they name a person rather than the container and
+      // reach a narrower audience than the space's readers.
+      const residencyCeiling: readonly CfcConfClause[] = [cfcAtom.space(space)];
       const declaredPolicyEntries = flowConfidentiality.length > 0
         ? persistedLabelEntries.filter((entry) =>
           (entry.origin === undefined || entry.origin === "declared") &&
@@ -6233,17 +6252,22 @@ export const prepareBoundaryCommit = (
           // Absent declared entries resolve to the EMPTY ceiling ("public
           // store"), never the undefined "no ceiling" — a tainted write to
           // an undeclared store is the canonical misfit, and fitting it
-          // by default would hollow the rule out. Clause membership is the
-          // shared subsumption predicate of the egress/observation gates,
-          // so writer-fit cannot drift from what a ceiling admits — and the
-          // ungrantable read-failed marker stays outside every declared
-          // policy (a poisoned measurement never proves fit).
+          // by default would hollow the rule out. The residency clause is
+          // then the whole ceiling, so only the target's own space audience
+          // fits. Clause membership is the shared subsumption predicate of
+          // the egress/observation gates, so writer-fit cannot drift from
+          // what a ceiling admits — and the ungrantable read-failed marker
+          // stays outside every ceiling, the residency clause included (a
+          // poisoned measurement never proves fit).
           const declaredCeiling =
             labelForEntriesAtPath(declaredPolicyEntries, path)
               ?.confidentiality ?? [];
           const offending = atomsOutsideCeiling(
             flowConfidentiality,
-            declaredCeiling as readonly CfcConfClause[],
+            [
+              ...declaredCeiling as readonly CfcConfClause[],
+              ...residencyCeiling,
+            ],
           );
           if (offending.length > 0) {
             // SC-18c error contract: a stable reason naming the rule id and
