@@ -564,6 +564,12 @@ function enqueuePostCommitLLMWork(
   );
 }
 
+/**
+ * Record the hash of the request this transaction stages, which a later run
+ * reads to recognize a request already in flight. If the transaction reports an
+ * error, the hash goes back to what it was and `onRollback` runs, so a caller
+ * can undo state it recorded for the same request.
+ */
 function markRequestHashPendingCommit(
   tx: IExtendedStorageTransaction,
   hash: string,
