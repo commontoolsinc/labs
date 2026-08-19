@@ -516,7 +516,10 @@ const assembleSchemaDocClosures = (
  * violation answered with the diagnostic — never the lenient
  * selects-nothing wait that link schemas inside delivered documents get.
  * Validation registers each document as it verifies, so the traversal
- * behind the selector resolves without re-reading.
+ * behind the selector resolves without re-reading. It reads through the
+ * caller's manager, so a historical query (`atSeq`) bounds resolution the
+ * same way it bounds every other read: the referenced document must exist
+ * and verify at that sequence.
  */
 const validateSelectorSchemaRefs = (
   space: string,

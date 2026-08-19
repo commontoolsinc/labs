@@ -4297,11 +4297,6 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   /**
-   * Whether the prospective frame (`overlay`) or the stored replica holds
-   * content under `cid:<hash>` that IS the schema document that id names —
-   * the identity check, not presence.
-   */
-  /**
    * Whether this replica holds SERVER-CONFIRMED verified content for
    * `cid:<hash>` — the emission gate for selector references: a confirmed
    * document arrived by delivery or by an acknowledged commit, so the
@@ -4309,7 +4304,9 @@ class SpaceReplica implements ISpaceReplica {
    * change. The confirmed layer specifically: a pending local write is
    * visible through `getDocument` before the server has it, and a
    * reference emitted on that evidence races the commit and is answered
-   * with the loud selector error.
+   * with the loud selector error. Confirmation is replica/host-local: it
+   * relies on the provisional route not changing after observable reads
+   * (CT-2046 tracks enforcing that broadly).
    */
   isSchemaDocPersisted(hash: string): boolean {
     const record = this.#docs.get(docKey(`cid:${hash}` as URI, undefined));
@@ -4320,6 +4317,11 @@ class SpaceReplica implements ISpaceReplica {
       internSchemaAsTaggedHashString(value as JSONSchema) === hash;
   }
 
+  /**
+   * Whether the prospective frame (`overlay`) or the stored replica holds
+   * content under `cid:<hash>` that IS the schema document that id names —
+   * the identity check, not presence.
+   */
   #isVerifiedSchemaDocDelivered(
     hash: string,
     overlay: ReadonlyMap<string, unknown>,
