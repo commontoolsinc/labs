@@ -1,6 +1,6 @@
 ---
 name: pattern-test-to-integration
-description: Convert Common Fabric pattern unit tests (`*.test.tsx` driven by actions and assertions) into browser integration tests (`packages/patterns/integration/*.test.ts`) that exercise the rendered UI and can be recorded with `deno task demo`. Use when asked to promote, mirror, spot-check, browser-test, or make a video demo from an existing pattern test, including multi-user pattern tests.
+description: Convert Common Fabric pattern unit tests (`*.test.tsx` driven by actions and assertions) into browser integration tests (`packages/patterns/integration/*.test.ts`) that exercise the rendered UI, scale to a chosen size, and can be recorded with `deno task demo`. Use when asked to promote, mirror, spot-check, browser-test, or make a video demo from an existing pattern test, including multi-user pattern tests.
 ---
 
 # Pattern Test to Integration
@@ -124,6 +124,41 @@ they already encode shadow traversal, one trusted interaction, view settling,
 commit semantics, or an effect wait. Prefer accessible names and stable
 product-facing selectors. Do not select by transient DOM structure when the UI
 offers a semantic role, label, or explicit stable id.
+
+## Make the scenario's scale a knob
+
+A browser test written at one fixed size answers whether the feature works. The
+same test with its size parameterized also answers how the feature behaves as
+data grows, which is a different and usually more valuable question — and it
+costs one constant to keep both. Read the size from the environment with a small
+default, so CI keeps paying the small number while an investigation can ask for
+a large one.
+
+Three distinctions are worth building in, because retrofitting them later means
+rewriting the scenario:
+
+- **Composed versus seeded.** A couple of items driven through the real composer
+  are what make the test a regression test; the rest exist only to establish
+  size and should be created through the verb. Keep the two counts separate and
+  derive the seeded count from the total. Presentation mode animates every
+  keystroke, so a large board built through the composer is also an unwatchable
+  recording.
+- **Where the bulk is created.** Seeding before the view is ever opened and
+  seeding while it is on screen measure different things — the first is the cost
+  with nothing rendering, the second is the cost of the live view keeping up.
+  Make that a knob too rather than picking one.
+- **Extra timed operations after the bulk exists.** What a regression actually
+  cares about is what _one more_ costs on a board of that size, which is not
+  recoverable by dividing the time it took to build it.
+
+Emit measurements as parseable single lines carrying the size they were taken
+at, rather than only as step durations, so a sweep across sizes can be collected
+without re-reading logs by eye.
+
+`packages/patterns/integration/topic-board-scale.bench.ts` is the same idea in
+the benchmark lane, including how it declares sizes it cannot yet run. When the
+task is measurement rather than conversion, `skills/perf-investigation/SKILL.md`
+picks up from here.
 
 ## Keep correctness timing separate from presentation
 
