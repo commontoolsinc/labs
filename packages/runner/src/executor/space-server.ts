@@ -111,8 +111,8 @@ import {
   type CellScope,
   identityOfScopeKey,
   resolveScopeKey,
-  scopeOfScopeKey,
   type ScopeKeyIdentity,
+  scopeOfScopeKey,
   SERVER_EXECUTION_EFFECTS_DOC_ID,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
 } from "@commonfabric/memory/v2";
@@ -2544,7 +2544,8 @@ export class SpaceServer implements TransactionSealDestination {
     const arrivals = new Set<string>();
     let notCurrentRearms = 0;
     for (const [key, row] of rowByKey) {
-      const pairs = demandersNow.get(key) ?? new Map<string, ScopeKeyIdentity>();
+      const pairs = demandersNow.get(key) ??
+        new Map<string, ScopeKeyIdentity>();
       let known = this.#demandersByKey.get(key);
       const address = addressOf(key, row);
       if (known === undefined) {
@@ -2723,7 +2724,10 @@ export class SpaceServer implements TransactionSealDestination {
     const d = stats.demand;
     d.demandedRows = rows.length;
     d.demandedInstances = this.#demandersByKey.size;
-    d.demandedInstancesMax = Math.max(d.demandedInstancesMax, d.demandedInstances);
+    d.demandedInstancesMax = Math.max(
+      d.demandedInstancesMax,
+      d.demandedInstances,
+    );
     d.demandedPairs = pairCount;
     d.demandedWriters = runtime.scheduler.demandedWriterCount;
     d.demandedWritersMax = Math.max(d.demandedWritersMax, d.demandedWriters);
@@ -2741,7 +2745,9 @@ export class SpaceServer implements TransactionSealDestination {
       rows: rows.length,
       keys: this.#demandersByKey.size,
     });
-    if (d.sizeSeries.length > 2000) d.sizeSeries.splice(0, d.sizeSeries.length - 2000);
+    if (d.sizeSeries.length > 2000) {
+      d.sizeSeries.splice(0, d.sizeSeries.length - 2000);
+    }
   }
 
   /** W0 (d′) SCRATCH — flag 6's index (root id → the registry keys whose

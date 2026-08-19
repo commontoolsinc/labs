@@ -1049,7 +1049,9 @@ export class Scheduler {
     }
     if (record === undefined) return;
     notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
-    if (shouldBeRoot && this.isLiveAction(action) && this.isInvalidAction(action)) {
+    if (
+      shouldBeRoot && this.isLiveAction(action) && this.isInvalidAction(action)
+    ) {
       // A dirty / never-ran node that just became live is a runnable seed
       // (work-oracle: dirty ∧ live); make sure the loop wakes for it.
       this.pending.add(action);
@@ -1135,7 +1137,9 @@ export class Scheduler {
     address: { space: MemorySpace; id: string; scope: CellScope },
   ): Action[] {
     return [
-      ...(this.writeIndex.writersByEntity.get(entityNameKey(address as never)) ??
+      ...(this.writeIndex.writersByEntity.get(
+        entityNameKey(address as never),
+      ) ??
         []),
     ];
   }

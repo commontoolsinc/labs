@@ -175,12 +175,19 @@ export type ServingLoopStats = {
     /** Per-session tracked sizes + union at the last pass (flag 7). */
     sizes: {
       perSession: Array<
-        { sessionId: string; principal?: string; tracked: number; watches: number }
+        {
+          sessionId: string;
+          principal?: string;
+          tracked: number;
+          watches: number;
+        }
       >;
       unionKeys: number;
     };
     /** Bounded history of (unionKeys, rows) per pass — the drift. */
-    sizeSeries: Array<{ t: number; unionKeys: number; rows: number; keys: number }>;
+    sizeSeries: Array<
+      { t: number; unionKeys: number; rows: number; keys: number }
+    >;
   };
   /** W0 (d′) SCRATCH — SERVER SETTLE per authored input (design §6 W4's
    * metric): from the authored commit's ADMISSION on the server (its seq,
