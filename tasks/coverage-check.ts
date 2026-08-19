@@ -1483,7 +1483,7 @@ export async function writeCoverageComment(
       lcov,
     );
   } else {
-    await writeCoverageResolved(prNumber, coverageRows, prFiles);
+    await writeCoverageResolved(prNumber, coverageRows, prFiles, lcov);
   }
 }
 
@@ -1583,6 +1583,50 @@ export async function buildUnattributedRegressionBody(
 }
 
 /**
+ * Per changed file in one of `groups`, how many of the lines the pull request
+ * added no test executes. Files that added no uncovered line are left out.
+ *
+ * This is the attribution both coverage comments carry: a regression names the
+ * files to write tests for, and an accepted debt names the files the acceptance
+ * stands in for. Uncovered line numbers are resolved only for changed files in
+ * those groups, so per-line data is never materialized for the whole workspace.
+ */
+async function uncoveredAddedLinesByFile(
+  prFiles: PRFile[],
+  lcov: string,
+  groups: Set<string>,
+): Promise<CoverageSuggestionFileLines[]> {
+  const changedInGroups = prFiles
+    .map((prFile) => prFile.filename.replaceAll("\\", "/"))
+    .filter((relativePath) => {
+      const group = coverageGroupForChangedFile(relativePath);
+      return group !== null && groups.has(group);
+    });
+  const uncoveredByPath = await collectUncoveredLinesForFiles({
+    rootDir: Deno.cwd(),
+    lcov,
+    files: changedInGroups,
+  });
+
+  const files: CoverageSuggestionFileLines[] = [];
+  for (const prFile of prFiles) {
+    const relativePath = prFile.filename.replaceAll("\\", "/");
+    const group = coverageGroupForChangedFile(relativePath);
+    if (!group || !groups.has(group)) continue;
+
+    const uncoveredLines = uncoveredByPath.get(relativePath);
+    if (!uncoveredLines || !prFile.patch) continue;
+
+    const addedLines = parseAddedLinesFromPatch(prFile.patch);
+    const uncoveredCount = uncoveredLines.filter((line) =>
+      addedLines.has(line)
+    ).length;
+    if (uncoveredCount > 0) files.push({ relativePath, group, uncoveredCount });
+  }
+  return files;
+}
+
+/**
  * Write the coverage-debt regression comment to a file for a later workflow to
  * post. The gate runs on `pull_request`, where fork PRs get a read-only token
  * and cannot comment, so the `coverage-comment` workflow_run job posts this from
@@ -1607,39 +1651,11 @@ export async function writeCoverageDebtSuggestion(
 
   if (groups.length === 0) return;
 
-  const failingGroups = new Set(groups.map((group) => group.group));
-
-  // Resolve uncovered line numbers only for changed files in the regressed
-  // groups, so we never materialize per-line data for the whole workspace.
-  const changedInFailingGroups = prFiles
-    .map((prFile) => prFile.filename.replaceAll("\\", "/"))
-    .filter((relativePath) => {
-      const group = coverageGroupForChangedFile(relativePath);
-      return group !== null && failingGroups.has(group);
-    });
-  const uncoveredByPath = await collectUncoveredLinesForFiles({
-    rootDir: Deno.cwd(),
+  const files = await uncoveredAddedLinesByFile(
+    prFiles,
     lcov,
-    files: changedInFailingGroups,
-  });
-
-  // Count, per changed file, the lines this PR added that coverage marks
-  // uncovered.
-  const files: CoverageSuggestionFileLines[] = [];
-  for (const prFile of prFiles) {
-    const relativePath = prFile.filename.replaceAll("\\", "/");
-    const group = coverageGroupForChangedFile(relativePath);
-    if (!group || !failingGroups.has(group)) continue;
-
-    const uncoveredLines = uncoveredByPath.get(relativePath);
-    if (!uncoveredLines || !prFile.patch) continue;
-
-    const addedLines = parseAddedLinesFromPatch(prFile.patch);
-    const uncoveredCount = uncoveredLines.filter((line) =>
-      addedLines.has(line)
-    ).length;
-    if (uncoveredCount > 0) files.push({ relativePath, group, uncoveredCount });
-  }
+    new Set(groups.map((group) => group.group)),
+  );
 
   try {
     // Nothing the pull request added accounts for the regression, so the lines
@@ -1692,11 +1708,18 @@ export async function writeCoverageDebtSuggestion(
  * changed, the same groups the gate ratchets, so the collapsed comment can show
  * where the PR left coverage. Never throws —
  * best-effort, like the regression path.
+ *
+ * An accepted debt also carries the files holding the uncovered lines, because
+ * this payload rewrites the regression comment that named them and would
+ * otherwise leave the pull request with no record of which file the acceptance
+ * is for. They are read only for an accepted debt: every other resolution
+ * covered its debt rather than accepting it, so there is nothing to name.
  */
 export async function writeCoverageResolved(
   prNumber: number,
   coverageRows: Row[],
   prFiles: PRFile[],
+  lcov: string,
 ): Promise<void> {
   const improvedLines = coverageRows.reduce((sum, row) => {
     if (row.status !== "OK" || row.baseline === undefined) return sum;
@@ -1721,14 +1744,18 @@ export async function writeCoverageResolved(
       changedGroups.has(group.group)
     );
 
-  // The gate passed because a changed group's debt was accepted with a
-  // per-group acceptance or the reset marker (status "ovrd"), not because the
-  // new code is covered.
-  const overridden = coverageRows.some((row) => {
-    if (row.status !== "ovrd") return false;
-    const group = coverageMetricGroupName(row.metric);
-    return group !== null && group !== "workspace" && changedGroups.has(group);
-  });
+  // The groups whose debt the gate accepted with a per-group acceptance or the
+  // reset marker (status "ovrd"), rather than passing because the new code is
+  // covered.
+  const overriddenGroups = new Set(
+    coverageRows
+      .filter((row) => row.status === "ovrd")
+      .map((row) => coverageMetricGroupName(row.metric))
+      .filter((group): group is string =>
+        group !== null && group !== "workspace" && changedGroups.has(group)
+      ),
+  );
+  const overridden = overriddenGroups.size > 0;
 
   try {
     const payload: CoverageCommentPayload = {
@@ -1737,6 +1764,9 @@ export async function writeCoverageResolved(
       improvedLines,
       groups,
       overridden,
+      files: overridden
+        ? await uncoveredAddedLinesByFile(prFiles, lcov, overriddenGroups)
+        : [],
     };
     const outputFile = coverageCommentOutputPath();
     await Deno.writeTextFile(outputFile, JSON.stringify(payload, null, 2));

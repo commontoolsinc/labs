@@ -783,6 +783,39 @@ Deno.test("buildCoverageResolvedComment says the debt was overridden, not improv
     resolved,
     "| `packages/runner` | 12 | 15 | 3 lines more |",
   );
+  // Nothing was named, so the section that names files is left out entirely.
+  assertFalse(resolved.includes("### Files with new uncovered lines"));
+});
+
+Deno.test("buildCoverageResolvedComment names the files an accepted debt stands in for", () => {
+  const resolved = buildCoverageResolvedComment(
+    0,
+    [{ group: "tasks", baseline: 1846, current: 1857 }],
+    true,
+    [
+      { relativePath: "tasks/one.ts", group: "tasks", uncoveredCount: 11 },
+      { relativePath: "tasks/two.ts", group: "tasks", uncoveredCount: 1 },
+    ],
+  );
+
+  assertStringIncludes(resolved, "### Files with new uncovered lines");
+  assertStringIncludes(resolved, "- `tasks/one.ts` — 11 lines");
+  // A single line reads as a line, the same as it does in the regression body.
+  assertStringIncludes(resolved, "- `tasks/two.ts` — 1 line");
+});
+
+Deno.test("buildCoverageResolvedComment names no files when the debt was covered", () => {
+  // Coverage that improved has no acceptance to account for, so a file list
+  // would be describing debt that is not there.
+  const resolved = buildCoverageResolvedComment(
+    5,
+    [{ group: "tasks", baseline: 1857, current: 1852 }],
+    false,
+    [{ relativePath: "tasks/one.ts", group: "tasks", uncoveredCount: 11 }],
+  );
+
+  assertFalse(resolved.includes("### Files with new uncovered lines"));
+  assertFalse(resolved.includes("tasks/one.ts"));
 });
 
 Deno.test("buildCoverageResolvedComment falls back to a sentence with no groups", () => {

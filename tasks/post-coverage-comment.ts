@@ -82,6 +82,7 @@ export async function postCoverageComment(): Promise<void> {
         payload.improvedLines ?? 0,
         payload.groups ?? [],
         payload.overridden ?? false,
+        payload.files ?? [],
       );
       if (updated === marked.body) {
         console.log(
