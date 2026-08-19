@@ -203,16 +203,17 @@ export function areMaybeLinkAndNormalizedLinkSame(
 // this module through the `export *` above.
 
 /**
- * Replaces an inline link schema with a reference to content-addressed
- * schema documents (`docs/specs/content-addressed-schemas.md`, Phase 1;
- * `contentAddressedSchemas` flag). Decomposition registers the closure in
+ * Replaces an inline schema with a reference to content-addressed schema
+ * documents (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2;
+ * `contentAddressedSchemas` flag) — the shared emission for link schemas
+ * and `$alias` binding schemas. Decomposition registers the closure in
  * the realm registry — in-session resolution works immediately — and the
  * commit pipeline materializes the documents into the destination space in
  * the same transaction as the write that carries the reference (the
  * write-side delivery guarantee). Input decomposition refuses stays inline,
  * exactly as with the flag off.
  */
-function externalizeLinkSchema(schema: JSONSchemaObj): JSONSchema {
+export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
   try {
     const { rootRef, documents } = decomposeSchema(schema, {
       resolveDocument: lookupSchemaDocument,
@@ -283,7 +284,7 @@ export function createSigilLinkFromParsedLink(
     );
     if (isNontrivialSchema(schema)) {
       reference.schema = getContentAddressedSchemasConfig()
-        ? externalizeLinkSchema(schema as JSONSchemaObj)
+        ? externalizeSchema(schema as JSONSchemaObj)
         : schema;
     }
   }

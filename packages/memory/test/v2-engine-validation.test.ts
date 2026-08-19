@@ -552,6 +552,38 @@ Deno.test("rejects a reference backed by a stored cid: document holding other co
   });
 });
 
+Deno.test("treats an $alias-shaped record as plain data at the commit boundary", async () => {
+  await withEngine((engine) => {
+    // An alias is a binding only by context. To the commit boundary this
+    // record is plain data, so the `cid:` ref inside its `schema` member
+    // creates no closure obligation — a document that merely looks like a
+    // binding must never have its commit rejected over one.
+    const hash = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "alias-data-leaf",
+    });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [
+          setOp("of:alias-data-carrier", {
+            bound: {
+              $alias: {
+                cell: "argument",
+                path: ["field"],
+                schema: { $ref: `cid:${hash}` },
+              },
+            },
+          }),
+        ],
+      }),
+    });
+    assertEquals(
+      read(engine, { id: "of:alias-data-carrier" } as never) !== null,
+      true,
+    );
+  });
+});
 Deno.test("applies an identical content-addressed re-set as a no-op", async () => {
   await withEngine((engine) => {
     const schema = { type: "string", title: "elided-re-set" } as const;

@@ -8,8 +8,11 @@
  * (`createSigilLinkFromParsedLink` in link-utils.ts) is pure module code
  * with no runtime handle. The Runtime propagates its experimental option
  * here and reads the effective state back. Readers are NOT gated — they
- * accept both link forms unconditionally, which is what makes the flag safe
- * to flip either way.
+ * accept both forms unconditionally, so old data keeps reading whatever
+ * the flag does. The rollout itself is one-way: the flag turns on only
+ * once every deployed client is a reader, and references written under it
+ * persist, so turning it back off stops emission without un-writing
+ * anything.
  */
 
 let contentAddressedSchemas = false;

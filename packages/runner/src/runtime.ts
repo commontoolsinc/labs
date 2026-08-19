@@ -216,8 +216,11 @@ export interface ExperimentalOptions {
   /**
    * Link writers replace inline schemas with references to
    * content-addressed schema documents
-   * (`docs/specs/content-addressed-schemas.md`, Phase 1). Gates writers
-   * only; readers accept both link forms unconditionally. Defaults to off.
+   * (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2): link
+   * writers stamp references, and selectors externalize opportunistically
+   * when their closure is already persisted in the target space. Gates
+   * emission only; readers and the server accept both forms
+   * unconditionally. Defaults to off.
    */
   contentAddressedSchemas?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */

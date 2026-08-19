@@ -1,3 +1,4 @@
+import type { JSONSchemaObj } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -7,6 +8,7 @@ import { isCell, setCellUnlinkedSpace } from "../cell.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import { createRef } from "../create-ref.ts";
 import {
+  externalizeSchema,
   getStableInternalPathSegment,
   KeepAsCell,
   sanitizeSchemaForLinks,
@@ -15,6 +17,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
+import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import { Runtime } from "../runtime.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 import {
@@ -503,9 +506,18 @@ function factoryFromPattern<T, R>(
       }
     }
 
-    const sanitizedSchema = cellReference.schema !== undefined
+    const rawSanitizedSchema = cellReference.schema !== undefined
       ? sanitizeSchemaForLinks(cellReference.schema, KeepAsCell.All)
       : undefined;
+    // The binding's schema position emits like a link's: a reference under
+    // the flag, keeping FabricValue-bearing schema content (defaults) out
+    // of the otherwise plain binding record; inline otherwise, and inline
+    // whenever decomposition refuses or the schema is a bare boolean.
+    const sanitizedSchema = rawSanitizedSchema !== undefined &&
+        typeof rawSanitizedSchema === "object" &&
+        getContentAddressedSchemasConfig()
+      ? externalizeSchema(rawSanitizedSchema as JSONSchemaObj)
+      : rawSanitizedSchema;
     const partialCause = derivedInternalPartialCausesByRoot.get(top);
     if (partialCause !== undefined) {
       if (!deepEqual(partialCause, cellReference.partialCause)) {
