@@ -413,8 +413,17 @@ export type ServerExecutionObserver = {
    * already narrowed must reach the SpaceServer's demand pass without
    * waiting for the next input; the session-open trigger fires before
    * any watch exists). Edge-triggered and cheap; the host wakes an
-   * active loop's demand pass, nothing else. */
-  demandChanged?: (space: string, reason?: DemandChangeReason) => void;
+   * active loop's demand pass, nothing else. `principal` is the changed
+   * session's principal (undefined for anonymous) so the host can DROP
+   * the serving runtime's OWN loopback session — the service principal's
+   * tracked-set growth is the serving graph's own reads, not client
+   * demand, and must neither wake the loop nor count in `pushGrowthWakes`
+   * (W1 review MINOR-4). */
+  demandChanged?: (
+    space: string,
+    reason?: DemandChangeReason,
+    principal?: string,
+  ) => void;
 };
 
 /** (d′): why `demandChanged` fired — `watch` (the pre-existing
@@ -3179,7 +3188,7 @@ export class Server {
       session.entities = entities;
       session.trackedIds = trackedIdsFromEntries(entities.values());
       session.lastSyncedSeq = serverSeq;
-      this.#notifyDemandChanged(message.space);
+      this.#notifyDemandChanged(message.space, "watch", session.principal);
       return {
         type: "response",
         requestId: message.requestId,
@@ -3377,7 +3386,7 @@ export class Server {
       session.graphs = graphs;
       session.watches = nextWatches;
       session.lastSyncedSeq = serverSeq;
-      this.#notifyDemandChanged(message.space);
+      this.#notifyDemandChanged(message.space, "watch", session.principal);
       recordSlowQueryDuration(
         "session.watch.add",
         message.space,
@@ -3882,7 +3891,11 @@ export class Server {
                 session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
               }
               if (session.trackedIds.size > sizeBefore) {
-                this.#notifyDemandChanged(space, "push-growth");
+                this.#notifyDemandChanged(
+                  space,
+                  "push-growth",
+                  session.principal,
+                );
               }
             };
             // The frame-under-construction's watch scope: committed tracked
@@ -4001,7 +4014,13 @@ export class Server {
             session.entities = entities;
             session.trackedIds = evaluatedTrackedIds;
             session.lastSyncedSeq = serverSeq;
-            if (changed) this.#notifyDemandChanged(space, "push-growth");
+            if (changed) {
+              this.#notifyDemandChanged(
+                space,
+                "push-growth",
+                session.principal,
+              );
+            }
           };
           if (isEmptySync(sync)) {
             commitWatchState();
@@ -4415,11 +4434,12 @@ export class Server {
   #notifyDemandChanged(
     space: string,
     reason: DemandChangeReason = "watch",
+    principal?: string,
   ): void {
     const observer = this.#serverExecutionObserver;
     if (observer?.demandChanged === undefined) return;
     try {
-      observer.demandChanged(space, reason);
+      observer.demandChanged(space, reason, principal);
     } catch (error) {
       console.warn(
         "memory v2: server-execution observer threw on demandChanged",

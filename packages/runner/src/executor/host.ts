@@ -114,8 +114,15 @@ export class ExecutorHost {
       // Fan-out stage B: a watch-set change on an ACTIVE space wakes its
       // demand pass (the arrival re-arm's trigger); an inactive space
       // waits for the session-open / admission activation triggers.
-      demandChanged: (space, reason) => {
+      // The serving runtime's OWN loopback session (the service
+      // principal) is dropped: its tracked-set growth is the serving
+      // graph's own reads (a wave's derivations re-traversed on push),
+      // not client demand — counting it in `pushGrowthWakes` and waking
+      // the loop spins an extra cycle + O(closure) pass that finds no
+      // client delta (W1 review MINOR-4).
+      demandChanged: (space, reason, principal) => {
         if (this.#closed) return;
+        if (principal === this.#options.serviceIdentity) return;
         const existing = this.#spaces.get(space);
         if (existing?.active) existing.noteDemandChanged(reason);
       },
