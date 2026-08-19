@@ -17,6 +17,7 @@ import {
   parseLink,
 } from "../src/link-utils.ts";
 import {
+  causalFormOfBinding,
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
   sendValueToBinding,
@@ -716,6 +717,81 @@ describe("pattern-binding", () => {
       lengths.length = 0;
       bind(binding);
       expect(lengths).toEqual(viaMap);
+    });
+  });
+
+  describe("causalFormOfBinding", () => {
+    /** Reduces `binding`, typed as the sibling `bind()` helper above is. */
+    const reduce = <T>(binding: T): T =>
+      causalFormOfBinding(binding as never) as T;
+
+    /** A link carrying a schema, as a bound binding holds one. */
+    const linkWithSchema = () =>
+      runtime.getCell(space, `causal ${crypto.randomUUID()}`, undefined, tx)
+        .asSchema({ type: "object", properties: { v: { type: "number" } } })
+        .getAsLink({ includeSchema: true });
+
+    it("returns a link naming the same cell with no schema on it", () => {
+      const link = linkWithSchema();
+      const before = parseLink(link)!;
+      expect(before.schema).not.toBeUndefined();
+
+      const after = parseLink(reduce({ x: link }).x)!;
+      expect(after.schema).toBeUndefined();
+      expect(areNormalizedLinksSame(after, before)).toBe(true);
+    });
+
+    it("reduces a link nested inside a binding", () => {
+      const binding = { $ctx: { deep: [{ items: linkWithSchema() }] } };
+      const reduced = reduce(binding);
+      expect(parseLink(reduced.$ctx.deep[0].items)!.schema).toBeUndefined();
+    });
+
+    it("returns a binding with no link schema to drop by identity", () => {
+      const binding = { x: 1, deep: { y: ["a", "b"] } };
+      expect(reduce(binding)).toBe(binding);
+    });
+
+    it("copies only the path to a reduced link, sharing its siblings", () => {
+      const untouched = { deep: [1, 2, 3] };
+      const binding = { changed: { inner: linkWithSchema() }, untouched };
+      const reduced = reduce(binding);
+
+      expect(reduced).not.toBe(binding);
+      expect(reduced.changed).not.toBe(binding.changed);
+      expect(reduced.untouched).toBe(untouched);
+      expect(reduced.untouched.deep).toBe(untouched.deep);
+    });
+
+    it("preserves holes when a sibling element reduces", () => {
+      // deno-lint-ignore no-sparse-arrays
+      const binding = [linkWithSchema(), , "third"] as unknown[];
+      const reduced = reduce(binding);
+
+      expect(reduced).not.toBe(binding);
+      expect(reduced.length).toBe(3);
+      expect(1 in reduced).toBe(false);
+      expect(reduced[2]).toBe("third");
+    });
+
+    it("leaves a deferred `$alias` as it stands", () => {
+      // An alias is a binding on its way to a nested pattern, not a link, and
+      // its schema is that pattern's structure rather than this node's cause.
+      const binding = {
+        a: {
+          $alias: { cell: "argument", defer: 1, path: ["v"], schema: true },
+        },
+      };
+      const reduced = reduce(binding);
+      expect(reduced).toBe(binding);
+      expect(isAliasBinding(reduced.a)).toBe(true);
+    });
+
+    it("leaves the binding it was handed unchanged", () => {
+      const binding = { x: linkWithSchema() };
+      const before = JSON.stringify(binding);
+      reduce(binding);
+      expect(JSON.stringify(binding)).toBe(before);
     });
   });
 

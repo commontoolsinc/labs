@@ -1,5 +1,9 @@
 import { isObjectNotArray } from "@commonfabric/utils/types";
-import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import {
+  isLinkRef,
+  linkRefFrom,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import {
   type CellScope,
   type JSONSchema,
@@ -301,6 +305,33 @@ export function areNormalizedLinksSameIgnoringScope(
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
     arrayEqual(link1.path, link2.path);
+}
+
+/**
+ * The same link with its `schema` dropped -- a link reduced to what it names,
+ * for a caller that must not be sensitive to how the value there is read.
+ *
+ * A link's identity is its address, which is what
+ * {@link areNormalizedLinksSame} compares: two links to one cell under
+ * different schemas name the same cell. The schema is a read lens laid over
+ * that address, so anything deriving from a link's identity has to leave it
+ * out. `causalFormOfBinding()` is the caller that does, reducing a node's
+ * bound inputs on the way into its cause; `WebhookCellLinkRefPayload` makes
+ * the same cut for the wire.
+ *
+ * A link carrying no schema is returned as it stands, so a caller pays an
+ * allocation only where there is something to drop.
+ */
+export function sigilLinkWithoutSchema(link: SigilLink): SigilLink {
+  const payload = linkRefPayload(link);
+
+  // `in`, not `!== undefined`: a hash is over the members a value HAS, so a
+  // key spelled `schema: undefined` is a member like any other and would
+  // otherwise reach the digest as one.
+  if (!("schema" in payload)) return link;
+
+  const { schema: _schema, ...rest } = payload;
+  return linkRefFrom(rest);
 }
 
 /**

@@ -117,6 +117,17 @@ is not a complete identity to fall back on (see
 [Computed Cell Identity](../computed-cell-identity.md)). The reduction itself
 lives in `hashStringForEntityAddress()`, which any other address intake shares.
 
+`createRef()` hashes the preimage it is handed, links and all, so what a
+derived id follows is settled by whoever builds the cause. A node's cause is
+built from its bound inputs, and those links carry the schema the node reads
+through, so `causalFormOfBinding()` reduces each of them to the cell it names
+first. A link's identity is its address — what
+[link equality](#internal-representation) compares — so an id derived through
+one stays put when a pattern's type signature widens, and the `$defs` closure a
+schema drags along stays out of the digest entirely. A deferred `$alias` keeps
+its schema: it is a binding on its way to a nested pattern, part of that
+pattern's structure rather than of this node's cause.
+
 The underlying `hashOf()` function — see
 [Data Model](./1-data-model.md#hashing-and-content-addressing) for the hashing
 mechanism — is also used directly for:

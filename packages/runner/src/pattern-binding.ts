@@ -22,11 +22,13 @@ import {
   getMetaLink,
   isAliasBinding,
   isCellLink,
+  isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedFullLink,
   parseLink,
   sanitizeSchemaForLinks,
+  sigilLinkWithoutSchema,
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
@@ -379,6 +381,76 @@ function sendValueToBindingInner<T>(
       throw new Error(`Got ${value} instead of ${binding}`);
     }
   }
+}
+
+/**
+ * The causal form of a bound binding tree: the same tree with every link in it
+ * reduced to the cell it names.
+ *
+ * `unwrapOneLevelAndBindToDoc()` emits its links with `includeSchema: true`,
+ * because a node reads through them and the schema is how it reads. A node's
+ * CAUSE is built from that same tree, and there the schema is wrong twice
+ * over. It is not causal: a link's identity is the address it carries (see
+ * `areNormalizedLinksSame`), so an id derived through one would be re-minted
+ * by a widened type signature or a renamed `$defs` entry, neither of which
+ * moves what the node reads or where it writes. And it is by far the largest
+ * thing in the tree: a schema drags its whole `$defs` closure along, running
+ * to kilobytes against a cause otherwise measured in hundreds of bytes.
+ *
+ * So the reduction happens here rather than in the binding itself, and the two
+ * trees part company at this call: what the node reads through keeps its
+ * schema, what names the node does not.
+ *
+ * A subtree holding nothing to reduce comes back by identity, so a cause built
+ * from schema-free links allocates nothing and hashes exactly as it did.
+ *
+ * A deferred `$alias` is left as it stands. It is not a link but a binding on
+ * its way to a nested pattern, and what it carries is that pattern's structure.
+ */
+export function causalFormOfBinding<T extends FabricExecValue>(binding: T): T {
+  function reduce(value: FabricExecValue): FabricExecValue {
+    if (isSigilLink(value)) return sigilLinkWithoutSchema(value);
+
+    // A `FabricPrimitive` is a leaf, and a `FabricInstance` holds its contents
+    // behind a codec this walk cannot read. Neither can hold a link the walk
+    // could reach, so both stand as they are. `unwrapOneLevelAndBindToDoc`
+    // throws on the latter, so a bound tree carries none to begin with.
+    if (value instanceof FabricPrimitive || value instanceof FabricInstance) {
+      return value;
+    }
+
+    // Copy lazily, and skip holes, exactly as `convert()` below does -- see
+    // there for why each of those is what it is. Each element is read once
+    // into a local, so an accessor-backed member is not run a second time by
+    // the comparison and does not land in the copy as a value the tree never
+    // held.
+    if (Array.isArray(value)) {
+      let reduced: FabricExecValue[] | undefined;
+      for (let i = 0; i < value.length; i++) {
+        if (!(i in value)) continue;
+        const element = value[i];
+        const next = reduce(element);
+        if (next === element) continue;
+        reduced ??= value.slice();
+        reduced[i] = next;
+      }
+      return reduced ?? value;
+    }
+
+    if (!isObjectOrArray(value)) return value;
+
+    let reduced: Record<string, FabricExecValue> | undefined;
+    for (const key of Object.keys(value)) {
+      const element = value[key];
+      const next = reduce(element);
+      if (next === element) continue;
+      reduced ??= { ...value };
+      reduced[key] = next;
+    }
+    return reduced ?? value;
+  }
+
+  return reduce(binding) as T;
 }
 
 /**
