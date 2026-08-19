@@ -869,12 +869,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                 {COLUMN_INDICES.map((colIdx) => {
                   // Extract per-column values from the reactive weekDates array
                   const columnDate = weekDates[colIdx] || "";
-                  // The comparison is wrapped because `isToday` is read as a
-                  // JSX condition further down rather than inside the
-                  // expression it was written in.
-                  const isToday = computed(() =>
-                    weekDates?.[colIdx] === todayDate
-                  );
+                  const isToday = weekDates?.[colIdx] === todayDate;
                   const dateHeader = computed(() => {
                     const d = weekDates?.[colIdx];
                     return d ? formatDateHeader(d) : "";

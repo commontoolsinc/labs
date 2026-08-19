@@ -11,10 +11,15 @@ document's hash is well-founded.
 
 Design; the readers-first resolution infrastructure (Phase 0 of
 [the implementation plan](../history/plans/content-addressed-schemas-phase-0.md))
-has landed, and Phase 1's link writer is landing behind the
-`contentAddressedSchemas` flag (off by default): links stamp references
-and commits materialize each closure into the destination space. `$alias`
-bindings and selector references are still ahead. The connection-scoped
+has landed, and Phases 1 and 2 are landing together behind the
+`contentAddressedSchemas` flag (off by default): links and `$alias`
+bindings stamp references with commits materializing each closure into
+the destination space, and a selector normalizes for the wire — the
+reference form only when its whole closure is confirmed persisted in
+the target space, the fully inline form (recomposed through the realm
+registry when the schema itself carries references) otherwise, and a
+loud server error for a selector reference nothing backs. The
+connection-scoped
 transport experiment (`syncSchemaCasV1`, unmerged) is not being pursued;
 this design is the storage-side successor for link positions, and a
 reference at rest never needs transport compression.
@@ -248,16 +253,22 @@ fixes the uncompressed client→server surface: a watch spec for a document
 whose schema is already persisted carries `{ "$ref": "cid:…" }` instead of
 the full schema, and reconnect re-sends references, not bodies.
 
-The server side of this needs no new machinery: selector schemas flow
-through the shared traversal, whose loader collects referenced documents
-from the requesting space's own storage and whose entry gate keeps an
-uncollectable schema from selecting anything (see Space boundaries). What remains
-for clients is the sending half: a client may send a reference only for a
-schema whose documents it knows are persisted in that space — one it
-wrote, or one it received by sync — and sends the schema inline otherwise,
-as today. A reference the server cannot resolve fails the query loudly
-(protocol error), not silently as an empty match: an unresolvable selector
-is a client bug, and matching nothing would mask it.
+The server validates root selector references BEFORE traversal begins:
+every referenced document, transitively through its closure, must be
+stored in the requesting space with content that verifies against its
+id, and the validation reads through the query's manager, so a
+historical query (`atSeq`) requires the closure to exist and verify at
+that same sequence. A reference that fails this validation fails the
+query loudly (a QueryError), never silently as an empty match — the
+lenient selects-nothing gate is for LINK schemas inside delivered
+documents, where a hole is a wait-for-arrival state; an unresolvable
+selector reference is a client bug, and matching nothing would mask
+it. Past validation, resolution flows through the shared traversal
+with the documents already registered. What remains for clients is
+the sending half: a client may send a reference only for a schema
+whose documents it knows are persisted in that space — one it wrote,
+or one it received by sync — and sends the schema inline otherwise,
+as today.
 
 ### Resolution
 
@@ -311,7 +322,11 @@ which compares special objects by content hash) — conflicting sets of one id
 within a single commit included — because a deleted or altered
 dependency would invalidate every document referencing it. An
 idempotent re-`set` of the same content is how writers install closures
-and stays legal, and a sync frame's removes are watch-result removals,
+and stays legal — and it applies as a semantic no-op: the immutability
+comparison proves the content unchanged, so the engine writes no
+revision, advances no head, and marks nothing dirty, while the commit
+row and space sequence still advance (a blind closure re-install costs
+watchers nothing). A sync frame's removes are watch-result removals,
 not deletions.
 
 The commit boundary also validates the closure a commit's content
@@ -508,12 +523,28 @@ phased on the op-migration playbook:
   links keep reading forever — links rewrite on every re-instantiation, so
   inline forms age out without a data migration. A canary pins the inline
   vintage.
-- **Phase 2 — clients send references in selectors.** Watch specs and
-  one-shot queries carry references for persisted schemas. The server side
-  already ships with Phase 0 — selector schemas resolve through the shared
-  traversal, per space, under the availability scope — so this phase is
-  the client emission plus the loud protocol error for an unresolvable
-  selector reference.
+- **Phase 2 — clients send references in selectors, and `$alias`
+  bindings shed their embedded schemas.** Watch specs and one-shot
+  queries carry references for persisted schemas. The server side
+  already ships with Phase 0 — selector schemas resolve through the
+  shared traversal, per space, under the availability scope — so the
+  selector half is the client emission plus the loud protocol error for
+  an unresolvable selector reference. Measured traffic puts selector
+  schemas at roughly six percent of mixed pattern-test bytes with over
+  seventy percent repetition, and higher in watch-heavy interactive
+  sessions. The `$alias` half is not a traffic win (under half a
+  percent measured) — it is a representation fix: an embedded schema
+  can carry `FabricValue` defaults, which puts special objects inside
+  otherwise plain binding records; a reference keeps binding objects
+  plain JSON and confines schema content to schema documents. An alias
+  is a binding only by CONTEXT: to the storage layer an `$alias`-shaped
+  record is plain data, so no commit-boundary, materializer, arrival,
+  or assembly walk treats its `schema` member as a schema position — a
+  document that merely looks like a binding can neither fail a commit
+  nor fail a query over a reference inside it. A binding's reference is
+  emitted by the pattern serializer and resolves through the realm
+  registry; a reader that cannot resolve it degrades to the schemaless
+  binding it would have had before schemas were stamped at all.
 - **Phase 3 — retire transport compression for link positions.**
   `syncSchemaTableV2` stops matching
   anything on link positions once reference-bearing links dominate; the

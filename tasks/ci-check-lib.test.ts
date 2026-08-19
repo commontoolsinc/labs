@@ -627,6 +627,21 @@ Deno.test("buildCoverageDebtSuggestionComment lists files (not lines), command, 
     comment,
     "coverage-debt: packages/runner uncovered lines  <=  12",
   );
+  // A failed workspace run yields a partial coverage profile. The agent is
+  // told to get a passing run, with temporary skips allowed only while
+  // collecting local coverage.
+  assertStringIncludes(
+    comment,
+    "make it pass or temporarily skip it for\nthe coverage run",
+  );
+  assertStringIncludes(
+    comment,
+    "Do not\ninclude temporary test skips in the PR",
+  );
+  assertStringIncludes(
+    comment,
+    "code in packages it never\nruns is counted as fully uncovered",
+  );
   // The comment ends at the prompt block — no verify/footer sections.
   assertFalse(comment.includes("### Verify locally"));
 });

@@ -213,7 +213,8 @@ consider the information in `docs/development/COVERAGE.md`.
 ### Automated gates
 
 `deno task check` type-checks a hand-maintained list of paths in
-`tasks/check.sh`, which now names every workspace package. Most are covered in
+`tasks/typecheck.ts` (`tasks/check.sh` owns the Deno version gate and delegates
+there), and that list now names every workspace package. Most are covered in
 full; a few are partial by design. The `*.input.ts` transformer fixtures under
 `schema-generator` and `ts-transformers` name ambient wrappers the transformer
 supplies, so they do not compile on their own and are left out. `ui` is checked
@@ -248,8 +249,13 @@ Each of these gates fails CI on its own, and none of them run as part of
   dependency declarations across the workspace
 - `deno task check-package-cycles` — two packages that import each other, the
   part of "Dependencies run downward" above that a machine can settle
+- `deno task check-local-program` — a program built from local files by hand
+  rather than through `resolveLocalProgram`, which silently drops any data files
+  the caller attached
 - `deno task check-baselines-append-only` — a pattern baseline that was deleted
   rather than added to
+- `deno task check-test-aliases` — a test-identity alias line that was edited or
+  removed rather than appended, mapped an identity twice, or formed a cycle
 
 The detail behind each of these lives in `.claude/rules/`, one file per kind of
 file it governs. Claude Code loads the matching rule on its own when it reads a

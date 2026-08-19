@@ -67,7 +67,7 @@ Use this map as a starting point, then follow the actual UI:
 
 | Pattern-test construct                       | Browser-test counterpart                                                                                                             |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `Pattern({ inputs })`                        | Compile the source with `FileSystemProgramResolver`, then create a piece with `PiecesController.create(..., { input, start: true })` |
+| `Pattern({ inputs })`                        | Build the program with `resolveLocalProgram`, then create a piece with `PiecesController.create(..., { input, start: true })`        |
 | `instance.action.send(value)`                | Fill, select, or click the rendered control that a user uses to cause that action                                                    |
 | `assert(() => instance.field === value)`     | Wait for the corresponding rendered text, control state, list contents, or other observable DOM effect                               |
 | `{ label }` / `{ await }` in `multiUserTest` | Coordinate real participant pages with event-driven waits on shared visible state                                                    |
@@ -92,9 +92,23 @@ Build from the closest fixture, retaining the local invariants it demonstrates:
   space. Reuse one identity across multiple shells when the source test models
   multiple sessions for the same user; use distinct identities for distinct
   users.
-- Resolve source through the runtime harness. Pass the patterns root to
-  `FileSystemProgramResolver` when the source imports siblings outside its own
-  directory.
+- Build the program with `resolveLocalProgram` from
+  `@commonfabric/runner/local-program.deno`, passing the harness's own
+  `resolve`. Give it `root` when the source imports siblings outside its own
+  directory, and `dataFilePaths` when the pattern reads an attached data file
+  with `dataFile()`:
+
+  ```ts
+  const program = await resolveLocalProgram(
+    (resolver) => cc.runtime.harness.resolve(resolver),
+    { main: sourcePath, root: rootPath, dataFilePaths: [dataPath] },
+  );
+  ```
+
+  A pattern reading a data file compiles and type-checks without the attachment,
+  so omitting it fails at the read rather than at the build.
+  `deno task check-local-program` refuses a `FileSystemProgramResolver` built by
+  hand, because a program assembled that way silently carries no data files.
 - Pass initial unit-test inputs through `PiecesController.create`'s `input`
   option when they are part of the scenario.
 - Keep the result demanded with a result-cell sink when pull-mode reactivity

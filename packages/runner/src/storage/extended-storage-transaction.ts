@@ -1526,6 +1526,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         if (detail.address.id.startsWith("cid:")) continue;
         if (detail.value === undefined) continue;
         const hashes = new Set<string>();
+        // Link positions only: `$alias` records are binding vocabulary by
+        // CONTEXT — in a transaction's written values they are plain data,
+        // and scanning them here would treat data that merely looks like a
+        // binding as a schema carrier. Binding schemas externalized by the
+        // pattern serializer resolve through the realm registry.
         mapLinkSchemas(detail.value, (schema) => {
           for (
             const hash of collectExternalSchemaRefHashes(

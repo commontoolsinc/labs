@@ -7,7 +7,8 @@
     "./clock-preload": "./test/clock-preload.ts",
     "./compile-byte-cache": "./src/compile-byte-cache.ts",
     "./fixture-runner": "./src/fixture-runner.ts",
-    "./isolated-deno": "./src/isolated-deno.ts"
+    "./isolated-deno": "./src/isolated-deno.ts",
+    "./records": "./src/records/mod.ts"
   },
   "tasks": {
     // The tests spawn the Deno running them, and a bare `--allow-run=deno`
@@ -15,7 +16,7 @@
     // which is a different binary whenever the shell's Deno is not the pinned
     // one. A task line runs the Deno running the task, so asking that Deno for
     // its own path allows exactly the one binary the tests start.
-    "test": "deno test --frozen=true --allow-env=CF_COMPILE_CACHE_FILE --allow-read --allow-write --allow-run=$(deno eval \"console.log(Deno.execPath())\") src/*.test.ts",
+    "test": "deno test --frozen=true --allow-env=CF_COMPILE_CACHE_FILE --allow-read --allow-write --allow-run=$(deno eval \"console.log(Deno.execPath())\") src/*.test.ts src/records/*.test.ts",
     "check": "deno check src/**/*.ts test/clock-preload.ts",
     "fmt": "deno fmt src/ test/",
     "lint": "deno lint src/ test/"

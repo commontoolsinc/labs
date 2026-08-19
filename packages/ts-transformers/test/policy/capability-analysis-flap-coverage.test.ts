@@ -13,8 +13,9 @@ import { analyzeFunctionCapabilities } from "../../src/policy/mod.ts";
 
 function createProgram(
   source: string,
+  extraFiles: Record<string, string> = {},
 ): { program: ts.Program; sourceFile: ts.SourceFile } {
-  const files: Record<string, string> = { "/test.ts": source };
+  const files: Record<string, string> = { "/test.ts": source, ...extraFiles };
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
@@ -37,7 +38,11 @@ function createProgram(
         ? ts.createSourceFile(name, files[name]!, lv, true, ts.ScriptKind.TS)
         : undefined,
   };
-  const program = ts.createProgram(["/test.ts"], options, host);
+  const program = ts.createProgram(
+    ["/test.ts", ...Object.keys(extraFiles)],
+    options,
+    host,
+  );
   return { program, sourceFile: program.getSourceFile("/test.ts")! };
 }
 
@@ -63,8 +68,12 @@ function findArrow(
   return cb;
 }
 
-function analyze(source: string, name = "fn") {
-  const { program, sourceFile } = createProgram(source);
+function analyze(
+  source: string,
+  name = "fn",
+  extraFiles: Record<string, string> = {},
+) {
+  const { program, sourceFile } = createProgram(source, extraFiles);
   return analyzeFunctionCapabilities(findArrow(sourceFile, name), {
     checker: program.getTypeChecker(),
   });
@@ -209,5 +218,77 @@ Deno.test(
       "input",
     );
     assert(input.readPaths.includes("rows.0"));
+  },
+);
+
+// A callee whose parameters declare each Common Fabric cell wrapper. The
+// declarations live in their own file because the analysis only reads a
+// signature declared outside the file under analysis, and the wrappers live in
+// a file named `commonfabric.d.ts` because that is how the analysis recognizes
+// a wrapper as the framework's rather than a local type of the same name.
+const CAPABILITY_CALLEE_FILES = {
+  "/commonfabric.d.ts": `declare module "commonfabric" {
+  export type Writable<T> = { set(value: T): void };
+  export type Stream<T> = { send(value: T): void };
+}`,
+  "/callee.ts": `import type { Stream, Writable } from "commonfabric";
+export declare function notify(target: Stream<string>): void;
+export declare function assign(target: Writable<string>): void;`,
+};
+
+// Branch: `Stream<T>` is the wrapper whose capability is neither read nor
+// write, so a parameter passed to one is recorded as an opaque path
+// (capability-analysis.ts ~377-378 and ~2540-2543). Which pattern in the
+// corpus passes a stream to a declared `Stream<T>` parameter decides whether
+// the branch runs at all, so it is covered on some CI runs and not others.
+Deno.test(
+  "a stream argument is recorded opaque while a writable argument is read and written",
+  () => {
+    const input = getPaths(
+      analyze(
+        `import type { Stream, Writable } from "commonfabric";
+         import { assign, notify } from "./callee.ts";
+         const fn = (
+           input: { channel: Stream<string>; slot: Writable<string> },
+         ) => {
+           notify(input.channel);
+           assign(input.slot);
+         };`,
+        "fn",
+        CAPABILITY_CALLEE_FILES,
+      ),
+      "input",
+    );
+    // Passing a stream says nothing about its value in either direction.
+    assertEquals(input.readPaths, ["slot"]);
+    assertEquals(input.writePaths, ["slot"]);
+  },
+);
+
+// Branch: `aliasBindingEquals` falls through to `false` when the two bindings
+// are of different shapes -- one a reference to a parameter path, the other a
+// record of properties (capability-analysis.ts ~1237). The two branches above
+// it, which compare two references or two records, are reached far more often.
+Deno.test(
+  "map values of different binding shapes drop the value binding",
+  () => {
+    const input = getPaths(
+      analyzeNoChecker(
+        `const fn = (input) => {
+           const m = new Map();
+           m.set("k", input.a);
+           m.set("k", { name: input.b });
+           const v = m.get("k");
+           return v.name;
+         };`,
+      ),
+      "input",
+    );
+    // Both set arguments are read where they are stored.
+    assert(input.readPaths.includes("a"));
+    assert(input.readPaths.includes("b"));
+    // The two shapes cannot be merged, so the later `.get("k").name` resolves
+    // through neither of them.
+    assert(!input.readPaths.includes("a.name"));
   },
 );

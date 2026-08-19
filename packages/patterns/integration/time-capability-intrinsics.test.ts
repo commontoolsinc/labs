@@ -9,7 +9,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 
 const ROOT = join(import.meta.dirname!, "..");
 
@@ -37,8 +37,9 @@ function gatedController(spaceName: string): Promise<PiecesController> {
 }
 
 async function instantiate(cc: PiecesController, rel: string) {
-  const program = await cc.runtime.harness.resolve(
-    new FileSystemProgramResolver(join(ROOT, rel), ROOT),
+  const program = await resolveLocalProgram(
+    (resolver) => cc.runtime.harness.resolve(resolver),
+    { main: join(ROOT, rel), root: ROOT },
   );
   return await cc.create(program, { start: true });
 }

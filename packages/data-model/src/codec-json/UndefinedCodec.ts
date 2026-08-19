@@ -7,7 +7,7 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 /**
  * Codec for `undefined`. Encodes to the `Undefined@1` tag with `null` state.
  * `undefined` has no corresponding class, so there is no `uniqueHandledClass`;
- * matching is by `canEncode()`. See Section 1.4.1 of the formal spec.
+ * matching is by `canEncode()`. See `1-fabric-values.md` Section 1.3.
  */
 export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue> {
   /** Constructs an instance. */

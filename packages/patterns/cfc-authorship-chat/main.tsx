@@ -1,4 +1,12 @@
-import { type Cfc, computed, NAME, pattern, UI, Writable } from "commonfabric";
+import {
+  type Cfc,
+  computed,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commonfabric";
 
 type AuthorshipIntegrity<Author extends string> = {
   readonly kind: "authored-by";
@@ -28,7 +36,7 @@ type AuthoredMessageWithIntegrity<
 
 export type AuthorshipChatOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   verifiedAuthor: string;
   forgedClaim: string;
   unsignedState: string;

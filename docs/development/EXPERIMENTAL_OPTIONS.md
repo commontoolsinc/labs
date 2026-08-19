@@ -122,14 +122,29 @@ value is ignored with a warning rather than coerced. See
   The ambient control point is `setContentAddressedSchemasConfig` in
   [`packages/runner/src/schema-doc-config.ts`](../../packages/runner/src/schema-doc-config.ts).
 - **Added by.** Robin McCollum (PR #5833).
-- **Purpose.** Phase 1 of
-  [content-addressed schemas](../specs/content-addressed-schemas.md): link
-  writers replace inline schemas with `{ "$ref": "cid:<hash>" }` references
-  to content-addressed schema documents, whose closure is installed into the
-  destination space in the same transaction as the reference. Gates writers
-  only — readers accept both link forms unconditionally, which is what makes
-  the flag safe to flip in either direction; a schema decomposition refuses
-  stays inline exactly as with the flag off.
+- **Purpose.** Phases 1 and 2 of
+  [content-addressed schemas](../specs/content-addressed-schemas.md), which
+  deploy together: link writers replace inline schemas with
+  `{ "$ref": "cid:<hash>" }` references to content-addressed schema
+  documents, whose closure is installed into the destination space in the
+  same transaction as the reference; `$alias` bindings stamp the same
+  references at pattern serialization, resolving through the realm
+  registry (an alias is a binding only by context — the storage layer
+  treats `$alias`-shaped records as plain data); and watch/sync selectors
+  normalize for the wire — the reference form only when the client
+  confirmed the whole closure persisted in the target space
+  (server-confirmed replica presence implies server presence), and the
+  fully inline form otherwise, recomposed through the realm registry when
+  the schema itself carries references (a live pattern's binding schema
+  reaches selectors before any document holds it). Gates emission only —
+  readers and the server accept both forms unconditionally, so old data
+  keeps reading throughout the rollout, and the server answers an
+  unresolvable selector reference with a loud QueryError, which a
+  compliant client never provokes; a schema decomposition refuses stays
+  inline exactly as with the flag off. The rollout is one-way: the flag
+  turns on only once every deployed client is a reader, and references
+  written under it persist, so turning it back off stops emission without
+  un-writing anything.
 - **Interaction with `syncSchemaTableV2`.** Both mechanisms dedupe the same
   link-schema positions, so a flag-on process disables the sync schema
   table outright (`setSyncSchemaTableConfig(false)` at Runtime
@@ -140,10 +155,11 @@ value is ignored with a warning rather than coerced. See
   during the reader-soak window: every client learns to read references
   before any client writes one, so the flag flips on (env for servers and
   CLI, build define for the shell) only once the deployed fleet is all
-  readers. Graduate to on once the writer path has soaked (old inline links
-  keep reading forever and age out through pattern re-instantiation), then
-  proceed to the spec's Phase 2 (references in selectors) and Phase 3
-  (retiring transport schema compression for link positions).
+  readers. Graduate to on once the writer path has soaked (old inline
+  links keep reading forever and age out through pattern
+  re-instantiation). Phases 1 and 2 both ship behind this flag; what
+  remains after graduation is the spec's Phase 3 (retiring transport
+  schema compression for link positions).
 
 ### `persistentSchedulerState`
 

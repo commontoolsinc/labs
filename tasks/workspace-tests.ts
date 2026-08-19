@@ -8,6 +8,11 @@
 import * as path from "@std/path";
 import { parse as parseJsonc } from "@std/jsonc";
 import { decode, encode } from "@commonfabric/utils/encoding";
+import {
+  FragmentWriter,
+  ingestJUnit,
+  recordsDir,
+} from "@commonfabric/test-support/records";
 import { parseShard, type Shard } from "./shard-utils.ts";
 import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
 import { assignWeightedShards } from "./weighted-shards.ts";
@@ -23,7 +28,7 @@ export function parseDisabledPackageList(raw: string | undefined): string[] {
   return (raw ?? "").split(/[,\s]+/).filter((name) => name.length > 0);
 }
 
-export async function initializeDb(cwd: string = Deno.cwd()): Promise<void> {
+export async function initializeDb(cwd: string = Deno.cwd()): Promise<boolean> {
   console.log("Initializing database dependencies...");
   const result = await new Deno.Command(Deno.execPath(), {
     args: ["task", "initialize-db"],
@@ -36,8 +41,9 @@ export async function initializeDb(cwd: string = Deno.cwd()): Promise<void> {
     console.error("Failed to initialize database dependencies.");
     console.log(decode(result.stdout));
     console.error(decode(result.stderr));
-    Deno.exit(result.code);
+    return false;
   }
+  return true;
 }
 
 export async function testPackage(
@@ -46,6 +52,7 @@ export async function testPackage(
   packagePath: string,
   coverageRoot: string | undefined,
   extraEnv?: Record<string, string>,
+  junitPath?: string,
 ): Promise<{
   memberPath: string;
   packageName: string;
@@ -64,8 +71,13 @@ export async function testPackage(
       );
     }
 
+    // Trailing arguments to `deno task` append to the task's command line,
+    // which is what threads the flag down to the leaf `deno test`.
+    const args = junitPath !== undefined
+      ? ["task", "test", `--junit-path=${junitPath}`]
+      : ["task", "test"];
     result = await new Deno.Command(Deno.execPath(), {
-      args: ["task", "test"],
+      args,
       cwd: packagePath,
       env,
       stdout: "piped",
@@ -101,6 +113,38 @@ function reportPackageFailure(result: PackageResult): void {
   console.error(`Failed ${result.packageName} (${result.packagePath})`);
   console.log(decode(result.result.stdout));
   console.error(decode(result.result.stderr));
+}
+
+// Reads one leaf's JUnit XML and appends its cases to the spool. A leaf
+// that wrote no XML — it crashed before the end, since deno test writes
+// the file only at process exit — contributes nothing, and a malformed
+// file warns without failing anything.
+async function ingestLeafJUnit(
+  fragment: FragmentWriter,
+  junitPath: string,
+  scope: string,
+  memberPath: string,
+): Promise<void> {
+  let xml: string;
+  try {
+    xml = await Deno.readTextFile(junitPath);
+  } catch {
+    return;
+  }
+  try {
+    const prefix = memberPath.replace(/^\.\//, "");
+    for (
+      const record of ingestJUnit(xml, {
+        kind: "unit",
+        scope,
+        filePrefix: prefix,
+      })
+    ) {
+      fragment.append(record);
+    }
+  } catch (error) {
+    console.warn(`test records: ingesting ${junitPath} failed: ${error}`);
+  }
 }
 
 // Read the workspace member list from the root manifest. Parsed with the JSONC
@@ -145,6 +189,56 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
   piece: { total: 3, envVar: "PIECE_TEST_SHARD" },
   tasks: { total: 3, envVar: "TASK_TEST_SHARD" },
 };
+
+// Members whose `deno task test` runs exactly one `deno test` (directly, or
+// through a runner that forwards trailing flags to one), so an appended
+// --junit-path lands on it whole. The runner threads the flag to these and
+// ingests the XML into the spool as unit-kind records when recording is on.
+// The exceptions and why they stay out: api, patterns, and ui run two test
+// commands in one task line, so the flag reaches only the second; cli's
+// run-tests.ts runs three deno test invocations per slice, which would each
+// overwrite the file; static, content-hash, data-model, memory, pure-json,
+// spec-model, and state-inspector route `test` through a task graph that
+// appends arguments nowhere; identity, iframe-sandbox, and dashboard run
+// browser harnesses that record through the deno-web-test reporter instead;
+// home-schemas, generated-patterns, and patterns/auth have no tests.
+const JUNIT_CAPABLE_MEMBERS = new Set([
+  "./packages/agents-host",
+  "./packages/background-piece-service",
+  "./packages/cf-harness",
+  "./packages/connectors/agents",
+  "./packages/deno-web-test",
+  "./packages/felt",
+  "./packages/fuse",
+  "./packages/html",
+  "./packages/integration",
+  "./packages/js-compiler",
+  "./packages/leb128",
+  "./packages/lib-shell",
+  "./packages/llm",
+  "./packages/piece",
+  "./packages/runner",
+  "./packages/runtime-client",
+  "./packages/schema-generator",
+  "./packages/shell",
+  "./packages/test-support",
+  "./packages/toolshed",
+  "./packages/ts-transformers",
+  "./packages/utils",
+  "./scripts",
+  "./tasks",
+]);
+
+// The identity scope of a unit: the package name with any internal slice
+// label stripped, so the records of "cli (3/10)" and "cli (7/10)" join.
+export function unitScope(packageName: string): string {
+  return packageName.replace(/ \(\d+\/\d+\)$/, "");
+}
+
+// A filename-safe slug for a unit's JUnit file, unique per slice.
+export function unitSlug(packageName: string): string {
+  return packageName.replaceAll("/", "__").replace(/[^A-Za-z0-9_.-]+/g, "-");
+}
 
 // Enabled workspace members are split by observed test cost. Without a shard,
 // every enabled member is selected as a single unit.
@@ -238,6 +332,25 @@ export async function runTests(
     ? path.resolve(workspaceCwd, coverageRootRaw)
     : undefined;
 
+  // With recording on, junit-capable leaves get a --junit-path in a
+  // temporary directory, and each leaf's XML is ingested into the spool as
+  // unit-kind records under the package's own scope. The runner stays
+  // plumbing: it forwards the flag and moves the results; the reported
+  // names come from the leaves. A temporary directory that cannot be
+  // created turns recording off with a warning; it never fails the suite.
+  const spoolDir = recordsDir();
+  let junitRoot: string | undefined;
+  if (spoolDir !== undefined) {
+    try {
+      junitRoot = await Deno.makeTempDir({ prefix: "workspace-junit-" });
+    } catch (error) {
+      console.warn(`test records: no JUnit directory: ${error}`);
+    }
+  }
+  const fragment = spoolDir !== undefined && junitRoot !== undefined
+    ? FragmentWriter.open(spoolDir)
+    : undefined;
+
   const results: PackageResult[] = [];
   let nextUnit = 0;
   let failureSeen = false;
@@ -247,14 +360,27 @@ export async function runTests(
       const unit = units[nextUnit++];
       console.log(`Testing ${unit.packageName}...`);
       const packagePath = path.resolve(workspaceCwd, unit.memberPath);
+      const junitPath =
+        junitRoot !== undefined && JUNIT_CAPABLE_MEMBERS.has(unit.memberPath)
+          ? path.join(junitRoot, `${unitSlug(unit.packageName)}.xml`)
+          : undefined;
       const result = await testPackage(
         unit.memberPath,
         unit.packageName,
         packagePath,
         coverageRoot,
         unit.env,
+        junitPath,
       );
       results.push(result);
+      if (junitPath !== undefined && fragment !== undefined) {
+        await ingestLeafJUnit(
+          fragment,
+          junitPath,
+          unitScope(unit.packageName),
+          unit.memberPath,
+        );
+      }
       if (!result.result.success) {
         failureSeen = true;
         reportPackageFailure(result);
@@ -262,6 +388,10 @@ export async function runTests(
     }
   });
   await Promise.all(workers);
+  fragment?.close();
+  if (junitRoot !== undefined) {
+    await Deno.remove(junitRoot, { recursive: true }).catch(() => {});
+  }
   const durationResults = [...results].sort((a, b) =>
     b.durationMs - a.durationMs
   );
@@ -290,17 +420,18 @@ export async function runTests(
   return failedPackages.length === 0;
 }
 
-export async function main(): Promise<void> {
+export async function main(): Promise<boolean> {
   const shardRaw = Deno.env.get("TEST_SHARD");
   const shard = shardRaw ? parseShard(shardRaw) : undefined;
   assertTaskTestsIncluded(await readWorkspaceMembers());
-  await initializeDb();
-  const passed = await runTests(
+  // A failure here returns rather than exits: the entry point's recording
+  // teardown runs in a finally that an exit would skip.
+  if (!await initializeDb()) return false;
+  return await runTests(
     [
       ...ALL_DISABLED,
       ...parseDisabledPackageList(Deno.env.get("TEST_DISABLED_PACKAGES")),
     ],
     shard,
   );
-  if (!passed) Deno.exit(1);
 }

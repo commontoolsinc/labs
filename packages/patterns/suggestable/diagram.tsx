@@ -32,9 +32,12 @@ export type DiagramOutput = {
  * representation of concepts using plain text art.
  */
 const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
+  // An empty prompt holds the request back: `generateText` clears its state
+  // and makes no call until one arrives. A diagram with no topic has nothing
+  // to draw, so the model is asked only once a caller names the subject.
   const prompt = computed(() => {
-    const t = topic || "the following";
-    return `Create a clear ASCII diagram illustrating: ${t}`;
+    if (!topic) return "";
+    return `Create a clear ASCII diagram illustrating: ${topic}`;
   });
 
   const response = generateText({

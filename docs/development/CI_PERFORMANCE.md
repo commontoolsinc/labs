@@ -206,12 +206,12 @@ before you "correct" a step name back to a more obvious emoji:
   the 📥 or 📦 download markers.
 
 The steps the runner injects into every job carry no marker, so the script
-classifies them by name. GitHub adds `Set up job`, `Post …`, and `Complete
-job`; the Blacksmith runners add `Set up runner` and `Complete runner`
-alongside them. The two set-up steps count as setup and the rest as shutdown.
-Any other step that reaches the chart without a recognized marker is counted as
-"other", drawn in gray, and listed on standard error when the script runs, so a
-missing marker is easy to find and fix.
+classifies them by name. Current jobs use `Set up job`, `Post …`, and `Complete
+job`. Retained records can also contain `Set up runner` and `Complete runner`.
+The two set-up steps count as setup and the rest as shutdown. Any other step
+that reaches the chart without a recognized marker is counted as "other", drawn
+in gray, and listed on standard error when the script runs, so a missing marker
+is easy to find and fix.
 
 ## Step And Job Timeouts
 

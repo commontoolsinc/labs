@@ -355,6 +355,10 @@ const scanSnapshotSchemaRefs = (
       }
     }
     if (!isSchemaDocument) {
+      // Link positions only: an `$alias`-shaped record in a document is
+      // plain data to this layer, so its `schema` member is never a
+      // delivery obligation — data that merely looks like a binding must
+      // not fail a query over an unresolvable ref inside it.
       mapLinkSchemas(doc as FabricValue, (schema) => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
@@ -503,6 +507,70 @@ const assembleSchemaDocClosures = (
   return { trackerAdds, additions };
 };
 
+/**
+ * Validates the schema references a query's root selectors carry, loudly:
+ * every referenced document, transitively through its closure, must be
+ * stored in this space with content that verifies against its id. A
+ * compliant client emits a selector reference only after verifying the
+ * closure persisted here, so an unresolvable reference is a protocol
+ * violation answered with the diagnostic — never the lenient
+ * selects-nothing wait that link schemas inside delivered documents get.
+ * Validation registers each document as it verifies, so the traversal
+ * behind the selector resolves without re-reading. It reads through the
+ * caller's manager, so a historical query (`atSeq`) bounds resolution the
+ * same way it bounds every other read: the referenced document must exist
+ * and verify at that sequence.
+ */
+const validateSelectorSchemaRefs = (
+  space: string,
+  manager: EngineObjectManager,
+  branch: string,
+  roots: GraphQuery["roots"],
+): void => {
+  const pending: string[] = [];
+  for (const root of roots) {
+    const schema = root.selector?.schema;
+    if (schema === undefined || typeof schema === "boolean") continue;
+    for (const hash of collectExternalSchemaRefHashes(schema as JSONSchema)) {
+      pending.push(hash);
+    }
+  }
+  if (pending.length === 0) return;
+  const seen = new Set<string>();
+  while (pending.length > 0) {
+    const hash = pending.pop()!;
+    if (seen.has(hash)) continue;
+    seen.add(hash);
+    const id = `cid:${hash}`;
+    const key = toDocKey(space, id, DEFAULT_SCOPE);
+    manager.load({ id, scope: DEFAULT_SCOPE, type: "application/json" });
+    const snapshot = snapshotForDocKey(space, manager, branch, key);
+    const doc = snapshot?.document;
+    const inner = isObjectNotArray(doc)
+      ? (doc as { value?: unknown }).value
+      : undefined;
+    if (snapshot === null || inner === undefined) {
+      throw new SchemaClosureError(
+        `Selector references schema document ${id}, which is not stored ` +
+          `in this space. A selector reference must name a persisted ` +
+          `closure (docs/specs/content-addressed-schemas.md).`,
+      );
+    }
+    let interned: JSONSchema;
+    try {
+      interned = registerSchemaDocument(hash, inner as JSONSchema);
+    } catch {
+      throw new SchemaClosureError(
+        `Selector references schema document ${id} that did not verify ` +
+          `in this space: its stored content does not hash to its id.`,
+      );
+    }
+    for (const dep of collectExternalSchemaRefHashes(interned)) {
+      pending.push(dep);
+    }
+  }
+};
+
 export const trackGraph = (
   space: string,
   engine: Engine.Engine,
@@ -544,6 +612,8 @@ export const trackGraph = (
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
+
+  validateSelectorSchemaRefs(space, manager, branch, query.roots);
 
   for (const root of query.roots) {
     const selector = toDocumentSelector(root.selector);
@@ -621,6 +691,8 @@ export const extendTrackedGraph = (
     ),
   );
   const touched = new Set<QueryDocKey>();
+
+  validateSelectorSchemaRefs(space, manager, state.branch, query.roots);
 
   for (const root of query.roots) {
     const selector = toDocumentSelector(root.selector);

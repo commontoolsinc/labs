@@ -85,3 +85,29 @@ port_is_blocked() {
     done
     return 1
 }
+
+# Exit code emitted when a requested port is one clients refuse to connect to.
+# The offset has to change; retrying it reaches the same port.
+PORT_UNREACHABLE_EXIT=4
+
+# Refuse a port that clients will not talk to. Such a port binds, so the server
+# starts and answers a curl health check, and then the browser cannot load the
+# page and toolshed's proxy hop to the shell dev server fails. Checked before a
+# script acts on the port, because the later failure surfaces as a test waiting
+# on state that never arrives. Reads the list from ports.json on every call, so
+# the answer comes from the repository rather than from whatever a caller's
+# environment happens to carry in BLOCKED_PORTS.
+# Usage: require_reachable_port <server name> <port>
+require_reachable_port() {
+    local name=$1
+    local port=$2
+
+    read_blocked_ports
+    port_is_blocked "$port" || return 0
+
+    echo "Error: $name port $port is one clients refuse to connect to." >&2
+    echo "       Browsers and Deno's fetch reject a request to it before" >&2
+    echo "       opening a connection, so a server here binds but nothing" >&2
+    echo "       reaches it. Choose a port offset that moves $name elsewhere." >&2
+    exit "$PORT_UNREACHABLE_EXIT"
+}

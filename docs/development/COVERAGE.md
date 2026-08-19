@@ -214,6 +214,16 @@ The
 works through two real instances, and describes how to localize a group-level
 change down to the specific file and line so you know what to write a test for.
 
+Before localizing, check that the group-level change is a measurement at all. A
+group marked `excl` in the job's table under the line "Not gated, because no
+baseline counts the same base-branch code as this run does" is comparing two
+different bodies of code, because the ratchet stepped back to an older baseline
+commit; its `Change` column then reports what the base branch did in between.
+Comparing two runs directly has the same trap in a different form, since a
+pull request's runs measure the merge ref, which GitHub rebuilds whenever the
+base branch moves. Compare only files whose content is identical between the
+two commits, and read the counts per line rather than per group.
+
 ### Diagnostics that fire on wall-clock time
 
 The slow-traverse report in `packages/runner/src/traverse.ts` was one of those
@@ -314,6 +324,54 @@ moved — a sibling branch in the same file is the next one to flap.
 [The investigation record](../history/development/coverage-flake-patch-remove-missing-key-2026-08-17.md)
 follows that line from a group-level `+2` down to the two integration hits that
 covered it in one run and not the next.
+
+### Checks the layer below already makes
+
+Not every line that moves deserves a test. Sometimes a line decides nothing:
+every observable consequence is the same whether it is there or not, because
+the code it calls makes the same check on its own. Opening a remote memory
+session had three abort checks, one before connecting, one after connecting,
+and one after mounting. The memory client refuses an aborted signal on entry to
+both the connect and the mount, raising the signal's own reason, which the
+caller's own catch clause converts exactly as its own check would. Only the
+third check decides anything: an abort landing after the mount resolves has
+already shut the client, and without the check the method would hand that dead
+client back.
+
+A test cannot distinguish such a line, which is exactly what makes it a
+problem: any test written for it passes with the line deleted, so it protects
+nothing and satisfies the tool. Delete the line instead, and write the test
+that states what the surviving code does at that point. That test is what makes
+the deletion safe — the check now lives one layer down, and the test fails if
+that layer stops making it.
+
+Reachability is not the test here. Both removed checks were reached in CI, on
+the runs where an abort happened to land in the microtask between one library
+call returning and the next line running. What decides the question is whether
+any input tells the two versions apart.
+
+### A branch only some of the corpus reaches
+
+`packages/ts-transformers` and `packages/schema-generator` move for a reason of
+their own: their unit suites never reach parts of the analyzer and the
+formatters. What reaches them is the pattern integration jobs, compiling
+whatever the pattern corpus happens to contain, on whichever shard the pattern
+landed on. So a branch for a language construct the corpus uses rarely — a
+`Stream<T>` parameter, a numeric literal type node, the bare `object` type —
+is covered when a shard happened to compile the one pattern that spells it,
+and uncovered otherwise. The carrier artifact names a different shard from one
+run to the next for the same line.
+
+These take a unit test, not a pattern. Both packages have `*-flap-coverage`
+test files that build the type or the source they need and call the analyzer or
+the generator directly:
+`packages/ts-transformers/test/policy/capability-analysis-flap-coverage.test.ts`
+and `packages/schema-generator/test/schema-generator-flap-coverage.test.ts`.
+Each case asserts what the branch produces — that a stream argument is
+recorded opaque while a writable argument is recorded read and written, that a
+numeric literal emits a number rather than the string the node carries — so a
+branch that changed what it produced would fail rather than stay green on the
+line count.
 
 ### What the check says when the regression is not the pull request's
 

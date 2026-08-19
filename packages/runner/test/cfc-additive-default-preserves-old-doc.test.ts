@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
@@ -65,8 +65,9 @@ const compileHomePattern = async (
     "../../patterns/system/home.tsx",
     import.meta.url,
   ).pathname;
-  const program = await runtime.harness.resolve(
-    new FileSystemProgramResolver(sourcePath, repoRoot),
+  const program = await resolveLocalProgram(
+    (resolver) => runtime.harness.resolve(resolver),
+    { main: sourcePath, root: repoRoot },
   );
   return await runtime.patternManager.compilePattern(program, { space });
 };

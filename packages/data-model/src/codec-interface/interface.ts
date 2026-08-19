@@ -49,7 +49,7 @@ export const CODEC: unique symbol = Symbol("data-model.codec");
  * `FabricValue`s and leaves every terminal decision to whatever walks the
  * result, so one binding serves every format.
  */
-export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodecEngine");
+export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodec");
 
 /**
  * Well-known symbol for binding the static getter `[REALM_CODEC]` on a
@@ -268,7 +268,8 @@ export interface LiveEnvironment {
    * for free by extending `BaseLiveEnvironment`, which centralizes the
    * getter; the `cloneIfNecessary`-style `true` default lives there.
    *
-   * Enforcement: each codec's `decode()` queries this and abides by it,
+   * Enforcement: a decode deep-freezes its result, and a codec that builds
+   * a value cheaper when it may stay thawed reads this to decide,
    * producing a deep-frozen result when it is `true`.
    */
   get shouldDeepFreeze(): boolean;

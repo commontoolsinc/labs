@@ -339,6 +339,17 @@ export function isLegacyPieceRegistryRoot(
 }
 
 /**
+ * The field a persisted default root exposes its piece registry under: the
+ * retired `allPieces` for a legacy default-app root, `pieceRegistry`
+ * otherwise. The single home for a selection every registry consumer makes.
+ */
+export function pieceRegistryKeyForRoot(
+  root: Cell<unknown>,
+): "pieceRegistry" | "allPieces" {
+  return isLegacyPieceRegistryRoot(root) ? "allPieces" : "pieceRegistry";
+}
+
+/**
  * Compile a pattern into `space` and persist its content-addressed source +
  * compiled documents there (the awaited write-back inside `compilePattern`).
  * The compiled pattern carries its `{ identity, symbol }` entry ref, the single

@@ -84,13 +84,14 @@ not a style reference.
 
 ## fixture
 
-`gideon-tests/`, `integration/`, `test/`, `scope-bug-computed-vnode-blank/`,
-`scope-bug-ct1597-forward/`, `scope-bug-ct1597-reduce/`, `cell-link.tsx`
-(suggestion tester), `nested-map-ifelse-test.tsx`, `render-test.tsx`,
-`self-reference-test.tsx`, and every `*.test.ts(x)` file anywhere in this
-package. (The blanket `*.test.ts(x)` rule is about pattern-authoring idioms —
-test _style_ is governed by `docs/common/workflows/pattern-testing.md`, and the
-exemplars' own test files remain good references for it.)
+`gideon-tests/`, `integration/`, `test/`, `plain-array-callback-locals/`,
+`scope-bug-computed-vnode-blank/`, `scope-bug-ct1597-forward/`,
+`scope-bug-ct1597-reduce/`, `cell-link.tsx` (suggestion tester),
+`nested-map-ifelse-test.tsx`, `render-test.tsx`, `self-reference-test.tsx`, and
+every `*.test.ts(x)` file anywhere in this package. (The blanket `*.test.ts(x)`
+rule is about pattern-authoring idioms — test _style_ is governed by
+`docs/common/workflows/pattern-testing.md`, and the exemplars' own test files
+remain good references for it.)
 
 ## legacy
 
@@ -1376,7 +1377,10 @@ inputs and produces a focused output.
 
 ## `suggestable/summary.tsx`
 
-Generates a concise summary of provided context using an LLM.
+Generates a concise summary of provided context using an LLM. The topic is what
+asks for the summary: with none given the pattern holds the request back, so
+`pending` stays `false` and `summary` stays empty until a caller names a
+subject.
 
 **Keywords:** summary, generateText, suggestion-fuel
 
@@ -1401,7 +1405,9 @@ type SummaryOutput = {
 
 ## `suggestable/checklist.tsx`
 
-Generates a checklist of actionable steps from a topic and context.
+Generates a checklist of actionable steps from a topic and context. The topic is
+what asks for the steps: with none given the pattern holds the request back, so
+`pending` stays `false` and `items` stays empty until a caller names a subject.
 
 **Keywords:** checklist, generateObject, suggestion-fuel
 
@@ -1431,7 +1437,10 @@ type ChecklistOutput = {
 
 ## `suggestable/question.tsx`
 
-Generates a clarifying question with optional multiple-choice options.
+Generates a clarifying question with optional multiple-choice options. The topic
+is what asks for the question: with none given the pattern holds the request
+back, so `pending` stays `false` and both `question` and `options` stay empty
+until a caller names a subject.
 
 **Keywords:** question, generateObject, suggestion-fuel
 
@@ -1459,7 +1468,9 @@ type QuestionOutput = {
 ## `suggestable/diagram.tsx`
 
 Generates an ASCII diagram illustrating relationships, flows, or structures.
-Rendered in a `<pre>` tag with monospace styling.
+Rendered in a `<pre>` tag with monospace styling. The topic is what asks for the
+diagram: with none given the pattern holds the request back, so `pending` stays
+`false` and `diagram` stays empty until a caller names a subject.
 
 **Keywords:** diagram, ASCII, generateText, suggestion-fuel
 
@@ -1485,7 +1496,10 @@ type DiagramOutput = {
 ## `suggestable/svg-diagram.tsx`
 
 Generates an SVG diagram illustrating relationships, flows, or structures.
-Rendered via `<cf-svg>` web component for scalable vector output.
+Rendered via `<cf-svg>` web component for scalable vector output. The topic is
+what asks for the diagram: with none given the pattern holds the request back,
+so `pending` stays `false` and `diagram` stays empty until a caller names a
+subject.
 
 **Keywords:** diagram, SVG, generateText, suggestion-fuel, cf-svg
 

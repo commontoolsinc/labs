@@ -127,13 +127,10 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
    * fault in the code doing the decoding does not come back to a caller
    * disguised as malformed input.
    *
-   * The commonest thing to hand this is a refusal of the serialized form
-   * itself, from a format's own entry points, which reach a conversion without
-   * passing through `decode()` -- `JsonCodecEngine`'s byte pair, for one. Such
-   * a form is data off a channel like any other, so being the wrong shape for
-   * this format is a malformation of the same kind as a bad state inside a
-   * well-formed one, and settles the same way. Nothing here is specific to
-   * that case.
+   * A refusal of the serialized form itself arrives here too. Such a form is
+   * data off a channel like any other, so being the wrong shape for this
+   * format is a malformation of the same kind as a bad state inside a
+   * well-formed one, and settles the same way.
    *
    * @throws Whatever it was given, if this act is not lenient or the throw was
    *   not a `ProblematicStateError`.

@@ -6,9 +6,9 @@
  * sentinel in place of a codec.
  *
  * A registry is mutable while it is being assembled and immutable once frozen,
- * and that is a safety property rather than a convenience. A codec holds the
+ * and that is a safety property rather than a convenience. An engine holds the
  * registry it was constructed with, so one handed out unfrozen could gain a
- * registration underneath a codec already relying on it. Building further on a
+ * registration underneath an engine already relying on it. Building further on a
  * frozen registry means extending it into a new one.
  */
 
@@ -80,8 +80,8 @@ function constructorOf(
  *
  * An instance is mutable while it is being built and immutable once
  * `Object.freeze()`d: every mutator refuses on a frozen instance. Freezing is
- * how a registry becomes safe to hand out, since a codec holds the registry it
- * was constructed with and would otherwise see a later registration. Use
+ * how a registry becomes safe to hand out, since an engine holds the registry
+ * it was constructed with and would otherwise see a later registration. Use
  * {@link #extend} to build on one that is already frozen.
  */
 export class CodecRegistry<Encoded> {

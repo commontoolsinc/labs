@@ -1,9 +1,9 @@
 /**
  * Syntax of a codec type tag: a type name, `@`, and a version number. The name
- * is `UpperCamelCase` -- an uppercase letter followed by letters and digits --
- * and the version is a positive integer with no leading zero. Section 2 of
- * `3-json-encoding.md` is where that convention is written down; this is the
- * check that holds every format to it.
+ * is `UpperCamelCase` -- an uppercase ASCII letter followed by ASCII letters
+ * and digits -- and the version is a decimal integer with no leading zero.
+ * Section 2 of `3-json-encoding.md` is where that syntax is written down; this
+ * is the check that holds every format to it.
  */
 const CODEC_TYPE_TAG_SYNTAX = /^[A-Z][A-Za-z0-9]*@[1-9][0-9]*$/;
 

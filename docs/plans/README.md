@@ -103,3 +103,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   do one job under two names. Separate from the read-layer plan because it
   renames rather than adds, so its risk is what breaks for a caller who already
   learned the current spelling.
+- [Tracking every test run](test-run-telemetry.md) designs a record of every
+  execution of every test — outcome, duration, commit, and run context — with
+  a refactor-stable identity scheme, a spool-then-one-upload reporting path,
+  a publicly readable storage bucket appendable only with keys that cannot
+  alter what was already recorded, a GitHub-anchored self-service path for
+  contributors' keys, and an adoption path for the organization's other
+  repositories.

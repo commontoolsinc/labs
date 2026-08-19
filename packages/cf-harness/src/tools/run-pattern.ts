@@ -2,6 +2,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import {
   type Cell,
   compileAndSavePattern,
+  getPatternIdentityRef,
   validateSlug,
 } from "@commonfabric/runner";
 import { validateAgainstSchema } from "@commonfabric/runner/cfc";
@@ -22,6 +23,7 @@ import {
 } from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import { fabricRuntimeObservations } from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
   isSealedOpaqueLinkObject,
@@ -120,6 +122,18 @@ export interface RunPatternToolErrorOutput {
   outputId: string;
   status: "compile-error" | "error" | "cancelled";
   message: string;
+  /**
+   * The durable piece a post-persistence failure leaves behind, for the
+   * persisted artifact's run-to-piece provenance. Stripped from the
+   * model-facing rendering like the success output's `pieceId`.
+   */
+  pieceId?: string;
+  /**
+   * The failing computation's own message, retained for the persisted
+   * artifact and stripped from the model-facing rendering: a computation
+   * over data the model cannot read may carry that data in its thrown text.
+   */
+  rawCauseMessage?: string;
 }
 
 export type RunPatternToolOutput =
@@ -201,6 +215,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         value: {},
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
+        rawValue: {},
       },
       required: [
         "outputId",
@@ -219,6 +234,8 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           enum: ["compile-error", "error", "cancelled"],
         },
         message: { type: "string" },
+        pieceId: { type: "string" },
+        rawCauseMessage: { type: "string" },
       },
       required: ["outputId", "status", "message"],
       additionalProperties: false,
@@ -753,6 +770,10 @@ export const runPatternTool: HarnessToolDefinition<
         return mismatch;
       }
     }
+    // Position in the runtime's observation stream before the piece exists,
+    // so the post-settle read covers exactly this invocation's window.
+    const observations = fabricRuntimeObservations(pieces.runtime);
+    const observationStart = observations.sequence();
     let piece: PieceController<unknown>;
     try {
       // Deliberately unregistered: no `pieces.add()` and no default-pattern
@@ -921,6 +942,74 @@ export const runPatternTool: HarnessToolDefinition<
         linkedStringCount = sanitized.linkedStringCount;
       } catch (error) {
         valueError = errorMessage(error);
+      }
+    }
+    // A result that settled to nothing is not a success to report. When the
+    // sanitized value failed its schema, or the raw result holds no fields of
+    // its own beyond the framework keys, the runtime's observation window
+    // says why: an action error attributed to this piece names the failing
+    // computation, and a non-settling episode names the other observed shape
+    // — actions deferred past the convergence budget, which is what both a
+    // reactive cycle and a policy-refused commit look like from here. The
+    // refusal reason itself has no channel of its own, so the message names
+    // the shapes rather than claiming to know which one happened.
+    const inertResultKeys = isObjectNotArray(rawValue)
+      ? Object.keys(rawValue).filter((key) => !key.startsWith("$"))
+      : undefined;
+    const resultAbsent = rawValue === undefined || rawValue === null ||
+      (inertResultKeys !== undefined && inertResultKeys.length === 0);
+    if (valueError !== undefined || resultAbsent) {
+      const pieceErrors = observations.errorsSince(observationStart, piece.id);
+      const registrationNote = registration !== undefined
+        ? `; the piece was registered at slug "${registration.slug}" and resolves to this broken result`
+        : "";
+      if (pieceErrors.length > 0) {
+        // The thrown text stays out of the model-facing message: a
+        // computation over data the model cannot read may carry that data in
+        // what it throws, so the artifact keeps the diagnostic and the model
+        // gets the fact of the failure.
+        return {
+          ...errorOutput(
+            "error",
+            `the pattern ran but a computation attributed to the created piece failed while settling and the result never landed; the failure text is retained in the run artifact and withheld here, since a computation's thrown message can carry the data it read${registrationNote}`,
+          ),
+          pieceId: piece.id,
+          rawCauseMessage: pieceErrors[0].message,
+        };
+      }
+      // A convergence-budget episode is claimed only when its deferred-action
+      // labels name this pattern's module identity — an unrelated piece
+      // churning during this invocation's settle window is not evidence
+      // about this one. Module identity is as fine as the labels resolve:
+      // another live piece created from the same source shares it, so the
+      // message says "this pattern's module" rather than claiming the
+      // episode as this piece's own. An episode lists at most its first ten
+      // deferred actions, so a wide episode can omit this pattern and
+      // under-report, which falls back to the plain ok-with-valueError
+      // rather than misattributing.
+      // The scheduler composes deferred-action ids as
+      // `cf:module/<identity>:<symbol>:<instanceKey>` from the same entry
+      // ref this meta stamp stores, so the match is on that composed prefix
+      // rather than a bare substring — a representation drift on either
+      // side fails the settle-cause test that drives this path, loudly.
+      const patternIdentity = getPatternIdentityRef(resultCell)?.identity;
+      const ownEpisodes = patternIdentity === undefined
+        ? []
+        : observations.episodesSince(observationStart).filter((episode) =>
+          episode.deferredActions.some((label) =>
+            label.includes(`cf:module/${patternIdentity}:`)
+          )
+        );
+      if (ownEpisodes.length > 0) {
+        return {
+          ...errorOutput(
+            "error",
+            `the pattern ran but its result never landed: while it settled, the scheduler deferred ${
+              ownEpisodes[ownEpisodes.length - 1].deferredActionCount
+            } action(s) of this pattern's module past its convergence budget — this piece's own, or another live piece created from the same source in an earlier attempt. A reactive cycle, a non-idempotent computation, or a write the space's policy refuses all produce this shape${registrationNote}`,
+          ),
+          pieceId: piece.id,
+        };
       }
     }
     return {

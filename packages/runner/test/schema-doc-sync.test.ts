@@ -20,6 +20,7 @@ import {
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../src/schema-registry.ts";
+import { setContentAddressedSchemasConfig } from "../src/schema-doc-config.ts";
 import { resolveSchema } from "../src/schema.ts";
 import { LINK_V1_TAG, type URI } from "../src/sigil-types.ts";
 import { defer } from "@commonfabric/utils/defer";
@@ -621,5 +622,66 @@ describe("schema-doc-sync", () => {
       "synthetic destroyNow failure",
     );
     await storage.closeNow();
+  });
+
+  it("sends a selector reference once its closure is resident, and the server resolves it", async () => {
+    setContentAddressedSchemasConfig(true);
+    try {
+      const schema: JSONSchemaObj = {
+        type: "object",
+        properties: { selectorField: { $ref: "#/$defs/SelectorLeaf" } },
+        $defs: {
+          SelectorLeaf: {
+            type: "object",
+            properties: { selectorLeafField: { type: "string" } },
+          },
+        },
+      };
+      const decomposed = decomposeSchema(schema);
+      await writeSchemaDocs(decomposed);
+      await writeDocs({
+        "of:selector-target": {
+          selectorField: { selectorLeafField: "resident" },
+        } as FabricValue,
+      });
+
+      const provider = readerStorage.open(space);
+      // Cold: the closure is not in the replica yet, so this sync falls
+      // back to the inline form (a wrongly emitted reference would be
+      // answered with a loud QueryError, failing this expect).
+      const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+      const cold = await provider.sync("of:selector-target" as URI, {
+        path: [],
+        schema,
+      });
+      expect(cold.error).toBeUndefined();
+      await readerStorage.synced();
+
+      // Deliver the closure so the replica holds it...
+      const pull = await provider.sync(`cid:${rootHash}` as URI, {
+        path: [],
+        schema: false,
+      });
+      expect(pull.error).toBeUndefined();
+      await readerStorage.synced();
+
+      // ...and the same logical sync now emits a reference — the server
+      // validates it against the space's store and resolves the traversal
+      // through it, or answers loudly if it could not.
+      const warm = await provider.sync("of:selector-target" as URI, {
+        path: [],
+        schema,
+      });
+      expect(warm.error).toBeUndefined();
+      await readerStorage.synced();
+      const stored = (provider as unknown as {
+        get: (uri: URI) => { value?: unknown } | undefined;
+      }).get("of:selector-target" as URI);
+      expect(stored?.value).toEqual({
+        selectorField: { selectorLeafField: "resident" },
+      });
+    } finally {
+      setContentAddressedSchemasConfig(false);
+    }
   });
 });

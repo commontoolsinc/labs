@@ -69,6 +69,35 @@ Prefer whichever names the smaller surface. A reference that is only compared
 wants `unknown`; one whose title is rendered wants a two-field projection, not
 the piece.
 
+### A pattern's own screen is not a reference
+
+`[UI]` on a pattern's result holds the tree that pattern built, not a pointer at
+a tree somewhere else. Declare it `VNode`.
+
+```typescript
+// Shown as interface or class members.
+[NAME]: string;
+[UI]: VNode;
+```
+
+Declared `unknown`, that screen still renders: the renderer reads a piece's
+`$UI` under a schema of its own rather than under the pattern's declared result
+schema. The loss shows up wherever the tree is read as a value instead — a
+pattern that reads another pattern's screen, a pattern test that inspects one —
+and what those get is an empty object.
+
+The consuming side of the same field goes the other way, and the two
+declarations are independent of each other. A pattern that takes another
+pattern's result as an argument and only renders it declares that position
+`unknown`, which is what keeps it a reference to the sub-piece's own screen
+rather than a copy, so the controls in it stay bound to the piece that owns
+them. `packages/patterns/record.tsx` reads the settings screen its sub-pieces
+export this way. An argument declaration also has to keep accepting every value
+it accepted before, which a narrower one does not, so a consumer view of a
+result type holds `unknown` even where the producing type names `VNode`;
+`BackwardsCompatibleProfile` in `packages/patterns/system/profile-home.tsx` is
+the worked example.
+
 ### `unknown` is not `any`
 
 They admit the same values and mean opposite things here. `any` says "fetch it

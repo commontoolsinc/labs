@@ -122,6 +122,7 @@ import {
 import * as V2Transaction from "./v2-transaction.ts";
 import {
   compactWatchEntries,
+  externalizeSyncSelector,
   normalizeSyncEntries,
   normalizeSyncSelector,
   watchIdForEntry,
@@ -1805,7 +1806,12 @@ class Provider implements IStorageProvider {
     selector?: SchemaPathSelector,
     scope?: CellScope,
   ): Promise<Result<Unit, Error>> {
-    const normalizedSelector = normalizeSyncSelector(selector);
+    // Externalization happens where requests enter, so request dedup, watch
+    // ids, and session-resume replay all see one selector form.
+    const normalizedSelector = externalizeSyncSelector(
+      normalizeSyncSelector(selector),
+      (hash) => this.replica.isSchemaDocPersisted(hash),
+    );
     const key = docKey(uri, scope);
     let requests = this.#syncRequests.get(key);
     if (requests === undefined) {
@@ -4256,6 +4262,8 @@ class SpaceReplica implements ISpaceReplica {
           );
         }
       }
+      // Link positions only — an `$alias`-shaped record in an arriving
+      // document is plain data, never a delivery obligation.
       mapLinkSchemas(doc as FabricValue, (schema) => {
         for (
           const hash of collectExternalSchemaRefHashes(schema as JSONSchema)
@@ -4286,6 +4294,27 @@ class SpaceReplica implements ISpaceReplica {
         );
       }
     }
+  }
+
+  /**
+   * Whether this replica holds SERVER-CONFIRMED verified content for
+   * `cid:<hash>` — the emission gate for selector references: a confirmed
+   * document arrived by delivery or by an acknowledged commit, so the
+   * space's server holds it, and content addressing means it can never
+   * change. The confirmed layer specifically: a pending local write is
+   * visible through `getDocument` before the server has it, and a
+   * reference emitted on that evidence races the commit and is answered
+   * with the loud selector error. Confirmation is replica/host-local: it
+   * relies on the provisional route not changing after observable reads
+   * (CT-2046 tracks enforcing that broadly).
+   */
+  isSchemaDocPersisted(hash: string): boolean {
+    const record = this.#docs.get(docKey(`cid:${hash}` as URI, undefined));
+    const doc = record?.confirmed.value;
+    if (!isObjectNotArray(doc)) return false;
+    const value = (doc as { value?: unknown }).value;
+    return isSubschema(value) &&
+      internSchemaAsTaggedHashString(value as JSONSchema) === hash;
   }
 
   /**

@@ -65,7 +65,12 @@ Deno.test("diffFiles: new / deleted / renamed / binary summaries", () => {
       "",
     ].join("\n"),
   );
-  assertEquals(created[0].summary.text, "▸ new.ts  (new)  +2 −0");
+  assertEquals(created[0].summary.text, "▸ new.ts  +2 (new)");
+  assertEquals(created[0].summary.spans.at(-1), {
+    col: 10,
+    text: "+2 (new)",
+    cls: "diffAdd",
+  });
 
   const deleted = diffFiles(
     [
@@ -79,7 +84,12 @@ Deno.test("diffFiles: new / deleted / renamed / binary summaries", () => {
       "",
     ].join("\n"),
   );
-  assertEquals(deleted[0].summary.text, "▸ gone.ts  (deleted)  +0 −2");
+  assertEquals(deleted[0].summary.text, "▸ gone.ts  −2 (deleted)");
+  assertEquals(deleted[0].summary.spans.at(-1), {
+    col: 11,
+    text: "−2 (deleted)",
+    cls: "diffDel",
+  });
 
   const renamed = diffFiles(
     [
