@@ -112,11 +112,39 @@ relative value. Record the reason in this plan.
   [August 2026 report](../history/packages/cli/cf-view-parser-adapter-spike-2026-08.md)
   records the measurements and leaves the decision to the next item.
 - [x] Record the parser decision before the remaining Stage 2 work.
-- [ ] Before the first Tree-sitter-backed implementation, measure the lazy
+- [x] Before the first Tree-sitter-backed implementation, measure the lazy
   selected-language path and record accepted maximums for 95th-percentile
   initialization, full highlighting, and incremental editing; shipped parser
   bytes; downloaded or unpacked dependency bytes; owned non-generated adapter
   and workaround source lines; and parser-specific build and deployment steps.
+  The
+  [August 2026 operating-envelope report](../history/packages/cli/cf-view-tree-sitter-operating-envelope-2026-08.md)
+  records the measurements and raw samples.
+
+### Parser operating maximums
+
+The common adapter and every parser-backed language must stay within these
+limits on a comparable arm64 macOS machine. Timing uses a 100-kilobyte source
+and a warm dependency cache. Initialization starts at the first statement in a
+fresh Deno process and includes dynamic imports, runtime initialization, the
+selected grammar and query, and one empty highlight.
+
+| Dimension | Python measurement | Accepted maximum |
+| --- | ---: | ---: |
+| 95th-percentile lazy initialization | 40.36 ms | 75 ms |
+| 95th-percentile full highlighting | 32.65 ms | 50 ms |
+| 95th-percentile incremental edit and changed-line highlight | 1.44 ms | 5 ms |
+| Compiled `cf` increase | 12.03 MiB | 14 MiB for runtime and first grammar |
+| Unpacked dependencies | 11.96 MiB | 14 MiB for runtime and first grammar |
+| Owned source | 131 probe lines | 500 shipped lines |
+| Parser-specific build and deployment steps | 0 | 0 |
+
+Each later host grammar may add at most 10 MiB to both byte measures and 200
+owned source lines. The common runtime and the Python, Go, Bash, and HTML host
+grammars together may occupy at most 40 MiB and 1,000 owned source lines. Tests,
+fixtures, and generated code do not count toward the source limit. The separate
+nested-HTML measurement sets the limits for its CSS and JavaScript grammars
+before Stage 5.
 
 ### Parser decision
 
