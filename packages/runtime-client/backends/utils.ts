@@ -36,15 +36,6 @@ export function mapCellRefsToSigilLinks(value: unknown): any {
     // policy input.
     return stripSigilCfcLabelViews(value);
   } else if (typeof value === "object" && value) {
-    // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at
-    // which point this becomes a walk rather than a silent flattening. The
-    // rebuild below reads own enumerable properties, which for a fabric class
-    // are not its contents -- a `FabricBytes` arriving here leaves as `{}`,
-    // neither refused nor carried. What keeps that from happening today is
-    // `CellHandle.serialize()` in `../cell-handle.ts`, which refuses a
-    // `FabricSpecialObject` before it can reach this walk; the marker on
-    // `WireCellValue` in `../protocol/types.ts` states the same gap at the
-    // type.
     return Object.entries(value).reduce((acc: Record<string, any>, [k, v]) => {
       acc[k] = mapCellRefsToSigilLinks(v);
       return acc;
