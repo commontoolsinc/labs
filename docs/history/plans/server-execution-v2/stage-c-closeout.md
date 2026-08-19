@@ -45,8 +45,8 @@ beside this record (§11).
   #5968 — built, reviewed, fixed, ledgered; the lunch gate (#5969)
   RE-CHARACTERIZED as served-handler double dispatch — no production
   code, the skip STAYS listed, an owner ruling is owed; the tuning trio
-  (#5991) DONE — reviewed, fixed, every target met, its ledger comment
-  still pending (§3).
+  (#5991) DONE — reviewed (two rounds), fixed, every target met, its
+  ledger comment posted 2026-08-18 (§3).
 - **Benchmarks**: the first (fan-out B tip) — ON could not COMPLETE the
   two-user journeys; the attribution named the mechanisms; the tuning
   trio fixed completion; the re-benchmark (trio tip) — ON completes
@@ -103,8 +103,9 @@ Ledgers: #5968 carries the coordinator-round independent review as its
 one comment (MAJOR-A supersession wedge, MAJOR-B fan-out cardinality 2,
 MINOR-C `createRef` — all fixed as `463ea3887`; three owed rows minted
 there: `OW28-supersession-family`, `OW28-instance-family`,
-`OW28-createRef`). #5969 and #5991 have no ledger comment yet (#5991's
-is the pending bookkeeping item).
+`OW28-createRef`). #5991's ledger comment was posted 2026-08-18
+(<https://github.com/commontoolsinc/labs/pull/5991#issuecomment-5337935897>;
+§3.3). #5969 has no ledger comment yet.
 
 ## 2. The owner's landing posture — and what it changes
 
@@ -190,7 +191,7 @@ arrival-gate revisit ruled KEEP (the gate is client-side; the fan-out
 fixes are server-side; live + unit evidence). Review:
 [`stage-c/stage-c-lunch-review-report.md`](stage-c/stage-c-lunch-review-report.md).
 
-### 3.3 The tuning trio (#5991) — DONE; ledger pending
+### 3.3 The tuning trio (#5991) — DONE; ledger posted 2026-08-18
 
 The owner-approved TUNING half of the attribution's split (§4), each
 item re-measured on the harness protocol with NO configured LLM model:
@@ -231,11 +232,20 @@ item re-measured on the harness protocol with NO configured LLM model:
 Review: [`stage-c/stage-c-tuning-review-report.md`](stage-c/stage-c-tuning-review-report.md)
 (no blocker; 1 MAJOR-latent + 8 minors, all dispositioned; the fan-out
 yield removed after its double-emission repro; the late-echo cascade and
-effects arms added; tests hardened). Register: the "Stage C tuning
-delta (2026-08-18)" in `verification-coverage.md` §3 carries the final
-numbers. Suites (foreground): runner 1 209 / 0 failed, memory 521,
-toolshed 142, runtime-client 61, piece 37, spec-model 23; the ON-lane
-danger sets green; skip-list validator 17/17.
+effects arms added; tests hardened). A SECOND, independent adversarial
+review of the tip `2e9d86478` followed —
+[`stage-c/stage-c-tuning-independent-review.md`](stage-c/stage-c-tuning-independent-review.md)
+(LANDABLE-WITH-FIXES; MINOR-1/2/3 addressed at `b54bf5215` — the
+register reconciled to the final binaries, the seal→outcome-window pin,
+the T2 row's explicit "pending owner ratification"; the pre-existing
+effect-channel flake recorded, not fixed; recovered on-branch on
+2026-08-18 after the handoff). Ledger comment POSTED 2026-08-18:
+<https://github.com/commontoolsinc/labs/pull/5991#issuecomment-5337935897>.
+Register: the "Stage C tuning delta (2026-08-18)" in
+`verification-coverage.md` §3 carries the final numbers. Suites
+(foreground): runner 1 209 / 0 failed, memory 521, toolshed 142,
+runtime-client 61, piece 37, spec-model 23; the ON-lane danger sets
+green; skip-list validator 17/17.
 
 ### 3.4 Benchmark → attribution → re-benchmark
 
@@ -450,7 +460,8 @@ itself (§5).
 ## 9. Ordered next actions (as understood at the handoff; the plan is live)
 
 1. Bookkeeping: #5991's ledger comment (the trio's independent review
-   verdict + fix batch, as #5968's has).
+   verdict + fix batch, as #5968's has). DONE 2026-08-18 — posted
+   (§3.3); the second review round's report recovered on-branch (§11).
 2. The design pass: the convener's `stage-c-design.md`; the owner's
    rulings on §7's set; then the two redesigns (structural walk; the
    storage-notification intent listener, schema-narrowed sink as
@@ -536,6 +547,11 @@ itself (§5).
   — #5969's two-round self-review.
 - [`stage-c-tuning-review-report.md`](stage-c/stage-c-tuning-review-report.md)
   — #5991's adversarial review + builder disposition.
+- [`stage-c-tuning-independent-review.md`](stage-c/stage-c-tuning-independent-review.md)
+  — #5991's second review round: the independent adversarial review of
+  the tip `2e9d86478` (LANDABLE-WITH-FIXES; MINOR-1/2/3 → `b54bf5215`),
+  recovered verbatim from the coordinator's session transcript (added
+  after the handoff, 2026-08-18).
 - [`stage-c-ow31-scope-report.md`](stage-c/stage-c-ow31-scope-report.md)
   — the OW31 write-authority scoping report behind the 2026-08-18
   ruling (added after the handoff; the register's OW31 row carries the

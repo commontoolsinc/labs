@@ -3627,7 +3627,10 @@ supply; OW29/OW32/OW34 closed):
     grant is flag-gated; OFF uses the configured list verbatim). The
     READ-side replacement (a read-only service class) is the
     recommendation on file, not yet ruled.
-  - Not rows, recorded: #5991's ledger comment is pending; the design
+  - Not rows, recorded: #5991's ledger comment POSTED 2026-08-18
+    (<https://github.com/commontoolsinc/labs/pull/5991#issuecomment-5337935897>;
+    the second review round's report recovered on-branch beside the
+    closeout, `stage-c/stage-c-tuning-independent-review.md`); the design
     pass's reconciled report (`stage-c-design.md`) LANDED 2026-08-18 as
     a LIVE design + build work order at
     `docs/plans/server-execution-v2/stage-c-design.md` (the design-pass

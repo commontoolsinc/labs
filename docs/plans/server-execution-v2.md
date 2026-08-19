@@ -78,7 +78,10 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   divergent client echo the arrival gate strands; no production code;
   the dossier is the PR's Flag 1; the invariant RULED 2026-08-18 and
   the late-echo rule RATIFIED (below); the arrival gate KEEP.
-- **The tuning trio (#5991) — DONE, ledger comment pending**: T1 one CFC
+- **The tuning trio (#5991) — DONE, ledger comment POSTED 2026-08-18
+  (<https://github.com/commontoolsinc/labs/pull/5991#issuecomment-5337935897>;
+  the second review round's report recovered on-branch beside the
+  closeout, `stage-c/stage-c-tuning-independent-review.md`)**: T1 one CFC
   probe per commit; T2 retirement on arrival + the late-echo rule; T3
   honest deadline + mid-wave renew; the drain's in-flight guard. Every
   target met: two-browsers gate 16/16 at night-like conditions,
@@ -103,7 +106,8 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   settle time EXPLICITLY (register OW38); the flip's performance BAR is
   an owner ruling.
 - **The design pass — report LANDED; ruling set ACCEPTED 2026-08-18
-  (owner, verbatim: "ruling set is accepted"); W0 is NEXT. Design (d)
+  (owner, verbatim: "ruling set is accepted"); W0 is RUNNING (launched
+  2026-08-18 — see the ordered next actions below). Design (d)
   SUPERSEDED by (d′) per owner direction 2026-08-18 (same day).** The
   reconciled design is
   [`server-execution-v2/stage-c-design.md`](server-execution-v2/stage-c-design.md)
@@ -186,11 +190,19 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   resolution for linked pieces' writers; `#demandersFor`'s key scan;
   the monotone growth of `trackedIds`.
 
-**Ordered next actions:** (1) #5991's ledger comment; (2) the design
-BUILD stage per the design's §6 work order — the §5 rulings are DONE
-(ruling set ACCEPTED 2026-08-18; the (d′) demand sentence landed) →
-**W0 is next**: (d′)'s refutation experiment (and (e)'s), scratch,
-nothing pushed → (d′) (or its fallback), (e), (α) as a train →
+**Ordered next actions:** (1) #5991's ledger comment — DONE 2026-08-18
+(posted; the second review round's report recovered on-branch); (2) the
+design BUILD stage per the design's §6 work order — the §5 rulings are
+DONE (ruling set ACCEPTED 2026-08-18; the (d′) demand sentence landed) →
+**W0 is RUNNING (launched 2026-08-18)**: (d′)'s refutation experiment
+on a detached worktree off `ed9e1cb2c`, scratch branch
+`claude/server-exec-v2-w0-dprime-scratch` (no PR); its report lands at
+`docs/history/plans/server-execution-v2/stage-c/w0-dprime-report.md`
+(cherry-picked onto this branch when it lands; durable copy at
+`/Users/berni/labs-worktrees/w0-dprime-report.md`); (e)'s own W0 (the
+one-line-schema sink probe) is deliberately DEFERRED to be W2's first
+step, so it does not load the box during (d′)'s settle measurements →
+(d′) (or its fallback), (e), (α) as a train →
 re-benchmarked measuring server settle time; (3) the
 CONFIDENCE VERDICT to the owner; (4) on "no fundamental issue", land
 the train on main with the flag OFF (siblings stacked; default lanes
