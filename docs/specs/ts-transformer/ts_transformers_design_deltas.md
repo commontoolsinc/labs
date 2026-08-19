@@ -153,9 +153,11 @@ each finding:
   argument, a computation over the read, and a call whose receiver chain
   reaches it are all accepted, terminal or not, and parentheses, the
   computed-key spelling, and the optional spellings do not change the
-  classification. A read with no such site — statement position, a reactive
-  array-method callback, or a plain (non-reactive) array-method callback —
-  remains outside the language, as does a read on a value that is not a cell.
+  classification. A read with no such site — statement position, or a
+  reactive array-method callback, whose callback becomes a sub-pattern over
+  per-element cells — remains outside the language, as does a read on a value
+  that is not a cell. Addendum 4 carries the same reasoning into a plain-array
+  value callback, which does supply a site.
 
   What settled it: the matrix already blessed the JSX spelling, so the earlier
   rule was really "no eager reads outside JSX" — which made extracting a JSX
