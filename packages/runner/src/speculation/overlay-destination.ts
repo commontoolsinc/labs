@@ -79,6 +79,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import {
   type CellScope,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
+  type StreamEventEntry,
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import type { Runtime, ServerRunInfo } from "../runtime.ts";
@@ -96,6 +97,7 @@ import type {
 } from "../storage/interface.ts";
 import type { CommitError } from "../storage/interface.ts";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
+import { CoalescedDocListener } from "./doc-notification-listener.ts";
 
 const logger = getLogger("speculation-overlay", {
   enabled: true,
@@ -128,29 +130,6 @@ export const speculationRunContextOf = (
  * deliberately, with its spec edit (protocol.md §5's FORBIDDEN list),
  * never by default. */
 const SPECULATION_ENACTABLE_EFFECT_KINDS = new Set(["navigateTo"]);
-
-/** W0 (e) interim (b): the intent sink's narrowed schema — the entry
- * fields the notice scan reads and nothing else. `additionalProperties`
- * deliberately UNSET (false would route unlisted properties through
- * descend() and record a shape read first). */
-const INTENT_SINK_SCHEMA = {
-  type: "object",
-  properties: {
-    entries: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          eventId: { type: "string" },
-          consequenced: { type: "boolean" },
-          error: { type: "string" },
-          status: { type: "string" },
-          reason: { type: "string" },
-        },
-      },
-    },
-  },
-} as const;
 
 /** A terminal event-intent outcome the client is SIGNALED about
  * (events.md §5): dropped (the conflicting-discharge notice), errored
@@ -280,16 +259,41 @@ export class SpeculationOverlayDestination
   #lateEchoDrops = 0;
   /** space -> last observed watermark (for registration-time sweeps). */
   readonly #watermarks = new Map<MemorySpace, number>();
-  /** Fired-intent notice watch (events.md §5, speculation.md §5):
-   * space -> sidecarId -> eventIds awaiting their consequence signal.
-   * Bounded by pending-intent count; the sidecar sink releases when its
-   * last tracked id resolves. */
+  /** Fired-intent notice watch (events.md §5, speculation.md §4 step 2,
+   * §5): space -> sidecarId -> eventIds awaiting their consequence
+   * signal — the OUTSTANDING set, which is the spec's own bound (§5:
+   * "overlay memory is bounded by pending-intent count"). Never
+   * persisted, never sent, drains to zero: not a processed-events table
+   * (events.md §4). */
   readonly #trackedIntents = new Map<
     MemorySpace,
     Map<string, Set<string>>
   >();
-  /** space\0sidecarId -> cancel fn for the sidecar-doc sink. */
-  readonly #intentSinks = new Map<string, () => void>();
+  /** The intent LISTENER (server-execution v2 stage C design (e), RULED
+   * 2026-08-18): ONE non-reactive storage-notification subscription per
+   * overlay, installed by `trackIntent` while any intent is outstanding
+   * and released when the set empties (or on close). It replaces the
+   * schema-less whole-sidecar `cell.sink` — a scheduler effect that
+   * re-read every entry (following payload links) and paid the CFC
+   * probe over that read set on EVERY sidecar change, O(entries²) per
+   * change (the attribution's dominant client term). Per notification:
+   * O(changes) map lookups; per check: O(outstanding + hinted indices),
+   * one raw replica read, ZERO transactions, ZERO probes, ZERO scheduler
+   * runs, no demand edge. */
+  #intentListener: CoalescedDocListener | undefined;
+  /** space\0sidecarId -> per-sidecar check state: entry-index HINTS the
+   * differential's leaf paths named since the last check (a mark on
+   * entry i arrives as `["value","entries","<i>","consequenced"]`),
+   * VERIFIED against the entry's eventId at check time — an index can
+   * move (a re-append lands behind concurrent entries; compaction, when
+   * built, shifts the tail down), so a hint is never trusted unread. */
+  readonly #intentSidecarStates = new Map<string, { hints: Set<number> }>();
+  /** DIAGNOSTIC counters (tests; the `commonfabric.*` surface reads the
+   * logger keys — `speculation-overlay/intent-*`). */
+  #intentCheckCount = 0;
+  #intentCheckVisits = 0;
+  #intentCheckMaxVisits = 0;
+  #intentListenerInstalls = 0;
   /** Subscribers to terminal intent outcomes — the events.md §5 "the
    * client MUST be signaled so the UI can react" hook. */
   readonly #intentOutcomeSubscribers = new Set<
@@ -343,6 +347,46 @@ export class SpeculationOverlayDestination
    * rule). */
   get lateEchoDropCount(): number {
     return this.#lateEchoDrops;
+  }
+
+  /** DIAGNOSTIC (tests): intents outstanding across every space — the
+   * `pendingIntents` gauge (design (e) §3.3 point 7). */
+  get pendingIntentCount(): number {
+    let count = 0;
+    for (const bySidecar of this.#trackedIntents.values()) {
+      for (const ids of bySidecar.values()) count += ids.size;
+    }
+    return count;
+  }
+
+  /** DIAGNOSTIC (tests): whether the intent listener is subscribed. */
+  get intentListenerInstalled(): boolean {
+    return this.#intentListener?.installed === true;
+  }
+
+  /** DIAGNOSTIC (tests): times the intent listener was installed. */
+  get intentListenerInstallCount(): number {
+    return this.#intentListenerInstalls;
+  }
+
+  /** DIAGNOSTIC (tests): intent checks run (immediate + notified). */
+  get intentCheckCount(): number {
+    return this.#intentCheckCount;
+  }
+
+  /** DIAGNOSTIC (tests): sidecar entries VISITED across all checks — the
+   * `sidecarEntriesRead` witness (design pin 5): O(outstanding + hints)
+   * per notified check, never O(history). (The immediate check at
+   * `trackIntent` may walk the raw array once when it finds no entry
+   * for a fresh id — a plain JS array walk, no transaction, microseconds;
+   * `intentCheckMaxVisits` reports it.) */
+  get intentCheckVisits(): number {
+    return this.#intentCheckVisits;
+  }
+
+  /** DIAGNOSTIC (tests): the largest single check's visit count. */
+  get intentCheckMaxVisits(): number {
+    return this.#intentCheckMaxVisits;
   }
 
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>> {
@@ -735,14 +779,28 @@ export class SpeculationOverlayDestination
 
   /**
    * Watch a fired intent's stream sidecar until its consequence signal
-   * arrives (events.md §5; speculation.md §4 step 2, §5): the entry
-   * marked `consequenced` retires the echo; `status: "dropped"` (the
-   * conflicting-discharge notice) or an `error` consequence retires it
-   * AND signals subscribers — the UI hook the ruling requires. The
-   * watch reads the VALUE plane (the notice and the consequence mark
-   * are ordinary doc writes riding the same first flush as the
-   * consequences), so no commit-metadata carriage is needed; the
-   * watermark sweep stays the backstop for signals this misses.
+   * arrives (events.md §5; speculation.md §4 step 2, §5): the TRACKED
+   * entry marked `consequenced` retires the echo; `status: "dropped"`
+   * (the conflicting-discharge notice) or an `error` consequence retires
+   * it AND signals subscribers — the UI hook the ruling requires. The
+   * watch reads the VALUE plane: the tracked entry's own `consequenced`
+   * / `status` / `error` fields are the SANCTIONED client-side carrier
+   * of the pushed commit's `consequenceOf` (speculation.md §4 step 2,
+   * RULED 2026-08-18 — T7 semantics: written as the event's consequence,
+   * retiring with the entry at compaction; never a dependency on
+   * HISTORY; the entry is read only for the tracked event, and for a
+   * dropped event's reason). The watermark sweep stays the backstop
+   * (`W ≥ seq(e)`) for signals this misses.
+   *
+   * Mechanism (stage C design (e), RULED 2026-08-18): (i) the sidecar is
+   * kept WATCHED — the client keeps a stream subscribed while it has
+   * intents outstanding on it (speculation.md §4) — through the same
+   * schema-less selector `syncCell` uses; (ii) ONE storage-notification
+   * listener per overlay learns THAT the sidecar changed and WHERE (the
+   * differential's leaf paths); (iii) a coalesced MICROTASK check
+   * re-reads the raw replica doc and locates each outstanding id by
+   * verified hint, else by a backward scan from the tail. No scheduler
+   * effect, no transaction, no CFC probe, no demand edge.
    */
   trackIntent(
     space: MemorySpace,
@@ -761,49 +819,172 @@ export class SpeculationOverlayDestination
       bySidecar.set(sidecarId, ids);
     }
     ids.add(eventId);
-    const sinkKey = `${space}\0${sidecarId}`;
-    if (this.#intentSinks.has(sinkKey)) return;
+    const key = `${space}\0${sidecarId}`;
+    if (!this.#intentSidecarStates.has(key)) {
+      this.#intentSidecarStates.set(key, { hints: new Set() });
+      this.#watchIntentSidecar(space, sidecarId);
+    }
+    // The IMMEDIATE raw check (design contract point 2(iii)): a
+    // duplicate fire whose consequence already landed (a re-delivered
+    // caller-supplied event id — round-2 thread T25) resolves HERE, and
+    // the listener is installed only while ids remain tracked, so such a
+    // fire leaks no subscription.
+    this.#checkIntents(space, sidecarId, []);
+    if (this.#trackedIntents.size > 0) this.#ensureIntentListener();
+  }
+
+  /** Keep the sidecar doc watched (contract point 2(ii)) — the
+   * schema-less selector `syncCell` uses for a schema-less cell (the
+   * doc itself, no link following); an already-covered watch is a
+   * no-op at the replica. Best-effort: on failure the echo's retirement
+   * rides the watermark backstop only, loudly. */
+  #watchIntentSidecar(space: MemorySpace, sidecarId: string): void {
     try {
-      // W0 (e) INTERIM (b) — the schema-narrowed sink (design §3.3 (b)):
-      // properties listed, `additionalProperties` UNSET, so unlisted
-      // properties (payload, stream, firedAt, ...) are not descended, no
-      // read, no link followed — O(E) per fire instead of O(E²), the
-      // demand leak closed. Scratch: the W0 gate's measurement arm.
-      const cell = this.#runtime.getCellFromLink<StreamEventsDocValue>({
-        space,
-        id: sidecarId as never,
-        scope: "space",
-        path: [],
-      }, INTENT_SINK_SCHEMA);
-      const cancel = cell.sink((value) => {
-        this.#scanIntentNotices(
-          space,
-          sidecarId,
-          value as StreamEventsDocValue | undefined,
-        );
-      });
-      // The sink's IMMEDIATE callback may have resolved the last
-      // tracked id (a duplicate fire whose consequence already landed
-      // — round-2 thread T25): #untrackIntent then found no stored
-      // cancel to release, so storing it NOW would leak the sidecar
-      // subscription for the runtime's lifetime. Store only while ids
-      // remain tracked; cancel otherwise.
-      const stillTracked = this.#trackedIntents.get(space)?.get(sidecarId);
-      if (stillTracked === undefined || stillTracked.size === 0) {
-        try {
-          cancel();
-        } catch {
-          // best-effort: the sink resolved everything it was for
+      const pulled = this.#runtime.storageManager.open(space).sync(
+        sidecarId as URI,
+        { path: [], schema: false },
+        "space",
+      );
+      Promise.resolve(pulled).then((result) => {
+        if (result?.error !== undefined) {
+          logger.warn("intent-watch-failed", () => [
+            `intent sidecar watch for ${space} failed; echo retirement ` +
+            "for its events rides the watermark backstop only",
+            result.error,
+          ]);
         }
-      } else {
-        this.#intentSinks.set(sinkKey, cancel);
-      }
+      }, (error) => {
+        logger.warn("intent-watch-failed", () => [
+          `intent sidecar watch for ${space} failed; echo retirement ` +
+          "for its events rides the watermark backstop only",
+          error,
+        ]);
+      });
     } catch (error) {
-      logger.warn("intent-sink-failed", () => [
-        `intent sidecar sink for ${space} failed; echo retirement for ` +
+      logger.warn("intent-watch-failed", () => [
+        `intent sidecar watch for ${space} failed; echo retirement for ` +
         "its events rides the watermark backstop only",
         error,
       ]);
+    }
+  }
+
+  /** Install the ONE intent listener (contract point 2(i)) — idempotent.
+   * `wants` is a map lookup on the outstanding set; `onNotify` runs in a
+   * microtask (contract point 3) with the change paths since the last
+   * dispatch, from which the entry-index hints are taken. */
+  #ensureIntentListener(): void {
+    if (this.#intentListener !== undefined) return;
+    const listener = new CoalescedDocListener(this.#runtime.storageManager, {
+      // Sidecars are SPACE docs; a scoped instance of a same-named id
+      // (none exists) would not be this watch's subject.
+      wants: (space, id, scope) =>
+        (scope === undefined || scope === "space") &&
+        this.#trackedIntents.get(space)?.has(id) === true,
+      onNotify: (space, id, paths) => {
+        if (this.#closed) return;
+        if (id === undefined) {
+          // A storage reset: everything tracked in the space is dirty.
+          const bySidecar = this.#trackedIntents.get(space);
+          if (bySidecar === undefined) return;
+          for (const sidecarId of [...bySidecar.keys()]) {
+            this.#checkIntents(space, sidecarId, []);
+          }
+          return;
+        }
+        const hints: number[] = [];
+        for (const path of paths) {
+          if (path[0] !== "value" || path[1] !== "entries") continue;
+          const index = Number(path[2]);
+          if (Number.isInteger(index) && index >= 0) hints.push(index);
+        }
+        this.#checkIntents(space, id, hints);
+      },
+    });
+    listener.ensure();
+    this.#intentListener = listener;
+    this.#intentListenerInstalls += 1;
+    logger.debug("intent-listener-installed", () => [
+      "intent listener subscribed to storage notifications",
+    ]);
+  }
+
+  /** Release the listener (contract point 5): when the outstanding set
+   * empties, and on close(). No check runs after release. */
+  #releaseIntentListener(): void {
+    const listener = this.#intentListener;
+    if (listener === undefined) return;
+    this.#intentListener = undefined;
+    listener.release();
+    logger.debug("intent-listener-released", () => [
+      "intent listener released: no intents outstanding",
+    ]);
+  }
+
+  /**
+   * The check (contract point 4): re-read the RAW replica doc — no
+   * transaction, no query proxy — and, for each outstanding id on the
+   * sidecar, locate its entry by verified hint (`entries[i].eventId ===
+   * id`), else by a backward scan from the tail that stops when every
+   * outstanding id is located; an id whose entry is not present stays
+   * tracked (its append has not landed; the watermark backstop stands).
+   * Then today's arms, in today's order (`#applyIntentEntry`).
+   */
+  #checkIntents(
+    space: MemorySpace,
+    sidecarId: string,
+    hints: readonly number[],
+  ): void {
+    if (this.#closed) return;
+    const ids = this.#trackedIntents.get(space)?.get(sidecarId);
+    if (ids === undefined || ids.size === 0) return;
+    const state = this.#intentSidecarStates.get(`${space}\0${sidecarId}`);
+    for (const hint of hints) state?.hints.add(hint);
+    let entries: unknown;
+    try {
+      const document = this.#runtime.storageManager.open(space).replica
+        .getDocument(sidecarId as URI, "space");
+      entries = (document?.value as StreamEventsDocValue | undefined)
+        ?.entries;
+    } catch (error) {
+      logger.warn("intent-check-read-failed", () => [
+        `intent check could not read the sidecar ${sidecarId} in ${space}`,
+        error,
+      ]);
+      return;
+    }
+    this.#intentCheckCount += 1;
+    logger.debug("intent-check", () => [
+      `intent check on ${sidecarId} (${ids.size} outstanding)`,
+    ]);
+    if (!Array.isArray(entries)) return;
+    const pending = new Set(ids);
+    let visits = 0;
+    const consider = (candidate: unknown): void => {
+      visits += 1;
+      if (candidate === null || typeof candidate !== "object") return;
+      const entry = candidate as StreamEventEntry;
+      if (typeof entry.eventId !== "string" || !pending.has(entry.eventId)) {
+        return;
+      }
+      pending.delete(entry.eventId);
+      this.#applyIntentEntry(space, sidecarId, entry);
+    };
+    if (state !== undefined && state.hints.size > 0) {
+      const hinted = [...state.hints];
+      state.hints.clear();
+      for (const index of hinted) {
+        if (pending.size === 0) break;
+        if (index < entries.length) consider(entries[index]);
+      }
+    }
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (pending.size === 0) break;
+      consider(entries[index]);
+    }
+    this.#intentCheckVisits += visits;
+    if (visits > this.#intentCheckMaxVisits) {
+      this.#intentCheckMaxVisits = visits;
     }
   }
 
@@ -816,6 +997,9 @@ export class SpeculationOverlayDestination
     outcome: { kind: "refused"; reason: string },
   ): void {
     if (this.#closed) return;
+    logger.debug("intent-refused", () => [
+      `intent ${eventId} refused at discharge: ${outcome.reason}`,
+    ]);
     this.#untrackIntent(space, sidecarId, eventId);
     this.retireIntent(space, eventId);
     this.#settleIntentConsequence(space, eventId, {
@@ -911,55 +1095,68 @@ export class SpeculationOverlayDestination
     }
   }
 
-  #scanIntentNotices(
+  /** Today's arms, in today's order, on ONE tracked entry (design
+   * contract point 4): `status === "dropped"` → untrack, retire, settle
+   * `dropped`, notify; else `consequenced === true` → untrack, retire,
+   * settle `errored` (if `error`) or `consequenced`, notify `errored`
+   * if `error`. Anything else (the entry present but not yet processed)
+   * leaves the intent tracked. */
+  #applyIntentEntry(
     space: MemorySpace,
     sidecarId: string,
-    value: StreamEventsDocValue | undefined,
+    entry: StreamEventEntry,
   ): void {
-    const ids = this.#trackedIntents.get(space)?.get(sidecarId);
-    if (ids === undefined || ids.size === 0) return;
-    for (const entry of value?.entries ?? []) {
-      if (entry === null || typeof entry !== "object") continue;
-      if (typeof entry.eventId !== "string" || !ids.has(entry.eventId)) {
-        continue;
+    if (entry.status === "dropped") {
+      // The conflicting-discharge notice (events.md §5, LT4/T7): the
+      // echo un-renders instead of lingering as false state, and the
+      // UI is signaled.
+      logger.debug("intent-drop-notice", () => [
+        `dropped-event notice for ${entry.eventId}`,
+      ]);
+      logger.debug("intent-retired-by-consequence-of", () => [
+        `intent ${entry.eventId} resolved by its tracked entry (dropped)`,
+      ]);
+      this.#untrackIntent(space, sidecarId, entry.eventId);
+      this.retireIntent(space, entry.eventId);
+      this.#settleIntentConsequence(space, entry.eventId, {
+        kind: "dropped",
+        reason: entry.reason ?? "dropped",
+      });
+      this.#notifyIntentOutcome({
+        space,
+        eventId: entry.eventId,
+        kind: "dropped",
+        reason: entry.reason ?? "dropped",
+      });
+    } else if (entry.consequenced === true) {
+      if (entry.error !== undefined) {
+        logger.debug("intent-error-notice", () => [
+          `error consequence for ${entry.eventId}`,
+        ]);
       }
-      if (entry.status === "dropped") {
-        // The conflicting-discharge notice (events.md §5, LT4/T7): the
-        // echo un-renders instead of lingering as false state, and the
-        // UI is signaled.
-        this.#untrackIntent(space, sidecarId, entry.eventId);
-        this.retireIntent(space, entry.eventId);
-        this.#settleIntentConsequence(space, entry.eventId, {
-          kind: "dropped",
-          reason: entry.reason ?? "dropped",
-        });
+      logger.debug("intent-retired-by-consequence-of", () => [
+        `intent ${entry.eventId} resolved by its tracked entry ` +
+        `(${entry.error !== undefined ? "errored" : "consequenced"})`,
+      ]);
+      this.#untrackIntent(space, sidecarId, entry.eventId);
+      this.retireIntent(space, entry.eventId);
+      this.#settleIntentConsequence(
+        space,
+        entry.eventId,
+        entry.error !== undefined
+          ? { kind: "errored", reason: entry.error }
+          : { kind: "consequenced" },
+      );
+      if (entry.error !== undefined) {
+        // The handler threw server-side: the error IS the consequence
+        // (events.md §5) — the echo still retires, and subscribers
+        // hear the error outcome.
         this.#notifyIntentOutcome({
           space,
           eventId: entry.eventId,
-          kind: "dropped",
-          reason: entry.reason ?? "dropped",
+          kind: "errored",
+          reason: entry.error,
         });
-      } else if (entry.consequenced === true) {
-        this.#untrackIntent(space, sidecarId, entry.eventId);
-        this.retireIntent(space, entry.eventId);
-        this.#settleIntentConsequence(
-          space,
-          entry.eventId,
-          entry.error !== undefined
-            ? { kind: "errored", reason: entry.error }
-            : { kind: "consequenced" },
-        );
-        if (entry.error !== undefined) {
-          // The handler threw server-side: the error IS the consequence
-          // (events.md §5) — the echo still retires, and subscribers
-          // hear the error outcome.
-          this.#notifyIntentOutcome({
-            space,
-            eventId: entry.eventId,
-            kind: "errored",
-            reason: entry.error,
-          });
-        }
       }
     }
   }
@@ -975,17 +1172,13 @@ export class SpeculationOverlayDestination
     ids.delete(eventId);
     if (ids.size === 0) {
       bySidecar!.delete(sidecarId);
-      const sinkKey = `${space}\0${sidecarId}`;
-      const cancel = this.#intentSinks.get(sinkKey);
-      if (cancel !== undefined) {
-        this.#intentSinks.delete(sinkKey);
-        try {
-          cancel();
-        } catch {
-          // sink cancellation is best-effort
-        }
-      }
+      this.#intentSidecarStates.delete(`${space}\0${sidecarId}`);
       if (bySidecar!.size === 0) this.#trackedIntents.delete(space);
+      // The listener lives exactly as long as something is outstanding
+      // (contract point 5). The sidecar WATCH stays: a session's watch
+      // set is coarse by ruling (R-D), and the next fire on this stream
+      // is likely imminent.
+      if (this.#trackedIntents.size === 0) this.#releaseIntentListener();
     }
   }
 
@@ -1293,6 +1486,15 @@ export class SpeculationOverlayDestination
         }
         if (!arrived) continue;
         entries.delete(entry.localSeq);
+        if (entry.eventId !== undefined) {
+          // An intent-origin echo retired by W coverage — the BACKSTOP
+          // (speculation.md §4; design (e) item 9): the consequence
+          // signal on its tracked entry was missed or is still in
+          // flight; one sweep serves both origins.
+          logger.debug("intent-echo-retired-by-backstop", () => [
+            `intent echo ${entry.eventId} retired by watermark coverage`,
+          ]);
+        }
         entry.resolveVerdict({
           withdrawn: {
             message: "speculation superseded by the authoritative " +
@@ -1345,14 +1547,8 @@ export class SpeculationOverlayDestination
       }
     }
     this.#watermarkSinks.clear();
-    for (const cancel of this.#intentSinks.values()) {
-      try {
-        cancel();
-      } catch {
-        // sink cancellation is best-effort during teardown
-      }
-    }
-    this.#intentSinks.clear();
+    this.#releaseIntentListener();
+    this.#intentSidecarStates.clear();
     this.#trackedIntents.clear();
     this.#intentOutcomeSubscribers.clear();
     for (const waiters of this.#intentConsequenceWaiters.values()) {
