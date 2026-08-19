@@ -56,6 +56,19 @@ export type ScriptedIntentManager = {
     paths?: string[][],
     type?: "commit" | "integrate" | "pull" | "load",
   ): void;
+  /** Mutate SEVERAL docs and dispatch ONE notification whose merged
+   * changes span them — one frame carrying a wave commit that marks two
+   * of this client's sidecars (two streams fired by one client in one
+   * wave). Each doc's `paths` default to one whole-doc change at `[]`. */
+  deliverMany(
+    space: MemorySpace,
+    docs: ReadonlyArray<{
+      id: string;
+      mutate: (value: StreamEventsDocValue) => void;
+      paths?: string[][];
+    }>,
+    type?: "commit" | "integrate" | "pull" | "load",
+  ): void;
   /** Dispatch a storage RESET for the space. */
   reset(space: MemorySpace): void;
 };
@@ -103,16 +116,13 @@ export const scriptedIntentManager = (): ScriptedIntentManager => {
       },
     }),
   };
-  return {
-    manager,
-    subscribers,
-    syncs,
-    reads,
-    dispatching: () => depth > 0,
-    seed: (space, id, value) => {
-      docs.set(key(space, id), { value });
-    },
-    deliver: (space, id, mutate, paths = [[]], type = "integrate") => {
+  const deliverMany: ScriptedIntentManager["deliverMany"] = (
+    space,
+    targets,
+    type = "integrate",
+  ) => {
+    const changes: unknown[] = [];
+    for (const { id, mutate, paths = [[]] } of targets) {
       const doc = docs.get(key(space, id)) ?? { value: {} };
       const before = doc.value;
       // Mutate a COPY so `before`/`after` differ by identity like the
@@ -123,16 +133,37 @@ export const scriptedIntentManager = (): ScriptedIntentManager => {
       };
       mutate(after);
       docs.set(key(space, id), { value: after });
-      dispatch({
-        type,
-        space,
-        changes: paths.map((path) => ({
-          address: { id: id as never, type: "application/json", path },
+      for (const path of paths) {
+        changes.push({
+          // The production differential's address shape
+          // (`differential.ts` `toAddress`): the normalized scope name
+          // rides every change — sidecars are SPACE docs.
+          address: {
+            id: id as never,
+            type: "application/json",
+            scope: "space",
+            path,
+          },
           before: before as never,
           after: after as never,
-        })),
-      } as unknown as StorageNotification);
+        });
+      }
+    }
+    dispatch({ type, space, changes } as unknown as StorageNotification);
+  };
+  return {
+    manager,
+    subscribers,
+    syncs,
+    reads,
+    dispatching: () => depth > 0,
+    seed: (space, id, value) => {
+      docs.set(key(space, id), { value });
     },
+    deliver: (space, id, mutate, paths = [[]], type = "integrate") => {
+      deliverMany(space, [{ id, mutate, paths }], type);
+    },
+    deliverMany,
     reset: (space) => {
       dispatch({ type: "reset", space });
     },

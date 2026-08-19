@@ -374,6 +374,117 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
     expect(destination.intentCheckCount).toBe(checks + 2);
     destination.close();
   });
+
+  it("review MAJ-1: a RE-ENTRANT trackIntent inside an outcome callback (a retry-on-drop UI subscriber re-firing on the same sidecar) applies each retired id exactly ONCE — the outer check re-reads the LIVE tracked set per entry, never its pre-loop snapshot (mutation: gate `consider` on the snapshot only → `dropped:X` is delivered twice and a stale memo is left behind)", async () => {
+    const { scripted, destination } = scriptedDestination();
+    const outcomes: string[] = [];
+    const consequences: Array<Promise<{ kind: string }>> = [];
+    let refired = false;
+    destination.subscribeIntentOutcomes((outcome) => {
+      outcomes.push(`${outcome.kind}:${outcome.eventId}`);
+      // The UI hook events.md §5 mandates, consuming the memo as it
+      // hears the outcome (the send path's durable-ack coupling does
+      // exactly this) ...
+      consequences.push(
+        destination.waitForIntentConsequence(outcome.space, outcome.eventId),
+      );
+      // ... and re-firing ONCE on the first drop: a fresh intent on the
+      // SAME sidecar, whose `trackIntent` runs an INNER immediate check
+      // while the OUTER check is still iterating its hinted indices.
+      if (!refired) {
+        refired = true;
+        destination.trackIntent(SPACE, SIDECAR, "retry");
+      }
+    });
+    scripted.seed(SPACE, SIDECAR, {
+      entries: [
+        { eventId: "X", stream: { id: "s", path: [] }, seq: 1 },
+        { eventId: "Z", stream: { id: "s", path: [] }, seq: 2 },
+      ],
+    });
+    destination.trackIntent(SPACE, SIDECAR, "X");
+    destination.trackIntent(SPACE, SIDECAR, "Z");
+    expect(destination.pendingIntentCount).toBe(2);
+    // ONE notification marks both dropped; the hints name Z first, then
+    // X — so the outer check retires Z, the subscriber re-fires, the
+    // inner check retires X from the tail, and the outer check then
+    // reaches its hint for X with X already retired.
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries![0].status = "dropped";
+      value.entries![0].reason = "x-gone";
+      value.entries![1].status = "dropped";
+      value.entries![1].reason = "z-gone";
+    }, [
+      ["value", "entries", "1", "status"],
+      ["value", "entries", "0", "status"],
+    ]);
+    await flushMicrotasks();
+    // Exactly one outcome per retired id, in retirement order.
+    expect(outcomes).toEqual(["dropped:Z", "dropped:X"]);
+    // Only the retry is outstanding; the listener stays for it.
+    expect(destination.pendingIntentCount).toBe(1);
+    expect(destination.intentListenerInstalled).toBe(true);
+    // Each consequence settled once, as the outcome said ...
+    expect((await Promise.all(consequences)).map((c) => c.kind)).toEqual([
+      "dropped",
+      "dropped",
+    ]);
+    // ... and no ORPHANED memo was left by a second settle: a fresh
+    // waiter for X hangs (memo consumed by the subscriber above).
+    const again = await Promise.race([
+      destination.waitForIntentConsequence(SPACE, "X"),
+      Promise.resolve("still-waiting"),
+    ]);
+    expect(again).toBe("still-waiting");
+    destination.close();
+  });
+
+  it("review MIN-1: ONE notification whose merged changes span TWO tracked sidecars (one frame carrying a wave commit that marks two streams this client fired) checks BOTH — each sidecar gets its own coalesced check, both intents retire (mutation: record only the first wanted change per notification → the second sidecar's intent stays outstanding until its next own change)", async () => {
+    const { scripted, destination, edits } = scriptedDestination();
+    const SIDECAR_B = "of:stream-events:listener-b";
+    scripted.seed(SPACE, SIDECAR, {
+      entries: [{ eventId: "a-1", stream: { id: "s", path: [] }, seq: 1 }],
+    });
+    scripted.seed(SPACE, SIDECAR_B, {
+      entries: [{ eventId: "b-1", stream: { id: "t", path: [] }, seq: 1 }],
+    });
+    destination.trackIntent(SPACE, SIDECAR, "a-1");
+    destination.trackIntent(SPACE, SIDECAR_B, "b-1");
+    expect(destination.pendingIntentCount).toBe(2);
+    expect(scripted.subscribers.size).toBe(1);
+    const checks = destination.intentCheckCount;
+    const waitA = destination.waitForIntentConsequence(SPACE, "a-1");
+    const waitB = destination.waitForIntentConsequence(SPACE, "b-1");
+    // One frame, one notification, changes on both docs — A's mark first
+    // in the merged list, B's second.
+    scripted.deliverMany(SPACE, [
+      {
+        id: SIDECAR,
+        mutate: (value) => {
+          value.entries![0].consequenced = true;
+        },
+        paths: [["value", "entries", "0", "consequenced"]],
+      },
+      {
+        id: SIDECAR_B,
+        mutate: (value) => {
+          value.entries![0].consequenced = true;
+        },
+        paths: [["value", "entries", "0", "consequenced"]],
+      },
+    ]);
+    // Nothing acts inline ...
+    expect(destination.pendingIntentCount).toBe(2);
+    await flushMicrotasks();
+    // ... then ONE check per sidecar, and both intents are retired.
+    expect(destination.intentCheckCount).toBe(checks + 2);
+    expect(destination.pendingIntentCount).toBe(0);
+    expect((await waitA).kind).toBe("consequenced");
+    expect((await waitB).kind).toBe("consequenced");
+    expect(destination.intentListenerInstalled).toBe(false);
+    expect(edits()).toBe(0);
+    destination.close();
+  });
 });
 
 // ─── e2e: the real replica, the real relay, a real serving side ─────────

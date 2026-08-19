@@ -973,6 +973,16 @@ export class SpeculationOverlayDestination
       `intent check on ${sidecarId} (${ids.size} outstanding)`,
     ]);
     if (!Array.isArray(entries)) return;
+    // `pending` is this check's worklist — the ids still to LOCATE. It
+    // is a snapshot, so it is NOT the authority on whether an entry is
+    // still tracked: `#applyIntentEntry` calls arbitrary outcome
+    // subscribers, and a subscriber that re-fires on this sidecar (the
+    // retry-on-drop UI hook events.md §5 mandates) runs a nested
+    // `trackIntent` → an INNER check that may retire ids this worklist
+    // still holds. The old sink's scan gated on the LIVE set per entry
+    // and could not double-apply; so does this — re-fetched from the
+    // map, because the inner check can delete and recreate the Set
+    // (independent review of W2, MAJ-1).
     const pending = new Set(ids);
     let visits = 0;
     const consider = (candidate: unknown): void => {
@@ -983,6 +993,8 @@ export class SpeculationOverlayDestination
         return;
       }
       pending.delete(entry.eventId);
+      const live = this.#trackedIntents.get(space)?.get(sidecarId);
+      if (live === undefined || !live.has(entry.eventId)) return;
       this.#applyIntentEntry(space, sidecarId, entry);
     };
     if (state !== undefined && state.hints.size > 0) {
