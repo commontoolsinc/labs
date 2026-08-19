@@ -2,7 +2,10 @@ import ts from "typescript";
 
 import { detectCallKind, isReactiveOriginExpression } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import {
+  unwrapExpression,
+  unwrapTransparentWrapperOnce,
+} from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
 import type { PathSegment } from "./destructuring-lowering.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
@@ -60,28 +63,9 @@ export function getOpaqueAccessInfo(
   let dynamic = false;
 
   while (true) {
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isAsExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isTypeAssertionExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isSatisfiesExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isNonNullExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isPartiallyEmittedExpression(current)) {
-      current = current.expression;
+    const unwrapped = unwrapTransparentWrapperOnce(current);
+    if (unwrapped) {
+      current = unwrapped;
       continue;
     }
 
