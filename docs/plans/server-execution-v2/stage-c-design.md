@@ -2120,6 +2120,19 @@ drain skip against an in-wave `streamEntry`-bearing copy; (α3) the
 derivation-emitter orphan refusal (seat stated in the PR); (α4) the
 per-event run-count pin; `events.lt1LeftoversPurged`; the lunch gate
 re-run (skip lifts only on the green pin).
+*W3 LANDED 2026-08-19 (stacked PR `claude/server-exec-v2-w3-alpha`;
+report `stage-c/w3-alpha-build-report.md`; register OW35 CLOSED): α1 as
+specified; α2 verified (the trio's guard covers held copies; the drain is
+the only `streamEntry`-bearing producer) — not rebuilt; α3's seat is the
+wave's requeue closure (an eventId → emitter map over the sealed ops'
+seq-less sidecar entries; refused when no surviving contribution appends
+the copy's entry); α4 pinned. PLUS a seat this list did not name and the
+ruled sentence requires — (α1b) the late-seal REFUSAL of an LT1 copy
+still RUNNING at the deadline (it seals after its appending wave closed;
+W0's l1 store is that shape: commit 64 = the unmarked in-process add +
+the drain copy's marked toggle-off) — the purge reaches only QUEUED
+copies. Lunch gate 3/3 green at the tip; the ON skip STAYS for the
+client cascade-echo stranding (l3's "3 joined"), which is W2's.*
 
 **W4 — measurement and acceptance** (the design pass's re-benchmark;
 register OW38 (i)):
@@ -2311,7 +2324,12 @@ tuning-class if measured, not a row.)*
   one whose emitter's durable append lands in the SAME wave — the drain
   must then deliver it, which the ruled sentence requires); (α3)'s seat
   is unexamined by the lenses — the builder verifies and pins; the
-  lunch gate is the live witness.
+  lunch gate is the live witness. *W3: the purge reaches QUEUED copies
+  only (a dispatched copy is off the queue), so it cannot over-reach an
+  in-flight one; the opposite gap — an in-flight copy sealing AFTER its
+  wave closed — was the real l1 mechanism and is the late-seal refusal
+  (α1b). A copy whose emitter seals into the same wave after the purge
+  is delivered by the next drain, one cycle late, never lost.*
 - **Process** — stacked PRs get no CI; a benchmark run with a configured
   LLM model is masked (the daytime greens); a source-run toolshed cannot
   bake the ON define; read toolshed logs with `/usr/bin/grep -a`.

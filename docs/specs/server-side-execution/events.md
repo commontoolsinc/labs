@@ -320,6 +320,46 @@ ambient-state one.
   prevent. `events.processed > events.appended` is NOT the signature
   (re-drains inflate `processed`; in-wave LT1 cascades count in
   neither); per-event run counts are.
+- **LANDED (stage C build W3, 2026-08-19 — the (α) build the sentence
+  above owed; verification-coverage.md OW35 CLOSED):** the serving loop
+  enforces the sentence at THREE seats, the two it names plus the
+  in-flight residue the purge cannot reach, which its own wording ("does
+  not complete within its appending wave") requires — recorded as a
+  DATED clarification of the enforcement paragraph, not a change to the
+  ruled sentence. **(α1) the purge:** synchronously at the flush-deadline
+  decision, every scheduler-QUEUED LT1 in-process copy (`served !==
+  undefined && served.streamEntry === undefined`, not yet dispatched) is
+  removed (`events.lt1LeftoversPurged`); no notice lands on the entry
+  (the copy carries no failure hook — it could never mark), the entry
+  stays pending, the next drain delivers it once WITH a `streamEntry`.
+  **(α1b) the late-seal refusal:** an LT1 copy already RUNNING at the
+  deadline seals after its appending wave — the wave its EMITTER sealed
+  into, carried on the copy as the emitter's transaction and resolved at
+  the dispatch stamp — closed; the seal destination refuses it BEFORE it
+  enters any wave (`events.lt1LateSealsRefused`), so nothing of it
+  reaches the serving replica and the drain's copy, running next, reads
+  clean state. This is the lunch gate's vote-toggle double (W0's l1:
+  commit 64 held the in-process copy's unmarked add AND the drain copy's
+  marked toggle-off, `consequenceOf` deduping to one id) — a case the
+  purge alone would not have fixed. **(α2) the drain skip** for an id
+  already queued, shaper-held, or run WITH a durable entry in the open
+  wave is the trio's in-flight guard (`events.drainInFlightSkips`): the
+  guard entry is set BEFORE the scheduler's `queueEvent`, which holds
+  shaped events synchronously, so a held copy is "queued" to the guard;
+  the drain is the only producer of `streamEntry`-bearing copies, so no
+  second in-wave producer exists today. **(α3) the orphan refusal:** the
+  wave's requeue closure refuses an LT1 copy's contribution — disposition
+  `dropped`, never reported as requeued, nothing re-armed
+  (`events.orphanDeliveriesRefused`) — when NO surviving contribution of
+  that wave appends its entry: the emitter's sidecar write was superseded
+  (a derivation's per-doc drop), the emitter dropped whole or requeued, or
+  the emitter's seal never entered the wave; readers of the refused run
+  and its own cascade grandchildren fold through the same closure. The
+  run-count pins (`executor-events-down.test.ts`, "(α1)+(α1b)+(α4)",
+  "(α1b)+(α4)", "(α3)") count completed runs from the store — the
+  handler's non-idempotent effect applied exactly once per durable entry
+  and exactly one derived commit naming each event — with the killing
+  mutations recorded in the W3 build report.
 
 FORBIDDEN: a processed-events table; per-event acks from clients;
 handler-run provenance records; a handler delivery with no durable

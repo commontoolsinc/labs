@@ -163,43 +163,32 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     {
       file: "integration/lunch-poll-vote.test.ts",
       phase: "phase-7",
-      reason: "Fan-out stage B (2026-08-17): the walls this entry carried " +
-        "are CLOSED — the OW32 client loop (stage A's arrival gate + stage " +
-        "B's per-demander run supply: both browsers boot < 2 s, 'both " +
-        "runtimes idle' 0.6–1.0 s, zero non-settling, client action runs " +
-        "~450–830 / run vs 45–56 k), the identity-less served `#profile` " +
-        "wish (space-root demand now carries the demanding principal; " +
-        "the wish runs per demander and provisions with its " +
-        "`demanded-run:<user>` carriage — 'both join lands' 35–640 ms), " +
-        "and OW34 (the renderer-trust attestation on the durable entry). " +
-        "Under the full ON posture on a fresh store this gate is " +
-        "BIMODAL (stage B build `store-lunch4` GREEN 2m28s; the fixer " +
-        "pass on the independent review reproduced 1/2 on binary " +
-        "fadc2efb1b — run 1 RED at 'both browsers see 2 love it (merge)' " +
-        "hanging to the 300 s timeout with '1 love it', run 2 GREEN " +
-        "1m18s). The residual mechanism, triaged (review F4) as " +
-        "SERVED-WISH TIMING and NOT a stage-B B7 dirtiness miss: the " +
-        "served `castVote` handler run as the second voter reads " +
-        "`nowTick` (the `#now/300` interval wish's value) null and " +
-        "returns without writing (`main.tsx` `if (!now) return`), so " +
-        "ONE vote no-ops; `todaysVotes`/`ranked` read only SHARED inputs " +
-        "(they are SPACE-scoped, not fanned out — a `nowTick` change is a " +
-        "space cause that dirties them and any per-user swatch VDOM " +
-        "downstream via `dirtyFanOutAll`, never a missed re-dirty), so " +
-        "the review's swatch flip [Bob,Alice]→[Alice]→[Bob,Alice] is " +
-        "`todaysVotes`' `dayKeyOf(nowTick)` filter flipping as `nowTick` " +
-        "resolves, not a per-instance dirtiness bug. The two-browsers " +
-        "gate (no `#now`/`nowTick` dependency) is GREEN 2/2 under the " +
-        "same binary and load, isolating the failure to the `nowTick` " +
-        "chain. Compounded by the pre-existing client-instantiate-vs-" +
-        "server-derive re-fetch race at piece creation (the ~6 s " +
-        "`compile-cache-hit` churn the 300 ms demand-wake grace only " +
-        "softens). Owed at Stage C (NOT stage-B-owned): the served " +
-        "`#now/300` value for a serving runtime at dispatch, or a wall " +
-        "clock the serving runtime supplies to the `if (!now)` guard. " +
-        "Recorded in verification-coverage.md (OW32's row); lifts when " +
-        "this gate greens ≥2/2 fresh-store under the full ON posture; " +
-        "the flip PR needs this list EMPTY.",
+      reason: "Stage-C design build W3 (2026-08-19): the served-handler " +
+        "DOUBLE DISPATCH this gate carried (#5969's Flag 1 — one durable " +
+        "event run once WITHOUT and once WITH a streamEntry when the " +
+        "flush deadline cut the appending wave; W0's l1 toggled a vote " +
+        "OFF that way) is CLOSED — events.md §4's one-entry-one-completed-" +
+        "run sentence is enforced at the deadline purge, the late-seal " +
+        "refusal, and the orphan refusal (verification-coverage.md OW35 " +
+        "CLOSED); at the W3 tip the gate is GREEN 3/3 fresh-store under " +
+        "the full ON posture (walls 36/20/17 s; `appended 11 / processed " +
+        "12`, the 12th the purged LT1 leftover the drain delivers; every " +
+        "event in exactly one derived commit; 3 vote adds, 0 toggles). " +
+        "The entry STAYS for a residual that is NOT the serving loop's: " +
+        "the step 'both join lands (count reaches 2)' passes in 7–16 ms " +
+        "— before any server round trip — on a stranded CLIENT cascade " +
+        "echo (the join is the click handler's LT1 cascade child; its " +
+        "speculative echo carries a client-minted cascade id " +
+        "`retireIntent` never matches, and its `$event`-caused user " +
+        "entity is a doc the server never writes, so the arrival gate " +
+        "never retires it: the host renders spec-Alice + confirmed Alice), " +
+        "and FAILS when the first probe lands after the guest's confirmed " +
+        "join (W0 l3: '3 joined', 300 s). That is W2's (the intent " +
+        "listener / T2 family; verification-coverage.md's W3 block carries " +
+        "the evidence and two candidate shapes). Lifts when W2's " +
+        "cascade-echo fix lands (or the step is re-pointed at the " +
+        "CONFIRMED count) AND this gate greens ≥3/3 fresh-store under the " +
+        "full ON posture; the flip PR needs this list EMPTY.",
     },
   ],
   runner: [

@@ -3567,6 +3567,67 @@ supply; OW29/OW32/OW34 closed):
     before the ON arm is called correct on non-idempotent handlers —
     i.e. before the confidence verdict is stated as "no fundamental
     issue" without this qualification.
+    **CLOSED 2026-08-19 by the design build's W3 (α)** (stacked PR
+    `claude/server-exec-v2-w3-alpha` off W1; no CI — every green a local
+    run). LANDED: (α1) the deadline-time purge of QUEUED LT1 leftovers
+    (`Scheduler.purgeQueuedEvents`, the ruled discriminator, synchronous
+    at both `exhausted` arms of `#waveCycle`; `events.lt1LeftoversPurged`);
+    (α1b) the late-seal REFUSAL of an LT1 copy that was still RUNNING at
+    the deadline and seals after its appending wave closed — the wave its
+    emitter sealed into, carried as `ServedEventDispatch.lt1.emitterTx`
+    and resolved at the dispatch stamp (`#lt1AppendingWave`), refused in
+    `SpaceServer.seal()` before it enters any wave
+    (`events.lt1LateSealsRefused`; the scheduler settles the copy quietly
+    on the `LT1_LATE_SEAL_REFUSED` sentinel) — the seat the ruled
+    sentence's "does not complete within its appending wave" requires and
+    the design's α1–α4 list did not name: W0's l1 store shows it (commit
+    64 = the in-process copy's unmarked vote add + the drain copy's marked
+    `remove-by-value`, `consequenceOf` deduping to ONE id — so per-event
+    `consequenceOf` counts cannot see a same-wave double; the handler's
+    effect can); (α2) VERIFIED, not rebuilt: the trio's in-flight guard is
+    set BEFORE `queueEvent`, which holds shaped events synchronously, so a
+    shaper-held drain copy is `queued` to the guard, and the drain is the
+    ONLY producer of `streamEntry`-bearing copies (cell.ts's LT1 copy
+    carries none; the scheduler's requeue paths never carry `served` —
+    served copies are queued `retries: false`); (α3) the orphan REFUSAL
+    in the wave's requeue closure — an LT1 copy (`WaveRunContext.lt1`)
+    whose entry no SURVIVING contribution of the wave appends (the
+    emitter's sidecar write superseded per-doc, the emitter dropped whole
+    or requeued, or the emitter's seal never entered the wave) is
+    withdrawn with disposition `dropped`, never reported as requeued,
+    nothing re-armed (`events.orphanDeliveriesRefused`; the seat is the
+    closure loop beside the C8d `parentRequeued` arm, keyed on a
+    per-wave eventId → emitter map built from the sealed ops' seq-less
+    sidecar entries); (α4) the per-event run-count pins, red-first:
+    `executor-events-down.test.ts` "(α1)+(α1b)+(α4)" (two LT1 children —
+    the first async and parked across the deadline, the second queued
+    behind it: purge 1, refusal 1, the child's non-idempotent effect
+    applied exactly twice for two entries, one consequence commit each;
+    mutations: purge skipped → purge 0 / refusal 2; seal refusal AND the
+    orphan arm's absent-emitter clause skipped → the effect applied
+    THREE times, the lunch double), "(α1b)+(α4)" (the in-flight copy
+    alone: refusal 1, effect once; the combined mutation → effect twice),
+    "(α3)" (a derivation emitter + a rival client append on the same
+    stream, the settle gate holding the wave: the orphan refused, the
+    sidecar holds only the rival's entry, every consequenced id has a
+    durable entry; mutation: the orphan arm removed → "ping" delivered
+    with no entry behind it). Defense in depth, recorded: with the seal
+    refusal alone removed, the late copy enters the next wave and the
+    orphan arm's absent-emitter clause withdraws it there (the drain's
+    copy, having read its write, requeues once) — the effect stays once;
+    the TRUE double needs both seats off. Live witness: the lunch gate ON
+    at the W3 tip, fresh store, 3/3 GREEN (walls 36 / 20 / 17 s; totals
+    7.3 / 5.5 / 4.5 s; `events appended 11 / processed 12` in every run —
+    the 12th is the purged LT1 leftover the drain delivered —
+    `lt1LeftoversPurged 1`, `lt1LateSealsRefused 0`,
+    `orphanDeliveriesRefused 0`; each run's store: 16 events (11 client
+    + 5 LT1), every eventId in exactly one derived commit, the votes doc
+    3 adds / 0 `remove-by-value` — W0's l1 showed the remove). The
+    before/after shape: `appended 11 / processed 17` (re-benchmark) and
+    `appended 9 / processed 10` + a vote toggled off (W0 l1) → `appended
+    11 / processed 12`, no toggle. The lunch ON skip STAYS (decision
+    below, W3 block): the gate's remaining bimodality is NOT (α)'s —
+    see the l3 row.
   - **OW36 — the late-echo arrival-gate rule — RULED 2026-08-18
     (ratified as written); CLOSED.**
     Implemented in #5991 (T2 (b)) as speculation.md §4 step 2 read as a
@@ -3992,6 +4053,10 @@ supply; OW29/OW32/OW34 closed):
       (the votes were demanded and derived, twice). The root cause is
       (α)/(e) territory (W3/W2); l3's duplicate not root-caused (client
       speculative echo vs a same-drain LT1 copy). Trigger: W3 (α).
+      **RESOLVED by W3 (2026-08-19):** the vote toggle was (α)'s in-flight
+      late seal (OW35 CLOSED above); the duplicate join is a CLIENT
+      cascade-echo stranding — W2's, handed off with the evidence (the W3
+      block below).
     - **OW37 re-read on W1's numbers** — with the walk gone, the wave
       count per authored input falls (fewer exhausted waves; W0: chat
       wavesBudgetExhausted 30–35 vs the trio tip's 739–777), and the
@@ -4406,6 +4471,103 @@ supply; OW29/OW32/OW34 closed):
     owner. Trigger: if the flicker witness reads non-zero on the W4
     acceptance workloads at a rate the owner will not accept, or when
     per-hop intents are wanted.
+- **Stage C design build delta — W3 (α) LANDED (2026-08-19).** One
+  durable stream entry is delivered to its handler exactly once as a
+  COMPLETED run (events.md §4, RULED 2026-08-18); the build is the
+  stacked PR `claude/server-exec-v2-w3-alpha` off W1 (no CI — every
+  green a local run; report
+  [`stage-c/w3-alpha-build-report.md`](../../history/plans/server-execution-v2/stage-c/w3-alpha-build-report.md)).
+  It closes OW35 (above) and lands events.md §4's LANDED note naming the
+  three seats. Coverage row per sentence of the RULED paragraph:
+  - "One durable stream entry is delivered to its handler exactly once
+    as a COMPLETED run, regardless of dispatch path or reference count"
+    — COVERED by the run-count pins (`executor-events-down.test.ts`
+    "(α1)+(α1b)+(α4)", "(α1b)+(α4)"): the child handler's non-idempotent
+    effect applied exactly once per durable entry and exactly one
+    derived commit naming each event, under a flush deadline that cuts
+    the appending wave with one LT1 copy running and one queued. Killing
+    mutations recorded in the report (the true double needs BOTH the
+    seal refusal and the orphan arm's absent-emitter clause off: the
+    effect applied three times / twice).
+  - "An entry whose in-process (LT1 same-wave) run does not complete
+    within its appending wave is dispatched by the drain alone; the
+    serving loop purges unrun in-process leftovers at the flush deadline
+    and skips at the drain any id already queued or run with a durable
+    entry" — COVERED by (α1) `#purgeLt1Leftovers` at both `exhausted`
+    arms (pin: `lt1LeftoversPurged` 1 for the queued child; mutation:
+    purge skipped → 0 and the copy is refused at the seal instead,
+    `lt1LateSealsRefused` 2), by (α1b) the late-seal refusal (pin:
+    `lt1LateSealsRefused` 1 for the parked child; `childRuns` 2 — the
+    refused copy and the drain's), and by (α2) the trio's guard, verified
+    by reading (held copies are `queued` to the guard; one producer of
+    `streamEntry`-bearing copies) — its pin is the trio's
+    ("exactly-once under an HONEST flush deadline"); a shaper-HELD-copy
+    pin is NOT added (FOLLOW-ON, see the report's not-done list).
+  - "A derivation-kind emitter's superseded LT1 leftover re-arms nothing
+    and its orphan delivery is REFUSED (never delivered without a durable
+    entry)" — COVERED by (α3): the orphan arm in the wave's requeue
+    closure (pin "(α3)": `orphanDeliveriesRefused` 1, the witness doc
+    saw only the rival's tag, every consequenced id has an entry;
+    mutation: the arm removed → "ping" delivered with no entry) and by
+    (α1)'s purge for a not-yet-run copy (no notice, no re-arm: the copy
+    carries no failure hook and no commit callback).
+  - Counters (serving-loop.md §7 `events`): `lt1LeftoversPurged`,
+    `lt1LateSealsRefused`, `orphanDeliveriesRefused` — asserted in the
+    pins; read on the live runs (lunch 1/0/0 per run; chat 0/0/0).
+  - **DECISION (flag-don't-fill) — the lunch ON skip STAYS, its reason
+    rewritten.** The lift rule's two conditions are met literally (the
+    (α4) pins green; the gate 3/3 green fresh-store on the W3 tip), but
+    the l3 root cause below shows the gate's "both join lands (count
+    reaches 2)" step has been passing on a stranded CLIENT echo (7–16 ms
+    after the guest's click in every green run — W0 l1/l2, W3 l1–l3 —
+    faster than any server round trip) and fails when the first probe
+    lands after the guest's confirmed join (W0 l3: "3 joined"). Lifting
+    would knowingly re-expose the ON lane to a ~1-in-8 flake whose
+    mechanism is W2's (the alternative, named: lift now on the literal
+    rule and accept the flake until W2 lands). Lift condition restated
+    in the entry: W2's cascade-echo fix (or the step re-pointed at the
+    CONFIRMED count) + 3/3 green. Owner-visible.
+  - **l3 root cause (W0's "3 joined") — NOT (α); W2 / T2 territory,
+    handed off with the evidence.** The join is a CASCADE child: the
+    `#lp-join-button` click lowers to a handler (stream `FkFw…`) whose
+    served run emits `joinAs`'s event (stream `lalq…`, payload `{}`)
+    as an LT1 same-space emission, consequenced in the same commit as
+    the click (W0 l3 store: commit 42 = click + child; `users` spliced
+    ONCE per join — commits 42 and 52 — so the server holds 2 joined; 8
+    events, each in exactly one `consequence_of`; `appended 6 /
+    processed 6`). On the client the speculative click echo sends the
+    same `{}` to `boundJoin`, minting a cascade id from its own tx
+    (`mintEventId(link, originTx)` — a random per-tx key) that never
+    equals the server's LT1 id (another random key); `retireIntent`
+    retires by EXACT eventId, so the child's echo is never retired by
+    the parent's consequence; the late-echo rule (T2/OW36) does not
+    apply (the child sealed ~8 ms after the click, before the served
+    consequence); and the sweep's ARRIVAL gate never passes because
+    `joinAs` cellifies the new `user` into a doc whose id derives from
+    the frame's cause — `$event: tx.dispatchedEventId` (runner.ts) — so
+    the client's entity (`$event` = the client cascade id) ≠ the
+    server's `NYEME…`, and the spec entity doc never holds a confirmed
+    value. The host page renders overlay spec-Alice + confirmed Alice +
+    Bob = "3 joined, Alice, Alice, Bob". Candidate shapes for W2, not
+    filled: (a) `retireIntent(P)` also retires the cascade children
+    whose `parentEventId` chain reaches P (the late-echo rule's jobless
+    logic applied on arrival; a visible flicker when the LT1 child lands
+    a wave later); (b) deterministic cascade ids derived from the parent
+    id + send ordinal on both sides (then `retireIntent` matches and the
+    `$event`-caused entity ids match, so the arrival gate passes) —
+    touches events.md §4's per-attempt freshness; owner-level.
+  - **OW37 re-read on W3's numbers** — (α) adds no wave: the purge and
+    the refusal run inside existing cut cycles; the lunch runs show
+    `derivedCommits == waves` (61/61, 52/52, 52/52) with
+    `wavesBudgetExhausted` 38 / 26 / 25 — the deadline-honesty shape the
+    trio named, fewer than the W0 tip's 21 on a 46-wave run in ratio
+    terms only by noise; the ratio metric stays owed to W4's quiet run,
+    never silenced.
+  - Chat n=20 smoke (PROVISIONAL, one run, load 9.4–9.6 — a concurrent
+    benchmark on the box; NOT comparable to W1's 1 239 ms): series
+    complete, median 1 541 ms (q1 1 408 / q3 1 818 / max 3 208);
+    `events appended 28 / processed 28`, purge/refusal/orphan 0/0/0 —
+    (α) is passive on the chat path.
 
 ## 4. Standing rule
 

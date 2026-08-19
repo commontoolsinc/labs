@@ -160,16 +160,22 @@ Deno.test("main: the patterns list holds exactly TWO phase-7 entries — topics-
     false,
   );
   // The lunch entry's reason is LOUD and states the residual mechanism as
-  // observed (the served vote no-op), names the closed walls and the
-  // owning register row, and keeps the flip's condition.
+  // observed, names the closed walls and the owning register rows, and
+  // keeps the flip's condition.
   const lunch = SERVER_EXECUTION_ON_SKIPS.patterns.find((skip) =>
     skip.file === "integration/lunch-poll-vote.test.ts"
   );
   if (lunch === undefined) throw new Error("missing lunch-poll-vote entry");
   assertEquals(lunch.phase, "phase-7");
-  assertMatch(lunch.reason, /OW32/);
-  assertMatch(lunch.reason, /castVote/);
-  assertMatch(lunch.reason, /nowTick/);
+  // Stage-C design build W3 (2026-08-19): the served-handler double
+  // dispatch (OW35) is CLOSED and the entry now carries the gate's
+  // remaining residual — the CLIENT cascade-echo stranding on the join
+  // step (W2's), named as such — never the refuted served-wish-timing
+  // story.
+  assertMatch(lunch.reason, /OW35/);
+  assertMatch(lunch.reason, /castVote|vote OFF/);
+  assertMatch(lunch.reason, /cascade echo|cascade-echo/);
+  assertMatch(lunch.reason, /W2/);
   assertMatch(lunch.reason, /flip PR needs this list EMPTY/);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);

@@ -1198,7 +1198,9 @@ demand: {demandedRows, demandedInstances, demandedInstancesMax,
 demandedPairs, demandedWriters, demandedWritersMax, demandRootEnters,
 demandRootLeaves, notCurrentRearms, demandPasses, demandPassMs,
 pushGrowthWakes, watchWakes}, settle: {series, dropped}, events:
-{appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
+{appended, processed, coalescedPerWaveMax, skippedIdempotent,
+drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
+orphanDeliveriesRefused}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed,
 budgetDeferrals}, lease:
 {held, lost}, push: {prioritizedSessions, followerSessions,
@@ -1285,6 +1287,25 @@ acceptance run reads p50/p95 off it (with that caveat, and net of the
 now-dropped service-session growth). `undemandedNarrowingRuns` and
 `earlyEmitRefusals` are pre-existing top-level counters the earlier §7
 list omitted (folded in here).
+
+The `events` block's dedupe counters (events.md §4's one-entry-one-
+completed-run sentence; stage C tuning + stage-C design build W3,
+2026-08-19): `drainInFlightSkips` — re-drains that found the entry's
+earlier drain copy still queued, held, running, or marked into an
+uncommitted wave and did not queue it again (the drain against itself);
+`lt1LeftoversPurged` — LT1 same-space in-process copies the flush
+deadline found still QUEUED and purged synchronously at the deadline
+decision (their durable entry stays pending; the next drain delivers it
+with a `streamEntry`); `lt1LateSealsRefused` — LT1 copies that were
+RUNNING at the deadline and sealed after their appending wave closed,
+refused at the seal destination before entering any wave (the drain's
+copy is the one completed run); `orphanDeliveriesRefused` — LT1 copy
+contributions the wave withdrew because no surviving contribution of
+that wave appended their entry (a derivation emitter's superseded
+sidecar write, a withdrawn or never-sealed emitter). All four are the
+invariant WORKING, routine under short waves; `events.processed >
+events.appended` is the drain delivering server-emitted entries, never
+the double's signature — per-event run counts are.
 
 ## 8. Tripwires (grep-able FORBIDDEN list)
 
