@@ -802,8 +802,21 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       speculationAckObserver: undefined as (() => void) | undefined,
       speculationArrivalObserver: undefined,
     };
+    // The intent watch is a storage-notification listener (stage C
+    // design (e)): the stub manager carries the seam it uses — a relay
+    // that accepts subscriptions, a raw replica read (nothing stored),
+    // and the schema-less watch.
+    const subscribers = new Set<unknown>();
     const runtime = {
-      storageManager: { open: () => ({ replica }) },
+      storageManager: {
+        open: () => ({
+          replica: Object.assign(replica, { getDocument: () => undefined }),
+          sync: () => Promise.resolve({ ok: {} }),
+        }),
+        subscribe: (subscription: unknown) => subscribers.add(subscription),
+        unsubscribe: (subscription: unknown) =>
+          subscribers.delete(subscription),
+      },
       getCellFromLink: () => ({ sink: () => () => {} }),
     } as unknown as Runtime;
     const destination = new SpeculationOverlayDestination(runtime);

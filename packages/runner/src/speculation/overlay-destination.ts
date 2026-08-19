@@ -833,6 +833,23 @@ export class SpeculationOverlayDestination
     if (this.#trackedIntents.size > 0) this.#ensureIntentListener();
   }
 
+  /** Install the ONE intent listener (contract point 2(i)) — idempotent,
+   * best-effort like today's `intent-sink-failed` arm: on failure the
+   * echo's retirement rides the watermark backstop only, loudly. */
+  #ensureIntentListener(): void {
+    if (this.#intentListener !== undefined) return;
+    try {
+      this.#installIntentListener();
+    } catch (error) {
+      logger.warn("intent-listener-failed", () => [
+        "intent listener could not subscribe to storage notifications; " +
+        "echo retirement for outstanding intents rides the watermark " +
+        "backstop only",
+        error,
+      ]);
+    }
+  }
+
   /** Keep the sidecar doc watched (contract point 2(ii)) — the
    * schema-less selector `syncCell` uses for a schema-less cell (the
    * doc itself, no link following); an already-covered watch is a
@@ -869,12 +886,10 @@ export class SpeculationOverlayDestination
     }
   }
 
-  /** Install the ONE intent listener (contract point 2(i)) — idempotent.
-   * `wants` is a map lookup on the outstanding set; `onNotify` runs in a
-   * microtask (contract point 3) with the change paths since the last
+  /** `wants` is a map lookup on the outstanding set; `onNotify` runs in
+   * a microtask (contract point 3) with the change paths since the last
    * dispatch, from which the entry-index hints are taken. */
-  #ensureIntentListener(): void {
-    if (this.#intentListener !== undefined) return;
+  #installIntentListener(): void {
     const listener = new CoalescedDocListener(this.#runtime.storageManager, {
       // Sidecars are SPACE docs; a scoped instance of a same-named id
       // (none exists) would not be this watch's subject.

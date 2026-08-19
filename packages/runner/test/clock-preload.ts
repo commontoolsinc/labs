@@ -82,6 +82,12 @@ installFakeClock({
     // waits on push/watermark edges with bounded timeouts, and its
     // "would-be loop" window is a real-time observation.
     "speculation-arrival-gate",
+    // The stage-C intent-listener suite (design (e)): its e2e pins drive
+    // a live memory server and, for the served-mark pin, a live
+    // ExecutorHost under the same wall-clock policies (renew cadence,
+    // flush deadline); it waits on replica/store edges with bounded
+    // timeouts.
+    "speculation-intent-listener",
     // The Phase-4 client-effect-channel suite drives a live
     // ExecutorHost (the served navigateTo → intent → enact/ack →
     // retirement journeys) under the same wall-clock policies — the
