@@ -55,11 +55,38 @@ recomputes that value and its upstream FOR THE SUBSCRIBER'S INSTANCES,
 nothing else — a principal's subscription at a broad address is demand
 for that principal's instance of every node that narrows beneath it
 (scopes.md §2, RULED 2026-08-16; fan-out stage B), so the demand
-registry keeps the demanding (user, session) pair on every root a
-client watches, space-scoped roots included, and the demand WALK
+registry keeps the demanding (user, session) pair on every INSTANCE a
+client session TRACKS — memory v2's schema-narrowed closure of that
+session's watches (the roots and every doc the selectors' schemas
+reach, absent targets included), instance-keyed, accumulated across
+its overlapping watches, space-scoped instances included. Demand is
+that union over the space's client sessions; there is no demand walk.
+The serving loop runs the STALE writers of demanded instances — a
+writer whose instance for a demanding pair never ran at its ratchet,
+or was dirtied since (§3b's per-instance clean bit; the basis index is
+the same predicate at activation) — and those runs' own logged reads
+make their inputs live and current in turn (§3b, one-run-late); a
+demanded instance's writers hold demand (a demand root, §8's liveness
+bracket) while any session tracks the instance and release it when
+none does — a session's tracked set shrinks only on a full
+re-evaluation or close (coarse, RULED 2026-08-18; fine-grained is
+future). A derivation that becomes reachable through a wave's own
+write becomes demand when the tracker's push-time re-traversal reaches
+it and lands in a later derived commit (protocol.md §4's later
+demand); a value-only change re-derives the demanded instances through
+the trigger index alone. Nothing about structure versus value is
+decided anywhere. *(RULED 2026-08-18 — the (d′) demand model; the
+owner accepted the stage-C design's ruling set, item 1 as recommended:
+the demand-WALK sentence this paragraph replaces — "the demand WALK
 (the live reader per demanded root that pulls the value's subtree)
 runs once per demanding pair, each run following THAT demander's
-redirects. Events run
+redirects" — described the fan-out stage-B mechanism and was amendable,
+not a rule. The text is the design's §2.10, verbatim
+([`stage-c-design.md`](../../plans/server-execution-v2/stage-c-design.md)).
+IMPLEMENTATION is the design build's W1: at this branch's tip the code
+still runs the per-demander walk, so this paragraph is the spec ahead
+of the code — verification-coverage.md OW39 is the row W1 closes.)*
+Events run
 their handlers eagerly — after preflight makes any dirty state
 inputs current (D-v2-2). Undemanded derivations stay
 dirty-unmaterialized indefinitely — `idle()` already excludes them

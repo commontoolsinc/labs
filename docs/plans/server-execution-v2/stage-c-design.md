@@ -34,6 +34,19 @@ RULED (R-D, the coarse unsubscribe); §6's W0/W1 are re-targeted. The
 reconciliation in §1 stands as the record of the lens pass — items 1.1
 #3, D1, D3, and D6 now concern the fallback only.**
 
+**RULING SET ACCEPTED 2026-08-18 (owner, verbatim: "ruling set is
+accepted") — later the same day.** Every OPEN item in §5 is RULED per
+its stated recommendation (the already-RULED R-A–R-D and the MOOT
+#2/#3/#11/#12 unchanged). The ONE binding spec edit the acceptance
+unlocks that is pure text — the (d′) replacement of serving-loop.md
+§1:57–62 with §2.10's text — LANDED with the acceptance (RULED marker;
+its IMPLEMENTATION is W1 — register OW39). The other spec edits the
+rulings unlock (events.md §5's drops/errors pin, speculation.md §4
+step 2's clarifying sentence, scopes.md §9's ragged amendment) are
+RULED text that rides the build PRs, not landed with the acceptance;
+item 4's step-4 sub-question is RULED owed (register OW40). Nothing
+else in this document's substance moves; **W0 (§6) is next.**
+
 **Inputs — the reconciler re-did none of their analysis; it reconciled
 them:**
 
@@ -68,8 +81,15 @@ them:**
 File:line citations are at `fb2292a24` (the lenses' tree) unless
 marked; Appendix A gives the offsets on the tuning tip. Spec citations
 are by section; the lenses' spec line numbers are also `fb2292a24`'s —
-serving-loop.md §1:53–62 is unmoved on this branch, §3b/§7/§8 sit
-~35 lines lower (the RULED text added on 2026-08-18).
+serving-loop.md §1:53–62 was unmoved on this branch until the
+acceptance commit (2026-08-18), which replaced §1:57–62 with the (d′)
+text (§2.10; RULED): "§1:57–62" throughout this document names the
+demand-WALK sentence as it stood at `fb2292a24`; on this branch the
+(d′) paragraph now spans §1:57–89, and every later serving-loop.md
+anchor sits a further +27 lines below Appendix A's tuning-tip column
+(§3b/§7/§8 were already ~35 lines lower than `fb2292a24` from the
+RULED text added on 2026-08-18: B7 :423 → :450, §7 :1147 → :1174, §8
+:1200 → :1227).
 
 ## 0. In one screen
 
@@ -121,7 +141,9 @@ serving-loop.md §1:53–62 is unmoved on this branch, §3b/§7/§8 sit
   subscription" text, §2F.4, is the fallback's wording). The reach gap,
   Q3.3, no-basis-rows, and the walk-node key are MOOT under (d′);
   everything else in the ruling set is a one-liner or already ruled
-  (§5).
+  (§5). **RULED 2026-08-18 — descriptive, the (d′) text adopted and
+  LANDED in serving-loop.md §1 the same day (implementation W1); the
+  whole ruling set is ACCEPTED (§5).**
 - Run the refutation experiments FIRST (§6, W0): (d′)'s cheap
   experiment — expose the closure, delete the walk on a scratch branch,
   run the chat/lunch/note workloads: do the demanded derivations still
@@ -926,6 +948,19 @@ is no walk; the demand pass reconciles the tracked-ids closure in
 O(rows) on deltas; the structural-growth path lands one derived commit
 later than the link that reaches it."*
 
+**LANDED 2026-08-18 (RULED).** The owner accepted the ruling set the
+same day, so the ruling did NOT lag the build and the DATED interim was
+never needed: the text above now stands in serving-loop.md §1 in place
+of lines 57–62 (§1:57–89 on this branch), verbatim, with a RULED marker
+that quotes the demand-WALK sentence it replaced and says its
+IMPLEMENTATION is W1 (register OW39 — the row W1 closes). The spec is
+therefore AHEAD of the code at §1: at this tip the per-demander walk
+still runs. For the same reason residual (ix) is NOT restated with the
+acceptance — it describes the code at this tip and is still its cost —
+its restatement rides W1 with the code (§6; the register's design-pass
+delta says the same). If W0 refutes (d′) and the fallback is taken, the
+§2F.4 text REPLACES a RULED sentence — a re-ruling, not a quiet swap.
+
 ## 2F. FALLBACK — (d) the structural walk (demoted 2026-08-18)
 
 *Everything in §2F is the pre-direction design for (d), kept verbatim
@@ -1717,6 +1752,22 @@ stands (they belong to the fallback, §2F, and are kept as written); ONE
 item is added as RULED — R-D, the coarse unsubscribe — because the
 owner's direction already says it. Nothing else in the set moves.
 
+**ACCEPTED 2026-08-18 — the owner accepted the ENTIRE revised ruling
+set (verbatim: "ruling set is accepted").** Every OPEN item below is
+RULED 2026-08-18 per its stated recommendation; each carries its ruling
+as a trailing **RULED** line, with the question, options, and
+recommendation kept above it as the record. The already-RULED items
+(R-A–R-D) and the MOOT items (#2/#3/#11/#12) are unchanged. What the
+acceptance LANDS in the spec is exactly one edit — item 1's (d′)
+sentence in serving-loop.md §1 (§2.10; RULED marker; implementation
+W1, register OW39); every other spec sentence a ruling unlocks (items
+5/6's speculation.md §4 step-2 sentence, item 7's events.md §5 pin,
+item 8's pin, item 10's scopes.md §9 amendment) is RULED text that
+rides its build PR (§6's "spec and register edits the build carries"),
+so the register's coverage row for each lands with the sentence
+(register §4's standing rule). Item 4's step-4 sub-question is RULED
+"owed" and its row is minted with the acceptance (register OW40).
+
 ### Already RULED (2026-08-18) — folded in, not re-asked
 
 - **R-A. No lazy demand** (SB S2 / S6 #5; W R1). RULED IN SUBSTANCE —
@@ -1761,7 +1812,7 @@ owner's direction already says it. Nothing else in the set moves.
   (per-doc refcounts across a session's selectors), not the loop; the
   register carries the row when the build lands (§6).
 
-### Open — front-loaded (the (d′) spec sentence; the reach/perf items are MOOT under (d′))
+### Front-loaded — RULED 2026-08-18 (was open; the (d′) spec sentence; the reach/perf items are MOOT under (d′))
 
 1. **The demand sentence — under (d′): "demand is the tracked-ids
    closure; there is no demand walk".** (SB S6 #1 + #2; W R2; RESTATED
@@ -1783,6 +1834,15 @@ owner's direction already says it. Nothing else in the set moves.
    sentence DATED, pending ratification (T2's precedent). The old
    sub-question — "must a value-only change under a demanded root
    re-run the walk?" — has no subject under (d′).
+   **RULED 2026-08-18 — (a), as recommended:** the sentence was
+   descriptive; serving-loop.md §1:57–62 now reads the (d′) text
+   (§2.10) with the RULED marker — LANDED the same day, with the
+   acceptance, ahead of the code; the ruling did not lag the build, so
+   the DATED interim was never needed. Its IMPLEMENTATION is W1 (§6;
+   register OW39, closed by W1's landing). Residual (ix)'s restatement
+   is the one part of (a) that rides W1 with the code: at this tip the
+   walk still runs and (ix) is still its cost, so the register stays
+   truthful about the code until W1 (§2.10's landing note).
 2. **MOOT under (d′) (fallback-only) — the reach gap, accepted as
    unchanged.** (W R3.) *Question:* a
    writer whose declared surface lies two or more levels below the
@@ -1809,7 +1869,7 @@ owner's direction already says it. Nothing else in the set moves.
    tuning-class follow-on if the build's numbers ask for it — not a
    ruling.)*
 
-### Open — the one-liners
+### The one-liners — RULED 2026-08-18 (were open)
 
 4. **The intent watch need not be a scheduler effect.** (SB S6 #3; C
    #1.) *Question:* may the watch be a non-reactive
@@ -1823,10 +1883,22 @@ owner's direction already says it. Nothing else in the set moves.
    not built in this stage (the listener is orthogonal); rule "owed"
    (mint a row) or "amend §4 to say an outstanding echo stands until
    retired".
+   **RULED 2026-08-18, as recommended:** yes — the intent watch may be
+   a non-reactive storage-notification listener outside the scheduler
+   (pin 10 guards the timing). Sub-question: RULED **"owed"** — step
+   4's re-run is not built in this stage and speculation.md §4 is NOT
+   amended (the "an outstanding echo stands until retired" alternative
+   was not taken); the register mints the row with the acceptance
+   (OW40).
 5. **Tracked-entry-only sidecar read.** (SB S6 #4.) *Recommend:* read
    the tracked entry only — on drop for the UI hook, otherwise its own
    terminal fields — never whole-history; add the §4 step-2 clarifying
    sentence (§3.2).
+   **RULED 2026-08-18, as recommended:** tracked-entry-only — the
+   client reads the tracked entry (its own terminal fields; on drop,
+   for the UI hook), never whole-history. The speculation.md §4 step-2
+   clarifying sentence (§3.2) is RULED text that rides the build (W2),
+   not landed with the acceptance.
 6. **Sanction the tracked entry's mark as the value-plane carrier of
    `consequenceOf`.** (SB S6 #6, flipped by C's wire finding — D4;
    reconciler's item.) *Question:* the spec does not sanction the
@@ -1838,26 +1910,48 @@ owner's direction already says it. Nothing else in the set moves.
    must `consequenceOf` go on the wire (C's option (d))? *Recommend
    sanction*, with SB's guard kept: never a dependency on HISTORY;
    always backstopped by `W ≥ seq(e)` / `eventWatermark ≥ seq(e)`.
+   **RULED 2026-08-18, as recommended:** SANCTIONED — the tracked
+   entry's `consequenced` / `status` / `error` mark is the client's
+   consequence carrier (T7 semantics: written as the event's
+   consequence, retiring with the entry at compaction — not a
+   processed-events table), with SB's guards binding: never a
+   dependency on HISTORY; always backstopped by `W ≥ seq(e)` /
+   `eventWatermark ≥ seq(e)`. `consequenceOf` does NOT go on the wire.
+   The sanctioning sentence rides the build with item 5's (W2).
 7. **Drops and errors ride `consequenceOf`.** (SB S6 #7.) Inferred
    from "every eventId drained this wave" + drops / errors advancing
    `eventWatermark`, never stated. *Recommend* a one-line pin in
    events.md §5.
+   **RULED 2026-08-18, as recommended:** pinned — drops and errors ride
+   `consequenceOf`; the one-line pin in events.md §5 is RULED text that
+   rides the build, not landed with the acceptance.
 8. **The client keeps a stream subscribed while it has intents
    outstanding on it.** (SB S6 #8.) The delivery vehicle in practice is
    the `eventWatermark` write on the stream doc the client appended to;
    *recommend pinning* — it is exactly the minimal watch ((a)'s point
    2(ii)).
+   **RULED 2026-08-18, as recommended:** pinned — a client keeps a
+   stream subscribed while it has intents outstanding on it ((a)'s
+   point 2(ii), the minimal watch); the pin's spec sentence rides the
+   build (its home — speculation.md §4 beside step 2, or events.md §5
+   — is the build's to name), not landed with the acceptance.
 9. **The W / `eventWatermark` backstop.** (SB S6 #9.) May an
    intent-origin entry retire on `W ≥ seq(e)` or `eventWatermark ≥
    seq(e)` when the `consequenceOf` frame was missed? Both are
    spec-defined "consequences committed" facts. *Recommend yes*;
    W-coverage is the sweep's existing rule, so one sweep serves both
    origins.
+   **RULED 2026-08-18, as recommended:** yes — an intent-origin entry
+   may retire on `W ≥ seq(e)` or `eventWatermark ≥ seq(e)` when the
+   `consequenceOf` frame was missed; one sweep serves both origins.
 10. **scopes.md §9 vs §2 — the ragged tripwire.** (SB S6 #10.) §9
     forbids "ragged instance sets as a steady state"; §2 (amended
     2026-08-16) permits ragged below the space→user hop
     "simultaneously and stably". *Recommend amending §9* to "ragged at
     the space→user hop".
+    **RULED 2026-08-18, as recommended:** amend scopes.md §9 to "ragged
+    at the space→user hop"; the amendment is RULED text that rides the
+    build PRs, not landed with the acceptance.
 11. **MOOT under (d′) (fallback-only) — no basis rows for the walk.**
     (SB S6 #11.) §3b's rows are per (action, instance) output-currency;
     the walk has no output, and activation re-walks demanded roots by
@@ -1875,6 +1969,10 @@ owner's direction already says it. Nothing else in the set moves.
     whole-doc `cell.sink` over the session effects doc. *Recommend
     yes*, as (e)'s second step (or a follow-on row if the effects doc
     is small on the acceptance workloads — say which).
+    **RULED 2026-08-18, as recommended:** yes — the effects-channel
+    sink follows the same redesign, as (e)'s second step (a follow-on
+    row only if the effects doc proves small on the acceptance
+    workloads — the build says which).
 14. **The zero-write CFC-probe skip is a CFC-owner rider, OFF-visible.**
     (C #3; W's generic-path note.) Skipping `flowLabelWorkExists` when
     a tx has no writes / attempted writes / write-policy inputs /
@@ -1884,14 +1982,21 @@ owner's direction already says it. Nothing else in the set moves.
     separate rider for the CFC owner, OFF suite as its gate; not in this
     stage (under (a) the intent watch has no tx, so the rider narrows
     to ordinary UI sinks — tuning-class).
+    **RULED 2026-08-18, as recommended:** a separate rider for the CFC
+    owner, OFF suite as its gate, OFF-visible; NOT this stage.
 15. **`storageManager.subscribe` vs `sinkDocument?` — the storage
     owner's call.** (C #4.) *Recommend `subscribe`* (typed, the
     scheduler's own precedent) unless the storage owner prefers the
     optional interface member.
+    **RULED 2026-08-18, as recommended:** `storageManager.subscribe`.
 16. **Is the schema-narrowed sink an acceptable interim?** (C #2.)
     Linear, still an effect. *Recommend* only if the build lands in two
     steps (the first step is also the cheap refutation experiment for
     (e), §6 W0); otherwise skip straight to (a).
+    **RULED 2026-08-18, as recommended:** the schema-narrowed sink is
+    acceptable ONLY as an interim, if the build lands (e) in two steps
+    (its first step doubling as (e)'s cheap refutation experiment, W0);
+    otherwise straight to (a).
 
 ## 6. The build-stage work order
 
@@ -1957,24 +2062,31 @@ registration / unregistration — §2.4); DELETING the walk
 traces, the walk's union logs and resubscribes); the `demand` counter
 block, (d′) version (W4); pins T1′–T5′, T7′, T9′, T10′, P-demand-set,
 P-coarse, P-arrival red-first, plus the settle-cycle count for T2′/T3′
-as a reported number; the register's residual (ix) restated per §2.10;
-the (d′) §1 sentence (RULED or DATED); `SCHEDULER_LIVENESS_EQUIVALENCE=1`
-green across the new transitions; the OFF suite byte-identical.
+as a reported number; the register's residual (ix) restated per §2.10
+(rides HERE with the code — the sentence landed ahead of it); the (d′)
+§1 sentence — RULED 2026-08-18 and LANDED in serving-loop.md §1 with
+the acceptance, ahead of the code (register OW39 — this item CLOSES
+it; the spec-ahead-of-code marker in §1 comes out with the walk);
+`SCHEDULER_LIVENESS_EQUIVALENCE=1` green across the new transitions;
+the OFF suite byte-identical.
 *(No B7 note, no "no basis rows for the walk" — moot.)*
 **FALLBACK BRANCH — W1-F, only if W0 refutes (d′):** (d) the structural
 walk per §2F: (a) node keying + refcount; (c′) the structural traversal
 + visited-set cycle guard; Q3.1 + Q3.2 (Q3.3 walk-only if ruled);
 liveness bracketing on every transition; the fallback's `demand`
 counter block (§2F.3); pins T1–T11 red-first; residual (ix) restated
-per §2F.4; §2F.4's amended §1 sentence (RULED or DATED); §3b's "no basis
-rows for the walk" and B7 note (if ruled); the equivalence hook green;
-OFF suite byte-identical.
+per §2F.4; §2F.4's amended §1 sentence — now a RE-RULING, since it
+would replace the RULED and landed (d′) text (§2.10's landing note);
+§3b's "no basis rows for the walk" and B7 note (if ruled); the
+equivalence hook green; OFF suite byte-identical.
 
 **W2 — (e) the intent listener** (client): contract points 1–7; the
 `commonfabric.*` debug counters; pins 1–11 red-first (re-seam the
 existing `event-append-client.test.ts` pin to the notification path);
-the effects channel if ruled (item 13); the speculation.md §4 step-2
-clarifying sentence; interim (b) only if two steps.
+the effects channel (item 13 — RULED yes, as (e)'s second step); the
+speculation.md §4 step-2 clarifying sentence (items 5/6 — RULED; the
+text rides this PR) and item 8's pin (RULED; its spec home is the
+build's to name); interim (b) only if two steps (item 16 — RULED so).
 
 **W3 — (α)** (dispatch path): (α1) the deadline-time purge; (α2) the
 drain skip against an in-wave `streamEntry`-bearing copy; (α3) the
@@ -2032,14 +2144,21 @@ register OW38 (i)):
   fall (fewer exhausted waves), the structural-growth path adds one;
   never silence the assertion.
 
-**Spec and register edits the build carries:** serving-loop.md §1:57–62
-— the (d′) text (§2.10) — item 1 (the B7 note and §3b's no-basis-rows
-are moot); scopes.md §9 ragged amendment — item 10; speculation.md §4
-step 2 clarifying sentence — item 5 / 6; events.md §5 drops / errors
-pin — item 7; §7 counter list (the (d′) `demand` block + the two omitted
-counters); the register: residual (ix) restated per §2.10, R-D recorded
-as RULED with its future-item row (fine-grained release), a "Stage C
-design build delta" LANDED block, and the owed rows below.
+**Spec and register edits the build carries** (every ruling below is
+RULED 2026-08-18 — the acceptance; what the build carries is the TEXT):
+serving-loop.md §1:57–62 — the (d′) text (§2.10) — item 1: LANDED with
+the acceptance, RULED, ahead of the code (register OW39; W1's landing
+closes it and removes the spec-ahead-of-code marker) — the B7 note and
+§3b's no-basis-rows are moot; scopes.md §9 ragged amendment — item 10
+(text rides the build); speculation.md §4 step 2 clarifying sentence —
+item 5 / 6 (text rides W2), and item 8's pin (text rides the build;
+spec home the build's to name); events.md §5 drops / errors pin — item
+7 (text rides the build); §7 counter list (the (d′)
+`demand` block + the two omitted counters); the register: residual (ix)
+restated per §2.10 (with W1's code), R-D recorded as RULED with its
+future-item row (fine-grained release), a "Stage C design build delta"
+LANDED block, the coverage row for each sentence as it lands (register
+§4's standing rule), and the owed rows below.
 
 **One PR or a train — recommend a TRAIN of three stacked PRs, in this
 order:** (1) (d′) — memory server + scheduler + SpaceServer, biggest,
@@ -2054,21 +2173,26 @@ without touching (e) or (α); the order is leverage, not dependency —
 it would couple three reviews and make a (d) re-scope stall the client
 fix.
 
-**Owed rows the build will create when it lands** (none exist yet —
-this is a design document; nothing binding has landed): fine-grained
-demand release (R-D's future item; seat: the memory server's tracker);
-the no-grace push-growth wake and/or the pre-seal closure refresh if
-W0's (c) needs them (flag 1); the structure load for demanded non-root
-docs with pattern meta if W0's count says so (flag 4); the output-doc
+**Owed rows the build will create when it lands** (the acceptance
+minted TWO ahead of the build — OW39, the (d′) §1 sentence's
+implementation, which W1 closes; OW40, step 4's rebase, RULED owed —
+otherwise none exist yet: this is a design document, and the (d′) §1
+sentence is the one binding edit landed so far): fine-grained demand
+release (R-D's future item; seat: the memory server's tracker); the
+no-grace push-growth wake and/or the pre-seal closure refresh if W0's
+(c) needs them (flag 1); the structure load for demanded non-root docs
+with pattern meta if W0's count says so (flag 4); the output-doc
 demanders union if `undemandedNarrowingRuns` shows the linked-piece
 shape (flag 5); the (b′) incremental walk ONLY on the fallback branch;
-the effects-channel follow-on if not in scope (item 13); the CFC
-zero-write probe rider (item 14, CFC owner); step 4's rebase if ruled
-owed (item 4); OW24 compaction as the bound on the ON-only linear
-residuals (existing row, re-pointed); the (a) upgrade if interim (b)
-lands first (item 16); OW37 re-read; OW38 (i) lands with the benchmark,
-(ii) the flip bar stays the owner's. *(Q3.3 for computeds leaves the
-owed list under (d′): tuning-class if measured, not a row.)*
+the effects-channel follow-on if not in scope (item 13 — RULED as (e)'s
+second step); the CFC zero-write probe rider (item 14 — RULED, CFC
+owner); step 4's rebase (item 4 — RULED owed 2026-08-18; OW40 minted
+with the acceptance, the build re-points it if it learns more); OW24
+compaction as the bound on the ON-only linear residuals (existing row,
+re-pointed); the (a) upgrade if interim (b) lands first (item 16); OW37
+re-read; OW38 (i) lands with the benchmark, (ii) the flip bar stays the
+owner's. *(Q3.3 for computeds leaves the owed list under (d′):
+tuning-class if measured, not a row.)*
 
 ## 7. Risks, and what would refute each redesign
 
@@ -2110,7 +2234,10 @@ owed list under (d′): tuning-class if measured, not a row.)*
 - **(d′) — the ruling** — if the owner rules the §1 sentence normative
   (§5 item 1 (b)), (d′) is a spec change: land the code DATED and the
   (d′) sentence as an amendment proposal; do not build a walk to satisfy
-  a descriptive sentence.
+  a descriptive sentence. *RETIRED 2026-08-18: RULED (a), descriptive;
+  the (d′) sentence is landed (§2.10's landing note). The residual risk
+  is the inverse — the spec is ahead of the code until W1 lands
+  (register OW39 keeps it visible).*
 - **(d) — FALLBACK-ONLY risks (kept for W1-F):**
 - **(d) — the term is elsewhere.** W0 checks it before the full walk is
   built; if refuted, re-attribute (wave commit / frames /
@@ -2135,7 +2262,10 @@ owed list under (d′): tuning-class if measured, not a row.)*
 - **(d) — the ruling** — if the owner rules the §1 sentence normative
   (option (b)), the redesign is a spec change: land the code DATED and
   the sentence as an amendment proposal; do not build a per-pair
-  re-walk to satisfy a descriptive sentence.
+  re-walk to satisfy a descriptive sentence. *Since 2026-08-18 the
+  fallback's own sentence (§2F.4) is what needs a ruling: the landed
+  (d′) text is RULED, so W1-F would replace a ruled sentence — a
+  re-ruling.*
 - **(e) — per-note growth persists** → C Q9's list (never-served
   instances growing `#entries`; the effects channel; UI sinks that OFF
   pays too); the linear ON-only residuals (whole-doc frames, the
@@ -2177,8 +2307,12 @@ The lenses cite `fb2292a24`; the trio's runtime (`2e9d86478` =
 | `scheduler/facade.ts` `dropEvent` / `dropQueuedEvent` | — | :2561–2579 |
 | `wave.ts` C8d fold (`parentEventId`) | — | :2566–2590 |
 | `executor/watermark.ts` `waitForSettled` | — | :62 |
-| serving-loop.md §1:53–62 (the walk sentence) | unmoved | unmoved |
-| serving-loop.md §3b B7 / §7 / §8 | :388 / :1112 / :1165 | :423 / :1147 / :1200 |
+| serving-loop.md §1:53–62 (the walk sentence) | unmoved | unmoved — until the acceptance commit (2026-08-18) replaced §1:57–62 with the (d′) text: now §1:57–89 |
+| serving-loop.md §3b B7 / §7 / §8 | :388 / :1112 / :1165 | :423 / :1147 / :1200 — +27 after the acceptance commit: :450 / :1174 / :1227 |
+
+*(The acceptance commit's +27 applies to every serving-loop.md anchor
+below §1 on this branch; the code anchors below are untouched — the
+acceptance changed no code.)*
 
 **(d′) anchors — the tuning tip (= this branch's code), verified
 2026-08-18 for §2:**

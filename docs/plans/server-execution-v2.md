@@ -102,9 +102,10 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   clearly far too high regardless. The next benchmark measures server
   settle time EXPLICITLY (register OW38); the flip's performance BAR is
   an owner ruling.
-- **The design pass — report LANDED; ruling set presented; the build
-  stage is NEXT. Design (d) SUPERSEDED by (d′) per owner direction
-  2026-08-18 (same day).** The reconciled design is
+- **The design pass — report LANDED; ruling set ACCEPTED 2026-08-18
+  (owner, verbatim: "ruling set is accepted"); W0 is NEXT. Design (d)
+  SUPERSEDED by (d′) per owner direction 2026-08-18 (same day).** The
+  reconciled design is
   [`server-execution-v2/stage-c-design.md`](server-execution-v2/stage-c-design.md)
   (LIVE — a design + build work order for unexecuted work; it archives
   beside the closeout when the build lands); the three lens reports it
@@ -151,26 +152,34 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   registry over the closure + the currency check, the demand-root
   bracket, deleting the walk, the pins) with the structural walk as the
   fallback branch W1-F; recommended shape: a train of three stacked PRs
-  ((d′) → (e) → (α)). The design's ruling set is its §5: FOUR items
-  RULED and folded in (no lazy demand — RULED in substance; the
-  double-dispatch invariant; the measurement caveat; NEW R-D — the
-  coarse unsubscribe accepted for now, fine-grained future — RULED
-  2026-08-18 by the same direction); the front-loaded open one is the
-  demand sentence (serving-loop.md §1:57–62 "runs once per demanding
-  pair" → the (d′) text: "demand is the union of the demanding sessions'
+  ((d′) → (e) → (α)). The design's ruling set (its §5) is **ACCEPTED
+  2026-08-18 in full** (owner, verbatim: "ruling set is accepted"):
+  the FOUR already-RULED items stand (no lazy demand — RULED in
+  substance; the double-dispatch invariant; the measurement caveat;
+  R-D — the coarse unsubscribe accepted for now, fine-grained future);
+  the front-loaded demand sentence is RULED (a) — descriptive — and
+  the (d′) text ("demand is the union of the demanding sessions'
   tracked instances (memory v2's schema-narrowed closure); the serving
-  loop runs the stale writers of demanded instances; there is no demand
-  walk" — recommend adopt; the SB/W "structural subscription" text is
-  the fallback's wording); MOOT under (d′): the reach gap, Q3.3, no
-  basis rows for the walk, the walk-node key; the rest are one-liners
-  (no scheduler effect for the intent watch; tracked-entry-only read;
-  sanction the tracked entry's mark as the value-plane carrier of
-  `consequenceOf`; drops/errors ride `consequenceOf`; keep the stream
-  subscribed while intents are outstanding; the W/eventWatermark
-  backstop; amend scopes.md §9's ragged tripwire; the effects channel
-  follows; the CFC zero-write probe skip is a CFC-owner rider;
-  `subscribe` vs `sinkDocument?` is the storage owner's; interim (b)
-  only if two steps). Flagged, not filled (design §2.8): the
+  loop runs the stale writers of demanded instances; there is no
+  demand walk") LANDED in serving-loop.md §1 the same day, RULED,
+  AHEAD of the code — its implementation is W1 (register OW39; the
+  SB/W "structural subscription" text stays the fallback's wording,
+  now a re-ruling if taken); MOOT under (d′): the reach gap, Q3.3, no
+  basis rows for the walk, the walk-node key; the one-liners all RULED
+  per recommendation (no scheduler effect for the intent watch — with
+  step 4's rebase RULED owed, register OW40; tracked-entry-only read;
+  the tracked entry's mark SANCTIONED as the client's consequence
+  carrier, with its guards; drops/errors ride `consequenceOf`; the
+  stream stays subscribed while intents are outstanding; the
+  W/eventWatermark backstop; scopes.md §9 → "ragged at the space→user
+  hop"; the effects channel follows as (e)'s second step; the CFC
+  zero-write probe skip is a CFC-owner rider, not this stage;
+  `storageManager.subscribe`; the schema-narrowed sink only as an
+  interim if two steps) — the spec text those unlock (events.md §5's
+  pin, speculation.md §4 step 2's sentence, scopes.md §9's amendment)
+  is RULED text that rides the build PRs, not landed with the
+  acceptance (register: the ruling-acceptance delta). Flagged, not
+  filled (design §2.8): the
   one-push-late structural growth (+ grace); the push-growth notify is
   a new site; the standing root kind is a new disjunct; the structure
   load stays root-scoped (linked pieces visible now); demander
@@ -178,9 +187,10 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   the monotone growth of `trackedIds`.
 
 **Ordered next actions:** (1) #5991's ledger comment; (2) the design
-BUILD stage per the design's §6 work order — the owner's rulings on its
-§5 (the (d′) demand sentence first) → W0: (d′)'s refutation experiment
-(and (e)'s) → (d′) (or its fallback), (e), (α) as a train →
+BUILD stage per the design's §6 work order — the §5 rulings are DONE
+(ruling set ACCEPTED 2026-08-18; the (d′) demand sentence landed) →
+**W0 is next**: (d′)'s refutation experiment (and (e)'s), scratch,
+nothing pushed → (d′) (or its fallback), (e), (α) as a train →
 re-benchmarked measuring server settle time; (3) the
 CONFIDENCE VERDICT to the owner; (4) on "no fundamental issue", land
 the train on main with the flag OFF (siblings stacked; default lanes
@@ -210,13 +220,19 @@ already delegated, the one defect is the served genesis ACL's content
 (recommended, not yet ruled) — work order recorded (register OW31; the
 scoping report beside the closeout), implementation OWED POST-MERGE,
 BEFORE the flip PR, OFF-invisible; (4) the design-pass set —
-PRESENTED as the design's §5 (`server-execution-v2/stage-c-design.md`):
-FOUR already ruled and folded in (no lazy demand, the double-dispatch
-invariant, the measurement caveat, and — by the 2026-08-18 direction
-that superseded (d) with (d′) — R-D, the coarse unsubscribe accepted for
-now with fine-grained future), the (d′) demand sentence front-loaded,
-four items MOOT under (d′) (reach gap, Q3.3, no basis rows for the walk,
-the walk-node key), the one-liners listed — UNRULED beyond those four;
+**ACCEPTED 2026-08-18** (owner, verbatim: "ruling set is accepted";
+the design's §5, `server-execution-v2/stage-c-design.md`): every open
+item RULED per its stated recommendation — the (d′) demand sentence
+RULED (a), descriptive, and LANDED in serving-loop.md §1 the same day
+ahead of the code (implementation W1 — register OW39); the one-liners
+as recommended; step 4's rebase RULED owed (register OW40); the other
+spec sentences the rulings unlock ride the build PRs as RULED text —
+with the FOUR already ruled and folded in (no lazy demand, the
+double-dispatch invariant, the measurement caveat, and — by the
+2026-08-18 direction that superseded (d) with (d′) — R-D, the coarse
+unsubscribe accepted for now with fine-grained future) and four items
+MOOT under (d′) (reach gap, Q3.3, no basis rows for the walk, the
+walk-node key) unchanged;
 (4′) the **(d′) direction itself — 2026-08-18** — "the client-side
 scheduler seems to work well without differentiating structural changes
 from just value changes … the set of documents the client cares about
@@ -1092,7 +1108,9 @@ Tasks:
       invariant RULED 2026-08-18, its (α) purge owed to the design build
       — OW35); the tuning trio (#5991) restored COMPLETION (ON
       finishes every journey, `lease.lost` 0); latency remains
-      design-class — the design pass is next*; (3)
+      design-class — the design pass RAN (report landed; its ruling
+      set ACCEPTED 2026-08-18, the (d′) sentence in serving-loop.md
+      §1); the design BUILD, W0 first, is next*; (3)
       OW28 — compile-and-run as an outbox effect kind + completion-class
       writeback — *DONE on #5968 (`463ea3887`, stage C; instantiation in
       the derivation, the completion re-arms — a recorded refinement;

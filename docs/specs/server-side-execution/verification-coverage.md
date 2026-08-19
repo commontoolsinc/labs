@@ -3643,7 +3643,9 @@ supply; OW29/OW32/OW34 closed):
   (live; the lens reports verbatim beside the closeout as
   `stage-c/stage-c-lens-*.md`). It is a DESIGN: this PR changes no
   binding sentence — serving-loop.md §1:57–62 still reads "runs once
-  per demanding pair"; the amended "structural subscription" text is
+  per demanding pair" (superseded later the same day: the
+  ruling-acceptance delta below lands the (d′) text there); the
+  amended "structural subscription" text is
   the design's §2F.4 (the FALLBACK's wording since the same-day (d′)
   amendment below; the (d′) text is §2.10) and the front-loaded item of
   its ruling set (§5); the residual (ix) item above ("N × walk per
@@ -3695,7 +3697,8 @@ supply; OW29/OW32/OW34 closed):
     the union of the demanding sessions' tracked instances (memory v2's
     schema-narrowed closure); the serving loop runs the stale writers
     of demanded instances; there is no demand walk"; design §2.10 —
-    still a PROPOSAL, not landed here); items 2 (reach gap), 3 (Q3.3),
+    still a PROPOSAL, not landed here; LANDED 2026-08-18 by the
+    ruling-acceptance delta below); items 2 (reach gap), 3 (Q3.3),
     11 (no basis rows for the walk), 12 (walk-node key) are MOOT under
     (d′); ONE new item is RULED — **R-D, the coarse unsubscribe** ("it
     doesn't unsubscribe in a fine-grained way … i think this remains
@@ -3721,6 +3724,132 @@ supply; OW29/OW32/OW34 closed):
     (b′) and Q3.3-for-computeds ONLY on the fallback branch. The
     design's §2.8 lists what in the code makes (d′) harder than the
     naive statement — flagged, not filled.
+- **Stage C ruling-acceptance delta (2026-08-18) — the design's §5
+  ruling set ACCEPTED by the owner (verbatim: "ruling set is
+  accepted"); ONE binding sentence lands — serving-loop.md §1's (d′)
+  demand paragraph (RULED 2026-08-18), whose IMPLEMENTATION is W1;
+  every other spec sentence the rulings unlock is RULED TEXT OWED WITH
+  THE BUILD; W0 is next.** Every open item of the design's §5 is RULED
+  per its stated recommendation (each carries its RULED line there);
+  the four already-RULED (R-A–R-D) and four MOOT items are unchanged.
+  Rows minted here: OW39, OW40 (the siblings mint no numbers; this
+  delta owns them).
+  - **serving-loop.md §1:57–62 — CHANGED sentence, same row; the
+    row's instrument moves to W1 (impl-gate → OW39).** The stage-B
+    description — "the demand WALK (the live reader per demanded root
+    that pulls the value's subtree) runs once per demanding pair, each
+    run following THAT demander's redirects" (pinned 2026-08-17 in
+    `executor-fan-out.test.ts` (f-walk) and `scheduler-fan-out.test.ts`
+    — the fan-out stage-B delta above) — is REPLACED by the (d′) text
+    (design §2.10, verbatim: demand = the demanding (user, session)
+    pair on every INSTANCE a client session TRACKS — memory v2's
+    schema-narrowed closure, instance-keyed, accumulated across
+    overlapping watches; the union over the space's client sessions;
+    there is no demand walk; the loop runs the STALE writers of
+    demanded instances; a demanded instance's writers hold demand while
+    any session tracks it and release when none does — coarse, R-D;
+    push-time re-traversal / a later derived commit for
+    structural growth; value-only changes through the trigger index
+    alone; nothing about structure versus value decided anywhere), with
+    a RULED marker that quotes the replaced sentence and states the
+    implementation gap. RULED (a) — the replaced sentence was
+    DESCRIPTIVE (item 1 as recommended), so this is a changed rule, not
+    a spec change; no count moves here (the map's re-tally is the
+    build's LANDED block, as the design-pass delta says). The
+    instrument: the stage-B pins pin the WALK the sentence no longer
+    describes — they stay green at this tip because the CODE still
+    runs the walk (the spec is ahead of the code at §1, and says so in
+    its own marker), and W1 retires them with the walk (T9′ is the
+    structural pin: no `demand-walk:*` node anywhere in the graph
+    snapshot; the (d′) `demand` counter block has no `walkRuns`); the
+    sentence's own pins are W1's — T1′–T5′, T7′, T9′, T10′,
+    P-demand-set, P-coarse, P-arrival (design §2.8 / §6) — red-first
+    when the build lands. NOT restated here, deliberately: residual (ix)
+    above ("the walk re-fires per changed doc it read … N × walk per
+    changed root") describes the code at this tip and stays its accepted
+    cost until W1 restates it with the code (design §2.10's landing
+    note; item 1's ruling line); speculation.md §4's rationale phrase
+    "any per-user subtree the demand walk does not reach" likewise
+    describes the stage-B mechanism and is swept by the build's
+    speculation.md edits (W2), not by the acceptance.
+  - **OW39 — the (d′) §1 sentence's IMPLEMENTATION (W1); the spec is
+    ahead of the code until it lands.** Binding since 2026-08-18
+    (serving-loop.md §1:57–89 on this branch): demand is the union of
+    the demanding sessions' tracked instances (memory v2's
+    schema-narrowed closure); the serving loop runs the stale writers
+    of demanded instances; there is no demand walk; a demanded
+    instance's writers hold demand while any session tracks it and
+    release when none does (coarse — R-D; fine-grained is the future
+    row the build mints). The code at this tip: the per-demander walk
+    (`#installDemandWalk`, `#demandSinks`, the `demand-walk:*` effects
+    and traces, `watchedRootsForSpace`, the walk's union logs and
+    resubscribes — design Appendix A's (d′) anchors). Owed: W1 per
+    design §6 — the memory-server exposure (`demandedInstancesForSpace`
+    + the push-growth `demandChanged` notify); the SpaceServer's
+    registry over the closure + the currency check on registry deltas
+    (writers of an entered key → demand roots; not-current-for-pair
+    re-arm; releases on leave); the scheduler's `demandedWriters` root
+    kind with its §8 bracket on every transition; the walk DELETED;
+    the (d′) `demand` counter block; the pins above red-first;
+    `SCHEDULER_LIVENESS_EQUIVALENCE=1` green; the OFF suite
+    byte-identical — gated by W0's (d′) refutation result. If W0
+    refutes (d′) and the fallback (design §2F) is taken, the §2F.4
+    "structural subscription" text REPLACES this ruled sentence — a
+    RE-RULING of the owner, not a quiet swap. Trigger: W1's landing PR
+    closes the row (and removes §1's spec-ahead-of-code marker); before
+    the design build stage's confidence verdict names the demand model
+    as built.
+  - **OW40 — speculation.md §4 step 4's re-run of un-consequenced
+    intents against fresh state — RULED "owed" 2026-08-18 (design §5
+    item 4's sub-question, as recommended; §4 NOT amended).** Step 4
+    names a rebase that is neither the sink's nor the sweep's job today
+    (`#sweep` retires / un-renders an intent echo, never rebases it);
+    NOT built in the design build stage — the intent listener (e) is
+    orthogonal to it; the alternative ruling ("amend §4 to say an
+    outstanding echo stands until retired") was not taken, so the
+    sentence stands as written with this row as its owed mechanism.
+    Owed: the rebase in the client overlay (`overlay-destination.ts`
+    is the seat), or a later ruling that retires the sentence. Trigger
+    (the recorder's, not ruled): before the flip PR — the sentence
+    binds the flag-ON client — and earlier if a rendered un-consequenced
+    echo is witnessed standing stale on a live run. The build
+    re-points this row if W2 learns more.
+  - **RULED text OWED WITH THE BUILD (not landed with the acceptance;
+    each sentence brings its coverage row when it lands — §4's standing
+    rule):** item 5 + item 6 — speculation.md §4 step 2's clarifying
+    sentence (the match is on the pushed commit's `consequenceOf`,
+    carried to the client as the tracked entry's own `consequenced` /
+    `status` / `error` fields — T7 semantics — SANCTIONED as the
+    consequence carrier with the guards binding: never a dependency on
+    HISTORY, always backstopped by `W ≥ seq(e)` / `eventWatermark ≥
+    seq(e)`; the entry read only for the tracked event and a dropped
+    event's reason; `consequenceOf` does NOT go on the wire) — rides
+    W2; item 7 — events.md §5's one-line pin (drops and errors ride
+    `consequenceOf`) — rides the build; item 8 — the client keeps a
+    stream subscribed while it has intents outstanding on it (the
+    minimal watch; the `eventWatermark` write on the appended stream
+    doc is the vehicle) — rides the build, its spec home (speculation.md
+    §4 beside step 2, or events.md §5) the build's to name; item 9 —
+    the W / `eventWatermark` backstop retires an intent-origin entry
+    when the `consequenceOf` frame was missed (already the sweep's
+    rule; one sweep serves both origins) — a clarifying clause if the
+    build needs one; item 10 —
+    scopes.md §9's tripwire amended to "ragged at the space→user hop"
+    — rides the build train (design §6's "spec and register edits the
+    build carries").
+  - **RULED, no spec sentence and no row (build items, recorded in the
+    design's §5):** item 4 — the intent watch may be a non-reactive
+    storage-notification listener outside the scheduler (pin 10 guards
+    the timing); item 13 — the effects-channel sink follows the same
+    redesign as (e)'s second step; item 14 — the zero-write CFC-probe
+    skip is a separate CFC-owner rider, OFF suite as its gate,
+    OFF-visible, not this stage; item 15 — `storageManager.subscribe`;
+    item 16 — the schema-narrowed sink only as an interim if (e) lands
+    in two steps.
+  - Not rows, recorded: the coordination state moves to "ruling set
+    ACCEPTED 2026-08-18; W0 is next" (plan); W0 is (d′)'s refutation
+    experiment (and (e)'s) on a scratch branch, nothing pushed (design
+    §6); the design document itself stays LIVE until the build lands.
 
 ## 4. Standing rule
 
