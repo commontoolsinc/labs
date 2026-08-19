@@ -284,11 +284,10 @@ export interface CellGetRequest extends BaseRequest {
  * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
  * is `postMessage` rather than JSON, so that is a gap rather than a limit --
  * though structured clone alone does not close it, a class instance arriving
- * with its prototype and private fields gone. `RealmCodecEngine` is the
- * mechanism -- `realmFromFabricValue()` and `fabricFromRealmValue()` from
- * `@commonfabric/data-model/codecs` -- being the format written for this
- * crossing: a `bigint` travels as itself, a `symbol` under a tag, and a
- * `FabricBytes` as an `ArrayBuffer` a send can transfer. Until then
+ * with its prototype and private fields gone. `codec-realm` is the mechanism,
+ * being the format written for this crossing: a `bigint` travels as itself, a
+ * `symbol` under a tag, and a `FabricBytes` as an `ArrayBuffer` a send can
+ * transfer. Until then
  * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw
  * rather than silent loss.
  */
@@ -561,7 +560,7 @@ export interface UploadBlobRequest extends BaseRequest {
    * IPC payload: a class does not survive the crossing, where a typed array
    * does and carries whole rather than element by element.
    *
-   * TODO(danfuzz): this wants to be a `FabricBytes`, which `RealmCodecEngine`
+   * TODO(danfuzz): this wants to be a `FabricBytes`, which `codec-realm`
    * carries across as a bare `ArrayBuffer` the send can transfer. The bytes
    * would then be immutable end to end rather than a view a sender still
    * holds.
@@ -644,7 +643,7 @@ export interface PageCreateRequest extends BaseRequest {
   // narrows it to the JSON-compatible subset with nothing carrying the rest.
   // The same gap `WireCellValue` is marked with, at the other request that
   // sends a value into the worker, and closed by the same mechanism
-  // (`RealmCodecEngine`).
+  // (`codec-realm`).
   argument?: JSONValue;
   cause?: string;
   run?: boolean;
@@ -1039,8 +1038,8 @@ export interface BooleanResponse {
  * direction loses where the inbound one throws: the producer hands over a
  * value with its `FabricPrimitive`s intact and structured clone strips each to
  * `{}` (see `handleCellGet` in `backends/runtime-processor.ts`).
- * `RealmCodecEngine` is the mechanism, and closing this gap and
- * `WireCellValue`'s is one change.
+ * `codec-realm` is the mechanism, and closing this gap and `WireCellValue`'s
+ * is one change.
  */
 export interface JSONValueResponse {
   value: JSONValue | undefined;
@@ -1116,9 +1115,9 @@ export interface ConsoleNotification {
   // TODO(danfuzz): these arrive pre-flattened to text by
   // `sanitizeForPostMessage()` (`backends/runtime-processor.ts`), and the
   // receiver hands them to `console.log()` -- a devtools inspector, which can
-  // show more of a value than a string of it can. A `RealmCodecValue` arm here
-  // is what lets the fabric among them cross whole; see the marker at the
-  // producer for what else has to move first.
+  // show more of a value than a string of it can. A `codec-realm` arm here is
+  // what lets the fabric among them cross whole; see the marker at the producer
+  // for what else has to move first.
   args: JSONValue[];
 }
 

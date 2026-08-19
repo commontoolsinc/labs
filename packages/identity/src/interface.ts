@@ -110,9 +110,9 @@ export interface AuthorizationError extends Error {
  * payload, and structured cloning does not preserve a class.
  *
  * TODO(danfuzz): Change these properties to `FabricBytes`, carried across the
- * boundary by `RealmCodecEngine` (`@commonfabric/data-model/codecs`), which
- * encodes one as a bare `ArrayBuffer` a send can transfer. The bytes would
- * then be immutable end to end, instead of only within a signer.
+ * boundary by `codec-realm`, which encodes one as a bare `ArrayBuffer` a send
+ * can transfer. The bytes would then be immutable end to end, instead of only
+ * within a signer.
  */
 export type InsecureCryptoKeyPair = {
   privateKey: Uint8Array;

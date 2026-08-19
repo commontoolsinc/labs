@@ -3161,7 +3161,7 @@ export class WorkerReconciler {
     // TODO(danfuzz): what this returns is not in fact cloneable without loss.
     // `convertCellsToLinks()` below preserves a `FabricPrimitive` by identity,
     // and structured clone strips one to `{}` between here and the applicator,
-    // silently. Encoding with `RealmCodecEngine` is what makes the doc comment
+    // silently. Encoding with `codec-realm` is what makes the doc comment
     // above true; see the marker on `SetPropOp` in `../vdom-ops.ts`.
     //
     // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject`, so a

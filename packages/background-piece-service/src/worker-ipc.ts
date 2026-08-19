@@ -13,8 +13,8 @@ export type InitializationData = {
   // TODO(danfuzz): this is one of the two crossings the `InsecureCryptoKeyPair`
   // marker in `@commonfabric/identity`'s `interface.ts` is about. The key
   // material is a plain `Uint8Array` pair because that is what structured
-  // clone carries; `RealmCodecEngine` carries a `FabricBytes`, which would
-  // make the bytes immutable end to end rather than only within a signer.
+  // clone carries; `codec-realm` carries a `FabricBytes`, which would make the
+  // bytes immutable end to end rather than only within a signer.
   rawIdentity: KeyPairRaw;
   experimental?: {
     modernCellRep?: boolean;

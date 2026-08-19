@@ -450,12 +450,12 @@ function sanitizedBody(
   // receiver wants. These args land in `console.log()` on the main thread
   // (`RuntimeInternals.#onConsole` in `lib-shell`), so the reader is a
   // devtools object inspector -- which renders a live `FabricBytes` as an
-  // expandable value and this string as a string. `RealmCodecEngine` carries
-  // the instance across whole, and the receiver decodes before logging.
+  // expandable value and this string as a string. `codec-realm` carries the
+  // instance across whole, and the receiver decodes before logging.
   //
-  // Two things stand in the way, and neither is this arm's doing. Encoding
-  // refuses a cycle today, where this walk reports one and carries on, so the
-  // memo `RealmCodecEngine` is marked for is a prerequisite. And a
+  // Two things stand in the way, and neither is this arm's doing.
+  // `codec-realm` refuses a cycle today, where this walk reports one and
+  // carries on, so its own memo `TODO` is a prerequisite. And a
   // `console.log()` argument is whatever pattern code passed, which need not
   // be a `FabricValue` at all -- so what replaces this is a walk that encodes
   // the fabric it finds and goes on naming the functions, cells and cycles it
@@ -943,7 +943,7 @@ export class RuntimeProcessor {
     // (`CellHandle.serialize`; see the `WireCellValue` marker in
     // `protocol/types.ts`) — this outbound direction loses silently. The
     // subscription-update path below posts the same conversion.
-    // `RealmCodecEngine` is the mechanism for both directions.
+    // `codec-realm` is the mechanism for both directions.
     const converted = redactSigilCfcLabelViewsForDisplay(
       convertCellsToLinks(value, {
         includeSchema: true,

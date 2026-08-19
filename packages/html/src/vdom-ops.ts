@@ -54,8 +54,8 @@ export interface SetPropOp {
   // JSON-compatible subset. The producer (`transformPropValue()` in
   // `worker/reconciler.ts`) does not narrow to match: it hands over a
   // `FabricPrimitive` whole, and structured clone strips one to `{}` on the
-  // way here. `RealmCodecEngine` (`@commonfabric/data-model/codecs`) is the
-  // mechanism, this batch crossing by `postMessage` rather than as JSON text.
+  // way here. `codec-realm` is the mechanism, this batch crossing by
+  // `postMessage` rather than as JSON text.
   value: JSONValue;
 }
 

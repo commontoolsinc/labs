@@ -92,9 +92,8 @@ function sanitizeForTransfer(value: unknown): unknown {
   // cell, and this narrows it to the JSON-compatible subset -- a
   // `FabricPrimitive` becomes `{}`, a `bigint` becomes its own decimal text.
   // A test that asserted on either would be asserting on the damage. The
-  // crossing is `postMessage`, so `RealmCodecEngine`
-  // (`@commonfabric/data-model/codecs`) carries the whole domain, and the
-  // harness decodes on the other side.
+  // crossing is `postMessage`, so `codec-realm` carries the whole domain, and
+  // the harness decodes on the other side.
   if (value === undefined) return undefined;
   return JSON.parse(JSON.stringify(value, (_key, entry) => {
     if (typeof entry === "function") return undefined;

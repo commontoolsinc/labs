@@ -122,8 +122,7 @@ export enum HostMessageType {
  * TODO(danfuzz): the value is a `FabricValue` -- it comes from a cell, by way
  * of the registered `IframeContextHandler` -- and crosses to the guest by
  * `postMessage()` as itself, so structured clone strips a `FabricPrimitive`
- * to `{}` on the way. `RealmCodecEngine`
- * (`@commonfabric/data-model/codecs`) encodes for exactly this crossing;
+ * to `{}` on the way. `codec-realm` encodes for exactly this crossing;
  * `GuestMessage`'s `Write` arm is the same value going the other way.
  */
 export type HostMessage = {

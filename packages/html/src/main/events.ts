@@ -194,10 +194,10 @@ export function serializeEvent(event: Event): SerializedEvent {
   // `bigint` throws out of `JSON.stringify()` and lands in the `catch`, which
   // replaces the entire detail with `String(detail)`, and a `FabricBytes`
   // stringifies to `{}`. The crossing is `postMessage`, not JSON text, so
-  // `RealmCodecEngine` (`@commonfabric/data-model/codecs`) carries the whole
-  // domain here; what has to stay is the separate job this does of turning an
-  // unencodable detail into something rather than failing the event. The
-  // outbound half of this seam is marked on `SetPropOp` in `../vdom-ops.ts`.
+  // `codec-realm` carries the whole domain here; what has to stay is the
+  // separate job this does of turning an unencodable detail into something
+  // rather than failing the event. The outbound half of this seam is marked on
+  // `SetPropOp` in `../vdom-ops.ts`.
   if ("detail" in event && (event as CustomEvent).detail !== undefined) {
     const detail = (event as CustomEvent).detail;
     try {
