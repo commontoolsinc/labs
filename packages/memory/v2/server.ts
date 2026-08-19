@@ -417,13 +417,13 @@ export type ServerExecutionObserver = {
   demandChanged?: (space: string, reason?: DemandChangeReason) => void;
 };
 
-/** W0 (d′) SCRATCH: why `demandChanged` fired — `watch` (the pre-existing
+/** (d′): why `demandChanged` fired — `watch` (the pre-existing
  * `session.watch.set` / `.add` sites) or `push-growth` (design §2.8 flag
  * 2: a push pass GREW a session's tracked set — a newly reachable doc
  * entered the closure through the tracker's re-traversal). */
 export type DemandChangeReason = "watch" | "push-growth";
 
-/** W0 (d′) SCRATCH: one row of a space's demand set (design §2.1's
+/** (d′): one row of a space's demand set (design §2.1's
  * definition; the successor of `watchedRootsForSpace`'s rows): an
  * INSTANCE a client session TRACKS, with the demanding pair. */
 export type DemandedInstanceRow = {
@@ -3871,7 +3871,7 @@ export class Server {
             // lost frame's docs as already-snapshotted (CT-1927 review,
             // round 6).
             const commitEntities = () => {
-              // W0 (d′) SCRATCH — design §2.8 flag 2: a push pass that
+              // (d′) — design §2.8 flag 2: a push pass that
               // GROWS the session's tracked set is a demand change (a
               // newly reachable doc entered the closure through the
               // tracker's re-traversal); notify so the demand pass sees
@@ -3984,7 +3984,7 @@ export class Server {
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
           const commitWatchState = () => {
-            // W0 (d′) SCRATCH — flag 2, the full-evaluation branch: the
+            // (d′) — flag 2, the full-evaluation branch: the
             // set is REPLACED (this is where it can shrink — R-D's coarse
             // boundary); a key that entered or left is a demand change.
             const previous = session.trackedIds;
@@ -4241,7 +4241,7 @@ export class Server {
   }
 
   /**
-   * W0 (d′) SCRATCH — the space's DEMAND SET (design §2.1's definition;
+   * (d′) — the space's DEMAND SET (design §2.1's definition;
    * the successor of `watchedRootsForSpace`): the union over the space's
    * CLIENT sessions of `session.trackedIds` — memory v2's schema-narrowed,
    * instance-keyed closure of each session's watches (roots and every doc
@@ -4326,7 +4326,7 @@ export class Server {
     return [...rows.values()];
   }
 
-  /** W0 (d′) SCRATCH DIAGNOSTIC: per-session `trackedIds.size` for a
+  /** (d′) DIAGNOSTIC: per-session `trackedIds.size` for a
    * space's client sessions, plus the union size (design §2.6 — the
    * demand-set size and its drift are measured, not assumed). */
   demandSetSizesForSpace(

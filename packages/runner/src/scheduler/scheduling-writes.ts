@@ -127,7 +127,7 @@ export class SchedulerWriteIndex
     return { nextEntities, addedEntities, removedEntities };
   }
 
-  /** W0 (d′) SCRATCH — the REGISTRATION hook for the standing
+  /** (d′) — the REGISTRATION hook for the standing
    * `demandedWriters` root kind (design §2.4: "a writer that registers
    * AFTER its output is demanded must consult the demanded set on
    * registration … unregistration releases"). Fired with the entities a

@@ -269,18 +269,6 @@ const demanderPairKey = (identity: ScopeKeyIdentity): string =>
  * the creator's own setup commits. Well under the flush deadline. */
 const DEMAND_WAKE_GRACE_MS = 300;
 
-/** W0 (d′) SCRATCH: the flag-4 pass-end scan (an engine read per
- * no-writer candidate row, every pass) is opt-in — `W0_FLAG4_SCAN=1` —
- * so its cost can be ablated from the workload numbers. */
-const W0_FLAG4_SCAN: boolean = (() => {
-  try {
-    return typeof Deno !== "undefined" &&
-      Deno.env.get("W0_FLAG4_SCAN") === "1";
-  } catch {
-    return false;
-  }
-})();
-
 const neverAPieceRootId = (id: string): boolean =>
   id === SERVER_EXECUTION_WATERMARK_DOC_ID ||
   // Phase 4: the effects doc is a session-scoped VALUE doc every
@@ -404,7 +392,7 @@ export class SpaceServer implements TransactionSealDestination {
   #pendingDemandWake = false;
   /** The demand wake's grace timer (see noteDemandChanged). */
   #demandWakeTimer: ReturnType<typeof setTimeout> | undefined;
-  // ---- W0 (d′) SCRATCH — server-settle instrumentation (design §6 W4's
+  // ---- (d′) — server-settle instrumentation (design §6 W4's
   // metric; §2.8 (c)). Per authored input: admission (the feed notice's
   // arrival, `enqueueCommit`) → COVERAGE (the wave commit whose
   // derivedThrough ≥ seq = the value-only settle) → and, when a
@@ -451,7 +439,7 @@ export class SpaceServer implements TransactionSealDestination {
    * drained seqs, insertion-ordered, pruned at a bound that far
    * exceeds any realistic in-process reorder window. */
   readonly #drainedLateWindow = new Set<number>();
-  // W0 (d′) SCRATCH: `#demandSinks` (the per-key demand WALK effects,
+  // (d′): `#demandSinks` (the per-key demand WALK effects,
   // `demand-walk:<space>/<root>`) is DELETED — demand is the tracked-ids
   // closure and its writers are standing demand roots (design §2.7).
   /** The DEMANDERS per demand key (server-execution v2 Phase 2, M1's
@@ -939,7 +927,7 @@ export class SpaceServer implements TransactionSealDestination {
     this.#feedArrived?.resolve();
   }
 
-  /** W0 (d′) SCRATCH: record coverage for every pending authored input
+  /** (d′): record coverage for every pending authored input
    * ≤ `coveredThrough` (W advanced past it in the wave that just
    * committed). */
   #recordSettleCoverage(coveredThrough: number): void {
@@ -971,7 +959,7 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
-  /** W0 (d′) SCRATCH: a push-growth wake fired — attribute it to the most
+  /** (d′): a push-growth wake fired — attribute it to the most
    * recently covered input (adjacency); its structural-growth landing is
    * the next derived commit. */
   #noteGrowthWakeForSettle(): void {
@@ -981,7 +969,7 @@ export class SpaceServer implements TransactionSealDestination {
     this.#growthAwaitingLanding = true;
   }
 
-  /** W0 (d′) SCRATCH: a derived commit landed after a growth wake — the
+  /** (d′): a derived commit landed after a growth wake — the
    * structural-growth path's landing for the attributed input. */
   #recordGrowthLanding(): void {
     if (!this.#growthAwaitingLanding) return;
@@ -1022,7 +1010,7 @@ export class SpaceServer implements TransactionSealDestination {
    * recompute lands in a LATER derived commit; arrival is later demand).
    * Input-driven cycles are unaffected (they run their pass regardless). */
   noteDemandChanged(reason: "watch" | "push-growth" = "watch"): void {
-    // W0 (d′) SCRATCH — flag 1/2 instrumentation: count the wake sources
+    // (d′) — flag 1/2 instrumentation: count the wake sources
     // (the push-growth notify is the NEW site) and remember that a growth
     // wake fired, so the settle series can class the inputs it covers.
     if (reason === "push-growth") {
@@ -1421,7 +1409,7 @@ export class SpaceServer implements TransactionSealDestination {
    * for the actor's OWN instance even if the actor watches nothing. */
   #demandersFor(pieceRootIds: readonly string[]): ScopeKeyIdentity[] {
     const demanders = new Map<string, ScopeKeyIdentity>();
-    // W0 (d′) SCRATCH — flag 6: indexed by root id (and by resolved piece
+    // (d′) — flag 6: indexed by root id (and by resolved piece
     // root) instead of a full key scan; same answer as the scan.
     const visit = (keys: Set<string> | undefined) => {
       if (keys === undefined) return;
@@ -2472,20 +2460,33 @@ export class SpaceServer implements TransactionSealDestination {
     if (runtime === undefined) return;
     const stats = this.#options.stats;
     const passStart = performance.now();
-    // W0 (d′) SCRATCH — the DEMAND PASS over the tracked-ids CLOSURE
-    // (design §2.1/§2.2; serving-loop.md §1 as RULED 2026-08-18): the
-    // memory server exposes every INSTANCE a client session tracks (the
-    // roots and every doc the selectors' schemas reach), one row per
-    // (instance key, session). The registry (`#demandersByKey`) is keyed
-    // by the instance key — `toDirtyKey(id, scopeKey)` =
-    // `${scopeKey}\0${id}`, byte-identical to the former `keyOf` — over
-    // EVERY demanded row; the structure load stays ROOT-scoped (flag 4);
-    // there is NO demand walk (deleted; nothing reads here). The pass is
-    // O(rows) map reconciliation on DELTAS: entered keys mark their
-    // writers demand roots (the scheduler's standing `demandedWriters`
-    // kind, bracketed — §2.4); entered (key, pair) rows get the currency
-    // check (a writer not current for the pair re-arms, B7's clean bit —
-    // §2.2); departed keys release the roots (R-D's coarse boundary).
+    // Obligation (iii): the demand-root enter/leave counters live on the
+    // CURRENT runtime's scheduler and reset to 0 on a fresh runtime (a
+    // reactivation after park). Snapshot them at pass START and fold the
+    // pass's DELTA into the space-lived `stats.demand` accumulators below,
+    // so the totals survive park (a pass never straddles a park — the
+    // runtime is stable for its duration).
+    const entersAtStart = runtime.scheduler.demandRootCounters.enters;
+    const leavesAtStart = runtime.scheduler.demandRootCounters.leaves;
+    // The DEMAND PASS over the tracked-ids CLOSURE (stage-C design
+    // §2.1/§2.2; serving-loop.md §1 as RULED 2026-08-18): the memory
+    // server exposes every INSTANCE a client session tracks (the roots
+    // and every doc the selectors' schemas reach), one row per (instance
+    // key, session). The registry (`#demandersByKey`) is keyed by the
+    // instance key — `toDirtyKey(id, scopeKey)` = `${scopeKey}\0${id}`,
+    // byte-identical to the former `keyOf` — over EVERY demanded row; the
+    // structure load stays ROOT-scoped (flag 4); there is NO demand walk
+    // (deleted; nothing reads here). The pass is O(rows) map
+    // reconciliation on DELTAS: entered keys mark their writers demand
+    // roots (the scheduler's standing `demandedWriters` kind, bracketed —
+    // §2.4); entered (key, pair) rows get the currency check (a writer not
+    // current for the pair re-arms, B7's clean bit — §2.2); departed keys
+    // release the roots (R-D's coarse boundary). The exposure is O(closure)
+    // per pass (an incremental-delta exposure is a named follow-on if the
+    // union grows to tens of thousands — W0 flag 6); the pass itself does
+    // NO per-row engine read (W0 obligation (i): a per-row read here lands
+    // on the wave-latency critical path — `#loadDemandedStructure` is
+    // awaited before `runtime.idle()`).
     const rows = this.#options.server.demandedInstancesForSpace(
       this.#options.space,
       // The serving session's own watches are its graph's reads, not
@@ -2709,41 +2710,21 @@ export class SpaceServer implements TransactionSealDestination {
         `${rearmed} narrowed node(s) for them (fan-out stage B)`,
       ]);
     }
-    // The (d′) counter block (scratch): sizes, roots, re-arms, pass cost.
+    // The (d′) `demand` counter block (serving-loop.md §7). Current
+    // snapshots (`demandedRows` / `demandedInstances` / `demandedPairs` /
+    // `demandedWriters`) plus their maxima and the ACCUMULATED tallies.
+    // No per-row engine read: `demandedRows` is the exposed row count,
+    // `demandedInstances` the registry size, both O(1) reads of counts the
+    // reconcile already produced (W0 obligation (i)). No `walkRuns` — the
+    // walk is deleted; T9′ pins its absence. The flag-4 no-writer count
+    // (a demanded piece doc with no server-registered writer) needs a
+    // per-row engine read for the pattern-meta test, so it is NOT computed
+    // here; W0 measured it once (chat 2 / note 19 / lunch 0) and the
+    // register carries the id-class-filtered structure-load extension as a
+    // future option (flag 4).
     let pairCount = 0;
     for (const pairs of this.#demandersByKey.values()) pairCount += pairs.size;
     const d = stats.demand;
-    // Flag 4 (design §2.8), recomputed at PASS END over the current
-    // registry (writers register after the structure load, so an
-    // at-entry count would over-report): demanded rows whose entity has
-    // NO registered writer — every class (`noWriterRows`), and among the
-    // NON-ROOT ones with a never-a-piece id excluded, those whose doc
-    // carries `patternIdentity` meta (a piece reachable only through a
-    // data link, not running here — parity with today; the walk never
-    // started pieces either). Counted, never acted on.
-    if (W0_FLAG4_SCAN) {
-      let noWriter = 0;
-      let noWriterMeta = 0;
-      for (const [key, row] of rowByKey) {
-        const address = addressOf(key, row);
-        if (runtime.scheduler.writersOfEntity(address).length > 0) continue;
-        noWriter += 1;
-        if (row.root || neverAPieceRootId(row.id)) continue;
-        try {
-          const doc = Engine.read(this.#options.engine, {
-            id: row.id as never,
-            scopeKey: row.scopeKey as never,
-          });
-          if (doc !== null && doc.patternIdentity !== undefined) {
-            noWriterMeta += 1;
-          }
-        } catch {
-          // best-effort diagnostic
-        }
-      }
-      d.noWriterRows = noWriter;
-      d.noWriterRowsWithPatternMeta = noWriterMeta;
-    }
     d.demandedRows = rows.length;
     d.demandedInstances = this.#demandersByKey.size;
     d.demandedInstancesMax = Math.max(
@@ -2753,26 +2734,19 @@ export class SpaceServer implements TransactionSealDestination {
     d.demandedPairs = pairCount;
     d.demandedWriters = runtime.scheduler.demandedWriterCount;
     d.demandedWritersMax = Math.max(d.demandedWritersMax, d.demandedWriters);
-    d.demandRootEnters = runtime.scheduler.demandRootCounters.enters;
-    d.demandRootLeaves = runtime.scheduler.demandRootCounters.leaves;
+    // Obligation (iii): fold THIS pass's enter/leave delta into the
+    // space-lived accumulators (not an absolute assign from the runtime,
+    // which zeroes on reactivation).
+    d.demandRootEnters += runtime.scheduler.demandRootCounters.enters -
+      entersAtStart;
+    d.demandRootLeaves += runtime.scheduler.demandRootCounters.leaves -
+      leavesAtStart;
     d.notCurrentRearms += notCurrentRearms;
     d.demandPasses += 1;
     d.demandPassMs += performance.now() - passStart;
-    d.sizes = this.#options.server.demandSetSizesForSpace(this.#options.space, {
-      excludePrincipal: this.#options.serviceIdentity,
-    });
-    d.sizeSeries.push({
-      t: Date.now(),
-      unionKeys: d.sizes.unionKeys,
-      rows: rows.length,
-      keys: this.#demandersByKey.size,
-    });
-    if (d.sizeSeries.length > 2000) {
-      d.sizeSeries.splice(0, d.sizeSeries.length - 2000);
-    }
   }
 
-  /** W0 (d′) SCRATCH — flag 6's index (root id → the registry keys whose
+  /** (d′) — flag 6's index (root id → the registry keys whose
    * id segment is that root, and resolved-root → keys), so `#demandersFor`
    * is a lookup instead of a full key scan per action run (with the
    * closure as keys the scan would be O(closure) twice per pass). */
@@ -3305,7 +3279,7 @@ export class SpaceServer implements TransactionSealDestination {
       stats.derivedCommits += 1;
       this.#wavesCommitted += 1;
       this.#options.onWaveCommitted?.();
-      // W0 (d′) SCRATCH: a derived commit after a growth wake is the
+      // (d′): a derived commit after a growth wake is the
       // structural-growth landing for the attributed input (checked
       // BEFORE this wave's own coverage rewrites #lastCovered).
       this.#recordGrowthLanding();

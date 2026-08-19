@@ -136,14 +136,7 @@ export class ExecutorHost {
     return {
       ...this.#stats,
       events: { ...this.#stats.events },
-      demand: {
-        ...this.#stats.demand,
-        sizes: {
-          perSession: [...this.#stats.demand.sizes.perSession],
-          unionKeys: this.#stats.demand.sizes.unionKeys,
-        },
-        sizeSeries: [...this.#stats.demand.sizeSeries],
-      },
+      demand: { ...this.#stats.demand },
       settle: {
         series: [...this.#stats.settle.series],
         dropped: this.#stats.settle.dropped,

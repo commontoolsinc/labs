@@ -66,7 +66,7 @@ export class NodeRegistry {
 
   readonly effects: ReadonlySet<Action> = this.activeEffects;
   readonly computations: ReadonlySet<Action> = this.activeComputations;
-  /** W0 (d′) SCRATCH — the STANDING, refcounted `demandedWriters` root
+  /** (d′) — the STANDING, refcounted `demandedWriters` root
    * kind (design §2.4; serving-loop.md §1's "a demanded instance's
    * writers hold demand … while any session tracks the instance"): the
    * writers of instances a client session TRACKS. A third `isDemandRoot`

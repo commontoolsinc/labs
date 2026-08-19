@@ -146,16 +146,24 @@ export type ServingLoopStats = {
   demandArrivals: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
-  /** W0 (d′) SCRATCH — the `demand` counter block, (d′) version (design
-   * §6 W4), scratch quality: the numbers the refutation experiment
-   * reports. `demandedRows` = rows the last pass saw; `demandedInstances`
-   * = distinct registry keys (current / max); `demandedPairs`; the
-   * standing root set (`demandedWriters` current / max);
-   * enters/leaves; `notCurrentRearms` (per-key not-current-for-pair
-   * re-arms); passes and their ms; `pushGrowthWakes` (the new notify's
-   * count); `noWriterRowsWithPatternMeta` (flag 4: demanded non-root
-   * rows whose doc carries pattern meta and has NO registered writer);
-   * `noWriterRows` (every demanded row with no writer, any class). */
+  /** The (d′) `demand` counter block (serving-loop.md §7; stage-C design
+   * §6 W4). Demand is memory v2's tracked-ids closure and the demand walk
+   * is deleted, so there is NO `walkRuns` counter — its absence is T9′'s
+   * structural witness. `demandedRows` = rows the last pass saw (the
+   * exposed closure size); `demandedInstances` = distinct registry keys
+   * (current / max — the demanded instance count and its peak);
+   * `demandedPairs` = total (key, demanding-pair) entries; the standing
+   * demand-root set (`demandedWriters` current / max);
+   * `demandRootEnters` / `demandRootLeaves` ACCUMULATED across the space's
+   * whole life (park and reactivation included — held here, not read from
+   * the current runtime's counters, which reset on a fresh runtime);
+   * `notCurrentRearms` (per-key not-current-for-pair re-arms, accumulated);
+   * `demandPasses` and `demandPassMs` (the pass's O(rows) reconcile cost —
+   * the pass must stay delta-cheap, W0 obligation (i)); `pushGrowthWakes`
+   * (the new push-time notify's count) and `watchWakes` (the pre-existing
+   * `session.watch.set` / `.add` notifies). `demandArrivals` is the
+   * pre-existing top-level `servingLoop.demandArrivals` counter (the
+   * root-level arrival re-arm's count), not duplicated here. */
   demand: {
     demandedRows: number;
     demandedInstances: number;
@@ -170,32 +178,15 @@ export type ServingLoopStats = {
     demandPassMs: number;
     pushGrowthWakes: number;
     watchWakes: number;
-    noWriterRows: number;
-    noWriterRowsWithPatternMeta: number;
-    /** Per-session tracked sizes + union at the last pass (flag 7). */
-    sizes: {
-      perSession: Array<
-        {
-          sessionId: string;
-          principal?: string;
-          tracked: number;
-          watches: number;
-        }
-      >;
-      unionKeys: number;
-    };
-    /** Bounded history of (unionKeys, rows) per pass — the drift. */
-    sizeSeries: Array<
-      { t: number; unionKeys: number; rows: number; keys: number }
-    >;
   };
-  /** W0 (d′) SCRATCH — SERVER SETTLE per authored input (design §6 W4's
-   * metric): from the authored commit's ADMISSION on the server (its seq,
-   * `enqueueCommit`) to W COVERING it (the wave commit whose
+  /** SERVER SETTLE per authored input (serving-loop.md §7; stage-C design
+   * §6 W4's metric): from the authored commit's ADMISSION on the server
+   * (its seq, `enqueueCommit`) to W COVERING it (the wave commit whose
    * `derivedThrough` ≥ seq). Bounded per-space series; `class` splits the
    * VALUE-ONLY path from the STRUCTURAL-GROWTH path (a push-growth demand
    * wake fired between admission and coverage). `waves` = committed
-   * waves between admission and coverage (the T2′/T3′ cycle count). */
+   * waves between admission and coverage (the T2′/T3′ cycle count). W4's
+   * quiet acceptance run reads p50/p95 from this series. */
   settle: {
     series: Array<{
       space: string;
@@ -280,10 +271,6 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     demandPassMs: 0,
     pushGrowthWakes: 0,
     watchWakes: 0,
-    noWriterRows: 0,
-    noWriterRowsWithPatternMeta: 0,
-    sizes: { perSession: [], unionKeys: 0 },
-    sizeSeries: [],
   },
   settle: { series: [], dropped: 0 },
   events: {

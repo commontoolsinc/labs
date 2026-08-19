@@ -56,7 +56,7 @@ function isDemandRoot(
   return state.nodes.isEffect(node.action) ||
     node.provisionalDemand ||
     state.materializerIndex.isMaterializer(node.action) ||
-    // W0 (d′) SCRATCH — the standing `demandedWriters` root kind (design
+    // (d′) — the standing `demandedWriters` root kind (design
     // §2.4; serving-loop.md §8's positive tripwire): a writer of an
     // instance a client session tracks holds demand while any session
     // tracks it. Every transition into and out of the set is bracketed

@@ -979,10 +979,12 @@ export class Scheduler {
   }
 
   // ============================================================
-  // W0 (d′) SCRATCH — the standing `demandedWriters` root kind and the
-  // per-(instance, demander) currency check (design §2.2 / §2.4). The
-  // SpaceServer's demand pass calls these on registry DELTAS; nothing
-  // here is reached off the serving posture.
+  // The (d′) standing `demandedWriters` root kind and the
+  // per-(instance, demander) currency check (stage-C design §2.2 / §2.4;
+  // serving-loop.md §1). The SpaceServer's demand pass calls these on
+  // registry DELTAS; nothing here is reached off the serving posture (the
+  // registration hook installs lazily on the first `enterDemandedEntity`,
+  // so a plain client runtime's `demandedWriters` set stays empty — T9′).
   // ============================================================
 
   /** Refcount per demanded ENTITY (scope-NAME keyed, `entityNameKey` —
@@ -990,7 +992,10 @@ export class Scheduler {
    * and `user:bob`, name ONE entity whose one node writes both). The
    * count is the number of registry instance keys naming the entity. */
   private readonly demandedEntityRefs = new Map<SpaceScopeAndURI, number>();
-  /** Diagnostic counters the SpaceServer folds into the stats block. */
+  /** Per-runtime enter/leave/re-arm tallies. The SpaceServer reads the
+   * enter/leave DELTA per pass and folds it into its space-lived
+   * `stats.demand` accumulators (these reset with the runtime on a
+   * reactivation, so they are a per-tenure source, not the total). */
   readonly demandRootCounters = { enters: 0, leaves: 0, notCurrentRearms: 0 };
   private demandedWriterHookInstalled = false;
 
@@ -1130,18 +1135,6 @@ export class Scheduler {
       this.queueExecution();
     }
     return rearmed;
-  }
-
-  /** DIAGNOSTIC: the writers of one entity (scope-name keyed). */
-  writersOfEntity(
-    address: { space: MemorySpace; id: string; scope: CellScope },
-  ): Action[] {
-    return [
-      ...(this.writeIndex.writersByEntity.get(
-        entityNameKey(address as never),
-      ) ??
-        []),
-    ];
   }
 
   /** DIAGNOSTIC: the standing demanded-writer root set's size (T9′: empty
