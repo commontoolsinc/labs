@@ -284,10 +284,10 @@ export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
 
 // TODO(danfuzz): The wire formats accept a plain object with any keys, that
 // being the rule a cross-language format has to hold to; this implementation
-// refuses these two, and the set is what stands between the two positions.
+// refuses these three, and the set is what stands between the two positions.
 // `unsafeObjectKeyIn()` below states the local reason for each and what would
 // let it go. Emptying this set is what closes the gap.
-const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
+const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "then"]);
 
 /**
  * Indicates whether `key` is one this implementation refuses to copy onto an
@@ -306,10 +306,11 @@ export function isUnsafeObjectKey(key: string): boolean {
  * Returns the reserved own property name the given object carries, if any.
  *
  * This asks about this implementation, not about the data model. A property
- * name is data like any other, and an implementation on a host that does not
- * route property assignment through a prototype chain -- which is most of them
- * -- would reserve no names at all. The two here are refused for two different
- * local reasons, and neither is a limit of the language:
+ * name is data like any other, and an implementation on a host that neither
+ * routes property assignment through a prototype chain nor duck-types
+ * promises -- which is most of them -- would reserve no names at all. Each
+ * name here is refused for its own local reason, and none is a limit of the
+ * language:
  *
  * * `__proto__` cannot be rebuilt by the copying this system actually does.
  *   Records are reconstructed by assignment (`target[key] = value`) and
@@ -323,13 +324,26 @@ export function isUnsafeObjectKey(key: string): boolean {
  *   in this implementation already refuse it: the projection to native values
  *   drops it, and `FabricError` throws on it. Accepting it here would mean
  *   admitting a key that a later boundary discards without saying so.
+ * * `then` copies faithfully and survives every boundary here. It is reserved
+ *   because its mere presence is what JavaScript takes for a `Thenable`, the
+ *   runtime's own internals included, so a record carrying one is adopted by
+ *   promise machinery it never asked to meet. Nothing awaits it deliberately;
+ *   resolution finds it. What comes out the far side is then the key's value
+ *   rather than the record, or nothing at all, and no boundary reports a fault
+ *   because none occurred.
  *
- * Both are therefore removable, by rebuilding the copy loops on a faithful
- * mechanism and revisiting the boundaries that filter these names. Until then
- * the reservation is what keeps a record from being corrupted in transit.
+ * A name leaves this set when what makes it awkward is dealt with, and what
+ * that takes differs. `__proto__` needs the copy loops rebuilt on a mechanism
+ * that carries the name. `constructor` needs the later boundaries that drop it
+ * changed to keep it. `then` needs nothing here, and can be dealt with
+ * nowhere: what makes it awkward is how the host resolves promises, so it
+ * stays reserved for as long as this system runs on such a host. While a name
+ * is in the set, the reservation is what keeps a record from being corrupted
+ * in transit or quietly consumed after it.
  *
- * The check is two `Object.hasOwn()` calls rather than a key walk, so it costs
- * nothing per property and can sit on a hot validation path.
+ * The check is one `Object.hasOwn()` call per reserved name rather than a walk
+ * over the object's own keys, so it costs nothing per property and can sit on
+ * a hot validation path.
  *
  * @param value The object to check.
  * @returns The offending property name, or `undefined` if there is none.

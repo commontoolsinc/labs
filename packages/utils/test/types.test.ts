@@ -392,6 +392,14 @@ describe("types", () => {
       expect(isUnsafeObjectKey("constructor")).toBe(true);
     });
 
+    it("returns `true` for `then`", () => {
+      // Reserved for a different reason than the two above, which is why it
+      // gets its own case: `then` copies faithfully and passes every boundary
+      // here. What it does not survive is promise resolution, which duck-types
+      // any object carrying the name.
+      expect(isUnsafeObjectKey("then")).toBe(true);
+    });
+
     it("returns `false` for ordinary keys", () => {
       expect(isUnsafeObjectKey("id")).toBe(false);
       expect(isUnsafeObjectKey("space")).toBe(false);
@@ -400,12 +408,16 @@ describe("types", () => {
     });
 
     it("returns `false` for near-miss keys that are not in the set", () => {
-      // Only `__proto__` and `constructor` are unsafe — not every
-      // prototype-adjacent name.
+      // The set is exactly three names, not every prototype-adjacent or
+      // promise-adjacent one. `catch` and `finally` sit beside `then` on a
+      // promise and are ordinary keys here, because it is `then` alone that
+      // resolution duck-types.
       expect(isUnsafeObjectKey("prototype")).toBe(false);
       expect(isUnsafeObjectKey("proto")).toBe(false);
       expect(isUnsafeObjectKey("toString")).toBe(false);
       expect(isUnsafeObjectKey("hasOwnProperty")).toBe(false);
+      expect(isUnsafeObjectKey("catch")).toBe(false);
+      expect(isUnsafeObjectKey("finally")).toBe(false);
     });
 
     it("is backstopped by the runtime keeping `__proto__` inert", () => {
@@ -442,6 +454,7 @@ describe("types", () => {
       });
       expect(unsafeObjectKeyIn(withProto)).toBe("__proto__");
       expect(unsafeObjectKeyIn({ ["constructor"]: 1 })).toBe("constructor");
+      expect(unsafeObjectKeyIn({ ["then"]: 1 })).toBe("then");
     });
 
     it("returns `undefined` for ordinary objects", () => {

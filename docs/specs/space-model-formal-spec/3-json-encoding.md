@@ -304,19 +304,22 @@ built-in escape, or an encoding error.
 > literal user-data keys.
 
 > **JS implementation note.** "Any keys" is the format's rule and this
-> implementation does not yet meet it: a plain object carrying `__proto__` or
-> `constructor` is refused rather than encoded, on both sides of the wire and
-> in the inert check that decides what a fabric value is at all. Neither name
-> is reserved by the format, and neither is a limit of JavaScript. They are
-> refused because of how *this* implementation rebuilds a record — by
-> assignment, which for `__proto__` reaches a prototype accessor instead of
-> creating a property — and because other boundaries here already drop
-> `constructor`, so accepting it would admit a key that something later
-> discards silently. `unsafeObjectKeyIn()` in `@commonfabric/utils/types`
-> carries the reasoning and the conditions for lifting each one. An
-> implementation on a host that does not route property assignment through a
-> prototype chain reserves no names at all, which is the behavior the format
-> describes.
+> implementation does not yet meet it: a plain object carrying `__proto__`,
+> `constructor` or `then` is refused rather than encoded, on both sides of the
+> wire and in the inert check that decides what a fabric value is at all. No
+> such name is reserved by the format, and none is a limit of JavaScript.
+> `__proto__` and `constructor` are about copying: this implementation rebuilds
+> a record by assignment, which for `__proto__` reaches a prototype accessor
+> instead of creating a property, and other boundaries here already drop
+> `constructor`. `then` is about what the host does with a record afterward —
+> JavaScript takes its presence as the mark of a thenable, its own runtime
+> internals included, so a record carrying one is consumed by promise
+> resolution that nothing asked for and no boundary reports.
+> `unsafeObjectKeyIn()` in `@commonfabric/utils/types` carries the reasoning
+> per name and the conditions for lifting each. An implementation on a host
+> that neither routes property assignment through a prototype chain nor
+> duck-types promises reserves no names at all, which is the behavior the
+> format describes.
 
 The common case — a **tagged value** — is a single-key object whose sole key
 starts with `/`:
