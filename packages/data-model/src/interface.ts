@@ -113,7 +113,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
  * constructor, after all fields are initialized. (Freezing in the base
  * constructor would prevent subclass field assignment.)
  *
- * See Section 1.4.5 and 1.4.6 of the formal spec.
+ * See Section 1.4.6 of the formal spec.
  */
 export abstract class FabricPrimitive extends FabricSpecialObject {
   /** Constructs an instance. */
