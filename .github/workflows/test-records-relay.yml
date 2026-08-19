@@ -33,12 +33,18 @@ jobs:
     name: "Relay Test Records"
     # Cancelled and timed-out runs are included deliberately: a job killed
     # at its bound is the wedge case whose surviving artifacts matter most.
+    #
+    # The provider variable gates the whole job. Where test records are not
+    # provisioned there is no identity to assume and nothing to ship, and the
+    # relay is best-effort by design -- nothing gates on the store -- so the
+    # honest outcome is a skipped job rather than a failed one.
     if: >-
+      vars.TEST_RECORDS_RELAY_WIF_PROVIDER != '' && (
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success' ||
       github.event.workflow_run.conclusion == 'failure' ||
       github.event.workflow_run.conclusion == 'cancelled' ||
-      github.event.workflow_run.conclusion == 'timed_out'
+      github.event.workflow_run.conclusion == 'timed_out' )
     runs-on: ubuntu-latest
     steps:
       # Every third-party action in this credentialed workflow is pinned to
