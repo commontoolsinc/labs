@@ -1490,6 +1490,15 @@ reason."*
 
 ### 3.3 The redesign — (a), with the seven-point contract; interim (b)
 
+*LANDED 2026-08-19 (W2, `claude/server-exec-v2-w2-intent-listener`):
+(a) as specified below — `overlay-destination.ts` `trackIntent` /
+`#checkIntents` over `speculation/doc-notification-listener.ts`; the
+interim (b) did NOT ship (item 16 — W0's gate arm only); the effects
+channel followed (item 13); pins 1–11 in
+`speculation-intent-listener.test.ts`. The anchors in §3.1 and Appendix
+A describe the pre-W2 code. Report:
+`docs/history/plans/server-execution-v2/stage-c/w2-intent-build-report.md`.*
+
 **(a) A non-reactive storage-notification listener** — feasible,
 smallest sound. Substrates (C Q2): `IStorageManager.subscribe(
 IStorageNotification)` (`storage/interface.ts:116, 512–562`), the same
@@ -2085,7 +2094,8 @@ would replace the RULED and landed (d′) text (§2.10's landing note);
 §3b's "no basis rows for the walk" and B7 note (if ruled); the
 equivalence hook green; OFF suite byte-identical.
 
-**W2 — (e) the intent listener** (client): contract points 1–7; the
+**W2 — (e) the intent listener** (client) — *BUILT 2026-08-19, see
+§3.3's landing note*: contract points 1–7; the
 `commonfabric.*` debug counters; pins 1–11 red-first (re-seam the
 existing `event-append-client.test.ts` pin to the notification path);
 the effects channel (item 13 — RULED yes, as (e)'s second step); the

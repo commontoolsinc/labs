@@ -4050,6 +4050,152 @@ supply; OW29/OW32/OW34 closed):
       not forbidden). The §7 counter-list omission the same drift note
       named (`undemandedNarrowingRuns` / `earlyEmitRefusals`) was already
       folded in by W1.
+- **Stage C design build delta — W2 (e) (2026-08-19) — the client
+  intent watch is a NON-REACTIVE storage-notification listener keyed on
+  the outstanding intent set; the schema-less whole-sidecar `cell.sink`
+  is GONE; the effects channel follows (item 13); THREE RULED sentences
+  LANDED (items 5/6, 8, 7). LANDED on
+  `claude/server-exec-v2-w2-intent-listener` (stacked on the design
+  branch; to be re-stacked onto W1's tip).** Report:
+  [`stage-c/w2-intent-build-report.md`](../../history/plans/server-execution-v2/stage-c/w2-intent-build-report.md).
+  W0's (e) gate (the design §6 refutation experiment, run FIRST on this
+  branch): the interim (b) schema-narrowed sink on the note n=20 series
+  collapsed the per-note client `scheduler/run` from 0.84 → 14–20 s
+  (monotone, `run/commit` = the CFC probes 60–70 % of it) to a FLAT
+  0.07–0.33 s, and createToView p50 from 4.03 s to 0.81 s (same
+  instruments, adjacent runs, ON binaries, no LLM model, loads
+  2.0–5.5) — the O(history) client term IS the intent sink; (a) was
+  built (design §3.3's seven-point contract), the interim (b) did NOT
+  ship (item 16: (a) replaced the sink outright; the (b) scratch is
+  W0's measurement arm only, kept in the branch history as
+  `e91194469`).
+  - **speculation.md §4 step 2 — the match-and-carrier sentence (items
+    5 + 6) — LANDED (RULED 2026-08-18; text with W2).** Binding: the
+    match is on the pushed commit's `consequenceOf`, carried to the
+    client as the TRACKED entry's own `consequenced` / `status` /
+    `error` fields (T7 semantics), SANCTIONED as the carrier;
+    `consequenceOf` does not go on the wire; guards: tracked-entry-only
+    read (its terminal fields; on a drop, its reason), never
+    whole-history, never a dependency on HISTORY; always backstopped
+    by `W ≥ seq(e)` / `eventWatermark ≥ seq(e)` (item 9's clause is
+    folded into the same sentence). Instrument:
+    `packages/runner/test/speculation-intent-listener.test.ts` — pin 1
+    (consequenced retires silently; errored + dropped retire AND signal;
+    `waitForIntentConsequence` per terminal kind, memo consumed), pin 2
+    (an UNTRACKED id's mark is ignored), pin 5 (a sidecar with 1 000
+    consequenced entries + 1 outstanding: the mark's check visits ≤ 2
+    entries, ZERO transactions — the "never O(history)" witness; a
+    moved index is verified by eventId and re-located from the tail),
+    pin 7 (T25: a re-fired id whose consequence already landed resolves
+    AT `trackIntent`, no listener leaks), pin 10 (the REAL path: the
+    served mark resolves the intent by the time it is visible in the
+    client replica, O(1) visits, the echo retires, the durable ack
+    settles from the consequence — plus `executor-events-down.test.ts`'s
+    full loop, whose ack assertion only settles through this carrier);
+    the re-seamed pin in `event-append-client.test.ts` ("intent outcome
+    consumption") now drives the storage-notification seam, not a
+    hand-stubbed `cell.sink`. Mutations recorded in the report's table
+    (each pin red under its own).
+  - **speculation.md §4 step 2 — "the client keeps a stream subscribed
+    while it has intents outstanding on it" (item 8) — LANDED, spec home
+    NAMED: speculation.md §4 beside step 2** (the client-side
+    reconciliation rule belongs with the retirement it serves; events.md
+    §5 is the server's failure semantics). Instrument: pin 1 (the
+    sidecar is put on watch through the schema-less selector
+    `sync(id, { path: [], schema: false }, "space")` at the first
+    `trackIntent` on it), pin 6 e2e (the appended sidecar ARRIVES in the
+    firing client's replica while its intent is outstanding — the
+    entry's arrival is checked in O(1) from the tail).
+  - **speculation.md §4 step 2 — the non-reactive listener (item 4,
+    build item; item 15 `storageManager.subscribe`) — LANDED with the
+    same sentence.** Instrument: pin 6 (no `sink:…/of:stream-events:`
+    scheduler node after a fire, before or after the append lands —
+    mutation: keep the `cell.sink` → a node appears), pin 9 (the check
+    runs in a MICROTASK, never inside the notification dispatch; a burst
+    coalesces to ONE check per sidecar; a storage RESET re-checks every
+    tracked sidecar), pin 8 (`close()` releases; a delivery already
+    dispatched when close runs does not check; nothing after close
+    subscribes), pin 11 (OFF: no overlay, no `subscribe`, no node).
+  - **The effects channel follows the same redesign — item 13, (e)'s
+    SECOND step — LANDED in this PR** (`speculation/effects-channel.ts`
+    over the shared `speculation/doc-notification-listener.ts`; the
+    reconcile is unchanged, it now reads the RAW session instance and
+    runs from a microtask; the LT8 resubscribe re-read rides the same
+    schema-less `sync`). Instrument: pin 6's second half (no
+    `sink:…/of:server-execution-effects/` node; `listenerInstalled`) and
+    the whole `executor-effect-channel.test.ts` suite green through the
+    listener (15 steps incl. the LT8 reload journey, cardinality 2, the
+    receipt-race divert pin, same-principal two-session isolation).
+    No follow-on row: the effects doc is small on the acceptance
+    workloads (one entry + one ack per navigation), but its sink shared
+    the intent sink's shape (schema-less whole-doc effect following
+    `args.target` links), so it was retired here rather than measured.
+  - **events.md §5 — "drops and errors ride `consequenceOf`" (item 7)
+    — LANDED.** Binding: a drop notice / an error surface is the
+    event's consequence, named in the writing derived commit's
+    `consequenceOf`, advancing `eventWatermark` (verified in
+    `space-server.ts` `#sealEventConsequenceNotice`: the notice seals as
+    an event-handler-kind tx stamped with the eventId, so the wave's
+    `consequenceOf` fold carries it). Instrument: the existing
+    `executor-events-down.test.ts` ERROR arm and DROP arm; the client
+    half by pins 1 and 2 (the `status: "dropped"` and `error` arms on
+    the tracked entry).
+  - **The `commonfabric.*` counter surface (design §3.3 point 7 / SB S5),
+    LANDED:** the overlay's logger keys under `speculation-overlay/` —
+    `intent-check` (per check: one at the fire, one per coalesced sidecar
+    change while outstanding), `intent-retired-by-consequence-of`
+    (an intent resolved by its tracked entry's mark), `intent-drop-notice`,
+    `intent-error-notice`, `intent-refused`, `intent-echo-retired-by-
+    backstop` (an intent-origin ENTRY retired by the W sweep instead),
+    `intent-listener-installed` / `-released`, `intent-watch-failed` /
+    `intent-listener-failed` / `intent-check-read-failed` (the loud
+    fail-soft arms); the effects channel's `effects-reconcile`; the
+    overlay's diagnostic getters `pendingIntentCount`,
+    `intentListenerInstalled`, `intentCheckCount`, `intentCheckVisits`
+    (the `sidecarEntriesRead` witness), `intentCheckMaxVisits`; the
+    browser churn line (`cfc-browser-helpers.ts`) gained
+    `overlayIntentChecks` / `overlayIntentsByConsequenceOf` /
+    `overlayIntentEchoBackstops`. `pendingIntents` = `pendingIntentCount`
+    (a gauge; not a logger key).
+  - **W4 witnesses (client side), PROVISIONAL numbers on the W2 tip
+    `7a5481d14` (ON built binary sha `7964711e835ea16f`, gitSha read per
+    run, `No default model available`, fresh store; the design tip's
+    server — the walk still present — so the cross-user numbers are
+    W1's territory):** note createToView **FLAT in history** —
+    per-note `scheduler/run` 71–170 ms across n=20 (baseline on the
+    design tip the same hour: 0.84 → 14–20 s), createToView series
+    `1145 692 637 878 765 741 932 444 879 415 596 474 1275 1166 876 887
+    574 793 1879 778` ms (p50 ~0.79 s vs the design tip's 4.03 s and
+    W0's 4.09 s; first-10 median 764 / last-10 876 — no slope), load
+    3.06 → 5.99 during the run; the sink effect no longer exists (0
+    runs, 0 ms; the design tip: 9–19 runs and 142 → 4 096 ms per note);
+    chat n=20 (load 4.3 → 3.8): `overlayIntentChecks` 75 for 25 fires
+    (3 per intent: fire, append landing, mark), `overlayIntentsBy
+    ConsequenceOf` 25/25 (every fire resolved by its mark),
+    `overlayIntentEchoBackstops` 2, cross-user median 11.3 s (the trio
+    tip 7.4–9.7 s: the walk term, unchanged by (e), plus load) — the
+    client-local speculation latency is preserved by construction (the
+    fire's own echo runs are inside the flat 71–170 ms per-note client
+    budget); a DEDICATED sender-echo instrument (click → own render)
+    does not exist in the harness and is W4's to add (recorded).
+  - **OW40 (step 4's rebase) — re-read, unchanged:** the listener
+    RETIRES and never rebases; an outstanding echo stands until its
+    mark or the backstop, as the sentence says; nothing learned moves
+    the row.
+  - **Recorded, not a row (the sweep may number it): the tracked-set
+    drain when a mark never arrives.** An intent stays outstanding
+    (listener installed, `pendingIntents` > 0) until its entry's mark, a
+    refusal, or close — if compaction (OW24, unbuilt) ever removed the
+    entry BEFORE this client saw its mark, the intent would never
+    resolve (`waitForIntentConsequence` hangs; the echo still retires by
+    the W backstop). Pre-existing with the sink; unreachable today. The
+    fix shape when OW24 lands: record the entry's `seq` at first sight and
+    treat `eventWatermark ≥ seq` with the entry gone as consequenced (item
+    9's fact on the tracked SET) — ~10 lines in `#checkIntents`.
+  - Not rows: the immediate check at `trackIntent` walks the raw array
+    once when it finds no entry for a fresh id (a plain JS array walk,
+    no transaction; T25 needs it) — `intentCheckMaxVisits` reports it;
+    every NOTIFIED check is O(outstanding + hints).
 
 ## 4. Standing rule
 

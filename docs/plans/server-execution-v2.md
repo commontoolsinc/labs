@@ -225,9 +225,17 @@ W0 DONE 2026-08-19 (PROCEED (d′), above) → **the build train LAUNCHED
 (stacked on this branch) and W2 (e) on
 `claude/server-exec-v2-w2-intent-listener` (its first step is (e)'s
 own W0 gate — the one-line-schema sink probe, deferred so it did not
-load the box during (d′)'s settle measurements) in parallel; W3 (α)
-follows on W1's tip (root-causes the l3 duplicate join); each build →
-independent adversarial review → fixer → ledger; then W4 the
+load the box during (d′)'s settle measurements) in parallel — **W2 (e)
+BUILT 2026-08-19** (PR #6039, stacked on the design tip, to be
+re-stacked onto W1's tip): its W0 gate PASSED (the narrowed sink
+collapsed the per-note client `scheduler/run` from 0.84 → 14–20 s to a
+flat ~0.1 s; createToView p50 4.03 → 0.81 s), then (a) — the
+storage-notification listener keyed on the outstanding intent set —
+replaced the sink outright, the effects channel followed (item 13), the
+RULED sentences of items 5/6, 7, 8 landed; report
+`docs/history/plans/server-execution-v2/stage-c/w2-intent-build-report.md`;
+W3 (α) follows on W1's tip (root-causes the l3 duplicate join); each
+build → independent adversarial review → fixer → ledger; then W4 the
 settle-time re-benchmark, measuring server settle time; (3) the
 CONFIDENCE VERDICT to the owner; (4) on "no fundamental issue", land
 the train on main with the flag OFF (siblings stacked; default lanes
