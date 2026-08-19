@@ -54,6 +54,8 @@ export interface GitHubOperationInProgress {
 const activeGitHubOperations = new Map<number, ActiveGitHubOperation>();
 let nextGitHubOperationId = 1;
 const SLOW_GITHUB_OPERATION_MS = 10_000;
+const GITHUB_ERROR_BODY_BYTES = 4_096;
+const GITHUB_LOG_DETAIL_CHARS = 300;
 
 export interface GitHubRequestOptions {
   // These expected HTTP responses stay quiet while transport failures still log.
@@ -77,10 +79,21 @@ export function githubOperationsInProgress(
   }));
 }
 
+function boundedLogDetail(detail: string): string | undefined {
+  const prefix = detail.slice(0, GITHUB_LOG_DETAIL_CHARS * 4);
+  const withoutControls = [...prefix].map((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || (code >= 127 && code <= 159) ? " " : character;
+  }).join("");
+  const compact = withoutControls.replace(/\s+/g, " ").trim();
+  return compact ? compact.slice(0, GITHUB_LOG_DETAIL_CHARS) : undefined;
+}
+
 function errorMessage(error: unknown): string {
-  return error instanceof Error
+  const detail = error instanceof Error
     ? `${error.name}: ${error.message}`
     : String(error);
+  return boundedLogDetail(detail) ?? "unknown error";
 }
 
 function githubResponseContext(response: Response): string {
@@ -112,12 +125,7 @@ function githubErrorBody(body: string): string | undefined {
   } catch {
     // A plain-text GitHub error body is already the useful detail.
   }
-  const withoutControls = [...detail].map((character) => {
-    const code = character.charCodeAt(0);
-    return code <= 31 || (code >= 127 && code <= 159) ? " " : character;
-  }).join("");
-  const compact = withoutControls.replace(/\s+/g, " ").trim();
-  return compact ? compact.slice(0, 300) : undefined;
+  return boundedLogDetail(detail);
 }
 
 function finishGitHubOperation(
@@ -149,18 +157,56 @@ function logGitHubOperationFailure(
 async function githubErrorResponseBody(
   response: Response,
   operation: ActiveGitHubOperation,
-  reportError: boolean,
 ): Promise<string> {
-  try {
-    return await response.text();
-  } catch (error) {
-    if (reportError) {
-      console.error(
-        `GitHub API operation ${operation.id} for ${operation.path} could not read ` +
-          `the error response from ${githubResponseContext(response)}: ${errorMessage(error)}`,
-      );
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  const detail = (): string => {
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
     }
+    return new TextDecoder().decode(bytes);
+  };
+  const logReadFailure = (action: string, error: unknown): void => {
+    console.error(
+      "GitHub API operation " + operation.id + " for " + operation.path +
+        " could not " + action + " the error response from " +
+        githubResponseContext(response) + ": " + errorMessage(error),
+    );
+  };
+  if (!response.body) return "";
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = response.body.getReader();
+  } catch (error) {
+    logReadFailure("read", error);
     return "";
+  }
+  const cancel = async (): Promise<void> => {
+    try {
+      await reader.cancel();
+    } catch (error) {
+      logReadFailure("stop reading", error);
+    }
+  };
+  try {
+    while (length < GITHUB_ERROR_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) return detail();
+      const remaining = GITHUB_ERROR_BODY_BYTES - length;
+      const kept = value.slice(0, remaining);
+      chunks.push(kept);
+      length += kept.length;
+    }
+    await cancel();
+    return detail();
+  } catch (error) {
+    logReadFailure("read", error);
+    return detail();
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -279,7 +325,6 @@ async function githubJson<T>(
     const body = await githubErrorResponseBody(
       res,
       operation,
-      reportHttpError,
     );
     let rateLimited = false;
     if (res.status === 403) {
@@ -379,7 +424,6 @@ async function githubDownloadResponse(
     const responseBody = await githubErrorResponseBody(
       response,
       operation,
-      reportHttpError,
     );
     if (reportHttpError) {
       const responseDetail = githubErrorBody(responseBody);

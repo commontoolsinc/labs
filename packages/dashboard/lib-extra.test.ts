@@ -158,6 +158,26 @@ Deno.test("github: a request failure logs its endpoint, stage, and elapsed time"
   });
 });
 
+Deno.test("github: request failure details are bounded and single-line", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      const unsafe = `connection\nclosed\x1b[31m${"x".repeat(500)}`;
+      await withFetch(
+        () => Promise.reject(new TypeError(unsafe)),
+        async () => {
+          await assertRejects(() => github("repos/o/runs"), TypeError);
+        },
+      );
+      assertEquals(messages.length, 1);
+      assert([...messages[0]].every((character) => {
+        const code = character.charCodeAt(0);
+        return code > 31 && (code < 127 || code > 159);
+      }));
+      assert(messages[0].length < 500);
+    });
+  });
+});
+
 Deno.test("github: unreadable JSON logs the endpoint and response context", async () => {
   await withTokens({ GH_TOKEN: "t" }, async () => {
     await captureConsole("error", async (messages) => {
@@ -228,6 +248,28 @@ Deno.test("github: an ignored status does not hide transport failures", async ()
       );
       assertEquals(messages, []);
       await withFetch(
+        () =>
+          new Response(
+            new ReadableStream({
+              pull(controller) {
+                controller.error(new Error("body connection closed"));
+              },
+            }),
+            { status: 404 },
+          ),
+        async () => {
+          await assertRejects(
+            () =>
+              github("repos/o/optional", undefined, {
+                ignoreStatuses: [404],
+              }),
+            Error,
+          );
+        },
+      );
+      assertEquals(messages.length, 1);
+      assert(messages[0].includes("body connection closed"));
+      await withFetch(
         () => Promise.reject(new TypeError("connection closed")),
         async () => {
           await assertRejects(
@@ -239,8 +281,8 @@ Deno.test("github: an ignored status does not hide transport failures", async ()
           );
         },
       );
-      assertEquals(messages.length, 1);
-      assert(messages[0].includes("TypeError: connection closed"));
+      assertEquals(messages.length, 2);
+      assert(messages[1].includes("TypeError: connection closed"));
     });
   });
 });
@@ -388,6 +430,41 @@ Deno.test("github: a failed download consumes and logs its error body", async ()
   });
 });
 
+Deno.test("github: a large download error keeps a bounded prefix and cancels the body", async () => {
+  await withTokens({ GH_TOKEN: "t" }, async () => {
+    await captureConsole("error", async (messages) => {
+      let sent = false;
+      let cancelled = false;
+      const response = new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (sent) return;
+            sent = true;
+            controller.enqueue(
+              new TextEncoder().encode(`useful detail ${"x".repeat(10_000)}`),
+            );
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 500 },
+      );
+      await withFetch(
+        () => response,
+        async () => {
+          const download = await githubDownload("repos/o/actions/artifacts/1/zip");
+          assertEquals(download.status, 500);
+        },
+      );
+      assert(cancelled);
+      assertEquals(messages.length, 1);
+      assert(messages[0].includes("useful detail"));
+      assert(messages[0].length < 500);
+    });
+  });
+});
+
 Deno.test("github: an ignored download status does not hide transport failures", async () => {
   await withTokens({ GH_TOKEN: "t" }, async () => {
     await captureConsole("error", async (messages) => {
@@ -407,6 +484,27 @@ Deno.test("github: an ignored download status does not hide transport failures",
       assert(response.bodyUsed);
       assertEquals(messages, []);
       await withFetch(
+        () =>
+          new Response(
+            new ReadableStream({
+              pull(controller) {
+                controller.error(new Error("body connection closed"));
+              },
+            }),
+            { status: 404 },
+          ),
+        async () => {
+          const download = await githubDownload(
+            "repos/o/actions/artifacts/1/zip",
+            undefined,
+            { ignoreStatuses: [404] },
+          );
+          assertEquals(download.status, 404);
+        },
+      );
+      assertEquals(messages.length, 1);
+      assert(messages[0].includes("body connection closed"));
+      await withFetch(
         () => Promise.reject(new TypeError("connection closed")),
         async () => {
           await assertRejects(
@@ -420,8 +518,8 @@ Deno.test("github: an ignored download status does not hide transport failures",
           );
         },
       );
-      assertEquals(messages.length, 1);
-      assert(messages[0].includes("TypeError: connection closed"));
+      assertEquals(messages.length, 2);
+      assert(messages[1].includes("TypeError: connection closed"));
     });
   });
 });
