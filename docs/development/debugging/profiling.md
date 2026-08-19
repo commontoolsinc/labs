@@ -33,9 +33,11 @@ deno task cf test packages/patterns/<pattern>/<name>.test.tsx --verbose --stats-
 No browser, no shell, no rendering — the cheapest rung that can see a read count
 explode. Each row carries `count`, `average`, `p95`, `max` and `total`.
 
-Read `count` against `average` before forming any theory. A row whose `total`
-grew because it ran more often is a different defect from one whose every call
-got slower, and the two have disjoint fixes.
+Each row prints `n`, `total`, `avg` and `p95`. Read the count against the
+average before forming any theory: a row whose `total` grew because it ran more
+often is a different defect from one whose every call got slower, and the two
+have disjoint fixes. (`max` and `p50` exist in the statistics but this command
+does not render them; the browser summary in step 3 does.)
 
 Two traps in the output itself:
 
@@ -49,24 +51,33 @@ Two traps in the output itself:
 `--storage-stats` adds the storage rows; `--stats-action-limit` controls how
 many per-step scheduler action deltas print.
 
-## 2. Bracket the phase so a profile can be read for it
+## 2. Bracket the phase — in the process you are going to profile
 
 A CPU profile is samples over a window. It has no idea what a phase is, so
 attributing one means knowing its exact interval.
 
-Wrap the phase the way
-[`packages/cli/lib/test-runner.ts`](../../../packages/cli/lib/test-runner.ts)
-does in its `withPhase` helper, which is the shape to copy:
+**Which process emits the marks decides whether they are any use.** `cf test`
+runs patterns in a Deno process with no browser in it; a worker CPU profile
+comes out of a browser worker over CDP. Marks emitted on one side of that
+boundary never appear in a profile taken on the other, so pick the bracket that
+matches the capture:
 
-- hierarchical keys, so subphases nest under their parent;
-- `logger.timeStart()` / `logger.timeEnd()` around the body;
-- `performance.mark()` at both boundaries and `performance.measure()` across the
-  pair, which gives the interval;
-- `console.timeStamp()` at each boundary, which puts the marker on a DevTools
-  timeline so zooming to the phase is a drag rather than arithmetic.
+- **Profiling the `cf test` process.** Wrap the phase the way
+  [`packages/cli/lib/test-runner.ts`](../../../packages/cli/lib/test-runner.ts)
+  does in its `withPhase` helper: hierarchical keys so subphases nest,
+  `logger.timeStart()` / `logger.timeEnd()` around the body, `performance.mark()`
+  at both boundaries with a `performance.measure()` across the pair, and a
+  `console.timeStamp()` at each. Run the process under `--inspect` and the marks
+  and timestamps land on the DevTools timeline beside the samples, so zooming to
+  the phase is a drag rather than arithmetic.
+- **Profiling the browser worker.** The interval has to come from the capture
+  itself: start the profiler when the phase starts and stop it when the phase
+  ends, so the profile *is* the phase. That is what the phase-scoped capture in
+  step 3 is for. Marks emitted inside the worker also work; marks emitted by the
+  test driving it do not.
 
-This is cheap to add and it is what makes the next descent possible. Add it to
-the phase you are narrowing, not to everything.
+Either way, add the bracket to the phase you are narrowing rather than to
+everything.
 
 ## 3. Attribute the phase to functions
 
@@ -74,7 +85,10 @@ Step wall-clock says how long; it does not say where the time went, and the
 scheduler's own spans account for only a fraction of the span they sit inside. A
 V8 sampling profile of the runtime worker attributes all of it, by function.
 
-Capture one around exactly the phase from step 2, using the seams in
+Start the capture when the phase starts and stop it when the phase ends. The
+profile is then the phase, and its ranking answers a question about that phase
+rather than about the whole run — which is the whole reason to bother scoping
+it. The seams are in
 [`packages/integration/cdp-profiler.ts`](../../../packages/integration/cdp-profiler.ts):
 
 - `attachWorkerProfiler(wsEndpoint)` — connects and waits for the runtime
@@ -89,6 +103,13 @@ Capture one around exactly the phase from step 2, using the seams in
 is the maintained example to lift the gating and naming from. Read the ranked
 report first; open the `.cpuprofile` in Chrome DevTools or speedscope when the
 ranking is not enough.
+
+For the logger's own view of the same run, `collectBrowserLoadSummary` in
+[`packages/patterns/integration/cfc-browser-helpers.ts`](../../../packages/patterns/integration/cfc-browser-helpers.ts)
+reads the worker's scheduler, runner and storage rows plus main-thread IPC, with
+`count`, `p50`, `p95` and `max` per row. It keeps the top rows by total, so a row
+recording set sizes rather than milliseconds will evict real timings — read
+those by name instead of widening the summary.
 
 ## 4. Split until an explosion has an origin
 

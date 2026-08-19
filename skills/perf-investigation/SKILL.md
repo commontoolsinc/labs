@@ -114,59 +114,39 @@ that differ costs less than a seam every future scenario has to be bent through.
 A phase is a place to look, never an answer. "The seed phase costs four minutes"
 is where an investigation starts being useful, and stopping there produces a fix
 aimed at a symptom. Keep going until you can name the thing doing the work — a
-function, a read, a derivation that re-runs — and can say whether it is
-expensive or merely frequent.
+function, a read, a derivation that re-runs — and say whether it is expensive or
+merely frequent.
 
-The instruments hand off to each other at each step down, and the handoff is the
-part worth knowing:
+`docs/development/debugging/profiling.md` has the steps and the commands. Two
+things about them are worth knowing before you start, because they decide where
+you begin and what you can trust:
 
-- **Logger phases say which phase.** Hierarchical keys are what make this a
-  descent rather than a single reading: a phase that costs four minutes splits
-  into named subphases, and one of those is usually most of it.
-- **`performance.mark` and `performance.measure` say where that phase sits in
-  the profile.** A CPU profile is samples over a window; it has no idea what a
-  phase is. Bracketing a phase with marks gives you its exact interval, so the
-  profile can be read for that window instead of averaged over the whole run —
-  which is the difference between "resolveLink is 30% of the run" and
-  "resolveLink is 90% of the phase that regressed". `console.timeStamp` at the
-  same boundaries puts the marker on a DevTools timeline, where the zoom is a
-  drag rather than an arithmetic exercise.
-- **Subphases say where a call explosion begins.** A count that is too high is
-  visible at the top, but the caller that multiplies it is not. Splitting the
-  phase until the count changes shape between two adjacent levels locates the
-  multiplication — the level where a count goes from proportional to the work to
-  proportional to the work squared is the one that introduced it.
+- **The timings already exist.** A logger constructed with `enabled: false` is
+  quiet, not inert: `timeStart`, `timeEnd` and `time` record into per-key
+  statistics without consulting that flag, and the counts behind the logging
+  methods increment before it is checked. Read what is accumulating before
+  instrumenting anything.
+- **Marks only help in the process that emits them.** `cf test` runs in a Deno
+  process with no browser; a worker CPU profile comes from a different process
+  over CDP. Bracketing a phase is what gives a profile its interval, but the
+  bracket has to be on the same side of that boundary as the samples.
 
-`withPhase` in `packages/cli/lib/test-runner.ts` is the worked example of the
-whole shape: hierarchical keys, a logger timer around the body, a mark at each
-boundary, a measure across the pair, and a `console.timeStamp` at each. Copy it
-into whatever you are narrowing.
-
-A logger constructed with `enabled: false` is quiet, not inert, and the
-difference decides where an investigation starts. `timeStart`, `timeEnd` and
-`time` record into per-key statistics without consulting that flag, and the
-counts behind the logging methods increment before it is checked — only the log
-lines are suppressed. So the timings for anything already wrapped are
-accumulating right now, and the first move is reading them rather than turning
-anything on.
-
-**You are done narrowing when you can write a benchmark.** That is the honest
-test, and it is worth holding to: a source you understand can be provoked
-directly, and one you cannot provoke is still a hypothesis. Build the benchmark
-before the fix, confirm it moves with the real measurement rather than merely
-being fast, and keep it — a benchmark that correlates with the thing users feel
-is what defends the fix afterwards, and it often lands as part of it. Where a
-source genuinely cannot be isolated that way, say so rather than skipping the
-step quietly.
+**You are done narrowing when you can write a benchmark.** A source you
+understand can be provoked directly; one you cannot provoke is still a
+hypothesis. Confirm it correlates — that it moves with the real measurement
+rather than merely being fast — and keep it, because that is what defends the
+fix afterwards.
 
 ## Count against average
 
-Every logger row carries `count`, `average`, `p95`, `max`, and `total`, and the
-first two are the whole diagnosis: a row whose `total` grew because `count` grew
-is a different bug from one whose `average` grew, and they have disjoint fixes.
-Read them before forming a theory. Rows are ranked by `total` and truncated, so
-a row that measures set sizes rather than milliseconds will sort above real
-timings and evict them — read those by name instead of widening the summary.
+Every logger row carries a count and a set of durations — the `cf test` stats
+print `n`, `total`, `avg` and `p95`, and the browser summary adds `p50` and
+`max` — and the count against the average is the whole diagnosis: a row whose
+`total` grew because `count` grew is a different bug from one whose `average`
+grew, and they have disjoint fixes. Read them before forming a theory. Rows are
+ranked by `total` and truncated, so a row that measures set sizes rather than
+milliseconds will sort above real timings and evict them — read those by name
+instead of widening the summary.
 
 ## Two ways to be slow, at every level
 
