@@ -11,9 +11,13 @@
 # break this script.
 #
 # Requirements beyond the usual: sqlite3 on PATH (for the VACUUM INTO
-# snapshot), and CF_DRILL_STORE_DIR pointing at the serving toolshed's
-# MEMORY_DIR (default <server cwd>/cache/memory), because a snapshot is taken
-# from the store file, not over the API.
+# snapshot — preinstalled on the CI runners and on macOS, so it is checked
+# rather than installed), and CF_DRILL_STORE_DIR pointing at the serving
+# toolshed's MEMORY_DIR (default <server cwd>/cache/memory), because a
+# snapshot is taken from the store file, not over the API.
+#
+# An identity is minted when CF_IDENTITY names none, the way
+# verbs-over-the-cli.sh does: CI sets no key, and every cf call here needs one.
 #
 #   API_URL=http://localhost:8000 CF_DRILL_STORE_DIR=cache/memory \
 #     packages/cli/integration/topics-restore-drill.sh
@@ -66,8 +70,23 @@ ENGINE_DIR="$STORE_DIR/engine-v3/engine-v3"
 WORK="$(mktemp -d)"
 SPACE="topics-drill-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 
+# Every cf call below reads CF_IDENTITY from the environment, and CI sets
+# none. Mint one for this run rather than failing on the first deploy with
+# nothing to say about why.
+if [ -z "${CF_IDENTITY:-}" ]; then
+  CF_IDENTITY="$WORK/identity.key"
+  $CF id new > "$CF_IDENTITY" 2> /dev/null || {
+    echo "could not mint an identity for the drill" >&2
+    exit 1
+  }
+fi
+export CF_IDENTITY
+
 step "deploy the topics board into a fresh space ($SPACE)"
-ls "$ENGINE_DIR" 2> /dev/null > "$WORK/dbs-before" || true
+# `.sqlite` only: each store also carries -wal and -shm companions, and a
+# snapshot is taken from the database file itself.
+ls "$ENGINE_DIR" 2> /dev/null | grep '\.sqlite$' | sort > "$WORK/dbs-before" ||
+  true
 BOARD="$(
   $CF piece new "$REPO_ROOT/packages/patterns/topics/main.tsx" \
     --space "$SPACE" --api-url "$API_URL" 2> /dev/null |
@@ -109,25 +128,33 @@ $CF piece call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
   > /dev/null 2>&1
 ok "seeded"
 
-step "snapshot the space store (VACUUM INTO)"
-ls "$ENGINE_DIR" > "$WORK/dbs-after"
-NEW_DB="$(comm -13 "$WORK/dbs-before" "$WORK/dbs-after" | head -1)"
-[ -n "$NEW_DB" ] || {
+step "snapshot the space store (VACUUM INTO) and export from it"
+ls "$ENGINE_DIR" 2> /dev/null | grep '\.sqlite$' | sort > "$WORK/dbs-after"
+NEW_DBS="$(comm -13 "$WORK/dbs-before" "$WORK/dbs-after")"
+[ -n "$NEW_DBS" ] || {
   bad "no new space DB under $ENGINE_DIR — is API_URL served from this store?"
   exit 1
 }
-sqlite3 "$ENGINE_DIR/$NEW_DB" "VACUUM INTO '$WORK/$NEW_DB'" &&
-  ok "snapshot: $NEW_DB" || {
-  bad "VACUUM INTO failed"
-  exit 1
-}
-
-step "export from the snapshot"
-deno run --allow-run --allow-read --allow-write \
-  "$REPO_ROOT/scripts/topics-export.ts" "$WORK/$NEW_DB" \
-  --out "$WORK/export.json" > "$WORK/export.log" 2>&1 &&
-  ok "export ran" || {
-  bad "export failed: $(cat "$WORK/export.log")"
+# More than one store can be new: a run that minted its own identity also
+# created that identity's home space. Rather than guess between them —
+# whichever sorts first is a coin flip, and picking wrong fails later in the
+# export where the cause is invisible — snapshot each and let the export say
+# which holds the topics. "The store the export can read" IS the criterion.
+NEW_DB=""
+while read -r candidate; do
+  [ -n "$candidate" ] || continue
+  sqlite3 "$ENGINE_DIR/$candidate" "VACUUM INTO '$WORK/$candidate'" \
+    2> /dev/null || continue
+  if deno run --allow-run --allow-read --allow-write \
+    "$REPO_ROOT/scripts/topics-export.ts" "$WORK/$candidate" \
+    --out "$WORK/export.json" > "$WORK/export.log" 2>&1; then
+    NEW_DB="$candidate"
+    break
+  fi
+done <<< "$NEW_DBS"
+[ -n "$NEW_DB" ] && ok "snapshot and export: $NEW_DB" || {
+  bad "no new store exported as a topics space; last attempt said:
+$(cat "$WORK/export.log" 2> /dev/null)"
   exit 1
 }
 TOPIC="$(jq -r '.topics[0].fid' "$WORK/export.json")"

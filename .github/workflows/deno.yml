@@ -836,9 +836,7 @@ jobs:
       - name: 📦 Install CLI integration dependencies
         uses: ./.github/actions/apt-install
         with:
-          # sqlite3 is the topics restore drill's snapshot step: a snapshot is
-          # `VACUUM INTO` on the store file, not an API call.
-          packages: ${{ matrix.install_fuse_deps && 'jq sqlite3 fuse3 libfuse3-dev' || 'jq sqlite3' }}
+          packages: ${{ matrix.install_fuse_deps && 'jq fuse3 libfuse3-dev' || 'jq' }}
           cache-key: cli-integration
 
       - name: 🧪 Run CLI integration suite

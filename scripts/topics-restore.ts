@@ -24,19 +24,25 @@
  * session-scoped fields no other session can see. So the script applies the
  * complete document in one call — built from the export's RAW argument, so
  * a plain authored field no field list here names still rides the restore —
- * then re-establishes the board link that a document write cannot carry
+ * then re-establishes every wiring link a document write cannot carry
  * (`$link` values are refused by the same validation), using
- * `cf piece link` on the board recorded in the export.
+ * `cf piece link` against the board recorded in the export.
+ *
+ * Those wiring links are `STRUCTURAL_LINK_SOURCES`, which maps each one to
+ * the board path it points at: `mentionable` to the board's `topics`, and
+ * `boardCrossrefs` to its `crossrefs`. A link-valued field absent from that
+ * map stops the restore rather than being guessed at, so a wiring input
+ * added to the topic pattern announces itself here.
  *
  * Three honest costs. Comment and link elements are re-written as plain
  * values, so their element entities are minted fresh: content, order,
  * timestamps, and attribution are exact, but a stored reference to an
- * individual old element is not preserved. The re-established `mentionable`
- * targets the board's result `topics` where the original targeted its
- * argument document — aliases of one another (#5632), so a before/after
- * diff of the stored link differs while resolution does not. And the
- * deprecated `myName` legacy link is not restored — it exists only as the
- * pre-agentName attribution fallback.
+ * individual old element is not preserved. A re-established link targets the
+ * board's RESULT path where the original targeted its argument document —
+ * aliases of one another (#5632), so a before/after diff of the stored link
+ * differs while resolution does not. And the deprecated `myName` legacy link
+ * is not restored — it exists only as the pre-agentName attribution
+ * fallback.
  *
  * The target's deployed pattern identity must match the export row's;
  * --allow-identity-mismatch overrides, which a restore after a deliberate
