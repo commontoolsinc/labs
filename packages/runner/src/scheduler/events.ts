@@ -1420,7 +1420,11 @@ export async function dispatchQueuedEvent(state: {
         // sentence): the invariant working, not a failed commit — the
         // durable entry is the truth and the drain delivers it with a
         // streamEntry. Settle the copy quietly (no retry, no warn; the
-        // SpaceServer counted it — `events.lt1LateSealsRefused`).
+        // SpaceServer counted it — `events.lt1LateSealsRefused`). This
+        // early return also SKIPS the `scheduler.event.commit` telemetry
+        // submit below for the refused copy (deliberate: the copy is
+        // not a commit outcome; the drain's copy of the same entry
+        // reports its own).
         logger.debug("lt1-late-seal-refused", () => [
           `LT1 in-process copy of ${queuedEvent.id} sealed outside its ` +
           "appending wave and was refused; the drain delivers the entry",

@@ -267,9 +267,17 @@ export type ServingLoopStats = {
      * Their consequences never commit; the drain's copy of the same
      * entry is the one completed run. A non-zero count is the sentence
      * working (the lunch gate's vote-toggle double was exactly this copy
-     * committing unmarked beside the drain's); a count that grows
-     * without `processed` settling names a handler whose in-process
-     * copy keeps missing its wave. */
+     * committing unmarked beside the drain's). It grows ROUTINELY for two
+     * benign classes, so a rising count is not by itself a signal: an
+     * async handler whose copy spans a deadline (the pinned shape), and
+     * an LT1 copy forwarding a renderer-trusted event object, which the
+     * scheduler's wake shaper HOLDS (`shouldShapeDelivery`) rather than
+     * queues — out of the purge's reach (it scans `eventQueue` only) and
+     * released into a later wave, where this refusal catches it and the
+     * drain delivers (independent review m3; exactly-once holds, at one
+     * refused run + one cycle per such cascade). A count that grows while
+     * `processed` never settles names a handler whose in-process copy
+     * keeps missing its wave. */
     lt1LateSealsRefused: number;
     /** Stage C build W3, (α3) — the orphan REFUSAL (events.md §4's third
      * clause): event-handler runs of an LT1 cascade whose durable entry
@@ -277,7 +285,9 @@ export type ServingLoopStats = {
      * per-doc drop, a dropped-whole or requeued emitter) — the entry
      * never lands and nothing re-emits it, so the run's consequences are
      * withdrawn rather than committed with zero durable entries behind
-     * them. Counted per refused contribution. */
+     * them — the copy's same-eventId siblings (the served navigateTo's
+     * intent tx) fold into the refusal. Counted once per refused EVENT,
+     * however many contributions folded. */
     orphanDeliveriesRefused: number;
   };
   memo: { hits: number; misses: number; inflight: number };

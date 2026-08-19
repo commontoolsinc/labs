@@ -1097,7 +1097,12 @@ export class SpaceServer implements TransactionSealDestination {
     // discarded; the durable entry, which landed with the emitter, is
     // the one the drain re-runs WITH a streamEntry — the one completed
     // run. Checked before #openWave(): a refused copy must not open an
-    // empty wave of its own.
+    // empty wave of its own. The refusal also does NOT wake the loop
+    // (`#feedArrived` is left alone): nothing of the copy needs a cycle,
+    // and the drain's copy of the same entry — queued by the drain that
+    // already found the entry unmarked — wakes it on its own seal. A
+    // future caller that relied on "every seal wakes the loop" would
+    // not get that from a refused seal.
     const appending = this.#lt1AppendingWave.get(tx);
     if (
       appending !== undefined &&

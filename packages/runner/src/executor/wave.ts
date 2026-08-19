@@ -1644,8 +1644,9 @@ export class WaveAccumulator
           // consequence for zero entries: the invariant broken from the
           // other side. REFUSED: withdrawn whole, disposition `dropped`,
           // never reported as requeued (no entry exists to retry), and
-          // its own readers and cascade grandchildren fold through the
-          // same closure. (A requeued EVENT-HANDLER emitter reaches its
+          // its own readers, its cascade grandchildren, and its
+          // same-eventId siblings (`eventOrphaned` below) fold through
+          // the same closure. (A requeued EVENT-HANDLER emitter reaches its
           // children first through `parentRequeued` — C8d — and those
           // children requeue with it; this arm covers the emitters C8d
           // cannot name.)
