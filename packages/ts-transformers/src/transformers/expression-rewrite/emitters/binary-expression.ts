@@ -1,7 +1,10 @@
 import ts from "typescript";
 
 import type { Emitter, EmitterContext } from "../types.ts";
-import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
+import {
+  createReactiveWrapperForExpression,
+  isArrayMethodReceiverExpression,
+} from "../rewrite-helpers.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "../fallback-array-method-rewrite.ts";
 import {
   findPendingComputeWrapCandidate,
@@ -9,56 +12,12 @@ import {
 } from "./compute-wrap-invariants.ts";
 import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
 import {
-  classifyArrayMethodCall,
   isReactiveValueExpression,
   isSimpleReactiveAccessExpression,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
 import { shouldLowerLogicalExpression } from "../../../policy/mod.ts";
-
-function getTransparentReceiverWrappedExpression(
-  node: ts.Node,
-): ts.Expression | undefined {
-  if (
-    ts.isParenthesizedExpression(node) ||
-    ts.isAsExpression(node) ||
-    ts.isTypeAssertionExpression(node) ||
-    ts.isSatisfiesExpression(node) ||
-    ts.isNonNullExpression(node) ||
-    ts.isPartiallyEmittedExpression(node)
-  ) {
-    return node.expression;
-  }
-  return undefined;
-}
-
-function isArrayMethodReceiverExpression(node: ts.Node): boolean {
-  let current: ts.Node = node;
-  let parent = current.parent;
-  while (parent) {
-    const wrapped = getTransparentReceiverWrappedExpression(parent);
-    if (!wrapped) break;
-    if (wrapped !== current) return false;
-    current = parent;
-    parent = parent.parent;
-  }
-
-  if (
-    !parent ||
-    (
-      !ts.isPropertyAccessExpression(parent) &&
-      !ts.isElementAccessExpression(parent)
-    ) ||
-    parent.expression !== current
-  ) {
-    return false;
-  }
-
-  const call = parent.parent;
-  return !!call && ts.isCallExpression(call) && call.expression === parent &&
-    !!classifyArrayMethodCall(call);
-}
 
 function isAllowedSyntheticArrayReceiverWrap(
   node: ts.Expression,

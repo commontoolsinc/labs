@@ -12,6 +12,7 @@ import type {
   EmitterContext,
   RewriteParams,
 } from "./types.ts";
+import { isArrayMethodReceiverExpression } from "./rewrite-helpers.ts";
 import {
   emitBinaryExpression,
   emitCallExpression,
@@ -60,58 +61,6 @@ function hasSyntheticComputeCallbackAncestor(
     current = current.parent;
   }
   return false;
-}
-
-function isTransparentReceiverWrapper(node: ts.Node): boolean {
-  return ts.isParenthesizedExpression(node) ||
-    ts.isAsExpression(node) ||
-    ts.isTypeAssertionExpression(node) ||
-    ts.isSatisfiesExpression(node) ||
-    ts.isNonNullExpression(node) ||
-    ts.isPartiallyEmittedExpression(node);
-}
-
-function getTransparentReceiverWrappedExpression(
-  node: ts.Node,
-): ts.Expression | undefined {
-  if (
-    ts.isParenthesizedExpression(node) ||
-    ts.isAsExpression(node) ||
-    ts.isTypeAssertionExpression(node) ||
-    ts.isSatisfiesExpression(node) ||
-    ts.isNonNullExpression(node) ||
-    ts.isPartiallyEmittedExpression(node)
-  ) {
-    return node.expression;
-  }
-  return undefined;
-}
-
-function isArrayMethodReceiverExpression(node: ts.Node): boolean {
-  let current: ts.Node = node;
-  let parent = current.parent;
-  while (parent && isTransparentReceiverWrapper(parent)) {
-    if (getTransparentReceiverWrappedExpression(parent) !== current) {
-      return false;
-    }
-    current = parent;
-    parent = parent.parent;
-  }
-
-  if (
-    !parent ||
-    (
-      !ts.isPropertyAccessExpression(parent) &&
-      !ts.isElementAccessExpression(parent)
-    ) ||
-    parent.expression !== current
-  ) {
-    return false;
-  }
-
-  const call = parent.parent;
-  return !!call && ts.isCallExpression(call) && call.expression === parent &&
-    !!classifyArrayMethodCall(call);
 }
 
 function isInsideKnownSafeCallbackWrapper(
