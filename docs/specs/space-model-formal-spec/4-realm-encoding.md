@@ -393,9 +393,9 @@ A tag that is *syntactically* a tag but that no codec claims is not a refusal:
 it becomes an `UnknownValue` and round-trips, exactly as under JSON
 (`3-json-encoding.md` Section 8).
 
-## 7. Serialization Context Responsibilities
+## 7. Codec Engine Responsibilities
 
-The realm encoding context is responsible for:
+The realm codec engine is responsible for:
 
 - Minting a marker per `encode()` call, per Section 2.2, and building the
   outer envelope around the walked tree.
@@ -403,7 +403,7 @@ The realm encoding context is responsible for:
   validating that envelope's shape and the marker's version per Section 2.4 —
   the one place the decoder takes instruction from the data it is reading.
 - Owning recursion and tag-wrapping around the shallow per-type codecs, as the
-  JSON context does (`3-json-encoding.md` Section 7): tags come from
+  JSON engine does (`3-json-encoding.md` Section 7): tags come from
   `codec.tagForValue(value)` on encode, and decode routes each tag to its
   registered codec.
 - Re-wrapping unknown types using the per-instance `wireTypeTag` preserved in
@@ -411,7 +411,7 @@ The realm encoding context is responsible for:
   codec.
 - Settling a codec's rejection according to leniency, identically to JSON.
 
-There is no escaping step and no stringify step, both of which the JSON context
+There is no escaping step and no stringify step, both of which the JSON engine
 carries.
 
 ### 7.1 Codec State Validation

@@ -144,7 +144,7 @@ export class RealmDecodeAct
    * a length an array cannot hold.
    *
    * Frozen on the way out whether it was rebuilt or passed through, per what
-   * {@link #decode} says a caller cedes to it.
+   * `4-realm-encoding.md` Section 5.2 says a caller cedes to it.
    */
   #decodeArray(
     data: readonly RealmCodecValue[],
@@ -182,7 +182,7 @@ export class RealmDecodeAct
    * container a payload cannot produce.
    *
    * Frozen on the way out whether it was rebuilt or passed through, per what
-   * {@link #decode} says a caller cedes to it.
+   * `4-realm-encoding.md` Section 5.2 says a caller cedes to it.
    */
   #decodePlainObject(
     data: Record<string, RealmCodecValue>,

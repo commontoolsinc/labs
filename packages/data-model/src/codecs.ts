@@ -180,11 +180,11 @@ export function realmFromFabricValue(value: FabricValue): RealmEncodedValue {
 /**
  * Decodes a value in the realm-crossing transport form. If no live
  * environment is given, {@link NULL_LIVE_ENVIRONMENT} is substituted, which
- * throws if any decoding is needed.
+ * throws if anything asks it for a cell.
  *
  * `data` is ceded to this function, which retains what it likes of it and
  * freezes whatever it retains; a caller must not use it afterwards.
- * `RealmCodecEngine.decode()` states the whole of that contract.
+ * `4-realm-encoding.md` Section 5.2 states the whole of that contract.
  */
 export function fabricFromRealmValue(
   data: RealmEncodedValue,

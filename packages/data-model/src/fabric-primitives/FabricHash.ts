@@ -253,14 +253,14 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
    * The codec for instances of this class in the realm-crossing format.
    *
    * Terminal, and it is the hash bytes that make it so rather than the record
-   * around them. A `Uint8Array` is in this format's domain and is not a
+   * around them. An `ArrayBuffer` is in this format's domain and is not a
    * `FabricValue`, so a state holding one has no nonterminal reading. The
    * record being a plain object decides nothing either way.
    *
-   * The state is terminal, and its `hash` is a bare `ArrayBuffer` for the
-   * reason `FabricBytes` encodes to one: that is the form `postMessage()` can
-   * *transfer*, so a caller assembling a transfer list finds a transferable
-   * object here rather than a view it would have to reach through.
+   * The `hash` is a bare `ArrayBuffer` for the reason `FabricBytes` encodes to
+   * one: that is the form `postMessage()` can *transfer*, so a caller
+   * assembling a transfer list finds a transferable object here rather than a
+   * view it would have to reach through.
    */
   static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
     return this.#realmCodec;
