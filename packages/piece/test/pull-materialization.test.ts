@@ -1544,6 +1544,46 @@ describe("piece pull materialization", () => {
     ).toThrow(/source Cell constraints disagree/);
   });
 
+  it("fails closed when the producer contract stops at a scalar ancestor", async () => {
+    // A supplied link that reaches THROUGH a scalar slot of its producer's
+    // durable schema has no derivable source contract: the contract walk in
+    // `buildSourceContracts` fails, and that failure must surface as the
+    // uniform supplied-link rejection rather than escaping unwrapped.
+    const scalarAncestorSchema: JSONSchema = {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    };
+    const source = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: scalarAncestorSchema,
+        result: { value: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await runtime.editWithRetry((tx) => {
+      source.withTx(tx).setMetaRaw("schema", scalarAncestorSchema);
+    });
+    const base = runtime.getCell(
+      pieces.getSpace(),
+      "scalar-ancestor-base-" + crypto.randomUUID(),
+    );
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: [], value: source.key("value").key("deep") }],
+        true,
+        base,
+        pieces,
+      )
+    ).toThrow(
+      /input link at <root> schema is not compatible: schema does not describe a container at deep/,
+    );
+  });
+
   it("recovers only producer-owned argument and internal contracts", async () => {
     const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
