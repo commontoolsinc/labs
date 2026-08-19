@@ -1,15 +1,15 @@
 /**
  * This directory holds the codec system's active machinery: the registry that
  * indexes codecs, the lookup that finds a class's codec, the engine base, the
- * per-act contexts, and the two classes a fault produces. It is also the
+ * per-act encode and decode classes, and the two classes a fault produces. It is also the
  * package's public face for the codec system as a whole, re-exporting the
  * declarations in `codec-interface/` so that an outside caller has one entry
  * point rather than two.
  *
- * That convenience is for this barrel alone. A module inside the package
- * imports the file it wants directly -- nothing here imports this barrel --
- * which is what keeps a module that only needs to name a codec from pulling
- * the machinery in behind it, and is the point of the two directories.
+ * That convenience is for callers. A module inside this directory imports
+ * the file it wants directly, which is what keeps a module that only needs
+ * to name a codec from pulling the machinery in behind it, and is the point
+ * of the two directories.
  *
  * Everything here is format-agnostic. Nothing in this directory knows which
  * wire format is in play, and a codec that exists because one particular

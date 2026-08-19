@@ -84,8 +84,8 @@ export function jsonFromFabricValue(
  * Decodes a string in the `FabricValue` JSON-embedded encoding format, which is
  * expected to be a plain object. Throws if it turns out to be something else.
  * If no live environment is given, {@link NULL_LIVE_ENVIRONMENT} is
- * substituted (via `fabricFromJsonValue()`), which throws if any decoding
- * is needed.
+ * substituted (via `fabricFromJsonValue()`), which throws if anything asks
+ * it for a cell.
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
@@ -113,7 +113,7 @@ export function plainObjectFromJson<T extends object = object>(
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format. If no
  * live environment is given, {@link NULL_LIVE_ENVIRONMENT} is substituted,
- * which throws if any decoding is needed.
+ * which throws if anything asks it for a cell.
  */
 export function fabricFromJsonValue(
   json: string,

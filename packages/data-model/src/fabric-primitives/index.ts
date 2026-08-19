@@ -30,9 +30,9 @@ export { FabricEpochDays } from "./FabricEpochDays.ts";
 
 /**
  * The concrete primitive classes whose instances are available over the wire,
- * each via its static `[JSON_CODEC]`. This is the curated source of truth for
- * which primitive types participate in encoding: add a class here once it
- * gains a `[JSON_CODEC]`.
+ * each via the codec it binds under a wire format's own symbol. This is the
+ * curated source of truth for which primitive types participate in encoding:
+ * add a class here once it binds a codec for every format that is built.
  *
  * Typed only as classes, which is weaker than it looks: a `FabricPrimitive`
  * binds its codec under a wire format's own symbol, so a type saying which

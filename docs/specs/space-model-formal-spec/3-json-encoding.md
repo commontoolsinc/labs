@@ -267,7 +267,7 @@ round-trip correctly.
 > malformed input — wrong type, invalid format, or missing fields — the codec
 > must reject it rather than silently produce garbage. A codec may reject by
 > throwing, or by returning a `ProblematicValue` (see `1-fabric-values.md`
-> Section 3.5); the two are equivalent, because the encoding context settles
+> Section 3.5); the two are equivalent, because the engine settles
 > them into one answer according to its own `lenient` setting (see
 > `1-fabric-values.md` Section 4.5). Which one a codec uses is therefore a
 > matter of what reads well where it is written, and carries no meaning for a
@@ -320,7 +320,7 @@ ambiguity about what is an encoding signal and what is user data.
 Types that require no decoding state use `null` as the value:
 
 ```json
-{ "/Stream@1": null }
+{ "/Undefined@1": null }
 ```
 
 Both `null` and `{}` are acceptable for "no state needed." `null` is the
@@ -431,7 +431,13 @@ for:
   `ProblematicValue` is not re-wrapped this way; see Section 8.
 - Settling a codec's rejection according to `lenient`: in lenient mode a
   codec's throw becomes a `ProblematicValue`, and in strict mode a
-  `ProblematicValue` a codec returns becomes a throw.
+  `ProblematicValue` a codec returns becomes a throw. `ProblematicValue`'s
+  own codec is exempt from the second half, because for that one a
+  `ProblematicValue` is the successful product rather than a rejection: a
+  payload under `Problematic@1` is a well-formed record of a past failure,
+  and reading one back is not a failure of this decode. Without the
+  exemption a strict reader could never read such a record, which is most
+  of what preserving one is for.
 
 Note: `/object` escaping (Section 6) is applied directly by the engine's
 internal encode walker in its plain-objects path, since it is structural
@@ -439,7 +445,7 @@ escaping rather than type encoding.
 
 ## 8. Unknown Type Handling
 
-When a JSON context encounters a `/<Type>@<Version>` key it doesn't recognize,
+When a JSON decode encounters a `/<Type>@<Version>` key it doesn't recognize,
 it wraps the data in `UnknownValue` (see `1-fabric-values.md` Section 3) to
 preserve it for round-tripping. Re-encoding reproduces the original key,
 the codec's `tagForValue()` reading back the preserved tag and `encode()`
@@ -480,10 +486,10 @@ Specifically:
 - **Multi-key objects** containing one or more `/`-prefixed keys are structural
   encoding errors, and are rejected. They are not valid plain objects.
 
-A structural violation is malformed wire data the encoding context detects
-itself, rather than a state a codec refuses, and the two are settled the same
-way: against `lenient` (see `1-fabric-values.md` Section 4.5). A lenient
-context yields a `ProblematicValue`, and a strict one raises. Which of the two
+A structural violation is malformed wire data the engine detects itself,
+rather than a state a codec refuses, and the two are settled the same way:
+against `lenient` (see `1-fabric-values.md` Section 4.5). A lenient decode
+yields a `ProblematicValue`, and a strict one raises. Which of the two
 noticed the fault is an implementation detail of where a check lives, and does
 not reach a caller.
 
