@@ -2967,9 +2967,30 @@ spelling-compat note in the normalizer's doc comment).
 
 **Runtime consumption.** After a verified evaluation,
 `Engine.recordModuleProvenance` reads the annotation off each exported or
-`__cfReg`-registered builder artifact (`readBindingIdentity`,
-`packages/runner/src/harness/verified-provenance.ts`) and records it as
-`VerifiedProvenance.bindingIdentity` against the implementation function.
+`__cfReg`-registered builder artifact and records it against the implementation
+function, through two independent readers.
+
+The TRUSTED read (`readBindingIdentity`,
+`packages/runner/src/harness/verified-provenance.ts`) requires `sourceFile` and
+`bindingPath` together and records them as
+`VerifiedProvenance.bindingIdentity`.
+
+The DEBUG read (`readAuthoredBindingAnnotation`,
+`packages/runner/src/harness/authored-debug-source.ts`) takes `sourceFile`,
+`position` and `bindingName`, never requires `bindingPath`, and tolerates a
+malformed field by dropping that field alone — an ordinary artifact carries no
+`bindingPath`, so the strict reader would drop every ordinary position. It
+records into a WeakMap separate from `VerifiedProvenance`, which `fn.src` and
+`fn.name` serve as lazy accessors: nothing on the identity, authorization, or
+scheduling path reads them, so a debug field cannot widen the surface that
+authorizes writes. The engine formats `src` as
+`cf:module/<identity>/<authoredPath>:<line>:<col>` — the canonical module source
+`Engine.canonicalModuleSource` resolves to — applying the file's
+`helperInjectionLineOffset` to the annotation's line EXACTLY ONCE, and passing
+the column through as emitted. Where the correction is unavailable (a
+source-free warm load, or a file outside the evaluation's measured set) `src` is
+omitted rather than guessed, and `bindingName` alone is recorded. Pinned by
+`packages/runner/test/authored-source-annotation.test.ts`.
 CFC's implementation identity surfaces it as `sourceFile`/`bindingPath`
 (`packages/runner/src/cfc/implementation-identity.ts`), and at commit the
 `writeAuthorizedBy` check requires the writing identity's

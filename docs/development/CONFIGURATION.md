@@ -263,7 +263,6 @@ The environment-backed flags (the only ones settable without editing code) are:
 |---|---|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
 | `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` |
-| `eagerSourceAnnotation` | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` |
 
 The runtime-only flags (`commitPreconditions`, the CFC enforcement dials) and the
 storage, memory-protocol, and shell flags are documented in the registry. See it
@@ -284,7 +283,6 @@ Most shell config is **build-time**: esbuild injects defines in
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for diagnostics and used by deployed shells to select the immutable `/builds/<sha>` worker asset graph. In development the explicit worker URL remains `/scripts/worker-runtime.js`. It does not authorize system-pattern updates. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | `EXPERIMENTAL.persistentSchedulerState` | _(unset)_ | See experimental flags. |
-| `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | `EXPERIMENTAL.eagerSourceAnnotation` | on in dev builds, off in production | See experimental flags. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 
 ---
@@ -381,7 +379,6 @@ the service that launched it, `ENV=test` to recognize the unit suite,
 | `API_URL` | `http://localhost:8000` | Toolshed URL the service calls. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | _(unset)_ | See experimental flags. |
-| `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | _(unset)_ | See experimental flags. |
 
 ---
 

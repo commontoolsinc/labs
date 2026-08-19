@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-23. Each flag's section carries the date its status
+**Last reviewed:** 2026-08-18. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -33,7 +33,6 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate)                     | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental`                                                                 | off                                                                                  | Bernhard Seefeld (#3646)                              | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement        |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
-| [`eagerSourceAnnotation`](#eagersourceannotation)                           | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental`                                                                    | off in production, on in shell dev builds                                            | gideon (#4458)                                        | permanent debug toggle, not slated for removal                                                                                                                                                                                    | implemented                                                                     |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
@@ -272,38 +271,6 @@ value is ignored with a warning rather than coerced. See
   server-side precondition check in the memory engine. The single-use grant path
   then drops its availability check (`cfcGrantReceiptsAvailable` in
   `packages/runner/src/cfc/grants.ts`), not the receipts themselves.
-
-### `eagerSourceAnnotation`
-
-- **Toggle via.** `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` environment variable,
-  or `RuntimeOptions.experimental.eagerSourceAnnotation`. The ambient control
-  point is `setEagerSourceAnnotation` in
-  [`packages/runner/src/builder/module.ts`](../../packages/runner/src/builder/module.ts).
-  Unlike the other env-backed flags, the runtime propagates this one only when
-  it is set explicitly, because the ambient flag is also a test seam.
-- **Added by.** gideon, in "make fn.src lazy/debug-only — re-root identity off
-  .src" (#4458, 2026-07-06).
-- **Purpose.** Resolves the per-primitive debug source annotation (`fn.src`)
-  eagerly at module evaluation instead of lazily. Resolving it is a stack
-  capture plus a source-map walk for every primitive, which is the single
-  largest cost in the cold boot floor (on the order of eighty milliseconds or
-  more per cold piece boot). Identity never reads `.src`, so this is purely a
-  debugging convenience.
-- **Current default and planned end state.** Off in production. Shell
-  development builds turn it on so that per-primitive source locations keep
-  working while debugging; the build define in
-  [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts)
-  supplies the value, and
-  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts)
-  defaults it to on when the environment is `development`. Unlike the flags
-  above, this one is not expected to graduate: it trades boot time for debug
-  fidelity and stays off in production by design.
-- **Status on 2026-07-08.** Implemented: reachable on the server through the
-  canonical environment mapping (like every env-backed flag), defaulted on in
-  shell development builds, and honored by the runtime.
-- **Path to removal.** There is no planned removal. It would only be deleted if
-  the debug source-annotation mechanism itself were removed, which is unlikely
-  because `.src` is a public debugging surface.
 
 ### `systemPatternAutoUpdate`
 
@@ -1065,7 +1032,6 @@ useful part of the remaining work for that flag.
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
 `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`,
-`EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`,
 `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`, `EXPERIMENTAL_LAZY_MATERIALIZATION`)
 reach the runtime through the deployed processes. The runtime-only flags
 (`commitPreconditions`, the CFC dials) reach it only through the
@@ -1232,6 +1198,20 @@ config reaches:
 
 These are recorded so that references to them elsewhere in the tree do not send
 a future reader hunting for a flag that no longer exists.
+
+### `eagerSourceAnnotation` / `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` (removed)
+
+The gate on resolving the per-primitive debug source annotation (`fn.src`) at
+module evaluation. Resolving it meant a stack capture plus a source-map walk for
+every primitive — the single largest cost in the cold boot floor — so it was off
+in production and on in shell development builds. CT-1870 replaced the
+resolution with a transform-time constant: the CTS pipeline stamps each builder
+artifact with where its function was authored, and the runner reads it during
+the provenance walk it already performs. What remains costs a WeakMap lookup, so
+there is nothing left to gate and the flag, its environment variable, and the
+shell build define are gone. `fn.src` stays a public debugging surface. See
+[behavior spec §17.3](../specs/ts-transformer/ts_transformers_current_behavior_spec.md)
+for the metadata contract.
 
 ### `systemPatternAutoUpdateHome` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` (removed)
 

@@ -25,13 +25,12 @@ merged 2026-07-09) — do not merge scopes.
 
 - **A′ is a debug-correctness line, not a boot-floor line.** The boot-floor arc
   is merged and done (~165ms floor, ~25ms/cold-boot banked by #4458 — historical
-  numbers, re-derive before quoting). What remains wrong: dev builds still pay
-  eager `.src` resolution (`EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`, on by default
-  in dev — `packages/shell/src/lib/env.ts`, gate in
-  `packages/runner/src/builder/module.ts` `setEagerSourceAnnotation`), and what
-  it computes is often wrong (historical finding: 64/82 lunch-poll primitives
-  hit the expensive fallback; the 18 "cheap successes" all returned the same
-  colliding runtime-factory frame).
+  numbers, re-derive before quoting). The eager `.src` resolution it describes
+  is gone (PR-2, §9.3–9.4): `fn.src` now reads the transform-time annotation, so
+  there is no stack capture, no source-map walk, and no flag. The historical
+  finding it was measured against — 64/82 lunch-poll primitives hitting the
+  expensive fallback, the 18 "cheap successes" all returning the same colliding
+  runtime-factory frame — is what the annotation replaced.
 - **The prerequisite**: transform-time injection needs the transformer pipeline
   to know, at the hoisting stage, where each builder call/callback was authored.
   Probe-verified on current main: **it doesn't** — all hoisted builder origins
@@ -53,18 +52,17 @@ merged 2026-07-09) — do not merge scopes.
 
 ## 1. Value proposition (what A′ buys once lineage is fixed)
 
-1. Debug-time `fn.src` becomes _truthful_ (today's cheap path returns colliding
-   runtime-factory frames; `INTERNAL_SOURCE_LOCATION_FRAME_PATTERNS` filters
-   `factory.ts` but not `module.ts`; eval-frames mostly don't canonicalize —
-   CT-1754 machinery).
-2. Kills the dev-build eager resolution cost entirely (annotation becomes a
-   transform-time constant read).
+1. Debug-time `fn.src` is _truthful_ — it names the authored callback, where the
+   stack walk it replaced returned colliding runtime-factory frames (DELIVERED,
+   §9.3).
+2. The eager resolution cost is gone entirely; the annotation is a
+   transform-time constant read (DELIVERED, §9.4).
 3. Unblocks seefeld's original directive — "remove the expensive fallback and
-   error instead" — which was always gated on the cheap path being correct.
+   error instead" — which was always gated on the cheap path being correct. The
+   fallback is deleted; what remains of the directive is the erroring (§9.5).
 4. Carries the empty-`fn.name` debug-name gap (#4458 follow-on): hoisted
-   `__cfLift_N` names replaced authored names in debug output. The original
-   chain reaches the authored _node_, not just a position, so the authored
-   binding name is recoverable at the same injection point.
+   `__cfLift_N` names replaced authored names in debug output. `fn.name` now
+   reports the authored binding name the annotation carries (DELIVERED, §9.3).
 
 ## 2. Probe findings on main @ 39afdb62b (re-derived 2026-07-07)
 
@@ -456,28 +454,36 @@ patterns) and the full fixture suite green.
      rendezvous.
    - _What content_: file + line:col of the authored callback (and the authored
      binding name — closes the empty-`fn.name` debug-name gap).
-3. **Runtime read side (PR-2, NEXT)**: `fn.src` lazy getter reads the annotation
-   instead of eval-frame resolution (CT-1754 machinery in `harness/engine.ts`
-   becomes dead on this path). Read the metadata off the annotated VALUE (the
-   factory), not the implementation function: `hardenVerifiedFunction` freezes
-   implementations during the builder call (`runner/src/builder/module.ts`,
-   createNodeFactory + handlerInternal), which runs before the annotation
-   statement, so the helper's implementation-stamp is skipped for those builders
-   (`Object.isExtensible` guard). The design-note shape stands: a
-   `readBindingIdentity(value)`-style read in `recordModuleProvenance`'s walk,
-   feeding a debug-only WeakMap keyed by the implementation. Apply the
-   `helperInjectionLineOffset` line correction on this side (the transformer
-   cannot — a legacy stored envelope is byte-indistinguishable from a fresh
-   injection at transform time). Re-verify the `recordModuleProvenance` region
-   against #5927's engine rework before wiring. Context note: stack traces never
-   needed this — emitted sourcemaps were already line-correct pre-1868 (verified
+3. **Runtime read side — PR-2 SHIPPED.** `Engine.recordModuleProvenance` reads
+   the annotation off the annotated VALUE during its existing walk and records
+   it in a debug-only WeakMap keyed by the implementation function
+   (`runner/src/harness/authored-debug-source.ts`); `fn.src` and `fn.name` are
+   lazy accessors over that map, installed while the function is still
+   extensible. The value — not the implementation — is the read target because
+   `hardenVerifiedFunction` freezes implementations during the builder call
+   (`runner/src/builder/module.ts`, createNodeFactory + handlerInternal), which
+   runs before the annotation statement, so the helper's implementation-stamp is
+   skipped for those builders (`Object.isExtensible` guard). A pattern factory
+   carries no `.implementation`, so it is itself both the annotated value and
+   the recorded key. The map is separate from `VerifiedProvenance` and its
+   reader is lenient — `bindingPath` stays trusted-scope-only. The
+   `helperInjectionLineOffset` correction is applied here, exactly once, because
+   the transformer cannot (a legacy stored envelope is byte-indistinguishable
+   from a fresh injection at transform time); a load with no source to measure
+   omits `src` rather than guessing. Context note: stack traces never needed
+   this — emitted sourcemaps were already line-correct pre-1868 (verified
    empirically, 2026-07-21); the annotation exists because `fn.src` needs
    function→position, which maps cannot answer.
-4. **Delete the dev-build eager resolution**:
-   `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` and `setEagerSourceAnnotation` gate
-   (~25ms dev cold-boot, historical — re-derive).
-5. **seefeld's directive**: remove the expensive fallback; error instead. Gated
-   on 2–3 making the cheap path correct.
+4. **Eager resolution deleted — PR-2 SHIPPED.** The stack capture, the
+   source-map walk, the `indexOf`-into-bundle fallback and its per-evaluation
+   concatenated script, the `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` flag and the
+   `setEagerSourceAnnotation` gate are all gone. The flag's record lives in
+   `docs/development/EXPERIMENTAL_OPTIONS.md` Appendix A.
+5. **seefeld's directive**: the expensive fallback is removed (step 4); what
+   remains is to ERROR where a position cannot be resolved rather than answering
+   undefined. Today a miss is silent by design — `Runner` reads `fn.src` on the
+   invoke path and a source-free warm load legitimately has no position — so
+   erroring needs a decision about which callers must have one.
 6. **Boundaries**: CT-1819 / PR #4560 (lazy source-map compose) is a sibling —
    don't re-tread composition here. `~/coding/L-cf-repos/ct1848-repro/` is
    another line's preserved repro kit — don't touch.
