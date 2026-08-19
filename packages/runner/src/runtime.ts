@@ -2423,6 +2423,14 @@ export class Runtime {
   }
 
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
+    // A transaction that is no longer open takes no prepare work, because it
+    // can no longer commit. Everything below reaches storage through the
+    // transaction: the flow probe reads stored metadata, and prepareCfc reads
+    // and writes the derived label map. A settled transaction refuses both,
+    // and its commit reports the terminal state as the result.
+    if (tx.status().status !== "ready") {
+      return;
+    }
     const state = tx.getCfcState();
     if (state.enforcementMode === "disabled") {
       // A vouched ingest still needs its provenance mark minted even where CFC
