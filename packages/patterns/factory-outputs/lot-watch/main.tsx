@@ -147,7 +147,10 @@ export type LotWatchAdminManagerCredential = AdminManagerCredential<
 >;
 
 export type LotWatchAdminList = RequiresIntegrity<
-  LotWatchAdminRole[],
+  AddIntegrity<
+    LotWatchAdminRole[],
+    readonly [typeof LOT_WATCH_ADMIN_MANAGER_INTEGRITY]
+  >,
   readonly [typeof LOT_WATCH_ADMIN_MANAGER_INTEGRITY]
 >;
 

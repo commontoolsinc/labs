@@ -73,7 +73,10 @@ type ProjectAdminRole = AddIntegrity<
 >;
 
 type ProjectAdminList = RequiresIntegrity<
-  ProjectAdminRole[],
+  AddIntegrity<
+    ProjectAdminRole[],
+    readonly [typeof PROJECT_ADMIN_MANAGER_INTEGRITY]
+  >,
   readonly [typeof PROJECT_ADMIN_MANAGER_INTEGRITY]
 >;
 
@@ -85,6 +88,21 @@ const admins = adminRegistryEntries<ProjectAdminRole>(adminRegistry);
 const everyoneIsAdmin = adminRegistryEveryoneIsAdmin(adminRegistry);
 const canEditAdmins = adminManagerCredentialIsActive(managerCredential.get());
 ```
+
+`ProjectAdminList` names `PROJECT_ADMIN_MANAGER_INTEGRITY` twice, once as the
+floor it requires and once as the atom it mints. The floor is checked against
+the value being written at the path that declares it, and a mint on the entries
+below that path does not reach it, so a list that floors an atom nothing mints
+is a list no write can satisfy once `cfcWriteFloor` reaches `enforce`.
+
+Mint the floored atom when the pattern's own gated write is the endorsement, as
+it is here: the manager credential and the trusted handler decide who may write
+the list, and the mint records that they did. Leave the floor unminted when the
+endorsement has to come from outside the pattern. A record of an externally
+verified fact is the case to watch: the value reaches the pattern as a link to a
+document that already carries the atom, the floor is met by the label that link
+carries, and minting the atom locally would let the pattern endorse whatever it
+writes.
 
 Keep subject lookup and local role toggling in the pattern when the domain model
 is local, such as people, profiles, rooms, or projects.

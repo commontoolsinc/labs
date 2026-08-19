@@ -91,11 +91,14 @@ export type LobbyRosterValue =
 export type LobbyRosterCell = Writable<LobbyRosterValue>;
 
 export type LobbyAdminList = RequiresIntegrity<
-  TrustedActionWrite<
-    LobbyAdminRole[],
-    typeof commitTrustedLobbyAction,
-    typeof TRUSTED_LOBBY_ACTION,
-    typeof TRUSTED_LOBBY_SURFACE
+  AddIntegrity<
+    TrustedActionWrite<
+      LobbyAdminRole[],
+      typeof commitTrustedLobbyAction,
+      typeof TRUSTED_LOBBY_ACTION,
+      typeof TRUSTED_LOBBY_SURFACE
+    >,
+    readonly [typeof LOBBY_ADMIN_INTEGRITY]
   >,
   readonly [typeof LOBBY_ADMIN_INTEGRITY]
 >;

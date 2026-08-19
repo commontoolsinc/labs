@@ -201,8 +201,9 @@ does. The integrity-tagged role model:
 
 - `adminManagerCredentialIsActive(credential)` — gates who may _assign_ admins.
 - `adminRegistryEntries<Role>(registry)` — read the admin list.
-- `AddIntegrity<...>` / `RequiresIntegrity<...>` — brand the role/list types so
-  they can only be produced through the credentialed path.
+- `AddIntegrity<...>` / `RequiresIntegrity<...>` — label the role and list
+  types. The list requires the manager atom and mints it, which is what the
+  write floor checks; the credential check above decides who may write it.
 
 ```ts
 export const LOT_WATCH_ADMIN_INTEGRITY = "lot-watch-admin" as const;
