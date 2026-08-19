@@ -88,15 +88,21 @@ profile inside the CDP message limit while still resolving a millisecond-scale
 action. Treat profiling as instrumentation: a capture that fails should report
 and let the phase run unprofiled, never fail the scenario.
 
-Copy that wiring rather than abstracting it.
+Share the parts of that wiring nobody varies; copy the rest.
+`attachWorkerProfiler`, `startWorkerProfile` and `writeWorkerProfile` (same
+module) are the invariant half — finding the worker, degrading to unprofiled
+rather than failing, and writing both artifacts — and no measurement has a
+reason to spell any of them differently. Everything that encodes the question
+stays in the scenario, written out: which iterations or phases to capture, the
+sampling interval, the output prefix and label that carry the board size or the
+phase, and the environment knob that turns capture on.
+
 `packages/patterns/integration/default-app.test.ts` is the maintained example to
-lift from, and keeping it worth copying is exactly why its connect / wait /
-start / stop / write-both-artifacts sequence stays inline there instead of
-moving behind a helper. A perf harness is usually throwaway — built for one
-investigation, driven by environment knobs nobody else needs, and not committed.
-Thirty duplicated lines of setup per investigation cost less than a shared seam
-that every future scenario has to be bent through, and the duplication is
-visible where a reader is already looking.
+lift from, and that is the reason for the split rather than a full helper: the
+half a measurer edits every time has to stay visible where they are already
+reading. A perf harness is otherwise throwaway — built for one investigation,
+driven by knobs nobody else needs, and not committed — so duplicating the parts
+that differ costs less than a seam every future scenario has to be bent through.
 
 ## Count against average
 
