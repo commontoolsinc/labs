@@ -594,18 +594,23 @@ describe("FabricError", () => {
 
       // Decoding hand-built state (not via `encode()`): exercises name/type
       // handling and back-compat that the round-trip tests don't.
-      describe("decode()", () => {
-        it("throws for state that is not a plain object", () => {
-          // Wire state is untrusted input. Without the shape check these
-          // decode into a `FabricError` bearing default type and an empty
-          // message, which is a malformation admitted silently rather than
-          // reported. The engine settles the throw against `lenient`.
-          for (const state of ["hello", 42, true, null, [1, 2]]) {
-            expect(() => codec.decode(expectedTag, state as never, env))
-              .toThrow("`Error@1` state is not an object.");
-          }
+      describe("canDecode()", () => {
+        it("returns `true` for a record", () => {
+          expect(codec.canDecode({ type: "Error", message: "boop" }))
+            .toBe(true);
         });
 
+        it("returns `false` for state that is not a plain object", () => {
+          // Wire state is untrusted input. Without this check these decode
+          // into a `FabricError` bearing a default type and an empty message,
+          // which is a malformation admitted silently rather than reported.
+          for (const state of ["hello", 42, true, null, [1, 2]]) {
+            expect(codec.canDecode(state as never)).toBe(false);
+          }
+        });
+      });
+
+      describe("decode()", () => {
         // `JSON.parse` creates an own `__proto__` property where an object
         // literal instead invokes the setter, so parsed wire state is the one
         // place a prototype-sensitive key genuinely arrives as decodable input.

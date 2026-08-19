@@ -213,12 +213,17 @@ describe("FabricBytes", () => {
         });
       });
 
-      describe("decode()", () => {
-        it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 42, env);
-          expect(decoded).toBeInstanceOf(ProblematicValue);
+      describe("canDecode()", () => {
+        it("returns `true` for string state", () => {
+          expect(codec.canDecode("AQID")).toBe(true);
         });
 
+        it("returns `false` for state that is not a string", () => {
+          expect(codec.canDecode(42)).toBe(false);
+        });
+      });
+
+      describe("decode()", () => {
         it("decodes malformed base64 to a `ProblematicValue`", () => {
           const decoded = codec.decode(
             expectedTag,

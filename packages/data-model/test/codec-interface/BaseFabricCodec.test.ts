@@ -20,11 +20,15 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 /**
  * Minimal concrete `BaseFabricCodec` for exercising the base class's own
- * behavior.
- * `encode` / `decode` are not under test here, so they throw.
+ * behavior. The subclass contract is not under test here, so those members
+ * throw.
  */
 class TestCodec extends BaseFabricCodec<FabricValue> {
   encode(_value: FabricValue): FabricValue {
+    throw new Error("Unimplemented.");
+  }
+
+  canDecode(_state: FabricValue): _state is FabricValue {
     throw new Error("Unimplemented.");
   }
 

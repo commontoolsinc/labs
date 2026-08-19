@@ -52,30 +52,29 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   //
 
   static #jsonCodec = Object.freeze(
-    new (class EpochNsecCodec extends BaseTerminalCodec<JsonCodecValue> {
+    new (class EpochNsecCodec
+      extends BaseTerminalCodec<JsonCodecValue, string> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.EpochNsec, FabricEpochNsec);
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochNsec): JsonCodecValue {
+      encode(value: FabricEpochNsec): string {
         return bigintToUnpaddedBase64url(value.#value);
+      }
+
+      /** @inheritDoc */
+      canDecode(state: JsonCodecValue): state is string {
+        return typeof state === "string";
       }
 
       /** @inheritDoc */
       decode(
         typeTag: string,
-        state: JsonCodecValue,
+        state: string,
         _env: LiveEnvironment,
       ): FabricValue {
-        if (typeof state !== "string") {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `EpochNsec: expected string state, got ${typeof state}`,
-          );
-        }
         try {
           return new FabricEpochNsec(bigintFromUnpaddedBase64url(state));
         } catch {

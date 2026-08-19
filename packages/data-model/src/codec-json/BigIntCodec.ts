@@ -24,7 +24,7 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class BigIntCodec extends BaseTerminalCodec<JsonCodecValue> {
+export class BigIntCodec extends BaseTerminalCodec<JsonCodecValue, string> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.BigInt, BigInt as unknown as Constructor);
@@ -36,23 +36,21 @@ export class BigIntCodec extends BaseTerminalCodec<JsonCodecValue> {
   }
 
   /** @inheritDoc */
-  encode(value: bigint): JsonCodecValue {
+  encode(value: bigint): string {
     return bigintToUnpaddedBase64url(value);
+  }
+
+  /** @inheritDoc */
+  canDecode(state: JsonCodecValue): state is string {
+    return typeof state === "string";
   }
 
   /** @inheritDoc */
   decode(
     typeTag: string,
-    state: JsonCodecValue,
+    state: string,
     _env: LiveEnvironment,
   ): FabricValue {
-    if (typeof state !== "string") {
-      return new ProblematicValue(
-        typeTag,
-        state,
-        `bigint: expected string state, got ${typeof state}`,
-      );
-    }
     try {
       return bigintFromUnpaddedBase64url(state);
     } catch {

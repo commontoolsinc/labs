@@ -93,6 +93,18 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
       /**
        * @inheritDoc
        *
+       * Stub -- accepts anything until `Set` support is implemented.
+       */
+      canDecode(_state: FabricValue): _state is FabricValue {
+        // The refusal is `decode()`'s, where "not yet implemented" is the
+        // honest answer. Refusing here would name the payload as the thing at
+        // fault.
+        return true;
+      }
+
+      /**
+       * @inheritDoc
+       *
        * Stub -- throws until `Set` support is implemented.
        */
       decode(

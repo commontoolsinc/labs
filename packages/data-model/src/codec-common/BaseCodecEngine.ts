@@ -165,11 +165,13 @@ export abstract class BaseCodecEngine<
    * `env` supplies what decoding needs beyond the data itself,
    * chiefly the ability to resolve a cell reference.
    *
-   * A codec rejects a state it will not accept in one of two ways, by
-   * throwing or by returning a `ProblematicValue`, and which one it picks is
-   * the codec author's business. {@link #lenient} decides what a caller sees,
-   * settling both into the same answer: strictly, either form of rejection
-   * raises; leniently, either becomes a `ProblematicValue` in the result.
+   * A codec rejects a state it will not accept in one of three ways: by
+   * refusing it in `canDecode()`, which this instance asks before dispatching
+   * any state, or from `decode()` by throwing or by returning a
+   * `ProblematicValue`. Which one it picks is the codec author's business.
+   * {@link #lenient} decides what a caller sees, settling all three into the
+   * same answer: strictly, any form of rejection raises; leniently, any
+   * becomes a `ProblematicValue` in the result.
    *
    * A tag no codec in the registry claims is a different matter, and becomes
    * an `UnknownValue` under both settings. That is not a rejection: it is how

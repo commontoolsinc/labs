@@ -4,7 +4,6 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { ProblematicValue } from "./ProblematicValue.ts";
 
 /**
  * Codec for registry-interned symbols, for any format whose encoded type
@@ -24,6 +23,11 @@ import { ProblematicValue } from "./ProblematicValue.ts";
  * it is checked where it is provable, and a format with no `string` arm cannot
  * supply it.
  *
+ * That same fact is why this codec's state type is `Encoded & string` rather
+ * than plain `string`. The state type is bounded by `Encoded`, which a bare
+ * `string` cannot be shown to satisfy; the intersection is the only spelling
+ * that is both a string and provably in the format's domain.
+ *
  * **What crosses is internedness**, and that is the whole of the promise: a
  * decoded symbol is interned under the key the encoded one was interned under,
  * which is as interned as a symbol on the far side can be. Whether it is the
@@ -42,7 +46,8 @@ import { ProblematicValue } from "./ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
+export class SymbolCodec<Encoded>
+  extends BaseTerminalCodec<Encoded, Encoded & string> {
   /** The value of {@link #keyAsEncoded}, supplied by the registering format. */
   readonly #keyAsEncoded: (key: string) => Encoded & string;
 
@@ -54,8 +59,8 @@ export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
    *   this at all, which is the point.
    *
    *   The result is `Encoded & string` rather than `Encoded`, so that what is
-   *   handed back is still a string. `decode()` accepts only a string, and a
-   *   format free to wrap the key in something its union also admits could
+   *   handed back is still a string. `canDecode()` accepts only a string, and
+   *   a format free to wrap the key in something its union also admits could
    *   emit state its own decoder refuses.
    */
   constructor(keyAsEncoded: (key: string) => Encoded & string) {
@@ -70,25 +75,22 @@ export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
   }
 
   /** @inheritDoc */
-  encode(value: symbol): Encoded {
+  encode(value: symbol): Encoded & string {
     // `canEncode()` already verified the symbol has a registry key.
     return this.#keyAsEncoded(Symbol.keyFor(value)!);
   }
 
   /** @inheritDoc */
+  canDecode(state: Encoded): state is Encoded & string {
+    return typeof state === "string";
+  }
+
+  /** @inheritDoc */
   decode(
-    typeTag: string,
-    state: Encoded,
+    _typeTag: string,
+    state: Encoded & string,
     _env: LiveEnvironment,
   ): FabricValue {
-    if (typeof state !== "string") {
-      return new ProblematicValue(
-        typeTag,
-        state,
-        `Symbol: expected string state, got ${typeof state}`,
-      );
-    }
-
     return Symbol.for(state);
   }
 }

@@ -252,6 +252,10 @@ describe("JsonCodecEngine", () => {
         return PROBE_STATE;
       }
 
+      canDecode(_state: JsonCodecValue): _state is JsonCodecValue {
+        return true;
+      }
+
       decode(_typeTag: string, state: JsonCodecValue): FabricValue {
         this.received = state;
         return new ProbeInstance();
@@ -268,6 +272,10 @@ describe("JsonCodecEngine", () => {
 
       encode(_value: FabricValue): FabricValue {
         return PROBE_STATE;
+      }
+
+      canDecode(_state: FabricValue): _state is FabricValue {
+        return true;
       }
 
       decode(_typeTag: string, state: FabricValue): FabricValue {
@@ -1512,6 +1520,45 @@ describe("JsonCodecEngine", () => {
     });
   });
 
+  describe("`Problematic@1` (strict mode)", () => {
+    // The engine exempts this codec from the rule that a returned
+    // `ProblematicValue` fails a strict decode, because for this one such a
+    // value is the successful product: a record of a *past* failure reads back
+    // as one however strict the reader. A refusal is not that product, so a
+    // record this codec did not write fails, and the pair below is what keeps
+    // the exemption from covering both.
+
+    /** Decodes a `Problematic@1` payload through a strict engine. */
+    function decodeStrict(state: JsonCodecValue): FabricValue {
+      return newDefaultJsonCodecEngine().decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(
+          JSON.stringify({ "/Problematic@1": state }),
+          true,
+        ),
+        new TestLiveEnvironment(),
+      );
+    }
+
+    it("decodes a well-formed record", () => {
+      const result = decodeStrict({
+        tag: "BadType@1",
+        state: "original data",
+        error: "boom",
+      }) as ProblematicValue;
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect(result.wireTypeTag).toBe("BadType@1");
+      expect(result.state).toBe("original data");
+      expect(result.error).toBe("boom");
+    });
+
+    it("throws for a record this codec did not write", () => {
+      expect(() => decodeStrict("nope")).toThrow(
+        /state is not one this codec decodes/,
+      );
+    });
+  });
+
   describe("`ProblematicValue` (lenient mode)", () => {
     it("encodes a `ProblematicValue` under its own tag, fault and all", () => {
       const prob = new ProblematicValue(
@@ -1545,8 +1592,9 @@ describe("JsonCodecEngine", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestLiveEnvironment();
 
-      // BigInt@1 with a non-string state produces ProblematicValue
-      // in lenient mode because the handler validates the state type.
+      // `BigInt@1` with a non-string state produces a `ProblematicValue` in
+      // lenient mode: the codec's `canDecode()` refuses it, and the engine
+      // reports the refusal.
       const data = { "/BigInt@1": 42 } as JsonCodecValue;
       const result = jsonCodecEngine.decode(
         JsonCodecEngine.wrapEncodedValueForTesting(
