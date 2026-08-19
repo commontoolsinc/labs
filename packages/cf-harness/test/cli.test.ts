@@ -2129,6 +2129,158 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
   assertEquals(stderr, []);
 });
 
+Deno.test("runCfHarnessCli announces well-known grants to the model and the operator", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const registrySpace =
+    "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const registryId = `of:fid1:${"D".repeat(43)}`;
+  // The grant persists run state, so the workspace must really be writable.
+  const workspace = await Deno.makeTempDir();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      workspace,
+      "--prompt",
+      "List the pieces",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "/keys/agent.pkcs8",
+      "--fabric-space",
+      "demo-space",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () =>
+        Promise.resolve(
+          {
+            pieces: {
+              getSpace: () => registrySpace,
+              getPieceRegistry: () =>
+                Promise.resolve({
+                  getAsNormalizedFullLink: () => ({
+                    space: registrySpace,
+                    id: registryId,
+                    path: ["pieceRegistry"],
+                  }),
+                }),
+            },
+            // deno-lint-ignore no-explicit-any
+          } as any,
+        ),
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-grants",
+                status: "completed",
+                createdAt: "2026-04-15T22:00:00.000Z",
+                updatedAt: "2026-04-15T22:00:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+                wellKnownGrants: [{
+                  name: "piece-registry",
+                  token: "cfh:a:granted1",
+                  ref: `/${registryId}/pieceRegistry`,
+                }],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  const grantMessages = (runPromptOptions?.contextMessages ?? []).filter((
+    message,
+  ) => message.includes("Granted references"));
+  assertEquals(grantMessages.length, 1);
+  assertEquals(grantMessages[0]!.includes("cfh:a:"), true);
+  assertEquals(grantMessages[0]!.includes(registryId), false);
+  assertEquals(
+    stdout.join("").includes("fabricGrants: piece-registry cfh:a:granted1"),
+    true,
+  );
+  assertEquals(stderr, []);
+});
+
+Deno.test("runCfHarnessCli says so when the well-known grants cannot be established", async () => {
+  const { io, stderr } = createIoBuffers();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "List the pieces",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "/keys/agent.pkcs8",
+      "--fabric-space",
+      "demo-space",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("space unauthorized")),
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Done.",
+              transcript: [],
+              modelTurns: 1,
+              runState: {
+                runId: "run-no-grants",
+                status: "completed",
+                createdAt: "2026-04-15T22:00:00.000Z",
+                updatedAt: "2026-04-15T22:00:01.000Z",
+                cfcEnforcementMode: "enforce-explicit",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(
+    (runPromptOptions?.contextMessages ?? []).some((message) =>
+      message.includes("Granted references")
+    ),
+    false,
+  );
+  assertEquals(
+    stderr.some((line) =>
+      line.includes("fabric grants: unavailable (space unauthorized)")
+    ),
+    true,
+  );
+});
+
 Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async () => {
   // Parsing was already covered; this pins the handoff. The option was
   // forwarded on the resume path only, so a fresh run silently lost it.

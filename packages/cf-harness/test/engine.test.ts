@@ -195,6 +195,55 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
   assertEquals(sessionless.getRunState().fabricSessionCfc, undefined);
 });
 
+Deno.test("CfHarnessEngine grants no well-known handles without a fabric session", async () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+  });
+  assertEquals(await engine.establishWellKnownGrants(), []);
+  assertEquals(engine.getRunState().wellKnownGrants, undefined);
+  assertEquals(engine.handleTable, undefined);
+});
+
+Deno.test("CfHarnessEngine seeds the piece-registry grant once and replays the record", async () => {
+  const registrySpace =
+    "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const registryId = `of:fid1:${"C".repeat(43)}`;
+  let registryReads = 0;
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () => registrySpace,
+            getPieceRegistry: () => {
+              registryReads += 1;
+              return Promise.resolve({
+                getAsNormalizedFullLink: () => ({
+                  space: registrySpace,
+                  id: registryId,
+                  path: ["pieceRegistry"],
+                }),
+              });
+            },
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+
+  const granted = await engine.establishWellKnownGrants();
+  assertEquals(granted.length, 1);
+  assertEquals(granted[0]!.name, "piece-registry");
+  assertEquals(granted[0]!.ref, `/${registryId}/pieceRegistry`);
+  assertEquals(engine.getRunState().wellKnownGrants, granted);
+  assertEquals(engine.handleTable?.entries.length, 1);
+
+  // A second establishment answers from the record without another resolve.
+  assertEquals(await engine.establishWellKnownGrants(), granted);
+  assertEquals(registryReads, 1);
+});
+
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {
   const resumedState = (
     modelProvider: "openai-codex" | "openai-compatible-gateway",
