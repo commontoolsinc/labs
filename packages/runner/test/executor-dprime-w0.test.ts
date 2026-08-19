@@ -49,6 +49,7 @@ const space = spaceSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("dprime w0 service");
 const aliceSigner = await Identity.fromPassphrase("dprime w0 alice");
 const bobSigner = await Identity.fromPassphrase("dprime w0 bob");
+const carolSigner = await Identity.fromPassphrase("dprime w0 carol");
 
 const waitUntil = async (
   predicate: () => boolean,
@@ -1278,7 +1279,31 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
   // push-time re-traversal reaches P2 → Bob's closure GROWS (a
   // push-growth demandChanged) → the settle series classes the input
   // `structural-growth` and the cycle count is the growth waves.
-  const standUpCrossPiece = async (options: {
+  // The cross-piece / array-growth GROWTH pin (MAJOR-3 of the W1 review):
+  // the value asserted must be one the SERVER derives FRESH through the
+  // wave's own link, not a value a client already committed and not one
+  // any session demanded before the link. So: Alice CREATES P1
+  // (relay/list) and P2 (leaf) and DEPARTS; a NON-runner then bumps P2's
+  // input so the store's `leaf` is STALE and P2's writer dirty; Bob
+  // watches ONLY P1's narrow field (never the stream, never P2's root); a
+  // SEPARATE firing actor (Carol) fires the relay/push. Before the link
+  // nobody demands leaf → the stale value stays. The wave writes the link
+  // → Bob's closure grows to P2's leaf (a closure row) → the server
+  // derives the FRESH leaf and it lands — the landing is the assertion,
+  // and `demandedWriters` grows because P2's writer became a demand root.
+  //
+  // NOTE on M-E (demand pass ignoring non-root rows): P2's `leaf` here is
+  // SPACE-scoped, so once Carol's served handler run READS the
+  // cross-piece target link, P2's single instance is made live through
+  // that run's own read edge (design §2.3(ii)) and lands regardless of
+  // the demand pass — so M-E does not bite THIS pin. The M-E kill
+  // (closure-row consumption is load-bearing for a landing) is a PER-USER
+  // property and is pinned by P-arrival-closure (a demander's own
+  // instance, reached only through her non-root closure row, is starved
+  // under M-E). The reviewer sanctioned recording this split rather than
+  // forcing a per-user narrowing the fan-out machinery will not produce
+  // in a departed-creator growth (MAJOR-3 fix note).
+  const standUpCrossGrowth = async (options: {
     p1Pattern: string;
     p1Names: { arg: string; result: string; field: string };
     bobFieldSchema: Record<string, unknown>;
@@ -1295,7 +1320,6 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
       main: "/main.tsx",
       files: [{ name: "/main.tsx", contents: options.p1Pattern }],
     }, { space });
-    // P2 (leaf): its space-scoped `leaf` computed is the link target.
     const bArg = alice.getCell<Record<string, unknown>>(
       space,
       "dp-x-b-arg",
@@ -1318,8 +1342,6 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
       alice.run(tx, leaf, bArg, bResult);
       expect((await tx.commit()).error).toBeUndefined();
     }
-    // P1 (relay/list): its arg carries a LINK to P2's result doc; the
-    // handler copies it into the watched field on an event.
     const holder = alice.getCell<unknown>(space, "dp-x-holder", undefined);
     const aArg = alice.getCell<Record<string, unknown>>(
       space,
@@ -1336,8 +1358,6 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     await aResult.sync();
     {
       const seed = alice.edit();
-      // `target` = a link to P2's result cell (cross-piece; not part of
-      // P1's own graph). `slot`/`list` = a fresh holder cell.
       aArg.withTx(seed).set({ slot: holder, list: holder, target: bResult });
       expect((await seed.commit()).error).toBeUndefined();
     }
@@ -1350,20 +1370,26 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     await alice.storageManager.synced();
     const bResultId = bResult.getAsNormalizedFullLink().id;
     const aResultId = aResult.getAsNormalizedFullLink().id;
-    // Alice demands P2 (leaf lands) and P1 (the handler is served). Alice
-    // watching P1 full-schema pre-empts P2 into ALICE's closure — fine;
-    // Bob is the demander we check.
-    const aliceWatchB = aResult.sink(() => {});
-    const aliceBResult = alice.getCell<Record<string, unknown>>(
+    // Alice DEPARTS: her creator session tracked every doc her local runs
+    // pulled (P1's whole wiring AND P2's leaf), which would keep leaf
+    // demanded and pre-empt the growth. After the TTL nobody demands leaf.
+    await alice.dispose();
+    await aliceClient.manager.close();
+    runtimes.splice(runtimes.indexOf(alice), 1);
+    managers.splice(managers.indexOf(aliceClient.manager), 1);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    // Carol: the FIRING actor. She watches P1's result to append the
+    // event; she does not watch P2's leaf beyond P1's own wiring.
+    const carolClient = openClient(carolSigner);
+    const carol = carolClient.runtime;
+    const carolFire = carol.getCell<Record<string, unknown>>(
       space,
-      "dp-x-b-result",
-      leaf.resultSchema,
+      options.p1Names.result,
+      p1.resultSchema,
     );
-    await aliceBResult.sync();
-    const aliceWatchLeaf = aliceBResult.sink(() => {});
+    await carolFire.sync();
     // Bob: watches P1's result but ONLY the one field, by a schema that
-    // follows the link into `{ leaf }`. Bob NEVER watches the stream, so
-    // the handler wiring cannot pre-empt P2 into his closure.
+    // follows the link into `{ leaf }`. Never the stream, never P2's root.
     const bobClient = openClient(bobSigner);
     const bob = bobClient.runtime;
     const bobResult = bob.getCell<Record<string, unknown>>(
@@ -1382,37 +1408,58 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
       "space activation",
     );
     await waitUntil(
-      () => instanceHolds(engine, "space", '"leaf:5"'),
-      "leaf:5 to land (alice demands P2)",
-    );
-    await waitUntil(
       () =>
         (host!.spaceServer(space)?.demandedIdentitiesOf(aResultId) ?? [])
           .some((i) => i.principal === bobSigner.did()),
       "bob's demand on P1's result to register",
     );
+    // Bump P2's `n` from Carol (a NON-runner of P2): the store's leaf:5 is
+    // now stale, P2's writer dirty; nobody demands leaf, so the server
+    // does not derive leaf:6 — it stays leaf:5 until Bob's link.
+    const carolBArg = carol.getCell<{ n: number }>(
+      space,
+      "dp-x-b-arg",
+      { type: "object", properties: { n: { type: "number" } } } as never,
+    );
+    await carolBArg.sync();
+    {
+      const tx = carol.edit();
+      carolBArg.key("n").withTx(tx).set(6);
+      expect((await tx.commit()).error).toBeUndefined();
+      await carol.idle();
+      await carol.storageManager.synced();
+    }
+    // Quiesce; let Alice's departed rows leave. The fresh value is ABSENT
+    // and leaf is not yet in Bob's closure (the growth precondition).
+    await waitUntil(
+      () => {
+        host!.spaceServer(space)!.noteDemandChanged();
+        return !demandRows().some((r) =>
+          r.identity?.principal === aliceSigner.did()
+        );
+      },
+      "alice's rows to leave (nobody demands leaf before the link)",
+    );
     await servingRuntime!.idle();
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     const bobTracksLeaf = () =>
       demandRows().some((r) =>
         r.id === bResultId && r.identity?.principal === bobSigner.did()
       );
     return {
       engine,
-      alice,
-      aResult,
+      carol,
+      carolFire,
       bResultId,
       bobTracksLeaf,
       cleanup: () => {
-        aliceWatchB();
-        aliceWatchLeaf();
         bobCancel();
       },
     };
   };
 
-  it("T2′ (cross-piece): a wave writes a link to ANOTHER piece's doc into a field the demander watches narrowly → the target enters the demander's closure (NOT pre-empted by P1's wiring), the input is classed structural-growth, the cycle count is recorded; zero walk runs", async () => {
-    const x = await standUpCrossPiece({
+  it("T2′ (cross-piece) GROWTH: a wave writes a link to ANOTHER piece's stale result doc into a field the demander watches narrowly → the target enters the demander's closure as a NON-ROOT row and the server derives the FRESH value, which LANDS (the landing is the assertion, not a value a client pre-committed); pushGrowthWakes +1, demandedWriters grows, zero walk runs", async () => {
+    const x = await standUpCrossGrowth({
       p1Pattern: CROSS_RELAY_PATTERN,
       p1Names: { arg: "dp-x-a-arg", result: "dp-x-a-result", field: "slot" },
       bobFieldSchema: {
@@ -1421,21 +1468,32 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
         additionalProperties: false,
       },
     });
-    // Bob's closure does NOT hold P2 before the link (the cross-piece
-    // target is unreachable through Bob's narrow, stream-free watch).
+    // Growth preconditions: leaf is not yet in Bob's closure, the FRESH
+    // value has not landed (nobody demands leaf), the stale value stands.
     const preEmpted = x.bobTracksLeaf();
+    expect(preEmpted).toBe(false);
+    expect(instanceHolds(x.engine, "space", '"leaf:6"')).toBe(false);
+    expect(instanceHolds(x.engine, "space", '"leaf:5"')).toBe(true);
     const wakesBefore = host!.stats().demand.pushGrowthWakes;
+    const writersBefore = servingRuntime!.scheduler.demandedWriterCount;
     const seriesBefore = host!.stats().settle.series.length;
-    // A SEPARATE actor (Alice) fires the relay: slot := link to P2.
-    x.aResult.key("relay").send({});
-    await x.alice.idle();
-    await x.alice.storageManager.synced();
+    // Carol (who does NOT demand leaf) fires the relay: slot := link(P2).
+    x.carolFire.key("relay").send({});
+    await x.carol.idle();
+    await x.carol.storageManager.synced();
+    // The FRESH value lands — the assertion (leaf:6 was never
+    // client-computed; it exists only if the server derived it after the
+    // link reached P2's writer).
     await waitUntil(
-      () => {
-        host!.spaceServer(space)!.noteDemandChanged();
-        return x.bobTracksLeaf();
-      },
-      "P2 to enter bob's closure through the link (push-growth)",
+      () => instanceHolds(x.engine, "space", '"leaf:6"'),
+      () =>
+        "the FRESH leaf (leaf:6) to land server-side after bob's link " +
+        "(bob tracks leaf=" + x.bobTracksLeaf() + ", leaf rows=" +
+        JSON.stringify(
+          [...rowsUnder(x.engine, "space").values()].filter((v) =>
+            JSON.stringify(v ?? null).includes("leaf:")
+          ),
+        ) + ")",
       15_000,
     );
     await new Promise((resolve) => setTimeout(resolve, 600));
@@ -1444,30 +1502,31 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
       s.class === "structural-growth"
     );
     console.log(
-      `[T2′ cross-piece] pre-empted before link=${preEmpted}; ` +
+      `[T2′ cross-growth] fresh leaf landed; pre-empted=${preEmpted}; ` +
         `pushGrowthWakes +${stats.demand.pushGrowthWakes - wakesBefore}; ` +
-        `structural-growth settle entries=${
+        `demandedWriters ${writersBefore} → ${
+          servingRuntime!.scheduler.demandedWriterCount
+        }; ` +
+        `structural-growth entries=${
           JSON.stringify(
-            growth.map((s) => ({
-              ms: Math.round(s.ms),
-              waves: s.waves,
-              growthWaves: (s as { growthWaves?: number }).growthWaves,
-            })),
+            growth.map((s) => ({ ms: Math.round(s.ms), waves: s.waves })),
           )
-        }; leaf present=${instanceHolds(x.engine, "space", '"leaf:5"')}`,
+        }`,
     );
-    // The deterministic facts: not pre-empted; P2 is in Bob's closure
-    // AFTER the link; the value is served; the walk is gone.
-    expect(preEmpted).toBe(false);
+    // The deterministic facts: the fresh value is served; P2 is in Bob's
+    // closure AFTER the link; the growth notify fired; the standing
+    // demand-root set grew (P2's writer entered); the walk is gone.
+    expect(instanceHolds(x.engine, "space", '"leaf:6"')).toBe(true);
     expect(x.bobTracksLeaf()).toBe(true);
-    expect(instanceHolds(x.engine, "space", '"leaf:5"')).toBe(true);
     expect(host!.stats().demand.pushGrowthWakes).toBeGreaterThan(wakesBefore);
+    expect(servingRuntime!.scheduler.demandedWriterCount)
+      .toBeGreaterThan(writersBefore);
     expect(walkRuns()).toBe(0);
     x.cleanup();
   });
 
-  it("T3′ (array growth): a handler appends a link-bearing element to a list the demander watches by schema → the appended target enters the closure; zero walk runs", async () => {
-    const x = await standUpCrossPiece({
+  it("T3′ (array growth) GROWTH: a handler appends a link-bearing element to a list the demander watches by schema → the appended target enters the closure as a NON-ROOT row and the server derives the FRESH value, which LANDS; pushGrowthWakes +1, demandedWriters grows, zero walk runs", async () => {
+    const x = await standUpCrossGrowth({
       p1Pattern: LIST_GROW_PATTERN,
       p1Names: { arg: "dp-y-a-arg", result: "dp-y-a-result", field: "list" },
       bobFieldSchema: {
@@ -1480,18 +1539,21 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
       },
     });
     const preEmpted = x.bobTracksLeaf();
+    expect(preEmpted).toBe(false);
+    expect(instanceHolds(x.engine, "space", '"leaf:6"')).toBe(false);
+    expect(instanceHolds(x.engine, "space", '"leaf:5"')).toBe(true);
     const wakesBefore = host!.stats().demand.pushGrowthWakes;
+    const writersBefore = servingRuntime!.scheduler.demandedWriterCount;
     const seriesBefore = host!.stats().settle.series.length;
-    // Alice pushes a link to P2 onto the list.
-    x.aResult.key("push").send({});
-    await x.alice.idle();
-    await x.alice.storageManager.synced();
+    // Carol pushes a link to P2 onto the list.
+    x.carolFire.key("push").send({});
+    await x.carol.idle();
+    await x.carol.storageManager.synced();
     await waitUntil(
-      () => {
-        host!.spaceServer(space)!.noteDemandChanged();
-        return x.bobTracksLeaf();
-      },
-      "the appended element's target to enter bob's closure",
+      () => instanceHolds(x.engine, "space", '"leaf:6"'),
+      () =>
+        "the FRESH leaf (leaf:6) to land server-side after the appended " +
+        "element (bob tracks leaf=" + x.bobTracksLeaf() + ")",
       15_000,
     );
     await new Promise((resolve) => setTimeout(resolve, 600));
@@ -1500,24 +1562,20 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
       s.class === "structural-growth"
     );
     console.log(
-      `[T3′ array growth] pre-empted before push=${preEmpted}; ` +
+      `[T3′ array-growth] fresh leaf landed; pre-empted=${preEmpted}; ` +
         `pushGrowthWakes +${stats.demand.pushGrowthWakes - wakesBefore}; ` +
-        `structural-growth settle entries=${
-          JSON.stringify(
-            growth.map((s) => ({
-              ms: Math.round(s.ms),
-              growthWaves: (s as { growthWaves?: number }).growthWaves,
-            })),
-          )
+        `demandedWriters ${writersBefore} → ${
+          servingRuntime!.scheduler.demandedWriterCount
+        }; ` +
+        `structural-growth entries=${
+          JSON.stringify(growth.map((s) => ({ ms: Math.round(s.ms) })))
         }`,
     );
-    expect(preEmpted).toBe(false);
+    expect(instanceHolds(x.engine, "space", '"leaf:6"')).toBe(true);
     expect(x.bobTracksLeaf()).toBe(true);
-    expect(instanceHolds(x.engine, "space", '"leaf:5"')).toBe(true);
-    // The tracker's push-time re-traversal (the NEW notify site) is what
-    // carries the appended target into demand — killing the notify makes
-    // this bite.
     expect(host!.stats().demand.pushGrowthWakes).toBeGreaterThan(wakesBefore);
+    expect(servingRuntime!.scheduler.demandedWriterCount)
+      .toBeGreaterThan(writersBefore);
     expect(walkRuns()).toBe(0);
     x.cleanup();
   });
