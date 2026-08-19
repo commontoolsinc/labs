@@ -20,6 +20,10 @@ permissions:
 jobs:
   janitor:
     name: "Lease Key Holders"
+    # Where test records are not provisioned there is no broker identity to
+    # assume and no key holders to lease, so the job skips. An outage here
+    # already fails in the right direction: nothing gets disabled.
+    if: vars.TEST_RECORDS_BROKER_WIF_PROVIDER != ''
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout repository
