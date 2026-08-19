@@ -187,6 +187,17 @@ export function serializeEvent(event: Event): SerializedEvent {
   }
 
   // Handle CustomEvent detail - ensure it's JSON-serializable
+  //
+  // TODO(danfuzz): a `detail` is a whole value a component chose to hand the
+  // pattern, and the pattern's handler receives it as a `FabricValue`. This
+  // JSON round-trip narrows it to the JSON-compatible subset on the way in: a
+  // `bigint` throws out of `JSON.stringify()` and lands in the `catch`, which
+  // replaces the entire detail with `String(detail)`, and a `FabricBytes`
+  // stringifies to `{}`. The crossing is `postMessage`, not JSON text, so
+  // `RealmCodecEngine` (`@commonfabric/data-model/codecs`) carries the whole
+  // domain here; what has to stay is the separate job this does of turning an
+  // unencodable detail into something rather than failing the event. The
+  // outbound half of this seam is marked on `SetPropOp` in `../vdom-ops.ts`.
   if ("detail" in event && (event as CustomEvent).detail !== undefined) {
     const detail = (event as CustomEvent).detail;
     try {

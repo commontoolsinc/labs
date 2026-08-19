@@ -115,6 +115,17 @@ export enum HostMessageType {
   Update = "update",
 }
 
+/**
+ * A message the host passes through to the guest. `data` is a key and the
+ * value read for it.
+ *
+ * TODO(danfuzz): the value is a `FabricValue` -- it comes from a cell, by way
+ * of the registered `IframeContextHandler` -- and crosses to the guest by
+ * `postMessage()` as itself, so structured clone strips a `FabricPrimitive`
+ * to `{}` on the way. `RealmCodecEngine`
+ * (`@commonfabric/data-model/codecs`) encodes for exactly this crossing;
+ * `GuestMessage`'s `Write` arm is the same value going the other way.
+ */
 export type HostMessage = {
   type: HostMessageType.Update;
   data: [string, unknown];
@@ -133,6 +144,11 @@ export type GuestMessage =
   | { type: GuestMessageType.Subscribe; data: string | string[] }
   | { type: GuestMessageType.Unsubscribe; data: string | string[] }
   | { type: GuestMessageType.Read; data: string }
+  // TODO(danfuzz): the `Write` value is the inbound half of the gap marked on
+  // `HostMessage`, and closed by the same mechanism. It is the weaker half:
+  // the guest is untrusted, so what arrives is whatever it sent, and an
+  // encoded form gives the host a decode that refuses rather than a value it
+  // has to vet by hand.
   | { type: GuestMessageType.Write; data: [string, unknown] };
 
 export function isGuestMessage(message: unknown): message is GuestMessage {
