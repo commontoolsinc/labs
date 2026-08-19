@@ -91,13 +91,15 @@ on the Common Fabric runtime.
 
 ### verbs/ — driving a deployed piece through `cf`
 
-Read in this order: what a verb hands back, then a whole session using it,
-then where an author's words go. Arriving without a piece id, start with the
-agent's entry instead.
+Start with the tour if the vocabulary is new; it assumes nothing. Arriving
+without a piece id, start with the agent's entry instead. The other three
+answer narrower questions, and the README says which is which.
 
+- [verbs/README.md](verbs/README.md) — which of the five to read, by the question you are asking
+- [verbs/the-verb-session.md](verbs/the-verb-session.md) — the tour: what a pattern, piece, space and verb are, and a whole session driven through `cf` in thirteen acts. Assumes nothing; read it first
 - [verbs/agents-over-the-cli.md](verbs/agents-over-the-cli.md) — reaching a piece with no id in hand: the discovery surfaces and what bounds each, orienting on an unfamiliar piece, and the conclusions an empty answer does not support
+- [verbs/session-walkthrough.md](verbs/session-walkthrough.md) — the same session priced: byte measurements, the code behind each answer, the caveats, and what the surface still owes. Its companion script under `packages/cli/integration/` runs every step
 - [verbs/over-the-cli.md](verbs/over-the-cli.md) — what a verb hands back: declared results, piece references, idempotent retries, and a runnable walkthrough
-- [verbs/session-walkthrough.md](verbs/session-walkthrough.md) — a whole session driven through `cf`: discovery, help, completion, refusals, and carrying an address from one call into the next. Its companion script under `packages/cli/integration/` runs every step
 - [verbs/prose-over-the-cli.md](verbs/prose-over-the-cli.md) — how an author's doc comments reach a caller, and which of the two documents `cf` reads carries what
 
 [INTRODUCTION.md](INTRODUCTION.md) is a stub kept for older links; this README

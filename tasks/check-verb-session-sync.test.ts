@@ -25,6 +25,7 @@ import {
   joinContinuations,
   main,
   tokenize,
+  TOUR_PATH,
   WALKTHROUGH_PATH,
   walkthroughCommands,
 } from "./check-verb-session-sync.ts";
@@ -34,9 +35,11 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 describe("check-verb-session-sync", () => {
   let sh = "";
   let md = "";
+  let tour = "";
   beforeAll(async () => {
     sh = await Deno.readTextFile(join(REPO_ROOT, DEMO_PATH));
     md = await Deno.readTextFile(join(REPO_ROOT, WALKTHROUGH_PATH));
+    tour = await Deno.readTextFile(join(REPO_ROOT, TOUR_PATH));
   });
 
   describe("tokenize", () => {
@@ -107,6 +110,11 @@ describe("check-verb-session-sync", () => {
       expect(actReferences(md).length).toBeGreaterThanOrEqual(5);
     });
 
+    it("collects an act reference whatever its case", () => {
+      expect(actReferences("Act 12, then act 13").map((r) => r.act))
+        .toEqual([12, 13]);
+    });
+
     it("maps every demo act number to a nonempty section", () => {
       const acts = demoActs(sh);
       expect(acts.size).toBeGreaterThanOrEqual(13);
@@ -133,18 +141,43 @@ describe("check-verb-session-sync", () => {
     });
 
     it("catches an act reference the demo does not have", () => {
-      // The first "act 12" in the walkthrough, wherever it sits, renumbered
-      // past the demo's range.
-      const stale = md.replace("act 12", "act 99");
-      expect(stale).not.toEqual(md);
-      const found = findViolations(sh, stale);
+      // The first "act 12" in the tour, wherever it sits, renumbered past the
+      // demo's range. The tour carries the act narrative; the walkthrough
+      // references acts too, and either would exercise this.
+      const stale = tour.replace("act 12", "act 99");
+      expect(stale).not.toEqual(tour);
+      const found = findViolations(sh, stale, TOUR_PATH);
       expect(found.some((v) => v.includes("act 99"))).toBe(true);
     });
 
     it("catches a shape-table row paired with the wrong act", () => {
-      const mispaired = md.replace("| act 9 |", "| act 3 |");
-      expect(mispaired).not.toEqual(md);
-      expect(findViolations(sh, mispaired).length).toBeGreaterThanOrEqual(1);
+      // The verb shape table lives in the tour, beside the fixture it
+      // describes.
+      const mispaired = tour.replace("| act 9 |", "| act 3 |");
+      expect(mispaired).not.toEqual(tour);
+      expect(findViolations(sh, mispaired, TOUR_PATH).length)
+        .toBeGreaterThanOrEqual(1);
+    });
+
+    it("checks a console transcript, not only a bash block", () => {
+      const block = [
+        "```console",
+        "$ cf frobnicate --nothing-like-this",
+        "```",
+      ].join("\n");
+      expect(findViolations(sh, block).length).toBe(1);
+    });
+
+    it("drops an -s space pair before matching a transcript command", () => {
+      // A transcript shows the space it really ran against; the demo passes
+      // its own. Without the drop these differ by two tokens and no command
+      // in a transcript would ever match.
+      const block = [
+        "```console",
+        "$ cf get -s demo $EPIC children --select @,title",
+        "```",
+      ].join("\n");
+      expect(findViolations(sh, block)).toEqual([]);
     });
 
     it("lets an exempted line differ from every demo command", () => {
