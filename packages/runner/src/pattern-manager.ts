@@ -81,6 +81,15 @@ const PATTERN_COVERAGE_CACHE_VARIANT = "pattern-coverage";
  * from an authored artifact — the pattern-update gates among them — read
  * provenance from the spelling alone: a `__cfPattern_<n>` in the artifact
  * index can only be the transformer's.
+ *
+ * What is PROHIBITED here is deliberately wider than what the compiler
+ * MINTS, and wider than what a consumer recognizes as a hoist (the gate's
+ * `isDerivedHoistSymbol` matches `_1` upward, since that is what actually
+ * gets emitted). `_0` and `_01` are minted by nothing, so reserving them
+ * costs authors nothing real — and leaving them authorable would leave the
+ * confusable spellings, the ones a reader cannot tell from a hoist at a
+ * glance, as the only ones anybody could take. A prohibition may safely
+ * exceed the convention it protects; a recognizer may not.
  */
 const RESERVED_HOIST_EXPORT = /^__cfPattern_\d+$/;
 
