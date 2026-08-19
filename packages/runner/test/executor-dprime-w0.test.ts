@@ -489,6 +489,17 @@ describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     });
     expect(sizes.unionKeys).toBe(keys.size);
     const stats = host!.stats();
+    // MINOR-2: within a single tenure (no park) the space-lived
+    // enter/leave accumulators fold the FULL delta since the last fold, so
+    // they equal the scheduler's own running counters exactly — no
+    // transition is lost (a pass-START snapshot would drop any counted
+    // between passes; the demand notes below drive passes without input).
+    expect(stats.demand.demandRootEnters).toBe(
+      servingRuntime!.scheduler.demandRootCounters.enters,
+    );
+    expect(stats.demand.demandRootLeaves).toBe(
+      servingRuntime!.scheduler.demandRootCounters.leaves,
+    );
     console.log(
       `[T1′] demand=${
         JSON.stringify({ ...stats.demand, sizeSeries: undefined })

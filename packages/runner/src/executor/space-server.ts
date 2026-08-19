@@ -401,6 +401,13 @@ export class SpaceServer implements TransactionSealDestination {
   // structural-growth landing. Attribution of a growth wake to an input
   // is by adjacency (the most recently covered input), stated as such.
   #growthWakeCounter = 0;
+  // MINOR-2 / obligation (iii): the last-folded demand-root enter/leave
+  // counter values, so the space-lived accumulators fold the FULL delta
+  // since the last fold (capturing between-pass hook transitions), not a
+  // pass-start snapshot. Reset to 0 when the runtime is replaced (its
+  // counters zero on a fresh runtime).
+  #lastFoldedDemandEnters = 0;
+  #lastFoldedDemandLeaves = 0;
   #cycleCounter = 0;
   #wavesCommitted = 0;
   readonly #pendingSettles = new Map<number, {
@@ -613,6 +620,9 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#runtime = runtime;
     this.#disposeRuntime = dispose;
+    // MINOR-2: the fresh runtime's demand-root counters start at 0.
+    this.#lastFoldedDemandEnters = 0;
+    this.#lastFoldedDemandLeaves = 0;
     this.#sink = new EngineWaveCommitSink({
       engineFor: (s) => s === space ? engine : this.#foreignEngineFor(s),
       sessionId: this.#holder,
@@ -2455,6 +2465,24 @@ export class SpaceServer implements TransactionSealDestination {
    * `#pendingStructureLoads` for the next input-driven cycle — the
    * missing meta arrives as a commit, and that commit fires the cycle
    * that retries. */
+  /** Fold the demand-root enter/leave delta SINCE THE LAST FOLD into the
+   * space-lived `stats.demand` accumulators (MINOR-2). Called at the end
+   * of every demand pass AND before park disposes the runtime, so a
+   * transition the registration/unregistration hook fired between passes
+   * (or after the last pass) is never dropped. `#lastFoldedDemand*` reset
+   * to 0 when the runtime is replaced (activate), matching the fresh
+   * runtime's zeroed counters. */
+  #foldDemandRootDelta(): void {
+    const runtime = this.#runtime;
+    if (runtime === undefined) return;
+    const d = this.#options.stats.demand;
+    const { enters, leaves } = runtime.scheduler.demandRootCounters;
+    d.demandRootEnters += enters - this.#lastFoldedDemandEnters;
+    d.demandRootLeaves += leaves - this.#lastFoldedDemandLeaves;
+    this.#lastFoldedDemandEnters = enters;
+    this.#lastFoldedDemandLeaves = leaves;
+  }
+
   async #loadDemandedStructure(): Promise<void> {
     const runtime = this.#runtime;
     if (runtime === undefined) return;
@@ -2462,12 +2490,16 @@ export class SpaceServer implements TransactionSealDestination {
     const passStart = performance.now();
     // Obligation (iii): the demand-root enter/leave counters live on the
     // CURRENT runtime's scheduler and reset to 0 on a fresh runtime (a
-    // reactivation after park). Snapshot them at pass START and fold the
-    // pass's DELTA into the space-lived `stats.demand` accumulators below,
-    // so the totals survive park (a pass never straddles a park — the
-    // runtime is stable for its duration).
-    const entersAtStart = runtime.scheduler.demandRootCounters.enters;
-    const leavesAtStart = runtime.scheduler.demandRootCounters.leaves;
+    // reactivation after park). We fold the delta SINCE THE LAST FOLD
+    // (`#lastFoldedDemand*`, reset to 0 when the runtime is replaced —
+    // `#foldDemandRootDelta` below, called here AND at park) into the
+    // space-lived `stats.demand` accumulators, so the totals survive park
+    // AND capture transitions the REGISTRATION/UNREGISTRATION hook fires
+    // BETWEEN passes (a piece loaded by event dispatch registers its
+    // writers before this pass runs; unregistration on stop). A pass-START
+    // snapshot swallowed those — the next pass's snapshot already included
+    // them, so they were lost from the space-lived total (W1 review
+    // MINOR-2).
     // The DEMAND PASS over the tracked-ids CLOSURE (stage-C design
     // §2.1/§2.2; serving-loop.md §1 as RULED 2026-08-18): the memory
     // server exposes every INSTANCE a client session tracks (the roots
@@ -2734,13 +2766,12 @@ export class SpaceServer implements TransactionSealDestination {
     d.demandedPairs = pairCount;
     d.demandedWriters = runtime.scheduler.demandedWriterCount;
     d.demandedWritersMax = Math.max(d.demandedWritersMax, d.demandedWriters);
-    // Obligation (iii): fold THIS pass's enter/leave delta into the
-    // space-lived accumulators (not an absolute assign from the runtime,
-    // which zeroes on reactivation).
-    d.demandRootEnters += runtime.scheduler.demandRootCounters.enters -
-      entersAtStart;
-    d.demandRootLeaves += runtime.scheduler.demandRootCounters.leaves -
-      leavesAtStart;
+    // Obligation (iii) + MINOR-2: fold the enter/leave delta SINCE THE
+    // LAST FOLD into the space-lived accumulators (not a pass-start
+    // snapshot, which would lose hook-driven transitions between passes;
+    // not an absolute assign from the runtime, which zeroes on
+    // reactivation).
+    this.#foldDemandRootDelta();
     d.notCurrentRearms += notCurrentRearms;
     d.demandPasses += 1;
     d.demandPassMs += performance.now() - passStart;
@@ -3438,6 +3469,10 @@ export class SpaceServer implements TransactionSealDestination {
       this.#demandWakeTimer = undefined;
     }
     this.#pendingDemandWake = false;
+    // MINOR-2: fold any demand-root delta since the last pass BEFORE the
+    // runtime (and its counters) are disposed below, so a transition after
+    // the final pass of this tenure is not lost.
+    this.#foldDemandRootDelta();
     this.#pendingStructureLoads.clear();
     this.#terminalStructureLoads.clear();
     this.#rearmedAwaitingSettle.clear();
