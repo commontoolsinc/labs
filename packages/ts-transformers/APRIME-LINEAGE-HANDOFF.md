@@ -422,10 +422,14 @@ patterns) and the full fixture suite green.
    `helperInjectionLineOffset`) and `bindingName` (authored declaration name,
    absent for inline-expression origins), and its coverage widened from the
    trusted-binding set to every function-bearing builder artifact (hoisted,
-   authored, exported, export-default). The helper stamps the metadata onto the
-   value; the implementation-stamp branch is skipped for builders whose
-   implementations `hardenVerifiedFunction` froze during the call, so the read
-   path in step 3 goes through the value. Security guard: `bindingPath` stays
+   authored, exported, export-default). Function-bearing is semantic
+   (`isCallbackReference` — the checker's call signatures, shared with schema
+   injection); a callback no same-file function anchors (property access, an
+   import) annotates anchor-less, its position reporting the builder call's own
+   authored site. The helper stamps the metadata onto the value; the
+   implementation-stamp branch is skipped for builders whose implementations
+   `hardenVerifiedFunction` froze during the call, so the read path in step 3
+   goes through the value. Security guard: `bindingPath` stays
    trusted-scope-only (with `sourceFile` it mints verified binding identity —
    `cfc/implementation-identity.ts`). No sandbox-verifier change was needed (it
    checks the helper's canonical source and matches wrapper calls by

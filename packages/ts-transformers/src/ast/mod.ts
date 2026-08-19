@@ -29,6 +29,7 @@ export {
   getLoweredArrayMethodName,
   getPatternBuilderCallbackArgument,
   hasReactiveCollectionProvenance,
+  isCallbackReference,
   isConsumedByTerminalChainCall,
   isPatternBuilderCall,
   isReactiveOriginCall,

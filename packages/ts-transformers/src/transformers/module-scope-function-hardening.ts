@@ -6,6 +6,7 @@ import {
 } from "@commonfabric/utils/sandbox-contract";
 import {
   detectCallKind,
+  isCallbackReference,
   resolveCallbackFunctionExpression,
 } from "../ast/call-kind.ts";
 import { recoverAuthoredPosition } from "../ast/utils.ts";
@@ -351,15 +352,21 @@ function wrapWithFunctionHardener(
 }
 
 /**
- * A top-level builder artifact that carries an authored function: the builder
- * call itself, plus the function-valued argument whose authored site the
- * annotation reports. `pattern`, `handler`, `lift`, `computed`, `action` and
- * the rest of the builder family qualify; a builder call with no function
- * argument carries no authored function to name and is left alone.
+ * A top-level function-bearing builder artifact: the builder call itself,
+ * plus — when one resolves in this file — the function-valued argument whose
+ * authored site the annotation reports. `pattern`, `handler`, `lift`,
+ * `computed`, `action` and the rest of the builder family qualify; a builder
+ * call with no function-bearing argument carries no authored function to name
+ * and is left alone.
  */
 interface BuilderArtifact {
   readonly call: ts.CallExpression;
-  readonly fn:
+  /**
+   * The position anchor. Absent for a callback no same-file function
+   * resolves — reached through property access, or imported (a position is
+   * same-file by contract) — and the annotation then anchors at `call`.
+   */
+  readonly fn?:
     | ts.ArrowFunction
     | ts.FunctionExpression
     | ts.FunctionDeclaration;
@@ -396,6 +403,17 @@ function resolveBuilderArtifact(
     const declaration = resolveSameFileFunctionDeclaration(argument, checker);
     if (declaration) return { call, fn: declaration };
   }
+  // A callback can be function-bearing with no resolvable anchor — reached
+  // through property access, or imported from another module. The artifact
+  // still qualifies; it annotates anchor-less, and the annotation reports the
+  // call's own authored site. Callback-ness is the checker's call signatures
+  // (`isCallbackReference`), so qualification cannot lag the spellings the
+  // builder families accept.
+  if (
+    call.arguments.some((argument) => isCallbackReference(argument, checker))
+  ) {
+    return { call };
+  }
   return undefined;
 }
 
@@ -406,8 +424,8 @@ function resolveBuilderArtifact(
  * rather than in the shared callback resolver so its other callers keep their
  * behavior. An identifier whose declaration lives in ANOTHER file resolves to
  * nothing: a position is same-file by contract (`sourceFile` names this
- * module), so an imported callback carries no annotation from the importing
- * module.
+ * module), so an imported callback cannot anchor a position — its builder
+ * call annotates anchor-less instead.
  */
 function resolveSameFileFunctionDeclaration(
   argument: ts.Expression,
@@ -480,7 +498,8 @@ function annotateBindingIdentifier(
  *
  * The position describes the artifact's FUNCTION — the callback a builder was
  * given — falling back to the builder call as a whole when the callback's
- * lineage was dropped.
+ * lineage was dropped, or when no same-file function anchors it (property
+ * access, an imported callback).
  */
 function createBindingIdentityMetadata(
   input: BindingIdentityMetadataInput,
@@ -548,7 +567,8 @@ interface AuthoredSite {
  * Resolve the authored line/column — and the authored binding name enclosing
  * it — for the value an annotation describes. The candidates are tried in
  * order, so a builder artifact reports its callback's site and falls back to
- * the whole call only when the callback arrived with no lineage.
+ * the whole call when the callback arrived with no lineage or no same-file
+ * function anchors it at all.
  */
 function resolveAuthoredSite(
   input: BindingIdentityMetadataInput,
@@ -558,7 +578,9 @@ function resolveAuthoredSite(
   if (!authoredSourceFile) return undefined;
 
   const candidates = input.artifact
-    ? [input.artifact.fn, input.artifact.call]
+    ? input.artifact.fn
+      ? [input.artifact.fn, input.artifact.call]
+      : [input.artifact.call]
     : input.site
     ? [input.site]
     : [];

@@ -70,6 +70,9 @@ import { batchTypeCheckFixtures } from "./utils.ts";
 //   ORIGIN-G  pattern-body binary over a dynamic opaque access → __cfLift
 //   ORIGIN-E  inline captured action in JSX          → handler scaffold → __cfHandler
 //   ORIGIN-D  .map with an element callback in JSX   → array-method → __cfPattern
+//   ORIGIN-H  handler over a referenced arrow const  → in-place, anchor = const
+//   ORIGIN-I  handler over a function declaration    → in-place, anchor = declaration
+//   ORIGIN-J  handler over a property-access callback → in-place, anchor = the call
 const FIXTURE = `import {
   action,
   computed,
@@ -107,6 +110,16 @@ const zero = handler<unknown, { count: Writable<number> }>(onZero);
 function onZero(_: unknown, state: { count: Writable<number> }) {
   state.count.set(0 * 1);
 }
+
+// ORIGIN-J: builder whose callback arrives through PROPERTY ACCESS — no
+// same-file function anchors it, so the annotation anchors at the builder
+// call itself.
+const callbacks = {
+  echoTick(_: unknown, state: { count: Writable<number> }) {
+    state.count.set(state.count.get() + 10);
+  },
+};
+const viaProperty = handler<unknown, { count: Writable<number> }>(callbacks.echoTick);
 
 export default pattern<ProbeInput>(({ count, flag, label, items, task }) => {
   // ORIGIN-A: authored computed with a capture
@@ -202,7 +215,7 @@ function collectBuilderSites(root: ts.SourceFile): BuilderSite[] {
           // Hoisted synthetics plus the authored module-scope `bump` handler.
           if (
             HOISTED_NAME.test(name) || name === "bump" || name === "reset" ||
-            name === "zero"
+            name === "zero" || name === "viaProperty"
           ) {
             sites.push({
               tag: name,
@@ -439,6 +452,12 @@ const ORIGIN_ANNOTATIONS = new Map<string, {
     anchor: "function onZero",
     bindingName: "onZero",
   }],
+  // ORIGIN-J: no same-file function anchors a property-access callback, so
+  // the annotation anchors at the builder call, named by its declaration.
+  ["callbacks.echoTick", {
+    anchor: "handler<unknown, { count: Writable<number> }>(callbacks.echoTick)",
+    bindingName: "viaProperty",
+  }],
   [
     "count, flag, label, items, task",
     { anchor: "({ count, flag, label, items, task }) => {" },
@@ -481,6 +500,10 @@ Deno.test(
     assert(
       tags.includes("zero"),
       "expected the declaration-callback `zero` handler (ORIGIN-I)",
+    );
+    assert(
+      tags.includes("viaProperty"),
+      "expected the property-access-callback `viaProperty` handler (ORIGIN-J)",
     );
     assert(
       tags.includes("export-default"),
@@ -545,11 +568,12 @@ Deno.test(
       recoveredByTag.set(site.tag, callText);
 
       // ORIGIN-H's builder call carries its callback as an IDENTIFIER
-      // (`handler(…, onReset)`), so there is no function argument to recover
-      // here; its authored position is pinned through the annotation check.
+      // (`handler(…, onReset)`) and ORIGIN-J's as a PROPERTY ACCESS, so there
+      // is no function argument to recover here; their authored positions are
+      // pinned through the annotation check.
       if (
         site.tag !== "export-default" && site.tag !== "reset" &&
-        site.tag !== "zero"
+        site.tag !== "zero" && site.tag !== "viaProperty"
       ) {
         assert(site.callback, `${site.tag}: expected a callback argument`);
       }
@@ -595,6 +619,12 @@ Deno.test(
         checkAnnotation(site.tag, "(item) =>");
       } else if (site.tag === "zero") {
         checkAnnotation(site.tag, "state.count.set(0 * 1)");
+      } else if (site.tag === "viaProperty") {
+        assert(
+          callText.includes("callbacks.echoTick"),
+          `viaProperty: expected the property-access callback call, got: ${callText}`,
+        );
+        checkAnnotation(site.tag, "callbacks.echoTick");
       } else if (site.tag === "reset") {
         assert(
           callbackText === undefined ||

@@ -36,6 +36,7 @@ import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import { TwoLevelWeakCache } from "@commonfabric/utils/two-level-weak-cache";
 import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
   builderNameForExportName,
@@ -715,6 +716,47 @@ function unwrapHardenedCallbackExpression(
   }
 
   return expression.arguments[0];
+}
+
+/**
+ * Whether `expression` names a callback.
+ *
+ * Callback-ness is SEMANTIC — the checker's call signatures — never a
+ * whitelist of spellings. Four review rounds each found the spelling the
+ * previous round's syntax list missed (inline arrow, const reference,
+ * function declaration, property access); asking the type ends the family,
+ * because a schema is never callable and a callback always is, however it
+ * is written. Two backstops cover the type information going missing
+ * rather than a spelling: the syntactic resolver catches a local
+ * `any`-typed callback (no call signatures to ask), and the declaration
+ * fallback catches an IMPORTED one — the resolver cannot cross modules,
+ * but the aliased symbol's declaration still says what the value is.
+ */
+export function isCallbackReference(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!expression) return false;
+  if (resolveCallbackFunctionExpression(expression, checker)) return true;
+  const unwrapped = unwrapExpression(expression);
+  const type = checker.getTypeAtLocation(unwrapped);
+  if (type.getCallSignatures().length > 0) return true;
+  if (!ts.isIdentifier(unwrapped)) return false;
+  let symbol = checker.getSymbolAtLocation(unwrapped);
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration === undefined) return false;
+  if (ts.isFunctionDeclaration(declaration)) return true;
+  // The initializer goes through the wrapper-stripping resolver rather than
+  // a node-kind test: an assertion (`as any`), parentheses, or the hardening
+  // helper around the function must not hide it. The resolver works on a
+  // foreign file's node — the checker is program-wide.
+  return ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    resolveCallbackFunctionExpression(declaration.initializer, checker) !==
+      undefined;
 }
 
 export function isWildcardTraversalCall(

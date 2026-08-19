@@ -160,6 +160,11 @@ const pingViaProperty = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
+__cfBindVerifiedBinding(pingViaProperty, {
+    sourceFile: "/test.tsx",
+    position: { line: 91, col: 24 },
+    bindingName: "pingViaProperty"
+});
 // The same form without a declared result: passed through untouched — no
 // generated schemas, no options object.
 const poke = handler({

@@ -2799,17 +2799,31 @@ declarations or un-lowered type arguments do.
 **Which builder artifacts are annotated.** `resolveBuilderArtifact` accepts a
 top-level value whose initializer — seen through `unwrapExpression`'s
 parenthesis / `as` / `satisfies` / assertion / non-null wrappers — is a call
-that `detectCallKind` classifies as `kind: "builder"` AND that carries an
-arrow-function or function-expression argument. That is the same builder test
+that `detectCallKind` classifies as `kind: "builder"` AND that is
+function-bearing: some argument names a callback per `isCallbackReference`
+(`src/ast/call-kind.ts`) — the checker's call signatures, never a syntax list,
+the same semantic predicate schema injection uses for the schema-first
+`handler` form. That is the same builder test
 `collectTopLevelBuilderArtifactNames` uses for `__cfReg` registration (§11.4),
 and on this stage's fully lowered AST it covers the stage-16 hoisted
 `__cfLift_N` / `__cfHandler_N` / `__cfPattern_N` consts as well as authored
 builder consts, because `detectCallKind` recognizes the pipeline's
 `__cfHelpers.*` spelling alongside the authored imports. `export default
 <builder call>` is annotated on the exported expression
-(`transformExportAssignment`); `export = …` is not. The function-argument
-requirement is what the annotation is FOR: a builder call with no function
-argument has no authored function whose position to report, and is left alone.
+(`transformExportAssignment`); `export = …` is not. A builder call with no
+function-bearing argument has no authored function whose position to report,
+and is left alone.
+
+The **position anchor** is resolved per argument, first match wins: an inline
+arrow / function expression, an identifier whose same-file initializer chain
+resolves through `resolveCallbackFunctionExpression` (wrapper strips and the
+hardening helper included), or a same-file `function` declaration
+(declarations hoist, so the use may precede it —
+`resolveSameFileFunctionDeclaration`). A callback none of these reach —
+property access, or an import (a position is same-file by contract:
+`sourceFile` names this module) — leaves the artifact anchor-less, and its
+annotation reports the builder call's own authored site
+(`resolveAuthoredSite`).
 
 **What is emitted.** The transformer emits
 `__cfBindVerifiedBinding(value, metadata)` where metadata is
@@ -2842,8 +2856,9 @@ field:
   `packages/runner/src/harness/engine.ts` — the same correction §16.2's
   coverage spans take). The position is recovered through §11.5's lineage
   channels (`recoverAuthoredPosition`, `src/ast/utils.ts`) from the builder's
-  FUNCTION argument, falling back to the builder call as a whole; it is
-  omitted when neither recovers.
+  FUNCTION argument when one anchors the artifact, falling back to the
+  builder call as a whole (dropped function lineage, or an anchor-less
+  artifact); it is omitted when neither recovers.
 - `bindingName` is the authored name enclosing that position: the nearest
   variable or function declaration reached by walking the parsed authored file
   down to it, dropped on the way down through a function
