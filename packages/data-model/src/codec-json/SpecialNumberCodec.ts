@@ -3,7 +3,21 @@ import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "./interface.ts";
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+
+/**
+ * The literals this codec decodes, and the value each one stands for. The
+ * state type is read off the keys, so what is accepted and what it becomes
+ * cannot disagree.
+ */
+const SPECIAL_NUMBERS = Object.freeze({
+  "-0": -0,
+  "+Infinity": Infinity,
+  "-Infinity": -Infinity,
+  "NaN": NaN,
+});
+
+/** The literals this codec's state may be, and nothing else. */
+type SpecialNumberState = keyof typeof SPECIAL_NUMBERS;
 
 /**
  * Codec for the four "special" numeric values that JSON cannot represent
@@ -18,7 +32,8 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
  * Any NaN bit pattern encodes as the literal `"NaN"` and round-trips
  * back to `Number.NaN`.
  */
-export class SpecialNumberCodec extends BaseTerminalCodec<JsonCodecValue> {
+export class SpecialNumberCodec
+  extends BaseTerminalCodec<JsonCodecValue, SpecialNumberState> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.SpecialNumber, Number);
@@ -34,7 +49,7 @@ export class SpecialNumberCodec extends BaseTerminalCodec<JsonCodecValue> {
   }
 
   /** @inheritDoc */
-  encode(value: number): JsonCodecValue {
+  encode(value: number): SpecialNumberState {
     if (Number.isNaN(value)) return "NaN";
     if (value === Infinity) return "+Infinity";
     if (value === -Infinity) return "-Infinity";
@@ -43,33 +58,16 @@ export class SpecialNumberCodec extends BaseTerminalCodec<JsonCodecValue> {
   }
 
   /** @inheritDoc */
+  canDecode(state: JsonCodecValue): state is SpecialNumberState {
+    return (typeof state === "string") && Object.hasOwn(SPECIAL_NUMBERS, state);
+  }
+
+  /** @inheritDoc */
   decode(
-    typeTag: string,
-    state: JsonCodecValue,
+    _typeTag: string,
+    state: SpecialNumberState,
     _env: LiveEnvironment,
   ): FabricValue {
-    if (typeof state !== "string") {
-      return new ProblematicValue(
-        typeTag,
-        state,
-        `SpecialNumber: expected string state, got ${typeof state}`,
-      );
-    }
-    switch (state) {
-      case "-0":
-        return -0;
-      case "+Infinity":
-        return Infinity;
-      case "-Infinity":
-        return -Infinity;
-      case "NaN":
-        return NaN;
-      default:
-        return new ProblematicValue(
-          typeTag,
-          state,
-          `SpecialNumber: unknown literal ${JSON.stringify(state)}`,
-        );
-    }
+    return SPECIAL_NUMBERS[state];
   }
 }

@@ -4,7 +4,6 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { LiveEnvironment } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { ProblematicValue } from "./ProblematicValue.ts";
 
 /**
  * Codec for registry-interned symbols, for any format whose encoded type
@@ -42,7 +41,8 @@ import { ProblematicValue } from "./ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
+export class SymbolCodec<Encoded>
+  extends BaseTerminalCodec<Encoded, Encoded & string> {
   /** The value of {@link #keyAsEncoded}, supplied by the registering format. */
   readonly #keyAsEncoded: (key: string) => Encoded & string;
 
@@ -54,8 +54,8 @@ export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
    *   this at all, which is the point.
    *
    *   The result is `Encoded & string` rather than `Encoded`, so that what is
-   *   handed back is still a string. `decode()` accepts only a string, and a
-   *   format free to wrap the key in something its union also admits could
+   *   handed back is still a string. `canDecode()` accepts only a string, and
+   *   a format free to wrap the key in something its union also admits could
    *   emit state its own decoder refuses.
    */
   constructor(keyAsEncoded: (key: string) => Encoded & string) {
@@ -70,25 +70,22 @@ export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
   }
 
   /** @inheritDoc */
-  encode(value: symbol): Encoded {
+  encode(value: symbol): Encoded & string {
     // `canEncode()` already verified the symbol has a registry key.
     return this.#keyAsEncoded(Symbol.keyFor(value)!);
   }
 
   /** @inheritDoc */
+  canDecode(state: Encoded): state is Encoded & string {
+    return typeof state === "string";
+  }
+
+  /** @inheritDoc */
   decode(
-    typeTag: string,
-    state: Encoded,
+    _typeTag: string,
+    state: Encoded & string,
     _env: LiveEnvironment,
   ): FabricValue {
-    if (typeof state !== "string") {
-      return new ProblematicValue(
-        typeTag,
-        state,
-        `Symbol: expected string state, got ${typeof state}`,
-      );
-    }
-
     return Symbol.for(state);
   }
 }

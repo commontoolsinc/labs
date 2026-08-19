@@ -163,6 +163,10 @@ describe("BaseCodecEngine", () => {
           return { self: value };
         }
 
+        canDecode(_state: FabricValue): _state is FabricValue {
+          return true;
+        }
+
         decode(): FabricValue {
           return selfNaming;
         }
@@ -389,6 +393,10 @@ describe("BaseCodecEngine", () => {
             return 1;
           }
 
+          canDecode(_state: ProbeValue): _state is ProbeValue {
+            return true;
+          }
+
           decode(): FabricValue {
             return 1;
           }
@@ -420,6 +428,10 @@ describe("BaseCodecEngine", () => {
 
         encode(): ProbeValue {
           throw new Error("codec refused");
+        }
+
+        canDecode(_state: ProbeValue): _state is ProbeValue {
+          return true;
         }
 
         decode(): FabricValue {
@@ -455,6 +467,10 @@ describe("BaseCodecEngine", () => {
 
           encode(): ProbeValue {
             return 1;
+          }
+
+          canDecode(_state: ProbeValue): _state is ProbeValue {
+            return true;
           }
 
           decode(): FabricValue {
@@ -495,17 +511,20 @@ describe("BaseCodecEngine", () => {
   });
 
   describe("`lenient`", () => {
-    // A codec rejects a state in one of two ways, and which it picks is the
+    // A codec rejects a state in one of three ways, and which it picks is the
     // codec author's business rather than a caller's. `lenient` is what
-    // decides what a caller sees, so it has to settle BOTH ways -- which is
-    // why each group below covers both. `ThrowingCodec` and `RejectingCodec`
-    // differ in nothing but that choice.
+    // decides what a caller sees, so it has to settle ALL of them -- which is
+    // why each group below covers each. `ThrowingCodec`, `RejectingCodec` and
+    // `RefusingCodec` differ in nothing but that choice.
 
     /** A wire form whose codec rejects by throwing. */
     const THROWN = new Tagged("Throws@1", "x");
 
     /** A wire form whose codec rejects by returning a report. */
     const RETURNED = new Tagged("Rejects@1", "x");
+
+    /** A wire form whose codec refuses the state in `canDecode()`. */
+    const REFUSED = new Tagged("Refuses@1", "x");
 
     /** A wire form the walk itself finds malformed, no codec involved. */
     const MALFORMED = new Tagged("", "x");
@@ -532,6 +551,25 @@ describe("BaseCodecEngine", () => {
 
         expect(() => engine.decode(RETURNED, ENV))
           .toThrow(/rejected by returning/);
+      });
+
+      it("raises a refusal from `canDecode()`", () => {
+        // The refusal is reported rather than raised, so strictly it is
+        // `reportMalformed()` that raises and the throw then passes back out
+        // through the codec-facing `catch`. Asserting the type and both facts
+        // is what says it arrives unaltered rather than rebuilt.
+        const { engine } = newProbeEngine();
+
+        try {
+          engine.decode(REFUSED, ENV);
+          throw new Error("Should have thrown.");
+        } catch (e) {
+          expect(e).toBeInstanceOf(ProblematicStateError);
+          expect((e as ProblematicStateError).message)
+            .toMatch(/state is not one this codec decodes/);
+          expect((e as ProblematicStateError).wireTypeTag).toBe("Refuses@1");
+          expect((e as ProblematicStateError).state).toBe("x");
+        }
       });
 
       it("raises a malformation the walk itself found", () => {
@@ -624,6 +662,20 @@ describe("BaseCodecEngine", () => {
         expect(result).toBeInstanceOf(ProblematicValue);
         expect((result as ProblematicValue).error)
           .toMatch(/rejected by returning/);
+      });
+
+      it("turns a refusal from `canDecode()` into a `ProblematicValue`", () => {
+        const { engine } = newProbeEngine({ lenient: true });
+        const result = engine.decode(REFUSED, ENV);
+
+        expect(result).toBeInstanceOf(ProblematicValue);
+        // The message is what separates this from the codec's `decode()`
+        // having run and thrown: that one refuses too, and would arrive here
+        // wearing the same tag and state.
+        expect((result as ProblematicValue).error)
+          .toMatch(/state is not one this codec decodes/);
+        expect((result as ProblematicValue).wireTypeTag).toBe("Refuses@1");
+        expect((result as ProblematicValue).state).toBe("x");
       });
 
       it("keeps a malformation the walk itself found", () => {

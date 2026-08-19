@@ -20,6 +20,17 @@ import type { FabricValue } from "@/interface.ts";
 const DEFAULT_FLAVOR = "es2025";
 
 /**
+ * The encoded state of a {@link FabricRegExp}. Each field is optional on the
+ * wire, an absent one standing for its default, which is what lets a narrower
+ * encoder omit it.
+ */
+type FabricRegExpState = {
+  flavor?: string;
+  source?: string;
+  flags?: string;
+};
+
+/**
  * Immutable regular-expression value in the fabric type system.
  *
  * The essential state is `{ source, flags, flavor }` -- the values needed to
@@ -134,49 +145,15 @@ export class FabricRegExp extends BaseFabricPrimitive
   // Static members
   //
 
-  /**
-   * Reads the three fields a wire state carries, or `null` if any of them is
-   * present with a type it cannot have.
-   *
-   * An absent field takes its default, which is what lets a narrower encoder
-   * omit one. A field that is *present* and not a string is a different thing
-   * entirely, and that includes one present as `undefined`: nothing here emits
-   * such a state, and defaulting it would silently answer a question the wire
-   * did actually ask -- a `flavor` sent that way would come back `es2025`,
-   * naming a dialect the sender did not.
-   *
-   * The rest matters more than it looks. The constructor stores a non-`es2025`
-   * flavor's `source` and `flags` without touching them, so an unchecked
-   * object here reaches the public getters, which are typed `string`, and
-   * takes an unfrozen reference into a frozen instance with it.
-   */
-  static #stateFields(
-    state: Record<string, unknown>,
-  ): { flavor: string; source: string; flags: string } | null {
-    for (const key of ["flavor", "source", "flags"] as const) {
-      if (Object.hasOwn(state, key) && (typeof state[key] !== "string")) {
-        return null;
-      }
-    }
-
-    const { flavor, source, flags } = state;
-
-    return {
-      flavor: (flavor as string | undefined) ?? DEFAULT_FLAVOR,
-      source: (source as string | undefined) ?? "",
-      flags: (flags as string | undefined) ?? "",
-    };
-  }
-
   static #jsonCodec = Object.freeze(
-    new (class RegExpCodec extends BaseNonterminalCodec {
+    new (class RegExpCodec extends BaseNonterminalCodec<FabricRegExpState> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);
       }
 
       /** @inheritDoc */
-      encode(value: FabricRegExp): FabricValue {
+      encode(value: FabricRegExp): FabricRegExpState {
         return {
           source: value.#source,
           flags: value.#flags,
@@ -184,35 +161,56 @@ export class FabricRegExp extends BaseFabricPrimitive
         };
       }
 
-      /** @inheritDoc */
-      decode(
-        typeTag: string,
-        state: FabricValue,
-        _env: LiveEnvironment,
-      ): FabricValue {
+      /**
+       * @inheritDoc
+       *
+       * A field that is *present* and not a string is refused, and that
+       * includes one present as `undefined`: nothing here emits such a state,
+       * and letting it default would silently answer a question the wire did
+       * actually ask -- a `flavor` sent that way would come back `es2025`,
+       * naming a dialect the sender did not. An absent field is a different
+       * thing, and takes its default in `decode()`, which is what lets a
+       * narrower encoder omit one.
+       *
+       * The check matters more than it looks. The constructor stores a
+       * non-`es2025` flavor's `source` and `flags` without touching them, so
+       * an unchecked object here reaches the public getters, which are typed
+       * `string`, and takes an unfrozen reference into a frozen instance with
+       * it.
+       */
+      canDecode(state: FabricValue): state is FabricRegExpState {
         if (!isPlainObject(state)) {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `RegExp: expected object state, got ${typeof state}`,
-          );
-        }
-        // Beyond the three fields being strings, this class does not enforce
-        // regex syntax as part of its wire participation: only the `es2025`
-        // flavor is validated, eagerly, by the constructor building a native
-        // `RegExp`. Another flavor's `source` and `flags` are stored
-        // faithfully and may be any strings at all, that dialect being one
-        // this runtime cannot check.
-        const fields = FabricRegExp.#stateFields(state);
-        if (fields === null) {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            "RegExp: expected string `flavor`, `source` and `flags`",
-          );
+          return false;
         }
 
-        const { flavor, source, flags } = fields;
+        for (const key of ["flavor", "source", "flags"] as const) {
+          if (Object.hasOwn(state, key) && (typeof state[key] !== "string")) {
+            return false;
+          }
+        }
+
+        return true;
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Beyond the three fields being strings, this class does not enforce
+       * regex syntax as part of its wire participation: only the `es2025`
+       * flavor is validated, eagerly, by the constructor building a native
+       * `RegExp`. Another flavor's `source` and `flags` are stored faithfully
+       * and may be any strings at all, that dialect being one this runtime
+       * cannot check.
+       */
+      decode(
+        typeTag: string,
+        state: FabricRegExpState,
+        _env: LiveEnvironment,
+      ): FabricValue {
+        const flavor = state.flavor ?? DEFAULT_FLAVOR;
+        const source = state.source ?? "";
+        const flags = state.flags ?? "";
+
         try {
           return new FabricRegExp(flavor, source, flags);
         } catch (e) {

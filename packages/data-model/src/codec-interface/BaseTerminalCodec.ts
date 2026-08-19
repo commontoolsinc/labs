@@ -10,6 +10,9 @@ import type { TerminalCodec } from "./interface.ts";
  * identity is the point: `CodecRegistry` reads it to know that a state coming
  * out of here is the answer rather than more work.
  *
+ * `State` is as {@link BaseFabricCodec} describes it, passed straight through:
+ * this codec's own states, within the one format it serves.
+ *
  * `Encoded` must be a wire format's own value type, and never `FabricValue`.
  * Nothing enforces that. `TerminalCodec<FabricValue>` and `NonterminalCodec`
  * are the same type, so a subclass declared at `FabricValue` satisfies the
@@ -17,8 +20,9 @@ import type { TerminalCodec } from "./interface.ts";
  * time, and its state would reach the wire unexpanded. A codec whose state is
  * made of fabric values extends {@link BaseNonterminalCodec}.
  */
-export abstract class BaseTerminalCodec<Encoded>
-  extends BaseFabricCodec<Encoded>
-  implements TerminalCodec<Encoded> {
+export abstract class BaseTerminalCodec<
+  Encoded,
+  State extends Encoded = Encoded,
+> extends BaseFabricCodec<Encoded, State> implements TerminalCodec<Encoded> {
   // This space intentionally left blank.
 }

@@ -211,6 +211,24 @@ describe("FabricHash", () => {
         });
       });
 
+      describe("canDecode()", () => {
+        it("returns `true` for a record with string `tag` and `hash`", () => {
+          expect(codec.canDecode({ tag: "fid1", hash: "AQID" })).toBe(true);
+        });
+
+        it("returns `false` for state that is not a record", () => {
+          expect(codec.canDecode(123)).toBe(false);
+        });
+
+        it("returns `false` for a record missing a field", () => {
+          expect(codec.canDecode({ tag: "fid1" })).toBe(false);
+        });
+
+        it("returns `false` for a record with a non-string field", () => {
+          expect(codec.canDecode({ tag: "fid1", hash: 7 })).toBe(false);
+        });
+      });
+
       describe("decode()", () => {
         it("decodes a `{ tag, hash }` object back to a `FabricHash`", () => {
           const cid = new FabricHash(SAMPLE_HASH, "fid1");
@@ -223,20 +241,6 @@ describe("FabricHash", () => {
           expect((decoded as FabricHash).taggedHashString).toBe(
             cid.taggedHashString,
           );
-        });
-
-        it("decodes non-object state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 123, env);
-          expect(decoded).toBeInstanceOf(ProblematicValue);
-        });
-
-        it("decodes missing/non-string fields to a `ProblematicValue`", () => {
-          const decoded = codec.decode(
-            expectedTag,
-            { tag: "fid1" },
-            env,
-          );
-          expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
         it("decodes a malformed base64 `hash` to a `ProblematicValue`", () => {

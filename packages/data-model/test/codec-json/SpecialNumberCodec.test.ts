@@ -18,7 +18,6 @@ import { expect } from "@std/expect";
 import { SpecialNumberCodec } from "@/codec-json/SpecialNumberCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("SpecialNumberCodec", () => {
   const codec = new SpecialNumberCodec();
@@ -70,26 +69,20 @@ describe("SpecialNumberCodec", () => {
       });
     });
 
-    describe("decode()", () => {
-      it("decodes non-string state to `ProblematicValue`", () => {
-        const result = codec.decode(
-          expectedTag,
-          0,
-          env,
-        );
-        expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
-          "SpecialNumber@1",
-        );
+    describe("canDecode()", () => {
+      it("returns `true` for each of the four literals", () => {
+        for (const literal of ["-0", "+Infinity", "-Infinity", "NaN"]) {
+          expect(codec.canDecode(literal)).toBe(true);
+        }
       });
 
-      it("decodes an unknown literal to `ProblematicValue`", () => {
+      it("returns `false` for state that is not a string", () => {
+        expect(codec.canDecode(0)).toBe(false);
+      });
+
+      it("returns `false` for a string that is not one of the literals", () => {
         // "Infinity" (missing leading +) is not a recognized literal.
-        const result = codec.decode(expectedTag, "Infinity", env);
-        expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
-          "SpecialNumber@1",
-        );
+        expect(codec.canDecode("Infinity")).toBe(false);
       });
     });
 

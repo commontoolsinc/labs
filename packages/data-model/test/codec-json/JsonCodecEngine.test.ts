@@ -252,6 +252,10 @@ describe("JsonCodecEngine", () => {
         return PROBE_STATE;
       }
 
+      canDecode(_state: JsonCodecValue): _state is JsonCodecValue {
+        return true;
+      }
+
       decode(_typeTag: string, state: JsonCodecValue): FabricValue {
         this.received = state;
         return new ProbeInstance();
@@ -268,6 +272,10 @@ describe("JsonCodecEngine", () => {
 
       encode(_value: FabricValue): FabricValue {
         return PROBE_STATE;
+      }
+
+      canDecode(_state: FabricValue): _state is FabricValue {
+        return true;
       }
 
       decode(_typeTag: string, state: FabricValue): FabricValue {

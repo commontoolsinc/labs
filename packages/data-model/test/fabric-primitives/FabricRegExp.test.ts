@@ -170,13 +170,24 @@ describe("FabricRegExp", () => {
         });
       });
 
-      describe("decode()", () => {
-        it("decodes non-object state to `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, "nope", env);
-          expect(decoded).toBeInstanceOf(ProblematicValue);
+      describe("canDecode()", () => {
+        it("returns `true` for a record of the three strings", () => {
+          expect(codec.canDecode({
+            flavor: "es2025",
+            source: "a",
+            flags: "g",
+          })).toBe(true);
         });
 
-        it("decodes a non-string field to `ProblematicValue`", () => {
+        it("returns `true` for a record with a field absent", () => {
+          expect(codec.canDecode({ source: "a" })).toBe(true);
+        });
+
+        it("returns `false` for state that is not a record", () => {
+          expect(codec.canDecode("nope")).toBe(false);
+        });
+
+        it("returns `false` for a non-string field", () => {
           // Only the `es2025` flavor is validated for syntax, so under any
           // other one these values reach the constructor untouched -- and
           // `source` and `flags` are exposed by getters typed `string`. An
@@ -195,11 +206,12 @@ describe("FabricRegExp", () => {
               { flavor: undefined, source: "a", flags: "g" },
             ]
           ) {
-            expect(codec.decode(expectedTag, state as never, env))
-              .toBeInstanceOf(ProblematicValue);
+            expect(codec.canDecode(state as never)).toBe(false);
           }
         });
+      });
 
+      describe("decode()", () => {
         it("decodes a state omitting a field, taking that field's default", () => {
           // Absent is not the same as present-and-wrong: a narrower encoder
           // may leave a field out, and the default stands in for it.

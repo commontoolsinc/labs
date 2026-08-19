@@ -45,8 +45,8 @@ import { type FabricValue } from "@/interface.ts";
 /**
  * Test codec that matches a single pre-set value (by `===`) and records
  * whether `canEncode()` was consulted, so tests can distinguish the classMap
- * fast path from the linear-scan slow path. `encode`/`decode` are never
- * exercised by the registry, so they throw.
+ * fast path from the linear-scan slow path. Nothing but `canEncode()` is ever
+ * exercised by the registry, so the rest throw.
  */
 class TestCodec extends BaseNonterminalCodec {
   canEncodeCalled = false;
@@ -67,6 +67,10 @@ class TestCodec extends BaseNonterminalCodec {
   }
 
   encode(_value: FabricValue): FabricValue {
+    throw new Error("Unimplemented.");
+  }
+
+  canDecode(_state: FabricValue): _state is FabricValue {
     throw new Error("Unimplemented.");
   }
 
@@ -121,6 +125,10 @@ class TestTerminalCodec extends BaseTerminalCodec<string> {
     throw new Error("Unimplemented.");
   }
 
+  canDecode(_state: string): _state is string {
+    throw new Error("Unimplemented.");
+  }
+
   decode(
     _typeTag: string,
     _state: string,
@@ -152,6 +160,10 @@ const UNCLASSIFIABLE_CODEC: FabricCodec<string> = {
   },
 
   encode(_value: FabricValue): string {
+    throw new Error("Unimplemented.");
+  },
+
+  canDecode(_state: string): boolean {
     throw new Error("Unimplemented.");
   },
 

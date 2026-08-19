@@ -9,7 +9,7 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
  * `undefined` has no corresponding class, so there is no `uniqueHandledClass`;
  * matching is by `canEncode()`. See `1-fabric-values.md` Section 1.3.
  */
-export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue> {
+export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue, null> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.Undefined, undefined);
@@ -21,21 +21,21 @@ export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue> {
   }
 
   /** @inheritDoc */
-  encode(_value: FabricValue): JsonCodecValue {
+  encode(_value: FabricValue): null {
     return null;
   }
 
   /** @inheritDoc */
+  canDecode(state: JsonCodecValue): state is null {
+    return state === null;
+  }
+
+  /** @inheritDoc */
   decode(
-    typeTag: string,
-    state: JsonCodecValue,
+    _typeTag: string,
+    _state: null,
     _env: LiveEnvironment,
   ): FabricValue {
-    if (state !== null) {
-      throw new Error(
-        `\`${typeTag}\`: expected \`null\` state, got \`${typeof state}\``,
-      );
-    }
     return undefined;
   }
 }

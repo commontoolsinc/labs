@@ -119,25 +119,23 @@ export class FabricBytes extends BaseFabricPrimitive {
   //
 
   static #jsonCodec = Object.freeze(
-    new (class BytesCodec extends BaseTerminalCodec<JsonCodecValue> {
+    new (class BytesCodec extends BaseTerminalCodec<JsonCodecValue, string> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Bytes, FabricBytes);
       }
 
       /** @inheritDoc */
+      canDecode(state: JsonCodecValue): state is string {
+        return typeof state === "string";
+      }
+
+      /** @inheritDoc */
       decode(
         typeTag: string,
-        state: JsonCodecValue,
+        state: string,
         _env: LiveEnvironment,
       ): FabricBytes | ProblematicValue {
-        if (typeof state !== "string") {
-          return new ProblematicValue(
-            typeTag,
-            state,
-            `Bytes: expected string state, got ${typeof state}`,
-          );
-        }
         try {
           const bytes = fromBase64url(state);
           return new FabricBytes(bytes, true);
@@ -151,7 +149,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       }
 
       /** @inheritDoc */
-      encode(value: FabricBytes): JsonCodecValue {
+      encode(value: FabricBytes): string {
         return toUnpaddedBase64url(value.#bytes);
       }
     })(),

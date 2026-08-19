@@ -33,7 +33,6 @@ import { cloneIfNecessary } from "@/value-clone.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
@@ -208,12 +207,17 @@ describe("FabricLink", () => {
         });
       });
 
-      describe("decode()", () => {
-        it("decodes non-object state to `ProblematicValue`", () => {
-          expect(codec.decode(expectedTag, "nope", env))
-            .toBeInstanceOf(ProblematicValue);
+      describe("canDecode()", () => {
+        it("returns `true` for a record", () => {
+          expect(codec.canDecode({ id: "fid1:abc" })).toBe(true);
         });
 
+        it("returns `false` for state that is not a record", () => {
+          expect(codec.canDecode("nope")).toBe(false);
+        });
+      });
+
+      describe("decode()", () => {
         it("round-trips a payload with a nested schema value", () => {
           const link = new FabricLink({
             id: "fid1:abc",

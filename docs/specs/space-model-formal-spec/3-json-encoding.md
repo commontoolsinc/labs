@@ -252,30 +252,34 @@ round-trip correctly.
 // preserved tag (Section 8), which it can because that tag is checked to be
 // a real one.
 //
-// On decoding, a non-object state, a non-string `tag` or `error`, or
-// an absent `state` property produces a `ProblematicValue` describing this
-// decode. `state` is checked for presence rather than type because every
-// `FabricValue` is a valid state, `undefined` among them, so filling in an
-// absent one would put a reshaped record back on the wire.
+// `canDecode()` refuses a non-object state, a non-string `tag` or `error`,
+// and a record with no `state` property. `state` is checked for presence
+// rather than type because every `FabricValue` is a valid state, `undefined`
+// among them, so filling in an absent one would put a reshaped record back on
+// the wire.
 ```
 
-> **Decoding validation.** Decoding cannot assume type safety from
-> the wire. Each codec must validate the format of its state in `decode()`
-> before processing. For example, a codec whose state is a base64url string
-> (such as
-> `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
-> its state is a `string` containing valid base64url (padded or unpadded) before decoding. On
-> malformed input — wrong type, invalid format, or missing fields — the codec
-> must reject it rather than silently produce garbage. A codec may reject by
-> throwing, or by returning a `ProblematicValue` (see `1-fabric-values.md`
-> Section 3.5); the two are equivalent, because the engine settles
-> them into one answer according to its own `lenient` setting (see
-> `1-fabric-values.md` Section 4.5). Which one a codec uses is therefore a
-> matter of what reads well where it is written, and carries no meaning for a
-> caller. This principle applies to
-> all codecs. Wire data is untrusted input. See `1-fabric-values.md`
-> Section 7.4 for the broader principle that applies to all code consuming
-> decoded values.
+> **Decoding validation.** Decoding cannot assume type safety from the wire.
+> Each codec must reject a state it did not write, rather than silently
+> producing garbage from one — wrong type, invalid format, or missing fields
+> alike. The rejection has two homes, and which one a check belongs in is
+> settled by what asking costs. `canDecode()` holds what is cheap to ask and
+> not already asked by the decoding: that the state is a `string`, that a
+> record carries the fields the decoding reads and that they are strings, that
+> a literal is one of a fixed set. `decode()` holds a check whose only
+> implementation is the decoding itself — that a base64url string (such as
+> `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) is valid base64url
+> is answered by decoding it, so asking first costs that work twice.
+>
+> A codec may reject from `decode()` by throwing, or by returning a
+> `ProblematicValue` (see `1-fabric-values.md` Section 3.5); with a refusal
+> from `canDecode()` that makes three ways, and all three are equivalent,
+> because the engine settles them into one answer according to its own
+> `lenient` setting (see `1-fabric-values.md` Section 4.5). Which one a codec
+> uses is therefore a matter of what reads well where it is written, and
+> carries no meaning for a caller. This principle applies to all codecs. Wire
+> data is untrusted input. See `1-fabric-values.md` Section 7.4 for the
+> broader principle that applies to all code consuming decoded values.
 
 > **Sparse array encoding in JSON.** Even when an array contains holes, it is
 > encoded as a JSON array. Runs of consecutive holes are represented by

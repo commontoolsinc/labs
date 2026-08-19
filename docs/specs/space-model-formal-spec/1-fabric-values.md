@@ -1107,9 +1107,9 @@ different algorithm tags are distinct values.
 Like every fabric primitive, `FabricHash` hosts a `[JSON_CODEC]` (tag
 `Hash@1`).
 Its encoded state is `{ tag, hash }` — the algorithm tag plus the hash as
-an unpadded base64url string (i.e., `.hashString`); `decode()` validates
-both fields are strings, producing a `ProblematicValue` on malformed
-state. See Section 5 of `3-json-encoding.md` for the wire format.
+an unpadded base64url string (i.e., `.hashString`); `canDecode()` refuses a
+state that is not a record of two strings, and `decode()` produces a
+`ProblematicValue` for a `hash` that is not valid base64url. See Section 5 of `3-json-encoding.md` for the wire format.
 
 #### 1.4.10 `FabricBytes`
 
@@ -1768,6 +1768,25 @@ export interface FabricCodec<Encoded> {
   canEncode(value: FabricValue): boolean;
 
   /**
+   * Returns `true` if the given state is one this codec knows how to
+   * decode: the decode side's counterpart to `canEncode()`, answering the
+   * same kind of question about whether a value is in the domain this codec
+   * works over.
+   *
+   * What belongs here is what is cheap to ask and not already asked by the
+   * decoding: the state's type, the presence and types of the parts a
+   * decode reads, membership in a fixed set of literals. What does not
+   * belong is a check whose only implementation is the decode itself.
+   * Whether a string is valid base64 is answered by decoding it, so asking
+   * here costs that work twice; `decode()` keeps such a question and is
+   * where a state failing it is refused.
+   *
+   * Called on every state before `decode()` sees it, so an implementation of
+   * the latter may take the check as done.
+   */
+  canDecode(state: Encoded): boolean;
+
+  /**
    * Returns the wire type tag to use when encoding the given value. Only
    * ever called on a value for which `canEncode()` has returned `true`.
    * Unlike `recognizedTypeTag` -- the codec's single recognized tag, if it
@@ -1788,10 +1807,12 @@ export interface FabricCodec<Encoded> {
    * does not necessarily correspond to `recognizedTypeTag` (depending on
    * how an instance of this class got hooked up).
    *
-   * `state` is the whole of `Encoded` rather than the narrower thing
-   * `encode()` emits, because decoding is dispatched on a tag read from
-   * untrusted input: a payload can carry any state at all under this
-   * codec's tag. Rejecting what does not fit is part of the job.
+   * Only ever called on a state for which `canDecode()` has returned `true`,
+   * which is the decode side's counterpart to the way `canEncode()` precedes
+   * `encode()`. That is what lets an implementation declare the narrower
+   * state type it actually decodes and read its parts as such. `state` is the
+   * whole of `Encoded` here because this interface is what a registry holds,
+   * and the codecs in one agree on nothing narrower.
    */
   decode(
     typeTag: string,
@@ -1877,22 +1898,33 @@ is enforced when a registry is built instead (Section 4.5).
 
 Three base classes round out the vocabulary:
 
-- **`BaseFabricCodec<Encoded>`** (`codec-interface/BaseFabricCodec.ts`)
-  supplies the common scaffolding: a constructor taking `(recognizedTypeTag,
-  uniqueHandledClass)`, an `instanceof`-based `canEncode()`, and a
-  `tagForValue()` that returns `recognizedTypeTag` (a codec with no
-  recognized tag — whose instances carry per-instance tags — must override
-  it). It is abstract in `encode()` and `decode()` and, deliberately, in
-  identity: a concrete codec extends one of the two below rather than this
-  directly.
-- **`BaseNonterminalCodec`** (`codec-interface/BaseNonterminalCodec.ts`) adds
-  nothing but the `FabricValue` domain and its own identity, and the identity
-  is the point: `CodecRegistry` reads it to know that a state coming out of
-  here is more work rather than an answer.
-- **`BaseTerminalCodec<Encoded>`** (`codec-interface/BaseTerminalCodec.ts`)
-  is its opposite number, telling the registry that a state coming out of
-  here is the answer. Extending one of these two fixes the `Encoded` domain in
-  the same stroke as the declaration, so the two cannot drift apart.
+- **`BaseFabricCodec<Encoded, State extends Encoded = Encoded>`**
+  (`codec-interface/BaseFabricCodec.ts`) supplies the common scaffolding: a
+  constructor taking `(recognizedTypeTag, uniqueHandledClass)`, an
+  `instanceof`-based `canEncode()`, and a `tagForValue()` that returns
+  `recognizedTypeTag` (a codec with no recognized tag — whose instances carry
+  per-instance tags — must override it). It is abstract in `encode()`,
+  `canDecode()` and `decode()` and, deliberately, in identity: a concrete codec
+  extends one of the two below rather than this directly.
+- **`BaseNonterminalCodec<State extends FabricValue = FabricValue>`**
+  (`codec-interface/BaseNonterminalCodec.ts`) adds nothing but the
+  `FabricValue` domain and its own identity, and the identity is the point:
+  `CodecRegistry` reads it to know that a state coming out of here is more
+  work rather than an answer.
+- **`BaseTerminalCodec<Encoded, State extends Encoded = Encoded>`**
+  (`codec-interface/BaseTerminalCodec.ts`) is its opposite number, telling the
+  registry that a state coming out of here is the answer. Extending one of
+  these two fixes the `Encoded` domain in the same stroke as the declaration,
+  so the two cannot drift apart.
+
+`State` is the codec's own state type, a subtype of the format-wide `Encoded`:
+what `encode()` emits, what `canDecode()` narrows to as a type predicate, and
+the only thing `decode()` is handed. One declaration serving all three members
+is what says the three agree, and it is what lets a decoding read its state's
+parts as the types `canDecode()` established them to be. That narrower
+parameter is true rather than merely declared because the engine asks
+`canDecode()` of every state before dispatching one to a codec. A codec that
+works over the whole of `Encoded` leaves it at the default.
 
 `TerminalCodec<FabricValue>` and `NonterminalCodec` are the same type, so a
 subclass of `BaseTerminalCodec` declared at `FabricValue` would satisfy the
@@ -1917,6 +1949,12 @@ Key contracts:
   nested values have already been decoded. The codec engine owns
   recursion and tag-wrapping (Section 4.5), which keeps the format
   mechanics in one place rather than spread across every codec.
+- **`canDecode()` runs before every decode.** The engine asks it of each state
+  it is about to dispatch, so a state reaches `decode()` only once that codec
+  has accepted it and is of the type that method declares. A refusal is a
+  rejection of wire data like any other, and the engine settles it against
+  `lenient` exactly as it settles one the codec raises from inside the
+  decoding (Section 4.5).
 - **`decode()` is codec-side, not constructor-side**, for two reasons: it
   receives a `LiveEnvironment` (Section 2.5) which shouldn't be
   mandated in a constructor signature, and it may return an existing
@@ -2032,8 +2070,15 @@ import {
   type LiveEnvironment,
 } from '@commonfabric/data-model/codec-common';
 import { BaseFabricInstance } from '@commonfabric/data-model/codec-common';
+import { isPlainObject } from '@commonfabric/utils/types';
 
 type TemperatureUnit = "C" | "F" | "K";
+
+/** The unit literals, for the wire check in `canDecode()` below. */
+const TEMPERATURE_UNITS: ReadonlySet<string> = new Set(["C", "F", "K"]);
+
+/** The codec's own state type: what it writes and the only thing it reads. */
+type TemperatureState = { value: number; unit: TemperatureUnit };
 
 class Temperature extends BaseFabricInstance {
   // (deepFreeze protocol members
@@ -2062,24 +2107,30 @@ class Temperature extends BaseFabricInstance {
 
   /** The codec singleton: the source of truth for encoding. */
   static #codec = Object.freeze(
-    new (class TemperatureCodec extends BaseNonterminalCodec {
+    new (class TemperatureCodec
+      extends BaseNonterminalCodec<TemperatureState> {
       constructor() {
         super('Temperature@1', Temperature);
       }
 
       /** Extract essential state (shallow). */
-      encode(value: Temperature): FabricValue {
+      encode(value: Temperature): TemperatureState {
         return { value: value.value, unit: value.unit };
+      }
+
+      /** Accept only the state this codec writes. */
+      canDecode(state: FabricValue): state is TemperatureState {
+        return isPlainObject(state) && (typeof state.value === "number") &&
+          TEMPERATURE_UNITS.has(state.unit as string);
       }
 
       /** Produce an instance from essential state (shallow). */
       decode(
         _typeTag: string,
-        state: FabricValue,
+        state: TemperatureState,
         _env: LiveEnvironment,
       ): FabricValue {
-        const s = state as { value: number; unit: TemperatureUnit };
-        return new Temperature(s.value, s.unit);
+        return new Temperature(state.value, state.unit);
       }
     })(),
   );
@@ -2091,14 +2142,12 @@ class Temperature extends BaseFabricInstance {
 }
 ```
 
-> **Runtime validation in `decode()`.** The `TemperatureCodec.decode()`
-> example above uses `state as { value: number; unit: TemperatureUnit }` — a
-> bare type cast with no runtime validation. This is acceptable in a short
-> illustrative example, but **production `decode()` implementations must
-> validate the shape of `state` at runtime** before using it. The `state`
-> parameter has been through encoding and decoding; it may not
-> conform to the expected TypeScript type. See Section 7.4 for the full
-> rationale.
+> **Runtime validation in `canDecode()`.** `TemperatureCodec.canDecode()`
+> above is what lets `decode()` read `state.value` and `state.unit`
+> without a cast: the state has been through encoding and decoding and need
+> not conform to any TypeScript type until something checks it at run time.
+> Every codec owes that check, and `canDecode()` is where the cheap part of it
+> goes. See Section 7.4 for the full rationale.
 
 **Why the protocol matters.** Without the codec protocol, the encoding
 system would see a `Temperature` as an opaque object and either reject it or
@@ -2110,8 +2159,8 @@ codec system:
 2. Encodes that state (recursively handling any nested `FabricValue`s)
    and wraps it with the tag from `codec.tagForValue(value)`.
 3. On decoding, routes the tag back to the codec and calls
-   `codec.decode(tag, state, env)` to produce a real `Temperature`
-   instance with its methods intact.
+   `codec.decode(tag, state, env)`, which checks `canDecode()` and then
+   produces a real `Temperature` instance with its methods intact.
 
 **Reference types and `LiveEnvironment`.** The `Temperature` example
 above is a simple value type -- its codec's `decode()` creates a fresh

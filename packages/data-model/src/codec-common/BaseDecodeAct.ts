@@ -260,6 +260,27 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
     let decoded: FabricValue;
 
     try {
+      // Every state is offered to the codec before it is decoded, which is
+      // what lets a `decode()` be written for the states its codec accepts
+      // rather than for everything its format can carry. Inside the `try`
+      // because a codec's own code runs here, and a predicate that throws is
+      // a fault of the same kind as one thrown from the decoding.
+      const accepted = terminal
+        ? (matched as TerminalCodec<Encoded>).canDecode(rawState)
+        : (matched as NonterminalCodec).canDecode(state as FabricValue);
+
+      if (!accepted) {
+        // Reported rather than raised, like every other malformation off a
+        // channel: `reportMalformed()` is what settles it against leniency,
+        // and strictly what it raises passes back out through the `catch`
+        // below untouched.
+        return this.reportMalformed(
+          tag,
+          state,
+          "state is not one this codec decodes",
+        );
+      }
+
       decoded = terminal
         ? (matched as TerminalCodec<Encoded>).decode(tag, rawState, this.env)
         : (matched as NonterminalCodec).decode(

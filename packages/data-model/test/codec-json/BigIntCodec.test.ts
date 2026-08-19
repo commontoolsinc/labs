@@ -75,6 +75,24 @@ describe("BigIntCodec", () => {
       });
     });
 
+    describe("canDecode()", () => {
+      it("returns `true` for string state", () => {
+        expect(codec.canDecode("Kg")).toBe(true);
+      });
+
+      it("returns `false` for state that is not a string", () => {
+        expect(codec.canDecode(42)).toBe(false);
+        expect(codec.canDecode(null)).toBe(false);
+        expect(codec.canDecode({ bad: true })).toBe(false);
+      });
+
+      it("returns `true` for a string that is not valid base64", () => {
+        // Validity of the contents is `decode()`'s question, that being the
+        // same work as the decoding.
+        expect(codec.canDecode("")).toBe(true);
+      });
+    });
+
     describe("decode()", () => {
       it("decodes unpadded base64url input", () => {
         // "Kg" is the standard unpadded base64url encoding of 42n.
@@ -87,32 +105,6 @@ describe("BigIntCodec", () => {
         // web-standard Uint8Array.fromBase64.
         const result = codec.decode(expectedTag, "Kg==", env);
         expect(result).toBe(42n);
-      });
-
-      it("decodes non-string state to `ProblematicValue`", () => {
-        const result = codec.decode(
-          expectedTag,
-          42,
-          env,
-        );
-        expect(result).toBeInstanceOf(ProblematicValue);
-        const prob = result as unknown as ProblematicValue;
-        expect(prob.wireTypeTag).toBe("BigInt@1");
-        expect(prob.state).toBe(42);
-      });
-
-      it("decodes `null` state to `ProblematicValue`", () => {
-        const result = codec.decode(expectedTag, null, env);
-        expect(result).toBeInstanceOf(ProblematicValue);
-      });
-
-      it("decodes object state to `ProblematicValue`", () => {
-        const result = codec.decode(
-          expectedTag,
-          { bad: true },
-          env,
-        );
-        expect(result).toBeInstanceOf(ProblematicValue);
       });
 
       it("decodes empty base64 string to `ProblematicValue`", () => {
