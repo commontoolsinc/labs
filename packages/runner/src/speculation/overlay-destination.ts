@@ -822,8 +822,16 @@ export class SpeculationOverlayDestination
     const key = `${space}\0${sidecarId}`;
     if (!this.#intentSidecarStates.has(key)) {
       this.#intentSidecarStates.set(key, { hints: new Set() });
-      this.#watchIntentSidecar(space, sidecarId);
     }
+    // Keep the sidecar WATCHED (contract point 2(ii)) — kicked on EVERY
+    // fire, not only the first on this sidecar: a covered watch is a
+    // replica no-op (the selector tracker's exact-match fast path, no
+    // wire), and a watch whose first pull FAILED transiently dropped its
+    // tracker entry, so the next fire re-issues it instead of leaving
+    // the stream unwatched — NO frame would arrive — until the set
+    // drains (independent review of W2, MIN-4; the old sink's single
+    // `if (!synced) sync()` kick had the same hole).
+    this.#watchIntentSidecar(space, sidecarId);
     // The IMMEDIATE raw check (design contract point 2(iii)): a
     // duplicate fire whose consequence already landed (a re-delivered
     // caller-supplied event id — round-2 thread T25) resolves HERE, and

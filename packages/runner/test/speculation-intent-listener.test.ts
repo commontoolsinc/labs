@@ -46,9 +46,13 @@ import {
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { MemorySpace } from "../src/storage/interface.ts";
+import type {
+  IStorageNotification,
+  MemorySpace,
+} from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { SpeculationOverlayDestination } from "../src/speculation/overlay-destination.ts";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import {
   flushMicrotasks,
@@ -91,10 +95,14 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
     destination.trackIntent(SPACE, SIDECAR, "evt-3");
     expect(destination.pendingIntentCount).toBe(3);
     // The listener is installed ONCE, and the sidecar is kept watched
-    // through the schema-less selector (contract points 2(i)/2(ii)).
+    // through the schema-less selector (contract points 2(i)/2(ii)) —
+    // the watch is kicked on EVERY fire (a covered watch is a replica
+    // no-op; a transiently failed one is retried — review MIN-4).
     expect(destination.intentListenerInstalled).toBe(true);
     expect(scripted.subscribers.size).toBe(1);
-    expect(scripted.syncs).toEqual([`${SPACE}\0${SIDECAR}\0space`]);
+    expect(scripted.syncs).toEqual(
+      Array(3).fill(`${SPACE}\0${SIDECAR}\0space`),
+    );
 
     // The appends land (no marks yet): the intents stay outstanding.
     scripted.deliver(SPACE, SIDECAR, (value) => {
@@ -485,6 +493,32 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
     expect(edits()).toBe(0);
     destination.close();
   });
+
+  it("review MIN-4: the sidecar WATCH is re-kicked on EVERY fire, not once per sidecar — a transient failure of the first `sync` (loud: `intent-watch-failed`) heals on the next trackIntent on that stream instead of leaving it unwatched until the set drains (mutation: kick only when the sidecar state is created → the second fire issues no sync)", async () => {
+    const { scripted, destination } = scriptedDestination();
+    const failures = () =>
+      getLoggerCountsBreakdown()["speculation-overlay"]
+        ?.["intent-watch-failed"]?.total ?? 0;
+    const failuresBefore = failures();
+    scripted.seed(SPACE, SIDECAR, { entries: [] });
+    // The first fire's watch kick fails transiently (the pull errored:
+    // the replica dropped its tracker entry, nothing is watching).
+    scripted.failNextSync();
+    destination.trackIntent(SPACE, SIDECAR, "evt-1");
+    expect(scripted.syncs.length).toBe(1);
+    await flushMicrotasks();
+    expect(failures()).toBe(failuresBefore + 1);
+    expect(destination.pendingIntentCount).toBe(1);
+    // A second fire on the SAME sidecar while the first is outstanding
+    // re-issues the watch (a covered watch is a replica no-op; a failed
+    // one is retried here).
+    destination.trackIntent(SPACE, SIDECAR, "evt-2");
+    expect(scripted.syncs.length).toBe(2);
+    expect(scripted.syncs[1]).toBe(`${SPACE}\0${SIDECAR}\0space`);
+    await flushMicrotasks();
+    expect(failures()).toBe(failuresBefore + 1);
+    destination.close();
+  });
 });
 
 // ─── e2e: the real replica, the real relay, a real serving side ─────────
@@ -649,7 +683,7 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     cancelDemand();
   });
 
-  it("pin 10 (+1 e2e): the served mark resolves the intent through the REAL notification path — by the time the mark is visible in the client replica the intent is already resolved (no extra turn), with O(1) visits on that check; the echo retires and the durable ack settles", async () => {
+  it("pin 10 (+1 e2e): the served mark resolves the intent through the REAL notification path — the check has run by the time `synced()` / `idle()` armed at the mark's frame resolve, and by the time the mark is visible on a macrotask poll (no extra turn), with O(1) visits on that check; the echo retires and the durable ack settles (mutation: defer the check to a macrotask)", async () => {
     const { manager, runtime } = openClient({ serverExecution: true });
     const engine = await server.engineForSpace(space);
     const { argument, result } = await standUp(runtime, "pin10");
@@ -696,6 +730,7 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     });
     const overlay = runtime.speculationOverlay!;
     expect(overlay.pendingIntentCount).toBe(1);
+    expect(overlay.intentListenerInstalled).toBe(true);
 
     await waitUntil(
       () => sidecarIdsIn(engine).length === 1,
@@ -705,6 +740,39 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     const clientEntry = () =>
       (manager.open(space).replica.getDocument(sidecarId as never, "space")
         ?.value as StreamEventsDocValue | undefined)?.entries?.[0];
+    // Design pin 10's statement proper (the timing regression guard,
+    // since the watch left the scheduler): the check HAS RUN by the time
+    // `storageManager.synced()` / `runtime.idle()` resolve after the
+    // frame that carries the mark. Observed from a subscriber registered
+    // AFTER the listener (the relay runs subscribers in insertion order,
+    // so the listener has already queued its microtask check when this
+    // one sees the same notification), which arms both barriers AT that
+    // frame — their continuations must find the intent resolved
+    // (mutation: defer the check to a macrotask → both read 1).
+    const afterMarkFrame = new Map<string, number>();
+    const probe: IStorageNotification = {
+      next: (notification) => {
+        if (notification.type === "reset" || afterMarkFrame.size > 0) {
+          return undefined;
+        }
+        let touchesSidecar = false;
+        for (const change of notification.changes) {
+          if (change.address.id === sidecarId) touchesSidecar = true;
+        }
+        if (!touchesSidecar || clientEntry()?.consequenced !== true) {
+          return undefined;
+        }
+        afterMarkFrame.set("armed", overlay.pendingIntentCount);
+        manager.synced().then(() => {
+          afterMarkFrame.set("synced", overlay.pendingIntentCount);
+        });
+        runtime.idle().then(() => {
+          afterMarkFrame.set("idle", overlay.pendingIntentCount);
+        });
+        return undefined;
+      },
+    };
+    manager.subscribe(probe);
     // The mark becomes VISIBLE in the client replica in some frame; the
     // predicate polls on macrotask ticks, so the frame's microtask check
     // has run by the time the predicate first reads true — the intent
@@ -715,6 +783,17 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     );
     expect(overlay.pendingIntentCount).toBe(0);
     expect(overlay.intentListenerInstalled).toBe(false);
+    await waitUntil(
+      () => afterMarkFrame.has("synced") && afterMarkFrame.has("idle"),
+      "the synced()/idle() barriers armed at the mark's frame",
+    );
+    manager.unsubscribe(probe);
+    // Still outstanding INSIDE the frame's dispatch (the check never acts
+    // inline — contract point 3) ...
+    expect(afterMarkFrame.get("armed")).toBe(1);
+    // ... and resolved by the time either barrier armed there resolves.
+    expect(afterMarkFrame.get("synced")).toBe(0);
+    expect(afterMarkFrame.get("idle")).toBe(0);
     // Every notified check on a one-entry sidecar is O(1).
     expect(overlay.intentCheckMaxVisits).toBeLessThanOrEqual(2);
     // No scheduler effect ever existed for the watch.

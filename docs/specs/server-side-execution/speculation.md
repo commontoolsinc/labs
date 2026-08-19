@@ -121,12 +121,21 @@ On each pushed `derived` commit with `derivedThrough = W` and
    write on that doc is the delivery vehicle in practice — so the marks
    arrive; the watch is a NON-REACTIVE storage-notification listener
    keyed on the outstanding set, outside the scheduler (item 4 — no
-   effect, no transaction, no CFC probe, no demand edge; the check
-   runs in a microtask and is O(outstanding), never O(history)). Impl:
+   effect, no transaction, no CFC probe, no demand edge, never a
+   dependency on history). Its cost, as built (W2; the ruling says
+   nothing about cost): a notified check runs in a microtask and
+   costs O(outstanding + hinted indices) — a hint that misses (the
+   index moved) or a change with no index (an append) degrades to a
+   raw backward scan over the entries appended AFTER the tracked one,
+   a plain array walk, O(k) per notification while an intent stays
+   outstanding on a busy shared stream; and the immediate check at
+   `trackIntent` walks the raw array once, O(E), for an id whose entry
+   is not yet present (the T25 re-fire needs it). Impl:
    `overlay-destination.ts` `trackIntent` / `#checkIntents` over
    `speculation/doc-notification-listener.ts`; pinned in
    `speculation-intent-listener.test.ts` (pins 1–11, each with its
-   mutation) and re-seamed in `event-append-client.test.ts`.
+   mutation or OFF witness, plus the review pins) and re-seamed in
+   `event-append-client.test.ts`.
 3. Retire overlay entries whose `origin` is `input` once their authored
    commit is acked AND `W ≥` that commit's seq AND — the ARRIVAL GATE
    (RULED 2026-08-16, landed with fan-out stage A) — every doc INSTANCE

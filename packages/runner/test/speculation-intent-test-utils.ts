@@ -39,6 +39,9 @@ export type ScriptedIntentManager = {
   readonly subscribers: Set<IStorageNotification>;
   /** `sync` calls seen: `${space}\0${id}\0${scope}`. */
   readonly syncs: string[];
+  /** Make the NEXT `sync` resolve `{ error }` (a transient pull failure);
+   * later calls succeed again. */
+  failNextSync(error?: unknown): void;
   /** Raw doc reads seen. */
   readonly reads: string[];
   /** Whether a notification dispatch is currently on the stack (a
@@ -79,6 +82,7 @@ export const scriptedIntentManager = (): ScriptedIntentManager => {
   const syncs: string[] = [];
   const reads: string[] = [];
   let depth = 0;
+  let nextSyncError: unknown = undefined;
   const key = (space: MemorySpace, id: string) => `${space}\0${id}`;
   const dispatch = (notification: StorageNotification) => {
     depth += 1;
@@ -112,6 +116,11 @@ export const scriptedIntentManager = (): ScriptedIntentManager => {
       },
       sync: (id: string, _selector: unknown, scope?: string) => {
         syncs.push(`${space}\0${id}\0${scope ?? ""}`);
+        if (nextSyncError !== undefined) {
+          const error = nextSyncError;
+          nextSyncError = undefined;
+          return Promise.resolve({ error });
+        }
         return Promise.resolve({ ok: {} });
       },
     }),
@@ -157,6 +166,9 @@ export const scriptedIntentManager = (): ScriptedIntentManager => {
     syncs,
     reads,
     dispatching: () => depth > 0,
+    failNextSync: (error = new Error("transient pull failure")) => {
+      nextSyncError = error;
+    },
     seed: (space, id, value) => {
       docs.set(key(space, id), { value });
     },
