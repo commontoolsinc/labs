@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import {
+  deterministicCompileError,
   isDeterministicCompileFailure,
   markDeterministicCompileFailure,
 } from "../src/harness/compile-failure.ts";
@@ -34,6 +35,13 @@ describe("markDeterministicCompileFailure", () => {
     const jscStyle = new Error("Out of memory");
     expect(markDeterministicCompileFailure(jscStyle)).toBe(jscStyle);
     expect(isDeterministicCompileFailure(jscStyle)).toBe(false);
+  });
+
+  it("constructs a pre-classified deterministic error", () => {
+    const error = deterministicCompileError("no body emitted");
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("no body emitted");
+    expect(isDeterministicCompileFailure(error)).toBe(true);
   });
 
   it("still marks a stack overflow", () => {

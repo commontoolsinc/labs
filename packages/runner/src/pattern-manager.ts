@@ -38,8 +38,8 @@ import {
 import { createRef } from "./create-ref.ts";
 import { interleaveCompileYield } from "./harness/compile-interleave.ts";
 import {
+  deterministicCompileError,
   isDeterministicCompileFailure,
-  markDeterministicCompileFailure,
 } from "./harness/compile-failure.ts";
 import { compilerStack } from "./harness/deferred-compiler-stack.ts";
 import type {
@@ -1446,10 +1446,8 @@ export class PatternManager {
         },
       );
       if (compiled.entryIdentity !== entryIdentity) {
-        throw markDeterministicCompileFailure(
-          new Error(
-            `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
-          ),
+        throw deterministicCompileError(
+          `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
         );
       }
       const cachedModules: CachedCompiledModule[] = compiled.modules.map(

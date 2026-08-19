@@ -63,7 +63,10 @@ import {
   verifyModuleGraph,
 } from "../sandbox/module-record-verifier.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
-import { markDeterministicCompileFailure } from "./compile-failure.ts";
+import {
+  deterministicCompileError,
+  markDeterministicCompileFailure,
+} from "./compile-failure.ts";
 import {
   COMPILE_INTERLEAVES_EVENT_LOOP,
   interleaveCompileYield,
@@ -1123,10 +1126,8 @@ export class Engine extends EventTarget {
     );
     for (const file of moduleFiles) {
       if (!emitted.has(file.name)) {
-        throw markDeterministicCompileFailure(
-          new Error(
-            `Recompile from source produced no body for '${file.name}'`,
-          ),
+        throw deterministicCompileError(
+          `Recompile from source produced no body for '${file.name}'`,
         );
       }
     }

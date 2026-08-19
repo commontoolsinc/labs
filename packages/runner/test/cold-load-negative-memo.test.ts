@@ -13,6 +13,11 @@ describe("ColdLoadNegativeMemo", () => {
     expect(memo.suppresses("identity", "v1")).toBe(false);
   });
 
+  it("rejects a non-positive or fractional capacity", () => {
+    expect(() => new ColdLoadNegativeMemo(0)).toThrow(RangeError);
+    expect(() => new ColdLoadNegativeMemo(1.5)).toThrow(RangeError);
+  });
+
   it("evicts distinct identities in insertion order", () => {
     const memo = new ColdLoadNegativeMemo(2);
     memo.add("oldest", "v1");

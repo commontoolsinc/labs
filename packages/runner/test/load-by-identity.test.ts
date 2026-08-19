@@ -1165,6 +1165,40 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     });
   });
 
+  it("T8f: a recompiled-identity mismatch is memoized", async () => {
+    const rt = newRuntime();
+    const fixture = await storedModules("/main.tsx", [{
+      name: "/main.tsx",
+      contents: "import { pattern } from 'commonfabric';\n" +
+        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
+    }]);
+    await persist(rt, fixture);
+
+    // Compiler drift: the recompile succeeds but emits a different entry
+    // identity than the stored reference. That mismatch is deterministic for
+    // this runtime version, so the memo suppresses the second attempt.
+    const rt2 = newRuntime();
+    const engine2 = rt2.harness as Engine;
+    let coldCompiles = 0;
+    const original = engine2.compileResolvedToRecordGraph.bind(engine2);
+    engine2.compileResolvedToRecordGraph = (async (
+      ...args: Parameters<typeof original>
+    ) => {
+      coldCompiles++;
+      const compiled = await original(...args);
+      return { ...compiled, entryIdentity: `${compiled.entryIdentity}-drift` };
+    }) as typeof engine2.compileResolvedToRecordGraph;
+    const load = () =>
+      rt2.patternManager.loadPatternByIdentity(
+        fixture.entryIdentity,
+        "default",
+        space,
+      );
+    expect(await load()).toBeUndefined();
+    expect(await load()).toBeUndefined();
+    expect(coldCompiles).toBe(1);
+  });
+
   it("retries a coverage-collector failure", async () => {
     class FailOnceCoverage extends PatternCoverageCollector {
       #failed = false;

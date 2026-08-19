@@ -51,6 +51,11 @@ export function markDeterministicCompileFailure<T>(error: T): T {
   return error;
 }
 
+/** Construct an Error already classified as a deterministic compile failure. */
+export function deterministicCompileError(message: string): Error {
+  return markDeterministicCompileFailure(new Error(message));
+}
+
 /** True only for throwables stamped by this module. */
 export function isDeterministicCompileFailure(error: unknown): boolean {
   return typeof error === "object" && error !== null &&
