@@ -958,21 +958,29 @@ the schema-sanitized `value` (with `linkedStringCount`) when `resultSchema` was
 given. `resultSchema` is how a caller reads what the pattern computed: without
 one there is no `value` at all, and with one the inert positions the schema
 models — numbers, booleans, `enum` and `const` strings — come back as
-themselves, while unconstrained strings and anything unmodeled come back as
-opaque links. The result is measured as it arrived: the framework's own result
-keys (`$NAME`, `$UI` and the other rendering variants) are named to the
-sanitizer as reserved, so a schema describing only the computed fields does not
-have to declare them and does not lose its numbers to the whole-object seal an
-unmodeled key would otherwise cause. Reserved only excuses a key from the
-unmodeled-key rules: one the schema does model — through a `$ref` or a
-combinator branch as readily as at the top level — is measured against what the
-schema says about it and kept, and one it does not model is dropped rather than
-shown. The ordinary outbound swap turns `resultRef` (and any link strings inside
-`value`) into `cfh:a:` tokens at the model boundary, and the ordinary inbound
-swap resolves such a token passed back through `inputs`; the tool itself carries
-no handle code. The persisted tool-output artifact keeps the raw reference, the
-raw result value, and the `pieceId` — a bare fabric identifier the handle
-boundary never swaps, so it stays out of the model-facing rendering.
+themselves, while unconstrained strings and anything unmodeled are withheld as
+text and come back as the ADDRESS of the withheld position — the result
+reference plus the sealed path, which the outbound swap renders as a `cfh:a:`
+token. A run_pattern result is fabric-backed by construction, so every position
+the schema cannot release still names a place: `describe_handle` answers its
+shape, and a later `run_pattern` wires it by reference, following whatever links
+sit on the path. (`linkedStringCount` still counts the string positions withheld
+as text.) A sealed `opaque:` link an author declared in the schema, or one
+lifted out of another output, is not this run's to address and passes through —
+and remains refused as an input. The result is measured as it arrived: the
+framework's own result keys (`$NAME`, `$UI` and the other rendering variants)
+are named to the sanitizer as reserved, so a schema describing only the computed
+fields does not have to declare them and does not lose its numbers to the
+whole-object seal an unmodeled key would otherwise cause. Reserved only excuses
+a key from the unmodeled-key rules: one the schema does model — through a `$ref`
+or a combinator branch as readily as at the top level — is measured against what
+the schema says about it and kept, and one it does not model is dropped rather
+than shown. The ordinary outbound swap turns `resultRef` (and any link strings
+inside `value`) into `cfh:a:` tokens at the model boundary, and the ordinary
+inbound swap resolves such a token passed back through `inputs`; the tool itself
+carries no handle code. The persisted tool-output artifact keeps the raw
+reference, the raw result value, and the `pieceId` — a bare fabric identifier
+the handle boundary never swaps, so it stays out of the model-facing rendering.
 
 A result that settles to nothing names its cause when one was observed: when the
 settled result fails the declared `resultSchema` or holds no fields of its own

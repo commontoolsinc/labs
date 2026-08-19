@@ -10,6 +10,7 @@ import {
   createLLMFriendlyLink,
   FRAMEWORK_RESULT_KEYS,
   matchLLMFriendlyLink,
+  type NormalizedFullLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
 import {
@@ -26,6 +27,7 @@ import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { fabricRuntimeObservations } from "../fabric-observations.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
+  addressSealedPositions,
   isSealedOpaqueLinkObject,
   parseStructuredResultSchema,
   validateAndSanitizeStructuredResult,
@@ -173,7 +175,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           { type: "object", additionalProperties: true },
         ],
         description:
-          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself, anything else as an opaque link. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
+          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
       },
       register: {
         type: "object",
@@ -242,6 +244,36 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
     }],
   } satisfies JSONSchema,
   tags: ["fabric", "pattern", "piece"],
+};
+
+/**
+ * The `@link` object addressing one sealed position of a result: the result
+ * cell's link extended by the sealed path. It rides as a whole object, which
+ * the outbound swap mints from in one piece — the free-text scanner would
+ * stop an address short at a property name's whitespace. A path the link
+ * grammar cannot round-trip — an empty final segment parses back as its
+ * parent — answers `undefined`, keeping the seal rather than becoming a
+ * reference to the wrong cell.
+ */
+export const sealedPositionLink = (
+  resultLink: NormalizedFullLink,
+  path: readonly (string | number)[],
+  space: NormalizedFullLink["space"],
+): { "@link": string } | undefined => {
+  const segments = [...resultLink.path, ...path.map(String)];
+  const ref = createLLMFriendlyLink({ ...resultLink, path: segments }, space);
+  try {
+    const parsed = parseLLMFriendlyLink(ref, space);
+    if (
+      parsed.path.length !== segments.length ||
+      parsed.path.some((segment, i) => segment !== segments[i])
+    ) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return { "@link": ref };
 };
 
 const errorMessage = (error: unknown): string =>
@@ -938,7 +970,19 @@ export const runPatternTool: HarnessToolDefinition<
           opaqueHandleId: outputId,
           reservedKeys: FRAMEWORK_RESULT_KEYS,
         });
-        value = sanitized.value;
+        // A position the schema could not release as text is fabric-backed
+        // by construction — the result reference plus the sealed path is its
+        // address — so it goes over as that address rather than as a dead
+        // output-scoped link. The outbound swap renders each one as a handle
+        // token, which describe_handle answers and a later run_pattern can
+        // wire by reference. `linkedStringCount` still counts the string
+        // positions withheld as text.
+        const resultLink = resultCell.getAsNormalizedFullLink();
+        value = addressSealedPositions(
+          sanitized.value,
+          sanitized.sealedPaths,
+          (path) => sealedPositionLink(resultLink, path, space),
+        );
         linkedStringCount = sanitized.linkedStringCount;
       } catch (error) {
         valueError = errorMessage(error);
