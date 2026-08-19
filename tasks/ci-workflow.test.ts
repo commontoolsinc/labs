@@ -491,3 +491,43 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
     assert(callers.includes(name), `${name}: no deploy.sh call found`);
   }
 });
+
+Deno.test("every test-records artifact name is store-safe and unique", async () => {
+  // The relay derives each store object's name from the artifact's name
+  // through objectNameSlug, which collapses characters unsafe in object
+  // names. Two artifacts in one run whose names differ only by collapsed
+  // characters would produce one object name, and the second would be
+  // mistaken for an idempotent re-ship and silently lost. Holding every
+  // literal to the already-safe alphabet makes the slug the identity on
+  // these names, so distinct names stay distinct in the store. Uniqueness
+  // matters per workflow: object names carry the run id, so two different
+  // workflows can reuse a name.
+  let shipSteps = 0;
+  for (const name of await workflowNames()) {
+    const contents = withoutComments(await workflow(name));
+    const artifacts: string[] = [];
+    const chunks = contents.split("uses: ./.github/actions/test-records-ship");
+    for (const chunk of chunks.slice(1)) {
+      shipSteps++;
+      const artifact = chunk.match(/^\s*artifact: (.+)$/m);
+      assert(artifact, `${name}: a ship step with no artifact input`);
+      artifacts.push(artifact[1].trim());
+    }
+    for (const artifact of artifacts) {
+      const literal = artifact.replaceAll(/\$\{\{[^}]*\}\}/g, "");
+      assert(
+        /^[A-Za-z0-9._-]*$/.test(literal),
+        `${name}: artifact name \`${artifact}\` has characters the store ` +
+          "slug would collapse",
+      );
+    }
+    assertEquals(
+      new Set(artifacts).size,
+      artifacts.length,
+      `${name}: duplicate test-records artifact names`,
+    );
+  }
+  // The count pins the search itself: zero found steps would mean the
+  // extraction broke, not that the repository stopped shipping records.
+  assert(shipSteps >= 14, `only ${shipSteps} ship steps found`);
+});

@@ -54,6 +54,7 @@ decision is reversed or superseded).
 - [Server-primary execution](server-side-execution/README.md)
 - [Verifiable execution](verifiable-execution/README.md)
 - [Webhook ingress](webhook-ingress/README.md)
+- [Test-run records](test-records.md)
 
 ### Contextual flow control and security
 

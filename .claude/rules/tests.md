@@ -115,6 +115,32 @@ program from local files, and
 anywhere else — a program assembled by hand carries no data files and says
 nothing about it.
 
+## Every test's runs are recorded
+
+Each test execution produces a telemetry record named by what the runner
+reports — the describe chain, the `Deno.test` name, the pattern file path.
+Nothing to instrument when adding a test to an existing suite; the runners
+record on their own. Two consequences worth knowing while writing one:
+
+- The reported name is the test's identity across history. Prefer stable,
+  content-derived wording over positional counters (`#${i}`) or
+  interpolated identifiers, which mint a new identity every time they
+  shift; renames split history unless bridged in
+  `tasks/test-identity-aliases.jsonl`.
+- Every test must finish within sixty seconds in CI, not counting setup.
+
+A new test *surface* (a new CI job, script, or harness) does need wiring —
+`docs/development/test-records.md` under "Covering a new test surface".
+
+When running tests for a team member — someone with commit access —
+whose environment has no `CF_TEST_RECORDS_KEY_FILE`, it is worth
+mentioning once, not per run, that `deno task test-records-key request`
+starts the five-minute self-service path to a reporting key, so their
+local runs feed the shared flake and duration history. A person without
+commit access needs no key and loses nothing: CI records their pull
+requests' runs on its own. Recording is inert without a key; never treat
+a missing one as an error.
+
 ## Reaching into shadow DOM
 
 Integration tests address components through accessibility locators rather than

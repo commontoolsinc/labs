@@ -60,6 +60,11 @@ can run their own spaces or use hosted versions.
      [Installing `cf` on PATH](./packages/cli/README.md#installing-cf-on-path).
 5. Start local dev servers: `./scripts/start-local-dev.sh`
 6. Access the application at <http://localhost:8000>
+7. Team members: get a test-reporting key (`deno task test-records-key request`)
+   so your local test runs feed the shared flake and duration history — see
+   [test-records.md](./docs/development/test-records.md). Contributing without
+   commit access? Then there is nothing to set up here: tests run identically
+   without a key, and CI records your pull requests' runs on its own.
 
 Installing
 [Deno 2 directly](https://docs.deno.com/runtime/getting_started/installation/)
@@ -134,7 +139,9 @@ When adding or rolling repository dependencies, follow the
 ### Development Practices
 
 - **CI/CD**: All changes must pass automated checks before merging
-- **Testing**: Tests are critical - run with `deno task test`
+- **Testing**: Tests are critical - run with `deno task test`. Every run can
+  report per-test records to the shared history; see
+  [test-records.md](./docs/development/test-records.md)
 - **Linting**: Use `deno task check` for type checking
 - **Formatting**: Always run `deno fmt` before committing
 - See [CLAUDE.md](./CLAUDE.md) for detailed coding guidelines

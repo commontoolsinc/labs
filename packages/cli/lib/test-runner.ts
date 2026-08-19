@@ -32,6 +32,11 @@
 
 import { basename } from "@std/path";
 
+import {
+  FragmentWriter,
+  repositoryRelativePath,
+} from "@commonfabric/test-support/records";
+
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { Identity } from "@commonfabric/identity";
@@ -1952,8 +1957,28 @@ export async function runTests(
   let totalFailed = 0;
   let totalSkipped = 0;
 
+  // One record per file, spooled with the file's final verdict — the one
+  // that includes the runtime-error, console, and idempotence checks below,
+  // not just the assertion results. Inert unless CF_TEST_RECORDS_DIR is
+  // set; the integration orchestrator clears that variable for its cf
+  // children and records from its own clock instead.
+  const recordsFragment = FragmentWriter.openForRun();
+  const recordFile = (testPath: string, failed: boolean, durationMs: number) =>
+    recordsFragment?.append({
+      line: "record",
+      test: {
+        k: "pattern",
+        s: "patterns",
+        n: repositoryRelativePath(testPath),
+      },
+      outcome: failed ? "fail" : "pass",
+      durationMs: Math.round(durationMs),
+    });
+
   for (const testPath of paths) {
     console.log(`\n${basename(testPath)}`);
+    const failedBefore = totalFailed;
+    const fileStarted = performance.now();
 
     // `runTestPattern` RAISES a teardown that did not complete, which is the
     // right contract for a direct caller — the vintage capture is about to read
@@ -1967,6 +1992,7 @@ export async function runTests(
     } catch (error) {
       totalFailed++;
       console.log(`  ✗ ${formatError(error)}`);
+      recordFile(testPath, true, performance.now() - fileStarted);
       continue;
     }
     allResults.push(result);
@@ -2106,7 +2132,10 @@ export async function runTests(
         }
       }
     }
+
+    recordFile(testPath, totalFailed > failedBefore, result.totalDurationMs);
   }
+  recordsFragment?.close();
 
   // Summary
   const totalTime = allResults.reduce((sum, r) => sum + r.totalDurationMs, 0);
