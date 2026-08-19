@@ -569,12 +569,14 @@ function markRequestHashPendingCommit(
   hash: string,
   getPreviousCallHash: () => string | undefined,
   setPreviousCallHash: (hash: string | undefined) => void,
+  onRollback?: () => void,
 ): void {
   const previousCallHash = getPreviousCallHash();
   setPreviousCallHash(hash);
   tx.addCommitCallback((_committedTx, commitResult) => {
     if (commitResult.error && getPreviousCallHash() === hash) {
       setPreviousCallHash(previousCallHash);
+      onRollback?.();
     }
   });
 }
@@ -1087,12 +1089,17 @@ export function generateText(
       return;
     }
 
+    const previousRequestQueued = lastRequestQueued;
+    lastRequestQueued = !!queueName;
     markRequestHashPendingCommit(
       tx,
       hash,
       () => previousCallHash,
       (next) => {
         previousCallHash = next;
+      },
+      () => {
+        lastRequestQueued = previousRequestQueued;
       },
     );
 
@@ -1102,7 +1109,6 @@ export function generateText(
       currentRun++;
     }
     const thisRun = currentRun;
-    lastRequestQueued = !!queueName;
 
     resultWithLog.set(undefined);
     errorWithLog.set(undefined);
@@ -1505,6 +1511,8 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
+      const previousRequestQueued = lastRequestQueued;
+      lastRequestQueued = !!queueName;
       markRequestHashPendingCommit(
         tx,
         hash,
@@ -1512,13 +1520,15 @@ export function generateObject<T extends Record<string, unknown>>(
         (next) => {
           previousCallHash = next;
         },
+        () => {
+          lastRequestQueued = previousRequestQueued;
+        },
       );
 
       if (hash !== currentRequestHash) {
         currentRun++;
       }
       const thisRun = currentRun;
-      lastRequestQueued = !!queueName;
 
       resultWithLog.set(undefined);
       messagesWithLog.set(undefined);
@@ -1865,12 +1875,17 @@ export function generateObject<T extends Record<string, unknown>>(
         return;
       }
 
+      const previousRequestQueued = lastRequestQueued;
+      lastRequestQueued = !!queueName;
       markRequestHashPendingCommit(
         tx,
         hash,
         () => previousCallHash,
         (next) => {
           previousCallHash = next;
+        },
+        () => {
+          lastRequestQueued = previousRequestQueued;
         },
       );
 
@@ -1880,7 +1895,6 @@ export function generateObject<T extends Record<string, unknown>>(
         currentRun++;
       }
       const thisRun = currentRun;
-      lastRequestQueued = !!queueName;
 
       resultWithLog.set(undefined);
       messagesWithLog.set(undefined);
