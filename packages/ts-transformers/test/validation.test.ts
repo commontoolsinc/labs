@@ -3420,7 +3420,7 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
-    "allows optional access inside an array-method callback on a .get() chain",
+    "still errors on optional access inside a lowered array-method callback",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
 
@@ -3437,12 +3437,8 @@ Deno.test("Reactive .get() Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(
-        errors.length,
-        0,
-        "the callback's value sites carry the access, so its '?.' runs on " +
-          "resolved values",
-      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:optional-chaining");
     },
   );
 
@@ -3487,7 +3483,7 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
-    "allows a .get() inside a plain array-method callback",
+    "allows a .get() inside a plain array map callback",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
 
@@ -3503,9 +3499,59 @@ Deno.test("Reactive .get() Validation", async (t) => {
       assertEquals(
         errors.length,
         0,
-        "a plain array-method callback runs in the pattern body, so its " +
-          "value sites carry the read into a per-element lift",
+        "map collects what the callback returns, so its value sites carry " +
+          "the read into a per-element lift",
       );
+    },
+  );
+
+  await t.step(
+    "still errors on a named reactive comparison inside a plain filter",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b", "c"];
+
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
+        const t = target.get();
+        const filtered = VALUES.filter((value) => {
+          const matches = value === t;
+          return matches;
+        });
+        return { filtered };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "still errors on a named reactive comparison inside a plain find",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b", "c"];
+
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
+        const t = target.get();
+        const found = VALUES.find((value) => {
+          const foundMatch = value === t;
+          return foundMatch;
+        });
+        return { found };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
     },
   );
 

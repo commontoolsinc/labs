@@ -86,18 +86,29 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
-### Addendum 4 (plain-array value callbacks carry pattern-owned sites)
+### Addendum 4 (a plain-array `map` callback carries pattern-owned sites)
 
-A `map`, `filter`, or `find` callback on an ordinary JavaScript array inside a
-pattern body now carries pattern-owned expression sites, the same ones the
-pattern body carries. `supportsPatternOwnedWrapperCallbackSite`
-(`policy/callback-boundary.ts`) admits the `plain-array-value` boundary
-alongside `reactive-array-method`, `pattern-builder`, and `render-builder`.
+A `map` callback on an ordinary JavaScript array inside a pattern body now
+carries pattern-owned expression sites, the same ones the pattern body carries.
+`supportsPatternOwnedWrapperCallbackSite` (`policy/callback-boundary.ts`)
+admits the `plain-array-value` boundary for that callback role, which
+`isCollectingPlainArrayMethodCallback` (`ast/call-kind.ts`) decides.
 
 The callback runs eagerly during pattern build, so its statements are pattern
 body statements that happen to be written once and executed several times. A
 value binding in one is therefore a pattern-body binding, and a reactive
 computation bound there lowers to its own lift-applied call per iteration.
+
+The permission stops at the callback's role, because the boundary kind alone is
+too coarse to carry it. `plain-array-value` also covers `filter`, `find`,
+`some`, `every`, `sort`, `flatMap`, and `reduce`, and each of those reads what
+the callback returns while it runs — as a boolean, a number, an array test, or
+the next accumulator. `map` is the one that merely collects. A lift returned to
+a predicate is an object, so `filter` keeps every element and `find` matches
+the first; those callbacks therefore keep the diagnostic. The test that admits
+a callback also requires it to be argument zero of a method resolved on
+`Array`/`ReadonlyArray`, so a comparator in a later argument position and a
+`map` belonging to some other type are both excluded.
 
 Two behaviors change:
 
@@ -109,9 +120,10 @@ Two behaviors change:
   `isInRestrictedReactiveContext` suppresses the "wrap it in `computed()`"
   errors that the same binding draws outside JSX.
 - `pattern-context:get-call` and `pattern-context:optional-chaining` no longer
-  fire for a read that the callback's own value sites can carry, so
+  fire for a read that a `map` callback's own value sites can carry, so
   `["-", "+"].map((sep) => rows.get().join(sep))` compiles to an array of
-  per-separator lifts instead of being rejected.
+  per-separator lifts instead of being rejected. Both still fire in the
+  result-interpreting callbacks.
 
 A reactive array-method callback keeps the older, stricter rule, and the
 difference is structural rather than stylistic: that callback is lowered into a
@@ -157,7 +169,8 @@ each finding:
   reactive array-method callback, whose callback becomes a sub-pattern over
   per-element cells — remains outside the language, as does a read on a value
   that is not a cell. Addendum 4 carries the same reasoning into a plain-array
-  value callback, which does supply a site.
+  `map` callback, which does supply a site; the array callbacks whose result
+  the method reads as it runs do not.
 
   What settled it: the matrix already blessed the JSX spelling, so the earlier
   rule was really "no eager reads outside JSX" — which made extracting a JSX

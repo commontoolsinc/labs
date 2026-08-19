@@ -6,6 +6,7 @@ import {
   detectCallKind,
   getPatternBuilderCallbackArgument,
   getPatternToolCallbackArgument,
+  isCollectingPlainArrayMethodCallback,
 } from "../ast/call-kind.ts";
 import { isEventHandlerJsxAttribute } from "../ast/event-handlers.ts";
 
@@ -404,7 +405,8 @@ export function getCallbackBoundarySemantics(
     isPatternToolCallback: supportedKind === "pattern-tool",
     supportsPatternOwnedWrapperCallbackSite: supportedKind ===
         "reactive-array-method" ||
-      supportedKind === "plain-array-value" ||
+      (supportedKind === "plain-array-value" &&
+        isCollectingPlainArrayMethodCallback(callback, checker)) ||
       supportedKind === "pattern-builder" ||
       supportedKind === "render-builder",
     supportsPatternOwnedStatements: supportedKind === "reactive-array-method" ||

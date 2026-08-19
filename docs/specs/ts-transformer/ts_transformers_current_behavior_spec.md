@@ -489,11 +489,14 @@ Diagnostics emitted in all modes:
     over per-element cells rather than pattern-body code), or a read whose
     receiver is not a `Cell`/`Writable`/`Stream` (`items.get()` on a plain
     pattern input, which also draws `opaque-get:invalid-call`)
-  - a read inside a plain (non-reactive) array-method value callback
+  - a read inside a plain (non-reactive) array `map` callback
     (`["-", "+"].map((sep) => rows.get().join(sep))`) is accepted. That
-    callback runs eagerly during pattern build, so its value sites are
-    pattern-owned wrapper sites like the pattern body's own, and each
-    iteration's site lowers to its own lift-applied computation
+    callback runs eagerly during pattern build and `map` collects what it
+    returns without reading it, so its value sites are pattern-owned wrapper
+    sites like the pattern body's own, and each iteration's site lowers to its
+    own lift-applied computation. The result-interpreting array callbacks
+    (`filter`, `find`, `some`, `every`, `sort`, `flatMap`, `reduce`) keep the
+    diagnostic
   - a cell read that DOES sit at a lowerable site is not rejected: the site is
     auto-wrapped into a lift-applied computation. That covers the read itself
     (`const v = count.get()`, `{ value: count.get() }`,
@@ -566,12 +569,13 @@ Diagnostics emitted in all modes:
     lowerable expression site — including inside a lowered array-method
     callback (`map`/`filter`/`flatMap`) and inside a callback whose owning
     call has no lowerable site
-  - a plain array-method value callback supplies such a site for the reactive
-    values it closes over, so `weekDates?.[colIdx] === todayDate` bound inside
+  - a plain array `map` callback supplies such a site for the reactive values
+    it closes over, so `weekDates?.[colIdx] === todayDate` bound inside
     `COLUMN_INDICES.map((colIdx) => …)` lowers rather than erroring; an
     optional access on the callback's own plain parameter
     (`["a", "bb"].map((s) => s?.length ?? 0)`) has nothing reactive to lift
-    and still errors
+    and still errors, and so does one in a callback whose result the method
+    reads (`rows.get().filter((r) => r?.flag)`)
   - an optional access inside an inline callback argument is carried by the
     callback's owning call when that call is outside the lowered array-method
     families and itself sits at a lowerable expression site: the site's lift
@@ -691,15 +695,27 @@ described in the target-language spec:
 - JSX expressions
 - top-level pattern-body value-expression sites
 - callback-local value-expression sites inside supported collection callbacks,
-  both the reactive ones that become sub-patterns and the plain-array value
+  both the reactive ones that become sub-patterns and the plain-array `map`
   callbacks that run during pattern build
 
 `isEligiblePatternOwnedWrapperCallbackSite` decides the third bucket from the
 enclosing callback's boundary kind
-(`supportsPatternOwnedWrapperCallbackSite`, `policy/callback-boundary.ts`):
-`reactive-array-method`, `plain-array-value`, `pattern-builder`, and
-`render-builder` carry pattern-owned sites; the compute-owned boundaries
-(`computed`, `action`, `lift`, `handler`, event handlers) do not.
+(`supportsPatternOwnedWrapperCallbackSite`, `policy/callback-boundary.ts`).
+`reactive-array-method`, `pattern-builder`, and `render-builder` carry
+pattern-owned sites outright; the compute-owned boundaries (`computed`,
+`action`, `lift`, `handler`, event handlers) never do.
+
+`plain-array-value` carries them only for the callback role that can hold
+them, which `isCollectingPlainArrayMethodCallback` (`ast/call-kind.ts`)
+decides. It admits a callback that is argument zero of an
+`Array`/`ReadonlyArray` method named in `COLLECTING_ARRAY_METHOD_NAMES` —
+today `map` alone — over a plain receiver no reactive lowering owns. `map`
+stores each result without reading it, so a result that is a cell stays a
+cell. Every other callback-taking array method reads the result as it runs:
+`filter`, `find`, `some`, and `every` as a boolean, `sort` as a number,
+`flatMap` as an array test, `reduce` as the next accumulator. A cell reaching
+any of those is an object, which is truthy, not a number, and not an array, so
+those callbacks keep the diagnostic instead.
 
 `findLowerableExpressionSite` walks outward through enclosing pattern-context
 containers until it finds the nearest lowerable site admitted by
