@@ -174,7 +174,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           { type: "object", additionalProperties: true },
         ],
         description:
-          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself, anything else as an opaque link. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
+          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
       },
       register: {
         type: "object",
@@ -949,7 +949,7 @@ export const runPatternTool: HarnessToolDefinition<
         const resultLink = resultCell.getAsNormalizedFullLink();
         value = addressSealedPositions(
           sanitized.value,
-          outputId,
+          sanitized.sealedPaths,
           (path) =>
             createLLMFriendlyLink(
               {

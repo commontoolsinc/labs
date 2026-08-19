@@ -13,6 +13,13 @@ import {
 export interface SchemaOpaqueLinkSanitizationResult {
   value: unknown;
   linkedStringCount: number;
+  /**
+   * The paths of the positions THIS sanitization sealed, in walk order. A
+   * caller-provided opaque link the schema admits is preserved, not sealed,
+   * and is not listed — which is what lets a consumer address or replace
+   * exactly what was minted without inferring provenance from the handle id.
+   */
+  sealedPaths: (string | number)[][];
 }
 
 const NO_RESERVED_KEYS: ReadonlySet<string> = new Set<string>();
@@ -404,15 +411,17 @@ const sanitizeValueWithOpaqueLinks = (
   const effectiveSchema = schemaForValue(schema, value, fullSchema, reserved);
   if (typeof value === "string") {
     if (schemaAllowsRawString(effectiveSchema, value, fullSchema, reserved)) {
-      return { value, linkedStringCount: 0 };
+      return { value, linkedStringCount: 0, sealedPaths: [] };
     }
     return {
       value: cfcOpaqueLinkForPath(opaqueHandleId, path),
       linkedStringCount: 1,
+      sealedPaths: [[...path]],
     };
   }
   if (Array.isArray(value)) {
     let linkedStringCount = 0;
+    const sealedPaths: (string | number)[][] = [];
     const items = value.map((item, index) => {
       const sanitized = sanitizeValueWithOpaqueLinks(
         item,
@@ -424,16 +433,17 @@ const sanitizeValueWithOpaqueLinks = (
         NO_RESERVED_KEYS,
       );
       linkedStringCount += sanitized.linkedStringCount;
+      sealedPaths.push(...sanitized.sealedPaths);
       return sanitized.value;
     });
-    return { value: items, linkedStringCount };
+    return { value: items, linkedStringCount, sealedPaths };
   }
   if (isObjectOrArray(value)) {
     if (
       valueIsOpaqueLinkObject(value) &&
       schemaAcceptsOpaqueLinkObject(schema, value, fullSchema, reserved)
     ) {
-      return { value, linkedStringCount: 0 };
+      return { value, linkedStringCount: 0, sealedPaths: [] };
     }
     // The unmodeled-key policy: one key the schema does not model seals the
     // whole object, because a key it cannot model is a key whose NAME may
@@ -449,10 +459,12 @@ const sanitizeValueWithOpaqueLinks = (
       return {
         value: cfcOpaqueLinkForPath(opaqueHandleId, path),
         linkedStringCount: 0,
+        sealedPaths: [[...path]],
       };
     }
     const dropped = new Set(unmodeled);
     let linkedStringCount = 0;
+    const sealedPaths: (string | number)[][] = [];
     const entries = Object.entries(value).filter(([key]) => !dropped.has(key))
       .map(([key, child]) => {
         const sanitized = sanitizeValueWithOpaqueLinks(
@@ -466,11 +478,16 @@ const sanitizeValueWithOpaqueLinks = (
           NO_RESERVED_KEYS,
         );
         linkedStringCount += sanitized.linkedStringCount;
+        sealedPaths.push(...sanitized.sealedPaths);
         return [key, sanitized.value] as const;
       });
-    return { value: Object.fromEntries(entries), linkedStringCount };
+    return {
+      value: Object.fromEntries(entries),
+      linkedStringCount,
+      sealedPaths,
+    };
   }
-  return { value, linkedStringCount: 0 };
+  return { value, linkedStringCount: 0, sealedPaths: [] };
 };
 
 export const validateAndSanitizeSchemaValueWithOpaqueLinks = (
