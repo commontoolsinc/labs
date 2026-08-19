@@ -288,7 +288,15 @@ export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
 // rather than refusing them, and code that does will read this list too, to
 // know which names need the care. `unsafeObjectKeyIn()` below states what
 // makes each name awkward.
-const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "then"]);
+//
+// `then` is deliberately absent, and belongs here less than it looks. A
+// callable `then` is adopted by promise resolution, and a layer that answers a
+// property with a function can make a data key callable -- which is why the
+// value proxies in `runner` guard the name. But JSON Schema uses `if` / `then`
+// / `else`, and this system's schemas are themselves fabric values, so
+// reserving the name would stop an ordinary schema being one. The hazard is
+// real and is handled where a property becomes callable, not here.
+const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
 
 /**
  * Indicates whether `key` is one this implementation refuses to copy onto an
@@ -307,11 +315,10 @@ export function isUnsafeObjectKey(key: string): boolean {
  * Returns the reserved own property name the given object carries, if any.
  *
  * This asks about this implementation, not about the data model. A property
- * name is data like any other, and an implementation on a host that neither
- * routes property assignment through a prototype chain nor duck-types
- * promises -- which is most of them -- would reserve no names at all. Each
- * name here is refused for its own local reason, and none is a limit of the
- * language:
+ * name is data like any other, and an implementation on a host that does not
+ * route property assignment through a prototype chain -- which is most of them
+ * -- would reserve no names at all. Each name here is refused for its own
+ * local reason, and neither is a limit of the language:
  *
  * * `__proto__` cannot be rebuilt by the copying this system actually does.
  *   Records are reconstructed by assignment (`target[key] = value`) and
@@ -325,16 +332,6 @@ export function isUnsafeObjectKey(key: string): boolean {
  *   in this implementation already refuse it: the projection to native values
  *   drops it, and `FabricError` throws on it. Accepting it here would mean
  *   admitting a key that a later boundary discards without saying so.
- * * `then` copies faithfully, and the name alone is not the hazard: promise
- *   adoption probes for `then` and takes over only when what it finds is
- *   callable, so a record holding a string under that name resolves intact.
- *   What makes the name unsafe is that a record's properties are not always
- *   answered by the record. A layer surfacing a value through a proxy decides
- *   what a property read returns, and one that can answer with a function
- *   turns the data key into a thenable, which promise resolution then adopts
- *   -- taking the record out of the caller's hands with no fault reported,
- *   because none occurred. The value proxies here already guard the name for
- *   that reason.
  *
  * Refusing them is what this implementation does today. The format asks that
  * such records be carried instead, which is work this implementation has to

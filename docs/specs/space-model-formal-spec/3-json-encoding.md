@@ -259,21 +259,15 @@ built-in escape, or an encoding error.
 > literal user-data keys.
 
 > **JS implementation note.** "Any keys" is the format's rule and this
-> implementation does not yet meet it: a plain object carrying `__proto__`,
-> `constructor` or `then` is refused rather than encoded, on both sides of the
-> wire and in the inert check that decides what a fabric value is at all. No
-> such name is reserved by the format, and none is a limit of JavaScript.
-> `__proto__` and `constructor` are about copying: this implementation rebuilds
-> a record by assignment, which for `__proto__` reaches a prototype accessor
-> instead of creating a property, and other boundaries here already drop
-> `constructor`. `then` is about what the host does with a record afterward:
-> JavaScript's promise resolution probes for that name and adopts whatever
-> answers it, if what answers is callable. A record read through a layer that
-> can answer a property with a function is therefore consumed by resolution
-> nothing asked for, with no fault reported. An implementation
-> on a host that neither routes property assignment through a prototype chain
-> nor duck-types promises reserves no names at all, which is the behavior the
-> format describes.
+> implementation does not yet meet it: a plain object carrying `__proto__` or
+> `constructor` is refused rather than encoded, on both sides of the wire and
+> in the inert check that decides what a fabric value is at all. Neither name
+> is reserved by the format, and neither is a limit of JavaScript. Both are
+> about copying: this implementation rebuilds a record by assignment, which for
+> `__proto__` reaches a prototype accessor instead of creating a property, and
+> other boundaries here already drop `constructor`. An implementation on a host
+> that does not route property assignment through a prototype chain reserves no
+> names at all, which is the behavior the format describes.
 
 The common case — a **tagged value** — is a single-key object whose sole key
 starts with `/`:
