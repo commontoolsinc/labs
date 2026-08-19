@@ -295,7 +295,7 @@ tag (`0x27` instead of `0x26`), ensuring that `FabricEpochNsec(42n)` and
 ### 4.10 `FabricEpochDay`
 
 ```
-Bytes: TAG_EPOCH_DAY  LENGTH_LEB128  TWO_COMP_BYTES
+Bytes: TAG_EPOCH_DAY   LENGTH_LEB128  TWO_COMP_BYTES
        0x28            <1+ bytes>     <length bytes>
 ```
 
@@ -751,7 +751,7 @@ of these rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are
 | Bigint payload bytes              | unsigned LEB128 | Byte count of two's complement   |
 | Byte sequence (`FabricBytes`)     | unsigned LEB128 | Byte count of raw payload        |
 | `FabricEpochNsec` payload         | unsigned LEB128 | Byte count of two's complement   |
-| `FabricEpochDay` payload         | unsigned LEB128 | Byte count of two's complement   |
+| `FabricEpochDay` payload          | unsigned LEB128 | Byte count of two's complement   |
 | `FabricHash` algorithm tag        | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |
 | `FabricHash` hash bytes           | unsigned LEB128 | Byte count of raw hash payload   |
 | `FabricInstance` type tag         | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |

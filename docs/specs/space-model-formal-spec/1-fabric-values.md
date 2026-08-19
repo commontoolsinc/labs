@@ -3146,7 +3146,7 @@ organized into four categories by high nibble:
 | `TAG_BYTES`       | `0x25` | 37      | `FabricBytes`                     |
 | `TAG_BIGINT`      | `0x26` | 38      | `bigint`                          |
 | `TAG_EPOCH_NSEC`  | `0x27` | 39      | `FabricEpochNsec`                 |
-| `TAG_EPOCH_DAY`  | `0x28` | 40      | `FabricEpochDay`                 |
+| `TAG_EPOCH_DAY`   | `0x28` | 40      | `FabricEpochDay`                  |
 | `TAG_HASH`        | `0x29` | 41      | `FabricHash`                      |
 | `TAG_SYMBOL`      | `0x2A` | 42      | `symbol` (registry-interned only) |
 | `TAG_REGEXP`      | `0x2B` | 43      | `FabricRegExp`                    |
@@ -3301,7 +3301,7 @@ export function hashOf(value: unknown): FabricHash {
   // - `FabricSet`:        hash(TAG_INSTANCE, hashStr("Set@1"), hashOf(elements))
   //                         where elements are hashed in insertion order
   // - `FabricEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
-  // - `FabricEpochDay`:  hash(TAG_EPOCH_DAY, leb128(byteLen), twosComplementBytes)
+  // - `FabricEpochDay`:   hash(TAG_EPOCH_DAY, leb128(byteLen), twosComplementBytes)
   // - `FabricHash`:  hash(TAG_HASH, hashStr(algTag), leb128(hashByteLen), hashBytes)
   // - `FabricBytes`:      hash(TAG_BYTES, leb128(byteLen), rawBytes)
   // - `FabricRegExp`:     hash(TAG_REGEXP, hashStr(source), hashStr(flags),
