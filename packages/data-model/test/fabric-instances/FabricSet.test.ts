@@ -134,6 +134,16 @@ describe("FabricSet", () => {
         });
       });
 
+      describe("canDecode()", () => {
+        it("returns `true` for any state (stub)", () => {
+          // Accepting is what leaves the refusal to `decode()`, where "not
+          // yet implemented" is the honest account of it. A stub that refused
+          // here would report the payload as the thing at fault.
+          expect(codec.canDecode(null)).toBe(true);
+          expect(codec.canDecode([["k", "v"]])).toBe(true);
+        });
+      });
+
       describe("decode()", () => {
         it("throws (stub)", () => {
           expect(() => codec.decode(expectedTag, null, env)).toThrow(

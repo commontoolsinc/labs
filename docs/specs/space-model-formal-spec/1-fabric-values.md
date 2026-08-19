@@ -3526,19 +3526,22 @@ whose runtime shape does not match their static type.
 
 This applies at every point where decoded data is consumed:
 
-- **Codec `decode()` implementations** (Section 2.4) receive `state:
-  FabricValue`. The state has been decoded by the codec system,
-  but its internal structure is determined by whatever was on the wire.
-  Implementations must validate the shape of `state` at runtime — checking
-  property existence, types, and constraints — rather than relying on a type
-  cast (e.g., `state as { value: number }`). See the note in Section 2.7 for a
-  concrete example.
+- **Codec implementations** (Section 2.4) are handed a state whose internal
+  structure is whatever was on the wire. Checking it at run time — property
+  existence, types, constraints — is the codec's obligation, and a type cast
+  (`state as { value: number }`) discharges none of it. What a codec is spared
+  is checking twice: `canDecode()` holds the cheap part, stated as a type
+  predicate over the codec's own state type, and that predicate is what makes
+  the narrower `state` parameter `decode()` declares true rather than asserted.
+  `decode()` keeps the checks whose only implementation is the decoding itself.
+  See the note in Section 2.7 for a concrete example.
 
 - **JSON-side codec decoding** (Section 3 of `3-json-encoding.md`) must
   validate the format of its state before processing. Malformed input must
   be rejected rather than silently producing garbage; a codec rejects by
-  throwing or by returning a `ProblematicValue`, and the engine
-  settles the two against its `lenient` setting (Section 4.5).
+  refusing the state in `canDecode()`, or from `decode()` by throwing or by
+  returning a `ProblematicValue`, and the engine settles all three against its
+  `lenient` setting (Section 4.5).
 
 - **Hashing** (Section 6.3) may operate on values that have been
   through a decoding round-trip. Code that extracts properties from

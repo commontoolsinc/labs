@@ -27,6 +27,7 @@ import {
   IS_DEEP_FROZEN,
 } from "@/fabric-bases/BaseFabricInstance.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
@@ -218,6 +219,19 @@ describe("FabricLink", () => {
       });
 
       describe("decode()", () => {
+        it("returns a `ProblematicValue` for a payload the constructor rejects", () => {
+          // `canDecode()` accepts any record, so what reaches the `catch` is a
+          // record the constructor will not take. A reserved key is one such
+          // payload, and the wire is where it plausibly arrives: `JSON.parse`
+          // is what creates that name as an own property.
+          const evil = JSON.parse('{ "id": "fid1:abc", "__proto__": "x" }');
+          const result = codec.decode(expectedTag, evil, env);
+
+          expect(result).toBeInstanceOf(ProblematicValue);
+          expect((result as ProblematicValue).wireTypeTag).toBe(expectedTag);
+          expect((result as ProblematicValue).error).toMatch(/forbidden key/);
+        });
+
         it("round-trips a payload with a nested schema value", () => {
           const link = new FabricLink({
             id: "fid1:abc",
