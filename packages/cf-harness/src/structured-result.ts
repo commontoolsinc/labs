@@ -74,6 +74,13 @@ export const isSealedOpaqueLinkObject = (value: unknown): boolean => {
  * handle id — is preserved by the sanitizer, absent from `sealedPaths`, and
  * passes through here untouched.
  *
+ * The paths drive ONE traversal: they are gathered into a trie and the value
+ * is rebuilt along the touched spines in a single pass, so a result whose
+ * positions are mostly sealed — a discovery listing, say — costs linear
+ * work rather than one spine clone per sealed sibling. A path the value does
+ * not hold — which a correct `sealedPaths` never names — is simply never
+ * reached, leaving the value unchanged rather than inventing structure.
+ *
  * This is what makes a sealed position composable instead of terminal: a
  * run_pattern result is fabric-backed by construction, so a position the
  * schema could not release as text still has an address, and an address can
@@ -84,43 +91,73 @@ export const addressSealedPositions = (
   sealedPaths: readonly (readonly (string | number)[])[],
   buildRef: (path: readonly (string | number)[]) => string,
 ): unknown => {
-  let result = value;
-  for (const path of sealedPaths) {
-    result = replaceAtPath(result, path, buildRef(path));
+  if (sealedPaths.length === 0) {
+    return value;
   }
-  return result;
+  const root: ReplaceNode = { children: new Map() };
+  for (const path of sealedPaths) {
+    let at = root;
+    for (const segment of path) {
+      const key = String(segment);
+      let child = at.children.get(key);
+      if (child === undefined) {
+        child = { children: new Map() };
+        at.children.set(key, child);
+      }
+      at = child;
+    }
+    at.replaceWith = [...path];
+  }
+  return applyReplacements(value, root, buildRef);
 };
 
 /**
- * `value` with the position at `path` replaced by `replacement`, rebuilding
- * only the spine. A path that no longer exists in the value — which a
- * correct `sealedPaths` never names — leaves the value unchanged rather
- * than inventing structure.
+ * One position of the replacement trie: the child spines to rebuild below
+ * it, and — on a terminal — the sealed path to hand `buildRef`. A terminal
+ * never carries children, because the sanitizer never seals inside a
+ * subtree it already sealed whole.
  */
-const replaceAtPath = (
+interface ReplaceNode {
+  replaceWith?: readonly (string | number)[];
+  children: Map<string, ReplaceNode>;
+}
+
+const applyReplacements = (
   value: unknown,
-  path: readonly (string | number)[],
-  replacement: unknown,
+  at: ReplaceNode,
+  buildRef: (path: readonly (string | number)[]) => string,
 ): unknown => {
-  if (path.length === 0) {
-    return replacement;
+  if (at.replaceWith !== undefined) {
+    return buildRef(at.replaceWith);
   }
-  const [head, ...rest] = path;
   if (Array.isArray(value)) {
-    const index = typeof head === "number" ? head : Number(head);
-    if (!Number.isInteger(index) || index < 0 || index >= value.length) {
-      return value;
+    let items: unknown[] | undefined;
+    for (const [key, child] of at.children) {
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= value.length) {
+        continue;
+      }
+      const replaced = applyReplacements(value[index], child, buildRef);
+      if (replaced !== value[index]) {
+        items ??= [...value];
+        items[index] = replaced;
+      }
     }
-    const items = [...value];
-    items[index] = replaceAtPath(items[index], rest, replacement);
-    return items;
+    return items ?? value;
   }
   if (isObjectNotArray(value)) {
-    const key = String(head);
-    if (!Object.hasOwn(value, key)) {
-      return value;
+    let result: Record<string, unknown> | undefined;
+    for (const [key, child] of at.children) {
+      if (!Object.hasOwn(value, key)) {
+        continue;
+      }
+      const replaced = applyReplacements(value[key], child, buildRef);
+      if (replaced !== value[key]) {
+        result ??= { ...value };
+        result[key] = replaced;
+      }
     }
-    return { ...value, [key]: replaceAtPath(value[key], rest, replacement) };
+    return result ?? value;
   }
   return value;
 };

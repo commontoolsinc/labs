@@ -36,12 +36,21 @@ describe("structured-result", () => {
       ).toBe("/of:fid1:result");
     });
 
-    it("leaves a preserved link alone because sealedPaths never names it", () => {
+    it("replaces only the reported position, leaving a same-handle-id preserved link intact", () => {
       // A caller-provided opaque link the schema admits is preserved by the
       // sanitizer — even one spelled with the sanitization's own handle id —
-      // and does not appear in sealedPaths.
-      const value = { evidence: seal("#/anything"), n: 1 };
-      expect(addressSealedPositions(value, [], buildRef)).toEqual(value);
+      // and does not appear in sealedPaths. Only the minted sibling, which
+      // does, becomes an address.
+      const value = {
+        evidence: seal("#/evidence"),
+        note: seal("#/note"),
+        n: 1,
+      };
+      expect(addressSealedPositions(value, [["note"]], buildRef)).toEqual({
+        evidence: seal("#/evidence"),
+        note: "/of:fid1:result/note",
+        n: 1,
+      });
     });
 
     it("leaves the value unchanged for a path it does not hold", () => {
