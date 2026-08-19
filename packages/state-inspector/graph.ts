@@ -20,10 +20,13 @@ import { reconstructDocument } from "./reconstruct.ts";
 import type { EntityDocument } from "./reconstruct.ts";
 import {
   classifyDocument,
+  countEntities,
+  DEFAULT_SCAN_LIMIT,
   type EntityKind,
   isModuleValue,
   modelFromDocument,
   type ModuleEntry,
+  type ScanExtent,
 } from "./model.ts";
 
 export type EdgeKind = "pattern" | "argument" | "owns" | "link";
@@ -61,6 +64,8 @@ export interface SpaceGraph {
     edgesByKind: Record<EdgeKind, number>;
     externalEdges: number;
   };
+  /** How far the entity scan this graph was built from reached. */
+  extent: ScanExtent;
 }
 
 function shortPath(p?: readonly string[]): string | undefined {
@@ -83,17 +88,21 @@ export function buildSpaceGraph(
 ): SpaceGraph {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 5000;
+  const limit = Math.max(0, opts.limit ?? DEFAULT_SCAN_LIMIT);
   const includeLinks = opts.includeLinks ?? true;
   const own = (space.path.split("/").pop() ?? "").replace(/\.sqlite$/, "");
 
+  // One row past the limit is asked for and dropped: getting it is what proves
+  // the space holds more entities than this graph covers.
   const rows = space.db
     .prepare(
       `SELECT id, count(*) revisions FROM revision
        WHERE branch = ? AND scope_key = ?
        GROUP BY id ORDER BY revisions DESC LIMIT ?`,
     )
-    .all<{ id: string; revisions: number }>(branch, scope, limit);
+    .all<{ id: string; revisions: number }>(branch, scope, limit + 1);
+  const truncated = rows.length > limit;
+  if (truncated) rows.pop();
 
   // Pass 1: reconstruct + build the module index (identity → module entity).
   const docs = new Map<string, EntityDocument>();
@@ -226,6 +235,11 @@ export function buildSpaceGraph(
     nodes: [...nodes.values()],
     edges: deduped,
     stats: { nodesByKind, edgesByKind, externalEdges },
+    extent: {
+      limit,
+      total: countEntities(space, { branch, scope }),
+      truncated,
+    },
   };
 }
 
@@ -280,6 +294,9 @@ export function subgraphAround(
     nodes,
     edges,
     stats: { nodesByKind, edgesByKind, externalEdges },
+    // A neighborhood inherits the cap of the scan it was cut from: narrowing
+    // to one root does not restore the entities the scan never reached.
+    extent: graph.extent,
   };
 }
 

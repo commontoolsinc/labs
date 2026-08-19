@@ -127,7 +127,7 @@ deno task cf inspect conflicts z6Mkqa41 of:fid1:…        # writer timeline + A
 
 # what's in a space
 deno task cf inspect summary  z6Mkqa41
-deno task cf inspect entities z6Mkqa41 [--kind piece]
+deno task cf inspect entities z6Mkqa41 [--kind piece] [--limit 5000]
 deno task cf inspect piece    z6Mkqa41 of:fid1:… [--code]   # pattern source, input, owned cells
 deno task cf inspect hot      z6Mkqa41 --limit 10
 deno task cf inspect churn    z6Mkqa41 [--bucket 60] [--since '2026-07-22 10:00:00'] [--top 10]
@@ -136,14 +136,14 @@ deno task cf inspect value-at z6Mkqa41 of:fid1:… --path value/count [--seq N]
 deno task cf inspect value-at z6Mkqa41 of:fid1:… --full-depth # every nested value, every link schema
 
 # the entity graph (relationships between pieces/cells/modules)
-deno task cf inspect graph    z6Mkqa41 [--root of:fid1:… --depth 2] [--dot]
+deno task cf inspect graph    z6Mkqa41 [--root of:fid1:… --depth 2] [--dot] [--limit 5000]
 
 # time travel
 deno task cf inspect diff     z6Mkqa41 of:fid1:… --from 7 --to 12
 deno task cf inspect timeline z6Mkqa41 [of:fid1:…]          # how a space / one entity grew
 
 # a self-contained HTML explorer (tree + graph + detail) to open in a browser
-deno task cf inspect html     z6Mkqa41 --out /tmp/space.html [--app-url https://host]
+deno task cf inspect html     z6Mkqa41 --out /tmp/space.html [--app-url https://host] [--limit 5000]
 
 # cross-space convergence (--all discovered, or --spaces a,b, or --dir)
 deno task cf inspect converge      of:fid1:… --all --path value
@@ -209,9 +209,16 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
   watermark machinery (serving-loop.md §3b). The summary surface reports its
   presence and row count; a pre-migration snapshot without the table degrades
   gracefully — absence is a store from before the migration, not a broken DB.
-- **Lists and the HTML bundle are capped** for cost; un-analyzed cells are
-  marked rather than shown as clean. A count at a round cap may be truncated —
-  narrow with flags or a per-entity command.
+- **Space-wide scans are capped** at `--limit` (5,000 by default) for cost, and
+  every one of them says so: `entities`, `graph`, and `html` note a capped
+  result on stderr in both human and `--json` mode, `graph --json` also carries
+  an `extent`, and the HTML header marks the page. Silence means the result IS
+  the whole set. `entities --kind` selects during the scan, so `--limit` counts
+  the entities of that kind rather than the entities scanned to find them.
+- **The other caps are silent**: `history` / `hot` / `conflicts` row limits, and
+  the HTML stale-read pass, which caps per bundle and marks un-analyzed cells
+  rather than showing them clean. There a count at a round cap may be truncated
+  — narrow with flags or a per-entity command.
 - **Reads DBs it didn't write**: cross-space comparisons identify an unavailable
   view and return `unknown`. Per-entity diffs stop with the reconstruction error
   instead of reporting the value as absent.

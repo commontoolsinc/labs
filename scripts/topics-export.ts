@@ -75,12 +75,21 @@ if (!snapshot || positional.length > 1 || !outPath) usage();
 const didMatch = /(did:key:[A-Za-z0-9]+)\.sqlite$/.exec(snapshot);
 const spaceDid = didMatch ? didMatch[1] : null;
 
+// A capped listing would hand the export a subset of the space's pieces, and a
+// rollback payload missing topics reads exactly like a complete one. A `--kind`
+// scan walks the whole space whenever the space holds fewer pieces than the
+// limit, so naming a limit past any plausible piece count costs nothing and
+// removes the cliff entirely.
+const PIECE_LIMIT = 1_000_000;
+
 const pieces = await cfJson<EntityRow[]>([
   "inspect",
   "entities",
   snapshot,
   "--kind",
   "piece",
+  "--limit",
+  String(PIECE_LIMIT),
   "--json",
 ]);
 

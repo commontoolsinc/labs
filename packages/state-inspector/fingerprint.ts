@@ -30,8 +30,8 @@ import { listScopes } from "./scopes.ts";
  * `listEntityModels` caps at 5,000 by default — a real Estuary space already
  * exceeds that. A fingerprint computed over a truncated enumeration would still
  * return a confident-looking hash, which is the exact failure this whole module
- * exists to prevent, so we raise the cap and REFUSE when even that is reached
- * rather than hash a partial space.
+ * exists to prevent, so we raise the cap and REFUSE the listing that reports
+ * itself truncated rather than hash a partial space.
  */
 const ENUMERATION_CAP = 1_000_000;
 
@@ -70,19 +70,18 @@ function allEntities(
 ): EntityModel[] {
   const out: EntityModel[] = [];
   for (const scope of listScopes(space, { branch })) {
-    const models = listEntityModels(space, {
+    const listing = listEntityModels(space, {
       branch,
       scope: scope.raw,
       limit: cap,
     });
-    if (models.length >= cap) {
+    if (listing.extent.truncated) {
       throw new Error(
-        `scope ${scope.raw} enumerates ${models.length}+ entities, at or above ` +
-          `the ${cap} cap; refusing to fingerprint a possibly truncated ` +
-          `enumeration.`,
+        `scope ${scope.raw} holds ${listing.extent.total} entities, past the ` +
+          `${cap} cap; refusing to fingerprint a truncated enumeration.`,
       );
     }
-    out.push(...models);
+    out.push(...listing.entities);
   }
   return out;
 }

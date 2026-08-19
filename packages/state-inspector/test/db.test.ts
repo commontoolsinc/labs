@@ -81,7 +81,7 @@ Deno.test("scope_key shim: a DB without scope_key still inspects", async () => {
       const snapDoc = reconstructDocument(space, { id: "of:b" });
       assertEquals((snapDoc?.value as { n: number }).n, 2);
 
-      const models = listEntityModels(space);
+      const models = listEntityModels(space).entities;
       assertEquals(models.length, 2); // of:a, of:b
       assertEquals(models.map((m) => m.id).sort(), ["of:a", "of:b"]);
     } finally {

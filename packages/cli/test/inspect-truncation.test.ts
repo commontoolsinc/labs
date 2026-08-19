@@ -1,0 +1,223 @@
+// The capped-listing surface of `cf inspect`, through the real CLI process.
+//
+// A capped result is a subset that renders exactly like a complete one, so
+// these tests pin where the cap becomes visible: on stderr for every command
+// that scans a space, in BOTH modes, while `--json` keeps writing the same
+// bare array to stdout that its consumers parse. The scan semantics themselves
+// are pinned in packages/state-inspector/test/scan-extent.test.ts.
+
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Database } from "@db/sqlite";
+
+import { cf, type CliResult, stripAnsi } from "./utils.ts";
+
+const SESSION = "session:did%3Akey%3AzAlice:s1";
+const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
+
+/** Six busy free cells, one module, three quiet pieces. */
+const ENTITIES = [
+  ...Array.from({ length: 6 }, (_, i) => ({
+    id: `of:cell-${i + 1}`,
+    document: { value: `cell ${i + 1}` },
+    revisions: 5,
+  })),
+  {
+    id: "of:mod",
+    document: {
+      value: {
+        kind: "source",
+        identity: MODULE_IDENTITY,
+        code: "export default () => null;\n",
+        filename: "/api/patterns/notes/notebook.tsx",
+        imports: [],
+      },
+    },
+    revisions: 2,
+  },
+  ...Array.from({ length: 3 }, (_, i) => ({
+    id: `of:piece-${i + 1}`,
+    document: {
+      value: { $NAME: `Topic ${i + 1}` },
+      patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+    },
+    revisions: 1,
+  })),
+];
+
+const TOTAL = ENTITIES.length;
+
+function seed(path: string): void {
+  const db = new Database(path, { create: true });
+  db.exec(`
+CREATE TABLE "commit" (
+  seq INTEGER NOT NULL PRIMARY KEY, branch TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL, local_seq INTEGER NOT NULL,
+  invocation_ref TEXT, authorization_ref TEXT,
+  original JSON NOT NULL, resolution JSON NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE revision (
+  branch TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'space', seq INTEGER NOT NULL,
+  op_index INTEGER NOT NULL, op TEXT NOT NULL, data JSON, commit_seq INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, seq, op_index)
+);
+CREATE TABLE branch (
+  name TEXT NOT NULL PRIMARY KEY DEFAULT '', parent_branch TEXT,
+  fork_seq INTEGER, created_seq INTEGER NOT NULL DEFAULT 0,
+  head_seq INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active'
+);
+INSERT INTO branch (name, head_seq, status) VALUES ('', 39, 'active');`);
+  const commit = db.prepare(
+    `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+     VALUES (?, ?, ?, '{}', '{"seq":0}')`,
+  );
+  const rev = db.prepare(
+    `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, 0, 'set', ?, ?)`,
+  );
+  let seq = 0;
+  for (const entity of ENTITIES) {
+    for (let n = 0; n < entity.revisions; n++) {
+      seq++;
+      commit.run(seq, SESSION, seq);
+      rev.run(entity.id, seq, JSON.stringify(entity.document), seq);
+    }
+  }
+  db.close();
+}
+
+async function withStore(run: (path: string) => Promise<void>): Promise<void> {
+  const dir = await Deno.makeTempDir({ prefix: "cf-inspect-truncation-" });
+  try {
+    const path = `${dir}/space.sqlite`;
+    seed(path);
+    await run(path);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+}
+
+/**
+ * The cap notices among the process's stderr, which also carries the task
+ * runner's own echo and whatever Deno warns about on the day.
+ */
+const notices = (result: CliResult): string[] =>
+  result.stderr.map(stripAnsi).filter((line) => line.includes("NOTE:"));
+
+describe("cf inspect capped listings", () => {
+  it("names the cap, the space's size, and the flag that lifts it", async () => {
+    await withStore(async (path) => {
+      const result = await cf(`inspect entities ${path} --limit 3`);
+      expect(result.code).toBe(0);
+      expect(notices(result)).toEqual([
+        `NOTE: capped at --limit 3 entities; the space holds ${TOTAL} ` +
+        `entities. Raise --limit for the rest.`,
+      ]);
+    });
+  });
+
+  it("says nothing when the limit covers the whole space", async () => {
+    await withStore(async (path) => {
+      const result = await cf(`inspect entities ${path} --limit ${TOTAL}`);
+      expect(result.code).toBe(0);
+      expect(notices(result)).toEqual([]);
+      // The whole space is there to be silent about.
+      expect(stripAnsi(result.stdout.join("\n"))).toContain("of:piece-1");
+    });
+  });
+
+  it("writes the same bare array to stdout under `--json` while noting the cap", async () => {
+    await withStore(async (path) => {
+      const result = await cf(`inspect entities ${path} --limit 3 --json`);
+      expect(result.code).toBe(0);
+      const parsed = JSON.parse(result.stdout.join("\n"));
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed.length).toBe(3);
+      expect(notices(result).length).toBe(1);
+    });
+  });
+
+  it("returns every piece under `--kind piece` where the limit reaches only cells", async () => {
+    await withStore(async (path) => {
+      // Six cells outrank every piece, so the same limit without `--kind`
+      // reaches no piece at all — which is what this composition has to beat.
+      const cellsOnly = await cf(`inspect entities ${path} --limit 6 --json`);
+      const scanned = JSON.parse(cellsOnly.stdout.join("\n")) as {
+        kind: string;
+      }[];
+      expect(scanned.filter((e) => e.kind === "piece")).toEqual([]);
+
+      const result = await cf(
+        `inspect entities ${path} --kind piece --limit 6 --json`,
+      );
+      expect(result.code).toBe(0);
+      const pieces = JSON.parse(result.stdout.join("\n")) as { kind: string }[];
+      expect(pieces.map((p) => p.kind)).toEqual(["piece", "piece", "piece"]);
+      expect(notices(result)).toEqual([]);
+    });
+  });
+
+  it("names the kind in the notice when a kind outruns the limit", async () => {
+    await withStore(async (path) => {
+      const result = await cf(
+        `inspect entities ${path} --kind piece --limit 2`,
+      );
+      expect(result.code).toBe(0);
+      expect(notices(result)).toEqual([
+        `NOTE: capped at --limit 2 piece entities; the space holds ${TOTAL} ` +
+        `entities. Raise --limit for the rest.`,
+      ]);
+    });
+  });
+
+  it("rejects a `--kind` no entity classifies as, before opening the space", async () => {
+    await withStore(async (path) => {
+      const result = await cf(`inspect entities ${path} --kind pieces`);
+      expect(result.code).not.toBe(0);
+      const stderr = stripAnsi(result.stderr.join("\n"));
+      expect(stderr).toContain('Unknown --kind "pieces"');
+      expect(stderr).toContain("owned-cell");
+    });
+  });
+
+  it("notes the cap on a capped graph, rendered or as DOT", async () => {
+    await withStore(async (path) => {
+      const rendered = await cf(`inspect graph ${path} --limit 3`);
+      expect(rendered.code).toBe(0);
+      expect(notices(rendered).length).toBe(1);
+
+      const dot = await cf(`inspect graph ${path} --limit 3 --dot`);
+      expect(dot.code).toBe(0);
+      expect(dot.stdout.join("\n")).toContain("digraph");
+      expect(notices(dot).length).toBe(1);
+
+      const whole = await cf(`inspect graph ${path} --limit ${TOTAL}`);
+      expect(whole.code).toBe(0);
+      expect(notices(whole)).toEqual([]);
+    });
+  });
+
+  it("carries the cap into the graph's `--json`, where the shape can hold it", async () => {
+    await withStore(async (path) => {
+      const result = await cf(`inspect graph ${path} --limit 3 --json`);
+      expect(result.code).toBe(0);
+      const graph = JSON.parse(result.stdout.join("\n")) as {
+        extent: { limit: number; total: number; truncated: boolean };
+      };
+      expect(graph.extent).toEqual({ limit: 3, total: TOTAL, truncated: true });
+    });
+  });
+
+  it("notes the cap on a capped HTML explorer and marks the page itself", async () => {
+    await withStore(async (path) => {
+      const result = await cf(`inspect html ${path} --limit 3`);
+      expect(result.code).toBe(0);
+      expect(notices(result).length).toBe(1);
+      expect(result.stdout.join("\n")).toContain(
+        `capped at 3 of ${TOTAL} entities`,
+      );
+    });
+  });
+});
