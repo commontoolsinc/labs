@@ -115,6 +115,17 @@ Confusing an approximation for truth is the failure mode that matters here:
   legitimately differ. The scan labels `cross-space-linked` (real replica →
   drift bug) vs `no-cross-space-link` (likely independent instance). Don't cry
   wolf on the latter.
+- **A `schema` under `$link` is what the link stores, and a `$elidedSchema` is a
+  summary of it.** A link's schema is a JSON Schema, so `true` and `false` are
+  values it can really hold — `true` constrains nothing and lets the reader's
+  own schema travel through the hop, while a schema with properties in it
+  freezes a shape at that link. Never read one as the other. A schema too large
+  to print inline is replaced by `{ $elidedSchema: { keys, bytes,
+  digest } }`,
+  which is a marker rather than a schema: equal digests mean equal schemas, so
+  it answers "do these links agree?" on its own, and `--full-depth` prints every
+  schema in full when you need the text. A link with no `schema` key stores no
+  schema at all.
 
 ## Which question → which command
 

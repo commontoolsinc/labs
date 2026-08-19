@@ -18,6 +18,7 @@ import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { fabricFromJsonValue } from "@commonfabric/data-model/codecs";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isPlainObject } from "@commonfabric/utils/types";
 
@@ -33,7 +34,13 @@ export interface DecodedLink {
   space?: string;
   path?: readonly string[];
   scope?: string;
-  hasSchema: boolean;
+  /**
+   * The schema stored on the link, or `undefined` when it stores none. A
+   * stored schema is a JSON Schema, so `true` and `false` are among the values
+   * it can hold — `true` constrains nothing, `false` admits nothing — and
+   * neither may be synthesized to stand for a schema that is merely present.
+   */
+  schema?: Json;
 }
 
 type Json = unknown;
@@ -67,7 +74,7 @@ function payloadToLink(payload: Record<string, Json>): DecodedLink {
       ? (payload.path as readonly string[])
       : undefined,
     scope: typeof payload.scope === "string" ? payload.scope : undefined,
-    hasSchema: payload.schema !== undefined,
+    schema: payload.schema,
   };
 }
 
@@ -178,7 +185,7 @@ export function summarizeLink(link: DecodedLink): string {
   const space = link.space
     ? ` @${escapeTerminalText(shortDid(link.space) ?? "")}`
     : "";
-  const schema = link.hasSchema ? " +schema" : "";
+  const schema = link.schema !== undefined ? " +schema" : "";
   return `🔗 ${id}${path}${space}${schema}`;
 }
 
@@ -198,9 +205,64 @@ interface AnnotationLeave {
 type AnnotationFrame = AnnotationVisit | AnnotationLeave;
 
 /**
+ * Largest schema, in bytes of JSON, written into annotated output as itself. A
+ * link's schema is unbounded and routinely dwarfs the value carrying it —
+ * kilobytes of `$defs` hanging off one array element — so a larger one is
+ * summarized by `elideSchema()` instead. The bound is on rendered size rather
+ * than on depth, because a schema is metadata about the link rather than part
+ * of the value's own shape, and so is not what a caller's `maxDepth` is
+ * budgeting.
+ */
+const MAX_INLINE_SCHEMA_BYTES = 200;
+
+const utf8 = new TextEncoder();
+
+/**
+ * Stand-in for a schema too large to write out as itself: its top-level keys,
+ * the size in bytes of its rendered JSON, and a truncated hash of the stored
+ * schema. Equal digests mean the two links almost certainly agree, which is
+ * what makes a summary enough to answer whether one link's schema is stale
+ * against another's; a truncated hash bounds that at "almost".
+ *
+ * The `$elidedSchema` wrapper is what keeps the summary from being read as the
+ * schema: `true`, `false`, and every object shape are values a link can really
+ * store, so a summary wearing one of those would be indistinguishable from the
+ * thing it stands for. The wrapper is not proof against a consumer that treats
+ * whatever it finds here as JSON Schema and ignores keywords it does not know
+ * — nothing rendered in this position could be — but it cannot be mistaken for
+ * a stored schema by a reader who looks at it.
+ */
+function elideSchema(schema: Json, bytes: number): Json {
+  return {
+    $elidedSchema: {
+      ...(isNameWalkable(schema) ? { keys: Object.keys(schema) } : {}),
+      bytes,
+      digest: hashStringOf(schema).slice(0, 12),
+    },
+  };
+}
+
+/**
+ * Render the schema stored on a link: as itself when it is small enough to
+ * read or when `maxDepth` is infinite, and as an `elideSchema()` summary
+ * otherwise. Never synthesizes a schema — a rendered `true` means `true` was
+ * what the link stored.
+ */
+function renderLinkSchema(schema: Json, maxDepth: number): Json {
+  const rendered = annotate(schema, Number.POSITIVE_INFINITY);
+  if (!Number.isFinite(maxDepth)) return rendered;
+  const bytes = utf8.encode(JSON.stringify(rendered)).length;
+  return bytes <= MAX_INLINE_SCHEMA_BYTES
+    ? rendered
+    : elideSchema(schema, bytes);
+}
+
+/**
  * Transform a stored value into an annotated, JSON-printable form. Links
  * become `{ $link: … }`, entity refs become `{ $ref: … }`, and streams become
- * `"$stream"`. `maxDepth` limits how many nested containers are retained.
+ * `"$stream"`. `maxDepth` limits how many nested containers are retained, and
+ * an infinite one additionally writes out every link's schema in full; see
+ * `renderLinkSchema()` for what a finite one does with a large schema.
  */
 export function annotate(v: Json, maxDepth = 8): Json {
   const root: Record<string, Json> = {};
@@ -235,7 +297,11 @@ export function annotate(v: Json, maxDepth = 8): Json {
           ...(link.path && link.path.length ? { path: link.path } : {}),
           ...(link.space ? { space: link.space } : {}),
           ...(link.scope ? { scope: link.scope } : {}),
-          ...(link.hasSchema ? { schema: true } : {}),
+          // `maxDepth` rather than `frame.depth`: full schema fidelity is a
+          // property of the whole rendering, not of where a link sits in it.
+          ...(link.schema !== undefined
+            ? { schema: renderLinkSchema(link.schema, maxDepth) }
+            : {}),
         },
       });
       continue;

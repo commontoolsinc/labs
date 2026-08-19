@@ -21,6 +21,7 @@ import type { SpaceDb } from "./db.ts";
 import {
   annotate,
   type DecodedLink,
+  decodedLinkOf,
   parseSigilLink,
   summarize,
 } from "./decode.ts";
@@ -196,29 +197,25 @@ function parseCfc(cfc: unknown): CfcSummary | undefined {
  * A stream / owned cell carries no schema of its own — its DECLARED schema (a
  * stream's event payload, a cell's value type) is attached where it is NAMED in
  * its owner piece, under the key `<key>`. Two sources, link-first:
- *   1. the inline `schema` on the LINK itself (`value[key]."/"."link@N".schema`)
- *      — present even when the result schema omits the handler (e.g. addFavorite),
+ *   1. the inline `schema` on the LINK itself, in either at-rest form — present
+ *      even when the result schema omits the handler (e.g. addFavorite),
  *   2. else the owner's `schema.properties[<key>]`, following a `$ref` into `$defs`.
  */
 function declaredSchemaFor(
   ownerDoc: EntityDocument | undefined,
   key: string,
 ): { schema: unknown; keys?: string[]; via: string } | undefined {
-  // 1. inline schema carried on the naming link.
-  const linkRaw = isObjectNotArray(ownerDoc?.value)
+  // 1. inline schema carried on the naming link, in either at-rest form.
+  const naming = isObjectNotArray(ownerDoc?.value)
     ? (ownerDoc!.value as Record<string, unknown>)[key]
     : undefined;
-  if (isObjectNotArray(linkRaw) && isObjectNotArray(linkRaw["/"])) {
-    const slash = linkRaw["/"] as Record<string, unknown>;
-    const linkKey = Object.keys(slash).find((k) => k.startsWith("link@"));
-    const inner = linkKey ? slash[linkKey] : undefined;
-    if (isObjectNotArray(inner) && isObjectNotArray(inner.schema)) {
-      return {
-        schema: annotate(inner.schema),
-        keys: Object.keys(inner.schema),
-        via: "link",
-      };
-    }
+  const linkSchema = decodedLinkOf(naming)?.schema;
+  if (isObjectNotArray(linkSchema)) {
+    return {
+      schema: annotate(linkSchema),
+      keys: Object.keys(linkSchema),
+      via: "link",
+    };
   }
   // 2. fallback: owner's result-schema property ($ref into $defs).
   // NOTE: this is a deliberately NARROW resolver — a single top-level
