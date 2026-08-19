@@ -67,7 +67,7 @@ export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodec");
  * other `FabricValue`s and leaving every terminal decision to whatever walks
  * the result.
  */
-export const REALM_CODEC: unique symbol = Symbol("data-model.realmCodecEngine");
+export const REALM_CODEC: unique symbol = Symbol("data-model.realmCodec");
 
 /**
  * Interface for codecs (encoder-decoder objects). These are objects which can
