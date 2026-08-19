@@ -23,6 +23,23 @@ describe("object-formatter", () => {
     );
   }
 
+  it("emits an open object schema for the bare `object` type", async () => {
+    // The `object` type says a value is an object and nothing about its
+    // properties, so the formatter claims it by name and emits a schema that
+    // accepts any properties rather than enumerating the none it has. Which
+    // pattern in the corpus writes a bare `object` decides whether this branch
+    // runs at all, so it is covered on some CI runs and not others.
+    const schema = await schemaFor(`
+interface SchemaRoot {
+  bag: object;
+}
+`);
+    expect(schema.properties?.bag).toEqual({
+      type: "object",
+      additionalProperties: true,
+    });
+  });
+
   it("keeps the JSDoc description on a callable stream property", async () => {
     const schema = await schemaFor(`
 interface OpenEvent {

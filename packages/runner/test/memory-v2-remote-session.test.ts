@@ -8,6 +8,7 @@ import {
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
 } from "@commonfabric/memory/v2";
+import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
   createStorageAddressResolver,
   MEMORY_STORAGE_PATH,
@@ -515,6 +516,87 @@ describe("WebSocketTransport failure signaling", () => {
       });
   }
 
+  /**
+   * Aborts `controller` at the moment the memory client stops listening for
+   * aborts on the signal, which it does once its handshake is done and before
+   * the promise `create` is awaiting resolves. Nothing else on the signal is
+   * disturbed, and aborting twice is harmless, so the later removals do no
+   * more than the first.
+   *
+   * Returns whether the abort has happened yet. Where in the client's own
+   * cleanup the first removal falls is the client's business rather than this
+   * file's, so a case reads that back and states which side of the handshake
+   * the abort landed on. A client that grew an earlier removal would then fail
+   * the case rather than quietly move it to a window it was not written for.
+   */
+  const abortWhenClientStopsListening = (
+    controller: AbortController,
+    reason: Error,
+  ): () => boolean => {
+    const signal = controller.signal;
+    const remove = signal.removeEventListener.bind(signal);
+    signal.removeEventListener = ((
+      ...args: Parameters<AbortSignal["removeEventListener"]>
+    ) => {
+      remove(...args);
+      controller.abort(reason);
+    }) as AbortSignal["removeEventListener"];
+    return () => signal.aborted;
+  };
+
+  /**
+   * Aborts `controller` at the moment a mount resolves, before whoever awaited
+   * it is resumed. Returns the undo, which every caller runs: the patch is on
+   * the shared client prototype.
+   */
+  const abortWhenMountResolves = (
+    controller: AbortController,
+    reason: Error,
+  ): () => void => {
+    const prototype = MemoryClient.Client.prototype;
+    const mount = prototype.mount;
+    prototype.mount = function (
+      this: MemoryClient.Client,
+      ...args: Parameters<MemoryClient.Client["mount"]>
+    ) {
+      return mount.apply(this, args).then((session) => {
+        controller.abort(reason);
+        return session;
+      });
+    };
+    return () => {
+      prototype.mount = mount;
+    };
+  };
+
+  /** Answers the client's `hello`, which is the whole of connecting. */
+  const answerHello = (socket: DrivableWebSocket): void => {
+    socket.receive(encodeMemoryBoundary({
+      type: "hello.ok",
+      protocol: MEMORY_PROTOCOL,
+      flags: getMemoryProtocolFlags(),
+      sessionOpen: TEST_HELLO_SESSION_OPEN,
+    }));
+  };
+
+  /** Answers the `session.open` the client sent as its second frame. */
+  const answerSessionOpen = (
+    socket: DrivableWebSocket,
+    sessionId: string,
+  ): void => {
+    const open = decodeMemoryBoundary(socket.sent[1]) as { requestId: string };
+    socket.receive(encodeMemoryBoundary({
+      type: "response",
+      requestId: open.requestId,
+      ok: {
+        sessionId,
+        sessionToken: `token:${sessionId}`,
+        serverSeq: 0,
+        sessionOpen: TEST_HELLO_SESSION_OPEN,
+      },
+    }));
+  };
+
   it("rejects the in-flight send and closes cleanly when the socket closes before opening", async () => {
     await withTransport(async (transport, socket) => {
       let closeCalled = false;
@@ -534,6 +616,65 @@ describe("WebSocketTransport failure signaling", () => {
       // A close before opening is not an error, so the receiver gets none.
       expect(closeCalled).toBe(true);
       expect(closeError).toBeUndefined();
+    });
+  });
+
+  it("dials once for two sends issued while the socket is opening", async () => {
+    await withTransport(async (transport, socket) => {
+      const first = transport.send("first");
+      const second = transport.send("second");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+
+      await Promise.all([first, second]);
+      expect(activeSocket.sent).toEqual(["first", "second"]);
+      expect(DrivableWebSocket.instances).toHaveLength(1);
+    });
+  });
+
+  it("rejects a remote session whose signal is aborted before it dials", async () => {
+    const signer = await Identity.fromPassphrase("pre-aborted-remote-session");
+    const controller = new AbortController();
+    const reason = new Error("memory replica route replaced");
+    controller.abort(reason);
+
+    await withTransport(async () => {
+      const factory = new RemoteSessionFactory(
+        () => new URL("wss://memory.test/api/storage/memory"),
+        signer,
+      );
+
+      await expect(
+        factory.create(signer.did(), signer, {}, controller.signal),
+      ).rejects.toBe(reason);
+      expect(DrivableWebSocket.instances).toHaveLength(0);
+    });
+  });
+
+  it("rejects a remote session whose signer reports a signing failure", async () => {
+    const identity = await Identity.fromPassphrase("failing-signer-session");
+    const failure = new Error("signing key unavailable");
+    const signer: Signer = {
+      did: () => identity.did(),
+      verifier: identity.verifier,
+      sign: () => ({ error: failure }),
+    };
+
+    await withTransport(async (_transport, socket) => {
+      const factory = new RemoteSessionFactory(
+        () => new URL("wss://memory.test/api/storage/memory"),
+        signer,
+      );
+      const opening = factory.create(signer.did(), signer, {});
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      answerHello(activeSocket);
+
+      await expect(opening).rejects.toBe(failure);
+      // The failure lands while signing the session.open, so that frame was
+      // never sent.
+      expect(activeSocket.sent).toHaveLength(1);
     });
   });
 
@@ -699,6 +840,79 @@ describe("WebSocketTransport failure signaling", () => {
         await opened?.client.close();
       }
     });
+  });
+
+  it("cancels a remote session aborted between connecting and mounting", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cancel-connected-remote-session",
+    );
+    const controller = new AbortController();
+    const reason = new Error("memory replica route replaced");
+    const hasAborted = abortWhenClientStopsListening(controller, reason);
+
+    await withTransport(async (_transport, socket) => {
+      const factory = new RemoteSessionFactory(
+        () => new URL("wss://memory.test/api/storage/memory"),
+        signer,
+      );
+      const opening = factory.create(
+        signer.did(),
+        signer,
+        {},
+        controller.signal,
+      );
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      // The route is still live while the handshake is in flight: this case is
+      // about the abort that lands after it, not during it.
+      expect(hasAborted()).toBe(false);
+      answerHello(activeSocket);
+
+      await expect(opening).rejects.toBe(reason);
+      expect(hasAborted()).toBe(true);
+      // No session.open followed the handshake, and the connection the
+      // handshake opened did not survive the rejection.
+      expect(activeSocket.sent).toHaveLength(1);
+      expect(activeSocket.readyState).toBe(DrivableWebSocket.CLOSED);
+    });
+  });
+
+  it("cancels a remote session aborted between mounting and returning", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cancel-mounted-remote-session",
+    );
+    const controller = new AbortController();
+    const reason = new Error("memory replica route replaced");
+    const restoreMount = abortWhenMountResolves(controller, reason);
+
+    try {
+      await withTransport(async (_transport, socket) => {
+        const factory = new RemoteSessionFactory(
+          () => new URL("wss://memory.test/api/storage/memory"),
+          signer,
+        );
+        const opening = factory.create(
+          signer.did(),
+          signer,
+          {},
+          controller.signal,
+        );
+        const activeSocket = socket();
+        activeSocket.openConnection();
+        await activeSocket.whenSent(1);
+        answerHello(activeSocket);
+        await activeSocket.whenSent(2);
+        answerSessionOpen(activeSocket, "session:cancel-mounted");
+
+        // The server opened the session, so the mount resolved; the route was
+        // replaced before `create` could hand the session back.
+        await expect(opening).rejects.toBe(reason);
+        expect(activeSocket.readyState).toBe(DrivableWebSocket.CLOSED);
+      });
+    } finally {
+      restoreMount();
+    }
   });
 
   it("surfaces the underlying Error of a socket error to the close receiver", async () => {
