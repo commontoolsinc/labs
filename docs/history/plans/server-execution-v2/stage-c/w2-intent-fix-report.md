@@ -48,7 +48,12 @@ code is byte-identical across the rebase (`git diff 2ce7cb8c7 HEAD --
 packages/` empty before any fix). Pushed ONCE with
 `--force-with-lease=claude/server-exec-v2-w2-intent-listener:2ce7cb8c7`
 (the history rewrite of this branch's own commits: `2ce7cb8c7 →
-20c442213`); every later push plain. The re-stack onto W1's tip will
+20c442213`); every later push plain. SHA map for the pre-rebase
+commits the build report and the PR body cite: (b) scratch
+`e91194469` → `b6af5ff86`; the series tip `7a5481d14` → `44b5b361c`
+(the run artifacts' `gitSha` keeps the pre-rebase value the binary was
+built from); `75f02c1f7` → `162c221df`; the build tip `2ce7cb8c7` →
+`20c442213`. The re-stack onto W1's tip will
 meet the same paragraph again (W1's branch also rewrote the plan's
 coordination block) and `docs/history/INDEX.md`'s
 `plans/server-execution-v2/` directory-entry LINE, which both W1 and W2

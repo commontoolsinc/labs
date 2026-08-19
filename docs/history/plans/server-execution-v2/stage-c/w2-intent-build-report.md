@@ -14,7 +14,11 @@ review (`w2-intent-review-report.md`, LANDABLE-WITH-FIXES — 0 BLOCKER /
 sit beside it; claims the review refuted or sharpened are corrected IN
 PLACE below with a dated "Fix-pass" note, the original wording kept.
 The branch was rebased onto the design branch's tip `461b01822` (review
-MIN-7) — the code is byte-identical across the rebase.*
+MIN-7) — the code is byte-identical across the rebase; the pre-rebase
+SHAs cited here map to: (b) scratch `e91194469` → `b6af5ff86`, the
+series tip `7a5481d14` → `44b5b361c` (the run artifacts' `gitSha` keeps
+the pre-rebase value the binary was built from), `75f02c1f7` →
+`162c221df`, the build tip `2ce7cb8c7` → `20c442213`.*
 
 Date: 2026-08-19 (runs 07:02–07:53 UTC). Base: the stage-C design
 branch tip `c3ec7fc7b` (`claude/server-exec-v2-stage-c-design`, PR
