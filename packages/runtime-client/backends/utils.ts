@@ -26,11 +26,8 @@ import { CellRef, PageRef } from "../protocol/types.ts";
  * writes: every `CellRef` in it becomes a `SigilLink`, and every raw
  * `SigilLink` loses its label view.
  *
- * A cell's value is a `FabricValue`, so that is the domain both ways, and a
- * `CellRef` is one too -- the conversion moves within the type rather than
- * across it. That the result holds no `CellRef` is therefore a fact about this
- * function and not something its return type states; a narrower name for the
- * result would only seem to exclude them.
+ * A cell's value is a `FabricValue`, as are a `CellRef` and a `SigilLink`, so
+ * the conversion moves within that type. The result holds no `CellRef`.
  */
 export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
   if (
@@ -55,21 +52,20 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
     // link payload it finds, so given a link it returns one.
     return stripSigilCfcLabelViews(value) as SigilLink;
   } else if (value instanceof FabricPrimitive) {
-    // Atomic, so there is nothing under it to map and handing it back whole is
-    // the complete answer rather than a deferral. It goes _before_ the record
+    // Atomic, so there is nothing under it to map. It goes _before_ the record
     // branch: one is also a record, and that branch rebuilds from enumerable
     // own properties a fabric class does not have, which would put `{}` here in
     // place of the value.
     return value;
   } else if (typeof value === "object" && value) {
     // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at
-    // which point this becomes a walk rather than a silent flattening. This is
-    // the one arm of the declared domain that is not yet served: an instance
-    // reaches here and the rebuild below reads enumerable own properties it
-    // does not have, so it leaves as `{}`. Handing one back whole instead is
-    // no better, unlike the primitive above -- an instance can hold a link in
-    // its contents, which would then go unmapped -- so which disposition to
-    // take meanwhile is open. What keeps it from arising today is
+    // which point this becomes a walk rather than a silent flattening. It is
+    // the one arm of the domain above not yet served: an instance reaching
+    // here meets a rebuild that reads enumerable own properties it does not
+    // have, and leaves as `{}`. Passing it through untouched is the other
+    // available disposition, and drops any link in its contents instead;
+    // neither is right, and which to take meanwhile is open. What keeps it
+    // from arising today is
     // `CellHandle.serialize()` in `../cell-handle.ts`, which refuses a
     // `FabricSpecialObject` before it can reach this walk; the marker on
     // `WireCellValue` in `../protocol/types.ts` states the same gap at the
