@@ -280,9 +280,32 @@ FOREGROUND, `--no-lock`; counts filled from the runs on the tip:
   not silenced); `executor-events-down.test.ts` 1 / 13 green (under the
   interim (b) too).
 
-### 5a. Final counts
+### 5a. Final counts (the tip; FOREGROUND, `--no-lock`)
 
-FILLED AT PR TIME — see the PR body's Test plan for the numbers.
+- runner — `packages/runner` `deno task test` (the clock preload):
+  **1213 passed (6728 steps) / 0 failed** (7m07s) at `75f02c1f7`; the
+  3-line effects-channel retry tweak after it re-ran
+  `executor-effect-channel` + `speculation-intent-listener` green (3 /
+  24). (The first full run at the pre-fix checkpoint read 1211 / 6725
+  with exactly my two reds: the arrival-gate late-echo stub lacked the
+  relay seam; the new suite was missing from the preload's real-clock
+  list — both fixed, both now green.)
+- memory — `deno task test` (check + tests): **521 passed (229 steps)**.
+- toolshed — **142 passed (428 steps)**.
+- runtime-client — **61 passed (212 steps)**.
+- piece — **37 passed (451 steps)**.
+- spec-model — **23 passed**.
+- `deno task check-docs`: 548 code blocks pass; `check-docs-history-index`:
+  120 entries / 163 documents (this report rides the
+  `plans/server-execution-v2/` directory entry, as W0's does).
+- `deno fmt --check`: every file this PR touches is formatted; the 5
+  unformatted files it reports are pre-existing at the base
+  (`packages/patterns/system/summary-index.tsx`,
+  `packages/runner/src/builtins/llm-dialog.ts`,
+  `packages/runner/test/space-host-late-hint.test.ts`,
+  `packages/shell/test/env.test.ts`, `skills/state-inspector/SKILL.md` —
+  the stage-C closeout's "6 fmt-dirty files at HEAD" minus one). `deno
+  lint` on the touched files: clean.
 
 ## 6. The series on the W2 tip (PROVISIONAL — W4 is the quiet acceptance run)
 

@@ -207,6 +207,9 @@ export class EffectsChannel {
         }) as Promise<unknown>,
       );
     } catch (error) {
+      // Leave the space un-subscribed so a later ensureSubscribed can
+      // retry (the sink-era posture).
+      this.#spaces.delete(space);
       logger.warn("effects-subscribe-failed", () => [
         `effects-doc subscription for ${space} failed; intents for this ` +
         "space will not enact in this runtime",
