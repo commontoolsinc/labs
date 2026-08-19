@@ -1,0 +1,149 @@
+/**
+ * Recover the caller tree from emitted timing measures.
+ *
+ * A logger records a span against its own key and nothing else, so
+ * `tx/read` is `tx/read` whoever asked for it. What the measures add over the
+ * statistics is an interval per span, and intervals nest: the span that was
+ * open when another began is the one that called it. Rebuilding that
+ * containment forest is what turns "this key ran 800,000 times" into "this key
+ * ran 800,000 times, and here is who asked".
+ *
+ * Containment is inferred, not recorded. Spans that overlap without nesting —
+ * which async work produces — are left without a parent rather than assigned a
+ * plausible-looking one, because an invented parent is an invented caller.
+ *
+ * Used by `attribute-measures.ts`; import it for an analysis that script does
+ * not cover.
+ */
+
+/** One emitted measure, as `performance.getEntriesByType("measure")` gives it. */
+export interface MeasureEntry {
+  name: string;
+  startTime: number;
+  duration: number;
+}
+
+/** A span placed in the forest. `parent` is an index, or -1 at a root. */
+export interface Span {
+  /** The logger key, with the uniquifying suffix removed. */
+  key: string;
+  start: number;
+  end: number;
+  parent: number;
+}
+
+/** `cell/get/user-data#4127` names the span `cell/get/user-data`. */
+export function keyOf(name: string): string {
+  const hash = name.lastIndexOf("#");
+  return hash === -1 ? name : name.slice(0, hash);
+}
+
+/**
+ * The test harness's own phases wrap everything a `cf test` run does, so they
+ * would win every containment test and hide the runtime span that issued the
+ * work. Treated as transparent by default when walking up.
+ */
+export const HARNESS_KEY = /^(runTestPattern|cf-test)(\/|$)/;
+
+/**
+ * Build the containment forest.
+ *
+ * Returns spans sorted by start, each carrying the index of the innermost span
+ * that fully contains it. Sorting longest-first at an equal start is what puts
+ * a parent before the child it opened alongside.
+ */
+export function buildForest(entries: readonly MeasureEntry[]): Span[] {
+  const spans: Span[] = entries
+    .map((entry) => ({
+      key: keyOf(entry.name),
+      start: entry.startTime,
+      end: entry.startTime + entry.duration,
+      parent: -1,
+    }))
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+
+  const open: number[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i];
+    while (open.length && spans[open[open.length - 1]].end <= span.start) {
+      open.pop();
+    }
+    const top = open.length ? open[open.length - 1] : -1;
+    if (top !== -1 && spans[top].end >= span.end) span.parent = top;
+    open.push(i);
+  }
+  return spans;
+}
+
+/** Every ancestor key, innermost first. */
+export function ancestors(
+  spans: readonly Span[],
+  index: number,
+  options: { skip?: RegExp } = {},
+): string[] {
+  const skip = options.skip ?? HARNESS_KEY;
+  const out: string[] = [];
+  for (let p = spans[index].parent; p !== -1; p = spans[p].parent) {
+    const key = spans[p].key;
+    if (!skip.test(key)) out.push(key);
+  }
+  return out;
+}
+
+/**
+ * The innermost ancestor that is not skipped, or `undefined` at a root.
+ *
+ * A root is a real answer rather than a gap in the data: it means the span ran
+ * outside every instrumented region, which is a statement about where the
+ * instrumentation stops.
+ */
+export function callerOf(
+  spans: readonly Span[],
+  index: number,
+  options: { skip?: RegExp } = {},
+): string | undefined {
+  return ancestors(spans, index, options)[0];
+}
+
+/**
+ * Collapse an immediate repeat, so a recursive stretch reads as one shape:
+ * `["traverse", "traverse", "cell/get"]` becomes `["traverse x2", "cell/get"]`.
+ */
+export function collapseRepeats(chain: readonly string[]): string[] {
+  const out: string[] = [];
+  let last = "";
+  let run = 0;
+  for (const key of chain) {
+    if (key === last) {
+      run++;
+      continue;
+    }
+    if (last) out.push(run > 1 ? `${last} x${run}` : last);
+    last = key;
+    run = 1;
+  }
+  if (last) out.push(run > 1 ? `${last} x${run}` : last);
+  return out;
+}
+
+/** Read a measures file, or stdin when no path is given. */
+export async function loadMeasures(path?: string): Promise<MeasureEntry[]> {
+  let raw: string;
+  if (path) {
+    raw = await Deno.readTextFile(path);
+  } else {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of Deno.stdin.readable) chunks.push(chunk);
+    let length = 0;
+    for (const chunk of chunks) length += chunk.length;
+    const merged = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    raw = new TextDecoder().decode(merged);
+  }
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed : parsed.measures ?? [];
+}

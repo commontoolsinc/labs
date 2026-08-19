@@ -144,13 +144,34 @@ deno task cf test <file> --timing-measures-out /tmp/measures.json
 deno run --allow-read skills/perf-investigation/scripts/aggregate-measures.ts /tmp/measures.json
 ```
 
-The script rolls every span up by key prefix and prints calls, total, and time
-per call at each level. That roll-up is precisely what the stored statistics
+`aggregate-measures.ts` rolls every span up by key prefix and prints calls,
+total, and time per call at each level. That roll-up is precisely what the stored statistics
 cannot give you — a logger records against its full joined path and nothing
 shorter, so the count at the level where multiplication begins is in no row.
 Scan down a branch: the level whose calls jump by a large factor over its
 parent's while its own time per call stays flat is the one that introduced the
-multiplication. The level where a count stops being
+multiplication.
+
+That answers where the time went. It does not answer who asked, and for a key
+that runs everywhere it cannot: a logger records against its own key no matter
+which caller reached it. `attribute-measures.ts` recovers the caller from the
+intervals — spans nest, so whichever span was open when another began is the one
+that called it:
+
+```bash
+deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
+  /tmp/measures.json --key=tx/read              # who calls it
+deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
+  /tmp/measures.json --key=tx/read --via=traverse   # and how many each does
+deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
+  /tmp/measures.json --key=tx/read --chains     # the full chains
+```
+
+Read the `--via` table for the ratio rather than the totals, because the two
+shapes it separates have different fixes: many parent spans doing a little each
+is a frequency problem, and few parent spans doing a great deal each is a width
+problem. A large root share is not a gap in the data — it says those spans ran
+outside every instrumented region, which is the next thing to wrap. The level where a count stops being
 proportional to the work and starts being proportional to the work squared is
 the level that introduced the multiplication — that is the caller to fix, and it
 is frequently not the

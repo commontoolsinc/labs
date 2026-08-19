@@ -141,6 +141,14 @@ you begin and what you can trust:
   by key prefix, which is what the statistics cannot do: a logger records
   against its full joined path and nothing shorter, so the count at the level
   where it starts multiplying exists in no stored row.
+- **Intervals recover the caller.** A key that runs everywhere is recorded
+  against itself whoever reached it, so no aggregate can say who is responsible.
+  Spans nest, so the span open when another began is the one that called it:
+  `skills/perf-investigation/scripts/attribute-measures.ts` rebuilds that tree
+  and answers who, how deep, and how many each caller asked for. Read its ratio
+  rather than its totals — few callers asking for a great deal each is a width
+  problem, many asking for a little is a frequency one, and they are fixed at
+  opposite ends of the stack.
 
 **You are done narrowing when you can write a benchmark.** A source you
 understand can be provoked directly; one you cannot provoke is still a
