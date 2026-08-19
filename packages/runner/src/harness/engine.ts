@@ -64,6 +64,11 @@ import {
 } from "../sandbox/module-record-verifier.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import {
+  type AuthoredDebugSource,
+  readAuthoredBindingAnnotation,
+  recordAuthoredDebugSource,
+} from "./authored-debug-source.ts";
+import {
   COMPILE_INTERLEAVES_EVENT_LOOP,
   interleaveCompileYield,
 } from "./compile-interleave.ts";
@@ -71,6 +76,7 @@ import { Console } from "./console.ts";
 import {
   compilerStack,
   ensureCompilerStack,
+  isCompilerStackLoaded,
 } from "./deferred-compiler-stack.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
 import { FabricAwareResolver } from "./fabric-resolver.ts";
@@ -1491,6 +1497,7 @@ export class Engine extends EventTarget {
       this.recordModuleProvenance(
         exportsByIdentity,
         graph.registrationSink,
+        helperInjectionLineOffsets(ctx.filesForExports),
       );
 
       // `graph.registrationSink` was populated by each module's `__cfReg` during
@@ -1516,10 +1523,15 @@ export class Engine extends EventTarget {
    * artifact index uses (`isTrustedBuilderArtifact`) keeps forged values out.
    * First-write-wins (see `recordVerifiedProvenance`), so an export and a
    * `__cfReg` entry for one artifact agree on a single canonical symbol.
+   *
+   * The walk also feeds the DEBUG authored-source map, which is what `fn.src`
+   * serves. `helperLineOffsets` corrects the transformer's positions to
+   * authored lines (see {@link helperInjectionLineOffsets}).
    */
   private recordModuleProvenance(
     exportsByIdentity: Map<string, Exports>,
     registrationSink: Map<string, Map<string, unknown>>,
+    helperLineOffsets: ReadonlyMap<string, number>,
   ): void {
     const record = (identity: string, symbol: string, value: unknown) => {
       if (!isTrustedBuilderArtifact(value)) return;
@@ -1549,6 +1561,17 @@ export class Engine extends EventTarget {
         symbol,
         ...(bindingIdentity ? { bindingIdentity } : {}),
       });
+      // Debug-only, and deliberately a SEPARATE map from the provenance record
+      // above: `fn.src` names where an artifact was authored and nothing else
+      // reads it, so it stays outside the red-team surface that authorizes
+      // writes. It sits after the defining-module guard, so a re-exporter
+      // cannot stamp a position onto a function it did not define.
+      const debugSource = authoredDebugSourceFor(
+        identity,
+        value,
+        helperLineOffsets,
+      );
+      if (debugSource) recordAuthoredDebugSource(implementation, debugSource);
       // The strong content-addressed implementation index — the resolution
       // (and eviction-insurance) backing for serialized `$implRef`s; see
       // `ExecutableRegistry.registerVerifiedImplementation`.
@@ -2061,6 +2084,80 @@ export function helperInjectionLineOffset(contents: string): number {
   if (findFirstContentLineIndex(contents.split("\n")) === null) return 0;
   if (sourceDisablesCfTransform(contents)) return 0;
   return -1;
+}
+
+/**
+ * The authored-line correction for each source of an evaluation, keyed by the
+ * name the transformer's annotation spells its file under.
+ *
+ * Empty when the compiler stack is not loaded — the legacy-envelope arm of
+ * `helperInjectionLineOffset` lives inside it, and a warm boot deliberately
+ * never pays for that load. Every path where a legacy envelope can appear
+ * compiles, so it has the stack; the warm-by-identity path has neither the
+ * stack nor any source to measure, and yields no `fn.src` rather than a line
+ * that might be off by one.
+ */
+function helperInjectionLineOffsets(
+  files: readonly Source[],
+): ReadonlyMap<string, number> {
+  if (!isCompilerStackLoaded()) return new Map();
+  return new Map(
+    files.map((file) =>
+      [file.name, helperInjectionLineOffset(file.contents)] as const
+    ),
+  );
+}
+
+/**
+ * The authored debug source of one builder artifact, from the annotation its
+ * value carries. Returns undefined when the artifact carries neither a
+ * resolvable position nor a binding name.
+ */
+function authoredDebugSourceFor(
+  identity: string,
+  value: unknown,
+  helperLineOffsets: ReadonlyMap<string, number>,
+): AuthoredDebugSource | undefined {
+  const annotation = readAuthoredBindingAnnotation(value);
+  if (annotation === undefined) return undefined;
+  const src = authoredSrc(identity, annotation, helperLineOffsets);
+  const { bindingName } = annotation;
+  if (src === undefined && bindingName === undefined) return undefined;
+  return {
+    ...(src === undefined ? {} : { src }),
+    ...(bindingName === undefined ? {} : { bindingName }),
+  };
+}
+
+/**
+ * `cf:module/<identity>/<authoredPath>:<line>:<col>` for an annotated
+ * artifact — the canonical module source {@link Engine.canonicalModuleSource}
+ * resolves to, addressed at the authored position.
+ *
+ * The annotation's line indexes the file the transformer saw, which is the
+ * authored file plus the helper-import prelude, so the file's own injection
+ * offset is applied EXACTLY ONCE here — this is the only place `fn.src`
+ * crosses from transformed to authored coordinates. The column is emitted
+ * against the authored text and passes through unchanged (0-based).
+ *
+ * Undefined whenever the position cannot be placed with certainty: no
+ * position, no offset for the file (a source outside this evaluation's
+ * measured set), or a correction that lands off the top of the file. Wrong
+ * debug coordinates are worse than none, so every uncertain case yields none.
+ */
+function authoredSrc(
+  identity: string,
+  annotation: { sourceFile: string; position?: { line: number; col: number } },
+  helperLineOffsets: ReadonlyMap<string, number>,
+): string | undefined {
+  const { sourceFile, position } = annotation;
+  if (position === undefined) return undefined;
+  const lineOffset = helperLineOffsets.get(sourceFile);
+  if (lineOffset === undefined) return undefined;
+  const line = position.line + lineOffset;
+  if (line < 1) return undefined;
+  const path = sourceFile.startsWith("/") ? sourceFile : `/${sourceFile}`;
+  return `cf:module/${identity}${path}:${line}:${position.col}`;
 }
 
 // Pattern coverage runs after helper injection. This maps spans back to the

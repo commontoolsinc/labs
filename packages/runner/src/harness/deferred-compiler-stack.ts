@@ -44,6 +44,16 @@ export function ensureCompilerStack(
 }
 
 /**
+ * Whether the stack is already loaded. For OPTIONAL work that a boot path may
+ * legitimately skip — a flow that must have the stack calls
+ * {@link ensureCompilerStack} at its entry instead, and reaches values through
+ * {@link compilerStack}, whose throw is the signal that it forgot.
+ */
+export function isCompilerStackLoaded(): boolean {
+  return loaded !== undefined;
+}
+
+/**
  * The loaded compiler stack. Throws when no flow has awaited
  * {@link ensureCompilerStack} yet — a missed ensure on a new flow fails loud
  * here rather than silently re-eagering the compiler into the boot path.
