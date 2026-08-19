@@ -269,6 +269,17 @@ async function githubDollarSpend(
     (sum, item) => sum + (Number(item.netAmount) || 0),
     0,
   );
+  // The budgeted products' share of that total, counted from the rows rather
+  // than from the days, so a row whose date is unreadable weighs on the
+  // comparison as it already weighs on the headline. It has no day to chart,
+  // so it stays out of the series below.
+  const budgetedMtd = current.reduce(
+    (sum, item) =>
+      budgets.products.has(String(item.product).toLowerCase())
+        ? sum + (Number(item.netAmount) || 0)
+        : sum,
+    0,
+  );
   const byDay = new Map<string, number>();
   // The same days over the budgeted products alone. A product with no budget
   // of its own is taken to be spending within one, so it is left out of the
@@ -343,6 +354,7 @@ async function githubDollarSpend(
       now,
       {
         lagDays: GITHUB_LAG_DAYS,
+        measuredMtd: budgetedMtd,
         priorMonthDaily: priorMonthBudgetedDaily,
       },
     ).projected,

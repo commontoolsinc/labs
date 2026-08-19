@@ -406,6 +406,29 @@ Deno.test("github spend: a product with no budget of its own never trips the lig
   assertStringIncludes(budgeted.extra ?? "", "Budget $500");
 });
 
+Deno.test("github spend: an undated row weighs on the comparison as it does on the headline", async () => {
+  // A row the report dates unreadably still names an amount, and the headline
+  // counts it. A budgeted product's undated row has to reach the comparison
+  // too, or spend would go into the figure while staying out of the ceiling it
+  // is measured against, and the tile would read greener than the spend is.
+  const v = await view("2026-01-20T09:00:00Z", {
+    [usagePath(2026, 1)]: {
+      usageItems: [
+        ...days(2026, 1, 1, 10, 18), // $180, dated
+        item("", 100), // Actions again, with no readable date
+        stillReporting("2026-01-18"),
+      ],
+    },
+    [budgetsPath()]: { budgets: [productBudget("actions", 400)] },
+  });
+  // $280 over the 18 settled days across 31, in the headline and against the
+  // budget alike. Counting only the dated $180 would project $310 and pass.
+  assertEquals(v.value, "~$482/mo");
+  assertEquals(v.aside, '<span class="hmtd">$280 MTD</span>');
+  assertEquals(v.status, "warn"); // $482 of a $400 Actions budget
+  assertStringIncludes(v.extra ?? "", "Budget $400");
+});
+
 Deno.test("github spend: the headline sits under the shown budget exactly when the tile is green", async () => {
   // The color comes from the budgeted products while the headline carries
   // every product, so the two are only readable together if the ceiling shown
