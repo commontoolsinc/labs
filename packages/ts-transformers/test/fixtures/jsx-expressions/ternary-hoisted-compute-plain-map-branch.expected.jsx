@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -70,6 +88,11 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 19, col: 26 },
+    bindingName: "sorted"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         items: {
@@ -99,6 +122,11 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 23, col: 25 },
+    bindingName: "count"
+});
 // FIXTURE: ternary-hoisted-compute-plain-map-branch
 // Verifies: once a ternary JSX branch is wholly compute-wrapped, compute-owned
 // array maps inside that branch stay plain Array.map() calls.
@@ -106,7 +134,7 @@ const __cfLift_2 = __cfHelpers.lift<{
 //     → ifElse(showList, lift(() => { const itemCount = ...; return <div>{sorted.map(...)}</div>; })(...), ...)
 // Context: the branch contains both a local compute-only alias and a map over
 //   a computed array result, so the whole branch should be handled as compute-owned.
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     const showList = new Writable(true, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showList", true);
@@ -201,7 +229,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 16, col: 42 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

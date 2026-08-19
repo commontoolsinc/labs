@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -48,6 +66,11 @@ const SimplePattern = pattern(() => ({
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(SimplePattern, {
+    sourceFile: "/test.tsx",
+    position: { line: 15, col: 30 },
+    bindingName: "SimplePattern"
+});
 // Create a cell to store an array of pieces
 const createCellRef = lift(({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
@@ -79,6 +102,11 @@ const createCellRef = lift(({ isInitialized, storedCellRef }) => {
     },
     required: ["isInitialized", "storedCellRef"],
 });
+__cfBindVerifiedBinding(createCellRef, {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 2 },
+    bindingName: "createCellRef"
+});
 // Add a piece to the array and navigate to it
 // we get a new isInitialized passed in for each
 // piece we add to the list. this makes sure
@@ -105,6 +133,11 @@ const addPieceAndNavigate = lift(({ piece, cellRef, isInitialized }) => {
     },
     required: ["piece", "isInitialized"],
 });
+__cfBindVerifiedBinding(addPieceAndNavigate, {
+    sourceFile: "/test.tsx",
+    position: { line: 57, col: 2 },
+    bindingName: "addPieceAndNavigate"
+});
 // Create a new SimplePattern and add it to the array
 const createSimplePattern = handler({
     type: "unknown"
@@ -128,6 +161,11 @@ const createSimplePattern = handler({
     // Store the piece in the array and navigate
     return addPieceAndNavigate({ piece, cellRef, isInitialized });
 });
+__cfBindVerifiedBinding(createSimplePattern, {
+    sourceFile: "/test.tsx",
+    position: { line: 82, col: 2 },
+    bindingName: "createSimplePattern"
+});
 // Handler to navigate to a specific piece from the list
 const goToPiece = handler({
     type: "unknown"
@@ -143,6 +181,11 @@ const goToPiece = handler({
 } as const satisfies __cfHelpers.JSONSchema, (_, { piece }) => {
     console.log("goToPiece clicked");
     return navigateTo(piece);
+});
+__cfBindVerifiedBinding(goToPiece, {
+    sourceFile: "/test.tsx",
+    position: { line: 96, col: 2 },
+    bindingName: "goToPiece"
 });
 const __cfLift_1 = __cfHelpers.lift<{
     cellRef: unknown[];
@@ -160,6 +203,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 123, col: 10 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     piece: any;
 }, any>(({ piece }) => piece[__cfHelpers.NAME], {
@@ -169,6 +216,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     },
     required: ["piece"]
 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 133, col: 42 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const piece = __cf_pattern_input.key("element");
     const index = __cf_pattern_input.key("index");
@@ -210,6 +261,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 126, col: 25 }
+});
 // FIXTURE: reactive-cell-map
 // Verifies: a reactive factory result still rewrites JSX ifElse predicates after
 //           the forbidden Reactive cast is removed
@@ -218,7 +273,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 //     `as { cellRef: any[] }`, because the cast does not change the reactive origin
 // Context: Real-world pattern using Cell.for<any[]>(), handler, lift, and navigateTo
 // create the named cell inside the pattern body, so we do it just once
-export default pattern(() => {
+export default __cfBindVerifiedBinding(pattern(() => {
     // cell to store array of pieces we created
     const __cf_destructure_1 = createCellRef({
         isInitialized: cell(false, {
@@ -291,7 +346,10 @@ export default pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 110, col: 23 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

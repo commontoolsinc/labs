@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -32,6 +50,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 25, col: 16 },
+    bindingName: "count"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     rows: __cfHelpers.Writable<Row[]>;
 }, readonly Row[]>(({ rows }) => rows.get(), {
@@ -80,6 +103,11 @@ const __cfLift_2 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 26, col: 14 },
+    bindingName: "all"
+});
 const __cfLift_3 = __cfHelpers.lift<{
     rows: __cfHelpers.Writable<Row[]>;
 }, Row | undefined>(({ rows }) => rows.get()[0], {
@@ -129,6 +157,11 @@ const __cfLift_3 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 27, col: 16 },
+    bindingName: "first"
+});
 const __cfLift_4 = __cfHelpers.lift<{
     rows: __cfHelpers.Writable<Row[]>;
 }, string>(({ rows }) => rows.get().join(","), {
@@ -160,6 +193,11 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 28, col: 17 },
+    bindingName: "joined"
+});
 const __cfLift_5 = __cfHelpers.lift<{
     rows: __cfHelpers.Writable<Row[]>;
 }, readonly Row[]>(({ rows }) => rows.get(), {
@@ -208,6 +246,11 @@ const __cfLift_5 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_5, {
+    sourceFile: "/test.tsx",
+    position: { line: 29, col: 17 },
+    bindingName: "recent"
+});
 const __cfLift_6 = __cfHelpers.lift<{
     row: {
         sentAt: number;
@@ -229,6 +272,10 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_6, {
+    sourceFile: "/test.tsx",
+    position: { line: 29, col: 44 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     return __cfLift_6({ row: {
@@ -259,6 +306,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 29, col: 35 },
+    bindingName: "recent"
+});
 const __cfLift_7 = __cfHelpers.lift<{
     label?: __cfHelpers.Writable<string> | undefined;
 }, string | undefined>(({ label }) => label?.get(), {
@@ -276,6 +328,11 @@ const __cfLift_7 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_7, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 19 },
+    bindingName: "optional"
+});
 // FIXTURE: cell-get-terminal-binding-autowrap
 // Verifies: a cell read at a variable-initializer binding is auto-wrapped into a
 //   lift whether or not a computation sits on top of it — a bare `rows.get()`,
@@ -289,7 +346,7 @@ const __cfLift_7 = __cfHelpers.lift<{
 //   reads. `label` pins the optional spelling: optionality rides through the
 //   lift rather than blocking the site, so the input schema carries `label` as
 //   an unrequired `anyOf` and the result widens to include `undefined`.
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const rows = __cf_pattern_input.key("rows");
     const label = __cf_pattern_input.key("label");
     const count = __cfLift_1({ rows: rows }).for("count", true);
@@ -376,7 +433,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["sentAt", "body"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 76 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -31,6 +49,11 @@ const moduleHasSettings = lift(({ piece }: {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(moduleHasSettings, {
+    sourceFile: "/test.tsx",
+    position: { line: 4, col: 31 },
+    bindingName: "moduleHasSettings"
+});
 const selectMessage = handler({
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -47,6 +70,11 @@ const selectMessage = handler({
     required: ["selectedId", "msgId"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, { selectedId, msgId }) => {
     selectedId.set(msgId);
+});
+__cfBindVerifiedBinding(selectMessage, {
+    sourceFile: "/test.tsx",
+    position: { line: 11, col: 2 },
+    bindingName: "selectMessage"
 });
 interface Entry {
     piece: {
@@ -117,6 +145,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 35, col: 23 }
+});
 const __cfLift_1 = __cfHelpers.lift<{
     msg: {
         type: string;
@@ -138,6 +170,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 44, col: 14 }
+});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const msg = __cf_pattern_input.key("element");
     const selectedId = __cf_pattern_input.key("params", "selectedId");
@@ -208,11 +244,15 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 42, col: 24 }
+});
 // FIXTURE: ifelse-factory-boundaries
 // Verifies: authored ifElse keeps captured property access inside factory boundaries
 //   moduleHasSettings({ piece: entry.piece }) → piece capture stays structural inside lift() call
 //   selectMessage({ selectedId, msgId: msg.id }) → msg.id stays structural inside handler call branch
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const messages = __cf_pattern_input.key("messages");
     const selectedId = new Writable("", {
@@ -300,7 +340,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 29, col: 2 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

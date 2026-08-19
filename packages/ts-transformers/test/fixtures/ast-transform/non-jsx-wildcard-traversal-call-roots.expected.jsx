@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -56,6 +74,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 14, col: 14 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         wishes: [{ id: string; status: string; }, { id: string; status: string; }];
@@ -92,6 +114,10 @@ const __cfLift_2 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 15, col: 8 }
+});
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         wishes: [{ id: string; status: string; }, { id: string; status: string; }];
@@ -128,6 +154,10 @@ const __cfLift_3 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 16, col: 10 }
+});
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         wishes: [{ id: string; status: string; }, { id: string; status: string; }];
@@ -167,9 +197,13 @@ const __cfLift_4 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 17, col: 11 }
+});
 // FIXTURE: non-jsx-wildcard-traversal-call-roots
 // Verifies: wildcard traversal calls lower as whole call roots outside JSX
-export default pattern((state) => ({
+export default __cfBindVerifiedBinding(pattern((state) => ({
     serialized: __cfLift_1({ state: {
             wishes: state.key("wishes")
         } }).for(["__patternResult", "serialized"], true),
@@ -231,7 +265,10 @@ export default pattern((state) => ({
         }
     },
     required: ["serialized", "keys", "values", "entries"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 13, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

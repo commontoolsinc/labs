@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -40,6 +58,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 24, col: 17 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const value = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
@@ -93,6 +115,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 23, col: 25 }
+});
 // FIXTURE: cell-map-with-captures
 // Verifies: Cell.map() with outer-scope captures is transformed to mapWithPattern with params
 //   typedValues.map((value) => <span>{value * state.multiplier}</span>)
@@ -100,7 +126,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 //   value * state.multiplier → lift(...)({ value, state: { multiplier } })
 // Context: The map callback captures `state.multiplier` from the outer scope,
 //   which must be threaded through as a mapWithPattern param and re-derived inside.
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     // Explicitly type as Cell to ensure closure transformation
     const typedValues: Cell<number[]> = cell(state.key("values"), {
         type: "array",
@@ -160,7 +186,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 16, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

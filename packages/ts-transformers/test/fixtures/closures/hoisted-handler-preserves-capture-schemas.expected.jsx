@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -60,6 +78,11 @@ const Item = pattern((__cf_pattern_input) => {
     },
     required: ["id", "label", "$NAME"]
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(Item, {
+    sourceFile: "/test.tsx",
+    position: { line: 31, col: 2 },
+    bindingName: "Item"
+});
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -98,6 +121,11 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     if (existing) {
         return navigateTo(existing);
     }
+});
+__cfBindVerifiedBinding(__cfHandler_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 45, col: 24 },
+    bindingName: "read"
 });
 const __cfHandler_2 = __cfHelpers.handler({
     type: "object",
@@ -158,8 +186,13 @@ const __cfHandler_2 = __cfHelpers.handler({
     items.push(newItem as any);
     return newItem;
 });
+__cfBindVerifiedBinding(__cfHandler_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 59, col: 6 },
+    bindingName: "write"
+});
 // FIXTURE: hoisted-handler-preserves-capture-schemas (CT-1585 regression)
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     const self = __cf_pattern_input[__cfHelpers.SELF];
     // `read` action: matches the shape of notebook.tsx's
@@ -224,7 +257,10 @@ export default pattern((__cf_pattern_input) => {
         }
     },
     required: ["read", "write", "$NAME", "$UI"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 40, col: 2 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -58,6 +76,11 @@ const __cfHandler_1 = __cfHelpers.handler({
 } as const satisfies __cfHelpers.JSONSchema, ({ name }, { path }) => {
     path.push(name);
 });
+__cfBindVerifiedBinding(__cfHandler_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 44, col: 26 },
+    bindingName: "pushPath"
+});
 const __cfLift_1 = __cfHelpers.lift<{
     path: __cfHelpers.Cell<string[]>;
 }, readonly string[]>(({ path }) => path.get(), {
@@ -78,6 +101,11 @@ const __cfLift_1 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 52, col: 20 },
+    bindingName: "p"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     path: __cfHelpers.Cell<string[]>;
 }, readonly string[]>(({ path }) => path.get(), {
@@ -98,6 +126,11 @@ const __cfLift_2 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 57, col: 20 },
+    bindingName: "p"
+});
 const __cfLift_3 = __cfHelpers.lift<{
     entries: Writable<Default<Entry[], [
     ]>>;
@@ -149,6 +182,11 @@ const __cfLift_3 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 58, col: 26 },
+    bindingName: "visible"
+});
 const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -174,6 +212,10 @@ const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     },
     required: ["entry", "pushPath"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, entry }) => pushPath.send({ name: entry.name }));
+__cfBindVerifiedBinding(__cfHandler_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 62, col: 30 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element");
     const pushPath = __cf_pattern_input.key("params", "pushPath");
@@ -241,7 +283,11 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-export default pattern((__cf_pattern_input) => {
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 59, col: 29 }
+});
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const path = new Writable<string[]>([], {
         type: "array",
@@ -330,7 +376,10 @@ export default pattern((__cf_pattern_input) => {
         }
     },
     required: ["$UI"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 42, col: 38 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

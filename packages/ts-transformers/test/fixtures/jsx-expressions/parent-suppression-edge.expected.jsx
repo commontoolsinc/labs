@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -132,6 +150,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 99, col: 11 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         user: {
@@ -161,6 +183,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 105, col: 28 }
+});
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         user: {
@@ -190,6 +216,10 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 106, col: 11 }
+});
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         user: {
@@ -232,6 +262,10 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 172, col: 14 }
+});
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         user: {
@@ -261,6 +295,10 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_5, {
+    sourceFile: "/test.tsx",
+    position: { line: 174, col: 14 }
+});
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         config: {
@@ -316,6 +354,10 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_6, {
+    sourceFile: "/test.tsx",
+    position: { line: 179, col: 25 }
+});
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         user: {
@@ -345,6 +387,10 @@ const __cfLift_7 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_7, {
+    sourceFile: "/test.tsx",
+    position: { line: 195, col: 22 }
+});
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         user: {
@@ -374,12 +420,16 @@ const __cfLift_8 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_8, {
+    sourceFile: "/test.tsx",
+    position: { line: 196, col: 11 }
+});
 // FIXTURE: parent-suppression-edge
 // Verifies: property access suppression -- sibling properties share a captured parent in a lift-applied computation
 //   {state.user.name} ... {state.user.age} → individual .key() or shared lift(...)({ user: {...} })
 //   {state.config.theme.colors.primary}    → lift-applied computation with deeply nested capture
 // Context: Tests that the transformer correctly deduplicates and suppresses parent captures
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Same Base, Different Properties</h3>
@@ -958,7 +1008,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 85, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

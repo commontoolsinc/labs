@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -96,7 +114,7 @@ const inputSchema = __cfHelpers.__cf_data({
 } as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: default-union-syntax
 // Verifies: union Default and DeepDefault syntax is preserved through schema-transform fixtures
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const title = __cf_pattern_input.key("title");
     const subtitle = __cf_pattern_input.key("subtitle");
     const options = __cf_pattern_input.key("options");
@@ -214,7 +232,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["theme", "profile"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 34, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -21,6 +39,11 @@ declare const source: DeriveInput;
 const __cfLift_1 = __cfHelpers.lift((): DeriveResult => ({
     doubled: source.count * 2,
 }), false, undefined, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 18, col: 37 },
+    bindingName: "doubledValue"
+});
 // FIXTURE: schema-generation-computed
 // Verifies: computed() closure-extracts a captured value into a lift() with input
 // (capture) and output schemas generated from type info

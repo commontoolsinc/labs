@@ -2,6 +2,8 @@ import { assert, assertEquals } from "@std/assert";
 
 import ts from "typescript";
 
+import { BINDING_IDENTITY_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
+import { recoverAuthoredPosition } from "../src/ast/mod.ts";
 import { CommonFabricTransformerPipeline } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { batchTypeCheckFixtures } from "./utils.ts";
@@ -35,8 +37,14 @@ import { batchTypeCheckFixtures } from "./utils.ts";
  *      full-`preserveLineage` sites (lift-applied outer, mapWithPattern) and
  *      the capture-scaffold outer carry.
  * Recovery mirrors the probe's precedence (own position → own sourceMapRange →
- * original-chain terminal); CONTENT is the ground truth — a position pointing
- * at the wrong text is still broken lineage.
+ * original-chain terminal, `recoverAuthoredPosition` in `src/ast/utils.ts`);
+ * CONTENT is the ground truth — a position pointing at the wrong text is still
+ * broken lineage.
+ *
+ * The fourth check is CT-1870's consumer of that lineage: the module-scope
+ * hardening stage annotates every function-bearing builder artifact with
+ * `__cfBindVerifiedBinding(value, { … position, bindingName })`, and each
+ * annotation's `position` must land on the authored function it names.
  *
  * Bite matrix (verified by reverting each fix file to its pre-fix state):
  * pattern-builder, capture-scaffold, array-method-transform and
@@ -62,6 +70,9 @@ import { batchTypeCheckFixtures } from "./utils.ts";
 //   ORIGIN-G  pattern-body binary over a dynamic opaque access → __cfLift
 //   ORIGIN-E  inline captured action in JSX          → handler scaffold → __cfHandler
 //   ORIGIN-D  .map with an element callback in JSX   → array-method → __cfPattern
+//   ORIGIN-H  handler over a referenced arrow const  → in-place, anchor = const
+//   ORIGIN-I  handler over a function declaration    → in-place, anchor = declaration
+//   ORIGIN-J  handler over a property-access callback → in-place, anchor = the call
 const FIXTURE = `import {
   action,
   computed,
@@ -86,6 +97,30 @@ const bump = handler<unknown, { count: Writable<number> }>((_, state) => {
   state.count.set(state.count.get() + 1);
 });
 
+// ORIGIN-H: builder whose callback is a REFERENCED authored function
+const onReset = (_: unknown, state: { count: Writable<number> }) => {
+  state.count.set(0);
+};
+const reset = handler<unknown, { count: Writable<number> }>(onReset);
+
+// ORIGIN-I: builder whose callback is a same-file FUNCTION DECLARATION,
+// declared below its use (declarations hoist — mirrors the live
+// generated-pattern form lift(sanitizeTickets)).
+const zero = handler<unknown, { count: Writable<number> }>(onZero);
+function onZero(_: unknown, state: { count: Writable<number> }) {
+  state.count.set(0 * 1);
+}
+
+// ORIGIN-J: builder whose callback arrives through PROPERTY ACCESS — no
+// same-file function anchors it, so the annotation anchors at the builder
+// call itself.
+const callbacks = {
+  echoTick(_: unknown, state: { count: Writable<number> }) {
+    state.count.set(state.count.get() + 10);
+  },
+};
+const viaProperty = handler<unknown, { count: Writable<number> }>(callbacks.echoTick);
+
 export default pattern<ProbeInput>(({ count, flag, label, items, task }) => {
   // ORIGIN-A: authored computed with a capture
   const doubled = computed(() => count * 2);
@@ -107,6 +142,8 @@ export default pattern<ProbeInput>(({ count, flag, label, items, task }) => {
           {items.map((item) => <li>{item}</li>)}
         </ul>
         <cf-button onClick={bump({ count })}>bump</cf-button>
+        <cf-button onClick={reset({ count })}>reset</cf-button>
+        <cf-button onClick={zero({ count })}>zero</cf-button>
         {/* ORIGIN-E: inline captured action */}
         <cf-button onClick={action(() => count * 4)}>quad</cf-button>
       </div>
@@ -121,28 +158,20 @@ export default pattern<ProbeInput>(({ count, flag, label, items, task }) => {
 `;
 
 /**
- * Best-available authored position for a (possibly synthetic) node, mirroring
- * the probe's recovery precedence: the node's own text range, else its explicit
- * sourceMapRange, else the terminal of its original-node chain. Returns
- * undefined when none of the three yields a real (`>= 0`) position — i.e.
- * broken lineage.
+ * The value a binding-identity annotation wraps, or the expression itself when
+ * it carries none. The hardening stage annotates an EXPORTED artifact in place
+ * (`export default __cfBindVerifiedBinding(pattern(…), { … })`), so the builder
+ * call the lineage checks are about sits one level in.
  */
-function recoverPosition(
-  node: ts.Node,
-): { pos: number; end: number } | undefined {
-  if (node.pos >= 0) return { pos: node.pos, end: node.end };
-
-  // ts.getSourceMapRange returns the node itself when no explicit range is set.
-  const smr = ts.getSourceMapRange(node);
-  if ((smr as unknown) !== (node as unknown) && smr.pos >= 0) {
-    return { pos: smr.pos, end: smr.end };
+function unwrapBindingAnnotation(expression: ts.Expression): ts.Expression {
+  if (
+    ts.isCallExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === BINDING_IDENTITY_HELPER_NAME
+  ) {
+    return expression.arguments[0]!;
   }
-
-  const original = ts.getOriginalNode(node);
-  if (original !== node && original.pos >= 0) {
-    return { pos: original.pos, end: original.end };
-  }
-  return undefined;
+  return expression;
 }
 
 function findCallbackArgument(
@@ -184,7 +213,10 @@ function collectBuilderSites(root: ts.SourceFile): BuilderSite[] {
         ) {
           const name = decl.name.text;
           // Hoisted synthetics plus the authored module-scope `bump` handler.
-          if (HOISTED_NAME.test(name) || name === "bump") {
+          if (
+            HOISTED_NAME.test(name) || name === "bump" || name === "reset" ||
+            name === "zero" || name === "viaProperty"
+          ) {
             sites.push({
               tag: name,
               call: decl.initializer,
@@ -196,7 +228,7 @@ function collectBuilderSites(root: ts.SourceFile): BuilderSite[] {
     }
 
     if (ts.isExportAssignment(stmt) && !stmt.isExportEquals) {
-      let expr = stmt.expression;
+      let expr = unwrapBindingAnnotation(stmt.expression);
       while (
         ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) ||
         ts.isSatisfiesExpression(expr)
@@ -233,6 +265,12 @@ function collectRewrittenSites(
     if (ts.isCallExpression(node)) {
       if (
         ts.isIdentifier(node.expression) &&
+        node.expression.text === BINDING_IDENTITY_HELPER_NAME
+      ) {
+        // A binding-identity annotation names its target but is not a rewritten
+        // USE of it; it is checked separately, against its own metadata.
+      } else if (
+        ts.isIdentifier(node.expression) &&
         HOISTED_NAME.test(node.expression.text)
       ) {
         if (!sites.has(node.expression.text)) {
@@ -252,7 +290,7 @@ function collectRewrittenSites(
   return sites;
 }
 
-async function transformFixtureToAst(): Promise<{
+async function transformFixtureToAst(source = FIXTURE): Promise<{
   transformed: ts.SourceFile;
   /** The pre-transform source file, whose text the recovered positions index
    * into (it carries the `transformCfDirective` helper-import prelude). */
@@ -262,7 +300,7 @@ async function transformFixtureToAst(): Promise<{
   // Reuse the shared harness to build a program with the commonfabric + env
   // type definitions (and the `transformCfDirective` helper-import prelude).
   const { program } = await batchTypeCheckFixtures(
-    { [fileName]: FIXTURE },
+    { [fileName]: source },
     { types: COMMONFABRIC_TYPES },
   );
   const original = program.getSourceFile(fileName);
@@ -273,8 +311,99 @@ async function transformFixtureToAst(): Promise<{
   const transformed = result.transformed[0];
   assert(transformed, "pipeline returned a transformed source file");
   // NB: do NOT dispose the result yet — disposal can clear the emit-node data
-  // that holds sourceMapRange, which recoverPosition reads.
+  // that holds sourceMapRange, which recoverAuthoredPosition reads.
   return { transformed, original };
+}
+
+/** The `position` / `bindingName` a binding-identity annotation reports. */
+interface BindingAnnotation {
+  readonly position: { line: number; col: number } | undefined;
+  readonly bindingName: string | undefined;
+}
+
+function readNumericProperty(
+  literal: ts.ObjectLiteralExpression,
+  name: string,
+): number | undefined {
+  for (const property of literal.properties) {
+    if (
+      ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) &&
+      property.name.text === name &&
+      ts.isNumericLiteral(property.initializer)
+    ) {
+      return Number(property.initializer.text);
+    }
+  }
+  return undefined;
+}
+
+function readBindingAnnotation(metadata: ts.Expression): BindingAnnotation {
+  assert(
+    ts.isObjectLiteralExpression(metadata),
+    "binding-identity metadata must be an object literal",
+  );
+  let position: { line: number; col: number } | undefined;
+  let bindingName: string | undefined;
+  for (const property of metadata.properties) {
+    if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) {
+      continue;
+    }
+    if (
+      property.name.text === "position" &&
+      ts.isObjectLiteralExpression(property.initializer)
+    ) {
+      const line = readNumericProperty(property.initializer, "line");
+      const col = readNumericProperty(property.initializer, "col");
+      assert(
+        line !== undefined && col !== undefined,
+        "position must carry numeric line and col",
+      );
+      position = { line, col };
+    }
+    if (
+      property.name.text === "bindingName" &&
+      ts.isStringLiteral(property.initializer)
+    ) {
+      bindingName = property.initializer.text;
+    }
+  }
+  return { position, bindingName };
+}
+
+/**
+ * Every binding-identity annotation the hardening stage emitted, keyed the same
+ * way {@link collectBuilderSites} keys artifacts: by the annotated binding's
+ * name, and `export-default` for the annotated default export.
+ */
+function collectBindingAnnotations(
+  root: ts.SourceFile,
+): Map<string, BindingAnnotation> {
+  const annotations = new Map<string, BindingAnnotation>();
+  const isAnnotation = (node: ts.Node): node is ts.CallExpression =>
+    ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+    node.expression.text === BINDING_IDENTITY_HELPER_NAME;
+
+  for (const stmt of root.statements) {
+    if (
+      ts.isExpressionStatement(stmt) && isAnnotation(stmt.expression) &&
+      ts.isIdentifier(stmt.expression.arguments[0]!)
+    ) {
+      annotations.set(
+        (stmt.expression.arguments[0] as ts.Identifier).text,
+        readBindingAnnotation(stmt.expression.arguments[1]!),
+      );
+    }
+    if (
+      ts.isExportAssignment(stmt) && !stmt.isExportEquals &&
+      isAnnotation(stmt.expression)
+    ) {
+      annotations.set(
+        "export-default",
+        readBindingAnnotation(stmt.expression.arguments[1]!),
+      );
+    }
+  }
+  return annotations;
 }
 
 /** Distinctive authored markers for the hoisted-lift origins. Each hoisted
@@ -289,6 +418,52 @@ const LIFT_MARKERS = [
   'items[count] + "!"', // ORIGIN-G (pattern-body initializer)
 ];
 
+/**
+ * What each origin's annotation must report: the authored text its `position`
+ * points at, and the authored binding name it was declared under. Keyed by the
+ * origin's marker rather than by hoist name, because which `__cfLift_N` an
+ * origin becomes is an ordering detail this fixture deliberately does not pin.
+ * An entry with no `bindingName` was authored as an inline expression under no
+ * declaration, and the annotation must omit the field.
+ */
+const ORIGIN_ANNOTATIONS = new Map<string, {
+  anchor: string;
+  bindingName?: string;
+}>([
+  ["count * 2", { anchor: "() => count * 2", bindingName: "doubled" }],
+  ["probe ${label}", { anchor: "() => `probe ${label}`" }],
+  ["count * 3", { anchor: "count * 3" }],
+  ["!task.done", { anchor: "!task.done" }],
+  [
+    'items[count] + "!"',
+    { anchor: 'items[count] + "!"', bindingName: "pick" },
+  ],
+  ["count * 4", { anchor: "() => count * 4" }], // ORIGIN-E, hoisted handler
+  ["(item) =>", { anchor: "(item) => <li>{item}</li>" }], // ORIGIN-D
+  ["state.count.set", { anchor: "(_, state) => {", bindingName: "bump" }],
+  // ORIGIN-H: the annotation locates the REFERENCED callback where it was
+  // written, named by its own declaration — not the builder binding.
+  ["state.count.set(0)", {
+    anchor: "(_: unknown, state: { count: Writable<number> }) => {",
+    bindingName: "onReset",
+  }],
+  // ORIGIN-I: a declaration-form callback anchors at the declaration itself.
+  ["state.count.set(0 * 1)", {
+    anchor: "function onZero",
+    bindingName: "onZero",
+  }],
+  // ORIGIN-J: no same-file function anchors a property-access callback, so
+  // the annotation anchors at the builder call, named by its declaration.
+  ["callbacks.echoTick", {
+    anchor: "handler<unknown, { count: Writable<number> }>(callbacks.echoTick)",
+    bindingName: "viaProperty",
+  }],
+  [
+    "count, flag, label, items, task",
+    { anchor: "({ count, flag, label, items, task }) => {" },
+  ],
+]);
+
 Deno.test(
   "CT-1868: builder lineage recovers authored positions at the hoisting stage",
   async () => {
@@ -297,6 +472,7 @@ Deno.test(
 
     const sites = collectBuilderSites(transformed);
     const rewritten = collectRewrittenSites(transformed);
+    const annotations = collectBindingAnnotations(transformed);
 
     // Sanity: the fixture must actually exercise every origin path, or a
     // silent pipeline change (e.g. a builder no longer hoisting) would
@@ -318,13 +494,25 @@ Deno.test(
     );
     assert(tags.includes("bump"), "expected the authored `bump` handler");
     assert(
+      tags.includes("reset"),
+      "expected the referenced-callback `reset` handler (ORIGIN-H)",
+    );
+    assert(
+      tags.includes("zero"),
+      "expected the declaration-callback `zero` handler (ORIGIN-I)",
+    );
+    assert(
+      tags.includes("viaProperty"),
+      "expected the property-access-callback `viaProperty` handler (ORIGIN-J)",
+    );
+    assert(
       tags.includes("export-default"),
       "expected the export-default pattern",
     );
 
     const recoveredByTag = new Map<string, string>();
     const recover = (tag: string, role: string, node: ts.Node): string => {
-      const pos = recoverPosition(node);
+      const pos = recoverAuthoredPosition(node);
       assert(
         pos,
         `${tag} ${role}: reached the hoisting stage with no recoverable ` +
@@ -333,13 +521,60 @@ Deno.test(
       return sourceText.slice(pos.pos, pos.end);
     };
 
+    // 4. The emitted annotation for one origin: its `position` must address the
+    // authored function it names, and `bindingName` must be the name that
+    // function was declared under (or absent, for an inline expression).
+    const checkAnnotation = (tag: string, marker: string): void => {
+      const expected = ORIGIN_ANNOTATIONS.get(marker);
+      assert(expected, `no annotation expectation for origin "${marker}"`);
+      const annotation = annotations.get(tag);
+      assert(annotation, `${tag}: the hardening stage emitted no annotation`);
+      assert(
+        annotation.position,
+        `${tag}: annotation carries no authored position`,
+      );
+      const lineStarts = original.getLineStarts();
+      assert(
+        annotation.position.line >= 1 &&
+          annotation.position.line <= lineStarts.length,
+        `${tag}: annotation line ${annotation.position.line} is outside the ` +
+          `authored file (${lineStarts.length} lines)`,
+      );
+      const offset = original.getPositionOfLineAndCharacter(
+        annotation.position.line - 1,
+        annotation.position.col,
+      );
+      const authored = sourceText.slice(
+        offset,
+        offset + expected.anchor.length,
+      );
+      assertEquals(
+        authored,
+        expected.anchor,
+        `${tag}: annotation position ${annotation.position.line}:${annotation.position.col} ` +
+          `addresses the wrong authored text`,
+      );
+      assertEquals(
+        annotation.bindingName,
+        expected.bindingName,
+        `${tag}: annotation reports the wrong authored binding name`,
+      );
+    };
+
     // 1 + 2. Per-{tag, role} recovery AND per-tag content binding.
     const claimedLiftMarkers = new Map<string, string>();
     for (const site of sites) {
       const callText = recover(site.tag, "call", site.call);
       recoveredByTag.set(site.tag, callText);
 
-      if (site.tag !== "export-default") {
+      // ORIGIN-H's builder call carries its callback as an IDENTIFIER
+      // (`handler(…, onReset)`) and ORIGIN-J's as a PROPERTY ACCESS, so there
+      // is no function argument to recover here; their authored positions are
+      // pinned through the annotation check.
+      if (
+        site.tag !== "export-default" && site.tag !== "reset" &&
+        site.tag !== "zero" && site.tag !== "viaProperty"
+      ) {
         assert(site.callback, `${site.tag}: expected a callback argument`);
       }
       const callbackText = site.callback
@@ -369,29 +604,55 @@ Deno.test(
               `origin marker "${marker}", got: ${callbackText}`,
           );
         }
+        checkAnnotation(site.tag, marker);
       } else if (site.tag.startsWith("__cfHandler_")) {
         assert(
           callText.includes("count * 4"),
           `${site.tag}: expected the ORIGIN-E action body, got: ${callText}`,
         );
+        checkAnnotation(site.tag, "count * 4");
       } else if (site.tag.startsWith("__cfPattern_")) {
         assert(
           callText.includes("(item) =>"),
           `${site.tag}: expected the ORIGIN-D map callback, got: ${callText}`,
         );
+        checkAnnotation(site.tag, "(item) =>");
+      } else if (site.tag === "zero") {
+        checkAnnotation(site.tag, "state.count.set(0 * 1)");
+      } else if (site.tag === "viaProperty") {
+        assert(
+          callText.includes("callbacks.echoTick"),
+          `viaProperty: expected the property-access callback call, got: ${callText}`,
+        );
+        checkAnnotation(site.tag, "callbacks.echoTick");
+      } else if (site.tag === "reset") {
+        assert(
+          callbackText === undefined ||
+            callbackText.includes("state.count.set(0)"),
+          `reset callback recovery: ${callbackText}`,
+        );
+        checkAnnotation(site.tag, "state.count.set(0)");
       } else if (site.tag === "bump") {
         assert(
           callbackText !== undefined &&
             callbackText.includes("state.count.set"),
           `bump callback: expected the authored handler body, got: ${callbackText}`,
         );
+        checkAnnotation(site.tag, "state.count.set");
       } else if (site.tag === "export-default") {
         assert(
           callText.includes("count, flag, label, items, task"),
           `export-default: expected the authored pattern call, got: ${callText}`,
         );
+        checkAnnotation(site.tag, "count, flag, label, items, task");
       }
     }
+    assertEquals(
+      annotations.size,
+      sites.length,
+      `every builder artifact must carry exactly one binding-identity ` +
+        `annotation; annotated: ${[...annotations.keys()].join(", ")}`,
+    );
     assertEquals(
       claimedLiftMarkers.size,
       LIFT_MARKERS.length,
@@ -421,5 +682,56 @@ Deno.test(
           `than its hoist (expected marker "${sharedMarker}"), got: ${siteText}`,
       );
     }
+  },
+);
+
+// A pattern authored as a NAMED module-scope const, whose body lifts an inline
+// JSX expression. The const's own artifact is named `named`; the lift hoisted
+// out of its body was authored under no declaration and must stay anonymous —
+// the declaration a pattern is assigned to does not name what is written inside
+// its callback.
+const NAMED_PATTERN_FIXTURE = `import {
+  Default,
+  pattern,
+  UI,
+} from "commonfabric";
+
+interface Input {
+  count: number | Default<0>;
+}
+
+const named = pattern<Input>(({ count }) => ({
+  [UI]: <span>{count + 7}</span>,
+}));
+
+export default named;
+`;
+
+Deno.test(
+  "CT-1870: an inline lift inside a named pattern const stays anonymous",
+  async () => {
+    const { transformed } = await transformFixtureToAst(NAMED_PATTERN_FIXTURE);
+    const annotations = collectBindingAnnotations(transformed);
+
+    assertEquals(
+      annotations.get("named")?.bindingName,
+      "named",
+      `the pattern const's own artifact is named after its declaration; ` +
+        `annotated: ${[...annotations.keys()].join(", ")}`,
+    );
+
+    const lifts = [...annotations].filter(([tag]) => HOISTED_NAME.test(tag));
+    assertEquals(
+      lifts.length,
+      1,
+      `expected the inline JSX expression to hoist to one lift, got: ${
+        lifts.map(([tag]) => tag).join(", ")
+      }`,
+    );
+    assertEquals(
+      lifts[0]![1].bindingName,
+      undefined,
+      `a lift hoisted out of the pattern callback carries no authored name`,
+    );
   },
 );

@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -67,6 +85,11 @@ const __cfLift_1 = __cfHelpers.lift<{
         required: ["name", "rank", "isFirst"]
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 24, col: 29 },
+    bindingName: "adminData"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     people: __cfHelpers.ReadonlyCell<unknown[]>;
 }, number>(({ people }) => people.get().length, {
@@ -84,6 +107,11 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 25 },
+    bindingName: "count"
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const person = __cf_pattern_input.key("element");
     return (<span>{person.key("name")}</span>);
@@ -130,6 +158,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 35, col: 20 }
+});
 const __cfLift_3 = __cfHelpers.lift<{
     count: number;
 }, string>(({ count }) => count + " people", {
@@ -143,6 +175,10 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 41, col: 21 }
+});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element");
     return (<li>
@@ -198,6 +234,10 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 43, col: 31 }
+});
 // FIXTURE: computed-map-in-ternary-branch
 // Verifies: a computed array used inside a ternary JSX branch stays pattern-lowered
 //   const adminData = computed(() => [...people.get()].sort(...).map(...))
@@ -206,7 +246,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
 // Context: The outer `people.map(...)` is over a pattern input cell, while the
 //   inner `adminData.map(...)` is over compute-owned data but still lowered in
 //   pattern context when rendered from the ternary branch.
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const people = __cf_pattern_input.key("people");
     const showAdmin = new Writable(false, {
         type: "boolean"
@@ -296,7 +336,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 21, col: 37 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -49,12 +67,22 @@ const testPattern = pattern(() => {
     type: "number",
     asCell: ["cell"]
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(testPattern, {
+    sourceFile: "/test.tsx",
+    position: { line: 28, col: 28 },
+    bindingName: "testPattern"
+});
 // 6. Inside handler
 const testHandler = handler(false as const satisfies __cfHelpers.JSONSchema, false as const satisfies __cfHelpers.JSONSchema, () => {
     const _inHandler = cell(60, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("_inHandler", true);
     return _inHandler;
+});
+__cfBindVerifiedBinding(testHandler, {
+    sourceFile: "/test.tsx",
+    position: { line: 34, col: 28 },
+    bindingName: "testHandler"
 });
 // FIXTURE: context-variations
 // Verifies: schema injection works in all code contexts and pattern/handler get their own schemas

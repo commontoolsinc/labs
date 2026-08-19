@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -55,6 +73,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     },
     required: ["n", "u"]
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 19, col: 12 }
+});
 // FIXTURE: map-symbol-key-access
 // Verifies: .map() on reactive array is transformed when callback uses symbol key access
 //   .map(fn) → .mapWithPattern(pattern(...), {})
@@ -103,6 +125,11 @@ const _p = pattern((__cf_pattern_input) => {
         required: ["n", "u"]
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(_p, {
+    sourceFile: "/test.tsx",
+    position: { line: 18, col: 26 },
+    bindingName: "_p"
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

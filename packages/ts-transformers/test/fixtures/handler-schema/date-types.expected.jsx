@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -36,6 +54,11 @@ const timedHandler = handler({
     required: ["lastUpdate"]
 } as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     state.lastUpdate.set(event.timestamp);
+});
+__cfBindVerifiedBinding(timedHandler, {
+    sourceFile: "/test.tsx",
+    position: { line: 12, col: 53 },
+    bindingName: "timedHandler"
 });
 // FIXTURE: date-types
 // Verifies: Date type maps to JSON Schema string with format "date-time"

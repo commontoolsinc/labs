@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -66,6 +84,11 @@ const jumpToComment = handler({
     },
     required: ["selectedCommentId", "threadId", "commentId", "lane", "outerIndex", "innerIndex"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
+__cfBindVerifiedBinding(jumpToComment, {
+    sourceFile: "/test.tsx",
+    position: { line: 51, col: 3 },
+    bindingName: "jumpToComment"
+});
 // [TRANSFORM] lift: input and output schemas injected
 const passthroughLabels = lift((labels: string[]) => labels, {
     type: "array",
@@ -78,6 +101,11 @@ const passthroughLabels = lift((labels: string[]) => labels, {
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(passthroughLabels, {
+    sourceFile: "/test.tsx",
+    position: { line: 54, col: 31 },
+    bindingName: "passthroughLabels"
+});
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         threads: Thread[];
@@ -220,6 +248,11 @@ state.threads.map((thread, outerIndex) => ({
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 67, col: 34 },
+    bindingName: "visibleThreads"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     visibleComments: Comment[];
 }, Comment[]>(({ visibleComments }) => visibleComments, {
@@ -285,6 +318,11 @@ const __cfLift_2 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 88, col: 39 },
+    bindingName: "reboundComments"
+});
 const __cfLift_3 = __cfHelpers.lift<{
     reboundIndex: number;
     outerIndex: number;
@@ -302,6 +340,10 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 130, col: 15 }
+});
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         lane: string;
@@ -335,6 +377,10 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 131, col: 18 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const comment = __cf_pattern_input.key("element");
     const reboundIndex = __cf_pattern_input.key("index");
@@ -420,6 +466,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 128, col: 31 }
+});
 const __cfLift_5 = __cfHelpers.lift<{
     edgeIndex: number;
     outerIndex: number;
@@ -437,6 +487,10 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_5, {
+    sourceFile: "/test.tsx",
+    position: { line: 139, col: 15 }
+});
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         lane: string;
@@ -462,6 +516,10 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_6, {
+    sourceFile: "/test.tsx",
+    position: { line: 139, col: 42 }
+});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const edge = __cf_pattern_input.key("element");
     const edgeIndex = __cf_pattern_input.key("index");
@@ -536,6 +594,10 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 137, col: 32 }
+});
 const __cfLift_7 = __cfHelpers.lift<{
     visibleThreads: {
         thread: {
@@ -717,6 +779,11 @@ visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_7, {
+    sourceFile: "/test.tsx",
+    position: { line: 79, col: 30 },
+    bindingName: "threadRows"
+});
 const __cfLift_8 = __cfHelpers.lift<{
     labelIndex: number;
 }, boolean>(({ labelIndex }) => labelIndex === 0, {
@@ -730,6 +797,10 @@ const __cfLift_8 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_8, {
+    sourceFile: "/test.tsx",
+    position: { line: 156, col: 13 }
+});
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         lane: string;
@@ -755,6 +826,10 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_9, {
+    sourceFile: "/test.tsx",
+    position: { line: 156, col: 32 }
+});
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const label = __cf_pattern_input.key("element");
     const labelIndex = __cf_pattern_input.key("index");
@@ -822,6 +897,10 @@ const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 154, col: 24 }
+});
 const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
     const row = __cf_pattern_input.key("element");
     const rowIndex = __cf_pattern_input.key("index");
@@ -879,8 +958,12 @@ const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 160, col: 24 }
+});
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
     const selectedCommentId = new Writable<string | undefined>(undefined, {
         type: ["string", "undefined"]
@@ -1002,7 +1085,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 61, col: 3 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

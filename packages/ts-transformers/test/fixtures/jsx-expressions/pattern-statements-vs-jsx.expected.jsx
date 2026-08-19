@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -28,6 +46,11 @@ const increment = handler(false as const satisfies __cfHelpers.JSONSchema, {
 }) => {
     state.value.set(state.value.get() + 1);
 });
+__cfBindVerifiedBinding(increment, {
+    sourceFile: "/test.tsx",
+    position: { line: 8, col: 26 },
+    bindingName: "increment"
+});
 const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -41,6 +64,11 @@ const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() - 1);
+});
+__cfBindVerifiedBinding(decrement, {
+    sourceFile: "/test.tsx",
+    position: { line: 12, col: 26 },
+    bindingName: "decrement"
 });
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
@@ -63,6 +91,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 34, col: 24 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         value: number;
@@ -84,6 +116,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 36, col: 21 }
+});
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         value: number;
@@ -105,6 +141,10 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 38, col: 20 }
+});
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         value: number;
@@ -126,13 +166,17 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 40, col: 19 }
+});
 // FIXTURE: pattern-statements-vs-jsx
 // Verifies: only JSX-context expressions are transformed; statement-context expressions are left alone
 //   const next = state.value + 1    → NOT transformed (statement context)
 //   <p>{state.value + 1}</p>        → lift(({state}) => state.value + 1)({ value }) (JSX context)
 //   state.value > 10 ? "High":"Low" → ifElse(lift(...)(...), "High", "Low") (JSX context)
 // Context: Ensures the transformer distinguishes between statement and JSX expression contexts
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     return {
         // This template literal SHOULD be transformed (builder function context)
         [NAME]: str `Simple counter: ${state.key("value")}`,
@@ -214,7 +258,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 37 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

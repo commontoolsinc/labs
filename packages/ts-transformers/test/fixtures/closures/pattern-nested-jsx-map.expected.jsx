@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -51,6 +69,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 40, col: 28 },
+    bindingName: "hasItems"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     i: number;
     item: {
@@ -76,6 +99,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 52, col: 21 }
+});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const tag = __cf_pattern_input.key("element");
     const i = __cf_pattern_input.key("index");
@@ -155,6 +182,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 50, col: 31 }
+});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return (<div>
@@ -225,6 +256,10 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfPattern_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 46, col: 20 }
+});
 // FIXTURE: pattern-nested-jsx-map
 // Verifies: nested .map() calls in JSX both become mapWithPattern, including inside ifElse
 //   items.map((item) => ...) → items.mapWithPattern(pattern(...))
@@ -234,7 +269,7 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
 // Context: Inner map on item.tags captures `item.selectedIndex` from the outer
 //   mapWithPattern, so it must be passed as a param. Ternaries become ifElse at
 //   both the outer and inner levels.
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     const hasItems = __cfLift_1({ items: items }).for("hasItems", true);
     return {
@@ -330,7 +365,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 39, col: 37 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

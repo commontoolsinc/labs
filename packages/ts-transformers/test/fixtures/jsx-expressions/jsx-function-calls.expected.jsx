@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -45,6 +63,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 24, col: 17 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         a: number;
@@ -66,6 +88,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 25, col: 17 }
+});
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         a: number;
@@ -91,6 +117,10 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 26, col: 17 }
+});
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         price: number;
@@ -112,6 +142,10 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 27, col: 19 }
+});
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         price: number;
@@ -133,6 +167,10 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_5, {
+    sourceFile: "/test.tsx",
+    position: { line: 28, col: 19 }
+});
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         price: number;
@@ -154,6 +192,10 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_6, {
+    sourceFile: "/test.tsx",
+    position: { line: 29, col: 21 }
+});
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         a: number;
@@ -175,6 +217,10 @@ const __cfLift_7 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_7, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 25 }
+});
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         name: string;
@@ -196,6 +242,10 @@ const __cfLift_8 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_8, {
+    sourceFile: "/test.tsx",
+    position: { line: 33, col: 23 }
+});
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         name: string;
@@ -217,6 +267,10 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_9, {
+    sourceFile: "/test.tsx",
+    position: { line: 34, col: 23 }
+});
 const __cfLift_10 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -238,6 +292,10 @@ const __cfLift_10 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_10, {
+    sourceFile: "/test.tsx",
+    position: { line: 35, col: 23 }
+});
 const __cfLift_11 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -259,6 +317,10 @@ const __cfLift_11 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_11, {
+    sourceFile: "/test.tsx",
+    position: { line: 36, col: 21 }
+});
 const __cfLift_12 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -280,6 +342,10 @@ const __cfLift_12 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_12, {
+    sourceFile: "/test.tsx",
+    position: { line: 37, col: 22 }
+});
 const __cfLift_13 = __cfHelpers.lift<{
     state: {
         name: string;
@@ -301,6 +367,10 @@ const __cfLift_13 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_13, {
+    sourceFile: "/test.tsx",
+    position: { line: 38, col: 25 }
+});
 const __cfLift_14 = __cfHelpers.lift<{
     state: {
         price: number;
@@ -322,6 +392,10 @@ const __cfLift_14 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_14, {
+    sourceFile: "/test.tsx",
+    position: { line: 41, col: 22 }
+});
 const __cfLift_15 = __cfHelpers.lift<{
     state: {
         price: number;
@@ -343,6 +417,10 @@ const __cfLift_15 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_15, {
+    sourceFile: "/test.tsx",
+    position: { line: 42, col: 26 }
+});
 const __cfLift_16 = __cfHelpers.lift<{
     state: {
         float: string;
@@ -364,6 +442,10 @@ const __cfLift_16 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_16, {
+    sourceFile: "/test.tsx",
+    position: { line: 45, col: 23 }
+});
 const __cfLift_17 = __cfHelpers.lift<{
     state: {
         float: string;
@@ -385,6 +467,10 @@ const __cfLift_17 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_17, {
+    sourceFile: "/test.tsx",
+    position: { line: 46, col: 25 }
+});
 const __cfLift_18 = __cfHelpers.lift<{
     state: {
         values: number[];
@@ -409,6 +495,10 @@ const __cfLift_18 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_18, {
+    sourceFile: "/test.tsx",
+    position: { line: 49, col: 17 }
+});
 const __cfLift_19 = __cfHelpers.lift<{
     state: {
         values: number[];
@@ -433,6 +523,10 @@ const __cfLift_19 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_19, {
+    sourceFile: "/test.tsx",
+    position: { line: 50, col: 23 }
+});
 const __cfLift_20 = __cfHelpers.lift<{
     state: {
         values: number[];
@@ -457,6 +551,10 @@ const __cfLift_20 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_20, {
+    sourceFile: "/test.tsx",
+    position: { line: 51, col: 20 }
+});
 const __cfLift_21 = __cfHelpers.lift<{
     state: {
         a: number;
@@ -478,6 +576,10 @@ const __cfLift_21 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_21, {
+    sourceFile: "/test.tsx",
+    position: { line: 54, col: 27 }
+});
 const __cfLift_22 = __cfHelpers.lift<{
     state: {
         a: number;
@@ -499,6 +601,10 @@ const __cfLift_22 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_22, {
+    sourceFile: "/test.tsx",
+    position: { line: 55, col: 26 }
+});
 const __cfLift_23 = __cfHelpers.lift<{
     state: {
         name: string;
@@ -520,6 +626,10 @@ const __cfLift_23 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_23, {
+    sourceFile: "/test.tsx",
+    position: { line: 56, col: 27 }
+});
 const __cfLift_24 = __cfHelpers.lift<{
     state: {
         a: number;
@@ -545,12 +655,16 @@ const __cfLift_24 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_24, {
+    sourceFile: "/test.tsx",
+    position: { line: 57, col: 30 }
+});
 // FIXTURE: jsx-function-calls
 // Verifies: function/method calls with reactive args in JSX are wrapped in a lift-applied computation
 //   Math.max(state.a, state.b)     → lift(({state}) => Math.max(state.a, state.b))({ a, b })
 //   state.name.toUpperCase()       → lift(...)({ name })
 //   parseInt(state.float)          → lift(...)({ float })
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Math Functions</h3>
@@ -715,7 +829,10 @@ export default pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 19, col: 30 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -40,6 +58,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 21, col: 33 }
+});
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         label?: string | null | undefined;
@@ -60,6 +82,10 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 24, col: 10 }
+});
 // FIXTURE: jsx-direct-branch-roots
 // Verifies: direct JSX branch roots lower structurally without leaving raw
 //   child expressions in place.
@@ -67,7 +93,7 @@ const __cfLift_2 = __cfHelpers.lift<{
 //   primary ? "A" : secondary ? "B" : "C"        -> nested ternary lowering
 //   primary ? "A" : fallbackLabel || "C"         -> nested logical branch lowering
 //   label ?? "Pending"                           -> top-level JSX nullish lowering
-export default pattern((state) => ({
+export default __cfBindVerifiedBinding(pattern((state) => ({
     [UI]: (<div>
       <p>{__cfHelpers.ifElse({
         type: "boolean"
@@ -186,7 +212,10 @@ export default pattern((state) => ({
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 18, col: 3 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -53,6 +71,11 @@ const join = handler({
 } as const satisfies __cfHelpers.JSONSchema, (event, { myName, profile }) => {
     const resolved = profile?.get();
     myName.set(resolved ? resolved.name : event.name);
+});
+__cfBindVerifiedBinding(join, {
+    sourceFile: "/test.tsx",
+    position: { line: 22, col: 2 },
+    bindingName: "join"
 });
 interface CardState {
     myName: Default<string, "">;
@@ -116,6 +139,11 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 48, col: 24 },
+    bindingName: "activeProfile"
+});
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -132,6 +160,10 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     },
     required: ["boundJoin"]
 } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { boundJoin }) => boundJoin.send({ name: "guest" }));
+__cfBindVerifiedBinding(__cfHandler_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 56, col: 28 }
+});
 // FIXTURE: builder-arg-hoisted-nullish-selection
 // Verifies: the remedy the `reactive:call-argument-computation` diagnostic
 //   advises — a reactive `??` selection hoisted to a body-level const and
@@ -146,7 +178,7 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
 //   the hoist diagnostic (see fixtures/bug-repro/ and
 //   test/builder-argument-computation-diagnostic.test.ts); this golden pins
 //   that the advised hoisted form compiles, and what it compiles to.
-export default pattern((__cf_pattern_input) => {
+export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
     const myName = __cf_pattern_input.key("myName");
     const profile = __cf_pattern_input.key("profile");
     const profileWish = wish<Profile>({ query: "#profile" }, {
@@ -230,7 +262,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 46, col: 34 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -65,6 +83,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 39, col: 18 }
+});
 // FIXTURE: readonly-capture-named-alias-nested-cell
 // Verifies (BEHAVIOR LOCK): a by-reference, read-only-used capture of a bare
 //   `Cell<EntriesValue>` (EntriesValue = Entry[] | Default<[]>, Entry has a
@@ -83,7 +105,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 //   packages/patterns/cfc-group-chat-demo/main.test.tsx (the `profiles` capture).
 //   This fixture pins the intended single-file output with a legible diff so a
 //   future change to the readonly-rewrap path is obvious here too.
-export default pattern(() => {
+export default __cfBindVerifiedBinding(pattern(() => {
     const entries = Writable.of<EntriesValue>([] as EntriesValue, {
         type: "array",
         items: {
@@ -112,7 +134,10 @@ export default pattern(() => {
     return __cfLift_1({ entries: entries }).for("__patternResult", true);
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 37, col: 23 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

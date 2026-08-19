@@ -1,3 +1,21 @@
+function __cfBindVerifiedBinding(value: any, metadata: any) {
+    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
+        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
+            value: metadata,
+            configurable: true
+        });
+    }
+    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
+        var implementation = value.implementation;
+        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
+            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
+                value: metadata,
+                configurable: true
+            });
+        }
+    }
+    return value;
+}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -41,6 +59,11 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_1, {
+    sourceFile: "/test.tsx",
+    position: { line: 24, col: 16 },
+    bindingName: "label"
+});
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         maybeUser?: { name: string; } | undefined;
@@ -67,6 +90,11 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_2, {
+    sourceFile: "/test.tsx",
+    position: { line: 25, col: 21 },
+    bindingName: "maybeLabel"
+});
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         a: number;
@@ -92,6 +120,10 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_3, {
+    sourceFile: "/test.tsx",
+    position: { line: 30, col: 14 }
+});
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         float: string;
@@ -113,6 +145,10 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_4, {
+    sourceFile: "/test.tsx",
+    position: { line: 31, col: 17 }
+});
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         label?: string | null | undefined;
@@ -133,6 +169,10 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+__cfBindVerifiedBinding(__cfLift_5, {
+    sourceFile: "/test.tsx",
+    position: { line: 32, col: 19 }
+});
 // FIXTURE: pattern-top-level-root-lowering
 // Verifies: top-level non-JSX ordinary helper calls with reactive inputs are
 //   lifted as whole calls instead of lowering only inner argument expressions.
@@ -142,7 +182,7 @@ const __cfLift_5 = __cfHelpers.lift<{
 //   parseInt(state.float)         -> lift-applied free-function root
 //   state.label ?? "Pending"      -> lift-applied nullish root
 //   state.items?.[0]              -> lowered optional element access
-export default pattern((state) => {
+export default __cfBindVerifiedBinding(pattern((state) => {
     const label = __cfLift_1({ state: {
             user: {
                 name: state.key("user", "name")
@@ -234,7 +274,10 @@ export default pattern((state) => {
         }
     },
     required: ["label", "maybeLabel", "maxValue", "parsedValue", "fallbackLabel", "firstItem"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema), {
+    sourceFile: "/test.tsx",
+    position: { line: 23, col: 3 }
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
