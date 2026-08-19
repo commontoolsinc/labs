@@ -39,7 +39,6 @@ dashboard/
   palette.ts    THE ONE PLACE status colors, washes and dot shapes are chosen
   theme.ts      light/dark surface colors, theme switch markup and browser behavior
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
-  blacksmith.ts authenticated read client for Blacksmith billing data
   ctx.ts        shared, memoized data sources handed to every tile (ctx.runs)
   favicon.ts    runtime status priority and access to generated PNG favicon copies
   favicon-png.generated.ts  generated runtime PNG favicon copies
@@ -314,7 +313,7 @@ surveillance tool.
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
-| ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond. A source whose feed stopped being written more than four days ago counts as one that cannot be read, rather than charting the days since as $0. A month whose usage report cannot be read breaks that source's line across those days rather than charting them as $0 | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
+| ci spend | GitHub Actions billing, projected to month-end in USD. The 45-day chart labels the line with MTD spend, and the header shows the same total. A report that stopped being written more than four days ago is unavailable rather than a run of $0 days. A month whose report cannot be read breaks the line across those days rather than charting them as $0 | `GH_TOKEN` (with org billing read); optional `GH_BILLING_ORG` |
 | benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise from a CPU measured in the preceding twelve hours. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total; a provider whose cost report stopped being written more than four days ago is one of those | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
@@ -375,30 +374,6 @@ select only `commontoolsinc/labs`, and grant Actions/Contents read without any
 organization permissions. Classic PATs also work (use `read:org` for GitHub
 users and `admin:org` for ci spend). If the org requires approval for
 fine-grained tokens, yours stays pending until an owner approves it.
-
-### `BLACKSMITH_API_TOKEN`
-
-Powers the Blacksmith share of **ci spend**. Use the bearer token accepted by
-the Blacksmith CLI. The CLI's documented
-[`blacksmith auth login`](https://docs.blacksmith.sh/blacksmith-testbox/cli#blacksmith-auth-login)
-flow opens a browser and saves the returned token under
-`~/.blacksmith/credentials`. The CLI also accepts
-`blacksmith auth login --api-token <token>` as a non-interactive way to save an
-existing token to that file. The flag does not create or register a token with
-Blacksmith.
-
-The dashboard does not read the CLI credentials file. Complete the browser
-login on a trusted workstation, then copy the saved token into the deployment's
-secret manager as `BLACKSMITH_API_TOKEN`. Do not run the CLI login command in
-the dashboard container. Set `BLACKSMITH_ORG` when it differs from
-`GH_BILLING_ORG` or the owner in `DASHBOARD_REPO`. The account needs
-organization billing access. Blacksmith
-[maps billing access to organization admins](https://docs.blacksmith.sh/blacksmith-administration/permissions).
-
-The collector sends the token as `Authorization: Bearer` to
-`https://backend.blacksmith.sh`. It makes read-only `GET` requests and does not
-store or rotate the token. `BLACKSMITH_API_URL` overrides the backend URL in the
-same way as the CLI, primarily for local testing.
 
 ### `SIGNOZ_URL` + `SIGNOZ_API_KEY`
 
@@ -571,9 +546,6 @@ it.
 | env var | tile | purpose |
 |---|---|---|
 | `GH_BILLING_ORG` | ci spend | org login for billing (default: the org from `DASHBOARD_REPO` — `commontoolsinc`). |
-| `BLACKSMITH_ORG` | ci spend | Blacksmith organization login. Defaults to `GH_BILLING_ORG`, then the owner from `DASHBOARD_REPO`. |
-| `BLACKSMITH_API_URL` | ci spend | Blacksmith backend URL. Defaults to `https://backend.blacksmith.sh`. |
-| `CI_MONTHLY_BUDGET` | ci spend | combined monthly USD budget across GitHub and Blacksmith. Without it, a single provider uses its configured budget. Two providers use the sum when both have a configured budget. |
 | `MODEL_MONTHLY_BUDGET` | model spend | combined monthly USD budget across providers. |
 | `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. The projected month is compared with this daily rate multiplied by the number of days in the month. |
@@ -622,29 +594,15 @@ Notes:
   read. A second token would not reduce exposure because the process would hold
   both, so there is just one. With Actions read alone, those two tiles gray out
   and the other GitHub tiles still work.
-- **`ci spend`** shows the **projected** full-month total across GitHub Actions
-  and Blacksmith. Each source is projected from its own recent daily rate. The
-  rate uses at least two weeks and reaches into last month early in a month.
-  GitHub contributes net Actions spend after discounts and included usage.
-  Blacksmith's current invoice amount supplies its all-in month-to-date total
-  and current-month projection input. Daily runner cost supplies its history
-  and chart; storage usage is not requested or charted separately.
-  `CI_MONTHLY_BUDGET` overrides provider budgets. A single provider otherwise
-  uses its own configured budget. With both providers, their budgets are added
-  only when both exist. Blacksmith's budget is its monthly spending-alert
-  threshold. A budget that resolves to no number is left out of the status line
-  rather than shown as an unknown amount. A failed configured source turns the
-  tile gray and shows `$???` for that source. The values from responding sources
-  remain as a lower bound. A source that has stopped reporting fails the same
-  way. Both feeds report a day or two after a day ends, and a settled day
-  neither has a row for is a day that cost nothing — which holds only while the
-  feed is still being written.
-  Each is read no further than its own newest row reaches: GitHub's report is
-  one pipeline across every product the org uses, so any product's row dates it,
-  and Blacksmith's daily endpoint dates itself. Four days without a row is a
-  stopped feed rather than a slow one.
-  A GitHub classic-plan setup still falls back to minutes when Blacksmith is not
-  configured.
+- **`ci spend`** shows the **projected** full-month GitHub Actions total. Its
+  recent daily rate uses at least two weeks and reaches into last month early in
+  a month. Spend is net of discounts and included usage. The projection is
+  compared with the Actions budget configured in GitHub. A missing budget
+  leaves the projection uncompared. A source that has stopped reporting turns
+  the tile gray. The billing report is one pipeline across every product the
+  organization uses, so any product's row dates it. Four days without a row is
+  a stopped feed rather than a slow one. A classic-plan organization falls back
+  to minutes against its included allowance.
 - **`benchmarks`** trends one **scale-invariant index per CPU** on the
   `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json`
   over the bench files that workflow lists — micro-benchmarks across the runner,
@@ -940,9 +898,6 @@ Env knobs for the dev loop:
 - `GH_TOKEN` (or `GITHUB_TOKEN`) — required for the GitHub tiles. CI spend also
   needs Administration read. GitHub users also needs Members read. Without the
   token, those tiles stay gray.
-- `BLACKSMITH_API_TOKEN` — enables the Blacksmith share of CI spend. Use
-  `BLACKSMITH_ORG` when its organization differs from the GitHub billing
-  organization.
 - `DASHBOARD_PORT` — run several instances at once (e.g. one per branch) without clashing.
 - `DASHBOARD_REPO` — point the CI tiles at any repo. Its owner selects the
   organization for GitHub users.
@@ -1086,8 +1041,7 @@ during Google's initial export backfill it reports `no billing data yet` rather
 than a false zero.
 
 Every backend is reached over HTTP, so the image carries no cloud CLI. The
-GitHub tiles use `GH_TOKEN`. The Blacksmith share of CI spend uses
-`BLACKSMITH_API_TOKEN`. The cloud-spend tile queries BigQuery as the pod's
+GitHub tiles use `GH_TOKEN`. The cloud-spend tile queries BigQuery as the pod's
 own service account through Workload Identity. The infra repo's
 `tofu/gke/dashboard.tf` provisions that account, the Workload Identity binding,
 and its BigQuery Job User and Data Viewer grants, so no key is stored in the

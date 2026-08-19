@@ -63,8 +63,9 @@ export function phaseOf(stepName: string): Phase {
   for (const [emoji, phase] of PHASE_MARKERS) {
     if (norm.startsWith(stripVS(emoji))) return phase;
   }
-  // Injected steps carry no marker; their wording is not ours to set. GitHub
-  // adds the "job" pair and the "Post …" steps, Blacksmith the "runner" pair.
+  // Injected steps carry no marker; their wording is not ours to set. Current
+  // jobs use the "job" pair and the "Post …" steps. Retained records can also
+  // contain the "runner" pair.
   if (name.startsWith("Post ")) return "shutdown";
   if (name === "Set up job" || name === "Set up runner") return "setup";
   if (name === "Complete job" || name === "Complete runner") return "shutdown";
