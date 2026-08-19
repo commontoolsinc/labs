@@ -16,12 +16,14 @@ const virtualLibrarySource = `
 
   interface Array<T> extends ReadonlyArray<T> {}
 `;
+const ambientArrayFileName = "/ambient/array.d.ts";
 
 function createProgramAndContext(
   source: string,
   options: {
     withDefaultLibrary?: boolean;
     withVirtualLibrary?: boolean;
+    withAmbientArrayDeclaration?: boolean;
   } = {},
 ): {
   sourceFile: ts.SourceFile;
@@ -35,7 +37,8 @@ function createProgramAndContext(
     module: ts.ModuleKind.ESNext,
     jsx: ts.JsxEmit.Preserve,
     strict: true,
-    noLib: !options.withDefaultLibrary,
+    noLib: !options.withDefaultLibrary && !options.withVirtualLibrary,
+    ...(options.withVirtualLibrary ? { lib: ["es2023.d.ts"] } : {}),
     skipLibCheck: true,
   };
 
@@ -46,45 +49,52 @@ function createProgramAndContext(
     true,
     ts.ScriptKind.TSX,
   );
-  const virtualLibraryFile = options.withVirtualLibrary
-    ? ts.createSourceFile(
-      virtualLibraryFileName,
-      virtualLibrarySource,
-      compilerOptions.target!,
-      true,
-      ts.ScriptKind.TS,
-    )
-    : undefined;
+  const injectedFiles = new Map<string, string>();
+  if (options.withVirtualLibrary) {
+    injectedFiles.set(virtualLibraryFileName, virtualLibrarySource);
+  }
+  if (options.withAmbientArrayDeclaration) {
+    injectedFiles.set(ambientArrayFileName, virtualLibrarySource);
+  }
+  const injectedSourceFiles = new Map(
+    [...injectedFiles].map(([name, text]) => [
+      name,
+      ts.createSourceFile(
+        name,
+        text,
+        compilerOptions.target!,
+        true,
+        ts.ScriptKind.TS,
+      ),
+    ]),
+  );
 
   const host = ts.createCompilerHost(compilerOptions, true);
   const getSourceFile = host.getSourceFile.bind(host);
   const fileExists = host.fileExists.bind(host);
   const readFile = host.readFile.bind(host);
-  host.getSourceFile = (name, languageVersion, onError, shouldCreateNew) =>
-    name === fileName
-      ? sourceFile
-      : name === virtualLibraryFileName
-      ? virtualLibraryFile
-      : getSourceFile(name, languageVersion, onError, shouldCreateNew);
+  host.getSourceFile = (name, languageVersion, onError, shouldCreateNew) => {
+    if (name === fileName) return sourceFile;
+    return injectedSourceFiles.get(name) ??
+      getSourceFile(name, languageVersion, onError, shouldCreateNew);
+  };
   host.getCurrentDirectory = () => "/";
   host.getDirectories = () => [];
   host.fileExists = (name) =>
-    name === fileName ||
-    (name === virtualLibraryFileName && !!virtualLibraryFile) ||
+    name === fileName || injectedFiles.has(name) ||
     fileExists(name);
   host.readFile = (name) =>
-    name === fileName
-      ? source
-      : name === virtualLibraryFileName
-      ? virtualLibrarySource
-      : readFile(name);
+    name === fileName ? source : injectedFiles.get(name) ?? readFile(name);
   host.writeFile = () => {};
   host.useCaseSensitiveFileNames = () => true;
   host.getCanonicalFileName = (name) => name;
   host.getNewLine = () => "\n";
+  if (options.withVirtualLibrary) {
+    host.getDefaultLibLocation = () => "/virtual";
+  }
 
-  const rootNames = virtualLibraryFile
-    ? [virtualLibraryFileName, fileName]
+  const rootNames = options.withAmbientArrayDeclaration
+    ? [ambientArrayFileName, fileName]
     : [fileName];
   const program = ts.createProgram(rootNames, compilerOptions, host);
   const context = new TransformationContext({
@@ -183,13 +193,37 @@ Deno.test(
     if (!virtualLibraryFile) {
       throw new Error("Expected virtual library source file");
     }
-    assertEquals(program.isSourceFileDefaultLibrary(virtualLibraryFile), false);
+    assertEquals(program.isSourceFileDefaultLibrary(virtualLibraryFile), true);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
     const semantics = getCallbackBoundarySemantics(callback, checker, context);
 
     assertEquals(semantics.isPlainArrayValueCallback, true);
     assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: ambient Array declarations carry no wrapper site",
+  () => {
+    const { sourceFile, checker, context, program } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = items.map((item) => item + 1);
+    `,
+      { withAmbientArrayDeclaration: true },
+    );
+    const ambientArrayFile = program.getSourceFile(ambientArrayFileName);
+    if (!ambientArrayFile) {
+      throw new Error("Expected ambient Array declaration");
+    }
+    assertEquals(program.isSourceFileDefaultLibrary(ambientArrayFile), false);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
   },
 );
 

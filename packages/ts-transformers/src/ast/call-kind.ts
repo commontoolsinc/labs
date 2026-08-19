@@ -900,15 +900,16 @@ const COLLECTING_ARRAY_METHOD_NAMES = new Set(["map"]);
  * Three things must hold, and each rules out a shape that would otherwise slip
  * through method-name matching alone: the callback is argument zero, so a
  * comparator or an `initialValue` in another position does not qualify; the
- * resolved owner is TypeScript's declaration-file-backed global
- * `Array`/`ReadonlyArray` type, so a same-named source type or a `map` of some
- * other type does not qualify; and the receiver is a plain array that no
- * reactive lowering owns, so the reactive collection operators keep their own
- * structural treatment.
+ * resolved owner symbol includes the configured default-library
+ * `Array`/`ReadonlyArray` declaration, so a same-named source or ambient type
+ * and a `map` of some other type do not qualify; and the receiver is a plain
+ * array that no reactive lowering owns, so the reactive collection operators
+ * keep their own structural treatment.
  */
 export function isCollectingPlainArrayMethodCallback(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
 ): boolean {
   const position = getCallArgumentPosition(callback);
   if (!position || position.index !== 0) {
@@ -934,9 +935,8 @@ export function isCollectingPlainArrayMethodCallback(
   const ownerSymbol = checker.getSymbolAtLocation(owner.name);
   if (
     !ownerSymbol ||
-    !checker.isArrayType(checker.getDeclaredTypeOfSymbol(ownerSymbol)) ||
     !(ownerSymbol.declarations ?? []).some((candidate) =>
-      candidate.getSourceFile().isDeclarationFile
+      isSourceFileDefaultLibrary(candidate.getSourceFile())
     )
   ) {
     return false;

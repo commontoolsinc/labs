@@ -88,8 +88,11 @@ export const getCompilerOptions = (): CompilerOptions => {
     jsxFragmentFactory: "__cfHelpers.h.fragment",
     target: TARGET,
     // `lib` should autoapply, but we need to manage default libraries since
-    // we are running outside of node. Ensure this lib matches `target`.
-    lib: [TARGET_TYPE_LIB, "dom", "jsx"],
+    // we are running outside of node. The Compiler API needs the actual file
+    // names to register these virtual files as default libraries; extensionless
+    // names load, but `Program.isSourceFileDefaultLibrary()` rejects them.
+    // Ensure the target lib matches `target`.
+    lib: [`${TARGET_TYPE_LIB}.d.ts`, "dom.d.ts", "jsx.d.ts"],
     // Dynamic import/requires and `<reference` pragmas
     // should not be respected.
     noResolve: true,
