@@ -430,3 +430,27 @@ Deno.test("initializeDb returns false when the task fails", async () => {
     await Deno.remove(dir, { recursive: true });
   }
 });
+
+Deno.test("runTests reports a failure when every member is disabled", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-empty-" });
+  try {
+    await makeWorkspace(dir, ["a", "b"]);
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...values: unknown[]) => {
+      errors.push(values.map(String).join(" "));
+    };
+    let passed: boolean;
+    try {
+      passed = await runTests(["a", "b"], undefined, dir);
+    } finally {
+      console.error = originalError;
+    }
+    // A run that tested nothing is a misconfiguration, not a pass.
+    assertEquals(passed, false);
+    assertEquals(errors, ["No workspace packages selected to test."]);
+    assertEquals(await ranPackages(dir, ["a", "b"]), []);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});

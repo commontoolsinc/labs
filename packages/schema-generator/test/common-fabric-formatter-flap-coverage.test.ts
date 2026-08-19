@@ -64,6 +64,29 @@ function findWrapperInnerNode(
 
 describe("Common Fabric formatter flap coverage", () => {
   it(
+    "keeps only the scope when a scope wrapper wraps a schema that accepts anything",
+    async () => {
+      // A scope wrapper carries its scope down onto the schema it wraps. When
+      // that schema is `true` there is no object to carry it on, so the scope
+      // becomes the whole schema.
+      const code = `
+        type PerUser<T> = T;
+
+        interface SchemaRoot {
+          anything: PerUser<any>;
+        }
+      `;
+
+      const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+      const schema = asObjectSchema(
+        new SchemaGenerator().generateSchema(type, checker),
+      );
+
+      expect(schema.properties?.anything).toEqual({ scope: "user" });
+    },
+  );
+
+  it(
     "TrustedActionUiContract defaults required event integrity to the trusted pattern",
     async () => {
       // Three type arguments: the requiredEventIntegrity falls back to the

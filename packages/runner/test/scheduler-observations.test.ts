@@ -1,9 +1,13 @@
 import type { FabricValue } from "@commonfabric/api";
-import type { SchedulerActionSnapshotResult } from "@commonfabric/memory/v2";
+import type {
+  SchedulerActionSnapshotResult,
+  SchedulerExecutionContextKey,
+} from "@commonfabric/memory/v2";
 
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
   buildSchedulerActionObservation,
+  type CompleteActionScopeSummaryInput,
   isSchedulerActionObservation,
   type PersistedSchedulerObservationSnapshot,
   type SchedulerActionObservation,
@@ -14,6 +18,7 @@ import {
 } from "../src/scheduler/run.ts";
 import type {
   IMemorySpaceAddress,
+  MemorySpace,
   TransactionReactivityLog,
 } from "../src/storage/interface.ts";
 import {
@@ -898,6 +903,219 @@ describe("persistent scheduler observations", () => {
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
+  });
+
+  // Addresses in the runtime's own space, for the scope-summary cases below.
+  // The module-level fixtures name a different space, which would make every
+  // scope summary built from them cross spaces; these keep a summary
+  // self-consistent so that a case can cross spaces on purpose.
+  const ownedReadAddress = {
+    space,
+    scope: "space" as const,
+    id: "of:owned-source" as const,
+    path: ["value", "input"],
+  };
+
+  const ownedWriteAddress = {
+    space,
+    scope: "space" as const,
+    id: "of:owned-target" as const,
+    path: ["value", "output"],
+  };
+
+  const otherSpace = "did:key:other-space" as MemorySpace;
+
+  /** A scope summary naming `piece`, reading `reads` and writing `writes`. */
+  const scopeSummaryFor = (
+    piece: IMemorySpaceAddress,
+    reads: readonly IMemorySpaceAddress[],
+    writes: readonly IMemorySpaceAddress[] = [ownedWriteAddress],
+  ): CompleteActionScopeSummaryInput => ({
+    version: 1,
+    complete: true,
+    piece,
+    reads: [...reads],
+    writes: [...writes],
+    materializerWriteEnvelopes: [],
+    directOutputs: [...writes],
+  });
+
+  /** A piece address in the runtime's own space, at the top of its document. */
+  const ownPiece = (id: string): IMemorySpaceAddress => ({
+    space,
+    scope: "space",
+    id: id as IMemorySpaceAddress["id"],
+    path: [],
+  });
+
+  /**
+   * Registers `actionId` with one snapshot candidate carrying `summary` under
+   * `executionContextKey`, and returns how many times the action ran while the
+   * runtime settled. Zero means the candidate was adopted and the action
+   * rehydrated clean, one means it was rejected and the action ran fresh.
+   *
+   * The observation records having read and written exactly what `summary`
+   * describes, plus `unaccountedRead` where a case passes one, so the only
+   * thing a case varies is the summary. A summary that did not account for a
+   * runtime address would be rejected for that reason instead, and the case
+   * would pass without exercising the rule it names.
+   */
+  const runsAfterRehydrationFrom = async (
+    actionId: string,
+    pieceId: string,
+    executionContextKey: SchedulerExecutionContextKey,
+    summary: CompleteActionScopeSummaryInput,
+    unaccountedRead?: IMemorySpaceAddress,
+  ): Promise<number> => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      let runs = 0;
+      const action = Object.assign(
+        function scopeSummaryCandidate() {
+          runs++;
+        },
+        { writes: [writeLink], implementationHash: actionId },
+      );
+      const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
+        actionId,
+        actionKind: "effect",
+        branch: "",
+        pieceId,
+        processGeneration: 1,
+        implementationFingerprint: schedulerImplementationFingerprint(
+          action,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        currentKnownWrites: summary.writes,
+        transactionLog: {
+          reads: unaccountedRead
+            ? [...summary.reads, unaccountedRead]
+            : summary.reads,
+          shallowReads: [],
+          writes: [],
+        },
+        completeActionScopeSummary: summary,
+      });
+
+      testRuntime.runtime.scheduler.subscribe(action, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId,
+          processGeneration: 1,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            actionId,
+            [{ executionContextKey, observation }],
+          ]]),
+        },
+      });
+
+      await testRuntime.runtime.idle();
+      return runs;
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  };
+
+  it("adopts a space-context candidate whose summary stays in one space", async () => {
+    expect(
+      await runsAfterRehydrationFrom(
+        "cf:module/test:scope-summary-matched",
+        "space:of:scope-summary-matched",
+        "space",
+        scopeSummaryFor(
+          ownPiece("of:scope-summary-matched"),
+          [ownedReadAddress],
+        ),
+      ),
+    ).toBe(0);
+  });
+
+  it("runs fresh given a space-context candidate whose summary omits an address the run read", async () => {
+    expect(
+      await runsAfterRehydrationFrom(
+        "cf:module/test:unaccounted-read",
+        "space:of:unaccounted-read",
+        "space",
+        scopeSummaryFor(ownPiece("of:unaccounted-read"), [ownedReadAddress]),
+        { ...ownedReadAddress, id: "of:unaccounted-source" as const },
+      ),
+    ).toBe(1);
+  });
+
+  it("runs fresh given a space-context candidate whose summary crosses spaces with nothing scoped", async () => {
+    expect(
+      await runsAfterRehydrationFrom(
+        "cf:module/test:cross-space-shared",
+        "space:of:cross-space-shared",
+        "space",
+        scopeSummaryFor(
+          ownPiece("of:cross-space-shared"),
+          [ownedReadAddress, { ...ownedReadAddress, space: otherSpace }],
+        ),
+      ),
+    ).toBe(1);
+  });
+
+  it("adopts a session-context candidate whose summary crosses spaces with nothing scoped", async () => {
+    expect(
+      await runsAfterRehydrationFrom(
+        "cf:module/test:cross-space-session",
+        "space:of:cross-space-session",
+        "session:did%3Akey%3Aalice:session-one",
+        scopeSummaryFor(
+          ownPiece("of:cross-space-session"),
+          [ownedReadAddress, { ...ownedReadAddress, space: otherSpace }],
+        ),
+      ),
+    ).toBe(0);
+  });
+
+  it("runs fresh given a space-context candidate whose summary names another space", async () => {
+    expect(
+      await runsAfterRehydrationFrom(
+        "cf:module/test:foreign-summary-space",
+        "space:of:foreign-summary-space",
+        "space",
+        scopeSummaryFor(
+          { ...ownPiece("of:foreign-summary-space"), space: otherSpace },
+          [{ ...ownedReadAddress, space: otherSpace }],
+          [{ ...ownedWriteAddress, space: otherSpace }],
+        ),
+      ),
+    ).toBe(1);
+  });
+
+  it("runs fresh given a space-context candidate whose summary names another piece", async () => {
+    expect(
+      await runsAfterRehydrationFrom(
+        "cf:module/test:foreign-summary-piece",
+        "space:of:foreign-summary-piece",
+        "space",
+        scopeSummaryFor(ownPiece("of:some-other-piece"), [ownedReadAddress]),
+      ),
+    ).toBe(1);
+  });
+
+  it("adopts a session-context candidate whose summary names another piece", async () => {
+    expect(
+      await runsAfterRehydrationFrom(
+        "cf:module/test:foreign-summary-piece-session",
+        "space:of:foreign-summary-piece-session",
+        "session:did%3Akey%3Aalice:session-one",
+        scopeSummaryFor(ownPiece("of:some-other-piece"), [ownedReadAddress]),
+      ),
+    ).toBe(0);
   });
 
   it("rejects a fallback-fingerprint shared candidate and runs fresh", async () => {
