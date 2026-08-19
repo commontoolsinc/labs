@@ -21,7 +21,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
-import type { ClientCommit } from "@commonfabric/memory/v2";
+import type {
+  ClientCommit,
+  StreamEventsDocValue,
+} from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -568,62 +571,75 @@ describe("OW27 event-flood shaping — per-stream pacing, pace-never-drop (READM
 });
 
 describe("intent outcome consumption (events.md §5's client signal)", () => {
-  // Destination-level pins over a stub runtime: the notice scan, the
-  // retirement calls, the subscriber signal, and the sink release —
-  // the "client MUST be signaled" machinery (events.md §5) that the
-  // e2e suites exercise only incidentally (the watermark backstop
-  // also retires echoes there, so without these pins the mechanism
-  // was feature-deletion-survivable).
-  it("consequenced retires; dropped/errored retire AND signal; the sidecar sink releases with its last tracked id", async () => {
+  // Destination-level pins over the SCRIPTED STORAGE-NOTIFICATION seam
+  // (stage C design (e), RULED 2026-08-18): the notice arms, the
+  // retirement calls, the subscriber signal, and the listener release —
+  // the "client MUST be signaled" machinery (events.md §5) that the e2e
+  // suites exercise only incidentally (the watermark backstop also
+  // retires echoes there, so without these pins the mechanism was
+  // feature-deletion-survivable). The seam is the one production
+  // consumes — `storageManager.subscribe` + the raw replica read — not a
+  // hand-stubbed `cell.sink` (retired with the sink); the full pin set
+  // (visits, microtask, release, T25, no scheduler node, OFF) lives in
+  // `speculation-intent-listener.test.ts`.
+  it("consequenced retires; dropped/errored retire AND signal; the intent listener releases with its last tracked id", async () => {
     const { SpeculationOverlayDestination } = await import(
       "../src/speculation/overlay-destination.ts"
     );
-    const sinks = new Map<
-      string,
-      { cb: (value: unknown) => void; cancelled: boolean }
-    >();
-    const runtimeStub = {
-      getCellFromLink: (link: { id: string }) => ({
-        sink: (cb: (value: unknown) => void) => {
-          const record = { cb, cancelled: false };
-          sinks.set(link.id, record);
-          return () => {
-            record.cancelled = true;
-          };
-        },
-      }),
-      storageManager: { open: () => ({ replica: {} }) },
-    } as never;
+    const { scriptedIntentManager, flushMicrotasks } = await import(
+      "./speculation-intent-test-utils.ts"
+    );
+    const scripted = scriptedIntentManager();
+    const runtimeStub = { storageManager: scripted.manager } as never;
     const destination = new SpeculationOverlayDestination(runtimeStub);
     const outcomes: string[] = [];
     const unsubscribe = destination.subscribeIntentOutcomes((outcome) => {
       outcomes.push(`${outcome.kind}:${outcome.eventId}`);
     });
     const SPACE = "did:key:stub" as never;
+    const SIDECAR = "of:stream-events:a";
+    scripted.seed(SPACE, SIDECAR, { entries: [] });
 
-    destination.trackIntent(SPACE, "of:stream-events:a", "evt-1");
-    destination.trackIntent(SPACE, "of:stream-events:a", "evt-2");
-    destination.trackIntent(SPACE, "of:stream-events:a", "evt-3");
-    expect(sinks.has("of:stream-events:a")).toBe(true);
+    destination.trackIntent(SPACE, SIDECAR, "evt-1");
+    destination.trackIntent(SPACE, SIDECAR, "evt-2");
+    destination.trackIntent(SPACE, SIDECAR, "evt-3");
+    expect(destination.intentListenerInstalled).toBe(true);
+    expect(scripted.subscribers.size).toBe(1);
 
-    const feed = (entries: unknown[]) =>
-      sinks.get("of:stream-events:a")!.cb({ entries });
+    const feed = (
+      entries: NonNullable<StreamEventsDocValue["entries"]>,
+      paths?: string[][],
+    ) => {
+      scripted.deliver(SPACE, SIDECAR, (value) => {
+        value.entries = entries;
+      }, paths);
+      return flushMicrotasks();
+    };
+    const stream = { id: "of:stream", path: ["s"] };
     // consequenced: retires silently (no outcome signal).
-    feed([{ eventId: "evt-1", consequenced: true }]);
+    await feed([{ eventId: "evt-1", stream, consequenced: true }]);
+    expect(destination.pendingIntentCount).toBe(2);
     // errored: retires AND signals.
-    feed([
-      { eventId: "evt-1", consequenced: true },
-      { eventId: "evt-2", consequenced: true, error: "boom" },
-    ]);
+    await feed([
+      { eventId: "evt-1", stream, consequenced: true },
+      { eventId: "evt-2", stream, consequenced: true, error: "boom" },
+    ], [["value", "entries", "1", "consequenced"], [
+      "value",
+      "entries",
+      "1",
+      "error",
+    ]]);
     // dropped: retires AND signals; the LAST tracked id releases the
-    // sink.
-    feed([
-      { eventId: "evt-1", consequenced: true },
-      { eventId: "evt-2", consequenced: true, error: "boom" },
-      { eventId: "evt-3", status: "dropped", reason: "gone" },
-    ]);
+    // listener.
+    await feed([
+      { eventId: "evt-1", stream, consequenced: true },
+      { eventId: "evt-2", stream, consequenced: true, error: "boom" },
+      { eventId: "evt-3", stream, status: "dropped", reason: "gone" },
+    ], [["value", "entries", "2", "status"]]);
     expect(outcomes).toEqual(["errored:evt-2", "dropped:evt-3"]);
-    expect(sinks.get("of:stream-events:a")!.cancelled).toBe(true);
+    expect(destination.pendingIntentCount).toBe(0);
+    expect(destination.intentListenerInstalled).toBe(false);
+    expect(scripted.subscribers.size).toBe(0);
 
     // The refusal path (a deterministic admission refusal at
     // discharge): retires + signals without any store state.
@@ -637,7 +653,7 @@ describe("intent outcome consumption (events.md §5's client signal)", () => {
       "dropped:evt-3",
       "refused:evt-r",
     ]);
-    expect(sinks.get("of:stream-events:b")!.cancelled).toBe(true);
+    expect(destination.intentListenerInstalled).toBe(false);
     unsubscribe();
     destination.close();
   });

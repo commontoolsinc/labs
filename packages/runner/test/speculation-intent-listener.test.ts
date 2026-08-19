@@ -40,7 +40,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
-import type { StreamEventsDocValue } from "@commonfabric/memory/v2";
+import {
+  SERVER_EXECUTION_EFFECTS_DOC_ID,
+  type StreamEventsDocValue,
+} from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -519,6 +522,19 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     // The arrival was checked (a notification-driven check), and the
     // check located the entry in O(1) from the tail.
     expect(overlay.intentCheckCount).toBeGreaterThanOrEqual(2);
+    // (e)'s second step (design §5 item 13): the EFFECTS CHANNEL watches
+    // its session doc through the same listener shape — no
+    // `sink:…/<effects doc>` scheduler node either (mutation: keep the
+    // effects-doc cell.sink → a sink node appears).
+    const channel = runtime.effectsChannel!;
+    expect(channel).toBeDefined();
+    expect(channel.listenerInstalled).toBe(true);
+    const effectsSinkNodes = runtime.scheduler.getGraphSnapshot().nodes
+      .filter((node) =>
+        node.id.startsWith("sink:") &&
+        node.id.includes(`/${SERVER_EXECUTION_EFFECTS_DOC_ID}/`)
+      );
+    expect(effectsSinkNodes.length).toBe(0);
     cancelDemand();
   });
 

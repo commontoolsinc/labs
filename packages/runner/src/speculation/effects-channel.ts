@@ -39,6 +39,22 @@
 // The ack is once-per-nonce and the server-side retirement is
 // idempotent, so the accepted LT8 re-enactment never doubles anything
 // downstream of the client.
+//
+// HOW the channel watches its doc (server-execution v2 stage C design
+// (e), item 13 — RULED 2026-08-18: "the effects-channel sink follows the
+// same redesign, as (e)'s second step"): a NON-REACTIVE storage-
+// notification listener keyed on the subscribed spaces, not a schema-less
+// whole-doc `cell.sink`. The sink was a scheduler effect that re-read
+// every entry on every change of the session's effects doc — following
+// each intent's `args.target` link into the navigated-to doc (a demand
+// leak) — and paid the CFC probe over that read set; the same shape as
+// the intent watch, on a smaller doc. Now: ONE `storageManager.subscribe`
+// per channel, the doc kept WATCHED through the schema-less selector
+// (`sync(id, { path: [], schema: false }, "session")` — also the LT8
+// resubscribe re-read), and ONE coalesced MICROTASK reconcile per
+// (space) that reads the RAW replica doc: no transaction, no proxy, no
+// probe, no scheduler node, no demand edge. The reconcile itself is
+// unchanged.
 
 import {
   SERVER_EXECUTION_EFFECTS_DOC_ID,
@@ -46,7 +62,8 @@ import {
 } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
-import type { MemorySpace } from "../storage/interface.ts";
+import type { MemorySpace, URI } from "../storage/interface.ts";
+import { CoalescedDocListener } from "./doc-notification-listener.ts";
 
 const logger = getLogger("effects-channel", {
   enabled: true,
@@ -65,8 +82,12 @@ export class EffectsChannel {
    * failure (record retracted; the entry — still unacked in the store
    * — re-enacts on a later delivery). */
   readonly #enactInFlight = new Map<string, Promise<boolean>>();
-  /** space -> cancel fn for the effects-doc sink. */
-  readonly #sinks = new Map<MemorySpace, () => void>();
+  /** Spaces whose session effects instance this channel watches. */
+  readonly #spaces = new Set<MemorySpace>();
+  /** The ONE storage-notification listener (design (e) item 13). */
+  #listener: CoalescedDocListener | undefined;
+  /** DIAGNOSTIC (tests): reconciles run from notifications / re-reads. */
+  #reconciles = 0;
   /** In-flight ack writes (`${space}\0${nonce}`) — one authored ack per
    * nonce at a time; a failed ack retries on the next sink delivery
    * (the entry is still unacked there). */
@@ -91,6 +112,17 @@ export class EffectsChannel {
    * records two. */
   get enactedNonceCount(): number {
     return this.#enacted.size;
+  }
+
+  /** DIAGNOSTIC (tests): reconciles run (notification-driven + the
+   * resubscribe re-read). */
+  get reconcileCount(): number {
+    return this.#reconciles;
+  }
+
+  /** DIAGNOSTIC (tests): whether the notification listener is live. */
+  get listenerInstalled(): boolean {
+    return this.#listener?.installed === true;
   }
 
   /** Record `nonce` as enacted BEFORE `work` (the enactment itself)
@@ -122,43 +154,51 @@ export class EffectsChannel {
   }
 
   /** Subscribe to this session's effects instance in `space` (idempotent
-   * per space). The doc link names scope "session" and NO key: the
-   * instance resolves from the runtime's own authenticated session, and
-   * push delivers only this session's rows (protocol.md §3's applicable
+   * per space). The doc names scope "session" and NO key: the instance
+   * resolves from the runtime's own authenticated session, and push
+   * delivers only this session's rows (protocol.md §3's applicable
    * set). */
   ensureSubscribed(space: MemorySpace): void {
-    if (this.#closed || this.#sinks.has(space)) return;
+    if (this.#closed || this.#spaces.has(space)) return;
     if (this.#runtime.installedSealDestination !== undefined) {
       // A runtime with a WAVE seal destination installed is serving-side
       // machinery (or a wave test bench), never a client enact surface —
       // production non-serving runtimes never install one
       // (installSealDestination's contract). Subscribing here would
-      // inject the sink's setup transaction into the wave's serial seal
-      // order (a concurrent seal). Skip.
+      // inject the watch's setup into the wave's serial seal order. Skip.
       return;
     }
+    this.#spaces.add(space);
     try {
-      const cell = this.#runtime.getCellFromLink<SessionEffectsDocValue>({
-        space,
-        id: SERVER_EXECUTION_EFFECTS_DOC_ID as never,
-        scope: "session",
-        path: [],
-      });
-      const cancel = cell.sink((value) => {
-        this.#reconcile(space, value as SessionEffectsDocValue | undefined);
-      });
-      this.#sinks.set(space, cancel);
-      // The RESUBSCRIBE re-read (protocol.md §5's reload journey; LT8):
-      // a sink alone fires on PUSH — a fresh runtime whose instance
-      // already holds unacked intents sees nothing until the next
-      // commit touches the doc. The explicit sync pulls the STORED
-      // instance, so a reload enacts what it left unacked.
-      const pulled = cell.sync();
+      this.#ensureListener();
+      // The WATCH + the RESUBSCRIBE re-read (protocol.md §5's reload
+      // journey; LT8): the schema-less selector keeps the session
+      // instance watched (pushes arrive as notifications), and the pull
+      // it issues brings the STORED instance — a fresh runtime whose
+      // instance already holds unacked intents sees nothing until the
+      // next commit otherwise. Reconcile when it lands (the arrival's
+      // own notification reconciles too; the reconcile is idempotent by
+      // nonce).
+      const pulled = this.#runtime.storageManager.open(space).sync(
+        SERVER_EXECUTION_EFFECTS_DOC_ID as URI,
+        { path: [], schema: false },
+        "session",
+      );
       this.#runtime.trackAsyncWork(
-        Promise.resolve(pulled).catch((error) => {
+        Promise.resolve(pulled).then((result) => {
+          if (result?.error !== undefined) {
+            logger.warn("effects-resubscribe-read-failed", () => [
+              `effects-doc re-read for ${space} failed; unacked intents ` +
+              "enact only on the next push",
+              result.error,
+            ]);
+            return;
+          }
+          this.#reconcileFromReplica(space);
+        }).catch((error) => {
           // The re-read failing means this life may never see its
           // UNACKED intents until the next commit touches the doc —
-          // loud, like the sink-failure arm below.
+          // loud, like the subscribe-failure arm below.
           logger.warn("effects-resubscribe-read-failed", () => [
             `effects-doc re-read for ${space} failed; unacked intents ` +
             "enact only on the next push",
@@ -173,6 +213,44 @@ export class EffectsChannel {
         error,
       ]);
     }
+  }
+
+  /** ONE listener per channel (design (e) item 13): wants the session
+   * effects doc of every subscribed space; reconciles in a microtask. */
+  #ensureListener(): void {
+    if (this.#listener !== undefined) return;
+    const listener = new CoalescedDocListener(this.#runtime.storageManager, {
+      wants: (space, id, scope) =>
+        id === SERVER_EXECUTION_EFFECTS_DOC_ID && scope === "session" &&
+        this.#spaces.has(space),
+      onNotify: (space) => this.#reconcileFromReplica(space),
+    });
+    listener.ensure();
+    this.#listener = listener;
+  }
+
+  /** Read the RAW session instance from the replica (no transaction, no
+   * proxy) and reconcile it. */
+  #reconcileFromReplica(space: MemorySpace): void {
+    if (this.#closed || !this.#spaces.has(space)) return;
+    let value: SessionEffectsDocValue | undefined;
+    try {
+      value = this.#runtime.storageManager.open(space).replica.getDocument(
+        SERVER_EXECUTION_EFFECTS_DOC_ID as URI,
+        "session",
+      )?.value as SessionEffectsDocValue | undefined;
+    } catch (error) {
+      logger.warn("effects-read-failed", () => [
+        `effects-doc read for ${space} failed; reconcile skipped`,
+        error,
+      ]);
+      return;
+    }
+    this.#reconciles += 1;
+    logger.debug("effects-reconcile", () => [
+      `effects reconcile for ${space}`,
+    ]);
+    this.#reconcile(space, value);
   }
 
   /** One delivery of the session's effects instance: enact unacked
@@ -321,18 +399,14 @@ export class EffectsChannel {
     }
   }
 
-  /** Dispose: release the sinks. The enacted-nonce record dies with the
-   * process (LT8's accepted wipe). */
+  /** Dispose: release the listener. The enacted-nonce record dies with
+   * the process (LT8's accepted wipe). */
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    for (const cancel of this.#sinks.values()) {
-      try {
-        cancel();
-      } catch {
-        // sink cancellation is best-effort during teardown
-      }
-    }
-    this.#sinks.clear();
+    const listener = this.#listener;
+    this.#listener = undefined;
+    listener?.release();
+    this.#spaces.clear();
   }
 }
