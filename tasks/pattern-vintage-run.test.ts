@@ -175,6 +175,69 @@ const NESTED_ALIASED = aliased(false);
 const NESTED_ALIASED_FLIPPED = aliased(true);
 
 /**
+ * The map is gone and `rows` is re-derived from a plain read: today's module
+ * emits no `__cfPattern_N` at all, while every value a root held stays
+ * byte-equal. The recorded hoist root names an artifact that no longer
+ * exists — the renumbering face of supersession, isolated from state change.
+ */
+const NESTED_MAP_UNROLLED = nestedSource()
+  .replace(
+    "import { Confidential, Default, Writable, pattern } from 'commonfabric';",
+    "import { Confidential, Default, Writable, computed, pattern } from 'commonfabric';",
+  )
+  .replace(
+    "  const rows = items.map((word) => Row({ word }));",
+    "  const rows = computed(() =>\n" +
+      "    items.get().map((word) => ({ shout: word }))\n" +
+      "  );",
+  );
+
+/**
+ * The map body now closes over `marker`, an outer binding, and maps a FRESH
+ * collection carrying the same values. The fresh cause is what makes the
+ * drift observable: a re-run over the ORIGINAL collection re-supplies the
+ * recorded cells' arguments before their own targets validate, so only a
+ * derivation that no longer writes those cells leaves the captured
+ * arguments to face today's params schema — which now demands `marker`.
+ * `Row` itself widens compatibly (`prefix` optional and unused), and every
+ * stored value stays byte-equal.
+ */
+const NESTED_CAPTURE_GROWN = nestedSource()
+  .replace(
+    "export const Row = pattern<{ word: string }, RowOut>(({ word }) => {",
+    "export const Row = pattern<{ word: string; prefix?: string }, RowOut>(({ word }) => {",
+  )
+  .replace(
+    "  const rows = items.map((word) => Row({ word }));",
+    "  const marker = new Writable<string>('m').for('marker');\n" +
+      "  const items2 = new Writable<string[]>(['captured']).for('items2');\n" +
+      "  const rows = items2.map((word) => Row({ word, prefix: marker }));",
+  );
+
+/**
+ * `Row` — an AUTHORED export — now requires an argument its stored roots
+ * never held, under the same derivation drift as `NESTED_CAPTURE_GROWN`:
+ * the map iterates a fresh same-valued collection AND captures `marker`, so
+ * neither the re-run map nor a re-applied hoist re-supplies the recorded
+ * Row cell (a hoist that applied would re-run its body and heal the Row's
+ * arguments). One replay then carries both sides of the partition: the
+ * hoist's refusal is held back as derivation, and `Row`'s must FAIL — the
+ * spelling test is what separates a derived hoist from an authored pattern,
+ * and holding an authored refusal back would hide a real hazard.
+ */
+const NESTED_ROW_ARGS_TIGHTENED = nestedSource()
+  .replace(
+    "export const Row = pattern<{ word: string }, RowOut>(({ word }) => {",
+    "export const Row = pattern<{ word: string; word2: string; prefix?: string }, RowOut>(({ word }) => {",
+  )
+  .replace(
+    "  const rows = items.map((word) => Row({ word }));",
+    "  const marker = new Writable<string>('m').for('marker');\n" +
+      "  const items2 = new Writable<string[]>(['captured']).for('items2');\n" +
+      "  const rows = items2.map((word) => Row({ word, word2: word, prefix: marker }));",
+  );
+
+/**
  * A subject that returns a key its declared output type never NAMES, riding an
  * index signature instead — the shape `system/default-app.tsx` declares
  * (`[key: string]: unknown`), and the reason its root's `recentPieces`,
@@ -1757,6 +1820,81 @@ describe("the vintage gate, end to end", () => {
       expect(failures.length).toBeGreaterThan(0);
       expect(
         failures.some((f) => f.detail.includes('defines no "Row"')),
+      ).toBe(true);
+    });
+
+    it("holds a derived hoist back when the edit no longer emits it", async () => {
+      // The recorded `__cfPattern_N` root names an artifact today's module
+      // does not define, because the edit unrolled the map — the renumbering
+      // face of supersession. Held back and reported with its reason; the
+      // authored roots around it replay and compare as always.
+      await captureMissing(
+        roots,
+        [NESTED_TEST_KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+      await writeNested(NESTED_MAP_UNROLLED);
+
+      const { failures, capturesSuperseded } = await replayAll(roots);
+
+      expect(failures).toEqual([]);
+      expect(
+        capturesSuperseded.some((target) =>
+          /__cfPattern_[1-9]\d* \(hoist no longer emitted\)$/.test(target)
+        ),
+      ).toBe(true);
+    });
+
+    it("holds a derived hoist back when its captures outgrow the stored arguments", async () => {
+      // Today's hoist exists, but the map body's new outer capture makes its
+      // params schema demand a property the stored arguments never carried —
+      // the same refusal the runner reports as a stored-argument rejection.
+      // Captures are derivation the re-run map re-supplies, so this is held
+      // back rather than failed.
+      await captureMissing(
+        roots,
+        [NESTED_TEST_KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+      await writeNested(NESTED_CAPTURE_GROWN);
+
+      const { failures, capturesSuperseded } = await replayAll(roots);
+
+      expect(failures).toEqual([]);
+      expect(
+        capturesSuperseded.some((target) =>
+          /__cfPattern_[1-9]\d* \(stored arguments superseded\)$/.test(target)
+        ),
+      ).toBe(true);
+    });
+
+    it("FAILS an authored export whose stored arguments today's schema refuses", async () => {
+      // The same refusal class the hoists are held back on, fired by an
+      // AUTHORED pattern: `Row` now requires `word2` and the stored roots
+      // never held one. Nothing here is derivation a re-run re-supplies, so
+      // holding it back would hide a stranded piece. The hoist's own refusal
+      // in the same replay stays held back — both sides of the partition,
+      // decided by what the symbol is rather than by the refusal's shape.
+      await captureMissing(
+        roots,
+        [NESTED_TEST_KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+      await writeNested(NESTED_ROW_ARGS_TIGHTENED);
+
+      const { failures, capturesSuperseded } = await replayAll(roots);
+
+      expect(failures.length).toBeGreaterThan(0);
+      expect(
+        failures.some((f) => f.detail.includes("(Row)")),
+      ).toBe(true);
+      expect(
+        failures.some((f) => f.detail.includes("__cfPattern")),
+      ).toBe(false);
+      expect(
+        capturesSuperseded.some((target) =>
+          /__cfPattern_[1-9]\d* \(stored arguments superseded\)$/.test(target)
+        ),
       ).toBe(true);
     });
   });

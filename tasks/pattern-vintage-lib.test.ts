@@ -24,7 +24,6 @@ import {
   describePinOutcome,
   isClean,
   isDerivedHoistSymbol,
-  isMissingArtifactRefusal,
   isStoredArgumentRefusal,
   KNOWN_FLAGS,
   newestAutoGeneration,
@@ -1770,6 +1769,11 @@ describe("derived-hoist classification", () => {
     expect(isDerivedHoistSymbol("x__cfPattern_4")).toBe(false);
   });
 
+  it("returns false for numbers the per-file counter never mints", () => {
+    expect(isDerivedHoistSymbol("__cfPattern_0")).toBe(false);
+    expect(isDerivedHoistSymbol("__cfPattern_01")).toBe(false);
+  });
+
   it("classifies a stored-argument refusal in Error and string form", () => {
     const message = `${STORED_ARGUMENT_SCHEMA_REFUSAL}: params: missing ` +
       `required property boundRemoveHistoryEntry`;
@@ -1781,23 +1785,5 @@ describe("derived-hoist classification", () => {
     expect(isStoredArgumentRefusal(new Error("commit failed"))).toBe(false);
     expect(isStoredArgumentRefusal("compile error")).toBe(false);
     expect(isStoredArgumentRefusal(undefined)).toBe(false);
-  });
-});
-
-describe("missing-artifact refusal classification", () => {
-  it("recognizes a defines-no message for the recorded symbol", () => {
-    const message = "today's /packages/patterns/lunch-poll/main.tsx defines " +
-      'no "__cfPattern_6"; the stored root names an artifact this version ' +
-      "does not have";
-    expect(isMissingArtifactRefusal("__cfPattern_6", message)).toBe(true);
-    expect(isMissingArtifactRefusal("__cfPattern_6", new Error(message)))
-      .toBe(true);
-  });
-
-  it("returns false for a different symbol or a different error", () => {
-    const message = 'today\'s main.tsx defines no "__cfPattern_6"; …';
-    expect(isMissingArtifactRefusal("__cfPattern_4", message)).toBe(false);
-    expect(isMissingArtifactRefusal("__cfPattern_6", "commit failed"))
-      .toBe(false);
   });
 });

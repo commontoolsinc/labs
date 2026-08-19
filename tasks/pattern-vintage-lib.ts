@@ -1184,16 +1184,34 @@ export function armVerdictGuard(
  * `replayed` is part of the condition and not just a number to print: zero
  * replays is the shape a broken gate takes, not the shape a clean tree takes.
  */
+export function isClean(
+  failures: readonly ReplayFailure[],
+  uncovered: readonly string[],
+  counts: { replayed: number; candidates: number; targets: number },
+): boolean {
+  return failures.length === 0 && uncovered.length === 0 &&
+    counts.replayed > 0 && counts.candidates > 0 && counts.targets > 0;
+}
+
 /**
  * Whether a recorded instantiation is a transformer-emitted pattern hoist —
  * an anonymous sub-pattern the compiler derives from the source (a mapped
  * row's body), as opposed to a pattern an author exports. The `__cfPattern_N`
  * name is the transformer's own emission convention, and N is a builder node
  * id with no stability across edits — which is exactly why nothing durable
- * may be addressed by it.
+ * may be addressed by it. The per-file counter starts at 1, so
+ * `__cfPattern_0` is not a name the transformer mints.
+ *
+ * Spelling is the only evidence available here. The artifact index registers
+ * hoists and exports through one path and keeps no provenance, and the
+ * missing-artifact face asks about a symbol today's module does not even
+ * define — so an authored export squatting on the reserved spelling would be
+ * classified as derived, and its refusals held back. Reserving the namespace
+ * at emission is the transformer-side fix; this gate cannot tell the
+ * squatter from the hoist.
  */
 export function isDerivedHoistSymbol(symbol: string): boolean {
-  return /^__cfPattern_\d+$/.test(symbol);
+  return /^__cfPattern_[1-9]\d*$/.test(symbol);
 }
 
 /**
@@ -1206,34 +1224,4 @@ export function isStoredArgumentRefusal(error: unknown): boolean {
   if (isStoredArgumentSchemaRefusal(error)) return true;
   return typeof error === "string" &&
     error.startsWith(`${STORED_ARGUMENT_SCHEMA_REFUSAL}:`);
-}
-
-/**
- * Whether a materialization error says today's source no longer DEFINES the
- * recorded symbol. For a derived hoist that is the renumbering face of the
- * same supersession as a capture drift — hoist ids are builder node ids with
- * no stability across edits, so an edited pattern routinely re-derives the
- * same rows under different numbers — and the caller pairs this with
- * `isDerivedHoistSymbol` so an AUTHORED export that disappeared still fails
- * as the retirement it is.
- */
-export function isMissingArtifactRefusal(
-  symbol: string,
-  error: unknown,
-): boolean {
-  const message = error instanceof Error
-    ? error.message
-    : typeof error === "string"
-    ? error
-    : "";
-  return message.includes(`defines no "${symbol}"`);
-}
-
-export function isClean(
-  failures: readonly ReplayFailure[],
-  uncovered: readonly string[],
-  counts: { replayed: number; candidates: number; targets: number },
-): boolean {
-  return failures.length === 0 && uncovered.length === 0 &&
-    counts.replayed > 0 && counts.candidates > 0 && counts.targets > 0;
 }

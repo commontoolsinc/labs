@@ -287,9 +287,9 @@ async function main() {
   if (replay.capturesSuperseded.length > 0) {
     const targets = [...new Set(replay.capturesSuperseded)].sort();
     console.log(
-      `\nHeld ${targets.length} derived sub-pattern target(s) back from ` +
-        `stored-argument validation: a hoist's captures are re-supplied by ` +
-        `the re-run derivation (root contracts still gate):`,
+      `\nHeld ${targets.length} derived sub-pattern target(s) back, each ` +
+        `with the rule that held it: a hoist is derivation the updated ` +
+        `source re-runs and re-supplies (root contracts still gate):`,
     );
     for (const target of targets) {
       console.log(`  ${target}`);

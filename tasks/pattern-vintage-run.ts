@@ -21,7 +21,6 @@ import {
   collectVintages,
   describeError,
   isDerivedHoistSymbol,
-  isMissingArtifactRefusal,
   isStoredArgumentRefusal,
   newestAutoGeneration,
   patternKeyFromMain,
@@ -720,14 +719,20 @@ export async function replayVintage(
       if (outcome.error !== undefined) {
         // A derived hoist whose stored arguments no longer satisfy today's
         // schema is not a stranded piece: see `capturesSuperseded` on the
-        // report. Held back and reported, never silently dropped. Any other
-        // refusal of a hoist — compile, commit, storage — still fails.
-        if (
-          isDerivedHoistSymbol(entry.symbol) &&
-          (isStoredArgumentRefusal(outcome.error) ||
-            isMissingArtifactRefusal(entry.symbol, outcome.error))
-        ) {
-          report.capturesSuperseded.push(`${entry.main} ${entry.symbol}`);
+        // report. Held back and reported WITH the rule that fired, never
+        // silently dropped. Any other refusal of a hoist — compile, commit,
+        // storage — still fails.
+        const supersession = !isDerivedHoistSymbol(entry.symbol)
+          ? undefined
+          : isStoredArgumentRefusal(outcome.error)
+          ? "stored arguments superseded"
+          : outcome.missingArtifact === true
+          ? "hoist no longer emitted"
+          : undefined;
+        if (supersession !== undefined) {
+          report.capturesSuperseded.push(
+            `${entry.main} ${entry.symbol} (${supersession})`,
+          );
           continue;
         }
         report.failures.push({
