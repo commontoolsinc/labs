@@ -86,6 +86,54 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
+### Addendum 4 (a plain-array `map` callback carries pattern-owned sites)
+
+A `map` callback on an ordinary JavaScript array inside a pattern body now
+carries pattern-owned expression sites, the same ones the pattern body carries.
+`supportsPatternOwnedWrapperCallbackSite` (`policy/callback-boundary.ts`)
+admits the `plain-array-value` boundary for that callback role, which
+`isCollectingPlainArrayMethodCallback` (`ast/call-kind.ts`) decides.
+
+The callback runs eagerly during pattern build, so its statements are pattern
+body statements that happen to be written once and executed several times. A
+value binding in one is therefore a pattern-body binding, and a reactive
+computation bound there lowers to its own lift-applied call per iteration.
+
+The permission stops at the callback's role, because the boundary kind alone is
+too coarse to carry it. `plain-array-value` also covers `filter`, `find`,
+`some`, `every`, `sort`, `flatMap`, and `reduce`, and each of those reads what
+the callback returns while it runs — as a boolean, a number, an array test, or
+the next accumulator. `map` is the one that merely collects. A lift returned to
+a predicate is an object, so `filter` keeps every element and `find` matches
+the first; those callbacks therefore keep the diagnostic. The test that admits
+a callback also requires it to be argument zero of a method resolved on
+`Array`/`ReadonlyArray`, so a comparator in a later argument position and a
+`map` belonging to some other type are both excluded.
+
+Two behaviors change:
+
+- A binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside
+  `COLUMN_INDICES.map((colIdx) => …)` lowers. Previously the comparison was
+  emitted raw, so it ran on the reactive proxies rather than their values and
+  froze to `false`. Reading the binding as a JSX condition then rendered the
+  wrong branch with no diagnostic, because the JSX exemption in
+  `isInRestrictedReactiveContext` suppresses the "wrap it in `computed()`"
+  errors that the same binding draws outside JSX.
+- `pattern-context:get-call` and `pattern-context:optional-chaining` no longer
+  fire for a read that a `map` callback's own value sites can carry, so
+  `["-", "+"].map((sep) => rows.get().join(sep))` compiles to an array of
+  per-separator lifts instead of being rejected. Both still fire in the
+  result-interpreting callbacks.
+
+A reactive array-method callback keeps the older, stricter rule, and the
+difference is structural rather than stylistic: that callback is lowered into a
+sub-pattern over per-element cells, so a `.get()` on the element binding has no
+pattern-body site to become a lift.
+
+This is P-011 applied to a boundary that had been drawn by the receiver's type
+rather than by what the callback lowers to. Whether the mapped array is plain
+says nothing about whether the values the callback closes over are reactive.
+
 ### Addendum 3 (`toJSON` is an ordinary member name)
 
 `pattern-context:object-member` treats `toJSON` like any other member. A
@@ -117,9 +165,12 @@ each finding:
   argument, a computation over the read, and a call whose receiver chain
   reaches it are all accepted, terminal or not, and parentheses, the
   computed-key spelling, and the optional spellings do not change the
-  classification. A read with no such site — statement position, a reactive
-  array-method callback, or a plain (non-reactive) array-method callback —
-  remains outside the language, as does a read on a value that is not a cell.
+  classification. A read with no such site — statement position, or a
+  reactive array-method callback, whose callback becomes a sub-pattern over
+  per-element cells — remains outside the language, as does a read on a value
+  that is not a cell. Addendum 4 carries the same reasoning into a plain-array
+  `map` callback, which does supply a site; the array callbacks whose result
+  the method reads as it runs do not.
 
   What settled it: the matrix already blessed the JSX spelling, so the earlier
   rule was really "no eager reads outside JSX" — which made extracting a JSX

@@ -82,7 +82,13 @@ function findFirstNode<T extends ts.Node>(
 Deno.test(
   "Callback support policy: plain array map callbacks stay plain-array value callbacks",
   () => {
+    // The harness compiles with `noLib`, so the Array members a test relies on
+    // are declared by the test itself.
     const { sourceFile, checker, context } = createProgramAndContext(`
+      interface Array<T> {
+        map<U>(callback: (value: T) => U): U[];
+      }
+
       const items = [1, 2, 3];
       const result = items.map((item) => item + 1);
     `);
@@ -99,7 +105,7 @@ Deno.test(
     });
     assertEquals(semantics.isReactiveArrayMethodCallback, false);
     assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
-    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
   },
 );
 
@@ -127,7 +133,99 @@ Deno.test(
     });
     assertEquals(semantics.isReactiveArrayMethodCallback, false);
     assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
+    // `find` reads what the callback returns as a boolean, so a lifted local
+    // returned from it would always be truthy.
     assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a plain filter callback carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      interface Array<T> {
+        filter(callback: (value: T) => boolean): T[];
+      }
+
+      const items = [1, 2, 3];
+      const result = items.filter((item) => item > 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a sort comparator carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      interface Array<T> {
+        toSorted(compare: (a: T, b: T) => number): T[];
+      }
+
+      const items = [1, 2, 3];
+      const result = items.toSorted((a, b) => a - b);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a map on some other type carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      interface Grid<T> {
+        map<U>(callback: (value: T) => U): U[];
+      }
+
+      declare const grid: Grid<number>;
+      const result = grid.map((cell) => cell + 1);
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a callback past argument zero carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      interface Array<T> {
+        map<U>(callback: (value: T) => U, andThen: (value: U) => U): U[];
+      }
+
+      const items = [1, 2, 3];
+      const result = items.map((item) => item + 1, (item) => item * 2);
+    `);
+
+    const callbacks: ts.ArrowFunction[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isArrowFunction(node)) callbacks.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+
+    assertEquals(
+      getCallbackBoundarySemantics(callbacks[0]!, checker, context)
+        .supportsPatternOwnedWrapperCallbackSite,
+      true,
+    );
+    assertEquals(
+      getCallbackBoundarySemantics(callbacks[1]!, checker, context)
+        .supportsPatternOwnedWrapperCallbackSite,
+      false,
+    );
   },
 );
 
