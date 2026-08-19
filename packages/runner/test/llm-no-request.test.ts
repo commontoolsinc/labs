@@ -17,6 +17,11 @@
  * abandon a request already in flight, so a response that lands afterwards
  * writes nothing; and it has to forget the request it remembered, so the same
  * prompt coming back is sent again rather than suppressed as a duplicate.
+ *
+ * Both of those apply to a request the builtin can abandon. A queued request
+ * runs to completion under the queue's own lifecycle, so it is remembered
+ * across the empty prompt and the same prompt returning does not enqueue a
+ * second copy. A fourth test holds that line.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -334,6 +339,61 @@ describe("LLM builtin no-request paths", () => {
       expect(result.key("result").get()).toEqual({ answer: "cats" });
     } finally {
       LLMClient.prototype.generateObject = original;
+    }
+  });
+
+  it("`generateText` keeps a queued request remembered across an empty prompt", async () => {
+    const original = LLMClient.prototype.sendRequest;
+    let calls = 0;
+    LLMClient.prototype.sendRequest = () => {
+      calls++;
+      return Promise.resolve({ content: "a summary of cats" } as never);
+    };
+    try {
+      const testPattern = builder.pattern<{ prompt: string }>(({ prompt }) =>
+        builder.generateText({ prompt, queue: "no-request-queue" })
+      );
+      const promptCell = runtime.getCell<string>(
+        space,
+        "queued-prompt-input",
+        undefined,
+        tx,
+      );
+      promptCell.set("summarize cats");
+      const resultCell = runtime.getCell(
+        space,
+        "queued-prompt",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { prompt: promptCell },
+        resultCell,
+      );
+      tx.commit();
+      tx = runtime.edit();
+
+      await waitForLlmSettled(runtime, result);
+      expect(calls).toBe(1);
+
+      const clear = runtime.edit();
+      promptCell.withTx(clear).set("");
+      clear.commit();
+      await runtime.settled();
+
+      const restore = runtime.edit();
+      promptCell.withTx(restore).set("summarize cats");
+      restore.commit();
+      await runtime.settled();
+
+      // The queue owns a queued request's lifecycle, so the builtin goes on
+      // remembering it and the returning prompt matches rather than enqueuing a
+      // second copy of the same call.
+      expect(calls).toBe(1);
+    } finally {
+      LLMClient.prototype.sendRequest = original;
     }
   });
 });
