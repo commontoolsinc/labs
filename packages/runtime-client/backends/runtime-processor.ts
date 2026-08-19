@@ -180,11 +180,11 @@ import {
   postRuntimeError,
 } from "./runtime-error.ts";
 import {
+  assertFabricLoggerFlags,
   createCellRef,
   createPageRef,
   getCell,
   mapCellRefsToSigilLinks,
-  vetLoggerFlags,
 } from "./utils.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
@@ -1573,7 +1573,8 @@ export class RuntimeProcessor {
     const counts = getLoggerCountsBreakdown();
     const metadata = this.#getLoggerMetadata();
     const timing = getTimingStatsBreakdown();
-    const flags = vetLoggerFlags(getLoggerFlagsBreakdown());
+    const flags = getLoggerFlagsBreakdown();
+    assertFabricLoggerFlags(flags);
     return { counts, metadata, timing, flags };
   }
 

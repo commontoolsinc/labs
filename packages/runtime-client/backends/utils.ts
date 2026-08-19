@@ -1,6 +1,5 @@
 import {
   FabricInstance,
-  type FabricPlainObject,
   FabricPrimitive,
   type FabricValue,
   isFabricPlainObject,
@@ -95,41 +94,46 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
 }
 
 /**
- * Vets a logger flag breakdown for the connection. A flag's metadata is
- * whatever its caller passed -- `Logger` takes a `Record<string, unknown>` and
- * constrains it no further -- so this is where it becomes a `FabricValue` or
- * does not travel.
+ * Asserts that a logger flag breakdown is carriable on the connection. A
+ * flag's metadata is whatever its caller passed -- `Logger` takes a
+ * `Record<string, unknown>` and constrains it no further -- so this is where it
+ * is established to be a `FabricValue` or the read fails.
  *
- * Metadata that does not vet is carried as `null`, which is what a flag set
- * without metadata carries: the flag's presence survives, its metadata does
- * not. Vetting here rather than at the logger keeps the constraint on what
- * crosses instead of on every caller that raises a flag.
+ * Metadata that does not vet throws rather than travelling as `null`. Nulling
+ * it would lose the metadata while the payload went on reporting the flag,
+ * which is the silent loss "Death before confusion!" rules out; the throw names
+ * the flag whose metadata cannot travel, which is what a reader needs in order
+ * to fix it.
+ *
+ * Nothing reaches the throw today, de facto rather than by construction: no
+ * flag gates it, and every producer that raises a flag with metadata passes
+ * fabric data -- one of them a cell's own raw value.
  */
-export function vetLoggerFlags(
+export function assertFabricLoggerFlags(
   breakdown: Record<
     string,
     Record<string, Record<string, Record<string, unknown> | null>>
   >,
-): LoggerFlagsData {
-  const out: LoggerFlagsData = {};
+): asserts breakdown is LoggerFlagsData {
   for (const [logger, flags] of Object.entries(breakdown)) {
-    const byFlag: Record<string, Record<string, FabricPlainObject | null>> = {};
     for (const [flag, byId] of Object.entries(flags)) {
-      const vetted: Record<string, FabricPlainObject | null> = {};
       for (const [id, metadata] of Object.entries(byId)) {
         // `isFabricValue()` is the validating half and runs first;
         // `isFabricPlainObject()` takes a value it has already accepted, which
         // is why the two are spelled together rather than either alone.
-        vetted[id] = (metadata !== null) && isFabricValue(metadata) &&
-            isFabricPlainObject(metadata)
-          ? metadata
-          : null;
+        if (
+          (metadata === null) ||
+          (isFabricValue(metadata) && isFabricPlainObject(metadata))
+        ) {
+          continue;
+        }
+        throw new Error(
+          "Cannot send logger flag metadata on this connection: " +
+            `\`${logger}\` \`${flag}\` \`${id}\` is not a fabric record.`,
+        );
       }
-      byFlag[flag] = vetted;
     }
-    out[logger] = byFlag;
   }
-  return out;
 }
 
 export function cellRefToSigilLink(cell: CellRef): SigilLink {

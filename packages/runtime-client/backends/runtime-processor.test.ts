@@ -46,10 +46,10 @@ import {
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
 import {
+  assertFabricLoggerFlags,
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
-  vetLoggerFlags,
 } from "./utils.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
@@ -2880,35 +2880,49 @@ describe("runtime-client CellRef conversion", () => {
   });
 });
 
-describe("vetLoggerFlags", () => {
-  it("carries metadata that vets, and nulls metadata that does not", () => {
+describe("assertFabricLoggerFlags", () => {
+  it("accepts metadata that vets, and a flag raised without any", () => {
     // A `Logger` takes `Record<string, unknown>` and constrains it no further,
-    // so both of these are values a caller can legitimately have flagged with.
-    const fabric = { a: 1, b: ["x", null] };
-    const notFabric = { when: new Date(0) };
-
-    const vetted = vetLoggerFlags({
+    // so what it holds is established here or not at all.
+    const flags = {
       runner: {
         "action invalid input": {
-          "action:ok": fabric,
-          "action:bad": notFabric,
+          "action:ok": { a: 1, b: ["x", null] },
           "action:bare": null,
         },
       },
-    });
+    };
 
-    // The one that vets travels as itself rather than as a copy.
-    expect(vetted.runner["action invalid input"]["action:ok"]).toBe(fabric);
-    // The one that does not is indistinguishable from a flag set without
-    // metadata, which is the documented cost of carrying the flag anyway.
-    expect(vetted.runner["action invalid input"]["action:bad"]).toBe(null);
-    expect(vetted.runner["action invalid input"]["action:bare"]).toBe(null);
-    // Every id survives either way: the flag's presence is what this carries.
-    expect(Object.keys(vetted.runner["action invalid input"])).toEqual([
-      "action:ok",
-      "action:bad",
-      "action:bare",
-    ]);
+    expect(() => assertFabricLoggerFlags(flags)).not.toThrow();
+  });
+
+  it("throws naming the flag whose metadata cannot travel", () => {
+    // A `Date` clones perfectly well and is not a `FabricValue`, so it is the
+    // shape that would otherwise cross as something the far side cannot read.
+    const flags = {
+      runner: {
+        "action invalid input": { "action:bad": { when: new Date(0) } },
+      },
+    };
+
+    // Named down to the id: a reader has to know which flag to go fix, and
+    // "some metadata somewhere" would not tell them.
+    expect(() => assertFabricLoggerFlags(flags)).toThrow(
+      "Cannot send logger flag metadata on this connection: `runner` " +
+        "`action invalid input` `action:bad` is not a fabric record.",
+    );
+  });
+
+  it("throws rather than dropping the metadata and reporting the flag", () => {
+    // The disposition itself, asserted: nulling the metadata would leave the
+    // payload reporting a flag whose contents had silently gone, which is the
+    // loss "Death before confusion!" rules out.
+    const flags = {
+      runner: { sample: { "id:1": { fn: () => 0 } } },
+    };
+
+    expect(() => assertFabricLoggerFlags(flags)).toThrow();
+    expect(flags.runner.sample["id:1"]).not.toBe(null);
   });
 });
 
