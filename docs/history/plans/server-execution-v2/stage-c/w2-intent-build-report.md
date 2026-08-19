@@ -511,12 +511,12 @@ hidden (`cascade-echo-retired-unarrived`); shape (b) — deterministic
 cascade ids on both sides — is recorded as the owner-level alternative
 in the register's W2 block. Pins W2.1-1…4 (scripted, the mark path) +
 the W2.1 e2e lunch-join shape, every one RED on the W2 tip `6bec4a4bb`
-and each with its killing mutation; the lunch gate 3/3 green at the
-W2.1 tip (join step 3.6 / 4.1 / 5.1 s — honest; the (α) class still
-visible in the store: the castVote child consequenced 3×, W3's) and
-3/3 green on a local W2.1 + (α) scratch (255 / 253 / 254 ms; every
-event in exactly one derived commit; `appended 11 / processed 12, 11,
-11`). Everything else — suites, mutations, the (b) flag text, what was
+and each with its killing mutation; the lunch gate 6/6 green at the
+W2.1 tip (join step 3.3–5.1 s — honest; the (α) class still visible in
+the store: the castVote child consequenced 3×, W3's) and 6/6 green at
+loads ≤ 12 on a local W2.1 + (α) scratch (253–255 ms; every event in
+exactly one derived commit; `appended 11 / processed 11–12`; the
+later load-dominated runs reported, not excused). Everything else — suites, mutations, the (b) flag text, what was
 not done — is in
 [`w2-1-cascade-echo-report.md`](w2-1-cascade-echo-report.md). The
 "no lunch run" line in §8 above is superseded by that report.*

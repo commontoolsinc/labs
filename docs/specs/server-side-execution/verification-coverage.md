@@ -4330,9 +4330,11 @@ supply; OW29/OW32/OW34 closed):
     lunch gate's "both join lands" step now asserts the CONFIRMED
     roster (exactly {Alice, Bob} chips on BOTH browsers + "2 joined"),
     RED on a standing echo (7–16 ms on the pre-W2.1 tip), green only on
-    the real landing (3.6 / 4.1 / 5.1 s at the W2.1 tip without (α);
-    255 / 253 / 254 ms on the W2.1 + (α) scratch — each ≥ a server
-    round trip); the ON skip entry is W3's to lift. Counters:
+    the real landing (3.3–5.1 s across 6/6 green runs at the W2.1 tip
+    without (α); 253–255 ms across the 6 green runs at loads ≤ 12 on
+    the W2.1 + (α) scratch — each ≥ a server round trip; the scratch's
+    later load-dominated runs are in the report); the ON skip entry is
+    W3's to lift. Counters:
     `speculation-overlay/cascade-echo-retired` and
     `…/cascade-echo-retired-unarrived` (the flicker witness, armed only
     on a consequenced non-error parent: no doc the echo wrote held a
@@ -4350,8 +4352,11 @@ supply; OW29/OW32/OW34 closed):
     `…Flickers` 1 on the host every run — the join child landed one
     wave AFTER the click's mark (commit 45 the click, 46 the child's
     `users` splice), so spec-Alice went at 45 and the confirmed Alice
-    arrived at 46: the flicker, live; on the (α) scratch the child rode
-    the click's wave and the witness read 0.
+    arrived at 46: the flicker, live; on the (α) scratch the JOIN child
+    rode the click's wave (0 for it), and the purged castVote leftover
+    (`lt1LeftoversPurged 1` in ~1 run in 2: the click alone in one
+    commit, the drained child in the next) is the flicker the mark-
+    frame-keyed witness catches (0–1 per browser per run).
   - **FUTURE / owner-level — (b) deterministic cascade ids (NOT built;
     the reason the flicker exists).** Derive a cascade child's event id
     on BOTH sides from the parent event id + the send ordinal within the
