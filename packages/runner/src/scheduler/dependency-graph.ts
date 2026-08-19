@@ -55,7 +55,14 @@ function isDemandRoot(
 ): boolean {
   return state.nodes.isEffect(node.action) ||
     node.provisionalDemand ||
-    state.materializerIndex.isMaterializer(node.action);
+    state.materializerIndex.isMaterializer(node.action) ||
+    // W0 (d′) SCRATCH — the standing `demandedWriters` root kind (design
+    // §2.4; serving-loop.md §8's positive tripwire): a writer of an
+    // instance a client session tracks holds demand while any session
+    // tracks it. Every transition into and out of the set is bracketed
+    // with the liveness notifications (facade.enterDemandedEntity /
+    // leaveDemandedEntity / the write-index registration hook).
+    state.nodes.isDemandedWriter(node.action);
 }
 
 export function isLive(
@@ -608,7 +615,8 @@ export function recomputeLiveRefs(state: SchedulerLivenessState): void {
     if (
       state.nodes.isEffect(record.action) ||
       record.provisionalDemand ||
-      state.materializerIndex.isMaterializer(record.action)
+      state.materializerIndex.isMaterializer(record.action) ||
+      state.nodes.isDemandedWriter(record.action)
     ) {
       reachable.add(record.action);
       stack.push(record.action);

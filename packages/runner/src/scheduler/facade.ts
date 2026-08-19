@@ -1,6 +1,6 @@
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
-import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
+import type { CellScope, ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { Cancel } from "../cancel.ts";
 import { getTopFrame } from "../builder/pattern.ts";
 import { ConsoleEvent } from "../harness/console.ts";
@@ -162,11 +162,12 @@ import type {
   SchedulerObservationIdentity,
   SettleStats,
   SettleStatsHistoryEntry,
+  SpaceScopeAndURI,
   TelemetryAnnotations,
   TriggerTraceEntry,
 } from "./types.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { entityKey } from "./keys.ts";
+import { entityKey, entityNameKey } from "./keys.ts";
 
 ensureNotRenderThread();
 
@@ -975,6 +976,179 @@ export class Scheduler {
     }
     if (rearmed.length > 0) this.queueExecution();
     return rearmed;
+  }
+
+  // ============================================================
+  // W0 (d′) SCRATCH — the standing `demandedWriters` root kind and the
+  // per-(instance, demander) currency check (design §2.2 / §2.4). The
+  // SpaceServer's demand pass calls these on registry DELTAS; nothing
+  // here is reached off the serving posture.
+  // ============================================================
+
+  /** Refcount per demanded ENTITY (scope-NAME keyed, `entityNameKey` —
+   * the writer index's vocabulary: two instances of one doc, `user:alice`
+   * and `user:bob`, name ONE entity whose one node writes both). The
+   * count is the number of registry instance keys naming the entity. */
+  private readonly demandedEntityRefs = new Map<SpaceScopeAndURI, number>();
+  /** Diagnostic counters the SpaceServer folds into the stats block. */
+  readonly demandRootCounters = { enters: 0, leaves: 0, notCurrentRearms: 0 };
+  private demandedWriterHookInstalled = false;
+
+  private installDemandedWriterHook(): void {
+    if (this.demandedWriterHookInstalled) return;
+    this.demandedWriterHookInstalled = true;
+    // The REGISTRATION / UNREGISTRATION bracket (§2.4): a writer whose
+    // surface gains a demanded entity enters the root set; one that loses
+    // its last demanded entity leaves it. Bracketed like every other root
+    // flip (serving-loop.md §8: capture wasLive → flip → notify).
+    this.writeIndex.onWriterEntitiesChanged = (action, added, removed) => {
+      let touchesDemand = false;
+      for (const entity of added) {
+        if ((this.demandedEntityRefs.get(entity) ?? 0) > 0) {
+          touchesDemand = true;
+          break;
+        }
+      }
+      if (!touchesDemand) {
+        for (const entity of removed) {
+          if ((this.demandedEntityRefs.get(entity) ?? 0) > 0) {
+            touchesDemand = true;
+            break;
+          }
+        }
+      }
+      if (!touchesDemand) return;
+      this.reconcileDemandedWriter(action);
+    };
+  }
+
+  /** Recompute whether `action` is a demanded writer from its CURRENT
+   * write entities and the demanded entity refs; bracket the flip. */
+  private reconcileDemandedWriter(action: Action): void {
+    const entities = this.writeIndex.actionWriteEntities.get(action);
+    let shouldBeRoot = false;
+    if (entities !== undefined) {
+      for (const entity of entities) {
+        if ((this.demandedEntityRefs.get(entity) ?? 0) > 0) {
+          shouldBeRoot = true;
+          break;
+        }
+      }
+    }
+    const isRoot = this.nodes.isDemandedWriter(action);
+    if (shouldBeRoot === isRoot) return;
+    const record = this.nodes.get(action);
+    const wasLive = record !== undefined &&
+      isLive(this.dependencyGraphState, record);
+    if (shouldBeRoot) {
+      this.nodes.demandedWriters.add(action);
+      this.demandRootCounters.enters += 1;
+    } else {
+      this.nodes.demandedWriters.delete(action);
+      this.demandRootCounters.leaves += 1;
+    }
+    if (record === undefined) return;
+    notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
+    if (shouldBeRoot && this.isLiveAction(action) && this.isInvalidAction(action)) {
+      // A dirty / never-ran node that just became live is a runnable seed
+      // (work-oracle: dirty ∧ live); make sure the loop wakes for it.
+      this.pending.add(action);
+      this.queueExecution();
+    }
+  }
+
+  /** ENTER: a demanded instance key `(space, id, scope)` entered the
+   * SpaceServer's registry (design §2.2 step 2). Refcounted per entity;
+   * the 0→1 transition marks every current writer of the entity a demand
+   * root (bracketed). Returns the writers (for the currency check). */
+  enterDemandedEntity(
+    address: { space: MemorySpace; id: string; scope: CellScope },
+  ): Action[] {
+    this.installDemandedWriterHook();
+    const entity = entityNameKey(address as never);
+    const before = this.demandedEntityRefs.get(entity) ?? 0;
+    this.demandedEntityRefs.set(entity, before + 1);
+    const writers = [...(this.writeIndex.writersByEntity.get(entity) ?? [])];
+    if (before === 0) {
+      for (const writer of writers) this.reconcileDemandedWriter(writer);
+    }
+    return writers;
+  }
+
+  /** LEAVE: the last session tracking the instance key left (R-D's
+   * coarse boundary — never early). The 1→0 transition releases the
+   * writers' root status (bracketed; `withdrawDemandFrom` re-derives from
+   * the remaining roots). */
+  leaveDemandedEntity(
+    address: { space: MemorySpace; id: string; scope: CellScope },
+  ): void {
+    const entity = entityNameKey(address as never);
+    const before = this.demandedEntityRefs.get(entity) ?? 0;
+    if (before <= 1) {
+      this.demandedEntityRefs.delete(entity);
+      for (const writer of this.writeIndex.writersByEntity.get(entity) ?? []) {
+        this.reconcileDemandedWriter(writer);
+      }
+    } else {
+      this.demandedEntityRefs.set(entity, before - 1);
+    }
+  }
+
+  /** The CURRENCY CHECK for one (instance key, demanding pair) row
+   * (design §2.2 step 3): for each writer of the entity, is the writer's
+   * instance FOR THIS PAIR current — ran at the ratchet and no cause
+   * dirtied it since (B7's clean bit)? Not current ⇒ re-arm with the
+   * sibling instances kept — the `rearmNotCurrentFanOutForActor` shape
+   * applied to a demanding pair. A writer with NO fan-out record is
+   * current iff clean (it never ran under the serving posture with a
+   * principal-bearing demander, or ran unnarrowed); a dirty/never-ran one
+   * is already a runnable seed once live (enter made it live). Returns
+   * the number of writers re-armed. */
+  rearmNotCurrentForDemander(
+    address: { space: MemorySpace; id: string; scope: CellScope },
+    demander: ScopeKeyIdentity,
+  ): number {
+    const entity = entityNameKey(address as never);
+    const writers = this.writeIndex.writersByEntity.get(entity);
+    if (writers === undefined || writers.size === 0) return 0;
+    let rearmed = 0;
+    for (const writer of writers) {
+      const record = this.nodes.get(writer);
+      if (record === undefined) continue;
+      if (record.fanOut === undefined) continue;
+      const pairKey = keyAtRatchet(record.fanOut, demander);
+      if (pairKey === undefined) continue;
+      if (record.fanOut.clean.has(pairKey)) continue;
+      this.markActionInvalid(writer, undefined, { fanOutInstances: "keep" });
+      this.pending.add(writer);
+      rearmed += 1;
+    }
+    if (rearmed > 0) {
+      this.demandRootCounters.notCurrentRearms += rearmed;
+      this.queueExecution();
+    }
+    return rearmed;
+  }
+
+  /** DIAGNOSTIC: the writers of one entity (scope-name keyed). */
+  writersOfEntity(
+    address: { space: MemorySpace; id: string; scope: CellScope },
+  ): Action[] {
+    return [
+      ...(this.writeIndex.writersByEntity.get(entityNameKey(address as never)) ??
+        []),
+    ];
+  }
+
+  /** DIAGNOSTIC: the standing demanded-writer root set's size (T9′: empty
+   * off the serving posture). */
+  get demandedWriterCount(): number {
+    return this.nodes.demandedWriters.size;
+  }
+
+  /** DIAGNOSTIC: the demanded entity refcount map's size. */
+  get demandedEntityCount(): number {
+    return this.demandedEntityRefs.size;
   }
 
   /** DIAGNOSTIC (tests): a node's fan-out record — the known-scope

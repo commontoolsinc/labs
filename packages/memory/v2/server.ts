@@ -91,6 +91,7 @@ import {
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
+  fromDirtyKey,
   fromDocKey,
   isGraphQueryCoveredByState,
   type QueryDocKey,
@@ -413,7 +414,26 @@ export type ServerExecutionObserver = {
    * waiting for the next input; the session-open trigger fires before
    * any watch exists). Edge-triggered and cheap; the host wakes an
    * active loop's demand pass, nothing else. */
-  demandChanged?: (space: string) => void;
+  demandChanged?: (space: string, reason?: DemandChangeReason) => void;
+};
+
+/** W0 (d′) SCRATCH: why `demandChanged` fired — `watch` (the pre-existing
+ * `session.watch.set` / `.add` sites) or `push-growth` (design §2.8 flag
+ * 2: a push pass GREW a session's tracked set — a newly reachable doc
+ * entered the closure through the tracker's re-traversal). */
+export type DemandChangeReason = "watch" | "push-growth";
+
+/** W0 (d′) SCRATCH: one row of a space's demand set (design §2.1's
+ * definition; the successor of `watchedRootsForSpace`'s rows): an
+ * INSTANCE a client session TRACKS, with the demanding pair. */
+export type DemandedInstanceRow = {
+  id: string;
+  scope: CellScope;
+  scopeKey: ScopeKey;
+  identity?: { principal?: string; sessionId?: string };
+  /** True when the row is a watch ROOT of its session (the structure
+   * load's input, unchanged in scope — design §2.8 flag 4). */
+  root: boolean;
 };
 
 class Connection {
@@ -3851,9 +3871,18 @@ export class Server {
             // lost frame's docs as already-snapshotted (CT-1927 review,
             // round 6).
             const commitEntities = () => {
+              // W0 (d′) SCRATCH — design §2.8 flag 2: a push pass that
+              // GROWS the session's tracked set is a demand change (a
+              // newly reachable doc entered the closure through the
+              // tracker's re-traversal); notify so the demand pass sees
+              // it without waiting for the next input.
+              const sizeBefore = session.trackedIds.size;
               for (const [key, entry] of updates) {
                 session.entities.set(key, entry);
                 session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
+              }
+              if (session.trackedIds.size > sizeBefore) {
+                this.#notifyDemandChanged(space, "push-growth");
               }
             };
             // The frame-under-construction's watch scope: committed tracked
@@ -3955,10 +3984,24 @@ export class Server {
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
           const commitWatchState = () => {
+            // W0 (d′) SCRATCH — flag 2, the full-evaluation branch: the
+            // set is REPLACED (this is where it can shrink — R-D's coarse
+            // boundary); a key that entered or left is a demand change.
+            const previous = session.trackedIds;
+            let changed = previous.size !== evaluatedTrackedIds.size;
+            if (!changed) {
+              for (const key of evaluatedTrackedIds) {
+                if (!previous.has(key)) {
+                  changed = true;
+                  break;
+                }
+              }
+            }
             session.graphs = graphs;
             session.entities = entities;
             session.trackedIds = evaluatedTrackedIds;
             session.lastSyncedSeq = serverSeq;
+            if (changed) this.#notifyDemandChanged(space, "push-growth");
           };
           if (isEmptySync(sync)) {
             commitWatchState();
@@ -4198,6 +4241,119 @@ export class Server {
   }
 
   /**
+   * W0 (d′) SCRATCH — the space's DEMAND SET (design §2.1's definition;
+   * the successor of `watchedRootsForSpace`): the union over the space's
+   * CLIENT sessions of `session.trackedIds` — memory v2's schema-narrowed,
+   * instance-keyed closure of each session's watches (roots and every doc
+   * the selectors' schemas reach, absent targets included) — one row per
+   * (instance key, session), each carrying the session's demanding
+   * identity, `root: true` on the rows that are watch ROOTS. The service
+   * principal's sessions are excluded (their watches are the serving
+   * graph's own reads). Anonymous sessions contribute keys but no
+   * demander (identity without principal); a session that cannot resolve
+   * a scoped root's instance is not demand for it (the tracker never
+   * keyed one for it). Roots are UNIONED in from the watch specs so a
+   * root the tracker has not (yet) keyed still carries what
+   * `watchedRootsForSpace` carried — parity with today's structure load.
+   */
+  demandedInstancesForSpace(
+    space: string,
+    options: { excludePrincipal?: string } = {},
+  ): DemandedInstanceRow[] {
+    const rows = new Map<string, DemandedInstanceRow>();
+    for (const session of this.#sessions.sessionsForSpace(space)) {
+      if (
+        options.excludePrincipal !== undefined &&
+        session.principal === options.excludePrincipal
+      ) {
+        continue;
+      }
+      const identity = {
+        ...(session.principal === undefined
+          ? {}
+          : { principal: session.principal }),
+        sessionId: session.id,
+      };
+      // The session's watch ROOT keys (instance-keyed like trackedIds).
+      const rootKeys = new Set<string>();
+      for (const watch of session.watches) {
+        for (const root of watch.query.roots) {
+          const scope = root.scope ?? "space";
+          if (scope === "space") {
+            rootKeys.add(toDirtyKey(root.id, "space"));
+            continue;
+          }
+          try {
+            rootKeys.add(
+              toDirtyKey(
+                root.id,
+                resolveScopeKey(scope, {
+                  principal: session.principal,
+                  sessionId: session.id,
+                }),
+              ),
+            );
+          } catch {
+            // unresolvable scope: not demand for that instance
+          }
+        }
+      }
+      const emit = (dirtyKey: string, root: boolean) => {
+        const rowKey = `${dirtyKey}\0${session.id}`;
+        if (rows.has(rowKey)) {
+          if (root) rows.get(rowKey)!.root = true;
+          return;
+        }
+        let parsed: { id: string; scopeKey: ScopeKey; scope: CellScope };
+        try {
+          parsed = fromDirtyKey(dirtyKey);
+        } catch {
+          return;
+        }
+        rows.set(rowKey, {
+          id: parsed.id,
+          scope: parsed.scope,
+          scopeKey: parsed.scopeKey,
+          identity,
+          root,
+        });
+      };
+      for (const dirtyKey of session.trackedIds) {
+        emit(dirtyKey, rootKeys.has(dirtyKey));
+      }
+      for (const dirtyKey of rootKeys) emit(dirtyKey, true);
+    }
+    return [...rows.values()];
+  }
+
+  /** W0 (d′) SCRATCH DIAGNOSTIC: per-session `trackedIds.size` for a
+   * space's client sessions, plus the union size (design §2.6 — the
+   * demand-set size and its drift are measured, not assumed). */
+  demandSetSizesForSpace(
+    space: string,
+    options: { excludePrincipal?: string } = {},
+  ): { perSession: Array<{ sessionId: string; principal?: string; tracked: number; watches: number }>; unionKeys: number } {
+    const perSession: Array<{ sessionId: string; principal?: string; tracked: number; watches: number }> = [];
+    const union = new Set<string>();
+    for (const session of this.#sessions.sessionsForSpace(space)) {
+      if (
+        options.excludePrincipal !== undefined &&
+        session.principal === options.excludePrincipal
+      ) {
+        continue;
+      }
+      perSession.push({
+        sessionId: session.id,
+        ...(session.principal === undefined ? {} : { principal: session.principal }),
+        tracked: session.trackedIds.size,
+        watches: session.watches.length,
+      });
+      for (const key of session.trackedIds) union.add(key);
+    }
+    return { perSession, unionKeys: union.size };
+  }
+
+  /**
    * Attach (or clear) the ExecutorHost's in-process observer
    * (serving-loop.md §1 planes (b)/(d)). One observer per server: a
    * second attach replaces the first, which only the one host per
@@ -4237,11 +4393,14 @@ export class Server {
     }
   }
 
-  #notifyDemandChanged(space: string): void {
+  #notifyDemandChanged(
+    space: string,
+    reason: DemandChangeReason = "watch",
+  ): void {
     const observer = this.#serverExecutionObserver;
     if (observer?.demandChanged === undefined) return;
     try {
-      observer.demandChanged(space);
+      observer.demandChanged(space, reason);
     } catch (error) {
       console.warn(
         "memory v2: server-execution observer threw on demandChanged",

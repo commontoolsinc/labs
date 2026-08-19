@@ -146,6 +146,64 @@ export type ServingLoopStats = {
   demandArrivals: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
+  /** W0 (d′) SCRATCH — the `demand` counter block, (d′) version (design
+   * §6 W4), scratch quality: the numbers the refutation experiment
+   * reports. `demandedRows` = rows the last pass saw; `demandedInstances`
+   * = distinct registry keys (current / max); `demandedPairs`; the
+   * standing root set (`demandedWriters` current / max);
+   * enters/leaves; `notCurrentRearms` (per-key not-current-for-pair
+   * re-arms); passes and their ms; `pushGrowthWakes` (the new notify's
+   * count); `noWriterRowsWithPatternMeta` (flag 4: demanded non-root
+   * rows whose doc carries pattern meta and has NO registered writer);
+   * `noWriterRows` (every demanded row with no writer, any class). */
+  demand: {
+    demandedRows: number;
+    demandedInstances: number;
+    demandedInstancesMax: number;
+    demandedPairs: number;
+    demandedWriters: number;
+    demandedWritersMax: number;
+    demandRootEnters: number;
+    demandRootLeaves: number;
+    notCurrentRearms: number;
+    demandPasses: number;
+    demandPassMs: number;
+    pushGrowthWakes: number;
+    watchWakes: number;
+    noWriterRows: number;
+    noWriterRowsWithPatternMeta: number;
+    /** Per-session tracked sizes + union at the last pass (flag 7). */
+    sizes: {
+      perSession: Array<
+        { sessionId: string; principal?: string; tracked: number; watches: number }
+      >;
+      unionKeys: number;
+    };
+    /** Bounded history of (unionKeys, rows) per pass — the drift. */
+    sizeSeries: Array<{ t: number; unionKeys: number; rows: number; keys: number }>;
+  };
+  /** W0 (d′) SCRATCH — SERVER SETTLE per authored input (design §6 W4's
+   * metric): from the authored commit's ADMISSION on the server (its seq,
+   * `enqueueCommit`) to W COVERING it (the wave commit whose
+   * `derivedThrough` ≥ seq). Bounded per-space series; `class` splits the
+   * VALUE-ONLY path from the STRUCTURAL-GROWTH path (a push-growth demand
+   * wake fired between admission and coverage). `waves` = committed
+   * waves between admission and coverage (the T2′/T3′ cycle count). */
+  settle: {
+    series: Array<{
+      space: string;
+      seq: number;
+      admittedAt: number;
+      coveredAt: number;
+      ms: number;
+      waves: number;
+      cycles: number;
+      growthWakes: number;
+      class: "value-only" | "structural-growth";
+      eventAppend: boolean;
+    }>;
+    dropped: number;
+  };
   events: {
     appended: number;
     processed: number;
@@ -201,6 +259,26 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   earlyEmitRefusals: 0,
   demandArrivals: 0,
   watermarkLag: 0,
+  demand: {
+    demandedRows: 0,
+    demandedInstances: 0,
+    demandedInstancesMax: 0,
+    demandedPairs: 0,
+    demandedWriters: 0,
+    demandedWritersMax: 0,
+    demandRootEnters: 0,
+    demandRootLeaves: 0,
+    notCurrentRearms: 0,
+    demandPasses: 0,
+    demandPassMs: 0,
+    pushGrowthWakes: 0,
+    watchWakes: 0,
+    noWriterRows: 0,
+    noWriterRowsWithPatternMeta: 0,
+    sizes: { perSession: [], unionKeys: 0 },
+    sizeSeries: [],
+  },
+  settle: { series: [], dropped: 0 },
   events: {
     appended: 0,
     processed: 0,
