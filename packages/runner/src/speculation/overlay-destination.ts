@@ -129,6 +129,29 @@ export const speculationRunContextOf = (
  * never by default. */
 const SPECULATION_ENACTABLE_EFFECT_KINDS = new Set(["navigateTo"]);
 
+/** W0 (e) interim (b): the intent sink's narrowed schema — the entry
+ * fields the notice scan reads and nothing else. `additionalProperties`
+ * deliberately UNSET (false would route unlisted properties through
+ * descend() and record a shape read first). */
+const INTENT_SINK_SCHEMA = {
+  type: "object",
+  properties: {
+    entries: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          eventId: { type: "string" },
+          consequenced: { type: "boolean" },
+          error: { type: "string" },
+          status: { type: "string" },
+          reason: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
 /** A terminal event-intent outcome the client is SIGNALED about
  * (events.md §5): dropped (the conflicting-discharge notice), errored
  * (the handler threw server-side — the error is the consequence), or
@@ -741,12 +764,17 @@ export class SpeculationOverlayDestination
     const sinkKey = `${space}\0${sidecarId}`;
     if (this.#intentSinks.has(sinkKey)) return;
     try {
+      // W0 (e) INTERIM (b) — the schema-narrowed sink (design §3.3 (b)):
+      // properties listed, `additionalProperties` UNSET, so unlisted
+      // properties (payload, stream, firedAt, ...) are not descended, no
+      // read, no link followed — O(E) per fire instead of O(E²), the
+      // demand leak closed. Scratch: the W0 gate's measurement arm.
       const cell = this.#runtime.getCellFromLink<StreamEventsDocValue>({
         space,
         id: sidecarId as never,
         scope: "space",
         path: [],
-      });
+      }, INTENT_SINK_SCHEMA);
       const cancel = cell.sink((value) => {
         this.#scanIntentNotices(
           space,
