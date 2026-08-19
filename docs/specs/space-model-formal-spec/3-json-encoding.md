@@ -303,6 +303,21 @@ built-in escape, or an encoding error.
 > `/`-prefixed keys in the wire format are always encoding signals, never
 > literal user-data keys.
 
+> **JS implementation note.** "Any keys" is the format's rule and this
+> implementation does not yet meet it: a plain object carrying `__proto__` or
+> `constructor` is refused rather than encoded, on both sides of the wire and
+> in the inert check that decides what a fabric value is at all. Neither name
+> is reserved by the format, and neither is a limit of JavaScript. They are
+> refused because of how *this* implementation rebuilds a record — by
+> assignment, which for `__proto__` reaches a prototype accessor instead of
+> creating a property — and because other boundaries here already drop
+> `constructor`, so accepting it would admit a key that something later
+> discards silently. `unsafeObjectKeyIn()` in `@commonfabric/utils/types`
+> carries the reasoning and the conditions for lifting each one. An
+> implementation on a host that does not route property assignment through a
+> prototype chain reserves no names at all, which is the behavior the format
+> describes.
+
 The common case — a **tagged value** — is a single-key object whose sole key
 starts with `/`:
 

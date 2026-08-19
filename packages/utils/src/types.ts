@@ -282,13 +282,21 @@ export type Immutable<T> = T extends ReadonlyArray<infer U>
 /** Standard type meaning constructor function, a/k/a "class object." */
 export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
 
+// TODO(danfuzz): The wire formats accept a plain object with any keys, that
+// being the rule a cross-language format has to hold to; this implementation
+// refuses these two, and the set is what stands between the two positions.
+// `unsafeObjectKeyIn()` below states the local reason for each and what would
+// let it go. Emptying this set is what closes the gap.
 const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
 
 /**
- * Indicates whether `key` must never be copied onto an object from untrusted
- * input, because assigning it can pollute the prototype chain. Use at
- * boundaries where external data enters the system (deserialization,
- * structural copying).
+ * Indicates whether `key` is one this implementation refuses to copy onto an
+ * object from untrusted input. Use at boundaries where external data enters
+ * the system (deserialization, structural copying).
+ *
+ * The reservation belongs to this implementation and not to the data model:
+ * see {@link unsafeObjectKeyIn} for which names are refused, why each one is,
+ * and what would let it be accepted.
  */
 export function isUnsafeObjectKey(key: string): boolean {
   return UNSAFE_OBJECT_KEYS.has(key);
