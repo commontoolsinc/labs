@@ -40,8 +40,10 @@ question needs, and stop as soon as an instrument answers it.
 
 **Pattern test.** `deno task cf test <file> --verbose --stats-threshold 0`
 prints the logger's timing and count rows per step with no browser, no shell,
-and no rendering. `--stats-include` keeps named categories regardless of
-threshold, `--stats-action-limit` controls how many per-step scheduler action
+and no rendering. `--stats-include` rescues named categories from the top-ten
+truncation rather than from the threshold — a step faster than the threshold
+still prints nothing at all, so keep `--stats-threshold 0` when every step has
+to report — `--stats-action-limit` controls how many per-step scheduler action
 deltas print, and `--storage-stats` adds the storage rows. This is the fastest
 way to see a read count explode, and it needs no conversion work.
 

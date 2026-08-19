@@ -135,14 +135,16 @@ rather than one-off flame charts.
 
 #### Documenting the Process
 
-We don't have profiling documentation yet (the debugging docs cover logging
-and pattern-level tips, but not runtime profiling). Whoever does the first
-client or server profile should document the concrete steps — which pattern
-to use, how to start the local dev server, how to record the trace, how to
-attach to the Deno process, what to look for — in
-`docs/development/debugging/profiling.md` so the next person can repeat it.
-This is something we'll need to do periodically; it shouldn't require tribal
-knowledge.
+`skills/perf-investigation/SKILL.md` carries the process for a slowness that
+surfaces in a pattern or in the browser: which instrument reaches what, why a
+logger row and a worker CPU profile answer different questions, and the causes
+this runtime has actually produced. It is live documentation — as those answers
+change, it changes with them.
+
+The server side is the half still undocumented: attaching to a running
+toolshed's Deno process, and recording OTEL traces against a collector. Whoever
+profiles the server first should write those steps down the same way, under
+`docs/development/debugging/`, so that path stops being tribal knowledge too.
 
 ### Making the Loop Fast
 
