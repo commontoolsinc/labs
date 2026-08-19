@@ -1,8 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { RuntimeClient } from "./runtime-client.ts";
-import { NotificationType, RequestType } from "./protocol/mod.ts";
+import {
+  NotificationType,
+  RequestType,
+  type UploadBlobRequest,
+} from "./protocol/mod.ts";
 import type { RuntimeTransport } from "./client/transport.ts";
 
 describe("RuntimeClient.initialize option validation", () => {
@@ -442,5 +448,45 @@ describe("RuntimeClient boot-window diagnostics", () => {
     })(conn, {});
     expect(client.getPendingRequests()).toEqual(pending);
     expect(client.getRequestTimeline()).toEqual(timeline);
+  });
+});
+
+describe("RuntimeClient.uploadBlob", () => {
+  it("sends the blob's bytes as an encoded `FabricBytes`", async () => {
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ id: "fid1:blob", url: "blobs/blob.png" });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    const body = new Uint8Array([1, 2, 3]);
+
+    const result = await client.uploadBlob({
+      space: "did:key:z6Mk-runtime-client-blob" as never,
+      contentType: "image/png",
+      body,
+      suffix: "png",
+    });
+
+    expect(result).toEqual({ id: "fid1:blob", url: "blobs/blob.png" });
+    expect(requests.length).toBe(1);
+    const request = requests[0] as UploadBlobRequest;
+    expect(request.type).toBe(RequestType.UploadBlob);
+    expect(request.space).toBe("did:key:z6Mk-runtime-client-blob");
+    expect(request.contentType).toBe("image/png");
+    expect(request.suffix).toBe("png");
+
+    // Mutated before the request is read, so that what the decode reports is
+    // the value as passed rather than a view of an array the caller went on
+    // using.
+    body[0] = 0xff;
+    const sent = fabricFromRealmValue(request.body);
+    expect(sent).toBeInstanceOf(FabricBytes);
+    expect((sent as FabricBytes).slice()).toEqual(new Uint8Array([1, 2, 3]));
   });
 });

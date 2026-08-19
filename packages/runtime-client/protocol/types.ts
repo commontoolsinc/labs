@@ -1,4 +1,5 @@
 import type { MetaField } from "@commonfabric/api";
+import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
@@ -556,16 +557,13 @@ export interface UploadBlobRequest extends BaseRequest {
   space: DID;
   contentType: string;
   /**
-   * The blob's bytes. The type has to stay structured-clone-able, this being an
-   * IPC payload: a class does not survive the crossing, where a typed array
-   * does and carries whole rather than element by element.
-   *
-   * TODO(danfuzz): this wants to be a `FabricBytes`, which `codec-realm`
-   * carries across as a bare `ArrayBuffer` the send can transfer. The bytes
-   * would then be immutable end to end rather than a view a sender still
-   * holds.
+   * The blob's bytes: a `FabricBytes` in the realm-crossing form, which
+   * carries it as a bare `ArrayBuffer` that structured cloning delivers whole
+   * and a send can transfer. It decodes back into a `FabricBytes`, so the
+   * bytes are an immutable value at both ends rather than a view a sender
+   * still holds.
    */
-  body: Uint8Array;
+  body: RealmEncodedValue;
   suffix?: string;
 }
 

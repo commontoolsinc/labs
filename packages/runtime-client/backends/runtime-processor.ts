@@ -1,4 +1,7 @@
-import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
+import {
+  fabricFromRealmValue,
+  newDefaultJsonCodecEngine,
+} from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -1687,11 +1690,14 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
-    // The `true` below cedes `request.body` to the `FabricBytes` rather than
-    // having it copied. That is legitimate because a handler owns the values
-    // its request carries, per `BaseRequest`, so nothing else can be reading
-    // this array.
-    const bytes = new FabricBytes(request.body, true);
+    // `request.body` is ceded to the decode rather than copied for it. That is
+    // legitimate because a handler owns the values its request carries, per
+    // `BaseRequest`, so nothing else can be reading this tree. What comes back
+    // is a `FabricValue`, of which only the one arm is a blob's bytes.
+    const bytes = fabricFromRealmValue(request.body);
+    if (!(bytes instanceof FabricBytes)) {
+      throw new Error("uploadBlob requires bytes as its body");
+    }
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
     const body = blobUploadCodec.encode({
