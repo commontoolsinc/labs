@@ -2160,6 +2160,7 @@ Deno.test("runCfHarnessCli announces well-known grants to the model and the oper
               getSpace: () => registrySpace,
               getDefaultPattern: (_runIt: boolean) =>
                 Promise.resolve({
+                  getMetaRaw: () => undefined,
                   key: (segment: string) => ({
                     getAsNormalizedFullLink: () => ({
                       space: registrySpace,

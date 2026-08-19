@@ -14,6 +14,7 @@
  * it, where the CFC boundary rules as it does for every other flow.
  */
 
+import { pieceRegistryKeyForRoot } from "@commonfabric/runner";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import type { HarnessFabricSession } from "./fabric-session.ts";
 import { createHarnessHandleTable, mintAddressHandle } from "./handle-table.ts";
@@ -40,8 +41,9 @@ const GRANT_DESCRIPTIONS: Record<HarnessWellKnownGrantName, string> = {
 /**
  * Resolves the canonical references behind every well-known grant through
  * `session`. Each resolution is address-only: the registry's address is the
- * default pattern's cell plus the `pieceRegistry` path, so resolving the
- * root pointer is the whole read — nothing the registry lists is pulled.
+ * default pattern's cell plus the registry field — `pieceRegistry`, or the
+ * retired `allPieces` on a legacy default-app root — so resolving the
+ * root pointer is the whole read; nothing the registry lists is pulled.
  * (`getPieceRegistry()` is deliberately not used here: it syncs every
  * listed piece, a privileged data pull an address does not need, and in a
  * space with no default pattern it answers a detached placeholder that
@@ -60,7 +62,8 @@ export const resolveWellKnownGrantRefs = async (
       "space has no default pattern to anchor the piece registry",
     );
   }
-  const registryLink = defaultPattern.key("pieceRegistry")
+  const registryLink = defaultPattern
+    .key(pieceRegistryKeyForRoot(defaultPattern))
     .getAsNormalizedFullLink();
   return [{
     name: "piece-registry",
