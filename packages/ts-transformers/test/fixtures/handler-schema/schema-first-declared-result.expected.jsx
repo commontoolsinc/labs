@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -65,11 +47,6 @@ const ping = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
-__cfBindVerifiedBinding(ping, {
-    sourceFile: "/test.tsx",
-    position: { line: 35, col: 2 },
-    bindingName: "ping"
-});
 // The named-callback spelling of the same form: recognition is
 // identifier-aware, so the call still passes through un-prepended and the
 // declared result still lands in the trailing options. (SES-mode loading
@@ -97,11 +74,6 @@ const pingNamed = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
-__cfBindVerifiedBinding(pingNamed, {
-    sourceFile: "/test.tsx",
-    position: { line: 46, col: 18 },
-    bindingName: "echoNamed"
-});
 // A callback referenced as a function DECLARATION: no expression resolver can
 // return it, so recognition asks callback-ness instead — without this, the
 // prepend path ran and the trailing-options lowering spread-replaced the
@@ -129,11 +101,6 @@ const pingDeclared = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
-__cfBindVerifiedBinding(pingDeclared, {
-    sourceFile: "/test.tsx",
-    position: { line: 67, col: 0 },
-    bindingName: "echoDeclared"
-});
 // A callback reached through property access — the spelling no syntax list
 // anticipated. Callback-ness is the checker's call signatures, so any
 // callable expression recognizes the form; a schema is never callable.
@@ -160,11 +127,6 @@ const pingViaProperty = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
-__cfBindVerifiedBinding(pingViaProperty, {
-    sourceFile: "/test.tsx",
-    position: { line: 91, col: 24 },
-    bindingName: "pingViaProperty"
-});
 // The same form without a declared result: passed through untouched — no
 // generated schemas, no options object.
 const poke = handler({
@@ -175,12 +137,7 @@ const poke = handler({
     type: "object",
     properties: { count: { type: "number", asCell: ["cell"] } },
 }, (_event, _state) => { });
-__cfBindVerifiedBinding(poke, {
-    sourceFile: "/test.tsx",
-    position: { line: 116, col: 2 },
-    bindingName: "poke"
-});
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     const count = cell(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("count", true);
@@ -231,10 +188,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
             required: ["word"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 119, col: 53 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: schema-first-declared-result
 // Verifies: the schema-first authored form handler<E, T[, R]>(eventSchema,
 //   stateSchema, callback) keeps its authored schemas and callback positions

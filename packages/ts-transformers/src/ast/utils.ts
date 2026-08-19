@@ -394,51 +394,6 @@ export function preserveSourceMapRange<T extends ts.Node>(
   return ts.setSourceMapRange(node, ts.getSourceMapRange(origin));
 }
 
-/**
- * The best-available AUTHORED text range for a node that may be synthetic —
- * the read side of {@link preserveLineage} / {@link preserveSourceMapRange}.
- * Precedence, widest channel last:
- *
- *   1. the node's own text range, when it has one;
- *   2. its explicit `sourceMapRange` — the channel the lineage helpers carry,
- *      and the only one present at most rebuild sites;
- *   3. the terminal of its original-node chain.
- *
- * Returns undefined when none of the three yields a real (`>= 0`) position:
- * the node reached here with no lineage at all.
- *
- * The range indexes into the text of the source file the pipeline is
- * transforming (`TransformationContext.sourceFile.text`), which every stage
- * carries unchanged, so `text.slice(pos, end)` is the authored snippet. Like
- * every TypeScript node range it starts at `pos`, i.e. BEFORE any leading
- * trivia; callers that want the first authored character of the construct
- * itself must skip that trivia (`node.getStart(sourceFile)` on the parsed
- * node covering the range).
- *
- * `sourceMapRange` is the load-bearing channel: original chains are dropped
- * deliberately at most rebuild sites, so a walk that consults only
- * `getOriginalNode` sees nothing.
- */
-export function recoverAuthoredPosition(
-  node: ts.Node,
-): ts.TextRange | undefined {
-  if (node.pos >= 0) return { pos: node.pos, end: node.end };
-
-  // ts.getSourceMapRange returns the node itself when no explicit range is set.
-  const sourceMapRange = ts.getSourceMapRange(node);
-  if (
-    (sourceMapRange as unknown) !== (node as unknown) && sourceMapRange.pos >= 0
-  ) {
-    return { pos: sourceMapRange.pos, end: sourceMapRange.end };
-  }
-
-  const original = ts.getOriginalNode(node);
-  if (original !== node && original.pos >= 0) {
-    return { pos: original.pos, end: original.end };
-  }
-  return undefined;
-}
-
 // Import and re-export shared checks from schema-generator
 import {
   isDefaultAliasSymbol,

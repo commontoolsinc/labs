@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -152,11 +134,6 @@ const addItem = handler // <
 }) => {
     items.push({ text: event.detail.message });
 });
-__cfBindVerifiedBinding(addItem, {
-    sourceFile: "/test.tsx",
-    position: { line: 41, col: 2 },
-    bindingName: "addItem"
-});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const index = __cf_pattern_input.key("index");
@@ -205,10 +182,6 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 64, col: 21 }
-});
 // FIXTURE: pattern-with-types
 // Verifies: full pattern with toSchema, handler, JSX, and .map() all transform correctly together
 //   toSchema<T>() → inline JSON schema literal with Default<> mapped to "default" values
@@ -216,7 +189,7 @@ __cfBindVerifiedBinding(__cfPattern_1, {
 //   items.map((item, index) => JSX) → items.mapWithPattern(pattern(...), {})
 //   pattern<In, Out>() → uses pre-generated inputSchema/outputSchema passed as arguments
 // Context: kitchen-sink pattern with NAME, UI, handler, array .map(), and Default<> types
-export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export default pattern((__cf_pattern_input) => {
     const title = __cf_pattern_input.key("title");
     const items = __cf_pattern_input.key("items");
     const items_count = items.key("length");
@@ -294,10 +267,7 @@ export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
             required: ["text"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 53, col: 68 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

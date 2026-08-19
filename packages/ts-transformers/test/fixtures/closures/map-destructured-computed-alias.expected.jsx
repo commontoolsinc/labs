@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -50,9 +32,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx"
-});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const element = __cf_pattern_input.key("element");
     const __cf_val_key = dynamicKey;
@@ -104,16 +83,12 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 24, col: 25 }
-});
 // FIXTURE: map-destructured-computed-alias
 // Verifies: computed property key with a const-asserted identifier is lowered to lift-applied
 //   { [dynamicKey]: val } → __cf_val_key = dynamicKey; lift(...)(...element[__cf_val_key])
 //   .map(fn) → .mapWithPattern(pattern(...), {})
 // Context: dynamicKey is a const-asserted string, not a function call — still uses the lift-applied pattern
-export default __cfBindVerifiedBinding(pattern((state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         {state.key("items").mapWithPattern(__cfPattern_1, {})}
@@ -173,10 +148,7 @@ export default __cfBindVerifiedBinding(pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 20, col: 30 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

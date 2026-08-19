@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -76,17 +58,12 @@ const __cfLift_1 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 15, col: 25 },
-    bindingName: "liked"
-});
 // FIXTURE: computed-filter-map-chain
 // Verifies: .filter() and .map() inside computed() are NOT transformed
 // Context: Inside computed(), Reactive auto-unwraps to plain array, so
 //   .filter() and .map() are standard Array methods — they must remain
 //   untransformed. This is a negative test for the reactive method detection.
-export default __cfBindVerifiedBinding(pattern((state) => {
+export default pattern((state) => {
     const liked = __cfLift_1({ state: {
             preferences: state.key("preferences")
         } }).for("liked", true);
@@ -127,10 +104,7 @@ export default __cfBindVerifiedBinding(pattern((state) => {
         }
     },
     required: ["liked"]
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 14, col: 54 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

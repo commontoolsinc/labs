@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -52,11 +34,6 @@ const openNoteEditor = handler({
     },
     required: ["subPieces", "editingNoteIndex", "editingNoteText", "index"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
-__cfBindVerifiedBinding(openNoteEditor, {
-    sourceFile: "/test.tsx",
-    position: { line: 9, col: 3 },
-    bindingName: "openNoteEditor"
-});
 const openSettings = handler({
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -71,11 +48,6 @@ const openSettings = handler({
     },
     required: ["settingsModuleIndex", "index"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
-__cfBindVerifiedBinding(openSettings, {
-    sourceFile: "/test.tsx",
-    position: { line: 13, col: 3 },
-    bindingName: "openSettings"
-});
 const toggleExpanded = handler({
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -90,11 +62,6 @@ const toggleExpanded = handler({
     },
     required: ["expandedIndex", "index"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
-__cfBindVerifiedBinding(toggleExpanded, {
-    sourceFile: "/test.tsx",
-    position: { line: 17, col: 3 },
-    bindingName: "toggleExpanded"
-});
 const trashSubPiece = handler({
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -124,11 +91,6 @@ const trashSubPiece = handler({
     },
     required: ["subPieces", "trashedSubPieces", "expandedIndex", "settingsModuleIndex", "index"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
-__cfBindVerifiedBinding(trashSubPiece, {
-    sourceFile: "/test.tsx",
-    position: { line: 24, col: 3 },
-    bindingName: "trashSubPiece"
-});
 interface Item {
     note?: string;
     collapsed?: boolean;
@@ -218,11 +180,6 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 52, col: 30 },
-    bindingName: "allEntries"
-});
 const __cfLift_2 = __cfHelpers.lift<{
     entry: {
         collapsed?: boolean | undefined;
@@ -247,10 +204,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 67, col: 21 }
-});
 const __cfLift_3 = __cfHelpers.lift<{
     entry: {
         note?: string | undefined;
@@ -279,10 +232,6 @@ const __cfLift_3 = __cfHelpers.lift<{
     },
     required: ["fontWeight"]
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_3, {
-    sourceFile: "/test.tsx",
-    position: { line: 79, col: 34 }
-});
 const __cfLift_4 = __cfHelpers.lift<{
     entry: {
         note?: string | undefined;
@@ -303,10 +252,6 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_4, {
-    sourceFile: "/test.tsx",
-    position: { line: 82, col: 34 }
-});
 const __cfLift_5 = __cfHelpers.lift<{
     isExpanded: boolean;
 }, boolean>(({ isExpanded }) => !isExpanded, {
@@ -320,10 +265,6 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_5, {
-    sourceFile: "/test.tsx",
-    position: { line: 88, col: 15 }
-});
 const __cfLift_6 = __cfHelpers.lift<{
     isExpanded: boolean;
 }, boolean>(({ isExpanded }) => !isExpanded, {
@@ -337,10 +278,6 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_6, {
-    sourceFile: "/test.tsx",
-    position: { line: 105, col: 15 }
-});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element", "entry");
     const index = __cf_pattern_input.key("element", "index");
@@ -563,10 +500,6 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 65, col: 24 }
-});
 // FIXTURE: branch-lowered-capture-preservation
 // Verifies: branch-lowered UI chunks inside a computed-array map preserve captured
 // params needed by nested ifElse branches, inline computed() attributes, and handlers
@@ -576,7 +509,7 @@ __cfBindVerifiedBinding(__cfPattern_1, {
 //     -> params captures survive inside lowered branches
 //   computed(() => entry?.note ? "700" : "400") / title computed(...)
 //     -> authored compute wrappers still coexist with the preserved captures
-export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     const subPieces = __cf_pattern_input.key("subPieces");
     const trashedSubPieces = __cf_pattern_input.key("trashedSubPieces");
@@ -677,10 +610,7 @@ export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 46, col: 3 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -46,11 +28,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 20, col: 13 },
-    bindingName: "output1"
-});
 const __cfLift_2 = __cfHelpers.lift<{
     result: string;
 }, boolean>(({ result }) => !!result, {
@@ -64,11 +41,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 27, col: 13 },
-    bindingName: "output2"
-});
 // Tests ifElse where ifTrue is explicitly undefined
 // This pattern is common: ifElse(pending, undefined, { result })
 // The transformer must handle this correctly - the undefined is a VALUE, not a missing argument
@@ -77,7 +49,7 @@ __cfBindVerifiedBinding(__cfLift_2, {
 //   ifElse(cond, undefined, {result}) → ifElse(schema, schema, schema, schema, lift(...)(...), undefined, {result})
 //   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     const __cf_destructure_1 = fetchText({
         url: "/api/data",
     }), pending = __cf_destructure_1.key("pending").for("pending", true), result = __cf_destructure_1.key("result").for("result", true);
@@ -175,10 +147,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 13, col: 46 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -44,17 +26,13 @@ const __cfLift_1 = __cfHelpers.lift<{
     },
     required: ["result", "prompt"]
 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 20, col: 18 }
-});
 // FIXTURE: pattern-any-result-override
 // Verifies: explicit Output type parameter overrides inferred `any` return type for schema generation
 //   pattern<Input, string>() → output schema { type: "string" } instead of inferred any
 //   pattern<Input, { [UI]: VNode }>() → output schema with $UI vnode $ref
 // Context: simulates `any` leaking through generic functions; two named exports, no default
 // Case 1: Explicit Output type overrides inferred `any` return
-export const TypedFromAny = __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export const TypedFromAny = pattern((__cf_pattern_input) => {
     const prompt = __cf_pattern_input.key("prompt");
     const result = fetchAny();
     return __cfLift_1({
@@ -71,16 +49,12 @@ export const TypedFromAny = __cfBindVerifiedBinding(pattern((__cf_pattern_input)
     required: ["prompt"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 64 },
-    bindingName: "TypedFromAny"
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // Case 2: { [UI]: VNode } Output type instead of { [UI]: any }
 type Entry = {
     name: string;
 };
-export const TypedUIOutput = __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export const TypedUIOutput = pattern((__cf_pattern_input) => {
     const name = __cf_pattern_input.key("name");
     return {
         [UI]: (<div>{name}</div>),
@@ -101,11 +75,7 @@ export const TypedUIOutput = __cfBindVerifiedBinding(pattern((__cf_pattern_input
         }
     },
     required: ["$UI"]
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 25, col: 61 },
-    bindingName: "TypedUIOutput"
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

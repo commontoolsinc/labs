@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -52,10 +34,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 16, col: 9 }
-});
 const __cfLift_2 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
 }, string>(({ user }) => user.get().name, {
@@ -76,16 +54,12 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 16, col: 69 }
-});
 // Tests triple && chain: a && b && c
 // Should produce nested when calls or lower the entire chain to a lift-applied computation
 // FIXTURE: logical-triple-and-chain
 // Verifies: triple && chain (a && b && <JSX>) is transformed to nested when() or a lift-applied computation
 //   user.get().active && user.get().verified && <span> → when(lift(...)({ user }), <span>)
-export default __cfBindVerifiedBinding(pattern((_state) => {
+export default pattern((_state) => {
     const user = cell<{
         active: boolean;
         verified: boolean;
@@ -154,10 +128,7 @@ export default __cfBindVerifiedBinding(pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 9, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

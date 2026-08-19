@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -45,11 +27,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 11, col: 27 },
-    bindingName: "preview"
-});
 const __cfLift_2 = __cfHelpers.lift<{
     result?: any;
 }, any>(({ result }) => result?.title ?? "Untitled", {
@@ -58,17 +35,13 @@ const __cfLift_2 = __cfHelpers.lift<{
         result: true
     }
 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 22, col: 15 }
-});
 // FIXTURE: pattern-opaque-destructure-temporary-root-names
 // Verifies: destructured opaque temporaries preserve generated root suffixes
 //   const { result } = generateObject(...) uses the synthesized __cf_destructure_* binding consistently
 // NOTE (CT-1800): generateObject's `result` is declared optional, so the captured
 //   `result` is emitted optional (absent from `required`). The lift therefore
 //   fires while pending, keeping the `?? "Untitled"` fallback live.
-export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export default pattern((__cf_pattern_input) => {
     const messages = __cf_pattern_input.key("messages");
     const preview = __cfLift_1({ messages: messages }).for("preview", true);
     const __cf_destructure_1 = generateObject({
@@ -113,10 +86,7 @@ export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 10, col: 47 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

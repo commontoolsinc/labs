@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -50,11 +32,6 @@ const handleClick = handler({
 } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
-__cfBindVerifiedBinding(handleClick, {
-    sourceFile: "/test.tsx",
-    position: { line: 13, col: 2 },
-    bindingName: "handleClick"
-});
 const __cfLift_1 = __cfHelpers.lift<{
     count: Default<number, 0>;
 }, number>(({ count }) => count + 1, {
@@ -69,10 +46,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 34, col: 24 }
-});
 // FIXTURE: event-handler-no-compute-wrap
 // Verifies: handler invocations in JSX are NOT wrapped in a reactive compute
 // wrapper (formerly derive, now lift-applied post-CT-1615), while
@@ -83,7 +56,7 @@ __cfBindVerifiedBinding(__cfLift_1, {
 //   pattern<{ count: Default<number, 0> }>   → pattern(fn, inputSchema, outputSchema)
 // Context: Negative test ensuring handler calls in event attributes and
 // inside .map() are not wrapped as reactive compute.
-export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
         [UI]: (<div>
@@ -143,10 +116,7 @@ export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 29, col: 2 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -69,11 +51,6 @@ const removeItem = handler({
         next.splice(index, 1);
     items.set(next);
 });
-__cfBindVerifiedBinding(removeItem, {
-    sourceFile: "/test.tsx",
-    position: { line: 13, col: 2 },
-    bindingName: "removeItem"
-});
 // alias-based intersection variant
 type ListStateWithIndex = ListState & {
     index: number;
@@ -111,11 +88,6 @@ const removeItemAlias = handler({
     if (index >= 0 && index < next.length)
         next.splice(index, 1);
     items.set(next);
-});
-__cfBindVerifiedBinding(removeItemAlias, {
-    sourceFile: "/test.tsx",
-    position: { line: 23, col: 2 },
-    bindingName: "removeItemAlias"
 });
 // FIXTURE: array-cell-remove-intersection
 // Verifies: handler context intersection types are flattened and Cell<T[]> generates array schema with asCell

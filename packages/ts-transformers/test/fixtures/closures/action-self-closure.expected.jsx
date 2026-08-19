@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -60,11 +42,6 @@ const __cfHandler_1 = __cfHelpers.handler({
 } as const satisfies __cfHelpers.JSONSchema, (_, { self }) => {
     console.log("self.title:", self.title);
 });
-__cfBindVerifiedBinding(__cfHandler_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 26, col: 28 },
-    bindingName: "showSelf"
-});
 const __cfHandler_2 = __cfHelpers.handler({
     type: "object",
     properties: {},
@@ -105,17 +82,12 @@ const __cfHandler_2 = __cfHelpers.handler({
     console.log("self:", self);
     count.set(count.get() + 1);
 });
-__cfBindVerifiedBinding(__cfHandler_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 31, col: 37 },
-    bindingName: "incrementWithSelf"
-});
 // FIXTURE: action-self-closure
 // Verifies: action() closing over SELF captures self properties in the handler
 //   action(() => console.log(self.title)) → handler(eventSchema, { self: { title } }, (_, { self }) => ...)({ self: { title: self.key("title") } })
 //   action(() => { self; count.set(...) }) → handler(eventSchema, { self: TestOutput, count: asCell }, ...)({ self, count })
 // Context: SELF reference requires Default<> inputs so output schema is always satisfied
-export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export default pattern((__cf_pattern_input) => {
     const title = __cf_pattern_input.key("title");
     const self = __cf_pattern_input[__cfHelpers.SELF];
     const count = new Writable(0, {
@@ -167,10 +139,7 @@ export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
         }
     },
     required: ["title", "count", "$NAME", "$UI"]
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 22, col: 2 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

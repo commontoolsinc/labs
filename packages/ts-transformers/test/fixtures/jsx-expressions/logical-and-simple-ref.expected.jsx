@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -33,7 +15,7 @@ const __cfAmdHooks = undefined;
 // Verifies: simple opaque ref && <JSX> is transformed to when() for short-circuit rendering
 //   showPanel && <div>Panel content</div> → when(showPanel, <div>Panel content</div>)
 //   userName && <span>Hello</span>        → when(userName, <span>Hello</span>)
-export default __cfBindVerifiedBinding(pattern((_state) => {
+export default pattern((_state) => {
     const showPanel = cell(true, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showPanel", true);
@@ -104,10 +86,7 @@ export default __cfBindVerifiedBinding(pattern((_state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 8, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

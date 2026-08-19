@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -66,11 +48,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 24, col: 31 },
-    bindingName: "extraIsNine"
-});
 const __cfLift_2 = __cfHelpers.lift<{
     items: {
         label: string;
@@ -95,12 +72,7 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 26, col: 32 },
-    bindingName: "labelIsGamma"
-});
-export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     // Extras key: only exists on some elements; must shrink to `priority?`.
     const extraIsNine = __cfLift_1({ items: items }).for("extraIsNine", true);
@@ -144,10 +116,7 @@ export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
         }
     },
     required: ["extraIsNine", "labelIsGamma"]
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 22, col: 30 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

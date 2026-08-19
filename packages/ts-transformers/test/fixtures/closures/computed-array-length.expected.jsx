@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -64,10 +46,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 30, col: 21 }
-});
 const __cfLift_2 = __cfHelpers.lift<{
     pieceRegistry: {
         length: number;
@@ -89,10 +67,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 33, col: 31 }
-});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const piece = __cf_pattern_input.key("element");
     return (<li>{piece.key("name")}</li>);
@@ -139,17 +113,13 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 35, col: 29 }
-});
 // FIXTURE: computed-array-length
 // Verifies: computed(() => expr) with .length access on a Reactive<T[]> is closure-extracted
 //   computed(() => pieceRegistry.length) → lift(({ pieceRegistry }) => pieceRegistry.length)({ pieceRegistry: { length: pieceRegistry.length } })
 //   pieceRegistry.map(fn) → pieceRegistry.mapWithPattern(pattern(fn, ...schemas), {})
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     const __cf_destructure_1 = wish<{
         pieceRegistry: Piece[];
     }>({ query: "/" }, {
@@ -223,10 +193,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 26, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -53,16 +35,12 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 15, col: 21 }
-});
 // FIXTURE: pattern-with-name-and-type
 // Verifies: pattern with inline typed parameter generates input and output schemas
 //   pattern((input: MyInput) => ...)   → pattern((input) => ..., inputSchema, outputSchema)
 //   input.value                        → input.key("value")
 // Context: Type comes from inline parameter annotation, not generic type argument
-export default __cfBindVerifiedBinding(pattern((input: MyInput) => {
+export default pattern((input: MyInput) => {
     return {
         result: __cfLift_1({ input: {
                 value: input.key("value")
@@ -84,10 +62,7 @@ export default __cfBindVerifiedBinding(pattern((input: MyInput) => {
         }
     },
     required: ["result"]
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 13, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

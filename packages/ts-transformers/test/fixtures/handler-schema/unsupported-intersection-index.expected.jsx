@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -54,11 +36,6 @@ const removeItem = handler({
 } as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     state.items.get();
     state[event.key];
-});
-__cfBindVerifiedBinding(removeItem, {
-    sourceFile: "/test.tsx",
-    position: { line: 15, col: 2 },
-    bindingName: "removeItem"
 });
 // FIXTURE: unsupported-intersection-index
 // Verifies: dynamic key access keeps index-signature intersections open-ended

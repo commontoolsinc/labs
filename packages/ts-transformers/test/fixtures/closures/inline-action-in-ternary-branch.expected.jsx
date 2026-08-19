@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -61,10 +43,6 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.isEditing.set(true));
-__cfBindVerifiedBinding(__cfHandler_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 39, col: 34 }
-});
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         isEditing: __cfHelpers.ReadonlyCell<boolean>;
@@ -109,15 +87,11 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 38, col: 22 }
-});
 // FIXTURE: inline-action-in-ternary-branch
 // Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in a lift-applied computation
 //   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → lift(..., handler(...)(...))({ state: { isEditing: asCell } })
 // Context: Regression -- inline handler inside computed() must have its Cell ref captured in the lift-applied computation
-export default __cfBindVerifiedBinding(pattern((state) => {
+export default pattern((state) => {
     return {
         [UI]: (<cf-card>
         {__cfHelpers.ifElse({
@@ -219,10 +193,7 @@ export default __cfBindVerifiedBinding(pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 27, col: 30 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

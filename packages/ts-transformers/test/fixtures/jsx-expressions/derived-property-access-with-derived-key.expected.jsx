@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -98,11 +80,6 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 25, col: 37 },
-    bindingName: "itemsWithAisles"
-});
 const __cfLift_2 = __cfHelpers.lift<{
     itemsWithAisles: { aisle: string; item: Item; }[];
 }, Record<string, Assignment[]>>(({ itemsWithAisles }) => {
@@ -186,11 +163,6 @@ const __cfLift_2 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 33, col: 36 },
-    bindingName: "groupedByAisle"
-});
 const __cfLift_3 = __cfHelpers.lift<{
     groupedByAisle: Record<string, Assignment[]>;
 }, string[]>(({ groupedByAisle }) => Object.keys(groupedByAisle).sort(), {
@@ -241,11 +213,6 @@ const __cfLift_3 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_3, {
-    sourceFile: "/test.tsx",
-    position: { line: 45, col: 32 },
-    bindingName: "aisleNames"
-});
 const __cfLift_4 = __cfHelpers.lift<{
     groupedByAisle: Record<string, Assignment[]>;
     aisleName: string;
@@ -331,10 +298,6 @@ const __cfLift_4 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_4, {
-    sourceFile: "/test.tsx",
-    position: { line: 57, col: 15 }
-});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const assignment = __cf_pattern_input.key("element");
     return (<div>
@@ -397,10 +360,6 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 57, col: 46 }
-});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const aisleName = __cf_pattern_input.key("element");
     const groupedByAisle = __cf_pattern_input.key("params", "groupedByAisle");
@@ -483,10 +442,6 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 54, col: 26 }
-});
 // CT-1036: Property access on derived grouped objects with derived keys
 // This pattern groups items by a property, then maps over the group keys
 // and accesses the grouped object with each key.
@@ -495,7 +450,7 @@ __cfBindVerifiedBinding(__cfPattern_2, {
 //   aisleNames.map(...)            → aisleNames.mapWithPattern(pattern(...), {captures})
 //   groupedByAisle[aisleName].map  → lift over {groupedByAisle, aisleName} then .mapWithPattern(...)
 // Context: CT-1036 -- nested map with derived object indexed by derived key, two levels deep
-export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     // Create assignments with aisle data (whole-array map kept inside computed)
     const itemsWithAisles = __cfLift_1({ items: items }).for("itemsWithAisles", true);
@@ -569,10 +524,7 @@ export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 23, col: 2 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -58,10 +40,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 27, col: 27 }
-});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const v = __cf_pattern_input.key("element");
     const oid = __cf_pattern_input.key("params", "oid");
@@ -105,10 +83,6 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 27, col: 20 }
-});
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const v = __cf_pattern_input.key("element");
     return <i>{v.key("voterName")}</i>;
@@ -155,10 +129,6 @@ const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 28, col: 17 }
-});
 const __cfLift_2 = __cfHelpers.lift<{
     v: {
         optionId: string;
@@ -184,10 +154,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 31, col: 31 }
-});
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const v = __cf_pattern_input.key("element");
     const oid = __cf_pattern_input.key("params", "oid");
@@ -231,10 +197,6 @@ const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_3, {
-    sourceFile: "/test.tsx",
-    position: { line: 31, col: 24 }
-});
 const __cfLift_3 = __cfHelpers.lift<{
     v: {
         optionId: string;
@@ -260,10 +222,6 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_3, {
-    sourceFile: "/test.tsx",
-    position: { line: 33, col: 36 }
-});
 const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
     const v = __cf_pattern_input.key("element");
     const oid = __cf_pattern_input.key("params", "oid");
@@ -310,10 +268,6 @@ const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
         type: "boolean"
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_4, {
-    sourceFile: "/test.tsx",
-    position: { line: 33, col: 28 }
-});
 // FIXTURE: array-method-value-lift
 // Verifies (CT-1777): a bare reactive VALUE-expression in the return position of a
 // reactive map/filter/flatMap callback is lifted to a value-level lift, so it runs on
@@ -325,7 +279,7 @@ __cfBindVerifiedBinding(__cfPattern_4, {
 //   - flatMap -> array-element compare → flatMapWithPattern(pattern(... return [lift(...)(...)]))
 // Collection-valued `??` fallbacks and logical `&&`/`||` stay structural / control-flow
 // lowered; see filter-flatmap-fallback-chain for the structural-collection counterpart.
-export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
+export default pattern((__cf_pattern_input) => {
     const votes = __cf_pattern_input.key("votes");
     const oid = __cf_pattern_input.key("oid");
     return {
@@ -403,10 +357,7 @@ export default __cfBindVerifiedBinding(pattern((__cf_pattern_input) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 20, col: 55 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

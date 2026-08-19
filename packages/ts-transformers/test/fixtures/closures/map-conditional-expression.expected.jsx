@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -71,10 +53,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 27, col: 21 }
-});
 const __cfLift_2 = __cfHelpers.lift<{
     item: {
         price: number;
@@ -108,10 +86,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 28, col: 16 }
-});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
@@ -201,16 +175,12 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 25, col: 25 }
-});
 // FIXTURE: map-conditional-expression
 // Verifies: ternary expression in .map() callback is transformed to ifElse() with lift-applied branches
 //   item.price > state.threshold ? ... : ... → ifElse(lift(...)(condition), lift(...)(trueBranch), falseBranch)
 //   .map(fn) → .mapWithPattern(pattern(...), { state: { threshold, discount } })
 // Context: Captures state.threshold (for condition) and state.discount (for true branch) from outer scope
-export default __cfBindVerifiedBinding(pattern((state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
@@ -282,10 +252,7 @@ export default __cfBindVerifiedBinding(pattern((state) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 20, col: 30 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

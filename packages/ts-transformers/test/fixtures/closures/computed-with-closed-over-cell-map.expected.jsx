@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -47,10 +29,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 50 }
-});
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const n = __cf_pattern_input.key("element");
     const multiplier = __cf_pattern_input.key("params", "multiplier");
@@ -79,10 +57,6 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
-__cfBindVerifiedBinding(__cfPattern_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 45 }
-});
 const __cfLift_2 = __cfHelpers.lift<{
     numbers: __cfHelpers.ReadonlyCell<number[]>;
     multiplier: __cfHelpers.ReadonlyCell<number>;
@@ -110,18 +84,13 @@ const __cfLift_2 = __cfHelpers.lift<{
         type: "number"
     }
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 18, col: 27 },
-    bindingName: "doubled"
-});
 // FIXTURE: computed-with-closed-over-cell-map
 // Verifies: .map() on a closed-over Cell inside computed() IS transformed to .mapWithPattern()
 //   computed(() => numbers.map(n => n * multiplier.get())) → lift(({ numbers, multiplier }) => numbers.mapWithPattern(pattern(fn, ...), { multiplier }))({ numbers, multiplier })
 // Context: Unlike Reactive arrays, Cell arrays still need reactive mapping even
 //   inside a lift-applied callback. The .map() callback's closed-over `multiplier` cell
 //   is passed as a params object to mapWithPattern.
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     const numbers = new Writable([1, 2, 3], {
         type: "array",
         items: {
@@ -145,10 +114,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 10, col: 23 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

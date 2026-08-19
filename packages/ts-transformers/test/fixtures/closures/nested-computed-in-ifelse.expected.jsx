@@ -1,21 +1,3 @@
-function __cfBindVerifiedBinding(value: any, metadata: any) {
-    if (value && (typeof value === "object" || typeof value === "function") && Object.isExtensible(value)) {
-        Object.defineProperty(value, "__cfVerifiedBindingIdentity", {
-            value: metadata,
-            configurable: true
-        });
-    }
-    if (value && (typeof value === "object" || typeof value === "function") && typeof value.implementation === "function") {
-        var implementation = value.implementation;
-        if (implementation && (typeof implementation === "object" || typeof implementation === "function") && Object.isExtensible(implementation)) {
-            Object.defineProperty(implementation, "__cfVerifiedBindingIdentity", {
-                value: metadata,
-                configurable: true
-            });
-        }
-    }
-    return value;
-}
 function __cfHardenFn(fn: Function) {
     Object.freeze(fn);
     const prototype = fn.prototype;
@@ -63,10 +45,6 @@ const __cfLift_1 = __cfHelpers.lift<{
     },
     required: ["background"]
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_1, {
-    sourceFile: "/test.tsx",
-    position: { line: 31, col: 29 }
-});
 const __cfLift_2 = __cfHelpers.lift<{
     secondToggle: __cfHelpers.ReadonlyCell<boolean>;
 }, { background: string; }>(({ secondToggle }) => {
@@ -91,10 +69,6 @@ const __cfLift_2 = __cfHelpers.lift<{
     },
     required: ["background"]
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
-__cfBindVerifiedBinding(__cfLift_2, {
-    sourceFile: "/test.tsx",
-    position: { line: 39, col: 31 }
-});
 // FIXTURE: nested-computed-in-ifelse
 // Verifies: computed() inside ifElse branches transforms to the lift-applied form without double-wrapping .get()
 //   computed(() => { secondToggle.get(); ... }) → lift(({ secondToggle }) => { secondToggle.get(); ... })({ secondToggle })
@@ -102,7 +76,7 @@ __cfBindVerifiedBinding(__cfLift_2, {
 // Context: Regression test — .get() inside a computed() that is nested within
 //   an ifElse branch must NOT get an extra lift-applied wrapper, since computed is
 //   already a safe reactive context.
-export default __cfBindVerifiedBinding(pattern(() => {
+export default pattern(() => {
     const showOuter = new Writable(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showOuter", true);
@@ -164,10 +138,7 @@ export default __cfBindVerifiedBinding(pattern(() => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema), {
-    sourceFile: "/test.tsx",
-    position: { line: 23, col: 51 }
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
