@@ -122,7 +122,24 @@ export interface TopicsExport {
 /** The known link-valued argument fields a restore handles specially:
  * `mentionable` is re-established with `cf piece link` after the write, and
  * the deprecated `myName` stays retired. */
-export const STRUCTURAL_LINK_FIELDS = ["mentionable"] as const;
+/**
+ * The link-valued argument fields a restore re-establishes with
+ * `cf piece link` rather than writing as data, mapped to the board path each
+ * one points at. A document write cannot carry a `$link`, so these are routed
+ * aside and re-linked after the apply.
+ *
+ * Adding a wiring input to the topic pattern means adding it here. Leaving it
+ * out is not silent: `buildRestoreDocument` throws on any link-valued field it
+ * does not recognize, because writing one as data would corrupt it and
+ * dropping it would destroy it. The restore drill
+ * (`packages/cli/integration/topics-restore-drill.sh`) is what turns that
+ * throw into a failing check rather than a surprise mid-incident.
+ */
+export const STRUCTURAL_LINK_SOURCES: Record<string, string> = {
+  mentionable: "topics",
+  boardCrossrefs: "crossrefs",
+};
+export const STRUCTURAL_LINK_FIELDS = Object.keys(STRUCTURAL_LINK_SOURCES);
 export const LEGACY_LINK_FIELDS = ["myName"] as const;
 
 export interface RestoreDocument {

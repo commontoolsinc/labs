@@ -40,17 +40,41 @@ export interface AgentAuthoredEvent {
 }
 
 export interface AddCommentEvent extends AgentAuthoredEvent {
+  /** The comment text, appended verbatim after trimming. Must be non-empty:
+   * an empty body rejects rather than recording a blank thread entry. */
   body: string;
 }
 
 export interface AddLinkEvent extends AgentAuthoredEvent {
+  /** What the link points at — a rendering hint, not a behavior switch.
+   * Required by the deployed contract even though the handler would default
+   * it to "web": the compat gate compares a verb's event schema in the
+   * result direction, where required-to-optional is refused, so relaxing
+   * this rides the next acknowledged break rather than an ordinary deploy. */
   kind: TopicLinkKind;
+  /** The link target. Must be http(s): anything else rejects, because a
+   * user-supplied scheme on a shared surface is script execution in every
+   * viewer's session. */
   url: string;
+  /** Display label. A blank label falls back to the URL; required to be
+   * present for the same gate reason as `kind`. */
   label: string;
 }
 
 export interface SetBodyEvent extends AgentAuthoredEvent {
+  /** The complete replacement body, persisted verbatim — no trimming, so
+   * whitespace-sensitive Markdown survives. An empty body is legal: clearing
+   * a living document is an edit, not an error. */
   body: string;
+}
+
+export interface SetTitleEvent {
+  /** The new title, trimmed before it is stored. Must be non-empty. */
+  title: string;
+  /** The agent making this mutation, stored as structured attribution beside
+   * the write time. Required: this verb postdates the unsigned-caller era,
+   * so it carries no legacy fallback. */
+  agentName: string;
 }
 
 /**
@@ -127,6 +151,15 @@ export interface SetBodyResult {
   bodyUpdatedAt?: number;
 }
 
+export interface SetTitleResult {
+  /** The title as persisted, after trimming. */
+  title: string;
+  /** Attribution written for this rename — always present, because the verb
+   * requires `agentName`. */
+  titleUpdatedBy: TopicAuthor;
+  titleUpdatedAt: number;
+}
+
 export interface TopicComment {
   /** Snapshot taken at write time (profile enrichment comes later; never gate
    * authorship on a profile wish — CT-1879). Comments carry no minted id:
@@ -166,6 +199,12 @@ export interface TopicInput {
     TopicAuthor | Default<{ kind: "person"; name: "" }>
   >;
   bodyUpdatedAt?: Writable<number | Default<0>>;
+  /** Attribution of the last rename, stamped by `setTitle` — the same pair
+   * the body keeps, because a title is the other editable scalar. */
+  titleUpdatedBy?: Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >;
+  titleUpdatedAt?: Writable<number | Default<0>>;
   /** The board's own topics list — the mention universe the body editor
    * autocompletes over. A reference to the tracker's array, wired at creation
    * like `myName` (and backfillable as a one-time link-bind on pieces created
@@ -278,13 +317,15 @@ export interface TopicCrossrefRow {
  * surface is what leaves it free to shrink.
  */
 export interface TopicSummary {
-  /** Defaulted rather than required, like every other field a board card
-   * renders. The card list is a mapped sub-pattern, so this type reaches a
-   * piece holding topics written before the field existed as the argument
-   * schema its update is checked against, and a required property those topics
-   * lack refuses that update outright. `deno task pattern-vintage` is what
-   * catches it, by replaying a real deployed board. */
+  /** The topic's title. Defaulted rather than required, like every other
+   * field a board card renders: the card list is a mapped sub-pattern, so
+   * this type reaches a piece holding topics written before the field
+   * existed as the argument schema its update is checked against, and a
+   * required property those topics lack refuses that update outright.
+   * `deno task pattern-vintage` is what catches it, by replaying a real
+   * deployed board. */
   title: string | Default<"">;
+  /** When the topic was filed (epoch milliseconds), stamped at create. */
   createdAt: number;
   createdBy?:
     | TopicAuthor
@@ -315,8 +356,13 @@ export interface TopicPiece extends TopicSummary {
   /** @deprecated Compatibility shadow for consumers of the previous result
    * schema. New callers must use `createdBy`; the pattern mirrors this field. */
   createdByName: string | Default<"">;
+  /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
+  /** The thread, in arrival order: append-only point-in-time records, each
+   * carrying its author snapshot and `sentAt`. */
   comments: TopicComment[];
+  /** Typed outbound links, in arrival order, each carrying its author
+   * snapshot and `addedAt`. */
   links: TopicLink[];
   /** Every piece this topic's prose and links point at, as references.
    *
@@ -352,12 +398,22 @@ export interface TopicPiece extends TopicSummary {
   referencedBy: TopicSummary[] | Default<[]>;
   bodyUpdatedBy?: TopicAuthor | undefined;
   bodyUpdatedAt?: number | undefined;
+  /** Append to the thread — a point-in-time record of progress or
+   * deliberation; durable conclusions belong in the body. Returns the
+   * comment as recorded, resolved author and `sentAt` included. */
   addComment: Stream<AddCommentEvent, AddCommentResult>;
+  /** Attach a typed outbound link — a PR, an agent session, a web page.
+   * Returns the link as recorded, resolved `addedBy` and `addedAt`
+   * included. Appends merge and nothing dedupes: a repeated URL is two
+   * entries. */
   addLink: Stream<AddLinkEvent, AddLinkResult>;
+  /** Replace the living document whole — read it, revise it, write it back
+   * complete; the body is one value with whole-value conflict semantics.
+   * Returns the persisted body and any attribution written. */
   setBody: Stream<SetBodyEvent, SetBodyResult>;
-  /** Reference another piece from this topic, and stop referencing it. The
-   * browser equivalent is picking a completion in the body editor, which writes
-   * the same map.
+  /** Reference another piece from this topic — the payload is the piece
+   * itself, stored as a reference. The browser equivalent is picking a
+   * completion in the body editor, which writes the same map.
    *
    * OPTIONAL, unlike the verbs beside them, and for the reason every added path
    * on this projection is: a topic deployed before these existed carries
@@ -365,10 +421,26 @@ export interface TopicPiece extends TopicSummary {
    * outright. The older verbs predate every deployed generation, so they can
    * stay required; these cannot. */
   mention?: Stream<MentionEvent>;
+  /** Stop referencing a piece: removes every `mention`-made entry naming it.
+   * References made in the prose are retracted by editing the prose, not by
+   * this. Optional on the projection for the same reason as `mention`. */
   unmention?: Stream<UnmentionEvent>;
 }
 
-/** The complete result available when a Topic is instantiated directly. */
+/**
+ * A #topic — one durable unit of shared attention: a title, a living body
+ * document, a flat chronological comment thread, typed links out to other
+ * core objects (PRs, agent sessions, web pages), and the references it makes
+ * to sibling pieces.
+ *
+ * Durable conclusions get folded up into the body — revise it whole with
+ * `setBody`; the thread holds the deliberation as append-only, point-in-time
+ * `addComment` records. Sign every mutation with `agentName`: Fabric records
+ * the human principal behind the key; the name says which agent acted under
+ * it. The session-draft cells and `submit*` streams below belong to the
+ * rendered page, not the headless contract — they read state only this
+ * session holds.
+ */
 export interface TopicOutput extends TopicPiece {
   [UI]: VNode;
   /**
@@ -378,6 +450,8 @@ export interface TopicOutput extends TopicPiece {
   commentDraft: PerSession<Writable<string>>;
   bodyDraft: PerSession<Writable<string>>;
   editingBody: PerSession<boolean>;
+  titleDraft: PerSession<Writable<string>>;
+  editingTitle: PerSession<boolean>;
   linkUrlDraft: PerSession<Writable<string>>;
   linkLabelDraft: PerSession<Writable<string>>;
   linkKindDraft: PerSession<Writable<TopicLinkKind>>;
@@ -394,11 +468,43 @@ export interface TopicOutput extends TopicPiece {
    * this gives them one.
    */
   referencesDraft: PerSession<Writable<TopicMentionRefMap>>;
-  /** UI affordances as streams: composer submit, body edit lifecycle. */
+  /** Rename the topic. Lives on the direct interface rather than the shared
+   * `TopicPiece` projection, and the placement is the contract: a holder's
+   * required demands are write-once, so a required verb added to the
+   * projection every board embeds would refuse those boards' updates.
+   * (`mention` above takes the other safe road, an optional member; a rename
+   * is a direct-address mutation and needs no place on the projection at
+   * all.) Requires `agentName` and returns the persisted title with the
+   * attribution written. */
+  setTitle: Stream<SetTitleEvent, SetTitleResult>;
+  /** Attribution of the last rename; unset until the first `setTitle`.
+   * Beside `setTitle` rather than on the projection, for the same reason. */
+  titleUpdatedBy?: TopicAuthor | undefined;
+  titleUpdatedAt?: number | undefined;
+  /** UI wrapper: open the rename editor, seeding the session draft from the
+   * durable title. */
+  startEditTitle: Stream<void>;
+  /** UI wrapper: save the session title draft under the viewer's Profile —
+   * the contract verb is `setTitle`, and both land through the same core, so
+   * a browser rename stamps the same attribution and moves the same activity
+   * clock. */
+  saveTitle: Stream<void>;
+  /** UI wrapper: close the rename editor; the session draft is the discard. */
+  cancelEditTitle: Stream<void>;
+  /** UI wrapper: append the session comment draft under the viewer's
+   * Profile. Reads session-local state, so it is a silent no-op headless —
+   * the contract verb is `addComment`. */
   submitComment: Stream<void>;
+  /** UI wrapper: open the body editor, seeding the session drafts from the
+   * durable body and mention map. */
   startEditBody: Stream<void>;
+  /** UI wrapper: publish the session body and mention-map drafts whole,
+   * attributed to the viewer's Profile — the contract verb is `setBody`. */
   saveBody: Stream<void>;
+  /** UI wrapper: close the body editor; the session drafts are the discard. */
   cancelEditBody: Stream<void>;
+  /** UI wrapper: append the session link drafts under the viewer's Profile —
+   * the contract verb is `addLink`. */
   submitLink: Stream<void>;
 }
 
@@ -512,6 +618,50 @@ const LINK_KIND_ITEMS = [
   { label: "Agent session", value: "session" },
 ];
 
+/** The one place a comment record is built and appended. The contract verb
+ * and the browser composer both ride it, so the trim rule, the legacy-name
+ * mirror, and the write-time stamp cannot drift between them. Callers guard
+ * emptiness on their own terms first — the verb rejects, the composer
+ * silently declines. Mergeable append: concurrent comments all land. */
+export const appendComment = (
+  comments: Writable<TopicComment[] | Default<[]>>,
+  body: string,
+  author: TopicAuthor | undefined,
+  legacyName: string,
+): TopicComment => {
+  const comment = {
+    author,
+    authorName: legacyName,
+    body: body.trim(),
+    sentAt: Date.now(),
+  };
+  comments.push(comment);
+  return comment;
+};
+
+/** The one place a link record is built and appended, for the same reason as
+ * `appendComment`: the kind default, the label-falls-back-to-URL rule, and
+ * the write-time stamp live here and nowhere else. URL safety stays with the
+ * callers — the verb rejects an unsafe URL, the composer declines it. */
+export const appendLink = (
+  links: Writable<TopicLink[] | Default<[]>>,
+  url: string,
+  kind: TopicLinkKind | undefined,
+  label: string | undefined,
+  author: TopicAuthor | undefined,
+): TopicLink => {
+  const trimmedUrl = url.trim();
+  const link = {
+    kind: kind ?? ("web" as const),
+    url: trimmedUrl,
+    label: (label ?? "").trim() || trimmedUrl,
+    addedBy: author,
+    addedAt: Date.now(),
+  };
+  links.push(link);
+  return link;
+};
+
 /** Browser comment submit with Profile fields already resolved by the pattern.
  * Keeping the mutation in a module-scope handler lets tests bind deterministic
  * Profile snapshots while production still sources them only from wishes. */
@@ -524,13 +674,65 @@ export const submitProfileComment = handler<void, {
   const text = commentDraft.get();
   const author = topicAuthorFromPerson(profileName, profileAvatar);
   if (!text.trim() || !author) return;
-  comments.push({
-    author,
-    authorName: topicAuthorLabel(author),
-    body: text.trim(),
-    sentAt: Date.now(),
-  });
+  appendComment(comments, text, author, topicAuthorLabel(author));
   commentDraft.set("");
+});
+
+/** The one place a rename lands. The contract verb and the browser save both
+ * ride it, so the trim rule, the attribution stamp, and the activity clock
+ * move together — a title write without its attribution pair is exactly the
+ * stale-metadata state this rules out, since `titleUpdatedBy` would keep
+ * describing an earlier rename. Callers guard emptiness and resolve their
+ * author first. */
+export const persistTitle = (
+  title: Writable<string | Default<"">>,
+  titleUpdatedBy: Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >,
+  titleUpdatedAt: Writable<number | Default<0>>,
+  text: string,
+  author: TopicAuthor,
+): SetTitleResult => {
+  const trimmed = text.trim();
+  title.set(trimmed);
+  const at = Date.now();
+  titleUpdatedBy.set(author);
+  titleUpdatedAt.set(at);
+  return { title: trimmed, titleUpdatedBy: author, titleUpdatedAt: at };
+};
+
+/** Browser title save under the current Profile snapshot. The header binds a
+ * session draft, never the durable title: a live-bound shared string would
+ * conflict per keystroke, and a title write outside `persistTitle` would
+ * leave `titleUpdatedBy` and the activity clock describing an earlier
+ * rename. */
+export const saveProfileTitle = handler<void, {
+  title: Writable<string | Default<"">>;
+  titleDraft: Writable<string>;
+  editingTitle: Writable<boolean>;
+  titleUpdatedBy: Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >;
+  titleUpdatedAt: Writable<number | Default<0>>;
+  profileName: string;
+  profileAvatar: string;
+}>((
+  _,
+  {
+    title,
+    titleDraft,
+    editingTitle,
+    titleUpdatedBy,
+    titleUpdatedAt,
+    profileName,
+    profileAvatar,
+  },
+) => {
+  const text = titleDraft.get();
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!text.trim() || !author) return;
+  persistTitle(title, titleUpdatedBy, titleUpdatedAt, text, author);
+  editingTitle.set(false);
 });
 
 /** Browser body save under the current Profile snapshot. */
@@ -619,13 +821,7 @@ export const submitProfileLink = handler<void, {
   const url = linkUrlDraft.get();
   const author = topicAuthorFromPerson(profileName, profileAvatar);
   if (!url.trim() || !isSafeLinkUrl(url) || !author) return;
-  links.push({
-    kind: linkKindDraft.get(),
-    url: url.trim(),
-    label: linkLabelDraft.get().trim() || url.trim(),
-    addedBy: author,
-    addedAt: Date.now(),
-  });
+  appendLink(links, url, linkKindDraft.get(), linkLabelDraft.get(), author);
   linkUrlDraft.set("");
   linkLabelDraft.set("");
   linkKindDraft.set("web");
@@ -705,17 +901,18 @@ const mentionsOf = lift((
   ].filter((destination) => destination !== undefined && destination !== null)
 );
 
-/** Max of creation, the newest comment, the newest link, and the last body
- * save — declared over just those four timestamp surfaces. */
+/** Max of creation, the newest comment, the newest link, the last body save,
+ * and the last rename — declared over just those five timestamp surfaces. */
 const lastActivityOf = lift((
-  { comments, links, createdAt, bodyUpdatedAt }: {
+  { comments, links, createdAt, bodyUpdatedAt, titleUpdatedAt }: {
     comments: { sentAt: number }[];
     links: { addedAt?: number }[];
     createdAt: number;
     bodyUpdatedAt: number;
+    titleUpdatedAt: number;
   },
 ): number => {
-  let newest = Math.max(createdAt, bodyUpdatedAt);
+  let newest = Math.max(createdAt, bodyUpdatedAt, titleUpdatedAt);
   for (const c of comments) newest = Math.max(newest, c.sentAt);
   // `addedAt` is optional on TopicLink: links written before it existed carry
   // no timestamp and simply do not move the clock.
@@ -751,6 +948,8 @@ export default pattern<TopicInput, TopicOutput>(
       myName,
       bodyUpdatedBy,
       bodyUpdatedAt,
+      titleUpdatedBy,
+      titleUpdatedAt,
       mentionable,
       references,
       mentioned,
@@ -762,6 +961,8 @@ export default pattern<TopicInput, TopicOutput>(
     const commentDraft = new Writable.perSession("");
     const editingBody = new Writable.perSession(false);
     const bodyDraft = new Writable.perSession("");
+    const editingTitle = new Writable.perSession(false);
+    const titleDraft = new Writable.perSession("");
     const linkUrlDraft = new Writable.perSession("");
     const linkLabelDraft = new Writable.perSession("");
     const linkKindDraft = new Writable.perSession<TopicLinkKind>("web");
@@ -800,15 +1001,9 @@ export default pattern<TopicInput, TopicOutput>(
         const legacyName = author
           ? topicAuthorLabel(author)
           : (myName.get() ?? "").trim() || "someone";
-        const comment = {
-          author,
-          authorName: legacyName,
-          body: trimmed,
-          sentAt: Date.now(),
+        return {
+          comment: appendComment(comments, trimmed, author, legacyName),
         };
-        // Mergeable append: concurrent comments from different users all land.
-        comments.push(comment);
-        return { comment };
       },
     );
 
@@ -823,15 +1018,7 @@ export default pattern<TopicInput, TopicOutput>(
         if (!isSafeLinkUrl(trimmedUrl)) {
           rejectMutation("addLink", "url must be http(s)");
         }
-        const link = {
-          kind: kind ?? "web",
-          url: trimmedUrl,
-          label: (label ?? "").trim() || trimmedUrl,
-          addedBy: author,
-          addedAt: Date.now(),
-        };
-        links.push(link);
-        return { link };
+        return { link: appendLink(links, trimmedUrl, kind, label, author) };
       },
     );
 
@@ -852,6 +1039,24 @@ export default pattern<TopicInput, TopicOutput>(
           bodyUpdatedBy: author,
           bodyUpdatedAt: bodyUpdatedAtValue,
         };
+      },
+    );
+
+    const setTitle = action<SetTitleEvent, SetTitleResult>(
+      ({ title: text, agentName }) => {
+        const trimmed = (text ?? "").trim();
+        // No legacy fallback and no omission tolerance: this verb postdates
+        // the unsigned-caller era, so attribution is simply required.
+        const author = topicAuthorFromAgent(agentName ?? "") ??
+          rejectMutation("setTitle", "agentName must be non-blank");
+        if (!trimmed) rejectMutation("setTitle", "title must be non-empty");
+        return persistTitle(
+          title,
+          titleUpdatedBy,
+          titleUpdatedAt,
+          trimmed,
+          author,
+        );
       },
     );
 
@@ -907,6 +1112,27 @@ export default pattern<TopicInput, TopicOutput>(
       profileAvatar,
     });
 
+    const startEditTitle = action(() => {
+      titleDraft.set(title.get());
+      editingTitle.set(true);
+    });
+
+    const saveTitle = saveProfileTitle({
+      title,
+      titleDraft,
+      editingTitle,
+      titleUpdatedBy,
+      titleUpdatedAt,
+      profileName,
+      profileAvatar,
+    });
+
+    // Nothing to undo: the draft is session-local, so leaving it behind IS
+    // the discard.
+    const cancelEditTitle = action(() => {
+      editingTitle.set(false);
+    });
+
     const startEditBody = action(() => {
       bodyDraft.set(body.get());
       // Seeded together with the prose, so the editor opens on a map that
@@ -955,6 +1181,7 @@ export default pattern<TopicInput, TopicOutput>(
       links,
       createdAt,
       bodyUpdatedAt,
+      titleUpdatedAt,
     });
 
     const commentsView = comments.get().toSorted((a, b) => a.sentAt - b.sentAt);
@@ -993,11 +1220,43 @@ export default pattern<TopicInput, TopicOutput>(
       <cf-theme theme={TOPICS_THEME}>
         <cf-screen>
           <cf-vstack slot="header" gap="1" padding="4">
-            <cf-input
-              $value={title}
-              placeholder="Topic title…"
-              style="font-size: 1.25rem; font-weight: 600;"
-            />
+            {editingTitle
+              ? (
+                <cf-hstack gap="2" align="center">
+                  <cf-input
+                    $value={titleDraft}
+                    placeholder="Topic title…"
+                    style="font-size: 1.25rem; font-weight: 600; flex: 1;"
+                  />
+                  <cf-button
+                    variant="primary"
+                    disabled={!hasProfile}
+                    onClick={saveTitle}
+                  >
+                    Save
+                  </cf-button>
+                  <cf-button variant="ghost" onClick={cancelEditTitle}>
+                    Cancel
+                  </cf-button>
+                </cf-hstack>
+              )
+              : (
+                <cf-hstack gap="2" justify="between" align="center">
+                  <cf-text
+                    block
+                    style="font-size: 1.25rem; font-weight: 600;"
+                  >
+                    {topicName}
+                  </cf-text>
+                  <cf-button
+                    variant="ghost"
+                    disabled={!hasProfile}
+                    onClick={startEditTitle}
+                  >
+                    Rename
+                  </cf-button>
+                </cf-hstack>
+              )}
             <cf-hstack justify="between" align="center">
               <cf-text variant="caption" tone="muted">
                 started by {topicAuthorLabel(createdByView, createdByName)}
@@ -1299,18 +1558,26 @@ export default pattern<TopicInput, TopicOutput>(
       mentioned,
       mentions,
       referencedBy,
+      titleUpdatedBy,
+      titleUpdatedAt,
       addComment,
       addLink,
       setBody,
+      setTitle,
       mention,
       unmention,
       commentDraft,
       bodyDraft,
       editingBody,
+      titleDraft,
+      editingTitle,
       linkUrlDraft,
       linkLabelDraft,
       linkKindDraft,
       referencesDraft,
+      startEditTitle,
+      saveTitle,
+      cancelEditTitle,
       submitComment,
       startEditBody,
       saveBody,

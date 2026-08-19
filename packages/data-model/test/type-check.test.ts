@@ -258,6 +258,22 @@ describe("type-check", () => {
   });
 
   describe("isFabricValue()", () => {
+    it("returns `true` for a schema using the `if` / `then` / `else` keywords", () => {
+      // This system's schemas are themselves fabric values, and JSON Schema
+      // spells conditional subschemas with those three keywords. So `then` is
+      // a data key a schema routinely carries, and reserving it -- as a
+      // defense against promise resolution adopting a callable `then` -- would
+      // stop an ordinary schema being a fabric value at all. That hazard is
+      // handled where a property can become callable, in the value proxies,
+      // rather than by refusing the name here.
+      expect(isFabricValue({
+        type: "object",
+        if: { properties: { kind: { const: "a" } } },
+        then: { required: ["aField"] },
+        else: { required: ["bField"] },
+      })).toBe(true);
+    });
+
     describe("given a scalar `FabricValue`", () => {
       it("returns `true` for a boolean", () => {
         expect(isFabricValue(true)).toBe(true);

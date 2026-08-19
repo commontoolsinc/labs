@@ -24,19 +24,25 @@
  * session-scoped fields no other session can see. So the script applies the
  * complete document in one call — built from the export's RAW argument, so
  * a plain authored field no field list here names still rides the restore —
- * then re-establishes the board link that a document write cannot carry
+ * then re-establishes every wiring link a document write cannot carry
  * (`$link` values are refused by the same validation), using
- * `cf piece link` on the board recorded in the export.
+ * `cf piece link` against the board recorded in the export.
+ *
+ * Those wiring links are `STRUCTURAL_LINK_SOURCES`, which maps each one to
+ * the board path it points at: `mentionable` to the board's `topics`, and
+ * `boardCrossrefs` to its `crossrefs`. A link-valued field absent from that
+ * map stops the restore rather than being guessed at, so a wiring input
+ * added to the topic pattern announces itself here.
  *
  * Three honest costs. Comment and link elements are re-written as plain
  * values, so their element entities are minted fresh: content, order,
  * timestamps, and attribution are exact, but a stored reference to an
- * individual old element is not preserved. The re-established `mentionable`
- * targets the board's result `topics` where the original targeted its
- * argument document — aliases of one another (#5632), so a before/after
- * diff of the stored link differs while resolution does not. And the
- * deprecated `myName` legacy link is not restored — it exists only as the
- * pre-agentName attribution fallback.
+ * individual old element is not preserved. A re-established link targets the
+ * board's RESULT path where the original targeted its argument document —
+ * aliases of one another (#5632), so a before/after diff of the stored link
+ * differs while resolution does not. And the deprecated `myName` legacy link
+ * is not restored — it exists only as the pre-agentName attribution
+ * fallback.
  *
  * The target's deployed pattern identity must match the export row's;
  * --allow-identity-mismatch overrides, which a restore after a deliberate
@@ -50,6 +56,7 @@ import {
   cfJson,
   deepEqual,
   normalizeFid,
+  STRUCTURAL_LINK_SOURCES,
   type TopicsExport,
 } from "./topics-rehearsal-lib.ts";
 
@@ -146,51 +153,55 @@ for (const [field, wanted] of Object.entries(restoreDoc)) {
 }
 
 const boardFid = export_.board?.fid;
-const wantsMentionable = structural.includes("mentionable");
-const liveMentionable = await cfJson<unknown>([
-  "get",
-  "-q",
-  ...addr,
-  "--input",
-  "--select",
-  "mentionable@",
-]).catch(() => undefined);
-const mentionableMissing = wantsMentionable && liveMentionable === undefined;
+// A structural link the export recorded but the live piece has lost is a
+// reason to restore even when every content field already matches.
+const missingLinks: string[] = [];
+for (const field of structural) {
+  const live = await cfJson<unknown>([
+    "get",
+    "-q",
+    ...addr,
+    "--input",
+    "--select",
+    `${field}@`,
+  ]).catch(() => undefined);
+  if (live === undefined) missingLinks.push(field);
+}
 
-if (differing.length === 0 && !mentionableMissing) {
+if (differing.length === 0 && missingLinks.length === 0) {
   console.log("nothing to restore: every content field matches the export");
   Deno.exit(0);
 }
 for (const field of differing) console.log(`${field}: differs from export`);
-if (mentionableMissing) console.log("mentionable: board link absent");
+for (const field of missingLinks) console.log(`${field}: board link absent`);
 if (dryRun) {
   console.log(`dry run: ${differing.length} field(s) would be restored`);
   Deno.exit(0);
 }
 
 await cfApply(addr, restoreDoc);
-// The apply replaced the whole document, so a board link that was present a
-// moment ago is gone now — relink whenever the export says one belongs,
+// The apply replaced the whole document, so any board link that was present a
+// moment ago is gone now — relink every structural field the export recorded,
 // never on the pre-apply reading.
-if (wantsMentionable) {
+for (const field of structural) {
+  const source = STRUCTURAL_LINK_SOURCES[field];
   if (!boardFid) {
     console.error(
-      "mentionable was linked but the export records no board; " +
-        "re-link it by hand with `cf piece link <board>/topics " +
-        `${targetFid}/mentionable\``,
+      `${field} was linked but the export records no board; re-link it by ` +
+        `hand with \`cf piece link <board>/${source} ${targetFid}/${field}\``,
     );
-  } else {
-    await cf([
-      "piece",
-      "link",
-      "--space",
-      space,
-      "--api-url",
-      apiUrl,
-      `${normalizeFid(boardFid)}/topics`,
-      `${targetFid}/mentionable`,
-    ]);
+    continue;
   }
+  await cf([
+    "piece",
+    "link",
+    "--space",
+    space,
+    "--api-url",
+    apiUrl,
+    `${normalizeFid(boardFid)}/${source}`,
+    `${targetFid}/${field}`,
+  ]);
 }
 
 let failed = 0;
@@ -203,20 +214,20 @@ for (const field of Object.keys(restoreDoc)) {
     failed++;
   }
 }
-if (wantsMentionable) {
+for (const field of structural) {
   const after = await cfJson<unknown>([
     "get",
     "-q",
     ...addr,
     "--input",
     "--select",
-    "mentionable@",
+    `${field}@`,
   ]).catch(() => undefined);
   if (after === undefined) {
-    console.error("mentionable: board link NOT re-established");
+    console.error(`${field}: board link NOT re-established`);
     failed++;
   } else {
-    console.log("mentionable: board link present");
+    console.log(`${field}: board link present`);
   }
 }
 for (const field of legacy) {

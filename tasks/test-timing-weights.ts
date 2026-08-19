@@ -1,5 +1,20 @@
 // Relative weights from successful CI runs. Only tests whose cost materially
 // affects placement need an entry; selectors use a default for the long tail.
+/**
+ * Relative weights for the `agents-host` test files. The debug-view suite
+ * dominates the package, which is why it spans several files; the rest are
+ * cheap enough that the default covers them.
+ */
+export const AGENTS_HOST_TEST_WEIGHTS: Readonly<Record<string, number>> = {
+  "test/debug_view_pattern_test.ts": 40,
+  "test/debug_view_deployment_test.ts": 33,
+  "test/debug_view_replacement_test.ts": 16,
+  "test/cli_test.ts": 3.3,
+  "test/start_test.ts": 3.1,
+  "test/host_test.ts": 2.9,
+  "test/config_test.ts": 2.5,
+};
+
 export const RUNNER_TEST_WEIGHTS: Readonly<Record<string, number>> = {
   "profile-owner-cfc.test.ts": 19.0,
   "engine-ses.test.ts": 14.3,
@@ -95,6 +110,9 @@ export const TASK_TEST_WEIGHTS: Readonly<Record<string, number>> = {
 // close even when individual package durations differ.
 export const WORKSPACE_TEST_WEIGHTS: Readonly<Record<string, number>> = {
   api: 2.3,
+  "agents-host (1/3)": 40,
+  "agents-host (2/3)": 33,
+  "agents-host (3/3)": 16,
   "background-piece-service": 7.2,
   "cf-harness": 29.9,
   "cli (1/10)": 50.5,
