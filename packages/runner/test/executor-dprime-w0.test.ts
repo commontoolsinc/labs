@@ -1,18 +1,24 @@
-// W0 (d′) SCRATCH — the refutation experiment's pins (stage-C design
-// §2.8 (a)): demand is the memory server's TRACKED-IDS CLOSURE and the
-// demand walk is DELETED. Scratch quality; the NUMBERS these print are the
-// deliverable (the report reads them). Modeled on executor-fan-out.test.ts
-// (a real memory server, a live ExecutorHost, N flag-ON clients).
+// W1 (d′) — the (d′) pins (stage-C design §2.8 / §6 W1): demand is the
+// memory server's TRACKED-IDS CLOSURE and the demand walk is DELETED.
+// Seeded from the W0 refutation experiment; the pins now ASSERT (each
+// carries a killing mutation, recorded in the W1 build report). Modeled
+// on executor-fan-out.test.ts (a real memory server, a live ExecutorHost,
+// N flag-ON clients). Run with SCHEDULER_LIVENESS_EQUIVALENCE=1 (T10′).
 //
 // - T1′ value-only change under a demanded doc → the demanded computed's
 //   instances re-derive, W advances, ZERO walk runs (structural: no
 //   `demand-walk:*` action exists — T9′);
-// - T2′ a wave writes a NEW LINK (ifElse flips to a computed it never
-//   READS — the branch is reached only through the link) → the newly
-//   reachable computed enters the demand set (the tracker's push-time
-//   re-traversal, or the client's own pull — the row's `root` says
-//   which) → its writer is a demand root → it lands; the CYCLE COUNT is
-//   printed (settle series: waves / growth wakes / class);
+// - T2′ (probe) a wave writes a NEW LINK within a piece → the closure
+//   follows the piece's `source` wiring, so a piece's own computeds are
+//   PRE-EMPTED (recorded); the value lands, zero walk runs;
+// - T2′ (cross-piece) a wave writes a link to ANOTHER piece's doc into a
+//   field the demander watches narrowly (never the firing stream) → the
+//   target is NOT pre-empted → it enters the demander's closure on the
+//   tracker's push-time re-traversal (a push-growth demandChanged); the
+//   deterministic one-push-late shape W0 §5 left unbuilt;
+// - T3′ array growth: a handler appends a link-bearing element to a list
+//   the demander watches by schema → the appended target enters the
+//   closure (same mechanism, through an array);
 // - T4′ a per-user change re-runs only that demander's instances;
 // - T5′ one registry key per space doc with N pairs; a user-scoped doc
 //   under two principals is two keys;
@@ -24,8 +30,7 @@
 //   release; a doc tracked by two sessions stays while one remains;
 // - P-arrival a second principal arriving after narrowing gets her
 //   instance (the per-key not-current re-arm / root arrival re-arm);
-// - T9′ OFF arm: `demandedWriters` empty on a plain client runtime;
-// - T10′: run this file with SCHEDULER_LIVENESS_EQUIVALENCE=1.
+// - T9′ OFF arm: `demandedWriters` empty on a plain client runtime.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -113,6 +118,50 @@ const LINK_ON_EVENT_PATTERN = [
   "});",
 ].join("\n");
 
+/** T2′ (cross-piece): P1 relays an ARG-carried link into `slot` on an
+ * event — `slot.set(target.get())`. The link target is a SEPARATE piece's
+ * result doc (P2), NOT part of P1's own `source` wiring, so a demander
+ * watching P1's `slot` narrowly does not pre-empt P2 through the wiring:
+ * P2 enters the demander's closure only when the wave writes the link
+ * (§2.3 (i) — the tracker's push-time re-traversal). */
+const CROSS_RELAY_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "const relay = handler<unknown, { slot: Writable<unknown>; target: Writable<unknown> }>(",
+  "  (_ev, { slot, target }) => { slot.set(target); },",
+  ");",
+  "export default pattern<",
+  "  { slot?: Writable<unknown>; target?: Writable<unknown> },",
+  "  { slot: unknown; relay: Stream<unknown> }",
+  ">(({ slot, target }) => ({ slot, relay: relay({ slot: slot!, target: target! }) }));",
+].join("\n");
+
+/** T2′/T3′: the LEAF piece (P2). A space-scoped computed `leaf` the
+ * cross-piece link (and the appended array element) points at. */
+const LEAF_PATTERN = [
+  "import { computed, pattern } from 'commonfabric';",
+  "export default pattern<{ n?: number }, { leaf: string }>(",
+  "  ({ n }) => ({ leaf: computed(() => 'leaf:' + String(n ?? 0)) }),",
+  ");",
+].join("\n");
+
+/** T3′ (array growth): a handler PUSHES a link onto a list the demander
+ * watches by schema; the appended element carries a link to P2's doc, so
+ * the appended target enters the closure on the tracker's re-traversal. */
+const LIST_GROW_PATTERN = [
+  "import { Default, handler, pattern, Stream, Writable } from 'commonfabric';",
+  "type List = Writable<unknown[] | Default<[]>>;",
+  "const push = handler<unknown, { list: List; target: Writable<unknown> }>(",
+  "  (_ev, { list, target }) => {",
+  "    const cur = (list.get() as unknown[] | undefined) ?? [];",
+  "    list.set([...cur, target]);",
+  "  },",
+  ");",
+  "export default pattern<",
+  "  { list?: List; target?: Writable<unknown> },",
+  "  { list: unknown[]; push: Stream<unknown> }",
+  ">(({ list, target }) => ({ list: list!, push: push({ list: list!, target: target! }) }));",
+].join("\n");
+
 const rowsUnder = (
   engine: Engine.Engine,
   scopeKey: string,
@@ -136,7 +185,7 @@ const instanceHolds = (
     JSON.stringify(value ?? null).includes(needle)
   );
 
-describe("W0 (d′): demand = the tracked-ids closure, the walk deleted", () => {
+describe("W1 (d′): demand = the tracked-ids closure, the walk deleted", () => {
   let server: MemoryV2Server.Server;
   let host: ExecutorHost | undefined;
   let managers: EmulatedStorageManager[];
@@ -741,5 +790,260 @@ describe("W0 (d′): demand = the tracked-ids closure, the walk deleted", () => 
     );
     expect(instanceHolds(engine, aliceKey, '"echo:B"')).toBe(false);
     setup.cancel();
+  });
+
+  // T2′ (cross-piece) and T3′ (array growth): the ONE-PUSH-LATE structural
+  // growth path a unit pin can make DETERMINISTIC (W0 §5 left it unbuilt).
+  // The demander (Bob) watches ONLY a NARROW field and NEVER the firing
+  // stream, so P1's handler wiring (which reaches the cross-piece link
+  // target) never pre-empts Bob's closure — the within-piece source
+  // wiring the probe above hit pre-empts only a session that watches the
+  // handler. A SEPARATE actor (Alice) fires. Before the wave writes the
+  // link, P2's doc is NOT in Bob's rows; the wave writes it; the tracker's
+  // push-time re-traversal reaches P2 → Bob's closure GROWS (a
+  // push-growth demandChanged) → the settle series classes the input
+  // `structural-growth` and the cycle count is the growth waves.
+  const standUpCrossPiece = async (options: {
+    p1Pattern: string;
+    p1Names: { arg: string; result: string; field: string };
+    bobFieldSchema: Record<string, unknown>;
+  }) => {
+    host = newHost();
+    const aliceClient = openClient(aliceSigner);
+    const alice = aliceClient.runtime;
+    const engine = await server.engineForSpace(space);
+    const leaf = await alice.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: LEAF_PATTERN }],
+    }, { space });
+    const p1 = await alice.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: options.p1Pattern }],
+    }, { space });
+    // P2 (leaf): its space-scoped `leaf` computed is the link target.
+    const bArg = alice.getCell<Record<string, unknown>>(
+      space,
+      "dp-x-b-arg",
+      undefined,
+    );
+    const bResult = alice.getCell<Record<string, unknown>>(
+      space,
+      "dp-x-b-result",
+      leaf.resultSchema,
+    );
+    await bArg.sync();
+    await bResult.sync();
+    {
+      const seed = alice.edit();
+      bArg.withTx(seed).set({ n: 5 });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = alice.edit();
+      alice.run(tx, leaf, bArg, bResult);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    // P1 (relay/list): its arg carries a LINK to P2's result doc; the
+    // handler copies it into the watched field on an event.
+    const holder = alice.getCell<unknown>(space, "dp-x-holder", undefined);
+    const aArg = alice.getCell<Record<string, unknown>>(
+      space,
+      options.p1Names.arg,
+      undefined,
+    );
+    const aResult = alice.getCell<Record<string, unknown>>(
+      space,
+      options.p1Names.result,
+      p1.resultSchema,
+    );
+    await holder.sync();
+    await aArg.sync();
+    await aResult.sync();
+    {
+      const seed = alice.edit();
+      // `target` = a link to P2's result cell (cross-piece; not part of
+      // P1's own graph). `slot`/`list` = a fresh holder cell.
+      aArg.withTx(seed).set({ slot: holder, list: holder, target: bResult });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = alice.edit();
+      alice.run(tx, p1, aArg, aResult);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await alice.idle();
+    await alice.storageManager.synced();
+    const bResultId = bResult.getAsNormalizedFullLink().id;
+    const aResultId = aResult.getAsNormalizedFullLink().id;
+    // Alice demands P2 (leaf lands) and P1 (the handler is served). Alice
+    // watching P1 full-schema pre-empts P2 into ALICE's closure — fine;
+    // Bob is the demander we check.
+    const aliceWatchB = aResult.sink(() => {});
+    const aliceBResult = alice.getCell<Record<string, unknown>>(
+      space,
+      "dp-x-b-result",
+      leaf.resultSchema,
+    );
+    await aliceBResult.sync();
+    const aliceWatchLeaf = aliceBResult.sink(() => {});
+    // Bob: watches P1's result but ONLY the one field, by a schema that
+    // follows the link into `{ leaf }`. Bob NEVER watches the stream, so
+    // the handler wiring cannot pre-empt P2 into his closure.
+    const bobClient = openClient(bobSigner);
+    const bob = bobClient.runtime;
+    const bobResult = bob.getCell<Record<string, unknown>>(
+      space,
+      options.p1Names.result,
+      {
+        type: "object",
+        properties: { [options.p1Names.field]: options.bobFieldSchema },
+        additionalProperties: false,
+      } as never,
+    );
+    await bobResult.sync();
+    const bobCancel = bobResult.sink(() => {});
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space activation",
+    );
+    await waitUntil(
+      () => instanceHolds(engine, "space", '"leaf:5"'),
+      "leaf:5 to land (alice demands P2)",
+    );
+    await waitUntil(
+      () =>
+        (host!.spaceServer(space)?.demandedIdentitiesOf(aResultId) ?? [])
+          .some((i) => i.principal === bobSigner.did()),
+      "bob's demand on P1's result to register",
+    );
+    await servingRuntime!.idle();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const bobTracksLeaf = () =>
+      demandRows().some((r) =>
+        r.id === bResultId && r.identity?.principal === bobSigner.did()
+      );
+    return {
+      engine,
+      alice,
+      aResult,
+      bResultId,
+      bobTracksLeaf,
+      cleanup: () => {
+        aliceWatchB();
+        aliceWatchLeaf();
+        bobCancel();
+      },
+    };
+  };
+
+  it("T2′ (cross-piece): a wave writes a link to ANOTHER piece's doc into a field the demander watches narrowly → the target enters the demander's closure (NOT pre-empted by P1's wiring), the input is classed structural-growth, the cycle count is recorded; zero walk runs", async () => {
+    const x = await standUpCrossPiece({
+      p1Pattern: CROSS_RELAY_PATTERN,
+      p1Names: { arg: "dp-x-a-arg", result: "dp-x-a-result", field: "slot" },
+      bobFieldSchema: {
+        type: "object",
+        properties: { leaf: { type: "string" } },
+        additionalProperties: false,
+      },
+    });
+    // Bob's closure does NOT hold P2 before the link (the cross-piece
+    // target is unreachable through Bob's narrow, stream-free watch).
+    const preEmpted = x.bobTracksLeaf();
+    const wakesBefore = host!.stats().demand.pushGrowthWakes;
+    const seriesBefore = host!.stats().settle.series.length;
+    // A SEPARATE actor (Alice) fires the relay: slot := link to P2.
+    x.aResult.key("relay").send({});
+    await x.alice.idle();
+    await x.alice.storageManager.synced();
+    await waitUntil(
+      () => {
+        host!.spaceServer(space)!.noteDemandChanged();
+        return x.bobTracksLeaf();
+      },
+      "P2 to enter bob's closure through the link (push-growth)",
+      15_000,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const stats = host!.stats();
+    const growth = stats.settle.series.slice(seriesBefore).filter((s) =>
+      s.class === "structural-growth"
+    );
+    console.log(
+      `[T2′ cross-piece] pre-empted before link=${preEmpted}; ` +
+        `pushGrowthWakes +${stats.demand.pushGrowthWakes - wakesBefore}; ` +
+        `structural-growth settle entries=${
+          JSON.stringify(
+            growth.map((s) => ({
+              ms: Math.round(s.ms),
+              waves: s.waves,
+              growthWaves: (s as { growthWaves?: number }).growthWaves,
+            })),
+          )
+        }; leaf present=${instanceHolds(x.engine, "space", '"leaf:5"')}`,
+    );
+    // The deterministic facts: not pre-empted; P2 is in Bob's closure
+    // AFTER the link; the value is served; the walk is gone.
+    expect(preEmpted).toBe(false);
+    expect(x.bobTracksLeaf()).toBe(true);
+    expect(instanceHolds(x.engine, "space", '"leaf:5"')).toBe(true);
+    expect(host!.stats().demand.pushGrowthWakes).toBeGreaterThan(wakesBefore);
+    expect(walkRuns()).toBe(0);
+    x.cleanup();
+  });
+
+  it("T3′ (array growth): a handler appends a link-bearing element to a list the demander watches by schema → the appended target enters the closure; zero walk runs", async () => {
+    const x = await standUpCrossPiece({
+      p1Pattern: LIST_GROW_PATTERN,
+      p1Names: { arg: "dp-y-a-arg", result: "dp-y-a-result", field: "list" },
+      bobFieldSchema: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { leaf: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    });
+    const preEmpted = x.bobTracksLeaf();
+    const wakesBefore = host!.stats().demand.pushGrowthWakes;
+    const seriesBefore = host!.stats().settle.series.length;
+    // Alice pushes a link to P2 onto the list.
+    x.aResult.key("push").send({});
+    await x.alice.idle();
+    await x.alice.storageManager.synced();
+    await waitUntil(
+      () => {
+        host!.spaceServer(space)!.noteDemandChanged();
+        return x.bobTracksLeaf();
+      },
+      "the appended element's target to enter bob's closure",
+      15_000,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const stats = host!.stats();
+    const growth = stats.settle.series.slice(seriesBefore).filter((s) =>
+      s.class === "structural-growth"
+    );
+    console.log(
+      `[T3′ array growth] pre-empted before push=${preEmpted}; ` +
+        `pushGrowthWakes +${stats.demand.pushGrowthWakes - wakesBefore}; ` +
+        `structural-growth settle entries=${
+          JSON.stringify(
+            growth.map((s) => ({
+              ms: Math.round(s.ms),
+              growthWaves: (s as { growthWaves?: number }).growthWaves,
+            })),
+          )
+        }`,
+    );
+    expect(preEmpted).toBe(false);
+    expect(x.bobTracksLeaf()).toBe(true);
+    expect(instanceHolds(x.engine, "space", '"leaf:5"')).toBe(true);
+    // The tracker's push-time re-traversal (the NEW notify site) is what
+    // carries the appended target into demand — killing the notify makes
+    // this bite.
+    expect(host!.stats().demand.pushGrowthWakes).toBeGreaterThan(wakesBefore);
+    expect(walkRuns()).toBe(0);
+    x.cleanup();
   });
 });
