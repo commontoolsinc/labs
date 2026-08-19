@@ -102,6 +102,31 @@ On each pushed `derived` commit with `derivedThrough = W` and
    `#terminalIntents` at `#sealSpeculative`; pinned in
    `speculation-arrival-gate.test.ts` (the late-echo rule, scripted,
    with its mutation).
+   **The match, and its carrier (RULED 2026-08-18 — the stage-C design
+   pass, items 5/6, landed with W2):** the match is on the pushed
+   commit's `consequenceOf` — carried to the client as the TRACKED
+   entry's own `consequenced` / `status` / `error` fields (events.md
+   §5's T7 semantics: written as that event's consequence, retiring
+   with the entry at compaction — not a processed-events table), which
+   are SANCTIONED as the client's consequence carrier; `consequenceOf`
+   does NOT go on the wire. Two guards bind: the client reads the
+   tracked entry ONLY — its own terminal fields and, on a drop, its
+   reason for the UI hook — never whole-history and never as a
+   dependency on HISTORY; and the read is always BACKSTOPPED by
+   `W ≥ seq(e)` / `eventWatermark ≥ seq(e)` (item 9: an intent-origin
+   entry whose signal was missed retires on coverage — step 3's sweep
+   serves both origins). **The client keeps a stream subscribed while
+   it has intents outstanding on it** (item 8): the sidecar doc it
+   appended to stays watched — the minimal watch; the `eventWatermark`
+   write on that doc is the delivery vehicle in practice — so the marks
+   arrive; the watch is a NON-REACTIVE storage-notification listener
+   keyed on the outstanding set, outside the scheduler (item 4 — no
+   effect, no transaction, no CFC probe, no demand edge; the check
+   runs in a microtask and is O(outstanding), never O(history)). Impl:
+   `overlay-destination.ts` `trackIntent` / `#checkIntents` over
+   `speculation/doc-notification-listener.ts`; pinned in
+   `speculation-intent-listener.test.ts` (pins 1–11, each with its
+   mutation) and re-seamed in `event-append-client.test.ts`.
 3. Retire overlay entries whose `origin` is `input` once their authored
    commit is acked AND `W ≥` that commit's seq AND — the ARRIVAL GATE
    (RULED 2026-08-16, landed with fan-out stage A) — every doc INSTANCE
@@ -136,8 +161,10 @@ per-cycle load pass) — which makes the demanded derivation exist and
 land. That premise is FALSE for a scoped instance the server never
 serves (before the fan-out run supply, every per-user derivation is
 such an instance — the demand registry keeps no identity for a
-space-scoped root; and after it, any per-user subtree the demand walk
-does not reach), and coverage without arrival is then the
+space-scoped root; and after it, any per-user instance the server's
+demand set does not reach — the stage-B walk's coverage then, and under
+serving-loop.md §1's (d′) sentence an instance no client session
+tracks), and coverage without arrival is then the
 retire-to-nothing loop the P7 review recorded as OW32: the echo dropped
 to nothing, the writer — a reader of its own output through the
 scope-narrowing write path — re-derived, re-speculated, retired,

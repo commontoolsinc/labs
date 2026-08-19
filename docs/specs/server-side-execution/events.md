@@ -387,6 +387,16 @@ loop's duty).
   while offline; reconciliation is ordinary (speculation.md §4), and
   the notice retires the dropped event's overlay entries like any
   consequence.
+
+  **Drops and errors ride `consequenceOf` (RULED 2026-08-18 — the
+  stage-C design pass, item 7; landed with W2).** A dropped event's
+  notice and an erroring handler's error surface ARE that event's
+  consequence: the derived commit that writes them names the event in
+  its `consequenceOf` and advances `eventWatermark` past it, exactly
+  as a successful handling does — so "every eventId drained this wave
+  is in `consequenceOf`" (§4) holds for drops and errors too, and the
+  client's step-2 retirement (speculation.md §4) fires for them through
+  the same carrier (the entry's own `status` / `error` mark).
 - Duplicate submission (client retry after ambiguous network outcome):
   the append is CAS-guarded by `eventId` uniqueness above the dedupe
   horizon (§4) — a duplicate of a not-yet-consequenced event is

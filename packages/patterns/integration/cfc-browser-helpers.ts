@@ -1959,6 +1959,18 @@ export interface ChurnCounters {
    * (`speculation-overlay/arrival-sweep`) — served values arriving
    * decoupled from a watermark advance. */
   overlayArrivalSweeps: number;
+  /** Stage C design (e): intent checks the overlay's storage-notification
+   * listener ran (`speculation-overlay/intent-check`) — one per fire plus
+   * one per coalesced sidecar change while intents are outstanding; never
+   * a scheduler run. */
+  overlayIntentChecks: number;
+  /** Stage C design (e): intents resolved by their tracked entry's own
+   * consequence mark (`speculation-overlay/intent-retired-by-consequence-of`)
+   * — the sanctioned `consequenceOf` carrier. */
+  overlayIntentsByConsequenceOf: number;
+  /** Stage C design (e): intent-origin echoes retired by the watermark
+   * BACKSTOP instead (`speculation-overlay/intent-echo-retired-by-backstop`). */
+  overlayIntentEchoBackstops: number;
 }
 
 export interface BrowserLoadSummary {
@@ -2098,6 +2110,9 @@ export async function collectBrowserLoadSummary(
       eventLostRaces: 0,
       overlayLateEchoDrops: 0,
       overlayArrivalSweeps: 0,
+      overlayIntentChecks: 0,
+      overlayIntentsByConsequenceOf: 0,
+      overlayIntentEchoBackstops: 0,
     };
     try {
       const workerCounts = await cf?.rt?.getLoggerCounts?.();
@@ -2157,6 +2172,18 @@ export async function collectBrowserLoadSummary(
       churn.overlayArrivalSweeps = countOf(
         "speculation-overlay",
         "arrival-sweep",
+      );
+      churn.overlayIntentChecks = countOf(
+        "speculation-overlay",
+        "intent-check",
+      );
+      churn.overlayIntentsByConsequenceOf = countOf(
+        "speculation-overlay",
+        "intent-retired-by-consequence-of",
+      );
+      churn.overlayIntentEchoBackstops = countOf(
+        "speculation-overlay",
+        "intent-echo-retired-by-backstop",
       );
     } catch {
       // Worker may be disposed during teardown — main-thread IPC still tells
@@ -2231,7 +2258,10 @@ export function logBrowserLoadSummary(summary: BrowserLoadSummary): void {
     ` scheduleRunErrors=${c.scheduleRunErrors}` +
     ` eventLostRaces=${c.eventLostRaces}` +
     ` overlayLateEchoDrops=${c.overlayLateEchoDrops}` +
-    ` overlayArrivalSweeps=${c.overlayArrivalSweeps}`;
+    ` overlayArrivalSweeps=${c.overlayArrivalSweeps}` +
+    ` overlayIntentChecks=${c.overlayIntentChecks}` +
+    ` overlayIntentsByConsequenceOf=${c.overlayIntentsByConsequenceOf}` +
+    ` overlayIntentEchoBackstops=${c.overlayIntentEchoBackstops}`;
   const pendingLine = summary.pendingIpc.length === 0
     ? "    (none)"
     : summary.pendingIpc.map((row) =>
