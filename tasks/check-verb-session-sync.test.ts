@@ -70,7 +70,7 @@ describe("check-verb-session-sync", () => {
   describe("demoCommands", () => {
     it("extracts a command out of an assignment's substitution", () => {
       expect(demoCommands(`X=$(cf get --piece a title | jq -r .)`))
-        .toEqual([["cf", "piece", "get", "--piece", "a", "title"]]);
+        .toEqual([["cf", "get", "--piece", "a", "title"]]);
     });
   });
 
