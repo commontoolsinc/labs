@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   materializeOnCell,
   openFileBackedRuntime,
@@ -122,8 +122,9 @@ describe("vintage adopt", () => {
     const storeDir = await Deno.makeTempDir({ prefix: "adopt-capture-" });
     const capture = await openFileBackedRuntime(signer, storeDir);
     try {
-      const program = await capture.runtime.harness.resolve(
-        new FileSystemProgramResolver(`${dir}/patterns/${KEY}`, dir),
+      const program = await resolveLocalProgram(
+        (resolver) => capture.runtime.harness.resolve(resolver),
+        { main: `${dir}/patterns/${KEY}`, root: dir },
       );
       const outcome = await materializeOnCell(
         capture,
@@ -142,8 +143,9 @@ describe("vintage adopt", () => {
         }),
       )!.identity;
 
-      const childProgram = await capture.runtime.harness.resolve(
-        new FileSystemProgramResolver(`${dir}/patterns/${CHILD_KEY}`, dir),
+      const childProgram = await resolveLocalProgram(
+        (resolver) => capture.runtime.harness.resolve(resolver),
+        { main: `${dir}/patterns/${CHILD_KEY}`, root: dir },
       );
       const childOutcome = await materializeOnCell(
         capture,
@@ -166,8 +168,9 @@ describe("vintage adopt", () => {
       );
 
       // A root recorded under a NAMED artifact, for the dropped-symbol case.
-      const namedProgram = await capture.runtime.harness.resolve(
-        new FileSystemProgramResolver(`${dir}/patterns/${NAMED_KEY}`, dir),
+      const namedProgram = await resolveLocalProgram(
+        (resolver) => capture.runtime.harness.resolve(resolver),
+        { main: `${dir}/patterns/${NAMED_KEY}`, root: dir },
       );
       const namedOutcome = await materializeOnCell(
         capture,

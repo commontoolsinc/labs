@@ -113,6 +113,12 @@ SHELL_PORT=${SHELL_PORT:-$((BASE_SHELL_PORT + PORT_OFFSET))}
 TOOLSHED_PORT=${TOOLSHED_PORT:-$((BASE_TOOLSHED_PORT + PORT_OFFSET))}
 INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
 
+require_reachable_port "shell" "$SHELL_PORT"
+require_reachable_port "toolshed" "$TOOLSHED_PORT"
+if [[ "$INSPECT" == "true" ]]; then
+    require_reachable_port "inspector" "$INSPECT_PORT"
+fi
+
 # Export for child processes
 export SHELL_PORT
 export TOOLSHED_PORT
@@ -334,6 +340,13 @@ wait_for_http "shell" "http://localhost:$SHELL_PORT" "$SHELL_PID" "$SHELL_LOG"
 wait_for_listen "toolshed" "Server running on" "$TOOLSHED_PID" "$TOOLSHED_LOG"
 wait_for_http \
     "toolshed" "http://localhost:$TOOLSHED_PORT/_health" \
+    "$TOOLSHED_PID" "$TOOLSHED_LOG"
+
+# The page a browser loads: the toolshed serving the shell it proxies. The two
+# checks above cover each server on its own port, and this one covers the hop
+# between them, which the toolshed makes with fetch() rather than with curl.
+wait_for_http \
+    "shell through toolshed" "http://localhost:$TOOLSHED_PORT/" \
     "$TOOLSHED_PID" "$TOOLSHED_LOG"
 
 # Print the toolshed URL on success (when not using --bg-updater, which prints after health check)

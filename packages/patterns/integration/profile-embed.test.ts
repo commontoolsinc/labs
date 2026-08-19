@@ -1,7 +1,7 @@
 import { env, Page } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
@@ -85,8 +85,9 @@ describe("profile-embed integration test", () => {
       "profile-embed.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath, rootPath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath, root: rootPath },
     );
     const piece = await cc.create(program, { start: true });
     pieceId = piece.id;

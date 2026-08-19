@@ -1,14 +1,12 @@
-import { dirname } from "@std/path";
 import {
   assertImportInsideProgramRoot,
   collectImportSpecifiers,
-  FileSystemProgramResolver,
   type Program,
   type ProgramResolver,
   resolveImportSpecifier,
   type Source,
 } from "@commonfabric/js-compiler";
-import { attachDataFiles } from "./data-files.ts";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { TARGET } from "@commonfabric/js-compiler/typescript";
 import { Identity } from "@commonfabric/identity";
 import {
@@ -86,29 +84,35 @@ export async function process(
   // that state, so `fn.src` stays a raw bundle coordinate and CFC verified-
   // binding identities (writeAuthorizedBy) fail under enforcement.
   const engine = runtime.harness;
-  const resolver = new FileSystemProgramResolver(
-    options.main,
-    options.rootPath,
-  );
+  const localOptions = {
+    main: options.main,
+    ...(options.rootPath === undefined ? {} : { root: options.rootPath }),
+    ...(options.dataFilePaths === undefined
+      ? {}
+      : { dataFilePaths: options.dataFilePaths }),
+  };
   let program: RuntimeProgram;
   if (options.space) {
-    program = await collectLocalProgram(resolver, { fabricImports: "allow" });
+    program = await resolveLocalProgram(
+      (resolver) => collectLocalProgram(resolver, { fabricImports: "allow" }),
+      localOptions,
+    );
   } else {
     // engine.resolve fails fabric specifiers as generic unresolved modules;
-    // scan first so they get the friendlier requires-a-space message.
-    await collectLocalProgram(resolver, { fabricImports: "reject" });
-    program = await engine.resolve(resolver);
+    // scan first so they get the friendlier requires-a-space message. The
+    // scan's program is discarded — only its refusal matters.
+    await resolveLocalProgram(
+      (resolver) => collectLocalProgram(resolver, { fabricImports: "reject" }),
+      localOptions,
+    );
+    program = await resolveLocalProgram(
+      (resolver) => engine.resolve(resolver),
+      localOptions,
+    );
   }
   if (options.mainExport) {
     program.mainExport = options.mainExport;
   }
-  // Attach the same data files a deployment would, so `dataFile` reads what it
-  // will read once deployed instead of failing for want of a closure.
-  program = attachDataFiles(
-    program,
-    options.dataFilePaths,
-    options.rootPath ?? dirname(options.main),
-  );
   let transformed: string | undefined;
   const getTransformedProgram = options.showTransformed
     ? (program: Program) => {

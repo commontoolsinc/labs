@@ -1513,7 +1513,11 @@ export class Server {
           }],
         },
       });
-      this.markSpaceDirty(space, [toDirtyKey(id)]);
+      // An elided direct write changed nothing, and unlike a session
+      // transact it owes no catch-up marker — skip the flush entirely.
+      if (commit.revisions.length > 0) {
+        this.markSpaceDirty(space, [toDirtyKey(id)]);
+      }
       await this.runPostCommitSchedulerSideEffects(
         space,
         commit,
@@ -2354,18 +2358,32 @@ export class Server {
           // op produced the head this commit leaves behind, so it alone
           // decides the flush-time echo shape.
           const dirtyOps = new Map<string, DirtyOp>();
-          for (const operation of message.commit.operations) {
+          const elided = new Set(commit.elidedOpIndexes ?? []);
+          for (
+            const [opIndex, operation] of message.commit.operations.entries()
+          ) {
             if (operation.op === "sqlite") continue;
+            // An elided content-addressed re-set changed nothing — no head
+            // moved, so there is no novelty to fan out or classify.
+            if (elided.has(opIndex)) continue;
             dirtyOps.set(
               toDirtyKey(operation.id, declaredScope(operation.scope)),
               operation.op,
             );
           }
-          this.markSpaceDirty(message.space, dirtyOps.keys(), {
-            sessionId: message.sessionId,
-            seq: commit.seq,
-            ops: dirtyOps,
-          });
+          if (dirtyOps.size > 0) {
+            this.markSpaceDirty(message.space, dirtyOps.keys(), {
+              sessionId: message.sessionId,
+              seq: commit.seq,
+              ops: dirtyOps,
+            });
+          } else {
+            // Every operation elided: nothing was written, so no document
+            // turns dirty — but the accept still owes this session its
+            // catch-up marker, and the marker rides the batched flush.
+            // Schedule the pass without dirtying anything.
+            this.markSpaceDirty(message.space);
+          }
           // Stage the accept's catch-up obligation with the dirty mark. The
           // verdict response leaves this request before the independently
           // scheduled batch can send its covering frame. The batched fan-out

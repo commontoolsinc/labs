@@ -574,7 +574,7 @@ export const githubCiSpend: Tile = {
             BLACKSMITH_COLOR,
             charted,
           ),
-          `Budget ${Number.isFinite(budget) ? usd(budget) : "$???"}`,
+          ...(Number.isFinite(budget) ? [`Budget ${usd(budget)}`] : []),
         ].join(" • ")
       }</p>`;
     if (present.length === 0) {

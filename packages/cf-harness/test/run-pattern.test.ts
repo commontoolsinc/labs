@@ -429,6 +429,116 @@ describe("run-pattern", () => {
       expect(await piece.result.get(["doubled"])).toBe(20);
     });
 
+    it("returns an error naming the failing computation when the result settles to nothing", async () => {
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { computed, pattern } from 'commonfabric';",
+          "interface Output { boom: number; }",
+          "export default pattern<Record<string, never>, Output>(() => ({",
+          "  boom: computed(() => { throw new Error('boom in lift'); }),",
+          "}));",
+          "",
+        ].join("\n"),
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("failed while settling");
+      // The thrown text is a data channel: it stays in the artifact field the
+      // prompt loop strips from model context, never in the message.
+      expect(output.message).not.toContain("boom in lift");
+      expect(output.rawCauseMessage).toContain("boom in lift");
+      expect(output.pieceId).toBeDefined();
+      expect(result.runState.status).toBe("completed");
+    });
+
+    it("returns an error naming deferred writes when a policy-refused commit keeps the result from landing", async () => {
+      // A strict flow-label runtime over a labelled source: the pattern's
+      // description-derived write is refused at the commit boundary, the
+      // scheduler retries it past the convergence budget, and the result
+      // settles to nothing. The tool reports that as an error naming the
+      // deferred-writes shape rather than an ok over an empty value.
+      const strictStorage = StorageManager.emulate({ as: signer });
+      const strictRuntime = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager: strictStorage,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
+      });
+      const strictPieces = new PiecesController(
+        await createSession({
+          identity: signer,
+          spaceName: `run-pattern-strict-${crypto.randomUUID()}`,
+        }),
+        strictRuntime,
+      );
+      try {
+        await strictPieces.synced();
+        const space = strictPieces.getSpace();
+        const seed = strictRuntime.edit();
+        const sourceCell = strictRuntime.getCell(
+          space,
+          "labelled-source",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+              amount: { type: "number" },
+            },
+          },
+          seed,
+        );
+        const sourceId = sourceCell.getAsNormalizedFullLink().id;
+        seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
+          value: { secret: "s3cr3t", amount: 2 },
+          cfc: {
+            version: 1,
+            schemaHash: "seed-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: ["secret"],
+                label: { confidentiality: ["secret"] },
+              }],
+            },
+          },
+        });
+        expect((await seed.commit()).ok).toBeDefined();
+        const sourceRef = createLLMFriendlyLink(
+          sourceCell.getAsNormalizedFullLink(),
+          space,
+        );
+
+        const engine = new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: `run-pattern-strict-${crypto.randomUUID()}`,
+          cfcEnforcementMode: "disabled",
+          fabricSessionFactory: () => Promise.resolve({ pieces: strictPieces }),
+        });
+        const result = await engine.invokeBuiltinTool("run_pattern", {
+          sourceText: [
+            "import { computed, pattern, Reactive } from 'commonfabric';",
+            "interface Source { secret: string; amount: number; }",
+            "interface Input { source: Reactive<Source>; }",
+            "interface Output { copied: string; }",
+            "export default pattern<Input, Output>(({ source }) => ({",
+            "  copied: computed(() => `${source.secret}!`),",
+            "}));",
+            "",
+          ].join("\n"),
+          inputs: { source: sourceRef },
+        });
+        const output = result.output as RunPatternToolErrorOutput;
+        expect(output.status).toBe("error");
+        expect(output.message).toContain("result never landed");
+        expect(output.message).toContain("convergence budget");
+        expect(output.pieceId).toBeDefined();
+      } finally {
+        await strictRuntime.dispose();
+        await strictStorage.close();
+      }
+    });
+
     it("returns a `compile-error` output carrying the raw diagnostics without failing the run", async () => {
       const engine = createEngine();
       const result = await engine.invokeBuiltinTool("run_pattern", {

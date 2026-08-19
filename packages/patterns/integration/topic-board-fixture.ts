@@ -15,7 +15,7 @@
  */
 
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { join } from "@std/path";
 import {
@@ -232,8 +232,9 @@ export async function seedTopicBoard(
 
     const sourcePath = join(import.meta.dirname!, "..", "topics", "main.tsx");
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath, rootPath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath, root: rootPath },
     );
     const board = await cc.create(program, { start: true });
 

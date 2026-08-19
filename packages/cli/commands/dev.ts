@@ -80,6 +80,18 @@ async function checkAction(
       results.push({ file, output, transformed, patternJson });
     } catch (error) {
       hasError = true;
+      // The runtime reports that a data file is not attached; it does not know
+      // how this caller would attach one. `cf check` does, so it names its own
+      // flag here rather than leaving the reader to find it.
+      if (
+        error instanceof Error &&
+        error.message.includes("No attached data file") &&
+        options.datafile === undefined
+      ) {
+        console.error(
+          "Attach it with --datafile <path>, repeating the flag per file.",
+        );
+      }
       // Re-throw for single file, continue for multiple files
       if (files.length === 1) {
         throw error;

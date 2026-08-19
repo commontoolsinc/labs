@@ -85,6 +85,21 @@ tile once per collection interval. A tile with several workflows can update
 once for each workflow as they arrive. This keeps a repository's build, trust,
 duration, and recent-run views in agreement when their intervals coincide.
 
+A workflow snapshot is read a page at a time, and the pages have to describe
+one moment. A page after the first asks GitHub for the runs created at or
+before the run the page before it ended on, rather than for an offset into a
+list that shifts as runs land. That run is one the window already holds, so the
+page has to carry it; a page that comes back without it was cut from a moment
+that never held that run, and the fetch fails rather than joining the two. This
+reads the same whichever side went stale. The cost is the one run each page
+repeats, which is why the window is up to the configured maximum rather than
+exactly it. The runs that do come back are ordered newest-first by the
+collection, not by the order the pages arrived in. A fetch whose newest run is older than the newest run already held
+read a stale view of the workflow: the scheduler keeps the snapshot it has and
+names the source, and the next fetch that reaches a current view clears that.
+Together these keep a stale read from putting a run from weeks back at the head
+of a window, where every CI tile takes the state of the tree from.
+
 The recent-main-runs tile reads both the Labs and Loom snapshots. It rebuilds
 and sorts the combined list whenever either snapshot arrives. If one snapshot
 has not arrived yet, it shows the runs from the available snapshot in gray and
@@ -617,11 +632,13 @@ Notes:
   `CI_MONTHLY_BUDGET` overrides provider budgets. A single provider otherwise
   uses its own configured budget. With both providers, their budgets are added
   only when both exist. Blacksmith's budget is its monthly spending-alert
-  threshold. A failed configured source turns the tile gray and shows `$???`
-  for that source. The values from responding sources remain as a lower bound.
-  A source that has stopped reporting fails the same way. Both feeds report a
-  day or two after a day ends, and a settled day neither has a row for is a day
-  that cost nothing — which holds only while the feed is still being written.
+  threshold. A budget that resolves to no number is left out of the status line
+  rather than shown as an unknown amount. A failed configured source turns the
+  tile gray and shows `$???` for that source. The values from responding sources
+  remain as a lower bound. A source that has stopped reporting fails the same
+  way. Both feeds report a day or two after a day ends, and a settled day
+  neither has a row for is a day that cost nothing — which holds only while the
+  feed is still being written.
   Each is read no further than its own newest row reaches: GitHub's report is
   one pipeline across every product the org uses, so any product's row dates it,
   and Blacksmith's daily endpoint dates itself. Four days without a row is a

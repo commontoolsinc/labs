@@ -316,7 +316,11 @@ which compares special objects by content hash) — conflicting sets of one id
 within a single commit included — because a deleted or altered
 dependency would invalidate every document referencing it. An
 idempotent re-`set` of the same content is how writers install closures
-and stays legal, and a sync frame's removes are watch-result removals,
+and stays legal — and it applies as a semantic no-op: the immutability
+comparison proves the content unchanged, so the engine writes no
+revision, advances no head, and marks nothing dirty, while the commit
+row and space sequence still advance (a blind closure re-install costs
+watchers nothing). A sync frame's removes are watch-result removals,
 not deletions.
 
 The commit boundary also validates the closure a commit's content

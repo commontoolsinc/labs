@@ -226,8 +226,31 @@ If a test, browser capture, or FFmpeg encode fails, the command exits nonzero
 and retains its manifest and available intermediate streams under the printed
 run directory.
 
+## Patterns that read data files
+
+A pattern calling `dataFile()` reads a file attached to the program under test.
+Every kind of test attaches them where it builds that program: `cf test` takes
+repeatable `--datafile` paths, a `generated-patterns` scenario names them in
+`dataFiles` grounded by `dataRoot`, and a browser integration test passes
+`dataFilePaths` to `resolveLocalProgram`.
+
+A browser integration test needs nothing further: the data travels to the
+browser inside the compiled pattern the space holds, so there is no file to
+serve and no browser-side plumbing to arrange.
+
+The attachment is easy to leave out and reports nothing when it is: the pattern
+compiles and type-checks without it, and fails only when it reads, with
+`No attached data file "<path>"` naming what is attached instead. That is why
+`resolveLocalProgram` is the one operation for building a program from local
+files, and why `deno task check-local-program` refuses a
+`FileSystemProgramResolver` built anywhere else.
+
 ## Related documentation
 
+- [test-records.md](test-records.md) — the record of every test execution:
+  every suite here reports one record per test to a public store, and that
+  document covers what gets recorded, opting a workstation in, and reading
+  the data.
 - [unit-test-coding-style.md](unit-test-coding-style.md) — how a unit test file
   is shaped: where it lives and what it is called, the single top-level
   `describe()` and the blocks nested under it, how an `it()` description is

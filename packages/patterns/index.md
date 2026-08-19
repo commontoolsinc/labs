@@ -1511,7 +1511,10 @@ type SvgDiagramOutput = {
 ## `suggestable/budget-planner.tsx`
 
 Generates a budget breakdown with editable amounts for each category. The LLM
-suggests spending categories that sum to the given budget ceiling.
+suggests spending categories that sum to the given budget ceiling. The topic is
+what asks for the breakdown: with none given the pattern holds the request back
+and shows an empty budget, so building one costs nothing until a caller says
+what the money is for.
 
 **Keywords:** budget, generateObject, suggestion-fuel
 

@@ -2328,9 +2328,9 @@ export class Runtime {
   /**
    * True iff the default host AND every distinct mapped host are
    * reachable — one runtime can span hosts, so health is the
-   * conjunction over all of them.
+   * conjunction over all of them. The optional signal cancels the requests.
    */
-  async healthCheck(): Promise<boolean> {
+  async healthCheck(signal?: AbortSignal): Promise<boolean> {
     // Overlapping calls each capture into their own generation; only the
     // newest call's capture publishes, so a slow earlier response cannot
     // overwrite a newer one after the fact.
@@ -2352,7 +2352,7 @@ export class Runtime {
     }
     const checks = [...hosts].map(async (host) => {
       try {
-        const res = await fetch(new URL("/_health", host));
+        const res = await fetch(new URL("/_health", host), { signal });
         if (
           host === defaultHost && generation === this.#healthCheckGeneration
         ) {
@@ -2361,6 +2361,7 @@ export class Runtime {
         }
         return res.ok;
       } catch (_) {
+        signal?.throwIfAborted();
         return false;
       }
     });

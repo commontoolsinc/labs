@@ -1,6 +1,6 @@
 import { env } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { assertEquals } from "@std/assert";
@@ -48,8 +48,9 @@ describe("cfc authorized save integration test", () => {
       "main.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(sourcePath, rootPath),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: sourcePath, root: rootPath },
     );
     piece = await cc.create(program, { start: true });
 

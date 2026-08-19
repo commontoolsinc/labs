@@ -28,7 +28,7 @@
  */
 
 import { Identity } from "@commonfabric/identity";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { getPatternIdentityRef } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
 
@@ -245,8 +245,9 @@ export async function adoptVintage(options: AdoptOptions): Promise<string> {
       const source = `${roots.patternsRoot}/${entryKey}`;
       let program;
       try {
-        program = await vintage.runtime.harness.resolve(
-          new FileSystemProgramResolver(source, roots.repoRoot),
+        program = await resolveLocalProgram(
+          (resolver) => vintage.runtime.harness.resolve(resolver),
+          { main: source, root: roots.repoRoot },
         );
       } catch (error) {
         throw new Error(

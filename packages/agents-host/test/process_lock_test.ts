@@ -1,0 +1,116 @@
+import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
+import { join } from "@std/path";
+import {
+  AgentsHostProcessLock,
+  defaultTargetProcessLockPath,
+} from "../src/process-lock.ts";
+
+Deno.test("target process locks use the canonical API and resolved space", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const first = await defaultTargetProcessLockPath(
+      "https://user:secret@FABRIC.example.test:443/",
+      "did:key:space",
+      directory,
+    );
+    const equivalent = await defaultTargetProcessLockPath(
+      "https://fabric.example.test/ignored-api-path",
+      "did:key:space",
+      directory,
+    );
+    const differentSpace = await defaultTargetProcessLockPath(
+      "https://fabric.example.test/",
+      "did:key:other-space",
+      directory,
+    );
+
+    assertEquals(first, equivalent);
+    assertNotEquals(first, differentSpace);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHostProcessLock excludes another host process and releases cleanly", async () => {
+  const directory = await Deno.makeTempDir();
+  const path = join(directory, "agents.lock");
+  const child = new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--allow-read",
+      "--allow-write",
+      "--allow-sys=uid",
+      join(import.meta.dirname!, "process-lock-holder.ts"),
+      path,
+    ],
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "inherit",
+  }).spawn();
+  try {
+    const reader = child.stdout.getReader();
+    const ready = await reader.read();
+    reader.releaseLock();
+    assertEquals(new TextDecoder().decode(ready.value).trim(), "locked");
+
+    await assertRejects(
+      () => AgentsHostProcessLock.acquire(path),
+      Error,
+      "another agent host holds the process lock",
+    );
+
+    const writer = child.stdin.getWriter();
+    await writer.write(new Uint8Array([10]));
+    await writer.close();
+    assertEquals((await child.status).success, true);
+
+    const acquired = await AgentsHostProcessLock.acquire(path);
+    await assertRejects(
+      () => AgentsHostProcessLock.acquire(path),
+      Error,
+      "another agent host holds the process lock",
+    );
+    await acquired.release();
+    await acquired.release();
+  } finally {
+    await child.stdin.close().catch(() => undefined);
+    await child.status;
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHostProcessLock rejects symbolic links", async () => {
+  if (Deno.build.os === "windows") return;
+  const directory = await Deno.makeTempDir();
+  const target = join(directory, "target");
+  const path = join(directory, "agents.lock");
+  try {
+    await Deno.writeTextFile(target, "do not replace\n", { mode: 0o600 });
+    await Deno.symlink(target, path);
+    await assertRejects(
+      () => AgentsHostProcessLock.acquire(path),
+      Error,
+      "process lock file cannot be a symbolic link",
+    );
+    assertEquals(await Deno.readTextFile(target), "do not replace\n");
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("AgentsHostProcessLock rejects shared lock directories", async () => {
+  if (Deno.build.os === "windows") return;
+  const root = await Deno.makeTempDir();
+  const directory = join(root, "shared");
+  try {
+    await Deno.mkdir(directory, { mode: 0o755 });
+    await Deno.chmod(directory, 0o755);
+    await assertRejects(
+      () => AgentsHostProcessLock.acquire(join(directory, "agents.lock")),
+      Error,
+      "process lock directory permits access by other users",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});

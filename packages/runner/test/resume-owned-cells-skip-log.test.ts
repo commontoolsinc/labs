@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -275,11 +275,9 @@ describe("resume owned-cell walk skip logging", () => {
     });
     try {
       const patternsRoot = join(import.meta.dirname!, "..", "..", "patterns");
-      const program = await runtime.harness.resolve(
-        new FileSystemProgramResolver(
-          join(patternsRoot, "system", "home.tsx"),
-          patternsRoot,
-        ),
+      const program = await resolveLocalProgram(
+        (resolver) => runtime.harness.resolve(resolver),
+        { main: join(patternsRoot, "system", "home.tsx"), root: patternsRoot },
       );
       const homePattern = await runtime.patternManager.compilePattern(program, {
         space,

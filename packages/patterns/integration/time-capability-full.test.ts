@@ -14,7 +14,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   currentPatternIntegrationShard,
   selectPatternIntegrationShard,
@@ -80,8 +80,9 @@ async function checkPattern(rel: string): Promise<Outcome> {
   });
   let cancel: (() => void) | undefined;
   try {
-    const program = await cc.runtime.harness.resolve(
-      new FileSystemProgramResolver(join(ROOT, rel), ROOT),
+    const program = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: join(ROOT, rel), root: ROOT },
     );
     const piece = await cc.create(program, { start: true });
     const resultCell = cc.getResult(piece.getCell());

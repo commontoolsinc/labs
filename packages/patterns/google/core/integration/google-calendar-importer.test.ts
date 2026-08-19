@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { join } from "@std/path";
 
 const { API_URL, FRONTEND_URL } = env;
@@ -39,10 +39,10 @@ describe("google calendar importer e2e", () => {
       "..",
       "google-auth.tsx",
     );
-    const googleAuthProgram = await cc.runtime.harness
-      .resolve(
-        new FileSystemProgramResolver(googleAuthPath),
-      );
+    const googleAuthProgram = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: googleAuthPath },
+    );
     const googleAuthPiece = await cc.create(googleAuthProgram, { start: true });
     googleAuthPieceId = googleAuthPiece.id;
 
@@ -52,10 +52,10 @@ describe("google calendar importer e2e", () => {
       "..",
       "google-calendar-importer.tsx",
     );
-    const calendarProgram = await cc.runtime.harness
-      .resolve(
-        new FileSystemProgramResolver(calendarPath),
-      );
+    const calendarProgram = await resolveLocalProgram(
+      (resolver) => cc.runtime.harness.resolve(resolver),
+      { main: calendarPath },
+    );
     const calendarPiece = await cc.create(calendarProgram, { start: true });
     calendarImporterPieceId = calendarPiece.id;
 

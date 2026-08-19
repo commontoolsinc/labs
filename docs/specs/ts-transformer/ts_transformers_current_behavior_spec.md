@@ -3046,9 +3046,12 @@ Consequence for maintenance: the transformer's AST helper builders
 sandbox-contract string builders are maintained **by hand in two encodings**.
 Any drift between them is loud — every transformed module carries at least
 `__cfHardenFn(h);` (§17.2), so a non-matching helper fails verification for
-every pattern load — but there is no unit test asserting the equivalence
-directly (`packages/utils/test/sandbox-contract.test.ts` covers only the
-trusted-name lists).
+every pattern load — and the equivalence is asserted directly by
+`packages/runner/test/sandbox-contract-helper-equivalence.test.ts`, which
+transforms a module and compares each emitted helper declaration's
+trivia-stripped text against the corresponding string builder's output
+(`packages/utils/test/sandbox-contract.test.ts` covers only the trusted-name
+lists).
 
 ### 17.7 Edge cases (observed)
 
