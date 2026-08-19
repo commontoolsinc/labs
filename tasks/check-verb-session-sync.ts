@@ -1,26 +1,32 @@
 #!/usr/bin/env -S deno run --allow-read
 /**
- * Fails when the verb-session walkthrough drifts from the demo that runs it.
+ * Fails when a verb-session document drifts from the demo that runs it.
  *
- * The walkthrough (`docs/common/verbs/session-walkthrough.md`) may QUOTE
- * commands but never compose them: every `cf` line in one of its bash blocks
- * must be a command `packages/cli/integration/verb-session-demo.sh` actually
- * runs, or sit under a `# not in the demo` comment saying why it cannot be.
- * Nothing executes a bash block in a document, so a composed example can be
- * wrong from the day it is written and stay wrong through every editing pass
- * — one shipped that way and survived four of them. The same document names
- * demo acts by number, and those references have gone stale twice as acts
- * were inserted. Both failure classes are mechanical to detect, and this is
- * where they are detected.
+ * Two documents describe the same session — the tour
+ * (`docs/common/verbs/the-verb-session.md`) and the walkthrough
+ * (`docs/common/verbs/session-walkthrough.md`) — and each may QUOTE commands
+ * but never compose them: every `cf` line in one of their command blocks must
+ * be a command `packages/cli/integration/verb-session-demo.sh` actually runs,
+ * or sit under a `# not in the demo` comment saying why it cannot be. Nothing
+ * executes a command block in a document, so a composed example can be wrong
+ * from the day it is written and stay wrong through every editing pass — one
+ * shipped that way and survived four of them. Both documents also name demo
+ * acts by number, and those references have gone stale twice as acts were
+ * inserted. Both failure classes are mechanical to detect, and this is where
+ * they are detected.
  *
- * Three checks:
- * - Every walkthrough `cf` command matches a demo command, token for token,
- *   after normalization: the demo's `-s "$SPACE"` pair is dropped (the
- *   walkthrough's examples run in a configured shell), quotes are stripped,
- *   and a token holding a `$variable` or a `<placeholder>` matches anything.
- * - Every "act N" reference names an act the demo has.
- * - Every row of the verb shape table pairs its verbs with acts whose demo
+ * Three checks, run over every document in `DOC_PATHS`:
+ * - Every `cf` command matches a demo command, token for token, after
+ *   normalization: an `-s <space>` pair is dropped from both sides, quotes
+ *   are stripped, and a token holding a `$variable` or a `<placeholder>`
+ *   matches anything. An address a transcript shortened for width needs no
+ *   rule of its own: the demo holds every address in a variable.
+ * - Every "act N" reference, in any case, names an act the demo has.
+ * - Every row of a verb shape table pairs its verbs with acts whose demo
  *   text actually mentions them.
+ *
+ * A `bash` block holds commands alone; a `console` block holds a transcript,
+ * and its output lines fall out because they carry no `cf` token.
  *
  * Usage: deno run --allow-read ./tasks/check-verb-session-sync.ts
  */
@@ -30,6 +36,11 @@ import { dirname, fromFileUrl, join } from "@std/path";
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 export const DEMO_PATH = "packages/cli/integration/verb-session-demo.sh";
 export const WALKTHROUGH_PATH = "docs/common/verbs/session-walkthrough.md";
+export const TOUR_PATH = "docs/common/verbs/the-verb-session.md";
+
+/** Every document held to the demo. Both quote commands and name acts, and a
+ * command invented in either is wrong the same way. */
+export const DOC_PATHS = [TOUR_PATH, WALKTHROUGH_PATH];
 
 /** The comment that exempts the next `cf` line in a walkthrough bash block.
  * The marker alone is not enough: an exemption without a reason is one
@@ -85,13 +96,17 @@ export function tokenize(line: string): string[] {
 }
 
 /** A token that stands for "whatever the session had here": a shell variable
- * on the demo side, an angle-bracket placeholder on the walkthrough side. */
+ * on the demo side, an angle-bracket placeholder in a document. An address a
+ * transcript shortened for width needs nothing of its own — the demo holds
+ * every address in a variable, so the wildcard is already on that side. */
 function isWildcard(token: string): boolean {
   return token.includes("$") || (token.startsWith("<") && token.endsWith(">"));
 }
 
-/** Drops the demo's per-command space flag; the walkthrough's examples run in
- * a shell where the space is already configured. */
+/** Drops a command's per-space flag. The demo passes `-s "$SPACE"` and a
+ * transcript shows the space it really ran against, while the walkthrough's
+ * examples run in a shell where the space is already configured — so the flag
+ * is noise on every side of the comparison. */
 function dropSpaceFlag(tokens: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -145,8 +160,10 @@ export function demoCommands(shText: string): string[][] {
   return commands;
 }
 
-/** Every `cf` command a walkthrough bash block shows, with its 1-indexed
- * line, minus the ones a `# not in the demo` comment exempts. */
+/** Every `cf` command a document's command block shows, with its 1-indexed
+ * line, minus the ones a `# not in the demo` comment exempts. A `bash` block
+ * holds commands alone; a `console` block holds a transcript, where the
+ * output lines carry no `cf` token and fall out on their own. */
 export function walkthroughCommands(
   mdText: string,
 ): Array<{ tokens: string[]; line: number }> {
@@ -157,7 +174,9 @@ export function walkthroughCommands(
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     if (!inBash) {
-      if (line.startsWith("```bash")) inBash = true;
+      if (line.startsWith("```bash") || line.startsWith("```console")) {
+        inBash = true;
+      }
       continue;
     }
     if (line.startsWith("```")) {
@@ -179,7 +198,7 @@ export function walkthroughCommands(
       exempt = false;
       continue;
     }
-    out.push({ tokens: tokenize(span), line: i + 1 });
+    out.push({ tokens: dropSpaceFlag(tokenize(span)), line: i + 1 });
   }
   return out;
 }
@@ -221,7 +240,7 @@ export function actReferences(
   const out: Array<{ act: number; line: number }> = [];
   const lines = mdText.split("\n");
   for (let i = 0; i < lines.length; i++) {
-    for (const match of lines[i]!.matchAll(/\bacts? (\d+)(?: and (\d+))?/g)) {
+    for (const match of lines[i]!.matchAll(/\bacts? (\d+)(?: and (\d+))?/gi)) {
       out.push({ act: Number(match[1]), line: i + 1 });
       if (match[2]) out.push({ act: Number(match[2]), line: i + 1 });
     }
@@ -241,7 +260,7 @@ export function shapeTableRows(
     if (!line.startsWith("| `")) continue;
     const cells = line.split("|").map((cell) => cell.trim());
     const last = cells[cells.length - 2] ?? "";
-    const acts = [...last.matchAll(/\bact[s]? (\d+)(?: and (\d+))?/g)]
+    const acts = [...last.matchAll(/\bact[s]? (\d+)(?: and (\d+))?/gi)]
       .flatMap((m) => m[2] ? [Number(m[1]), Number(m[2])] : [Number(m[1])]);
     if (acts.length === 0) continue;
     const verbs = [...(cells[1] ?? "").matchAll(/`(\w+)`/g)].map((m) => m[1]!);
@@ -250,14 +269,19 @@ export function shapeTableRows(
   return out;
 }
 
-/** Every way the two files disagree, as printable findings. */
-export function findViolations(shText: string, mdText: string): string[] {
+/** Every way a document and the demo disagree, as printable findings.
+ * `docPath` only labels the findings; it is the caller's name for the text. */
+export function findViolations(
+  shText: string,
+  mdText: string,
+  docPath: string = WALKTHROUGH_PATH,
+): string[] {
   const violations: string[] = [];
   const demo = demoCommands(shText);
   for (const { tokens, line } of walkthroughCommands(mdText)) {
     if (!demo.some((cmd) => commandMatches(tokens, cmd))) {
       violations.push(
-        `${WALKTHROUGH_PATH}:${line} shows a command the demo does not run: ` +
+        `${docPath}:${line} shows a command the demo does not run: ` +
           `\`${tokens.join(" ")}\` — quote a demo line, or mark the line ` +
           `with \`# not in the demo\` and a reason`,
       );
@@ -267,7 +291,7 @@ export function findViolations(shText: string, mdText: string): string[] {
   for (const { act, line } of actReferences(mdText)) {
     if (!acts.has(act)) {
       violations.push(
-        `${WALKTHROUGH_PATH}:${line} names act ${act}, which the demo does ` +
+        `${docPath}:${line} names act ${act}, which the demo does ` +
           `not have`,
       );
     }
@@ -278,7 +302,7 @@ export function findViolations(shText: string, mdText: string): string[] {
       if (body === undefined) continue; // already reported above
       if (!verbs.some((verb) => body.includes(verb))) {
         violations.push(
-          `${WALKTHROUGH_PATH}:${line} pairs ${verbs.join("/")} with act ` +
+          `${docPath}:${line} pairs ${verbs.join("/")} with act ` +
             `${act}, whose demo text mentions none of them`,
         );
       }
@@ -286,7 +310,7 @@ export function findViolations(shText: string, mdText: string): string[] {
     for (const verb of verbs) {
       if (!rowActs.some((act) => (acts.get(act) ?? "").includes(verb))) {
         violations.push(
-          `${WALKTHROUGH_PATH}:${line} lists \`${verb}\` under acts ` +
+          `${docPath}:${line} lists \`${verb}\` under acts ` +
             `${rowActs.join(", ")}, and none of those acts mentions it`,
         );
       }
@@ -309,16 +333,23 @@ export async function main(deps: {
   const shText = await Deno.readTextFile(
     deps.shPath ?? join(REPO_ROOT, DEMO_PATH),
   );
-  const mdText = await Deno.readTextFile(
-    deps.mdPath ?? join(REPO_ROOT, WALKTHROUGH_PATH),
-  );
-  const violations = findViolations(shText, mdText);
+  const docPaths = deps.mdPath === undefined ? DOC_PATHS : [deps.mdPath];
+  const violations: string[] = [];
+  for (const docPath of docPaths) {
+    const mdText = await Deno.readTextFile(
+      docPath.startsWith("/") ? docPath : join(REPO_ROOT, docPath),
+    );
+    violations.push(...findViolations(shText, mdText, docPath));
+  }
   if (violations.length > 0) {
     error(`verb-session sync: ${violations.length} violation(s)\n`);
     for (const violation of violations) error(`  ${violation}`);
     return 1;
   }
-  log("Walkthrough commands and act references all match the demo.");
+  log(
+    `Commands and act references in ${docPaths.length} document(s) all ` +
+      `match the demo.`,
+  );
   return 0;
 }
 

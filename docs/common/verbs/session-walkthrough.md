@@ -1,19 +1,17 @@
-# A verb session, end to end
+# A verb session, measured
 
-What driving a pattern entirely through `cf` looks like when the verb surface is
-complete: discovery, documentation, help, completion, and carrying an address
-from one call into the next.
+What a whole session driven through `cf` costs and guarantees: the measurement
+behind each step, the caveats each one carries, and what the surface still
+owes. It assumes the vocabulary rather than teaching it.
 
-[Verbs over the CLI](over-the-cli.md) explains what a verb hands back.
-This walks a whole session using it.
+**Not met a pattern or a piece before?** Read
+[The Verb Session](the-verb-session.md) first. That is the tour of this same
+session — it defines pattern, piece, space, verb, handler and invocation,
+walks the thirteen acts, and reads start to finish. This document is where
+those acts are priced and their limits stated.
 
-**Not met a pattern or a piece before?** [The Verb Session][overview] is an
-illustrated tour of this same session that defines the vocabulary this
-document assumes — pattern, piece, space, verb, handler, invocation — and
-reads start to finish. Come back here for the measurements, the caveats, and
-what the surface still owes. Note which copy is authoritative: this one is
-gated by CI against the scripts it describes, while that page is a snapshot
-kept by hand.
+[Verbs over the CLI](over-the-cli.md) explains what a verb hands back; this
+document is where that behavior is priced against a session that exercises it.
 
 The subject is a work-item tracker — items in a tree, plus typed cross-links.
 It is a real pattern: [`packages/cli/integration/pattern/tracker.tsx`][tracker],
@@ -41,17 +39,17 @@ not run one-for-one — a step is a theme, an act is a beat, and a theme can
 take several beats to show. Watching the transcript and wanting the reasoning
 behind a particular act, read across:
 
-| Demo act | Explained here in |
+| Demo act | Explained in |
 | --- | --- |
 | 1 · Arrive by name | step 1 |
 | 2 · Ask what it is, and what it can do | step 2 |
 | 3 · Ask what a verb wants | step 3 |
 | 4 · Create, and act on what you were handed | step 5 |
-| 5 · Read addresses instead of contents | step 6, and "Why this pattern" on what an unshaped read costs |
+| 5 · Read addresses instead of contents | step 6, and "What you are driving" on what an unshaped read costs |
 | 6 · Ask the same question twice | step 6, on why a read may be asked twice and a call may not |
-| 7 · A verb returns what only the pattern could compute, and its receipt reads that outcome back | the verb-shapes table under "Why this pattern", and step 6 on the receipt |
-| 8 · Finishing reports what the caller could not know | the verb-shapes table under "Why this pattern" |
-| 9 · A verb that declares no result | the verb-shapes table, and step 5's closing read |
+| 7 · A verb returns what only the pattern could compute, and its receipt reads that outcome back | the [tour's verb-shapes table](the-verb-session.md#three-design-decisions-each-aimed-at-a-hard-case), and step 6 on the receipt |
+| 8 · Finishing reports what the caller could not know | the [tour's verb-shapes table](the-verb-session.md#three-design-decisions-each-aimed-at-a-hard-case) |
+| 9 · A verb that declares no result | the [tour's verb-shapes table](the-verb-session.md#three-design-decisions-each-aimed-at-a-hard-case), and step 5's closing read |
 | 10 · Step back and read the board | step 6 |
 | 11 · Ask for something that is not there | step 7 |
 | 12 · Relate two items | step 8 |
@@ -75,39 +73,16 @@ Section headers inside the help output below are the literal strings
 `renderPieceCallHelp` emits ([`packages/cli/lib/exec-schema.ts`][exec-schema]). Their contents
 are illustrative.
 
-## Why this pattern
+## What you are driving
 
 A fixture exists to be driven, and this one is shaped so that driving it is hard
-in the particular ways the verb surface has to be good at.
-
-**A tree with cross-links.** An item is filed under one item and can be waited
-on by any other, so the same item is reachable by two different paths. That is
-where an address stops being a convenience: handing a caller the item's contents
-twice says nothing about whether they are looking at one item or two, and only
-an address answers it.
-
-**State a caller cannot set.** `title` is the only field supplied at creation.
-`status`, `notes`, `children` and `blockedOn` belong to the pattern and change
-only when a verb is called, which is what makes the verb surface the whole
-interface rather than a convenience laid over a writable document.
-
-**Six verbs, five shapes.** They are not six features. Each shape is a
-different question a caller asks about what comes back, and the tracker carries
-every one of them so that none goes undemonstrated. Only the first shape has two
-verbs, and they differ in nothing but what the new item is filed under:
-
-| Verb | The shape it exercises | Where |
-| --- | --- | --- |
-| `addItem`, `addChild` | returns a piece — an address the next command takes as its target, and a value that can be reached from inside itself | acts 4 and 8 |
-| `recordNote` | returns what only the pattern could compute: the clock is a handler capability, so the stamp cannot come from the caller | act 7 |
-| `finish` | returns a derived fact — `openBelow` takes a walk of the whole subtree, which a caller would pay N reads for | act 8 |
-| `archive` | declares no result: the invocation settles carrying no `result` at all, and what it changed is a separate read | act 9 |
-| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12 — the address as printed, standing where the verb declares a reference |
-
-Those act numbers name acts in the demo script, which the table at the top of
-this document maps against its steps.
-
-## What you are driving
+in the particular ways the verb surface has to be good at. The three decisions
+behind that shape — a tree with cross-links, state a caller cannot set, and six
+verbs covering five result shapes — are laid out in the tour's
+[The program under the demo](the-verb-session.md#the-program-under-the-demo),
+along with the table pairing each shape against the act that demonstrates it.
+What belongs here is the cost of driving it, which the sections below carry
+step by step.
 
 Two patterns. A **board** holds root items; an **item** holds its own subtree,
 its own graph edges, and its own verbs — so the thing a create hands back is
@@ -438,18 +413,10 @@ needs.
 
 ## 5. Create, and carry the address forward
 
-This is where `--select` starts carrying the narrative, so here is the whole
-of the grammar the session uses. A selection names the shape of the answer;
-everything not named is left out.
-
-| Spelling | What comes back |
-| --- | --- |
-| `title,status` | those two fields and nothing else |
-| `item.title` | walks into `item` and keeps `title` — it prunes rather than flattens, so the answer is still shaped like the result |
-| `@` | the address of the position being read, in place of its contents |
-| `item@` | the address `item` holds, rather than following the link and copying what is behind it |
-| `children@` | applied across an array: each element's own address |
-| `@,title` | both — the address beside the field |
+This is where `--select` starts carrying the narrative. The grammar the session
+uses is set out in the tour's
+[act 4](the-verb-session.md#act-4--create-and-act-on-what-you-were-handed): a
+selection names the shape of the answer, and everything not named is left out.
 
 An address always arrives under the key `$link`, which is why that key is
 everywhere in the output below. The full account of the suffix — marking
@@ -887,4 +854,3 @@ argument, with the detached-copy refusal standing guard beside it (step 8).
 [exec-schema]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/lib/exec-schema.ts
 [piece-lib]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/lib/piece.ts
 [completion]: https://github.com/commontoolsinc/labs/blob/main/packages/cli/lib/completion/providers.ts
-[overview]: https://claude.ai/code/artifact/74bd43c3-4672-4e6c-9af4-34513e5bedaa
