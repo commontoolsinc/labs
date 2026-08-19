@@ -61,7 +61,7 @@
         "asCell": [
           "cell"
         ],
-        "description": "Shared pointer to whoever hosts the poll."
+        "description": "Shared pointer to whoever hosts the poll. Optional ONLY so card\ninstantiations stored by the name-keyed predecessor (which had no host\npointer) still satisfy this schema; the pattern always passes it."
       },
       "profile": {
         "$ref": "#/$defs/LunchProfile",
@@ -105,7 +105,6 @@
     },
     "required": [
       "users",
-      "host",
       "profileName",
       "profileAvatar"
     ],

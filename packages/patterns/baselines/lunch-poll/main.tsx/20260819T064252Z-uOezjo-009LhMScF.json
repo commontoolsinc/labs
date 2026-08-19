@@ -11,7 +11,7 @@
             "asCell": [
               "cell"
             ],
-            "description": "Live identity link to whoever logged it."
+            "description": "Live identity link to whoever logged it. Optional only for entries\nstored by the name-keyed predecessor, which recorded no identity link."
           },
           "loggedByName": {
             "default": "",
@@ -22,12 +22,15 @@
             "type": "string"
           },
           "votes": {
+            "default": [],
             "items": {
               "$ref": "#/$defs/VoteSnapshot"
             },
             "type": "array"
           },
           "wentAt": {
+            "default": 0,
+            "description": "Both defaulted so entries stored by the SQL-era predecessor (separate\ntables, text timestamps) read back — a zero `wentAt` sorts a legacy row\nlast rather than refusing the update, and its snapshot list reads empty.",
             "type": "number"
           }
         },
@@ -35,7 +38,6 @@
           "id",
           "title",
           "loggedByName",
-          "loggedBy",
           "wentAt",
           "votes"
         ],
@@ -309,7 +311,7 @@
           },
           "loggedBy": {
             "$ref": "#/$defs/LunchProfile",
-            "description": "Live identity link to whoever logged it."
+            "description": "Live identity link to whoever logged it. Optional only for entries\nstored by the name-keyed predecessor, which recorded no identity link."
           },
           "loggedByName": {
             "default": "",
@@ -320,12 +322,15 @@
             "type": "string"
           },
           "votes": {
+            "default": [],
             "items": {
               "$ref": "#/$defs/VoteSnapshot"
             },
             "type": "array"
           },
           "wentAt": {
+            "default": 0,
+            "description": "Both defaulted so entries stored by the SQL-era predecessor (separate\ntables, text timestamps) read back — a zero `wentAt` sorts a legacy row\nlast rather than refusing the update, and its snapshot list reads empty.",
             "type": "number"
           }
         },
@@ -333,7 +338,6 @@
           "id",
           "title",
           "loggedByName",
-          "loggedBy",
           "wentAt",
           "votes"
         ],
@@ -395,18 +399,23 @@
       "PlaceStat": {
         "properties": {
           "greens": {
+            "default": 0,
             "type": "number"
           },
           "reds": {
+            "default": 0,
             "type": "number"
           },
           "title": {
             "type": "string"
           },
           "visits": {
+            "default": 0,
+            "description": "Counts are defaulted so rows stored by the SQL-era predecessor (whose\nderived stat rows carried different fields) read back as zeros instead\nof refusing the update.",
             "type": "number"
           },
           "yellows": {
+            "default": 0,
             "type": "number"
           }
         },
