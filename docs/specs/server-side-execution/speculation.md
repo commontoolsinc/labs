@@ -102,6 +102,39 @@ On each pushed `derived` commit with `derivedThrough = W` and
    `#terminalIntents` at `#sealSpeculative`; pinned in
    `speculation-arrival-gate.test.ts` (the late-echo rule, scripted,
    with its mutation).
+   *Clarification (2026-08-19, stage C W2.1 — DESCRIPTIVE, the same
+   rule read at its other edge; not a new rule):* the jobless-cascade
+   consequence applies on ARRIVAL too. Retiring `e`'s echo when `e`'s
+   terminal consequence arrives also retires every overlay entry that
+   is a CLIENT CASCADE DESCENDANT of `e` — the echoes of the events
+   `e`'s speculative run itself sent, sealed under client-minted
+   cascade ids (`mintEventId(link, originTx)`, a per-attempt mint —
+   events.md §4) that the server's own run of `e` never mints (it mints
+   its own for the same cascade, and the handler-frame-caused entity
+   ids of the two runs differ likewise), so no mark ever names them and
+   step 3's arrival gate never passes for them: they are jobless on the
+   same grounds as a late cascade echo (W0 l3's "duplicate join" —
+   spec-Alice standing beside the confirmed Alice, forever). Scope,
+   exactly: only entries whose cascade thread (`parentEventId`,
+   recorded at seal) reaches `e` — client-minted descendants of `e`'s
+   speculative run, never a durable entry of its own (a root fire's
+   echo carries no thread; another intent's cascade does not reach
+   `e`); a retired descendant's id joins the jobless set so a LATE
+   grandchild drops at seal. Cost, stated: when the server's LT1 child
+   of `e` did not complete in `e`'s appending wave (events.md §4's
+   purge; the drain delivers it a wave later), the descendant echo goes
+   at `e`'s consequence while the child's own consequence is still a
+   wave away — a visible one-wave flicker, COUNTED
+   (`cascade-echo-retired-unarrived`), not hidden; the owner-level
+   alternative (deterministic cascade ids derived from the parent id +
+   send ordinal on both sides — which would also make the frame-caused
+   entity ids agree, so the arrival gate would carry the echo to the
+   child's own landing) touches this section's per-attempt mint and is
+   NOT taken here. Impl: `overlay-destination.ts` `retireIntent` (the
+   cascade arm) over `OverlayEntry.parentEventId` + `#cascadeParents`;
+   pinned in `speculation-intent-listener.test.ts` (W2.1-1…4 scripted,
+   each with its mutation, + the W2.1 e2e lunch-join shape, RED on the
+   pre-W2.1 tip).
    **The match, and its carrier (RULED 2026-08-18 — the stage-C design
    pass, items 5/6, landed with W2):** the match is on the pushed
    commit's `consequenceOf` — carried to the client as the TRACKED

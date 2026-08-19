@@ -1497,7 +1497,15 @@ interim (b) did NOT ship (item 16 — W0's gate arm only); the effects
 channel followed (item 13); pins 1–11 in
 `speculation-intent-listener.test.ts`. The anchors in §3.1 and Appendix
 A describe the pre-W2 code. Report:
-`docs/history/plans/server-execution-v2/stage-c/w2-intent-build-report.md`.*
+`docs/history/plans/server-execution-v2/stage-c/w2-intent-build-report.md`.
+W2.1 (2026-08-19, same branch): W3's root cause of W0 l3 — the CLIENT
+cascade-echo stranding (a cascade child's echo under a client-minted id
+no mark names, writing a frame-caused entity doc the arrival gate never
+sees) — fixed as shape (a): `retireIntent(P)` also retires P's client
+cascade descendants (speculation.md §4 step 2's dated clarification);
+shape (b), deterministic cascade ids on both sides, is the owner-level
+alternative (register, W2 block). Report:
+`docs/history/plans/server-execution-v2/stage-c/w2-1-cascade-echo-report.md`.*
 
 **(a) A non-reactive storage-notification listener** — feasible,
 smallest sound. Substrates (C Q2): `IStorageManager.subscribe(

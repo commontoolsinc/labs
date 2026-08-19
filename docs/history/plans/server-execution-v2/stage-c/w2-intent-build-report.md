@@ -487,3 +487,36 @@ exist in the harness; W4 should add it (recorded in the register block).
 - **The T25-class immediate walk** was not memoized (decision above).
 - **The sender-echo instrument** was not added (flag 3).
 - **The scopes.md §9 amendment** (item 10) — W1's.
+
+## 9. W2.1 (2026-08-19) — the cascade-echo stranding, fixed on this branch
+
+*Dated addendum. W3's build report §1 root-caused W0 l3's "duplicate
+join" as a CLIENT cascade-echo stranding and handed it to W2: the join
+is the click handler's LT1 cascade child; its speculative echo carries
+a client-minted cascade id (`mintEventId(link, originTx)`) the server's
+own mint never equals, so `retireIntent`'s exact-id match never fires,
+and its frame-caused user entity doc (`$event: tx.dispatchedEventId`)
+is an id the server never writes, so the sweep's arrival gate never
+passes — spec-Alice stood beside the confirmed Alice forever, and the
+lunch gate's "both join lands (count reaches 2)" step passed on it in
+7–16 ms. Built here as W3's shape (a), on this branch (commits
+`1afe64c13` code + pins, `145cf8680` the lunch step + churn counters,
+plus the docs commits): `retireIntent(P)` also retires every live
+entry whose cascade thread (`OverlayEntry.parentEventId`, recorded at
+the cascade echo's seal; `#cascadeParents` for a child that wrote
+nothing) reaches P, and the retired child's id joins the jobless set;
+the flicker case (the server's LT1 child purged at the deadline and
+drained a wave later — the echo goes a wave early) is COUNTED, not
+hidden (`cascade-echo-retired-unarrived`); shape (b) — deterministic
+cascade ids on both sides — is recorded as the owner-level alternative
+in the register's W2 block. Pins W2.1-1…4 (scripted, the mark path) +
+the W2.1 e2e lunch-join shape, every one RED on the W2 tip `6bec4a4bb`
+and each with its killing mutation; the lunch gate 3/3 green at the
+W2.1 tip (join step 3.6 / 4.1 / 5.1 s — honest; the (α) class still
+visible in the store: the castVote child consequenced 3×, W3's) and
+3/3 green on a local W2.1 + (α) scratch (255 / 253 / 254 ms; every
+event in exactly one derived commit; `appended 11 / processed 12, 11,
+11`). Everything else — suites, mutations, the (b) flag text, what was
+not done — is in
+[`w2-1-cascade-echo-report.md`](w2-1-cascade-echo-report.md). The
+"no lunch run" line in §8 above is superseded by that report.*

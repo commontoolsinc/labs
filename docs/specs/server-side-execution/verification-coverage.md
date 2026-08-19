@@ -4277,6 +4277,106 @@ supply; OW29/OW32/OW34 closed):
     the fix pass, so the `wants` scope filter is exercised by the
     scripted pins too (review MIN-6; before, only e2e pins 6/10 saw the
     production shape).
+  - **W2.1 (2026-08-19) — the CLIENT CASCADE-ECHO STRANDING (W0 l3's
+    "duplicate join", root-caused by W3 and handed to W2) — FIXED, shape
+    (a): `retireIntent(P)` also retires P's client cascade
+    descendants.** Report:
+    [`stage-c/w2-1-cascade-echo-report.md`](../../history/plans/server-execution-v2/stage-c/w2-1-cascade-echo-report.md).
+    Binding text: speculation.md §4 step 2's DATED clarification beside
+    the late-echo rule (descriptive — the jobless-cascade consequence
+    read on arrival; not a new rule). What it binds: when the terminal
+    consequence of intent `e` arrives (consequenced / errored / dropped
+    / refused — every arm reaches the one seam), every live overlay
+    entry whose cascade thread (`OverlayEntry.parentEventId`, recorded
+    at the cascade echo's seal; `#cascadeParents` links a child that
+    wrote nothing to its grandchildren) reaches `e` retires with `e`'s
+    own echo; the retired descendant's id joins the jobless set (a LATE
+    grandchild drops at seal). Scope: client-minted descendants of
+    `e`'s speculative run only — never a durable entry of its own, never
+    an unrelated intent's cascade, never a derivation echo. Guards kept:
+    no dependency on history (the thread is process-local and bounded
+    like the jobless set); the parent's own retirement is still the
+    sanctioned mark / the `W ≥ seq(e)` backstop — the descendant rides
+    the parent's signal (in the fail-soft posture where neither the
+    listener nor the watch installed, the descendant has no backstop of
+    its own — as before W2.1; stated). Instrument:
+    `speculation-intent-listener.test.ts` — **W2.1-1** (a cascade
+    child's echo is retired when P's MARK arrives; RED on the pre-W2.1
+    tip: `entryCount` 1 ≠ 0 — the entry stood forever; mutation: the
+    cascade arm removed), **W2.1-2** (P's mark retires ONLY P's cascade:
+    an entry with an unrelated parent, another intent's root echo, and
+    an untracked emitter's cascade stand; mutation: the walk accepts any
+    parented entry), **W2.1-3** (the late-echo rule holds around the
+    arrival arm — a LATE child and a LATE grandchild of the retired
+    child drop at seal; a grandchild behind a SILENT no-write child is
+    reached through the thread; mutations: the thread not recorded at a
+    no-write seal / the retired child not joining the jobless set),
+    **W2.1-4** (the flicker witness counts a cascade echo retired on
+    its parent's consequenced mark while NO doc it wrote landed at or
+    after the mark's frame — including when a CONCURRENT writer moved
+    the doc past the echo's basis first (the two voters' shape) — not
+    one whose written doc rode the mark's frame, and not a dropped
+    parent's cascade; mutations: key on the basis → the concurrent-
+    writer case reads arrived; arm on the drop arm → it counts), and
+    the **W2.1 e2e** pin — the lunch
+    join shape through the real path (a click handler that only forwards
+    to a handler that cellifies a NEW object into a list, one flag-ON
+    client + a live ExecutorHost): on the pre-W2.1 tip it times out at
+    "the cascade child's echo to retire" (the stranding, reproduced
+    end to end); with the fix the echo retires on the click's mark, the
+    rendered list holds exactly the server's one entry, the counter
+    reads 1, unarrived 0. OFF arm: pin 11's shape unchanged — every
+    W2.1 line lives inside the overlay, which does not exist OFF. The
+    lunch gate's "both join lands" step now asserts the CONFIRMED
+    roster (exactly {Alice, Bob} chips on BOTH browsers + "2 joined"),
+    RED on a standing echo (7–16 ms on the pre-W2.1 tip), green only on
+    the real landing (3.6 / 4.1 / 5.1 s at the W2.1 tip without (α);
+    255 / 253 / 254 ms on the W2.1 + (α) scratch — each ≥ a server
+    round trip); the ON skip entry is W3's to lift. Counters:
+    `speculation-overlay/cascade-echo-retired` and
+    `…/cascade-echo-retired-unarrived` (the flicker witness, armed only
+    on a consequenced non-error parent: no doc the echo wrote held a
+    confirmed value at or after the MARK frame's seq — the sidecar's
+    confirmed seq at the check — when it went; keyed on the mark's
+    frame, not the echo's basis, because a concurrent writer moves the
+    doc past the basis without the child having landed — a HEURISTIC,
+    two misreadings stated on the getter: an unchanged authoritative
+    value reads as unarrived; a foreign write landing in the mark's own
+    frame at or after the mark reads as arrived), getters
+    `cascadeEchoRetirementCount` /
+    `cascadeEchoRetirementUnarrivedCount`, the browser churn line's
+    `overlayCascadeEchoRetired` / `overlayCascadeEchoFlickers`. Lunch
+    witness: at the W2.1 tip (no (α)) `overlayCascadeEchoRetired` 2 /
+    `…Flickers` 1 on the host every run — the join child landed one
+    wave AFTER the click's mark (commit 45 the click, 46 the child's
+    `users` splice), so spec-Alice went at 45 and the confirmed Alice
+    arrived at 46: the flicker, live; on the (α) scratch the child rode
+    the click's wave and the witness read 0.
+  - **FUTURE / owner-level — (b) deterministic cascade ids (NOT built;
+    the reason the flicker exists).** Derive a cascade child's event id
+    on BOTH sides from the parent event id + the send ordinal within the
+    parent's run (instead of `mintEventId`'s per-tx random key): then
+    the client's cascade echo carries the SAME id as the server's LT1
+    entry — `retireIntent` matches it by its own mark (no thread walk),
+    AND the handler-frame-caused entity ids agree (`$event:
+    tx.dispatchedEventId`, runner.ts), so step 3's arrival gate passes
+    and the echo stands until the child's OWN consequence lands — no
+    flicker in the purged-leftover case, and a tracked intent per
+    cascade hop if wanted. What it touches: `event-identity.ts`
+    `mintEventId` and events.md §4's "cascade sends minted inside a
+    handler attempt get fresh ids per attempt" (the per-attempt
+    freshness that keeps a retried attempt's cascades apart; a
+    deterministic id must then carry the attempt or rely on the
+    committing-attempt-only escape), the C8d fold key and the served
+    dispatch's `parentEventId` carriage, the LT1 emission in `cell.ts`
+    (both arms mint), and the client cascade's `queueEvent` id. Better:
+    no flicker, the child's own mark retires its own echo, one identity
+    for one cascade hop. Worse: a spec-level identity change (events.md
+    §4), two code paths that must agree byte-for-byte, and a retry
+    story to re-rule. Owner-level; the coordinator is putting it to the
+    owner. Trigger: if the flicker witness reads non-zero on the W4
+    acceptance workloads at a rate the owner will not accept, or when
+    per-hop intents are wanted.
 
 ## 4. Standing rule
 
