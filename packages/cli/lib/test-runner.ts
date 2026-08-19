@@ -66,6 +66,7 @@ import type {
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   type CDFPoint,
+  clearTimingMeasures,
   getLogger,
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -73,6 +74,7 @@ import {
   resetAllLoggerCounts,
   resetAllTimingBaselines,
   resetAllTimingStats,
+  setTimingMeasuresEnabled,
 } from "@commonfabric/utils/logger";
 import { timeout } from "@commonfabric/utils/sleep";
 
@@ -127,6 +129,27 @@ async function withPhase<T>(
     phaseLogger.timeEnd(...keys);
     performance.measure(`${label}#${phaseMarkSequence}`, startMark, endMark);
   }
+}
+
+/**
+ * Write every emitted timing measure out as JSON, then drop them.
+ *
+ * The entries are the only copy and nothing else clears them, so draining here
+ * is what keeps a long run from growing its buffer without bound.
+ */
+async function writeTimingMeasures(path: string): Promise<void> {
+  const entries = performance.getEntriesByType("measure").map((entry) => ({
+    name: entry.name,
+    startTime: entry.startTime,
+    duration: entry.duration,
+  }));
+  await Deno.writeTextFile(path, JSON.stringify(entries));
+  clearTimingMeasures();
+  console.log(
+    `\nWrote ${entries.length} timing measure(s) to ${path}. Aggregate with:` +
+      `\n  deno run --allow-read ` +
+      `skills/perf-investigation/scripts/aggregate-measures.ts ${path}`,
+  );
 }
 
 function formatError(error: unknown): string {
@@ -311,6 +334,16 @@ export interface TestRunnerOptions {
   patternCoverageDir?: string;
   /** Keep the test descriptor's `$UI` demanded for the full test run. */
   continuousUI?: boolean;
+  /**
+   * Emit a `performance.measure` per logger time span and write them here.
+   *
+   * The statistics a run prints are aggregates: they say a key was reached
+   * 4,000 times and what that cost on average, and nothing about which of
+   * them nested inside which. The measures keep each span's own interval, so
+   * a consumer can roll them up by key prefix and find the level where the
+   * count starts multiplying.
+   */
+  timingMeasuresOut?: string;
   /**
    * Run against a caller-supplied identity and storage manager, and observe
    * what the run instantiates.
@@ -1952,6 +1985,7 @@ export async function runTests(
   results: TestRunResult[];
 }> {
   const paths = Array.isArray(pathOrPaths) ? pathOrPaths : [pathOrPaths];
+  if (options.timingMeasuresOut) setTimingMeasuresEnabled(true);
   const allResults: TestRunResult[] = [];
   let totalPassed = 0;
   let totalFailed = 0;
@@ -2136,6 +2170,10 @@ export async function runTests(
     recordFile(testPath, totalFailed > failedBefore, result.totalDurationMs);
   }
   recordsFragment?.close();
+
+  if (options.timingMeasuresOut) {
+    await writeTimingMeasures(options.timingMeasuresOut);
+  }
 
   // Summary
   const totalTime = allResults.reduce((sum, r) => sum + r.totalDurationMs, 0);

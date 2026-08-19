@@ -24,6 +24,14 @@ A logger constructed disabled is quiet, not inert.
 So the first move is reading, not instrumenting. The phase timings and call
 counts for anything already wrapped exist before you touch the code.
 
+What is *not* on by default is emission. `CF_TIMING_MEASURES=1` makes every
+recorded span also emit a `performance.measure`, which is what puts it on the
+timeline of the process that ran it and what step 4 aggregates. It is off
+because a measure costs several times what recording the span does, and the
+spans a logger wraps are the hot paths a profile is trying to describe — paying
+that always would distort the thing being measured. Turn it on for an
+investigation, not for a run you intend to trust the absolute numbers of.
+
 ## 1. Find the phase
 
 ```bash
@@ -118,10 +126,25 @@ those by name instead of widening the summary.
 A count that is too high is visible at the top level. The caller that multiplies
 it is not.
 
-Keep splitting the phase into subphases and comparing counts between adjacent
-levels. Compare the counts, not shares of a total: each key is timed
-independently and nothing aggregates, so a child's contribution cannot be
-inferred by subtracting it from its parent. The level where a count stops being
+Two ways to get there. By hand, keep splitting the phase into subphases and
+compare counts between adjacent levels — the counts themselves, not shares of a
+total, since each key is timed independently and a child's contribution cannot
+be inferred by subtracting it from its parent.
+
+Or let the measures do it. With emission on (step 0):
+
+```bash
+deno task cf test <file> --timing-measures-out /tmp/measures.json
+deno run --allow-read skills/perf-investigation/scripts/aggregate-measures.ts /tmp/measures.json
+```
+
+The script rolls every span up by key prefix and prints calls, total, and time
+per call at each level. That roll-up is precisely what the stored statistics
+cannot give you — a logger records against its full joined path and nothing
+shorter, so the count at the level where multiplication begins is in no row.
+Scan down a branch: the level whose calls jump by a large factor over its
+parent's while its own time per call stays flat is the one that introduced the
+multiplication. The level where a count stops being
 proportional to the work and starts being proportional to the work squared is
 the level that introduced the multiplication — that is the caller to fix, and it
 is frequently not the

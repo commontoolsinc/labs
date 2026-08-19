@@ -12,6 +12,11 @@ import {
   resetAllTimingStats,
   setGlobalLogFloor,
 } from "../src/logger.ts";
+import {
+  clearTimingMeasures,
+  getTimingMeasuresState,
+  setTimingMeasuresEnabled,
+} from "../src/logger.ts";
 
 describe("logger", () => {
   beforeEach(() => {
@@ -1933,6 +1938,98 @@ describe("logger", () => {
       expect(logger.counts.info).toBe(1);
       expect(logger.counts.warn).toBe(1);
       expect(logger.counts.error).toBe(1);
+    });
+  });
+
+  describe("timing measures", () => {
+    afterEach(() => {
+      setTimingMeasuresEnabled(false);
+      clearTimingMeasures();
+    });
+
+    const measureNames = () =>
+      performance.getEntriesByType("measure").map((entry) => entry.name);
+
+    it("records a span without emitting a measure until asked", () => {
+      clearTimingMeasures();
+      const logger = getLogger("measure-off");
+      logger.timeStart("phase", "one");
+      logger.timeEnd("phase", "one");
+
+      expect(measureNames().some((n) => n.startsWith("phase/one#"))).toBe(
+        false,
+      );
+      // The statistics are recorded either way — that is the whole point of
+      // emission being separable from measurement.
+      expect(logger.getTimeStats("phase", "one")?.count).toBe(1);
+    });
+
+    it("emits one measure per span, keyed by the joined path", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-on");
+      logger.timeStart("phase", "two");
+      logger.timeEnd("phase", "two");
+
+      const mine = measureNames().filter((n) => n.startsWith("phase/two#"));
+      expect(mine.length).toBe(1);
+    });
+
+    it("gives two spans on one key distinguishable names", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-twice");
+      for (let i = 0; i < 2; i++) {
+        logger.timeStart("phase", "three");
+        logger.timeEnd("phase", "three");
+      }
+
+      const mine = measureNames().filter((n) => n.startsWith("phase/three#"));
+      expect(mine.length).toBe(2);
+      expect(new Set(mine).size).toBe(2);
+    });
+
+    it("measures the span it recorded, not the moment it was emitted", () => {
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-span");
+      const started = performance.now();
+      logger.timeStart("phase", "four");
+      logger.timeEnd("phase", "four");
+
+      const entry = performance.getEntriesByType("measure").find((e) =>
+        e.name.startsWith("phase/four#")
+      );
+      expect(entry).toBeDefined();
+      expect(entry!.startTime).toBeGreaterThanOrEqual(started);
+      const recorded = logger.getTimeStats("phase", "four")!;
+      expect(Math.abs(entry!.duration - recorded.totalTime)).toBeLessThan(1);
+    });
+
+    it("stops emitting at the cap rather than growing without bound", () => {
+      setTimingMeasuresEnabled(true, { cap: 3 });
+      const logger = getLogger("measure-cap");
+      for (let i = 0; i < 10; i++) {
+        logger.timeStart("phase", "five");
+        logger.timeEnd("phase", "five");
+      }
+
+      expect(measureNames().filter((n) => n.startsWith("phase/five#")).length)
+        .toBe(3);
+      expect(getTimingMeasuresState().emitted).toBe(3);
+      // Every span still reached the statistics; only emission stopped.
+      expect(logger.getTimeStats("phase", "five")?.count).toBe(10);
+    });
+
+    it("gives the budget back when the entries are drained", () => {
+      setTimingMeasuresEnabled(true, { cap: 2 });
+      const logger = getLogger("measure-drain");
+      logger.timeStart("phase", "six");
+      logger.timeEnd("phase", "six");
+      expect(getTimingMeasuresState().emitted).toBe(1);
+
+      clearTimingMeasures();
+      expect(getTimingMeasuresState().emitted).toBe(0);
+      expect(measureNames().some((n) => n.startsWith("phase/six#"))).toBe(
+        false,
+      );
     });
   });
 });

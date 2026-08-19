@@ -130,6 +130,16 @@ you begin and what you can trust:
   process with no browser; a worker CPU profile comes from a different process
   over CDP. Bracketing a phase is what gives a profile its interval, but the
   bracket has to be on the same side of that boundary as the samples.
+- **Every recorded span can put itself on the timeline.** `CF_TIMING_MEASURES=1`
+  — or `cf test --timing-measures-out <file>` — makes each logger time span emit
+  a `performance.measure` as well as recording into the statistics, across the
+  whole stack rather than only what someone wrapped by hand. It is off by
+  default because a measure costs several times what recording the span does,
+  and these are the hot paths a profile is trying to describe.
+  `skills/perf-investigation/scripts/aggregate-measures.ts` rolls the result up
+  by key prefix, which is what the statistics cannot do: a logger records
+  against its full joined path and nothing shorter, so the count at the level
+  where it starts multiplying exists in no stored row.
 
 **You are done narrowing when you can write a benchmark.** A source you
 understand can be provoked directly; one you cannot provoke is still a
