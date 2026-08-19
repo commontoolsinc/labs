@@ -36,7 +36,9 @@ import { Runtime } from "../src/runtime.ts";
 // See docs/specs/content-addressed-action-identity.md and
 // packages/patterns/lunch-poll/perf-seed/B-IDENTITY-REROOT-HANDOFF.md.
 
-const signer = await Identity.fromPassphrase("src-independent identity invariant");
+const signer = await Identity.fromPassphrase(
+  "src-independent identity invariant",
+);
 const space = signer.did();
 
 function newRuntime(sm: ReturnType<typeof StorageManager.emulate>) {

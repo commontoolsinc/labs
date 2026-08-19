@@ -116,7 +116,11 @@ describe("authored debug source", () => {
     it("returns undefined without a usable sourceFile", () => {
       // The file name is the key the line correction is looked up by, so an
       // annotation missing it addresses nothing.
-      expect(readAuthoredBindingAnnotation(annotated({ position: { line: 1, col: 0 } })))
+      expect(
+        readAuthoredBindingAnnotation(
+          annotated({ position: { line: 1, col: 0 } }),
+        ),
+      )
         .toBeUndefined();
       expect(readAuthoredBindingAnnotation(annotated({ sourceFile: 7 })))
         .toBeUndefined();
