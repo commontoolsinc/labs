@@ -24,10 +24,10 @@ const deterministicCompileFailures = new WeakSet<object>();
 // An allocation failure is a function of heap pressure, not of the verified
 // source bytes, so it must never be classified as deterministic. The messages
 // are the stable V8 / JavaScriptCore / SpiderMonkey spellings for catchable
-// allocation errors. Stack overflow is deliberately NOT excluded: the
-// classified compile steps run on an event-loop-drained stack (see
-// `deterministicCompileStep`), so overflow depth is a property of the source
-// and recurs on every attempt.
+// allocation errors. Stack overflow is deliberately NOT excluded: an `await`
+// drains caller stack depth before each classified compile step, and the engine
+// stack limit is fixed within a runtime session. An overflow therefore recurs
+// for the same compile inputs in that session.
 const ALLOCATION_FAILURE_MESSAGE = /out of memory|allocation failed/i;
 
 function isAllocationFailure(error: object): boolean {
