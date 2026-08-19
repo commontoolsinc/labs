@@ -525,8 +525,15 @@ FORBIDDEN in v2 scope code (additive to serving-loop.md §8):
   leases;
 - a client committing ANY scoped derived instance, its own included
   (the overlay is a scoped instance's only client-side home);
-- ragged instance sets as a steady state — a node narrow for some
-  principals and broad for others;
+- ragged instance sets AT THE TOP (space→user) HOP as a steady state —
+  narrowing to `user` is UNIFORM across principals at that hop (§2). But
+  raggedness BELOW the hop — a node at `session` depth for one principal
+  and `user` for another, simultaneously and stably (a per-user branch
+  reading session-scoped state for A and only user-scoped state for B) —
+  is the RULED stage-B mechanism (§2 amendment, 2026-08-16; design §5
+  item 10), NOT forbidden: instance addresses carry the full
+  (scope-kind, principal) pair and "the node's known scope only narrows"
+  is a per-(node, principal) policy over them;
 - static scope inference (compile-time or load-time) feeding
   placement, admission, or fan-out;
 - per-scope or per-instance watermarks (W stays one integer —

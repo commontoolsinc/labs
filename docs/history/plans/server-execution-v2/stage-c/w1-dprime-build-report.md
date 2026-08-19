@@ -138,7 +138,7 @@ observed RED, then reverted:
 | T3′ (array growth) | an appended link-bearing element's target enters the closure, pushGrowthWakes +1 | M2 (strengthened T3′ to assert pushGrowthWakes so it bites) |
 | T9′ (OFF/structural) | `demandedWriterCount` 0 on a plain client runtime; no `demand-walk:*` action ever; OFF scheduler suites' pass/fail set identical to base | (structural; the walk deletion is the mutation) |
 | P-coarse | a departed session's rows leave; roots release only when no key names the writer; a doc tracked by 2 sessions stays | (the coarse-leave release; M1 also bites) |
-| P-arrival | a 2nd principal arriving gets her instance (notCurrentRearms/demandArrivals +1); the 1st untouched | break `rearmNotCurrentForDemander` (return 0) → Bob's instance never materializes |
+| P-arrival | a 2nd principal arriving gets her instance (notCurrentRearms/demandArrivals +1); the 1st untouched | ~~break `rearmNotCurrentForDemander` (return 0) → Bob's instance never materializes~~ **REFUTED — see the 2026-08-19 note below** |
 | T10′ | `SCHEDULER_LIVENESS_EQUIVALENCE=1` green across enter/leave/registration | an unbracketed flip → the hook's incremental-vs-rebuild mismatch throws |
 
 T2′ (probe, kept from W0): within one piece the closure follows the
@@ -152,6 +152,27 @@ series' structural-growth waves (the synthetic single event did not land
 a structural-growth settle entry — attribution is by adjacency to a
 covered authored input; the workload settle series carries the ms/wave
 cost: W0 chat landing 3.3–3.4 waves, 220–253 ms p50).
+
+**Correction (2026-08-19, W1 (d′) independent review).** The P-arrival
+row's recorded killing mutation is **REFUTED**: at the reviewed tip
+`19c6448ab`, breaking `rearmNotCurrentForDemander` (return 0) leaves
+P-arrival GREEN (mutation M-C in the review report — the log read
+`[P-arrival] notCurrentRearms +0, demandArrivals +1`). Bob arrives on the
+ROOT key, so the KEPT root-level arrival re-arm materializes his instance;
+the per-key currency check was exercised by no assertion (the only use of
+`notCurrentRearms` was a `console.log`). The mechanism was correct; the
+PIN was vacuous. Fixed on the review branch: P-arrival now ASSERTS
+`notCurrentRearms` +1 (and `demandArrivals` +1), and a NEW pin
+**P-arrival-closure** constructs the non-root-growth case (design §2.2) —
+a second principal whose closure reaches the narrowed writer's output doc
+ONLY through non-root closure rows (her watch root a plain holder doc, no
+piece beneath it), so ONLY `rearmNotCurrentForDemander` can materialize
+her instance. **M-C now turns BOTH pins RED** (P-arrival on the counter,
+P-arrival-closure on the landing timeout). See the review report and the
+W1 (d′) fix report for the red/green evidence. The M2 rows are likewise
+strengthened on the review branch: T2′-cross / T3′ now assert the FRESH
+value LANDS (not a pre-committed value) with `demandedWriters` 0→1, so the
+landing — not only `pushGrowthWakes` — is the assertion (review MAJOR-3).
 
 ## 4. Suite counts
 

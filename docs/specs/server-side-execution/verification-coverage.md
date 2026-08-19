@@ -3877,27 +3877,70 @@ supply; OW29/OW32/OW34 closed):
     of demanded instances … those runs' own logged reads make their
     inputs live and current in turn" — COVERED by the standing
     `demandedWriters` root kind (the `isDemandRoot` disjunct) + the
-    currency check on registry deltas; pins T1′/T4′/T7′. Killing
-    mutation M1 (recorded in the build report): drop the `demandedWriters`
-    disjunct in `isDemandRoot`/`recomputeLiveRefs` → 5/6 pin steps time
-    out (no demanded value lands). T9′: no `demand-walk:*` action in the
-    graph or trace; the OFF scheduler suites byte-identical.
+    currency check on registry deltas; pins T1′/T4′/T7′ (the standing
+    root), P-arrival (a second principal arriving on a ROOT key —
+    `notCurrentRearms` +1 AND `demandArrivals` +1, both now ASSERTED), and
+    **P-arrival-closure** (W1 review MAJOR-1 — the non-root-growth case of
+    design §2.2: a second principal whose closure reaches a narrowed
+    writer's OUTPUT doc ONLY through non-root closure rows, her watch root a
+    plain holder doc that is no piece's root, gets her instance through the
+    per-key currency check ALONE — the root-level arrival re-arm has no
+    piece beneath her root). Killing mutation **M1** (drop the
+    `demandedWriters` disjunct in `isDemandRoot`/`recomputeLiveRefs`) → 5/6
+    T1′-family steps time out. Killing mutation **M-C**
+    (`rearmNotCurrentForDemander` returns 0) → BOTH P-arrival (the counter
+    assertion) and P-arrival-closure (the landing times out) RED — the
+    build report's original P-arrival "killing mutation" claim was REFUTED
+    (M-C was green against it) and is corrected there. T9′: no
+    `demand-walk:*` action in the graph or trace; the OFF suites byte-identical.
   - "a demanded instance's writers hold demand … while any session
     tracks the instance and release it when none does — a session's
     tracked set shrinks only on a full re-evaluation or close (coarse)"
     — COVERED by the §8 liveness bracket on enter/leave/registration and
     the coarse leave (release only when no registry key names the writer);
-    pin P-coarse; `SCHEDULER_LIVENESS_EQUIVALENCE=1` green (T10′).
+    pins P-coarse (a departed session's keys leave; a shared key stays)
+    AND **P-release** (W1 review MAJOR-2): a writer demanded ONLY through a
+    departing session releases 1→0 (`demandRootLeaves` +N, `demandedWriters`
+    drops) and goes DORMANT (a later write to its input does not re-derive),
+    while a writer a remaining session still demands stays a root and keeps
+    re-deriving. Killing mutation **M-B** (`leaveDemandedEntity` a no-op) →
+    the solo writer never releases (`demandRootLeaves` 0; the dormant value
+    re-derives), RED. **M-I** (`before <= 2` early release) is GREEN by
+    construction: writer entities are SPACE-keyed so their refcount is
+    always 1 — the refcount>1 branch is reached only by writerless entities
+    (the session-scoped effects doc, the per-user narrowed rows, DIAG-2), so
+    `before <= 2` alters no writer's liveness; no multi-key writer entity is
+    reachable in the demand-set's shape (recorded, not forced).
+    `SCHEDULER_LIVENESS_EQUIVALENCE=1` green (T10′ — but see the T10′ note
+    below: the equivalence hook's real guard is fan-out's M-A2, not this
+    suite).
   - "a derivation that becomes reachable through a wave's own write
     becomes demand when the tracker's push-time re-traversal reaches it
     and lands in a later derived commit" — COVERED by the push-growth
     `demandChanged` notify (a push pass that GREW a session's tracked set)
-    → `pushGrowthWakes`; pins T2′-cross / T3′ (a cross-piece / array-element
-    link enters a narrowly-watching demander's closure, pre-empted=false,
-    `pushGrowthWakes` +1). Killing mutation M2 (recorded): remove the two
-    push-growth notify sites → T2′-cross/T3′ fail on `pushGrowthWakes`.
-    The cycle count is the `settle` series' structural-growth waves
-    (W0 workload numbers: chat landing 3.3–3.4 waves, 220–253 ms p50).
+    → `pushGrowthWakes`; pins T2′-cross / T3′ **GROWTH** (W1 review
+    MAJOR-3). The old pins asserted only the notify COUNTER while the
+    value they checked (`leaf:5`) had been pre-landed by the creator's
+    demand — "asserts the landing" was vacuous. Reworked: the creator
+    DEPARTS; a non-runner makes `leaf` STALE; a separate firing actor
+    (who does not demand leaf) fires the link; the FRESH `leaf:6` LANDS
+    server-side and `demandedWriters` goes 0→1 — the landing is now the
+    assertion. Killing mutation **M-D** (remove the two push-growth notify
+    sites) → the growth pins fail on `pushGrowthWakes`. NOTE (the reviewer's
+    sanctioned split): `leaf` is SPACE-scoped, so the firing actor's served
+    handler run makes it live through its own read edge (design §2.3(ii))
+    and it lands regardless of the demand pass — so **M-E** (the demand pass
+    ignoring every non-root row) does NOT bite the cross-piece growth pins.
+    The M-E kill — closure-row consumption LOAD-BEARING for a landing — is a
+    PER-USER property, pinned by **P-arrival-closure**: a demander's own
+    instance, reached only through her non-root closure row, is STARVED
+    under M-E (RED). Forcing a per-user narrowing in a departed-creator
+    growth is unreachable in the fan-out machinery, so this split is
+    RECORDED here rather than COVERED (design §2.8 note; the reviewer
+    sanctioned it). The cycle count is the `settle` series'
+    structural-growth waves (W0 workload numbers: chat landing 3.3–3.4
+    waves, 220–253 ms p50 — adjacency-attributed, and the W0/W1 counts
+    included service-session growth now dropped, MINOR-4).
   - The `demand` counter block (serving-loop.md §7, no `walkRuns`) and
     the `settle` series are asserted present in the pins; `demandRootEnters`/
     `Leaves` accumulate across park (obligation (iii)).
@@ -3954,6 +3997,59 @@ supply; OW29/OW32/OW34 closed):
       wavesBudgetExhausted 30–35 vs the trio tip's 739–777), and the
       structural-growth path adds one cycle; re-read the §4 amplification
       ratio on W4's quiet run, never silence the assertion.
+  - **W1 (d′) independent-review fixes (2026-08-19; LANDABLE-WITH-FIXES,
+    0 BLOCKER / 3 MAJOR / 9 MINOR / 6 NIT — all dispositioned; review
+    report on-branch at `docs/history/plans/server-execution-v2/stage-c/
+    w1-dprime-review-report.md`, fix report beside it).** The three MAJORs
+    were pin/register honesty, not mechanism (the (d′) code held): the
+    three coverage rows above are RE-WORDED to what is now genuinely
+    red-first — the per-key currency check (P-arrival-closure, RED under
+    M-C), the 1→0 release (P-release, RED under M-B), and the growth
+    LANDING (T2′-cross/T3′ GROWTH, RED under M-D; the M-E closure-row kill
+    pinned by P-arrival-closure). OW39's "pins … red-first with recorded
+    killing mutations" was true for the MECHANISM but overstated for
+    three named pins; it is now accurate. Minor dispositions worth a row:
+    - **MINOR-4 — the push-growth notify is now PRINCIPAL-FILTERED.** The
+      serving runtime's own loopback (service-principal) session is
+      dropped by the ExecutorHost (the memory server threads the changed
+      session's principal; pinned red-first in
+      `test/v2-demand-changed-principal.test.ts`). CAVEAT on the numbers:
+      the W0/W1 `structural-growth` p50 (220–263 ms) is BOTH
+      adjacency-attributed (the reports say so) AND included ~2/20
+      service-driven growth notifies per (d′) run (the reports did not say
+      so); W4's quiet run reads the counters net of the now-dropped service
+      growth. The settle `class` prose (§7, stats.ts) now labels the
+      adjacency honestly, and `demandPassMs` is labeled WALL time (it
+      includes structure-load awaits), `pushGrowthWakes`/`watchWakes` as
+      pre-coalescing NOTIFY counts.
+    - **T10′ / MINOR-5 — the equivalence hook's real guard is fan-out's
+      M-A2, not this suite.** In `executor-dprime-w0` every demanded
+      writer reads only authored docs (no upstream scheduler writer), so
+      `recomputeLiveRefs`'s disjunct is liveRefs-blind here and the (d′)
+      T10′ is a SMOKE check; the load-bearing kill (drop the disjunct from
+      `recomputeLiveRefs` only) is RED in `executor-fan-out` (f) —
+      `liveness drift … incremental=1 rebuilt=0` — as the build report
+      already records. A starvation-witness pin with an undemanded upstream
+      scheduler writer is the strengthening the reviewer named; NOT built
+      (the fan-out guard covers the disjunct); recorded.
+    - **OW41 (NEW, owed) — the demand pass is O(closure) per WAVE inside
+      the settle race (MINOR-6).** Measured 4.9 ms/pass at 1 922 rows /
+      823 keys (incl. early structure-load awaits), ≈ ≤2.5 µs/row; linear
+      — ~25 ms at 10 K rows, ~100 ms (the whole default flush deadline) at
+      ~40 K. Sub-second at today's sizes; NOT a hole. The named follow-on
+      is the INCREMENTAL-delta exposure (a per-space demand generation on
+      the memory server, bumped on watch.set/add / push-growth / session
+      prune, so a pass with an unchanged generation does only its pending
+      structure-load retries) — flag 6, not built here (rebase-risk for the
+      W3 builder; the cost curve is the trigger). Witness: `demandPassMs`.
+    - **Ruling item 10 (LANDED here) — scopes.md §9's ragged tripwire.**
+      The §9 "ragged instance sets as a steady state" tripwire forbade what
+      §2's amended ruling (2026-08-16, design §5 item 10) permits; §9 now
+      distinguishes the TOP (space→user) hop (uniform — forbidden ragged)
+      from BELOW it (ragged per principal — the RULED stage-B mechanism,
+      not forbidden). The §7 counter-list omission the same drift note
+      named (`undemandedNarrowingRuns` / `earlyEmitRefusals`) was already
+      folded in by W1.
 
 ## 4. Standing rule
 
