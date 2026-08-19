@@ -389,13 +389,18 @@ export class SpeculationOverlayDestination
   }
 
   /** DIAGNOSTIC (tests): the subset of `cascadeEchoRetirementCount`
-   * retired while NO doc the echo wrote held a confirmed value past the
-   * echo's read basis — the FLICKER witness: the server's cascade child
-   * had not landed at this client when its echo went (the purged-LT1-
-   * leftover shape, W3's α1: the child is drained a wave after its
-   * parent's consequence). A heuristic, stated: an unchanged
-   * authoritative value (equality cutoff — no seq move) reads as
-   * unarrived; a foreign write to a written doc reads as arrived. */
+   * retired on a CONSEQUENCED parent's mark while NO doc the echo wrote
+   * held a confirmed value at or after the mark frame's seq — the
+   * FLICKER witness: the server's cascade child had not landed at this
+   * client when its echo went (the purged-LT1-leftover shape, W3's α1:
+   * the child is drained a wave after its parent's consequence; or, pre-
+   * α, the leftover run in-process a wave late). A heuristic, stated:
+   * an unchanged authoritative value (equality cutoff — no seq move)
+   * reads as unarrived; a foreign write to a written doc landing in the
+   * mark's own frame at or after the mark reads as arrived. Not counted
+   * (unknown) when the parent dropped / erred / was refused — no cascade
+   * child is coming, the removal is final — or when the replica view is
+   * unavailable. */
   get cascadeEchoRetirementUnarrivedCount(): number {
     return this.#cascadeEchoRetirementsUnarrived;
   }
@@ -1287,7 +1292,16 @@ export class SpeculationOverlayDestination
         `(${entry.error !== undefined ? "errored" : "consequenced"})`,
       ]);
       this.#untrackIntent(space, sidecarId, entry.eventId);
-      this.retireIntent(space, entry.eventId);
+      // The flicker witness is armed ONLY for a consequenced (non-error)
+      // parent: only then is a server cascade child on its way whose
+      // landing the retired echo could have waited for; a dropped,
+      // refused, or errored parent produced no cascade — the echo's
+      // removal is final and correct, not a flicker.
+      this.retireIntent(
+        space,
+        entry.eventId,
+        entry.error === undefined ? { markSidecarId: sidecarId } : undefined,
+      );
       this.#settleIntentConsequence(
         space,
         entry.eventId,
@@ -1367,17 +1381,30 @@ export class SpeculationOverlayDestination
    * cascade echo goes at the parent's consequence while the child's own
    * consequence is still a wave away — the echo's value disappears until
    * that wave lands, a visible flicker. Counted: `cascade-echo-retired`
-   * per retired cascade echo, and `cascade-echo-retired-unarrived` when,
-   * at retirement, NO doc the echo wrote holds a confirmed value past the
-   * echo's read basis (the child's consequences had not landed here —
-   * the heuristic witness of that flicker; its two misreadings are
-   * stated on the getter). Keeping the echo until the child's own
-   * delivery is covered by W is NOT done: the durable child entry carries
-   * no parent reference and this client does not watch the child's
-   * stream, so there is nothing to match the echo against (the
-   * owner-level shape is deterministic cascade ids on both sides).
+   * per retired cascade echo, and — when the caller arms the witness
+   * with the MARK's sidecar (the consequenced, non-error arm: the one
+   * case where a server cascade child is on its way) —
+   * `cascade-echo-retired-unarrived` when NO doc the echo wrote holds a
+   * confirmed value at or after the mark frame's seq (read as the
+   * sidecar's confirmed seq at the check: the mark and a same-wave
+   * child's writes commit together, so a child that rode the parent's
+   * wave has moved every doc it wrote to that very seq, and a purged
+   * child has moved none). A HEURISTIC, two misreadings stated on the
+   * getter. Keyed on the mark's seq rather than the echo's read basis
+   * on purpose: a concurrent writer (the other voter's vote, landing
+   * between the echo's seal and the mark) moves the doc past the basis
+   * without the child having landed — the lunch gate's own shape.
+   * Keeping the echo until the child's own delivery is covered by W is
+   * NOT done: the durable child entry carries no parent reference and
+   * this client does not watch the child's stream, so there is nothing
+   * to match the echo against (the owner-level shape is deterministic
+   * cascade ids on both sides).
    */
-  retireIntent(space: MemorySpace, eventId: string): void {
+  retireIntent(
+    space: MemorySpace,
+    eventId: string,
+    witness?: { markSidecarId: string },
+  ): void {
     const entries = this.#entries.get(space);
     if (entries === undefined) return;
     let view:
@@ -1387,6 +1414,9 @@ export class SpeculationOverlayDestination
       ) => { confirmedSeq: number; pendingLocalSeqs: number[] })
       | null
       | undefined;
+    /** The mark frame's seq (the sidecar's confirmed seq at this check);
+     * 0 = unknown → the witness does not count. */
+    let markSeq: number | undefined;
     for (const entry of [...entries.values()]) {
       const own = entry.eventId === eventId;
       if (!own && !this.#cascadeReaches(entry, eventId)) continue;
@@ -1395,42 +1425,55 @@ export class SpeculationOverlayDestination
         // A cascade descendant: jobless by its ancestor's consequence.
         this.#cascadeEchoRetirements += 1;
         if (entry.eventId !== undefined) this.#noteJoblessIntent(entry.eventId);
-        if (view === undefined) {
-          try {
-            const replica = this.#runtime.storageManager.open(space).replica;
-            view = replica.speculationRetirementView?.bind(replica) ?? null;
-          } catch {
-            view = null;
-          }
-        }
-        // The flicker witness: did ANY doc this echo wrote already move
-        // past the echo's read basis (the server's cascade child landed
-        // here, in the parent's wave or before)?
-        let arrived = false;
-        if (view !== null && entry.writtenDocs.length > 0) {
-          for (const doc of entry.writtenDocs) {
-            try {
-              if (view(doc.id, doc.scope).confirmedSeq > entry.confirmedFloor) {
-                arrived = true;
-                break;
-              }
-            } catch {
-              // a replica mid-teardown: no witness, not a failure
-            }
-          }
-        }
-        if (!arrived) this.#cascadeEchoRetirementsUnarrived += 1;
         logger.debug("cascade-echo-retired", () => [
           `cascade echo ${entry.eventId} retired: its ancestor intent ` +
           `${eventId} reached a terminal consequence (speculation.md §4 ` +
           "step 2, the jobless-cascade consequence)",
         ]);
-        if (!arrived) {
-          logger.debug("cascade-echo-retired-unarrived", () => [
-            `cascade echo ${entry.eventId} retired before any doc it wrote ` +
-            "moved past its basis — the server's cascade child has not " +
-            "landed here yet (the W2.1 flicker)",
-          ]);
+        if (witness !== undefined) {
+          if (view === undefined) {
+            try {
+              const replica = this.#runtime.storageManager.open(space).replica;
+              view = replica.speculationRetirementView?.bind(replica) ?? null;
+            } catch {
+              view = null;
+            }
+          }
+          if (markSeq === undefined) {
+            markSeq = 0;
+            if (view !== null) {
+              try {
+                markSeq = view(witness.markSidecarId as URI, "space")
+                  .confirmedSeq;
+              } catch {
+                // a replica mid-teardown: no witness, not a failure
+              }
+            }
+          }
+          // The flicker witness: did ANY doc this echo wrote land at or
+          // after the mark's frame (the server's cascade child rode the
+          // parent's wave)? Unknown (no view, no seq) → not counted.
+          if (view !== null && markSeq > 0 && entry.writtenDocs.length > 0) {
+            let arrived = false;
+            for (const doc of entry.writtenDocs) {
+              try {
+                if (view(doc.id, doc.scope).confirmedSeq >= markSeq) {
+                  arrived = true;
+                  break;
+                }
+              } catch {
+                // a replica mid-teardown: no witness, not a failure
+              }
+            }
+            if (!arrived) {
+              this.#cascadeEchoRetirementsUnarrived += 1;
+              logger.debug("cascade-echo-retired-unarrived", () => [
+                `cascade echo ${entry.eventId} retired before any doc it ` +
+                "wrote landed at the mark's frame — the server's cascade " +
+                "child has not landed here yet (the W2.1 flicker)",
+              ]);
+            }
+          }
         }
       }
       entry.resolveVerdict({

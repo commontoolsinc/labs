@@ -568,10 +568,13 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
 //          entry of its own) is reached through the thread (mutation:
 //          the link is not recorded for a no-write child → the grandchild
 //          stands);
-//  W2.1-4. the FLICKER witness counts a cascade echo retired while no doc
-//          it wrote had moved past its basis, and not one whose written
-//          doc did (mutation: the witness reads `>=` → the unmoved doc
-//          counts as arrived);
+//  W2.1-4. the FLICKER witness counts a cascade echo retired on its
+//          parent's consequenced mark while no doc it wrote had landed at
+//          or after the mark's frame — including when a concurrent writer
+//          moved the doc past the echo's basis first — not one whose
+//          written doc rode the mark's frame, and not a dropped parent's
+//          cascade (mutations: key on the basis → the concurrent-writer
+//          case reads arrived; arm on the drop arm → it counts);
 //  W2.1-5. OFF arm unchanged — pin 11's shape stands: the overlay does
 //          not exist OFF, and every W2.1 line lives inside it.
 
@@ -682,11 +685,26 @@ const cascadeDestination = () => {
       })),
     });
   };
-  const markConsequenced = (index: number, landed: Record<string, number>) => {
+  /** The mark's frame: the sidecar itself lands at `markSeq` (the mark
+   * is written in the consequence commit), and `landed` names the docs
+   * that commit — or an earlier one — also moved, with their seqs. */
+  const markConsequenced = (
+    index: number,
+    landed: Record<string, number>,
+    markSeq = 42 + index,
+  ) => {
     for (const [id, seq] of Object.entries(landed)) confirmedSeqs.set(id, seq);
+    confirmedSeqs.set(W21_SIDECAR, markSeq);
     scripted.deliver(SPACE, W21_SIDECAR, (value) => {
       value.entries![index].consequenced = true;
     }, [["value", "entries", String(index), "consequenced"]]);
+  };
+  const markDropped = (index: number, markSeq = 42 + index) => {
+    confirmedSeqs.set(W21_SIDECAR, markSeq);
+    scripted.deliver(SPACE, W21_SIDECAR, (value) => {
+      value.entries![index].status = "dropped";
+      value.entries![index].reason = "gone";
+    }, [["value", "entries", String(index), "status"]]);
   };
   const verdictOf = async (localSeq: number) => {
     const verdict = verdicts.get(localSeq);
@@ -698,6 +716,7 @@ const cascadeDestination = () => {
     echoOf,
     seedAppend,
     markConsequenced,
+    markDropped,
     confirmedSeqs,
     verdictOf,
   };
@@ -839,48 +858,64 @@ describe("intent listener — W2.1 cascade-echo retirement (scripted; the jobles
     destination.close();
   });
 
-  it("W2.1-4: the FLICKER witness — a cascade echo retired while NO doc it wrote had moved past its basis counts `unarrived` (the purged-LT1-leftover shape: the server's child lands a wave after its parent's consequence); one whose written doc moved does not (mutation: the witness reads `>=` → the unmoved doc reads as arrived)", async () => {
+  it("W2.1-4: the FLICKER witness — a cascade echo retired on its parent's consequenced mark while NO doc it wrote had landed at or after the mark's frame counts `unarrived` (the purged-LT1-leftover shape: the server's child lands a wave after its parent's consequence) — also when a CONCURRENT writer moved the doc past the echo's basis before the mark; one whose written doc landed in the mark's frame does not count; a DROPPED parent's cascade is retired but not counted (no child is coming) (mutations: the witness keyed on the echo's basis instead of the mark's frame → the concurrent-writer case reads arrived; armed on the drop arm → the dropped parent's cascade counts)", async () => {
     const {
       destination,
       echoOf,
       seedAppend,
       markConsequenced,
+      markDropped,
       confirmedSeqs,
     } = cascadeDestination();
-    seedAppend(["evt-p1", "evt-p2"]);
-    destination.trackIntent(SPACE, W21_SIDECAR, "evt-p1");
-    destination.trackIntent(SPACE, W21_SIDECAR, "evt-p2");
-    // Both children read their list doc at seq 40 (the basis) and wrote
-    // it plus an entity doc.
-    confirmedSeqs.set("of:list-1", 40);
-    confirmedSeqs.set("of:list-2", 40);
-    await destination.seal(echoOf("evt:c:0:child-1", {
-      parentEventId: "evt-p1",
-      writes: ["of:list-1", "of:entity-1"],
-      floor: 40,
-    }));
-    await destination.seal(echoOf("evt:c:0:child-2", {
-      parentEventId: "evt-p2",
-      writes: ["of:list-2", "of:entity-2"],
-      floor: 40,
-    }));
-    expect(destination.entryCount(SPACE)).toBe(2);
-    // P1's mark arrives while list-1 is STILL at 40: the server's join
-    // has not landed here (its LT1 child was purged at the deadline and
-    // will be drained next wave) — the echo goes anyway (the known cost
-    // of the arrival-time retirement), and the witness counts it.
-    markConsequenced(0, {});
+    seedAppend(["evt-p1", "evt-p2", "evt-p3", "evt-p4"]);
+    for (const id of ["evt-p1", "evt-p2", "evt-p3", "evt-p4"]) {
+      destination.trackIntent(SPACE, W21_SIDECAR, id);
+    }
+    // Every child read its list doc at seq 40 (the basis) and wrote it
+    // plus an entity doc.
+    for (const n of [1, 2, 3, 4]) confirmedSeqs.set(`of:list-${n}`, 40);
+    for (const n of [1, 2, 3, 4]) {
+      await destination.seal(echoOf(`evt:c:0:child-${n}`, {
+        parentEventId: `evt-p${n}`,
+        writes: [`of:list-${n}`, `of:entity-${n}`],
+        floor: 40,
+      }));
+    }
+    expect(destination.entryCount(SPACE)).toBe(4);
+    // P1's mark lands at 45 while list-1 is STILL at 40: the server's
+    // join has not landed here (its LT1 child was purged at the deadline
+    // and will be drained next wave) — the echo goes anyway (the known
+    // cost of the arrival-time retirement), and the witness counts it.
+    markConsequenced(0, {}, 45);
     await flushMicrotasks();
-    expect(destination.entryCount(SPACE)).toBe(1);
+    expect(destination.entryCount(SPACE)).toBe(3);
     expect(destination.cascadeEchoRetirementCount).toBe(1);
     expect(destination.cascadeEchoRetirementUnarrivedCount).toBe(1);
-    // P2's mark arrives WITH its join (list-2 moved to 42 in the same
-    // frame): retired, not counted as unarrived.
-    markConsequenced(1, { "of:list-2": 42 });
+    // P2's mark lands at 46 WITH its child (list-2 moved to 46 in the
+    // same commit): retired, not counted.
+    markConsequenced(1, { "of:list-2": 46 }, 46);
     await flushMicrotasks();
-    expect(destination.entryCount(SPACE)).toBe(0);
+    expect(destination.entryCount(SPACE)).toBe(2);
     expect(destination.cascadeEchoRetirementCount).toBe(2);
     expect(destination.cascadeEchoRetirementUnarrivedCount).toBe(1);
+    // P3: a CONCURRENT writer (the other voter) moved list-3 to 44 —
+    // past the echo's basis 40 — BEFORE P3's mark at 47, and P3's child
+    // was purged (list-3 did not move at 47): the child has NOT landed,
+    // and the witness says so (keyed on the mark's frame, not the
+    // basis: 44 < 47).
+    markConsequenced(2, { "of:list-3": 44 }, 47);
+    await flushMicrotasks();
+    expect(destination.entryCount(SPACE)).toBe(1);
+    expect(destination.cascadeEchoRetirementCount).toBe(3);
+    expect(destination.cascadeEchoRetirementUnarrivedCount).toBe(2);
+    // P4 DROPS (the conflicting-discharge notice): its cascade echo is
+    // retired — no cascade child is coming — and the witness is not
+    // armed: the removal is final, not a flicker.
+    markDropped(3, 48);
+    await flushMicrotasks();
+    expect(destination.entryCount(SPACE)).toBe(0);
+    expect(destination.cascadeEchoRetirementCount).toBe(4);
+    expect(destination.cascadeEchoRetirementUnarrivedCount).toBe(2);
     destination.close();
   });
 });
