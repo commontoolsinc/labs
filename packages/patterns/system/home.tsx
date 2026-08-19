@@ -7,6 +7,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
@@ -50,7 +51,7 @@ type SpaceEntry = {
 
 export type HomeOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   // These defaults are part of Home's published result contract. Pattern setup
   // generates the output fields, so a newly added result does not need a
   // migration default; once a default has shipped, however, removing it changes

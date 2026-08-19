@@ -68,7 +68,7 @@ wrapper classes (Section 1.4).
 > abstract base that carries them (Section 8.6). The codec vocabulary (the `CODEC` symbol,
 > `FabricCodec`, `LiveEnvironment`) lives in `codec-interface/` (Section 2),
 > and the machinery that acts on it in `codec-common/` -- including
-> `EncodeAct` and `DecodeAct`, which are classes the walk carries
+> `BaseEncodeAct` and `BaseDecodeAct`, which are classes the walk carries
 > rather than contracts a caller implements. The conversion functions are in
 > `native-conversion.ts` (Section 8).
 >
@@ -2496,10 +2496,9 @@ is not part of the public boundary interface.
  * serialized form (which is `string`). Internal to the JSON implementation.
  *
  * Deep-frozen invariant on the decode side: every such tree that
- * enters decoding is deep-frozen, enforced at the two construction
- * sites that feed it (`decode()` and `#fromBytes()`, unified in
- * `#parseWireText()`). This is what lets the tag-unwrap and `/quote` arms
- * hand back extracted sub-trees directly without further copying. The
+ * enters decoding is deep-frozen, enforced at the one construction site that
+ * feeds it, `parseWireText()`. This is what lets the tag-unwrap and `/quote`
+ * arms hand back extracted sub-trees directly without further copying. The
  * encode-side trees are transient (`JSON.stringify`-ed and discarded)
  * and are not covered by this invariant. The `readonly` on the array and
  * object arms of the union expresses the decode-side contract at the
@@ -2517,33 +2516,44 @@ export type JsonCodecValue =
 ### 4.3 Public Boundary
 
 Every engine exposes `encode()` and `decode()`, parameterized by the boundary
-type — `string` for JSON, `Uint8Array` for a binary format — and an engine may
-add a pair for a second boundary type, as `JsonCodecEngine` does for bytes.
-Both are supplied by the base class and are not overridden: they mint the
-act, run the walk, and hand off to the format at each end. What a format
-supplies is those two ends and the act factories, all `protected`
-— the surface a second engine extends rather than one a caller reaches.
+type — `string` for JSON, `Uint8Array` for a binary format. An engine may add a
+pair for a second boundary type, though none does: a second pair over the same
+walk is API a caller can write for itself, and it invites the two forms to
+drift.
+Both are supplied by the base class and are not overridden: they mint the act
+and hand the work to it. An engine is otherwise its configuration — the codec
+registry and the leniency setting — and the two factories that say which act
+classes this format uses.
+
+The walk itself, and the format's account of how a container is written down,
+belong to the acts. That is what lets the walk be written without a threaded
+parameter: the state one call carries and the methods that consult it are the
+same object.
 
 ```typescript
 // Shown at module scope.
 // file: packages/data-model/codec-common/BaseCodecEngine.ts
 
 abstract class ExampleEngine {
-  protected abstract newEncodeAct(
-    env: LiveEnvironment,
-  ): EncodeAct;
+  protected abstract newEncodeAct(env: LiveEnvironment): ExampleEncodeAct;
   protected abstract newDecodeAct(
     env: LiveEnvironment,
     data: string,
-  ): DecodeAct;
+  ): ExampleDecodeAct;
+}
 
-  protected abstract serializedFromEncoded(
-    encoded: JsonCodecValue,
-    act: EncodeAct,
-  ): string;
-  protected abstract encodedFromSerializedForm(
-    data: string,
+abstract class ExampleEncodeAct {
+  abstract serializedFromEncoded(encoded: JsonCodecValue): string;
+  protected abstract encodeArray(value: readonly FabricValue[]): JsonCodecValue;
+  protected abstract encodePlainObject(
+    value: Record<string, FabricValue>,
   ): JsonCodecValue;
+  protected abstract wrapTag(tag: string, state: JsonCodecValue): JsonCodecValue;
+}
+
+abstract class ExampleDecodeAct {
+  abstract encodedFromSerializedForm(data: string): JsonCodecValue;
+  abstract decodeValue(data: JsonCodecValue): FabricValue;
 }
 ```
 
@@ -2569,20 +2579,20 @@ running — the inner act gets its own bookkeeping instead of corrupting the
 outer one's. A format needing more than the base class knows about, such as a
 wire marker minted per call, subclasses the act and carries it there.
 
-`JsonCodecEngine` supplies both directions at both of its boundary types:
+`JsonCodecEngine` supplies both directions at its one boundary type:
 
 - `encode(value, env?)` encodes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
 - `decode(data, env)` parses a JSON string, then decodes tagged
   forms back into runtime types.
-- `encodeToBytes(value, env?)` and `decodeFromBytes(bytes, env)` are the same
-  two walks against UTF-8 bytes rather than a string.
 
-> **Why the boundary is this narrow.** Tag wrapping and unwrapping are
-> machinery internal to the engine, leaving only
+A caller wanting bytes encodes the string itself. The format's boundary is the
+string, and a second entry point for the same walk was API without a purpose.
+
+> **Why the boundary is this narrow.** Tag wrapping and unwrapping belong to
+> the acts rather than to an engine's public surface, leaving only
 > `encode(value, env?) -> SerializedForm` and
-> `decode(data, env) -> FabricValue` — one such pair per boundary type the
-> engine offers — as public API. The engine owns the full pipeline rather than
+> `decode(data, env) -> FabricValue` — as public API. The engine owns the full pipeline rather than
 > the tag step alone, and its public surface says so by exposing no step of
 > it.
 
@@ -2593,21 +2603,21 @@ Encode:  value -> codec.encode(value) -> serialized form (e.g., JSON string)
 Decode:  serialized form -> codec.decode(data, env) -> FabricValue
 ```
 
-Internally, `JsonCodecEngine`'s `encode()` method calls its internal encode
-walker (`encodeValue()`) to walk the `FabricValue` tree and produce a
-`JsonCodecValue` tree, then stringifies it. The `decode()` method parses
-the JSON string, then calls its internal decode walker (`decodeValue()`) to
-walk the `JsonCodecValue` tree and decode runtime types. The
-recursive descent and codec dispatch are entirely internal to `JsonCodecEngine`.
+Internally, `JsonCodecEngine`'s `encode()` method mints an encoding act and
+has it walk (`encodeValue()`) the `FabricValue` tree into a `JsonCodecValue`
+tree, which the same act then stringifies. The `decode()` method mints a
+decoding act, which parses the JSON string and walks (`decodeValue()`) the
+`JsonCodecValue` tree back into runtime types. The recursive descent and codec
+dispatch belong to the acts, and neither is public.
 
 ### 4.5 Codecs, the Registry, and Internal Tree Walking
 
-The encoding and decoding logic is implemented as private
-methods on `JsonCodecEngine`. It dispatches per-type logic to the **codecs**
-(Section 2.4) held in a **`CodecRegistry<Encoded>`** — an index of which codec
-handles which class (for encoding) and which tag (for decoding), built over one
-wire format. Codecs are shallow: `JsonCodecEngine` owns recursion and
-tag-wrapping, and each codec translates exactly one layer.
+The encoding and decoding logic belongs to the acts an engine mints. It
+dispatches per-type logic to the **codecs** (Section 2.4) held in a
+**`CodecRegistry<Encoded>`** — an index of which codec handles which class (for
+encoding) and which tag (for decoding), built over one wire format, which an
+act reads through its engine's configuration. Codecs are shallow: the act owns
+recursion and tag-wrapping, and each codec translates exactly one layer.
 
 A registry is built over a `WireFormat<Encoded>` descriptor, which names both
 the type its encoded states live in and the symbol a class binds its codec for
@@ -2777,9 +2787,9 @@ error** — every wire form is explicitly represented; there is no implicit
 fallback for fabric classes. Arrays and plain objects (the structural
 types) are handled by the walker itself after no codec matches.
 
-#### Internal encode walker (`encodeValue()`)
+#### The encode walk (`encodeValue()`)
 
-`JsonCodecEngine`'s internal encode walker processes the `FabricValue` tree:
+The encoding act's walk processes the `FabricValue` tree:
 
 1. **Codec dispatch** — `codecFromValue()` finds how to encode the value.
    A `SELF_REP` result means the value is its own wire form (emitted
@@ -2802,9 +2812,9 @@ types) are handled by the walker itself after no codec matches.
 
 Circular references are detected via a `Set<object>` tracked during the walk.
 
-#### Internal decode walker (`decodeValue()`)
+#### The decode walk (`decodeValue()`)
 
-`JsonCodecEngine`'s internal decode walker processes the `JsonCodecValue` tree:
+The decoding act's walk processes the `JsonCodecValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed
    keys.
@@ -2855,11 +2865,11 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 > and carries the preserved one as data, that tag being possibly no tag at all
 > (Section 3.2).
 
-> **Why the walkers are internal.** `encodeValue()` and `decodeValue()` are
-> internal to the engine, which keeps the public API to
-> `encode()`/`decode()` and lets the engine hold its own state — registry,
-> codec view, lenient mode — instead of threading it through every recursive
-> call.
+> **Why the walks belong to an act.** `encodeValue()` and `decodeValue()` are
+> the act's rather than the engine's, which keeps an engine's public API to
+> `encode()`/`decode()` and puts the state one call carries on the same object
+> as the methods that consult it — so no recursive call threads it. What an act
+> needs of its engine, it reads through `CodecEngineConfig`.
 
 ### 4.6 Separation of Concerns
 
@@ -2935,13 +2945,15 @@ export function plainObjectFromJson<T extends object = object>(
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/src/codec-json/impl.ts
+// file: packages/data-model/src/codec-json/JsonCodecEngine.ts
 
-/**
- * Indicates if the given text has a "first-blush" appearance as text in the
- * JSON-embedded encoding (i.e., carries the `fvj1:` prefix).
- */
-export function seemsLikeJsonEncodedFabricValue(value: string): boolean;
+declare class ExampleJsonCodecEngine {
+  /**
+   * Indicates if the given text has a "first-blush" appearance as text in the
+   * JSON-embedded encoding (i.e., carries the `fvj1:` prefix).
+   */
+  static seemsLikeEncoded(value: string): boolean;
+}
 ```
 
 `codecs.ts` creates a single stateless `JsonCodecEngine` instance at module load
@@ -3995,8 +4007,8 @@ values cross from internal codec machinery to callers:
   each call site, so a caller reaching it outside the walker gets the same
   guarantee.
 
-- **`JsonCodecValue` parse boundary.** The `#parseWireText()` helper
-  (invoked by `decode()` and `#fromBytes()`) deep-freezes the parsed tree
+- **`JsonCodecValue` parse boundary.** The `parseWireText()` helper
+  (invoked by `decode()`) deep-freezes the parsed tree
   before handing it to the decode walker. This is what makes the
   decode-side `JsonCodecValue` invariant load-bearing: tag-unwrap and
   the `/quote` arm can hand back extracted sub-trees directly without

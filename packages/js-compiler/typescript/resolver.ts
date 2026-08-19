@@ -30,6 +30,10 @@ export async function resolveProgram(
     const current = sources.get(currentName)!;
     const specifiers = getImports(current, target);
     for (const specifier of specifiers) {
+      // Refused here rather than resolved: past this point the `..` segments
+      // are clamped away and every later error names a path that appears in
+      // no source file.
+      assertInsideRoot(specifier, current);
       const identifier = resolveSpecifier(specifier, current);
       if (sources.has(identifier)) {
         continue;
@@ -85,7 +89,10 @@ function isUnresolvedModuleOk(
 // without pulling the compiler into their bundle; re-exported here for the
 // existing compile-path importers.
 export { resolveImportSpecifier } from "../specifier.ts";
-import { resolveImportSpecifier as resolveSpecifier } from "../specifier.ts";
+import {
+  assertImportInsideProgramRoot as assertInsideRoot,
+  resolveImportSpecifier as resolveSpecifier,
+} from "../specifier.ts";
 
 /**
  * Collect every import/`export … from` specifier referenced by a source file,

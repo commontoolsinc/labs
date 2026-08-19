@@ -8,20 +8,24 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
-import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/index.ts";
+import {
+  type LiveEnvironment,
+  NULL_LIVE_ENVIRONMENT,
+} from "@/codec-interface/index.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
-import { EncodeAct } from "@/codec-common/EncodeAct.ts";
-import { DecodeAct } from "@/codec-common/DecodeAct.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import {
   Marker,
   NESTED,
   newProbeEngine,
   NONTERMINAL_HOST,
+  ProbeDecodeAct,
+  ProbeEncodeAct,
   ProbeEngine,
   type ProbeValue,
   Tagged,
@@ -131,6 +135,42 @@ describe("BaseCodecEngine", () => {
       value.self = value;
 
       expect(() => engine.encode(value)).toThrow(/Circular reference/);
+    });
+
+    it("throws given a cycle that closes through a tagged value", () => {
+      // The cycle guard on the codec-matched path, which no container arm
+      // reaches: a nonterminal codec's state can name the very value being
+      // encoded, and the walk expands that state. Without the enter/leave
+      // around the tagged form, this recurses until the stack gives out
+      // instead of being refused.
+      class SelfNaming {}
+
+      const selfNaming = new SelfNaming() as unknown as FabricValue;
+      const codec = new (class SelfNamingCodec extends BaseNonterminalCodec {
+        constructor() {
+          super(
+            "SelfNaming@1",
+            SelfNaming as unknown as new (...args: never[]) => object,
+          );
+        }
+
+        override canEncode(value: FabricValue): boolean {
+          return value === selfNaming;
+        }
+
+        encode(value: FabricValue): FabricValue {
+          // The state names the value it came from, closing the cycle.
+          return { self: value };
+        }
+
+        decode(): FabricValue {
+          return selfNaming;
+        }
+      })();
+
+      const { engine } = newProbeEngine({ extraCodecs: [codec] });
+
+      expect(() => engine.encode(selfNaming)).toThrow(/Circular reference/);
     });
 
     it("does not mistake a repeated value for a circular one", () => {
@@ -275,13 +315,19 @@ describe("BaseCodecEngine", () => {
       // `encode()` starts memoizing one act for the engine's lifetime.
       const seen: unknown[] = [];
       const { registry } = newProbeEngine();
+      // The spy sits on the act rather than the engine, and records `this`:
+      // what needs proving is that the act the walk runs on is a fresh one per
+      // call, not merely that the factory was consulted.
       const engine = new (class extends ProbeEngine {
-        protected override encodeArray(
-          value: readonly FabricValue[],
-          act: EncodeAct,
-        ): ProbeValue {
-          seen.push(act);
-          return super.encodeArray(value, act);
+        protected override newEncodeAct(env: LiveEnvironment): ProbeEncodeAct {
+          return new (class extends ProbeEncodeAct {
+            protected override encodeArray(
+              value: readonly FabricValue[],
+            ): ProbeValue {
+              seen.push(this);
+              return super.encodeArray(value);
+            }
+          })(this, env);
         }
       })({ registry });
 
@@ -296,12 +342,16 @@ describe("BaseCodecEngine", () => {
       const seen: unknown[] = [];
       const { registry } = newProbeEngine();
       const engine = new (class extends ProbeEngine {
-        protected override decodeValue(
-          data: ProbeValue,
-          act: DecodeAct,
-        ): FabricValue {
-          seen.push(act);
-          return super.decodeValue(data, act);
+        protected override newDecodeAct(
+          env: LiveEnvironment,
+          _data: ProbeValue,
+        ): ProbeDecodeAct {
+          return new (class extends ProbeDecodeAct {
+            override decodeValue(data: ProbeValue): FabricValue {
+              seen.push(this);
+              return super.decodeValue(data);
+            }
+          })(this, env);
         }
       })({ registry });
 
@@ -379,13 +429,12 @@ describe("BaseCodecEngine", () => {
 
       const { engine } = newProbeEngine({ extraCodecs: [codec] });
       const boom = new Boom() as unknown as FabricValue;
-      const act = new EncodeAct(engine, ENV);
-      const probe = engine as unknown as {
-        encodeValue(value: FabricValue, act: EncodeAct): unknown;
-      };
+      // One act, driven twice: the second call is what would report a cycle
+      // that is not there, had the first left `boom` entered.
+      const act = new ProbeEncodeAct(engine, ENV);
 
-      expect(() => probe.encodeValue(boom, act)).toThrow("codec refused");
-      expect(() => probe.encodeValue(boom, act)).toThrow("codec refused");
+      expect(() => act.encodeValue(boom)).toThrow("codec refused");
+      expect(() => act.encodeValue(boom)).toThrow("codec refused");
     });
 
     it("gives a re-entrant decode its own in-progress set", () => {

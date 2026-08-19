@@ -37,8 +37,8 @@ a string is sufficient to tell whether it carries a fabric-value payload.
   the number `42` encodes as the seven-character string `fvj1:42`).
 - A conforming **decoder** verifies the prefix is present before parsing the
   remainder as JSON, and strips the prefix before processing.
-- A short detection helper (`seemsLikeJsonEncodedFabricValue`) tests for the
-  prefix without parsing — useful for routing arbitrary input through the
+- A short detection helper (`JsonCodecEngine.seemsLikeEncoded()`) tests for
+  the prefix without parsing — useful for routing arbitrary input through the
   right decode path.
 
 **Forward compatibility.** The trailing `1` is a version digit, reserving the
@@ -324,6 +324,10 @@ are still processed normally during decoding:
 Decodes to: `{ "/myKey": <decoded Link> }`. The `/object` wrapper
 is stripped; inner keys are taken literally; inner values go through normal
 decoding.
+
+A state under this tag that is **not** a plain object is malformed wire data,
+and is refused rather than unwrapped — settled against `lenient` like any
+other malformation off a channel.
 
 **When the encoder emits `/object`:** During encoding, if a plain object
 has any string key that starts with `/` — regardless of how many other keys the

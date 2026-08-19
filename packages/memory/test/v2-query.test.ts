@@ -1643,3 +1643,291 @@ Deno.test("memory v2 schema scan and verification caches stay bounded at scale",
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 delivers a meta-linked document that arrives after its referrer", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-meta-arrival";
+  try {
+    // The referrer's `pattern` meta link points at a document nothing has
+    // written yet. The absent target must still enter the tracker — the
+    // tracker is what makes the graph reactive — or its arrival would
+    // never reach this watch.
+    applyCommit(engine, {
+      sessionId: "session:meta-arrival-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:meta-arrival-referrer",
+          value: {
+            value: { n: 1 },
+            pattern: {
+              "/": {
+                "link@1": { id: "of:meta-arrival-target", path: [] },
+              },
+            },
+          },
+        }],
+      },
+    });
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:meta-arrival-referrer",
+        selector: { path: [], schema: false },
+      }],
+    });
+    const targetKey = `${space}/space/of:meta-arrival-target` as const;
+    assert(tracked.state.tracker.has(targetKey));
+
+    applyCommit(engine, {
+      sessionId: "session:meta-arrival-writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:meta-arrival-target",
+          value: { value: { arrived: true } },
+        }],
+      },
+    });
+    const refreshed = refreshTrackedGraph(
+      space,
+      engine,
+      tracked.state,
+      new Set([toDirtyKey("of:meta-arrival-target")]),
+    );
+    assertExists(refreshed);
+    assert(refreshed.updates.has(targetKey));
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 resolves a selector schema reference against the stored closure", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-selector-ref";
+  try {
+    const leafSchema = {
+      type: "object",
+      properties: { selectorLeaf: { type: "string" } },
+    } as const;
+    const leafHash = internSchemaAsTaggedHashString(leafSchema);
+    applyCommit(engine, {
+      sessionId: "session:selector-ref-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: `cid:${leafHash}`, value: { value: leafSchema } },
+          {
+            op: "set",
+            id: "of:selector-ref-doc",
+            value: { value: { selectorLeaf: "present" } },
+          },
+        ],
+      },
+    });
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:selector-ref-doc",
+        selector: { path: [], schema: { $ref: `cid:${leafHash}` } },
+      }],
+    });
+    assert(
+      tracked.state.entities.has(`${space}/space/of:selector-ref-doc`),
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 rejects a selector referencing a schema document the space does not hold", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-selector-ref-absent";
+  try {
+    const absentHash = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "selector-never-installed",
+    });
+    applyCommit(engine, {
+      sessionId: "session:selector-absent-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:selector-absent-doc",
+          value: { value: { n: 1 } },
+        }],
+      },
+    });
+    // A compliant client only sends a reference it verified persisted, so
+    // an unresolvable selector reference is a protocol violation answered
+    // loudly — not the lenient selects-nothing wait link schemas get.
+    assertThrows(
+      () =>
+        trackGraph(space, engine, {
+          roots: [{
+            id: "of:selector-absent-doc",
+            selector: { path: [], schema: { $ref: `cid:${absentHash}` } },
+          }],
+        }),
+      Error,
+      "A selector reference must name a persisted closure",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 treats an $alias-shaped record as plain data in delivery", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-alias-data";
+  try {
+    // The ref inside this record points at NOTHING — and the query must
+    // not care: an alias is a binding only by context, and to result
+    // assembly an $alias-shaped record is plain data, neither a delivery
+    // obligation nor a failure.
+    const absent = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "alias-data-never-installed",
+    });
+    applyCommit(engine, {
+      sessionId: "session:alias-data-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:alias-data-doc",
+          value: {
+            value: {
+              bound: {
+                $alias: {
+                  cell: "argument",
+                  path: ["field"],
+                  schema: { $ref: `cid:${absent}` },
+                },
+              },
+            },
+          },
+        }],
+      },
+    });
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:alias-data-doc",
+        selector: { path: [], schema: false },
+      }],
+    });
+    assert(tracked.state.entities.has(`${space}/space/of:alias-data-doc`));
+    assert(!tracked.state.entities.has(`${space}/space/cid:${absent}`));
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 selector validation meets a shared dependency once and rejects forged storage", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-selector-diamond";
+  try {
+    const shared = {
+      type: "string",
+      title: "selector-diamond-shared",
+    } as const;
+    const sharedHash = internSchemaAsTaggedHashString(shared);
+    const left = {
+      type: "object",
+      properties: { l: { $ref: `cid:${sharedHash}` } },
+    } as const;
+    const leftHash = internSchemaAsTaggedHashString(left);
+    const right = {
+      type: "object",
+      properties: { r: { $ref: `cid:${sharedHash}` } },
+    } as const;
+    const rightHash = internSchemaAsTaggedHashString(right);
+    const root = {
+      type: "object",
+      properties: {
+        a: { $ref: `cid:${leftHash}` },
+        b: { $ref: `cid:${rightHash}` },
+      },
+    } as const;
+    const rootHash = internSchemaAsTaggedHashString(root);
+    const forgedTarget = internSchemaAsTaggedHashString({
+      type: "string",
+      title: "selector-forged-claim",
+    });
+    applyCommit(engine, {
+      sessionId: "session:selector-diamond-writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: `cid:${sharedHash}`, value: { value: shared } },
+          { op: "set", id: `cid:${leftHash}`, value: { value: left } },
+          { op: "set", id: `cid:${rightHash}`, value: { value: right } },
+          { op: "set", id: `cid:${rootHash}`, value: { value: root } },
+          {
+            op: "set",
+            id: "of:selector-diamond-doc",
+            value: { value: { a: {}, b: {} } },
+          },
+          // An unreferenced forged install is admitted (the boundary cannot
+          // name its class) — the selector validation below must still
+          // reject a reference to it.
+          {
+            op: "set",
+            id: `cid:${forgedTarget}`,
+            value: { value: { type: "number", title: "not-the-claim" } },
+          },
+        ],
+      },
+    });
+    // The diamond walk meets the shared dependency once and validates the
+    // whole closure from the space's own storage.
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: "of:selector-diamond-doc",
+        selector: { path: [], schema: { $ref: `cid:${rootHash}` } },
+      }],
+    });
+    assert(
+      tracked.state.entities.has(`${space}/space/of:selector-diamond-doc`),
+    );
+    // A selector reference backed by stored content that does not hash to
+    // its id fails loudly at validation, before any traversal.
+    assertThrows(
+      () =>
+        trackGraph(space, engine, {
+          roots: [{
+            id: "of:selector-diamond-doc",
+            selector: { path: [], schema: { $ref: `cid:${forgedTarget}` } },
+          }],
+        }),
+      Error,
+      "did not verify in this space",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

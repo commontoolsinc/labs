@@ -187,6 +187,37 @@ describe("cli fabric deps", () => {
     ).rejects.toThrow("compiler-internal namespaces");
   });
 
+  it("collectLocalProgram refuses an import that escapes the program root", async () => {
+    // No compile stands behind this walk, so an unrefused escape is a
+    // silently collected wrong file in `cf check` and `cf deps`.
+    const resolver = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `import { x } from "../outside.ts";\nexport default x;`,
+      "/outside.ts": "export const x = 1;",
+    });
+
+    await expect(
+      collectLocalProgram(resolver, { fabricImports: "allow" }),
+    ).rejects.toThrow(
+      'Import "../outside.ts" in "/main.tsx" escapes the program root.',
+    );
+  });
+
+  it("collectLocalProgram collects a parent import that stays inside", async () => {
+    const resolver = new InMemoryProgram("/core/main.tsx", {
+      "/core/main.tsx":
+        `import { x } from "../util/mod.ts";\nexport default x;`,
+      "/util/mod.ts": "export const x = 1;",
+    });
+
+    const program = await collectLocalProgram(resolver, {
+      fabricImports: "allow",
+    });
+    expect(program.files.map((f) => f.name).toSorted()).toEqual([
+      "/core/main.tsx",
+      "/util/mod.ts",
+    ]);
+  });
+
   it("exposes deps update help", async () => {
     const { code, stdout } = await cf("deps update --help");
 

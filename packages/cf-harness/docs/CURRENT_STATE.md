@@ -14,11 +14,14 @@ The runtime has four main boundaries:
 1. The caller supplies prompt-slot roles, model and gateway configuration,
    tools, child profiles, mounts, resource bounds, skills, policy mode, and
    optional structured-result schemas.
-2. The prompt loop performs bounded OpenAI-compatible model turns and invokes
-   only the configured tool/profile surface.
-3. Tool execution uses Docker with a configurable runtime, normally `runsc-cfc`.
-   The browser child is the exceptional host-adjacent profile and is constrained
-   to a leased local CDP endpoint and a narrow command policy.
+2. The prompt loop performs bounded turns through the selected model provider
+   and invokes only the configured tool/profile surface.
+3. Most tool execution uses Docker with a configurable runtime, normally
+   `runsc-cfc`. The browser child is a constrained host-adjacent profile bound
+   to a leased local CDP endpoint and narrow command policy. The optional
+   `run_pattern` tool is a distinct trusted-host path whose Fabric identity
+   stays outside Docker and whose authority is constrained to one configured
+   space.
 4. The artifact store records run state, transcript, reports, capability and
    policy snapshots, tool outputs, child references, skills provenance, and
    optional product run manifests.
@@ -55,6 +58,9 @@ The current package provides:
   cannot correct — transport, engine invariants, artifact persistence,
   cancellation, the turn cap — ends the run;
 - transcript-based resume and durable run artifacts;
+- server-side Responses context compaction with a default threshold derived from
+  the model's input budget, an explicit override/disable control, retained
+  compaction evidence, and tool-call/result-safe transcript pruning;
 - per-turn and aggregate token/cache usage in run reports, operator output,
   batch metadata, and interactive turn-completion events;
 - stable interactive prompt-cache affinity, configurable reasoning effort, and
@@ -101,6 +107,11 @@ The current package provides:
   bound is on the handle's own address rather than on everything the document
   reaches from it. Answering from the fabric establishes the run's fabric
   session despite the tool's `read` effect class;
+- bounded request-attribution headers on OpenAI-compatible gateway traffic,
+  using persisted operational provenance rather than request content or personal
+  identifiers;
+- content-addressed snapshots for in-run `view_image` observations, while
+  run-start images remain source-integrity-locked;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
   environment fallbacks): compiles and runs an inline `sourceText` pattern
@@ -119,10 +130,15 @@ The current package provides:
   because its redirect carries no per-assignment identity a withdrawal could
   match, so the message says the name may still resolve to the created piece and
   reports the piece list as that path left it; scrubs bare fabric identifiers
-  from model-facing diagnostics; returns the result cell's canonical reference
-  plus an optionally schema-sanitized value, and leaves the piece detached (no
-  recorded origin) and, unless `register` asked for a named address, out of the
-  space's registered piece list, with run→piece provenance carried by the run's
+  from model-facing diagnostics; reports a result that settles to empty or
+  schema-failing as an error when the invocation's settle window observed a
+  cause — an action error attributed to the piece, or a convergence-budget
+  episode whose deferred actions name this pattern — and otherwise still reports
+  ok, since an empty result with no observed cause is not evidence of failure;
+  returns the result cell's canonical reference plus an optionally
+  schema-sanitized value, and leaves the piece detached (no recorded origin)
+  and, unless `register` asked for a named address, out of the space's
+  registered piece list, with run→piece provenance carried by the run's
   persisted artifacts; without the session configuration the tool is absent from
   the tool surface, for a `default`- or `pattern-author`-profile subagent as
   much as for the parent — a child shares the one session the parent built;
@@ -172,6 +188,14 @@ requests structured capture results, and retains reviewable run artifacts.
 Autonomous wish dispatch currently routes through `cf-harness` when Loom's Page
 authority prerequisites are considered available.
 
+Local batch and interactive entrypoints use a dedicated single-user host
+binding. It resolves the persisted provider from a canonical `CF_HARNESS_HOME`,
+binds Codex credentials to the fixed local owner, records the provider, model,
+authentication source, owner, and home identity, and requires that exact
+snapshot on resume before any provider traffic. Hosted multi-user integrations
+must supply an owner-bound credential resolver rather than reuse this local
+host.
+
 Loom also has an opt-in adapter for the interactive NDJSON protocol. It is not
 the default interactive harness, and browser automation is not yet wired into
 that interactive product path.
@@ -213,7 +237,8 @@ mode.
 - Raw operator artifacts use filesystem paths. Parent-visible child returns are
   sanitized, and the prompt loop swaps model-bound tool output and
   model-authored tool arguments through the address handle table; denial-path
-  tool messages are not swapped.
+  tool messages are not swapped, and interactive restore does not persist the
+  handle table.
 - The session-local handle table covers cell addresses only. Value handles
   (`cfh:v:`) are reserved in the token grammar but not implemented, and there is
   no explicit dereference/release mechanism.

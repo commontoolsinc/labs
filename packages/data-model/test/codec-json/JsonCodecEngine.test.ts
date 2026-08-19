@@ -28,6 +28,7 @@ import { expect } from "@std/expect";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import {
   createDefaultJsonRegistry,
+  jsonFromFabricValue,
   newDefaultJsonCodecEngine,
 } from "@/codecs.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
@@ -451,112 +452,6 @@ describe("JsonCodecEngine", () => {
       // Deep-frozen like any other decoded result, so a caller cannot alter
       // the account it was handed.
       expect(Object.isFrozen(problem)).toBe(true);
-    });
-  });
-
-  describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
-    it("throws for unparseable bytes when strict", () => {
-      const bytes = new TextEncoder().encode("{not json");
-
-      expect(() =>
-        newDefaultJsonCodecEngine().decodeFromBytes(
-          bytes,
-          new TestLiveEnvironment(),
-        )
-      ).toThrow(/Malformed JSON in an encoded `FabricValue` string/);
-    });
-
-    it("returns a `ProblematicValue` for unparseable bytes when lenient", () => {
-      // This entry point reaches a conversion without passing through
-      // `decode()`, so it settles the refusal itself. Were it not to, the
-      // byte boundary would treat a malformed payload differently from the
-      // string boundary for no reason a caller could name.
-      const bytes = new TextEncoder().encode("{not json");
-      const decoded = newDefaultJsonCodecEngine({ lenient: true })
-        .decodeFromBytes(bytes, new TestLiveEnvironment());
-
-      expect(decoded).toBeInstanceOf(ProblematicValue);
-      expect((decoded as ProblematicValue).error)
-        .toMatch(/Malformed JSON in an encoded `FabricValue` string/);
-    });
-
-    it("returns `Uint8Array` from `encodeToBytes()`", () => {
-      const { jsonCodecEngine } = makeTestCodec();
-      const result = jsonCodecEngine.encodeToBytes(42);
-      expect(result).toBeInstanceOf(Uint8Array);
-    });
-
-    it("produces valid JSON bytes from `encodeToBytes()`", () => {
-      const { jsonCodecEngine } = makeTestCodec();
-      const bytes = jsonCodecEngine.encodeToBytes(
-        { a: 1 },
-      );
-      const json = new TextDecoder().decode(bytes);
-      expect(JSON.parse(json)).toEqual({ a: 1 });
-    });
-
-    it("decodes a `Uint8Array` through `decodeFromBytes()`", () => {
-      const { jsonCodecEngine, runtime } = makeTestCodec();
-      const bytes = new TextEncoder().encode(JSON.stringify({ a: 1 }));
-      const result = jsonCodecEngine.decodeFromBytes(
-        bytes,
-        runtime,
-      ) as Record<string, FabricValue>;
-      expect(result.a).toBe(1);
-    });
-
-    it("round-trips through `Uint8Array`", () => {
-      const { jsonCodecEngine, runtime } = makeTestCodec();
-      const value = {
-        name: "test",
-        count: 42,
-      };
-      const bytes = jsonCodecEngine.encodeToBytes(value);
-      const result = jsonCodecEngine.decodeFromBytes(
-        bytes,
-        runtime,
-      ) as Record<string, FabricValue>;
-      expect(result.name).toBe("test");
-      expect(result.count).toBe(42);
-    });
-
-    it("round-trips `FabricError` through `Uint8Array`", () => {
-      const { jsonCodecEngine, runtime } = makeTestCodec();
-      const err = FabricError.fromNativeError(new TypeError("oops"));
-      const bytes = jsonCodecEngine.encodeToBytes(err);
-      const result = jsonCodecEngine.decodeFromBytes(
-        bytes,
-        runtime,
-      );
-      expect(result).toBeInstanceOf(FabricError);
-      const se = result as unknown as FabricError;
-      expect(se.toNativeValue(true)).toBeInstanceOf(TypeError);
-      expect(se.message).toBe("oops");
-    });
-
-    it("round-trips `undefined` through `Uint8Array`", () => {
-      const { jsonCodecEngine, runtime } = makeTestCodec();
-      const bytes = jsonCodecEngine.encodeToBytes(undefined);
-      const result = jsonCodecEngine.decodeFromBytes(bytes, runtime);
-      expect(result).toBe(undefined);
-    });
-
-    it("round-trips complex structure through `Uint8Array`", () => {
-      const { jsonCodecEngine, runtime } = makeTestCodec();
-      const value = {
-        users: [{ name: "Alice" }, { name: "Bob" }],
-        error: FabricError.fromNativeError(new Error("fail")),
-        nothing: undefined,
-      };
-      const bytes = jsonCodecEngine.encodeToBytes(value);
-      const result = jsonCodecEngine.decodeFromBytes(
-        bytes,
-        runtime,
-      ) as Record<string, FabricValue>;
-      const users = result.users as FabricValue[];
-      expect((users[0] as Record<string, FabricValue>).name).toBe("Alice");
-      expect(result.error).toBeInstanceOf(FabricError);
-      expect(result.nothing).toBe(undefined);
     });
   });
 
@@ -1177,6 +1072,39 @@ describe("JsonCodecEngine", () => {
 
         const result = roundTrip(obj) as Record<string, FabricValue[]>;
         expect(result["/outer"]![0]).toEqual({ "/inner": "val" });
+      });
+    });
+
+    describe("`/object` over a state that is not an object", () => {
+      for (
+        const [label, state] of [
+          ["a string", "nope"],
+          ["a number", 42],
+          ["`null`", null],
+          ["an array", [1, 2]],
+        ] as const
+      ) {
+        it(`returns a \`ProblematicValue\` for ${label} when lenient`, () => {
+          const decoded = fromEncodedFormat(
+            { "/object": state } as JsonCodecValue,
+            true,
+          );
+
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+          expect((decoded as ProblematicValue).error)
+            .toMatch(/`\/object` state is not an object/);
+        });
+      }
+
+      it("throws for a state that is not an object when strict", () => {
+        const engine = newDefaultJsonCodecEngine();
+        const text = JsonCodecEngine.wrapEncodedValueForTesting(
+          JSON.stringify({ "/object": "nope" }),
+          true,
+        );
+
+        expect(() => engine.decode(text, new TestLiveEnvironment()))
+          .toThrow(/`\/object` state is not an object/);
       });
     });
 
@@ -1826,37 +1754,23 @@ describe("JsonCodecEngine", () => {
     });
   });
 
-  describe("deep-frozen encoded invariant (`decode()`/`decodeFromBytes()` symmetry)", () => {
-    // Every `JsonCodecValue` handed to the decode walk must be deep-frozen, so
-    // both decode entry points must produce equally deep-frozen
-    // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
-    // via `#fromBytes()`).
+  describe("deep-frozen encoded invariant", () => {
+    // Every `JsonCodecValue` handed to the decode walk must be deep-frozen.
     //
     // The `/quote` arm does `return state`, handing back a node lifted straight
     // out of the parsed codec-value tree (see `#unwrapTag()`'s contract). That
     // shortcut is sound only because the parsed tree is deep-frozen at
     // construction, which both construction sites must therefore do. These
-    // cases pin the symmetry, so that dropping the guarantee at either one
-    // cannot pass unnoticed.
+    // cases pin it, so that dropping the guarantee cannot pass unnoticed.
 
-    /**
-     * Decodes the same codec-value tree both ways. The string path needs the
-     * encoding prefix; the bytes path does not (it does not strip one).
-     */
-    function decodeBothPaths(
-      data: JsonCodecValue,
-    ): { viaString: FabricValue; viaBytes: FabricValue } {
+    /** Decodes one codec-value tree through this format's boundary. */
+    function decodeTree(data: JsonCodecValue): FabricValue {
       const { jsonCodecEngine, runtime } = makeTestCodec();
-      const json = JSON.stringify(data);
-      const viaString = jsonCodecEngine.decode(
-        JsonCodecEngine.wrapEncodedValueForTesting(json),
+
+      return jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(data)),
         runtime,
       );
-      const viaBytes = jsonCodecEngine.decodeFromBytes(
-        new TextEncoder().encode(json),
-        runtime,
-      );
-      return { viaString, viaBytes };
     }
 
     const cases: Array<[string, JsonCodecValue]> = [
@@ -1880,15 +1794,12 @@ describe("JsonCodecEngine", () => {
     ];
 
     for (const [name, encoded] of cases) {
-      it(`both paths yield a deep-frozen, equal result: ${name}`, () => {
-        const { viaString, viaBytes } = decodeBothPaths(encoded);
-        expect(isDeepFrozen(viaString)).toBe(true);
-        expect(isDeepFrozen(viaBytes)).toBe(true);
-        expect(viaString).toEqual(viaBytes);
+      it(`yields a deep-frozen result: ${name}`, () => {
+        expect(isDeepFrozen(decodeTree(encoded))).toBe(true);
       });
     }
 
-    it("string path deep-freezes `/quote` content at every depth (regression for `decode()` vs `#fromBytes()`)", () => {
+    it("deep-freezes `/quote` content at every depth", () => {
       const encoded = {
         "/quote": { outer: { inner: [1, 2] } },
       } as JsonCodecValue;
@@ -1906,23 +1817,6 @@ describe("JsonCodecEngine", () => {
       }).toThrow();
       expect(() => {
         (result.outer as Record<string, unknown>).added = true;
-      }).toThrow();
-    });
-
-    it("bytes path deep-freezes `/quote` content at every depth", () => {
-      const encoded = {
-        "/quote": { outer: { inner: [{ deep: 1 }] } },
-      } as JsonCodecValue;
-      const { jsonCodecEngine, runtime } = makeTestCodec();
-      const result = jsonCodecEngine.decodeFromBytes(
-        new TextEncoder().encode(JSON.stringify(encoded)),
-        runtime,
-      ) as Record<string, Record<string, Array<Record<string, FabricValue>>>>;
-
-      expect(isDeepFrozen(result)).toBe(true);
-      expect(Object.isFrozen(result.outer!.inner![0])).toBe(true);
-      expect(() => {
-        (result.outer!.inner![0] as Record<string, unknown>).deep = 2;
       }).toThrow();
     });
 
@@ -1969,23 +1863,6 @@ describe("JsonCodecEngine", () => {
       const decoded = jsonCodecEngine.decode(encoded, runtime);
       expect(decoded).toBeInstanceOf(FabricError);
       expect((decoded as unknown as FabricError).message).toBe("test");
-    });
-
-    it("`encodeToBytes()`/`decodeFromBytes()` round-trip", () => {
-      const jsonCodecEngine = newDefaultJsonCodecEngine();
-      const runtime = new TestLiveEnvironment();
-      const data = {
-        name: "test",
-        error: FabricError.fromNativeError(new Error("fail")),
-      };
-      const bytes = jsonCodecEngine.encodeToBytes(data);
-      expect(bytes).toBeInstanceOf(Uint8Array);
-      const decoded = jsonCodecEngine.decodeFromBytes(bytes, runtime) as Record<
-        string,
-        FabricValue
-      >;
-      expect(decoded.name).toBe("test");
-      expect(decoded.error).toBeInstanceOf(FabricError);
     });
 
     it("`.lenient` defaults to `false`", () => {
@@ -2103,6 +1980,60 @@ describe("JsonCodecEngine", () => {
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe(null); // null = same as type (common case)
       expect(state.message).toBe("compat test");
+    });
+  });
+
+  describe("`seemsLikeEncoded()`", () => {
+    // Decides on the prefix alone and never parses, so these cases are about
+    // where that suffices and where it would be too eager: the bare prefix
+    // counts, a prefix that is partial or not at the front does not, and plain
+    // JSON that happens to look similar does not. One case feeds it real
+    // encoder output, so the shape recognized here cannot drift from the shape
+    // produced.
+    it("recognizes a string with the encoding prefix", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded('fvj1:{"a":1}')).toBe(true);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1:null")).toBe(true);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1:42")).toBe(true);
+    });
+
+    it("recognizes the bare prefix", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1:")).toBe(true);
+    });
+
+    it("recognizes the actual output of `jsonFromFabricValue()` (round-trip check)", () => {
+      const encoded = jsonFromFabricValue({ a: 1, b: 42n });
+      expect(JsonCodecEngine.seemsLikeEncoded(encoded)).toBe(true);
+    });
+
+    it("returns `false` for an empty string", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("")).toBe(false);
+    });
+
+    it("returns `false` for plain JSON without the prefix", () => {
+      // These are plain JSON without the prefix, so the dispatch must reject
+      // them.
+      expect(JsonCodecEngine.seemsLikeEncoded("true")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("false")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("null")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded('"hello"')).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("[1,2,3]")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded('{"a":1}')).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("42")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("-1")).toBe(false);
+    });
+
+    it("returns `false` for a partial or misplaced prefix", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj1")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("FVJ1:")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("fvj2:")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded(" fvj1:")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("xfvj1:")).toBe(false);
+    });
+
+    it("returns `false` for a bare identifier or other non-JSON-looking string", () => {
+      expect(JsonCodecEngine.seemsLikeEncoded("hello")).toBe(false);
+      expect(JsonCodecEngine.seemsLikeEncoded("undefined")).toBe(false);
     });
   });
 

@@ -1,37 +1,19 @@
 /**
- * Reports month-to-date CI cost across GitHub Actions and Blacksmith, and
- * projects it to a full-month total. Each configured source contributes one
- * line to a shared 45-day daily-spend chart. The line labels show each
- * source's month-to-date spend and the header shows the combined
- * month-to-date total.
+ * Reports month-to-date GitHub Actions cost and projects it to a full-month
+ * total. The 45-day daily-spend chart labels the line with month-to-date spend.
  *
- * GitHub's enhanced billing report supplies daily net Actions spend.
- * Blacksmith supplies an all-in invoice total and daily runner cost. The
- * invoice is the month-to-date source of truth and the runner history supplies
- * the chart. A configured source that cannot be read shows "$???" and makes
- * the combined projection a lower bound.
- *
- * Both sources report a day or two after it ends, and a settled day either
- * source has no row for is a day it spent nothing. That reading holds only
- * while the source is still writing rows, so each is read only as far as its
- * own rows reach: a feed whose newest row is further back than its lag allows
- * counts as a source that cannot be read, rather than as days of $0.
+ * GitHub's enhanced billing report supplies daily net Actions spend. It
+ * reports a day or two after it ends, and a settled day with no row is a day
+ * Actions spent nothing. That reading holds only while the report is still
+ * writing rows, so a report whose newest row is too far back is unavailable
+ * rather than a run of $0 days.
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
-import {
-  budgetStatus,
-  daysLabel,
-  friendlyError,
-  github,
-  readBudget,
-  usd,
-} from "../lib.ts";
+import { budgetStatus, daysLabel, friendlyError, github, usd } from "../lib.ts";
 import { REPO } from "../config.ts";
-import { BlacksmithClient, blacksmithRoutes } from "../blacksmith.ts";
 import {
   calendarMonth,
-  DAY_MS,
   reportLagDays,
   settled,
   SPEND_HISTORY_DAYS,
@@ -74,10 +56,6 @@ interface GitHubDollarSpend extends DailySpend {
   months: Set<string>;
 }
 
-interface BlacksmithSpend extends DailySpend {
-  budget: number;
-}
-
 interface GitHubMinuteSpend {
   kind: "minutes";
   used: number;
@@ -86,13 +64,6 @@ interface GitHubMinuteSpend {
 }
 
 type GitHubSpend = GitHubDollarSpend | GitHubMinuteSpend;
-
-interface BlacksmithDailyResponse {
-  daily_metrics?: Array<{
-    date?: unknown;
-    cost?: unknown;
-  }>;
-}
 
 const actionsOf = (report: { usageItems?: UsageItem[] }): UsageItem[] =>
   (report.usageItems ?? []).filter((item) =>
@@ -106,15 +77,16 @@ const monthKey = (year: number, month0: number) =>
   `${year}-${String(month0 + 1).padStart(2, "0")}`;
 
 export const GITHUB_LAG_DAYS = 2;
-const BLACKSMITH_LAG_DAYS = 1;
 // How far back a source's newest row may sit before the tile stops reading the
-// source. Both feeds report within a day or two of a day ending, so four days
+// source. GitHub reports within a day or two of a day ending, so four days
 // without a row is a feed that has stopped rather than one running late. A
 // stretch where the org bills nothing at all leaves the same gap, and a
 // weekend of it stays inside this.
 const MAX_REPORT_LAG_DAYS = 4;
 const GITHUB_COLOR = "#58a6ff";
-const BLACKSMITH_COLOR = "#f59e0b";
+const GITHUB_SWATCH = `<span class="swatch" style="background:${
+  themedChartSeries(GITHUB_COLOR).color
+}"></span>`;
 
 function dayKey(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -123,13 +95,6 @@ function dayKey(value: unknown): string | null {
   const parsed = Date.parse(`${day}T00:00:00Z`);
   if (!Number.isFinite(parsed)) return null;
   return new Date(parsed).toISOString().slice(0, 10) === day ? day : null;
-}
-
-function finiteNumber(value: unknown): number | null {
-  if (typeof value !== "number" && typeof value !== "string") return null;
-  if (typeof value === "string" && value.trim() === "") return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
 }
 
 function addDaily(
@@ -325,120 +290,6 @@ async function githubSpend(
   }
 }
 
-interface BlacksmithDaily {
-  byDay: Map<string, number>;
-  /**
-   * The newest day the daily endpoint has a record for, whatever that day
-   * cost, which is how far the feed is known to reach.
-   */
-  reportedThrough?: string;
-}
-
-function parseBlacksmithDaily(
-  response: BlacksmithDailyResponse,
-): BlacksmithDaily {
-  if (!Array.isArray(response.daily_metrics)) {
-    throw new Error("Blacksmith daily costs have an unexpected shape");
-  }
-  const byDay = new Map<string, number>();
-  let reportedThrough: string | undefined;
-  for (const entry of response.daily_metrics) {
-    const day = dayKey(entry.date);
-    const cost = finiteNumber(entry.cost);
-    if (!day || cost === null || cost < 0) {
-      throw new Error("Blacksmith daily costs have an unexpected shape");
-    }
-    addDaily(byDay, day, cost);
-    if (reportedThrough === undefined || day > reportedThrough) {
-      reportedThrough = day;
-    }
-  }
-  return { byDay, reportedThrough };
-}
-
-function parseBlacksmithInvoice(response: unknown): number {
-  let amount: unknown = response;
-  if (response && typeof response === "object") {
-    const invoice = response as Record<string, unknown>;
-    if (
-      "currency" in invoice &&
-      (typeof invoice.currency !== "string" ||
-        invoice.currency.toUpperCase() !== "USD")
-    ) {
-      throw new Error("Blacksmith invoice amount has an unexpected shape");
-    }
-    amount = invoice.amount;
-  }
-  const parsed = finiteNumber(amount);
-  if (parsed === null || parsed < 0) {
-    throw new Error("Blacksmith invoice amount has an unexpected shape");
-  }
-  return parsed;
-}
-
-function parseBlacksmithBudget(response: unknown): number {
-  if (response === null || response === undefined) return NaN;
-  let threshold: unknown = response;
-  if (typeof response === "object") {
-    const settings = response as Record<string, unknown>;
-    if (!("threshold" in settings) && !("email_alert_threshold" in settings)) {
-      throw new Error("Blacksmith spending threshold has an unexpected shape");
-    }
-    threshold = settings.threshold ?? settings.email_alert_threshold;
-  }
-  if (threshold === null || threshold === undefined) return NaN;
-  const parsed = finiteNumber(threshold);
-  if (parsed === null || parsed < 0) {
-    throw new Error("Blacksmith spending threshold has an unexpected shape");
-  }
-  return parsed;
-}
-
-async function blacksmithSpend(
-  client: BlacksmithClient,
-  org: string,
-  now: Date,
-  readProviderBudget: boolean,
-): Promise<BlacksmithSpend> {
-  const today = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  );
-  const end = new Date(today - 1);
-  const start = new Date(today - SPEND_HISTORY_DAYS * DAY_MS);
-  const [daily, invoice, threshold] = await Promise.all([
-    client.get<BlacksmithDailyResponse>(
-      blacksmithRoutes.daily(org, start, end),
-    ),
-    client.get<unknown>(blacksmithRoutes.invoiceAmount(org)),
-    readProviderBudget
-      ? client.get<unknown>(blacksmithRoutes.spendingThreshold(org))
-      : Promise.resolve(undefined),
-  ]);
-  // The daily endpoint answers for a range of days, a record per day it has
-  // runner cost to report. Past its newest record a quiet day and an unwritten
-  // day read the same, so the tile stops there rather than charging the days
-  // after it at $0. The invoice is left out of that judgment: it is a running
-  // total with no date on it, so it cannot show that Blacksmith's billing is
-  // still moving.
-  const { byDay, reportedThrough } = parseBlacksmithDaily(daily);
-  requireCurrentReport("Blacksmith daily costs", reportedThrough, now);
-  const measuredMtd = parseBlacksmithInvoice(invoice);
-  return {
-    byDay,
-    ...summarizeDailySpend(
-      byDay,
-      now,
-      {
-        lagDays: BLACKSMITH_LAG_DAYS,
-        measuredMtd,
-      },
-    ),
-    budget: parseBlacksmithBudget(threshold),
-  };
-}
-
 function minutesView(
   org: string,
   spend: GitHubMinuteSpend,
@@ -463,12 +314,6 @@ function unavailableMessage(error: unknown): string {
   if (error instanceof GitHubUsageShapeError) return error.message;
   if (error instanceof StalledReportError) return error.message;
   if (!(error instanceof Error)) return "CI spend unavailable";
-  if (error.message === "Blacksmith API token rejected") {
-    return "check BLACKSMITH_API_TOKEN";
-  }
-  if (error.message.includes("BLACKSMITH_API_URL")) {
-    return "check BLACKSMITH_API_URL";
-  }
   return friendlyError(error.message);
 }
 
@@ -478,172 +323,63 @@ export const githubCiSpend: Tile = {
   async collect(ctx): Promise<TileView> {
     const label = "ci spend";
     const token = ctx.env("GH_TOKEN") ?? ctx.env("GITHUB_TOKEN");
-    const blacksmithToken = ctx.env("BLACKSMITH_API_TOKEN")?.trim();
-    if (!token && !blacksmithToken) {
+    if (!token) {
       return {
         label,
         status: "unknown",
         value: "—",
-        sub: "set GH_TOKEN (needs org billing read) / BLACKSMITH_API_TOKEN",
+        sub: "set GH_TOKEN (needs org billing read)",
       };
     }
 
-    const githubOrg = ctx.env("GH_BILLING_ORG") ?? REPO.split("/")[0];
-    const combinedBudgetRaw = ctx.env("CI_MONTHLY_BUDGET");
-    const hasCombinedBudget = combinedBudgetRaw !== undefined &&
-      combinedBudgetRaw.trim() !== "";
-    const now = new Date();
-    const [githubResult, blacksmithResult] = await Promise.all([
-      token
-        ? githubSpend(token, githubOrg, now).catch((error) => ({ error }))
-        : Promise.resolve(null),
-      blacksmithToken
-        ? (async () => {
-          const client = BlacksmithClient.fromEnvironment(ctx.env);
-          if (!client) throw new Error("Blacksmith API token unavailable");
-          const org = ctx.env("BLACKSMITH_ORG") ??
-            ctx.env("GH_BILLING_ORG") ?? REPO.split("/")[0];
-          return await blacksmithSpend(client, org, now, !hasCombinedBudget);
-        })().catch((error) => ({ error }))
-        : Promise.resolve(null),
-    ]);
-
-    const githubError = githubResult && "error" in githubResult
-      ? githubResult.error
-      : null;
-    const blacksmithError = blacksmithResult && "error" in blacksmithResult
-      ? blacksmithResult.error
-      : null;
-    const githubValue = githubResult && !("error" in githubResult)
-      ? githubResult
-      : null;
-    const blacksmithValue = blacksmithResult && !("error" in blacksmithResult)
-      ? blacksmithResult
-      : null;
-
-    if (
-      githubValue?.kind === "minutes" && !blacksmithToken &&
-      !blacksmithError
-    ) {
-      return minutesView(githubOrg, githubValue);
-    }
-
-    const githubDollars = githubValue?.kind === "dollars" ? githubValue : null;
-    const present = [githubDollars, blacksmithValue].filter(
-      (spend): spend is GitHubDollarSpend | BlacksmithSpend => spend !== null,
-    );
-    const combinedBudget = readBudget(combinedBudgetRaw);
-    const githubBudget = githubDollars?.budget ?? NaN;
-    const blacksmithBudget = blacksmithValue?.budget ?? NaN;
-    const providerBudget = token && blacksmithToken
-      ? Number.isFinite(githubBudget) && Number.isFinite(blacksmithBudget)
-        ? githubBudget + blacksmithBudget
-        : NaN
-      : token
-      ? githubBudget
-      : blacksmithBudget;
-    const budget = hasCombinedBudget ? combinedBudget : providerBudget;
-    const swatch = (color: string) =>
-      `<span class="swatch" style="background:${themedChartSeries(color).color}"></span>`;
-    const legendItem = (
-      configured: boolean,
-      spend: DailySpend | null,
-      name: string,
-      color: string,
-      charted: boolean,
-    ): string[] => {
-      if (!configured) return [];
-      if (!spend) return [`${swatch(color)} ${name} $???`];
-      const amount = charted ? "" : ` ${usd(spend.mtd)}`;
-      return [`${swatch(color)} ${name}${amount}`];
+    const org = ctx.env("GH_BILLING_ORG") ?? REPO.split("/")[0];
+    const drill = {
+      href: `https://github.com/organizations/${org}/settings/billing`,
+      hint: "billing ↗",
     };
-    const legend = (charted: boolean): string =>
-      `<p class="sub">${
-        [
-          ...legendItem(
-            Boolean(token),
-            githubDollars,
-            "GitHub",
-            GITHUB_COLOR,
-            charted,
-          ),
-          ...legendItem(
-            Boolean(blacksmithToken),
-            blacksmithValue,
-            "Blacksmith",
-            BLACKSMITH_COLOR,
-            charted,
-          ),
-          `Budget ${Number.isFinite(budget) ? usd(budget) : "$???"}`,
-        ].join(" • ")
-      }</p>`;
-    if (present.length === 0) {
-      const error = githubError ?? blacksmithError;
+    const now = new Date();
+    try {
+      const spend = await githubSpend(token, org, now);
+      if (spend.kind === "minutes") return minutesView(org, spend);
+
+      const budget = spend.budget;
+      const status = budgetStatus(spend.projected, budget);
+      const chart = spendChart(
+        [{
+          spend,
+          color: GITHUB_COLOR,
+          label: usd(spend.mtd),
+          lagDays: GITHUB_LAG_DAYS,
+          knownMonths: spend.months,
+        }],
+        now,
+        status,
+      );
+      const amount = chart.chart ? "" : ` ${usd(spend.mtd)}`;
+      const budgetLabel = Number.isFinite(budget)
+        ? ` • Budget ${usd(budget)}`
+        : "";
+      const legend =
+        `<p class="sub">${GITHUB_SWATCH} GitHub${amount}${budgetLabel}</p>`;
+
       return {
-        ...(token && !blacksmithToken
-          ? {
-            href:
-              `https://github.com/organizations/${githubOrg}/settings/billing`,
-            hint: "billing ↗",
-          }
-          : {}),
+        ...drill,
+        label,
+        status,
+        value: `~${usd(spend.projected)}/mo`,
+        aside: `<span class="hmtd">${usd(spend.mtd)} MTD</span>`,
+        extra: `${legend}${chart.chart}`,
+        duration: chart.duration,
+      };
+    } catch (error) {
+      return {
+        ...drill,
         label,
         status: "unknown",
         value: "—",
         sub: unavailableMessage(error),
-        extra: legend(false),
+        extra: `<p class="sub">${GITHUB_SWATCH} GitHub $???</p>`,
       };
     }
-
-    const complete = !(
-      (token && !githubDollars) ||
-      (blacksmithToken && !blacksmithValue)
-    );
-    const totalMtd = present.reduce((sum, spend) => sum + spend.mtd, 0);
-    const totalProjected = present.reduce(
-      (sum, spend) => sum + spend.projected,
-      0,
-    );
-    const status: Status = complete
-      ? budgetStatus(totalProjected, budget)
-      : "unknown";
-    const chart = spendChart(
-      [
-        {
-          spend: githubDollars,
-          color: GITHUB_COLOR,
-          label: githubDollars ? usd(githubDollars.mtd) : undefined,
-          lagDays: GITHUB_LAG_DAYS,
-          knownMonths: githubDollars?.months,
-        },
-        {
-          spend: blacksmithValue,
-          color: BLACKSMITH_COLOR,
-          label: blacksmithValue ? usd(blacksmithValue.mtd) : undefined,
-          lagDays: BLACKSMITH_LAG_DAYS,
-        },
-      ],
-      now,
-      status,
-    );
-
-    const drill = token && !blacksmithToken
-      ? {
-        href: `https://github.com/organizations/${githubOrg}/settings/billing`,
-        hint: "billing ↗",
-      }
-      : !token && blacksmithToken
-      ? { href: "https://app.blacksmith.sh/", hint: "billing ↗" }
-      : {};
-
-    return {
-      ...drill,
-      label,
-      status,
-      value: `${complete ? "~" : "≥"}${usd(totalProjected)}/mo`,
-      aside: `<span class="hmtd">${usd(totalMtd)} MTD</span>`,
-      extra: `${legend(Boolean(chart.chart))}${chart.chart}`,
-      duration: chart.duration,
-    };
   },
 };

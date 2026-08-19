@@ -1054,6 +1054,37 @@ Deno.test("a failed run source keeps its last good snapshot", async () => {
   assertStringIncludes(stale, "stale-source source unreachable");
 });
 
+Deno.test("a run source that reads backwards in time keeps its last good snapshot", async () => {
+  const source = { repo: "test/backwards-source", workflow: "ci.yml" };
+  // sourceRun times a run from its id, so run 5000 is weeks behind run 3. A
+  // fetch answering with the older one read a stale view of the workflow.
+  let stale = false;
+  const sourceCtx: Ctx = {
+    runs: () => sourceCtx.runsFor(source.repo, source.workflow),
+    runsFor: () =>
+      Promise.resolve([sourceRun(stale ? 5000 : 3, stale ? "weeks-old run" : "current run")]),
+    env: () => undefined,
+  };
+  const tile = sourceTile("labs-ci", "backwards source", [source]);
+
+  await tick([tile], sourceCtx);
+  assertStringIncludes(tileHtml("backwards source"), "current run");
+
+  stale = true;
+  await tick([tile], sourceCtx);
+  const held = tileHtml("backwards source");
+  assert(held.startsWith(`unknown" data-tile-id="labs-ci">`));
+  assertStringIncludes(held, "current run");
+  assert(!held.includes("weeks-old run"), held);
+  assertStringIncludes(held, "backwards-source");
+
+  stale = false;
+  await tick([tile], sourceCtx);
+  const recovered = tileHtml("backwards source");
+  assert(recovered.startsWith(`good" data-tile-id="labs-ci">`));
+  assertStringIncludes(recovered, "current run");
+});
+
 Deno.test("a tile can publish cached data while its collection is still running", async () => {
   const messages: string[] = [];
   const client = {
@@ -1436,7 +1467,7 @@ Deno.test("start: serves the handler on the configured port and keeps collecting
   let collections = 0;
   const log = console.log;
   console.log = (m: string) => logged.push(m);
-  let timer = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
   try {
     timer = start(((opts: Deno.ServeTcpOptions, handler: unknown) => {
       served.push({ opts, handler });
@@ -1466,7 +1497,7 @@ Deno.test("start: the work it schedules on its clock both heartbeats and collect
   const log = console.log;
   console.log = () => {};
   let collections = 0;
-  let timer = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
   let onTick = () => Promise.resolve();
   try {
     ({ timer, onTick } = start(

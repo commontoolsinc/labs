@@ -164,11 +164,11 @@ interface MailPieceAnalysisItem {
   imageUrl: string;
   analysis: {
     pending: boolean;
-    error?: unknown;
+    error?: string;
     result?: MailAnalysis;
   };
   pending: boolean;
-  error?: unknown;
+  error?: string;
   result?: MailAnalysis;
 }
 
@@ -383,6 +383,8 @@ interface PatternInput {
 
 /** USPS Informed Delivery mail analyzer. #uspsInformedDelivery */
 export interface PatternOutput {
+  [NAME]: string;
+  [UI]: VNode;
   mailPieces: (MailAnalysis | undefined)[];
   householdMembers: HouseholdMember[];
   mailCount: number;
@@ -400,7 +402,7 @@ export interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  (({ householdMembers, overrideAuth }: any) => {
+  ({ householdMembers, overrideAuth }) => {
     // Directly instantiate GmailExtractor with USPS-specific settings (raw mode)
     // This eliminates the need for separate gmail-importer piece + wish()
     const extractor = GmailExtractor({
@@ -1263,5 +1265,5 @@ export default pattern<PatternInput, PatternOutput>(
         </cf-screen>
       ),
     };
-  }) as any,
+  },
 );

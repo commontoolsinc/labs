@@ -15,6 +15,7 @@ import {
   pattern,
   str,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -41,12 +42,10 @@ export interface PhotoModuleInput {
   label: string | Default<"">;
 }
 
-// Output interface with unknown for UI properties to prevent OOM (CT-1148)
-// TypeScript infers deeply nested VNode types without this, causing memory explosion
 export interface PhotoModuleOutput {
-  [NAME]: unknown;
-  [UI]: unknown;
-  settingsUI: unknown;
+  [NAME]: string;
+  [UI]: VNode;
+  settingsUI: VNode;
   image: ImageData | null;
   label: string;
 }
@@ -82,8 +81,6 @@ export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
   ({ image: inputImage, label }) => {
     // We use an array internally for cf-image-input compatibility
     // but the module only supports a single image
-    // NOTE: Writable must use empty array to avoid TypeScript OOM (CT-1148)
-    // Using input params in new Writable() causes deep type inference explosion
     const images = new Writable<ImageData[]>([]);
 
     // Sync image Cell with images array (first element)

@@ -970,6 +970,13 @@ function buildCoverageSuggestionPrompt(
   lines.push(...formatTargetList(input.groups));
   lines.push("");
   lines.push(
+    "Use the metrics only after the test run finishes and passes. If a test",
+    "fails while collecting coverage, make it pass or temporarily skip it for",
+    "the coverage run, then rerun the command above from the start. Do not",
+    "include temporary test skips in the PR. The workspace runner stops",
+    "launching packages after the first failure, so code in packages it never",
+    "runs is counted as fully uncovered.",
+    "",
     "The local run omits the integration suites, so its counts are conservative:",
     "if every metric meets its target locally, CI will pass too.",
   );

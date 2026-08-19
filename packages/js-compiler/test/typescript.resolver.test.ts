@@ -51,5 +51,37 @@ describe("typescript/resolver.ts", () => {
         },
       )).rejects.toThrow();
     });
+
+    it("names an import that escapes the program root", async () => {
+      const escaping = new InMemoryProgram("/main.tsx", {
+        "/main.tsx": "import { helper } from '../../cfc/admin/mod.ts';",
+      });
+      await expect(resolveProgram(
+        escaping,
+        {
+          unresolvedModules: { type: "allow-all" },
+          resolveUnresolvedModuleTypes: false,
+          target: TARGET,
+        },
+      )).rejects.toThrow(
+        'Import "../../cfc/admin/mod.ts" in "/main.tsx" escapes the program root.',
+      );
+    });
+
+    it("resolves a parent import that stays inside the root", async () => {
+      const inside = new InMemoryProgram("/core/main.tsx", {
+        "/core/main.tsx": "import { helper } from '../util/mod.ts';",
+        "/util/mod.ts": "export const helper = 1;",
+      });
+      const program = await resolveProgram(
+        inside,
+        {
+          unresolvedModules: { type: "deny" },
+          resolveUnresolvedModuleTypes: false,
+          target: TARGET,
+        },
+      );
+      expect(program.files.length).toBe(2);
+    });
   });
 });

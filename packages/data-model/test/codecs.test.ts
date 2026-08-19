@@ -22,7 +22,6 @@ import {
   jsonFromFabricValue,
   plainObjectFromJson,
 } from "@/codecs.ts";
-import { seemsLikeJsonEncodedFabricValue } from "@/codec-json/impl.ts";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
@@ -51,7 +50,7 @@ function roundTrip(value: FabricValue): FabricValue {
  */
 function expectEncodedFormat(value: FabricValue, expected: unknown): void {
   const json = jsonFromFabricValue(value);
-  expect(seemsLikeJsonEncodedFabricValue(json)).toBe(true);
+  expect(JsonCodecEngine.seemsLikeEncoded(json)).toBe(true);
   expect(
     JSON.parse(JsonCodecEngine.unwrapEncodedValueForTesting(json)),
   ).toEqual(expected);

@@ -1,8 +1,8 @@
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   Engine,
-  FileSystemProgramResolver,
   joinedBodies,
   Runtime,
   signer,
@@ -401,8 +401,9 @@ describe("Engine in SES mode", () => {
       "../../patterns/self-improving-classifier.tsx",
       import.meta.url,
     ).pathname;
-    const program = await engine.resolve(
-      new FileSystemProgramResolver(sourcePath, repoRoot),
+    const program = await resolveLocalProgram(
+      (resolver) => engine.resolve(resolver),
+      { main: sourcePath, root: repoRoot },
     );
 
     const { graph } = await engine.compileToRecordGraph(program);

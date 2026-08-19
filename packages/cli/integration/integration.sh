@@ -65,6 +65,12 @@ SCHEMA_INCOMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-incompatible.tsx"
 CUSTOM_EXPORT="customPatternExport" # for testing this feature
 SECTION="${CF_CLI_INTEGRATION_SECTION:-${1:-all}}"
 
+# The dispatched section is the recorded test: one record per run, named
+# "integration.sh <section>", written from the EXIT trap with the script's
+# status and duration.
+source "$SCRIPT_DIR/test-records.sh"
+cf_test_record_script "integration.sh $SECTION"
+
 # A fresh invocation id. uuidgen is not present on every runner image, so this
 # falls back to Python, which the timing helper above already requires.
 new_invocation_id() {
@@ -412,7 +418,7 @@ run_piece_links() {
   # The slug index: both names just assigned are enumerable, and each resolves
   # to a piece. Names are compared exactly; the resolved ids are only checked
   # non-null, because an address is something to read next, not an identifier
-  # to compare (docs/common/verb-session-walkthrough.md, "An address is not an
+  # to compare (docs/common/verbs/session-walkthrough.md, "An address is not an
   # identifier to compare").
   SLUGS_JSON=$(cf piece slugs $SPACE_ARGS --json)
   echo "$SLUGS_JSON" | jq -e '[.[].slug] == ["counter-alias", "resolved-counter"]' > /dev/null ||
@@ -1036,7 +1042,7 @@ run_three_topic_fixture() {
 
 # The verb-result walkthrough. Delegates to the standalone script rather than
 # restating its assertions here: that script is what
-# docs/common/verbs-over-the-cli.md tells a reader to run, so the documented
+# docs/common/verbs/over-the-cli.md tells a reader to run, so the documented
 # artifact is the tested one and the two cannot drift. It deploys its own
 # fixture and takes its own space.
 #
@@ -1207,52 +1213,81 @@ run_piece_data_files() {
   echo "Successfully ran CLI data-file integration tests for ${API_URL}."
 }
 
+# Each step of a section records as its own test, named
+# "integration.sh <section> <step>"; the begin markers close the previous
+# step's record and the exit trap closes the last one, so a failing step is
+# recorded with the failure.
 case "$SECTION" in
   all)
+    cf_test_step_begin piece-values
     run_piece_values
+    cf_test_step_begin piece-data-files
     run_piece_data_files
+    cf_test_step_begin piece-links
     run_piece_links
+    cf_test_step_begin piece-call
     run_piece_call
+    cf_test_step_begin piece-call-retry
     run_piece_call_retry
+    cf_test_step_begin three-topic-fixture
     run_three_topic_fixture
+    cf_test_step_begin spelling-parity
     run_spelling_parity
+    cf_test_step_begin wish
     run_wish
     ;;
   piece-basics)
+    cf_test_step_begin piece-values
     run_piece_values
+    cf_test_step_begin piece-links
     run_piece_links
     ;;
   piece-values)
+    cf_test_step_begin piece-values
     run_piece_values
+    cf_test_step_begin piece-data-files
     run_piece_data_files
+    cf_test_step_begin spelling-parity
     run_spelling_parity
     ;;
   spelling-parity)
+    cf_test_step_begin spelling-parity
     run_spelling_parity
     ;;
   piece-links)
+    cf_test_step_begin piece-links
     run_piece_links
     ;;
   piece-call)
+    cf_test_step_begin piece-call
     run_piece_call
+    cf_test_step_begin piece-call-retry
     run_piece_call_retry
+    cf_test_step_begin three-topic-fixture
     run_three_topic_fixture
+    cf_test_step_begin verbs-walkthrough
     run_verbs_walkthrough
+    cf_test_step_begin verb-session-gaps
     run_verb_session_gaps
     ;;
   piece-call-retry)
+    cf_test_step_begin piece-call-retry
     run_piece_call_retry
     ;;
   three-topic)
+    cf_test_step_begin three-topic-fixture
     run_three_topic_fixture
     ;;
   wish)
+    cf_test_step_begin wish
     run_wish
     ;;
   verbs)
+    cf_test_step_begin verbs-walkthrough
     run_verbs_walkthrough
     ;;
   verb-gaps)
+    cf_test_step_begin verb-session-gaps
     run_verb_session_gaps
     ;;
   *)

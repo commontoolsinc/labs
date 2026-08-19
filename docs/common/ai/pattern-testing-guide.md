@@ -44,6 +44,13 @@ Avoid tests for:
 deno task cf test <pattern>.test.tsx
 ```
 
+Imports resolve from the nearest ancestor directory whose `deno.json(c)`
+declares a package name (`packages/patterns` for this repository's patterns),
+so imports that span the package — shared helpers, `cfc/` modules — work
+without a flag. A failure naming an import that "escapes the program root"
+means the file imports from above that root; pass `--root` naming a common
+ancestor. CI runs these tests with `--root packages/patterns`.
+
 If `cf test` fails, treat that as repair work. Preserve the failing command and
 relevant output, isolate the smallest failing action/assertion when useful, fix
 either the implementation or an invalid test contract, and rerun the test. A

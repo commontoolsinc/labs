@@ -1,13 +1,11 @@
 /**
- * ci spend tests. The tile is a pure collect(ctx) -> TileView over GitHub and
- * Blacksmith billing data. The tests pin the clock and provide fixed responses
- * for both sources.
+ * ci spend tests. The tile is a pure collect(ctx) -> TileView over GitHub
+ * billing data. The tests pin the clock and provide fixed responses.
  */
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";
-import { blacksmithRoutes } from "../blacksmith.ts";
 import { projectMonthly } from "../spend.ts";
 import { themedChartSeries } from "../theme.ts";
 import { githubCiSpend } from "./github-ci-spend.ts";
@@ -16,7 +14,9 @@ const ORG = "acme";
 const D = 86_400_000;
 
 const themedSwatch = (color: string) =>
-  `<span class="swatch" style="background:${themedChartSeries(color).color}"></span>`;
+  `<span class="swatch" style="background:${
+    themedChartSeries(color).color
+  }"></span>`;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -62,62 +62,6 @@ const budgetsPath = (org = ORG) =>
   `organizations/${org}/settings/billing/budgets`;
 const classicPath = (org = ORG) => `orgs/${org}/settings/billing/actions`;
 
-// One day of Blacksmith runner cost. A day costing nothing says the feed still
-// covers that day, which is what keeps the days around it readable as zeros.
-const blacksmithDay = (date: string, cost: unknown) => ({
-  date,
-  jobs: 1,
-  cost,
-  minutes: 1,
-});
-
-// The row that carries a January feed up to a tile observing it on the 20th:
-// the 19th, costing nothing. Without it the feed's newest row sits far enough
-// back that the tile stops reading Blacksmith rather than charting the days
-// after that row as zeros.
-const blacksmithCurrent = blacksmithDay("2026-01-19", 0);
-
-function blacksmithRouteSet(
-  now: string,
-  dailyMetrics: unknown[],
-  org = ORG,
-  billing: { invoice?: unknown; threshold?: unknown } = {},
-): Record<string, unknown> {
-  const observed = new Date(now);
-  const today = Date.UTC(
-    observed.getUTCFullYear(),
-    observed.getUTCMonth(),
-    observed.getUTCDate(),
-  );
-  const end = new Date(today - 1);
-  const start = new Date(today - 45 * D);
-  const routes: Record<string, unknown> = {
-    [`api/${blacksmithRoutes.daily(org, start, end)}`]: {
-      daily_metrics: dailyMetrics,
-    },
-  };
-  const month = observed.toISOString().slice(0, 7);
-  const measuredMtd = dailyMetrics.reduce<number>((sum, entry) => {
-    if (!entry || typeof entry !== "object") return sum;
-    const metric = entry as Record<string, unknown>;
-    return typeof metric.date === "string" && metric.date.startsWith(month) &&
-        Number.isFinite(Number(metric.cost))
-      ? sum + Number(metric.cost)
-      : sum;
-  }, 0);
-  routes[`api/${blacksmithRoutes.invoiceAmount(org)}`] = "invoice" in billing
-    ? billing.invoice
-    : measuredMtd;
-  routes[`api/${blacksmithRoutes.spendingThreshold(org)}`] =
-    "threshold" in billing ? billing.threshold : null;
-  return routes;
-}
-
-const BLACKSMITH_ENV = {
-  BLACKSMITH_API_TOKEN: "blacksmith-token",
-  BLACKSMITH_ORG: ORG,
-};
-
 class RejectedRoute {
   constructor(readonly reason: unknown) {}
 }
@@ -138,7 +82,6 @@ async function view(
   now: string,
   routes: Record<string, unknown>,
   env: Record<string, string> = { GH_TOKEN: "gh_pat_x", GH_BILLING_ORG: ORG },
-  requests: string[] = [],
 ): Promise<TileView> {
   const RealDate = Date;
   const realFetch = globalThis.fetch;
@@ -152,7 +95,6 @@ async function view(
   globalThis.fetch = (input: URL | Request | string) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     const key = url.pathname.slice(1) + url.search;
-    requests.push(key);
     if (!(key in routes)) {
       return Promise.resolve(new Response(null, { status: 404 }));
     }
@@ -181,7 +123,6 @@ Deno.test("ci spend: without a token the tile is gray and names what it needs", 
   assertEquals(v.value, "—");
   assertStringIncludes(v.sub ?? "", "GH_TOKEN");
   assertStringIncludes(v.sub ?? "", "org billing read"); // the extra right this tile needs
-  assertStringIncludes(v.sub ?? "", "BLACKSMITH_API_TOKEN");
 });
 
 Deno.test("ci spend: a projection with no observed rate window preserves the measured total", () => {
@@ -312,7 +253,7 @@ Deno.test("ci spend: no Actions budget in GitHub -> the projection stands, uncom
   });
   assertEquals(none.value, "~$310/mo");
   assertEquals(none.sub, undefined);
-  assertStringIncludes(none.extra ?? "", "Budget $???");
+  assertEquals((none.extra ?? "").includes("Budget"), false);
   assertEquals(none.status, "good"); // an absent budget never alarms
   // The org budgets Actions' neighbors but not Actions.
   const other = await view("2026-01-20T09:00:00Z", {
@@ -322,7 +263,7 @@ Deno.test("ci spend: no Actions budget in GitHub -> the projection stands, uncom
     },
   });
   assertEquals(other.sub, undefined);
-  assertStringIncludes(other.extra ?? "", "Budget $???");
+  assertEquals((other.extra ?? "").includes("Budget"), false);
   assertEquals(other.status, "good");
 });
 
@@ -469,285 +410,10 @@ Deno.test("ci spend: both billing endpoints unreachable -> gray with a calm reas
     v.href,
     "https://github.com/organizations/acme/settings/billing",
   );
-  assertStringIncludes(
-    v.extra ?? "",
-    `${themedSwatch("#58a6ff")} GitHub $??? • Budget $???`,
-  );
-});
-
-Deno.test("ci spend: every failed provider retains the combined middle line", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const routes = blacksmithRouteSet(now, []);
-  const dailyPath = Object.keys(routes).find((path) =>
-    path.includes("/metrics/daily?")
-  )!;
-  routes[dailyPath] = new Response(null, { status: 401 });
-
-  const result = await view(now, routes, {
-    GH_TOKEN: "gh_pat_x",
-    GH_BILLING_ORG: ORG,
-    ...BLACKSMITH_ENV,
-    CI_MONTHLY_BUDGET: "500",
-  });
-  assertEquals(result.status, "unknown");
-  assertEquals(result.value, "—");
-  assertStringIncludes(
-    result.extra ?? "",
-    `<p class="sub">${themedSwatch("#58a6ff")} GitHub $??? • ${themedSwatch("#f59e0b")} Blacksmith $??? • Budget $500</p>`,
-  );
-});
-
-Deno.test("ci spend: Blacksmith invoice, runner history, and threshold form one provider without storage requests", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const compute = [
-    ...Array.from(
-      { length: 10 },
-      (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 10),
-    ),
-    blacksmithCurrent,
-  ];
-  const routes = blacksmithRouteSet(
-    now,
-    compute,
-    ORG,
-    {
-      invoice: { amount: 150, currency: "USD" },
-      threshold: 230,
-    },
-  );
-  const requests: string[] = [];
-  const v = await view(now, routes, BLACKSMITH_ENV, requests);
-
-  assertEquals(v.value, "~$245/mo");
-  assertEquals(v.aside, '<span class="hmtd">$150 MTD</span>');
-  assertEquals(v.sub, undefined);
-  assertEquals(v.status, "warn");
-  assertEquals(v.href, "https://app.blacksmith.sh/");
-  assertStringIncludes(v.extra ?? "", "Blacksmith");
-  assertStringIncludes(v.extra ?? "", "$150");
-  assertStringIncludes(v.extra ?? "", "Budget $230");
-  assertStringIncludes(v.extra ?? "", "<polyline");
-  // Blacksmith settles a day behind, so the line runs to the 19th, charting
-  // the quiet 11th-19th as the zeros they are.
-  assertEquals(v.duration, 19 * D);
-  const blacksmithRequests = requests.filter((path) =>
-    path.startsWith("api/user/github/orgs/")
-  );
-  assertEquals(blacksmithRequests.length, 3);
   assertEquals(
-    blacksmithRequests.some((path) => path.includes("/metrics/docker/")),
-    false,
+    v.extra,
+    `<p class="sub">${themedSwatch("#58a6ff")} GitHub $???</p>`,
   );
-});
-
-Deno.test("ci spend: a Blacksmith invoice without daily history still supplies MTD and forecast totals", async () => {
-  const at = (now: string) =>
-    view(
-      now,
-      blacksmithRouteSet(
-        now,
-        [],
-        ORG,
-        {
-          invoice: { amount: 150, currency: "USD" },
-          threshold: 300,
-        },
-      ),
-      BLACKSMITH_ENV,
-    );
-
-  const early = await at("2026-01-10T09:00:00Z");
-  assertEquals(early.value, "~$332/mo");
-  assertEquals(early.aside, '<span class="hmtd">$150 MTD</span>');
-  assertEquals(early.sub, undefined);
-  assertEquals(early.status, "warn");
-  assertEquals(
-    early.extra,
-    `<p class="sub">${themedSwatch("#f59e0b")} Blacksmith $150 • Budget $300</p>`,
-  );
-  assertEquals(early.duration, 0);
-  assertEquals(early.href, "https://app.blacksmith.sh/");
-  assertEquals(early.hint, "billing ↗");
-
-  const ongoing = await at("2026-01-20T09:00:00Z");
-  assertEquals(ongoing.value, "~$245/mo");
-  assertEquals(ongoing.aside, '<span class="hmtd">$150 MTD</span>');
-  assertEquals(ongoing.status, "good");
-  assertEquals(ongoing.extra, early.extra);
-  assertEquals(ongoing.duration, 0);
-});
-
-Deno.test("ci spend: a Blacksmith feed that has stopped is unreadable, not quiet", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  // Runner cost through the 10th and nothing since. The feed carries a record
-  // for a day it has costs for, so past the 10th a day Blacksmith charged
-  // nothing for and a day it has yet to write read alike.
-  const stalled = blacksmithRouteSet(
-    now,
-    Array.from(
-      { length: 10 },
-      (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 5),
-    ),
-  );
-
-  const alone = await view(now, stalled, BLACKSMITH_ENV);
-  assertEquals(alone.status, "unknown");
-  assertEquals(alone.value, "—");
-  assertEquals(alone.sub, "Blacksmith daily costs 10 days behind");
-
-  // Beside a GitHub report that is still being written, the tile keeps
-  // GitHub's line and total and marks the combined figure a lower bound.
-  const beside = await view(
-    now,
-    {
-      [usagePath(2026, 1)]: {
-        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
-      },
-      ...stalled,
-    },
-    { GH_TOKEN: "gh_pat_x", GH_BILLING_ORG: ORG, ...BLACKSMITH_ENV },
-  );
-  assertEquals(beside.status, "unknown");
-  assertEquals(beside.value, "≥$310/mo");
-  assertEquals(beside.aside, '<span class="hmtd">$180 MTD</span>');
-  assertStringIncludes(
-    beside.extra ?? "",
-    `${themedSwatch("#f59e0b")} Blacksmith $???`,
-  );
-});
-
-Deno.test("ci spend: malformed Blacksmith costs never read as a green zero", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const malformedDaily = blacksmithRouteSet(now, [
-    blacksmithDay("2026-01-01", null),
-  ]);
-  const negativeDaily = blacksmithRouteSet(now, [
-    blacksmithDay("2026-01-01", -1),
-  ]);
-
-  for (const routes of [malformedDaily, negativeDaily]) {
-    const v = await view(now, routes, BLACKSMITH_ENV);
-    assertEquals(v.status, "unknown");
-    assertEquals(v.value, "—");
-  }
-});
-
-Deno.test("ci spend: malformed Blacksmith daily payloads are unavailable", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const cases: Array<{
-    name: string;
-    routeFragment: string;
-    response: unknown;
-  }> = [
-    {
-      name: "daily metrics are not an array",
-      routeFragment: "/metrics/daily?",
-      response: { daily_metrics: null },
-    },
-    {
-      name: "a daily date is not text",
-      routeFragment: "/metrics/daily?",
-      response: {
-        daily_metrics: [{ date: 42, jobs: 1, cost: 1, minutes: 1 }],
-      },
-    },
-    {
-      name: "a daily date is not a calendar day",
-      routeFragment: "/metrics/daily?",
-      response: {
-        daily_metrics: [blacksmithDay("2026-99-99", 1)],
-      },
-    },
-  ];
-
-  for (const malformed of cases) {
-    const routes = blacksmithRouteSet(now, [
-      blacksmithDay("2026-01-01", 1),
-    ]);
-    const path = Object.keys(routes).find((candidate) =>
-      candidate.includes(malformed.routeFragment)
-    );
-    assert(path, malformed.name);
-    routes[path] = malformed.response;
-
-    const result = await view(now, routes, BLACKSMITH_ENV);
-    assertEquals(result.status, "unknown", malformed.name);
-    assertEquals(result.value, "—", malformed.name);
-    assertEquals(result.sub, "temporarily unavailable", malformed.name);
-  }
-});
-
-Deno.test("ci spend: malformed Blacksmith invoice and threshold payloads are unavailable", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const cases: Array<{
-    name: string;
-    billing: { invoice?: unknown; threshold?: unknown };
-  }> = [
-    {
-      name: "invoice currency is not USD",
-      billing: { invoice: { amount: 10, currency: "EUR" } },
-    },
-    {
-      name: "invoice amount is negative",
-      billing: { invoice: { amount: -1, currency: "USD" } },
-    },
-    {
-      name: "threshold object has no supported field",
-      billing: { threshold: {} },
-    },
-    {
-      name: "threshold is negative",
-      billing: { threshold: { threshold: -1 } },
-    },
-  ];
-
-  for (const malformed of cases) {
-    const routes = blacksmithRouteSet(
-      now,
-      [blacksmithDay("2026-01-01", 10), blacksmithCurrent],
-      ORG,
-      malformed.billing,
-    );
-    const result = await view(now, routes, BLACKSMITH_ENV);
-    assertEquals(result.status, "unknown", malformed.name);
-    assertEquals(result.value, "—", malformed.name);
-    assertEquals(result.sub, "temporarily unavailable", malformed.name);
-  }
-});
-
-Deno.test("ci spend: a null threshold field is an unknown provider budget", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const routes = blacksmithRouteSet(
-    now,
-    [blacksmithDay("2026-01-01", 10), blacksmithCurrent],
-    ORG,
-    { threshold: { threshold: null } },
-  );
-
-  const result = await view(now, routes, BLACKSMITH_ENV);
-  assertEquals(result.status, "good");
-  assertEquals(result.value, "~$16/mo");
-  assertStringIncludes(result.extra ?? "", "Budget $???");
-});
-
-Deno.test("ci spend: Blacksmith token errors say how to restore the source", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const expiredRoutes = blacksmithRouteSet(now, []);
-  const dailyPath = Object.keys(expiredRoutes).find((path) =>
-    path.includes("/metrics/daily?")
-  )!;
-  expiredRoutes[dailyPath] = new Response(null, { status: 401 });
-
-  const rejected = await view(now, expiredRoutes, BLACKSMITH_ENV);
-  assertEquals(rejected.status, "unknown");
-  assertEquals(rejected.sub, "check BLACKSMITH_API_TOKEN");
-
-  const invalid = await view(now, {}, {
-    BLACKSMITH_API_TOKEN: "blacksmith-token",
-    BLACKSMITH_API_URL: "not-a-url",
-  });
-  assertEquals(invalid.status, "unknown");
-  assertEquals(invalid.sub, "check BLACKSMITH_API_URL");
 });
 
 Deno.test("ci spend: a source that rejects without an Error remains unavailable", async () => {
@@ -760,213 +426,6 @@ Deno.test("ci spend: a source that rejects without an Error remains unavailable"
   assertEquals(result.status, "unknown");
   assertEquals(result.value, "—");
   assertEquals(result.sub, "CI spend unavailable");
-});
-
-Deno.test("ci spend: a Blacksmith token removed during collection is unavailable", async () => {
-  let tokenReads = 0;
-  const result = await githubCiSpend.collect({
-    runs: () => Promise.resolve([]),
-    runsFor: () => Promise.resolve([]),
-    env: (name) => {
-      if (name !== "BLACKSMITH_API_TOKEN") return undefined;
-      tokenReads++;
-      return tokenReads === 1 ? "blacksmith-token" : undefined;
-    },
-  });
-
-  assertEquals(tokenReads, 2);
-  assertEquals(result.status, "unknown");
-  assertEquals(result.value, "—");
-  assertEquals(result.sub, "temporarily unavailable");
-});
-
-Deno.test("ci spend: current Blacksmith billing endpoint failures are not hidden", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  for (
-    const route of [
-      blacksmithRoutes.invoiceAmount(ORG),
-      blacksmithRoutes.spendingThreshold(ORG),
-    ]
-  ) {
-    const routes = blacksmithRouteSet(now, [
-      blacksmithDay("2026-01-01", 10),
-      blacksmithCurrent,
-    ]);
-    routes[`api/${route}`] = new Response(null, { status: 503 });
-
-    const result = await view(now, routes, BLACKSMITH_ENV);
-    assertEquals(result.status, "unknown");
-    assertEquals(result.value, "—");
-  }
-});
-
-Deno.test("ci spend: a combined budget avoids the unused Blacksmith threshold", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const routes = blacksmithRouteSet(now, [
-    blacksmithDay("2026-01-01", 10),
-    blacksmithCurrent,
-  ]);
-  routes[`api/${blacksmithRoutes.spendingThreshold(ORG)}`] = new Response(
-    null,
-    {
-      status: 503,
-    },
-  );
-
-  const result = await view(now, routes, {
-    ...BLACKSMITH_ENV,
-    CI_MONTHLY_BUDGET: "100",
-  });
-  assertEquals(result.status, "good");
-  assertEquals(result.value, "~$16/mo");
-  assertEquals(result.sub, undefined);
-  assertStringIncludes(result.extra ?? "", "Budget $100");
-});
-
-Deno.test("ci spend: GitHub and Blacksmith share totals, chart, and combined budget", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const blacksmith = blacksmithRouteSet(
-    now,
-    [
-      ...Array.from(
-        { length: 10 },
-        (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 5),
-      ),
-      blacksmithCurrent,
-    ],
-  );
-  const v = await view(
-    now,
-    {
-      [usagePath(2026, 1)]: {
-        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
-      },
-      [budgetsPath()]: {
-        budgets: [
-          { budget_product_sku: "actions", budget_amount: 1 },
-        ],
-      },
-      ...blacksmith,
-    },
-    {
-      GH_TOKEN: "gh_pat_x",
-      GH_BILLING_ORG: ORG,
-      ...BLACKSMITH_ENV,
-      CI_MONTHLY_BUDGET: "350",
-    },
-  );
-
-  assertEquals(v.value, "~$392/mo");
-  assertEquals(v.aside, '<span class="hmtd">$230 MTD</span>');
-  assertEquals(v.sub, undefined);
-  assertEquals(v.status, "warn");
-  assertEquals(v.href, undefined);
-  assertStringIncludes(
-    v.extra ?? "",
-    `<p class="sub">${themedSwatch("#58a6ff")} GitHub • ${themedSwatch("#f59e0b")} Blacksmith • Budget $350</p>`,
-  );
-  assertStringIncludes(v.extra ?? "", "$180");
-  assertStringIncludes(v.extra ?? "", "$50");
-});
-
-Deno.test("ci spend: provider budgets combine when no explicit budget is set", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const blacksmith = blacksmithRouteSet(
-    now,
-    [
-      ...Array.from(
-        { length: 10 },
-        (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 5),
-      ),
-      blacksmithCurrent,
-    ],
-    ORG,
-    { threshold: 100 },
-  );
-  const v = await view(
-    now,
-    {
-      [usagePath(2026, 1)]: {
-        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
-      },
-      [budgetsPath()]: {
-        budgets: [{ budget_product_sku: "actions", budget_amount: 300 }],
-      },
-      ...blacksmith,
-    },
-    {
-      GH_TOKEN: "gh_pat_x",
-      GH_BILLING_ORG: ORG,
-      ...BLACKSMITH_ENV,
-    },
-  );
-
-  assertEquals(v.value, "~$392/mo");
-  assertEquals(v.sub, undefined);
-  assertStringIncludes(v.extra ?? "", "Budget $400");
-  assertEquals(v.status, "good");
-});
-
-Deno.test("ci spend: a partial provider budget is not treated as the combined budget", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const blacksmith = blacksmithRouteSet(
-    now,
-    [blacksmithDay("2026-01-01", 50), blacksmithCurrent],
-    ORG,
-    { threshold: 1 },
-  );
-  const v = await view(
-    now,
-    {
-      [usagePath(2026, 1)]: {
-        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
-      },
-      ...blacksmith,
-    },
-    {
-      GH_TOKEN: "gh_pat_x",
-      GH_BILLING_ORG: ORG,
-      ...BLACKSMITH_ENV,
-    },
-  );
-
-  assertEquals(v.sub, undefined);
-  assertStringIncludes(v.extra ?? "", "Budget $???");
-  assertEquals(v.status, "good");
-});
-
-Deno.test("ci spend: one failed configured source leaves a gray lower bound", async () => {
-  const now = "2026-01-20T09:00:00Z";
-  const blacksmith = blacksmithRouteSet(now, []);
-  const dailyPath = Object.keys(blacksmith).find((path) =>
-    path.includes("/metrics/daily?")
-  )!;
-  blacksmith[dailyPath] = new Response(null, { status: 401 });
-  const v = await view(
-    now,
-    {
-      [usagePath(2026, 1)]: {
-        usageItems: [...days(2026, 1, 1, 10, 18), stillReporting("2026-01-18")],
-      },
-      ...blacksmith,
-    },
-    {
-      GH_TOKEN: "gh_pat_x",
-      GH_BILLING_ORG: ORG,
-      ...BLACKSMITH_ENV,
-      CI_MONTHLY_BUDGET: "1",
-    },
-  );
-
-  assertEquals(v.value, "≥$310/mo");
-  assertEquals(v.aside, '<span class="hmtd">$180 MTD</span>');
-  assertEquals(v.status, "unknown");
-  assertStringIncludes(
-    v.extra ?? "",
-    `${themedSwatch("#f59e0b")} Blacksmith $???`,
-  );
-  assertStringIncludes(v.extra ?? "", "GitHub");
-  assertStringIncludes(v.extra ?? "", "Budget $1");
 });
 
 Deno.test("ci spend: GITHUB_TOKEN works, and the org defaults to the CI tiles' repo owner", async () => {

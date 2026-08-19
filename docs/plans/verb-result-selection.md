@@ -19,7 +19,7 @@ to the receipt cell, not a contract of its own.
 This continues the identity work from
 [Pattern verb contract — implementation plan](../history/plans/pattern-verb-contract-implementation.md)
 (WS-F). The user-facing surface it changes is
-[Verbs over the CLI](../common/verbs-over-the-cli.md).
+[Verbs over the CLI](../common/verbs/over-the-cli.md).
 
 ## Orientation
 
@@ -414,7 +414,7 @@ first condition arrives on its own.
 
 ## Documentation owed
 
-- [Verbs over the CLI](../common/verbs-over-the-cli.md) documents the
+- [Verbs over the CLI](../common/verbs/over-the-cli.md) documents the
   `--show-links` shape, and its examples teach hand-written invocation ids
   beside the session that scopes them — safe now that an id names an
   invocation only within its session.

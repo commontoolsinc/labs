@@ -11,7 +11,8 @@
  */
 
 import { exists } from "@std/fs";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import { FragmentWriter } from "@commonfabric/test-support/records";
 import type { Identity } from "@commonfabric/identity";
 import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
 import {
@@ -90,11 +91,8 @@ function patternsPrefix(roots: GateRoots): string {
   return `${roots.patternsRoot.slice(roots.repoRoot.length)}/`;
 }
 
-function resolver(roots: GateRoots, key: string) {
-  return new FileSystemProgramResolver(
-    `${roots.patternsRoot}/${key}`,
-    roots.repoRoot,
-  );
+function localProgramOptions(roots: GateRoots, key: string) {
+  return { main: `${roots.patternsRoot}/${key}`, root: roots.repoRoot };
 }
 
 /**
@@ -577,8 +575,9 @@ export async function replayVintage(
       const source = `${roots.patternsRoot}/${key}`;
       let program;
       try {
-        program = await runtimeVintage.runtime.harness.resolve(
-          new FileSystemProgramResolver(source, roots.repoRoot),
+        program = await resolveLocalProgram(
+          (r) => runtimeVintage.runtime.harness.resolve(r),
+          { main: source, root: roots.repoRoot },
         );
       } catch (error) {
         report.failures.push({
@@ -933,8 +932,25 @@ export async function replayAll(
     unmappable = 0,
     stranded = 0;
   const failures: ReplayFailure[] = [];
+  // One gate-kind record per fixture, the replay's natural unit: a fixture
+  // covers several patterns, and anything finer would be a redesign. The
+  // stamp is part of the name because each captured generation is its own
+  // test; a new capture is a new test, not a rename.
+  const recordsFragment = FragmentWriter.openForRun();
   for (const vintage of vintages) {
+    const replayStarted = performance.now();
     const report = await replayVintage(roots, vintage);
+    recordsFragment?.append({
+      line: "record",
+      test: {
+        k: "gate",
+        s: "repo",
+        n: `pattern-vintage ${vintage.testKey} ${vintage.tier} ` +
+          vintage.stamp,
+      },
+      outcome: report.failures.length > 0 ? "fail" : "pass",
+      durationMs: Math.round(performance.now() - replayStarted),
+    });
     perVintage.push({
       ref: vintage,
       targets: report.targets,
@@ -969,6 +985,7 @@ export async function replayAll(
     }
     failures.push(...report.failures);
   }
+  recordsFragment?.close();
   return {
     vintages,
     replayed: vintages.length,
@@ -1078,8 +1095,9 @@ export async function captureVintage(
     // several. Deriving the name from one of them would have to pick a
     // privileged one, and there is no principled choice — a test that drives
     // two patterns equally has no primary.
-    const program = await vintage.runtime.harness.resolve(
-      resolver(roots, testKey),
+    const program = await resolveLocalProgram(
+      (r) => vintage.runtime.harness.resolve(r),
+      localProgramOptions(roots, testKey),
     );
     const pattern = await vintage.runtime.patternManager.compilePattern(
       program as never,

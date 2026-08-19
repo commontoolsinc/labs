@@ -29,6 +29,7 @@ was last checked against the code.
 | Flag                                                                        | Toggle via                                                                                                                                      | Default today                                                                        | Originally added by                                   | Planned end state                                                                                                                                                                                                                 | Status                                                                          |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [`modernCellRep`](#moderncellrep)                                           | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental`                                                                            | off                                                                                  | Dan Bornstein (#3818)                                 | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, off by default                                                     |
+| [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | off                                                                                  | Robin McCollum (PR #5833)                             | graduate on once Phase 1 soaks (writers emit refs; readers already accept both forms), then continue the spec's phases                                                                                                            | implemented, off by default                                                     |
 | [`persistentSchedulerState`](#persistentschedulerstate)                     | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental`                                                                 | off                                                                                  | Bernhard Seefeld (#3646)                              | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement        |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
@@ -75,11 +76,10 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Seven flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`eagerSourceAnnotation`, `plainResultReceipts`, `systemPatternAutoUpdate`,
-`computedCellIds`, `lazyMaterialization`); `commitPreconditions` is deliberately
-mapped to `null` there, which records "not env-reachable" as a decision rather
-than an omission. The mapping accepts exactly `"true"` and `"false"`; any other
+`EXPERIMENTAL_ENV_VARS` itself is the authority on which flags are
+env-reachable — a flag that deliberately is not, `commitPreconditions` today,
+is mapped to `null` there, which records the decision rather than leaving an
+omission. The mapping accepts exactly `"true"` and `"false"`; any other
 value is ignored with a warning rather than coerced. See
 [How flags propagate](#how-flags-propagate).
 
@@ -111,6 +111,55 @@ value is ignored with a warning rather than coerced. See
   in the fleet negotiates `modernCellRep` true; then delete the flag, the legacy
   `{ "/" }` serialization branches in `cell-rep.ts`, and the protocol-capability
   negotiation for it.
+
+### `contentAddressedSchemas`
+
+- **Toggle via.** `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` environment variable
+  (through the canonical mapping described in the category note above), the
+  shell build define of the same name (baked at build time through
+  `packages/shell/felt.config.ts` and read by `packages/shell/src/lib/env.ts`),
+  or directly through `RuntimeOptions.experimental.contentAddressedSchemas`.
+  The ambient control point is `setContentAddressedSchemasConfig` in
+  [`packages/runner/src/schema-doc-config.ts`](../../packages/runner/src/schema-doc-config.ts).
+- **Added by.** Robin McCollum (PR #5833).
+- **Purpose.** Phases 1 and 2 of
+  [content-addressed schemas](../specs/content-addressed-schemas.md), which
+  deploy together: link writers replace inline schemas with
+  `{ "$ref": "cid:<hash>" }` references to content-addressed schema
+  documents, whose closure is installed into the destination space in the
+  same transaction as the reference; `$alias` bindings stamp the same
+  references at pattern serialization, resolving through the realm
+  registry (an alias is a binding only by context — the storage layer
+  treats `$alias`-shaped records as plain data); and watch/sync selectors
+  normalize for the wire — the reference form only when the client
+  confirmed the whole closure persisted in the target space
+  (server-confirmed replica presence implies server presence), and the
+  fully inline form otherwise, recomposed through the realm registry when
+  the schema itself carries references (a live pattern's binding schema
+  reaches selectors before any document holds it). Gates emission only —
+  readers and the server accept both forms unconditionally, so old data
+  keeps reading throughout the rollout, and the server answers an
+  unresolvable selector reference with a loud QueryError, which a
+  compliant client never provokes; a schema decomposition refuses stays
+  inline exactly as with the flag off. The rollout is one-way: the flag
+  turns on only once every deployed client is a reader, and references
+  written under it persist, so turning it back off stops emission without
+  un-writing anything.
+- **Interaction with `syncSchemaTableV2`.** Both mechanisms dedupe the same
+  link-schema positions, so a flag-on process disables the sync schema
+  table outright (`setSyncSchemaTableConfig(false)` at Runtime
+  construction) rather than running both — a reference-bearing link never
+  needs frame compression, and the table's negotiation simply stops being
+  offered by that process.
+- **Current default and planned end state.** Off by default, everywhere,
+  during the reader-soak window: every client learns to read references
+  before any client writes one, so the flag flips on (env for servers and
+  CLI, build define for the shell) only once the deployed fleet is all
+  readers. Graduate to on once the writer path has soaked (old inline
+  links keep reading forever and age out through pattern
+  re-instantiation). Phases 1 and 2 both ship behind this flag; what
+  remains after graduation is the spec's Phase 3 (retiring transport
+  schema compression for link positions).
 
 ### `persistentSchedulerState`
 
@@ -726,6 +775,10 @@ the per-epic implementation notes).
   It changes only the size of the payload, not its meaning. Peers that do not
   advertise the capability keep receiving the historical fully-expanded
   `SessionSync` shape.
+- **Interaction with `contentAddressedSchemas`.** A process with that
+  flag on disables this table outright — content-addressed references
+  dedupe the same link-schema positions at rest, so the two mechanisms
+  never run together (see that flag's entry).
 - **Current default and planned end state.** On by default. It is negotiated, so
   it degrades safely against older peers. The end state is to retire the
   negotiation and the expanded form once every peer in the fleet speaks the

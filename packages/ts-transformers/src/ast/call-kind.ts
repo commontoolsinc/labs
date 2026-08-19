@@ -37,6 +37,7 @@ import { TwoLevelWeakCache } from "@commonfabric/utils/two-level-weak-cache";
 import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import { getCallArgumentPosition } from "./call-arguments.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
   builderNameForExportName,
@@ -875,6 +876,63 @@ export function classifyArrayCallbackContainerCall(
   return (returnType.flags & ts.TypeFlags.Void) === 0
     ? "plain-array-value"
     : "plain-array-void";
+}
+
+/**
+ * Array methods that merely collect what the callback returns. `map` stores
+ * each result in the output array without reading it, so a result that is a
+ * reactive cell stays a reactive cell.
+ *
+ * The other callback-taking Array methods interpret the result while they run:
+ * `filter`, `find`, `some`, and `every` read it as a boolean, `sort` reads it
+ * as a number, `flatMap` asks whether it is an array, and `reduce` feeds it
+ * back as the next accumulator. A cell reaching any of those is an object, so
+ * the method's own semantics change.
+ */
+const COLLECTING_ARRAY_METHOD_NAMES = new Set(["map"]);
+
+/**
+ * True when `callback` is the callback of an ordinary eager Array method that
+ * collects results rather than interpreting them — the one shape whose body may
+ * carry pattern-owned wrapper sites, because a lifted callback-local can be
+ * returned from it without changing what the method does.
+ *
+ * Three things must hold, and each rules out a shape that would otherwise slip
+ * through method-name matching alone: the callback is argument zero, so a
+ * comparator or an `initialValue` in another position does not qualify; the
+ * resolved signature is declared on `Array`/`ReadonlyArray`, so a `map` of some
+ * other type does not qualify; and the receiver is a plain array that no
+ * reactive lowering owns, so the reactive collection operators keep their own
+ * structural treatment.
+ */
+export function isCollectingPlainArrayMethodCallback(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const position = getCallArgumentPosition(callback);
+  if (!position || position.index !== 0) {
+    return false;
+  }
+
+  const call = position.call;
+  const callSite = classifyArrayMethodCallSite(call, checker);
+  if (!callSite || callSite.ownership !== "plain" || callSite.lowered) {
+    return false;
+  }
+
+  const declaration = checker.getResolvedSignature(call)?.declaration;
+  if (!declaration) {
+    return false;
+  }
+
+  const owner = findOwnerName(declaration);
+  if (!owner || !ARRAY_OWNER_NAMES.has(owner)) {
+    return false;
+  }
+
+  const { name } = declaration as { readonly name?: ts.Node };
+  return !!name && ts.isIdentifier(name) &&
+    COLLECTING_ARRAY_METHOD_NAMES.has(name.text);
 }
 
 export function classifyArrayMethodResultSinkCall(

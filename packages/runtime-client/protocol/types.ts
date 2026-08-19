@@ -183,6 +183,10 @@ export interface InitializationData {
     // Roll a space's system root pattern (home included) forward in place
     // when its toolshed serves a newer identity. Default off.
     systemPatternAutoUpdate?: boolean;
+    // Link writers emit cid: schema-document references, with each closure
+    // materialized in the carrying transaction (content-addressed schemas
+    // Phase 1). Default off.
+    contentAddressedSchemas?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:

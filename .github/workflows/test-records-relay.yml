@@ -1,0 +1,123 @@
+# The one CI principal that writes test records to the store. Test jobs
+# upload credential-free test-records-* artifacts; this follower runs with
+# base-repository credentials whatever repository the pull request came
+# from, downloads those artifacts, and performs the single privileged write
+# per run. Its Google Cloud identity comes from a Workload Identity
+# Federation provider pinned to exactly this workflow file on main, so no
+# other workflow, ref, or repository can mint it (infra:
+# tofu/test-records). Records arrive minutes after the run; nothing gates
+# on the store, and a relay failure loses at most one workflow run's
+# records — rerunning it re-ships idempotently, and a manual dispatch can
+# re-ship any run by id.
+
+name: Test Records Relay
+
+on:
+  workflow_run:
+    workflows: ["CI", "Dashboard"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: Workflow run id whose test-records artifacts to re-ship
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  relay:
+    name: "Relay Test Records"
+    # Cancelled and timed-out runs are included deliberately: a job killed
+    # at its bound is the wedge case whose surviving artifacts matter most.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure' ||
+      github.event.workflow_run.conclusion == 'cancelled' ||
+      github.event.workflow_run.conclusion == 'timed_out'
+    runs-on: ubuntu-latest
+    steps:
+      # Every third-party action in this credentialed workflow is pinned to
+      # an immutable commit, so a moved tag cannot alter the one privileged
+      # write path.
+      - name: 📥 Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+
+      - name: 🔍 Resolve the run to ship
+        id: run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPATCH_RUN_ID: ${{ inputs.run-id }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          if [ -n "$DISPATCH_RUN_ID" ]; then
+            case "$DISPATCH_RUN_ID" in
+              *[!0-9]*)
+                echo "run-id must be numeric" >&2
+                exit 1
+                ;;
+            esac
+            run_id="$DISPATCH_RUN_ID"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+              > run.json
+          else
+            run_id="$EVENT_RUN_ID"
+          fi
+          echo "id=${run_id}" >> "$GITHUB_OUTPUT"
+          # A run cancelled before any upload has no test-records
+          # artifacts, which is a benign no-op; the count lets the
+          # download step run only when there is something to download,
+          # so its failure always means records were lost.
+          count=$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
+            --jq '.artifacts[].name' \
+            | { grep -c '^test-records-' || true; })
+          echo "artifact-count=${count}" >> "$GITHUB_OUTPUT"
+
+      - name: 🔑 Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: commontools-core
+          workload_identity_provider: ${{ vars.TEST_RECORDS_RELAY_WIF_PROVIDER }}
+          service_account: ${{ vars.TEST_RECORDS_RELAY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
+      - name: 📥 Download test-records artifacts
+        if: steps.run.outputs.artifact-count != '0'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: test-records-*
+          path: test-records-artifacts
+          merge-multiple: false
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📤 Ship records to the store
+        env:
+          TEST_RECORDS_GCS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          TEST_RECORDS_BUCKET: ${{ vars.TEST_RECORDS_BUCKET }}
+          TEST_RECORDS_PREFIX: ${{ vars.TEST_RECORDS_PREFIX }}
+          TEST_RECORDS_MEMBER_ACTOR_IDS: ${{ vars.TEST_RECORDS_MEMBER_ACTOR_IDS }}
+          DISPATCH_RUN_ID: ${{ inputs.run-id }}
+        run: |
+          mkdir -p test-records-artifacts
+          if [ -n "$DISPATCH_RUN_ID" ]; then
+            deno run --allow-read --allow-env --allow-net \
+              tasks/test-records-relay.ts \
+              --artifacts test-records-artifacts --run-json run.json
+          else
+            deno run --allow-read --allow-env --allow-net \
+              tasks/test-records-relay.ts \
+              --artifacts test-records-artifacts
+          fi

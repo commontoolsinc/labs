@@ -10,7 +10,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { markRendererInputTx, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 
 const ROOT = join(import.meta.dirname!, "..");
 
@@ -44,11 +44,12 @@ describe("cell-flip shaping (plan B)", () => {
 
   it("shapes a renderer-input write's wake but not an internal write's", async () => {
     const runtime = cc.runtime;
-    const program = await runtime.harness.resolve(
-      new FileSystemProgramResolver(
-        join(ROOT, "integration/fixtures/shape-input-echo.tsx"),
-        ROOT,
-      ),
+    const program = await resolveLocalProgram(
+      (resolver) => runtime.harness.resolve(resolver),
+      {
+        main: join(ROOT, "integration/fixtures/shape-input-echo.tsx"),
+        root: ROOT,
+      },
     );
     const piece = await cc.create(program, { start: true });
     const result = cc.getResult(piece.getCell());

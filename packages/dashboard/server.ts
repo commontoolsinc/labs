@@ -22,7 +22,6 @@
  *   GH_TOKEN                          GitHub tiles; read access to the
  *                                     organization's members also powers the
  *                                     organization-users tile
- *   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
  */
 
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
@@ -244,6 +243,18 @@ function snapshotCtx(base: Ctx, snapshots: ReadonlyMap<string, Run[]>): Ctx {
   };
 }
 
+// When the newest run in a snapshot started, for comparing one fetch of a source
+// against the last one that was kept. A snapshot with no readable start times
+// counts as having no runs at all.
+function newestRunAt(runs: readonly Run[] | undefined): number {
+  let newest = -Infinity;
+  for (const run of runs ?? []) {
+    const at = Date.parse(run.created_at);
+    if (Number.isFinite(at) && at > newest) newest = at;
+  }
+  return newest;
+}
+
 function sourceLabel(source: RunSource): string {
   return source.repo.split("/").at(-1) ?? source.repo;
 }
@@ -375,6 +386,16 @@ export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
       }
 
       const key = runSourceKey(group.source);
+      // A repository's newest run on main only ever moves forward. A fetch that
+      // comes back with an older newest run than the one already held read a
+      // stale view of the workflow, and publishing it would age the whole tile
+      // family backwards without saying so. Keep what is held and name the
+      // source stale; the next fetch that reaches a current view clears it.
+      if (runs && newestRunAt(runs) < newestRunAt(runSnapshots.get(key))) {
+        error = "newest run older than the one already collected";
+        console.error(`run source ${key} stale:`, error);
+        runs = undefined;
+      }
       if (runs) {
         runSnapshots.set(key, runs);
         runSourceErrors.delete(key);

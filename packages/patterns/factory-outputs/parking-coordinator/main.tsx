@@ -407,24 +407,10 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
-  (
-    {
-      spots: inputSpots,
-      people: inputPeople,
-      requests: inputRequests,
-      adminRegistry: inputAdminRegistry,
-    },
-  ) => {
-    const spots = inputSpots ?? Writable.perSpace.of(DEFAULT_SPOTS);
-    const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
-    const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
-    const defaultAdminRegistry = new Writable.perSpace<
-      ParkingAdminRegistryValue
-    >(
-      {} as ParkingAdminRegistryValue,
-    );
-    const adminRegistry: ParkingAdminRegistryCell = inputAdminRegistry ??
-      defaultAdminRegistry;
+  ({ spots, people, requests, adminRegistry }) => {
+    // Each optional cell input materializes seeded from its type's `Default<>`
+    // when the caller wires nothing; a parent that owns the cells (e.g.
+    // lot-with-coordinator-demo) shares them by passing them in.
     const adminManagerCredential = new Writable.perUser<
       ParkingAdminManagerCredential | null
     >(null);

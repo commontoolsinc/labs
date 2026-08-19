@@ -7,7 +7,15 @@
  * UPDATED: Now uses the elegant agentic-tools API (defineItemSchema + listTool)
  * which eliminates the 3x redundancy of interface + input type + schema.
  */
-import { __cf_data, computed, Default, NAME, pattern, UI } from "commonfabric";
+import {
+  __cf_data,
+  computed,
+  Default,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+} from "commonfabric";
 import GmailAgenticSearch from "../core/experimental/gmail-agentic-search.tsx";
 import {
   defineItemSchema,
@@ -85,6 +93,8 @@ interface FavoriteFoodsInput {
 
 /** Favorite foods extractor from Gmail. #favoriteFoods */
 export interface FavoriteFoodsOutput {
+  [NAME]: string;
+  [UI]: VNode;
   foods: FoodPreference[];
   lastScanAt: number;
   count: number;

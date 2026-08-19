@@ -8,7 +8,20 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MIME } from "@commonfabric/memory/interface";
 import type { CellScope } from "@commonfabric/memory/v2";
 
+import type { JSONSchemaObj } from "@commonfabric/api";
+
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
+import {
+  containsExternalSchemaRef,
+  decomposeSchema,
+  recomposeSchema,
+  SchemaNotDecomposableError,
+} from "../schema-decompose.ts";
+import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
+import {
+  lookupSchemaDocument,
+  registerSchemaDocument,
+} from "../schema-registry.ts";
 import type { PullError, Result, Unit, URI } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
 
@@ -27,6 +40,69 @@ export const normalizeSyncSelector = (
   return internPathSelector(
     schema === selector.schema ? selector : { path: selector.path, schema },
   );
+};
+
+/**
+ * Normalizes a selector's schema for the wire
+ * (`docs/specs/content-addressed-schemas.md`, Phase 2; the
+ * `contentAddressedSchemas` flag, shared with the link writer — the two
+ * emissions deploy together). Two obligations meet here:
+ *
+ * - PREFERENCE (flag-gated): a schema whose whole closure
+ *   `isSchemaDocPersisted` confirms in the target space emits as a
+ *   reference — server-confirmed local presence implies server presence,
+ *   since a confirmed document arrived by delivery or an acknowledged
+ *   commit and can never change.
+ *
+ * - CORRECTNESS (unconditional): a schema that already carries `cid:`
+ *   refs — a live pattern's binding schema, a schema minted in another
+ *   space — must NOT reach the wire unless the target space persists the
+ *   closure, because the server answers an unpersisted selector reference
+ *   loudly. When the closure is not confirmed there, the schema
+ *   recomposes to the fully inline form through the realm registry, which
+ *   holds every document behind a locally created reference.
+ *
+ * A decomposition refusal keeps the selector exactly as given; so does a
+ * ref-bearing schema whose documents the registry cannot supply — that
+ * reference was unresolvable locally too, and the server's diagnostic is
+ * the loudest signal available.
+ */
+export const externalizeSyncSelector = (
+  selector: SchemaPathSelector,
+  isSchemaDocPersisted: (hash: string) => boolean,
+): SchemaPathSelector => {
+  const schema = selector.schema;
+  if (schema === undefined || typeof schema === "boolean") return selector;
+  const carriesRefs = containsExternalSchemaRef(schema);
+  if (!carriesRefs && !getContentAddressedSchemasConfig()) return selector;
+  try {
+    const { rootRef, documents } = decomposeSchema(schema as JSONSchemaObj, {
+      resolveDocument: lookupSchemaDocument,
+    });
+    for (const [hash, document] of documents) {
+      registerSchemaDocument(hash, document);
+    }
+    const persisted = [...documents.keys()].every((hash) =>
+      isSchemaDocPersisted(hash)
+    );
+    if (persisted && getContentAddressedSchemasConfig()) {
+      return internPathSelector({
+        path: selector.path,
+        schema: { $ref: rootRef },
+      });
+    }
+    if (!carriesRefs) return selector;
+    return internPathSelector({
+      path: selector.path,
+      schema: recomposeSchema(
+        rootRef,
+        (hash) => documents.get(hash) ?? lookupSchemaDocument(hash),
+      ),
+    });
+  } catch (error) {
+    if (error instanceof SchemaNotDecomposableError) return selector;
+    throw error;
+  }
 };
 
 export const normalizeSyncEntries = (

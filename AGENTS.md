@@ -16,8 +16,8 @@ Common Fabric product.
 1. Foundation: api, data-model, runner, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
 3. Capabilities: piece, html, llm
-4. Operation: background-piece-service, cli, connectors/agents, fuse,
-   state-inspector, cf-harness
+4. Operation: agents-host, background-piece-service, cli, connectors/agents,
+   fuse, state-inspector, cf-harness
 5. Deployed Product: toolshed, shell, lib-shell, runtime-client
 6. User Interface: ui
 7. End-User Programs: home-schemas, patterns
@@ -213,10 +213,20 @@ consider the information in `docs/development/COVERAGE.md`.
 ### Automated gates
 
 `deno task check` type-checks a hand-maintained list of paths in
-`tasks/check.sh`. Several workspace packages are absent from that list — `fuse`,
-`lib-shell`, `schema-generator`, `data-model` and `state-inspector` among them —
-so a green `deno task check` is not evidence that the tree type-checks. Run
-`deno task test` in every package you touched.
+`tasks/typecheck.ts` (`tasks/check.sh` owns the Deno version gate and delegates
+there), and that list now names every workspace package. Most are covered in
+full; a few are partial by design. The `*.input.ts` transformer fixtures under
+`schema-generator` and `ts-transformers` name ambient wrappers the transformer
+supplies, so they do not compile on their own and are left out. `ui` is checked
+only for its `v2` components, and not the outliner among them.
+
+Patterns are the exception `deno task check` does not own. It lists some pattern
+directories and checks them through the automatic-JSX environment the rest of
+the tree uses, but patterns compile under a different (classic-`h`) JSX runtime,
+and the two disagree on some advanced pattern types. `deno task cfcheck` (the
+"CFC Pattern Check" CI job) type-checks every pattern in the JSX and
+runtime-type environment they actually compile under, and is the authoritative
+pattern type-check. Run `deno task test` in every package you touched.
 
 Each of these gates fails CI on its own, and none of them run as part of
 `deno task check`:
@@ -233,14 +243,19 @@ Each of these gates fails CI on its own, and none of them run as part of
 - `deno task check-skill-facts` — a path or import cited by a skill, an
   `AGENTS.md`, or a rule that stopped resolving
 - `deno task check-verb-session-sync` — a `cf` command or act reference in
-  `docs/common/verb-session-walkthrough.md` that its demo script does not back;
+  `docs/common/verbs/session-walkthrough.md` that its demo script does not back;
   the walkthrough quotes commands, never composes them
 - `deno task check-single-copy-deps`, `check-unused-deps`, `check-deno-pins` —
   dependency declarations across the workspace
 - `deno task check-package-cycles` — two packages that import each other, the
   part of "Dependencies run downward" above that a machine can settle
+- `deno task check-local-program` — a program built from local files by hand
+  rather than through `resolveLocalProgram`, which silently drops any data files
+  the caller attached
 - `deno task check-baselines-append-only` — a pattern baseline that was deleted
   rather than added to
+- `deno task check-test-aliases` — a test-identity alias line that was edited or
+  removed rather than appended, mapped an identity twice, or formed a cycle
 
 The detail behind each of these lives in `.claude/rules/`, one file per kind of
 file it governs. Claude Code loads the matching rule on its own when it reads a

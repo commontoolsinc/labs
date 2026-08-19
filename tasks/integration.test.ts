@@ -1,8 +1,12 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import ports from "@commonfabric/ports" with { type: "json" };
 import {
   buildFilteredTestArgs,
+  chooseGeneratedPortOffset,
   findIntegrationTestFiles,
+  GENERATED_PORT_OFFSET_RANGE,
   integrationTestDir,
+  offsetPorts,
   runFilteredIntegration,
   runPackageIntegration,
   selectIntegrationTestFiles,
@@ -315,4 +319,56 @@ Deno.test("runPackageIntegration returns false when a filtered run matches nothi
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }
+});
+
+// Every offset the choice can return, collected by sweeping its random input
+// finely enough that nothing it can produce is missed.
+function generatedPortOffsets(): number[] {
+  const steps = 100_000;
+  const offsets = new Set<number>();
+  for (let step = 0; step < steps; step++) {
+    offsets.add(chooseGeneratedPortOffset(() => step / steps));
+  }
+  return [...offsets].sort((a, b) => a - b);
+}
+
+// A port offset shifts every dev server together, and the servers bind whatever
+// port arithmetic lands on. Browsers and Deno's `fetch` both refuse to open a
+// connection to a port on the WHATWG bad-port list, so an offset that lands a
+// server on one produces a server that starts, passes a curl health check, and
+// that nothing in a test can reach: every browser navigation gets an error page
+// and every server-to-server proxy hop fails.
+Deno.test("no generated port offset lands a server on a blocked port", () => {
+  const blocked = new Set(ports.blockedPorts);
+  const offenders: string[] = [];
+  for (const offset of generatedPortOffsets()) {
+    for (const port of offsetPorts(offset)) {
+      if (blocked.has(port)) {
+        offenders.push(`offset ${offset} uses port ${port}`);
+      }
+    }
+  }
+  assertEquals(offenders, []);
+});
+
+Deno.test("generated port offsets span the documented range", () => {
+  const offsets = generatedPortOffsets();
+  assertEquals(offsets[0], GENERATED_PORT_OFFSET_RANGE.first);
+  assertEquals(offsets[offsets.length - 1], GENERATED_PORT_OFFSET_RANGE.last);
+});
+
+// Keeps the recorded list honest against the runtime that enforces it. A
+// blocked port is rejected before any connection is opened, so pointing these
+// probes at a host that cannot resolve reaches no network service: the blocked
+// answer arrives first, and any other port would fail on the name instead.
+Deno.test("every recorded blocked port is one fetch refuses", async () => {
+  const stillBlocked: number[] = [];
+  for (const port of ports.blockedPorts) {
+    try {
+      await fetch(`http://blocked-port-probe.invalid:${port}/`);
+    } catch (error) {
+      if (String(error).includes("are blocked")) stillBlocked.push(port);
+    }
+  }
+  assertEquals(stillBlocked, ports.blockedPorts);
 });

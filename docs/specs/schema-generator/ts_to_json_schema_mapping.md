@@ -646,6 +646,12 @@ Mechanics:
   `normalizeWriterIdentityFile`). The transformer also handles the direct-root
   `toSchema<WriteAuthorizedBy<T, typeof b>>` form specially so the wrapper's
   value schema remains the root while the same identity marker is attached.
+  The content-addressed identity (`moduleIdentity`, and the legacy `bundleId`)
+  is update-volatile in the piece compat checker: it rehashes on any edit to
+  the authoring module, so `assertPatternSchemasBackwardCompatible` normalizes
+  it out of the `ifc` comparison and compares only the binding `file`/`path`
+  and the `uiContract`. The runner still verifies the live writer's
+  `moduleIdentity` against the claim at write time, so this narrows nothing.
 - `SchemaGeneratorTransformer.resolvePolicyOfMarkers` replaces a valid policy
   marker with the compiled module identity, exported symbol, and policy digest.
   If it cannot match a compiler-verified exported `exchangeRules()` binding,

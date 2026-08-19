@@ -15,8 +15,13 @@ import {
   resetPersistentSchedulerStateConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
+  setSyncSchemaTableConfig,
 } from "@commonfabric/memory/v2";
 import { RuntimeTelemetry } from "@commonfabric/runner";
+import {
+  getContentAddressedSchemasConfig,
+  setContentAddressedSchemasConfig,
+} from "./schema-doc-config.ts";
 import { StaticCache } from "@commonfabric/static";
 import {
   type AsyncLocalStore,
@@ -208,6 +213,16 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
   modernCellRep?: boolean | undefined;
+  /**
+   * Link writers replace inline schemas with references to
+   * content-addressed schema documents
+   * (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2): link
+   * writers stamp references, and selectors externalize opportunistically
+   * when their closure is already persisted in the target space. Gates
+   * emission only; readers and the server accept both forms
+   * unconditionally. Defaults to off.
+   */
+  contentAddressedSchemas?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
@@ -1006,6 +1021,20 @@ export class Runtime {
     // `undefined` and probably get very confused).
     setModernCellRepConfig(this.experimental.modernCellRep);
     this.experimental.modernCellRep = getModernCellRepConfig();
+    setContentAddressedSchemasConfig(
+      this.experimental.contentAddressedSchemas,
+    );
+    this.experimental.contentAddressedSchemas =
+      getContentAddressedSchemasConfig();
+    if (this.experimental.contentAddressedSchemas) {
+      // Content-addressed schema references and the sync schema table dedupe
+      // the same link-schema positions; a reference-bearing link never needs
+      // frame compression, so a flag-on process stops negotiating the table
+      // entirely rather than running both mechanisms. Ambient and one-way
+      // like the flag itself: once any runtime in the realm enables the
+      // flag, the table stays off for the process.
+      setSyncSchemaTableConfig(false);
+    }
     setPersistentSchedulerStateConfig(
       this.experimental.persistentSchedulerState,
     );
@@ -2299,9 +2328,9 @@ export class Runtime {
   /**
    * True iff the default host AND every distinct mapped host are
    * reachable — one runtime can span hosts, so health is the
-   * conjunction over all of them.
+   * conjunction over all of them. The optional signal cancels the requests.
    */
-  async healthCheck(): Promise<boolean> {
+  async healthCheck(signal?: AbortSignal): Promise<boolean> {
     // Overlapping calls each capture into their own generation; only the
     // newest call's capture publishes, so a slow earlier response cannot
     // overwrite a newer one after the fact.
@@ -2323,7 +2352,7 @@ export class Runtime {
     }
     const checks = [...hosts].map(async (host) => {
       try {
-        const res = await fetch(new URL("/_health", host));
+        const res = await fetch(new URL("/_health", host), { signal });
         if (
           host === defaultHost && generation === this.#healthCheckGeneration
         ) {
@@ -2332,6 +2361,7 @@ export class Runtime {
         }
         return res.ok;
       } catch (_) {
+        signal?.throwIfAborted();
         return false;
       }
     });

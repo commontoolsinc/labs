@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env --allow-net
 
 /**
  * Integration test runner for the entire monorepo.
@@ -19,6 +19,16 @@
 import { walk } from "@std/fs/walk";
 import * as path from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
+import {
+  FragmentWriter,
+  RECORDS_DIR_VARIABLE,
+  recordsDir,
+} from "@commonfabric/test-support/records";
+import {
+  finishRunRecording,
+  type RunRecording,
+  startRunRecording,
+} from "./test-records.ts";
 
 // Packages with integration tests that need a running server by default.
 const DEFAULT_PACKAGES_WITH_SERVER = [
@@ -96,6 +106,53 @@ async function stopServers(portOffset: number, rootDir: string): Promise<void> {
 // start-local-dev.sh exits with this code when a requested port is already in
 // use. Other failures use different codes and are not worth retrying.
 const PORT_IN_USE_EXIT = 3;
+
+/** The bounds a generated port offset is drawn between, both included. */
+export const GENERATED_PORT_OFFSET_RANGE = { first: 100, last: 1000 };
+
+/**
+ * Every port a run puts a server on for `offset`. The offset shifts all of them
+ * together, so one offset stands for the whole set.
+ */
+export function offsetPorts(offset: number): number[] {
+  return [
+    ports.toolshed + offset,
+    ports.shell + offset,
+    ports.inspector + offset,
+  ];
+}
+
+/**
+ * The offsets a generated choice draws from: the whole range, less every offset
+ * that would put a server on a port clients refuse to connect to. Such a server
+ * binds and reports itself healthy while every browser navigation and every
+ * server-to-server hop to it fails, so an offset that reaches one is dropped
+ * rather than tried. The inspector port counts here even though only an
+ * `--inspect` run binds it, so one generated offset serves both.
+ */
+const USABLE_PORT_OFFSETS: number[] = (() => {
+  const blocked = new Set<number>(ports.blockedPorts);
+  const { first, last } = GENERATED_PORT_OFFSET_RANGE;
+  const usable: number[] = [];
+  for (let offset = first; offset <= last; offset++) {
+    if (!offsetPorts(offset).some((port) => blocked.has(port))) {
+      usable.push(offset);
+    }
+  }
+  return usable;
+})();
+
+/**
+ * Picks the offset for a run that did not name one. `random` returns a number
+ * in `[0, 1)`; pass a stand-in to enumerate what the choice can produce.
+ */
+export function chooseGeneratedPortOffset(
+  random: () => number = Math.random,
+): number {
+  return USABLE_PORT_OFFSETS[
+    Math.floor(random() * USABLE_PORT_OFFSETS.length)
+  ];
+}
 
 // Starts the dev servers for the given offset. Returns the start-local-dev.sh
 // exit code: 0 on success, PORT_IN_USE_EXIT on a port collision, or another
@@ -250,6 +307,12 @@ async function runPatternTests(
   const testTimings: { file: string; durationMs: number; passed: boolean }[] =
     [];
 
+  // The orchestrator is the one producer of pattern-kind records for this
+  // run: it appends a record per file from its own wall clock, and it
+  // clears the records variable in each cf child so the in-runner hook does
+  // not record the same files a second time.
+  const recordsFragment = FragmentWriter.openForRun();
+
   // Run as a pool: always keep `concurrency` tests in flight
   let nextIndex = 0;
   const running = new Set<Promise<void>>();
@@ -259,24 +322,39 @@ async function runPatternTests(
       const testFile = testFiles[nextIndex++];
       const p = (async () => {
         const startMs = performance.now();
-        const result = await runCommand(
-          [
-            ...cfCmd,
-            "test",
-            "--timeout",
-            "180000",
-            "--root",
-            patternsDir,
-            testFile,
-          ],
-          { cwd: rootDir },
-        );
+        // A child that cannot even spawn is that file's failure, kept
+        // inside the pool promise: a rejection here would escape the
+        // Promise.race below, skip the fragment close, and leave the
+        // remaining children running unawaited.
+        let result: Awaited<ReturnType<typeof runCommand>>;
+        try {
+          result = await runCommand(
+            [
+              ...cfCmd,
+              "test",
+              "--timeout",
+              "180000",
+              "--root",
+              patternsDir,
+              testFile,
+            ],
+            { cwd: rootDir, env: { CF_TEST_RECORDS_DIR: "" } },
+          );
+        } catch (error) {
+          result = { success: false, code: 127, stderr: String(error) };
+        }
         const durationMs = performance.now() - startMs;
 
         testTimings.push({
           file: testFile,
           durationMs,
           passed: result.success,
+        });
+        recordsFragment?.append({
+          line: "record",
+          test: { k: "pattern", s: "patterns", n: testFile },
+          outcome: result.success ? "pass" : "fail",
+          durationMs: Math.round(durationMs),
         });
 
         if (result.success) {
@@ -311,6 +389,7 @@ async function runPatternTests(
   while (running.size > 0) {
     await Promise.race(running);
   }
+  recordsFragment?.close();
 
   if (failed.length === 0) {
     console.log(`\n✅ All ${testFiles.length} pattern tests passed`);
@@ -494,7 +573,14 @@ export async function runFilteredIntegration(
     return { success: false, code: 1 };
   }
 
-  const args = buildFilteredTestArgs(pkg, relDir, testFiles, junitDir);
+  // Resolved for the same reason as in runPackageIntegration: the child's
+  // working directory is the package, not the orchestrator's.
+  let resolvedJunitDir: string | undefined;
+  if (junitDir) {
+    resolvedJunitDir = path.resolve(junitDir);
+    await Deno.mkdir(resolvedJunitDir, { recursive: true });
+  }
+  const args = buildFilteredTestArgs(pkg, relDir, testFiles, resolvedJunitDir);
   return await run(["deno", ...args], {
     cwd: packageDir,
     env,
@@ -527,9 +613,14 @@ export async function runPackageIntegration(
     LOG_LEVEL: "warn",
   };
 
-  // Set INTEGRATION_TEST_FLAGS for JUnit output if --junit-dir was specified
+  // Set INTEGRATION_TEST_FLAGS for JUnit output if --junit-dir was specified.
+  // The path is resolved against the orchestrator's working directory: the
+  // package task runs with the package directory as its own, so a relative
+  // path would land the XML under packages/<pkg>/ where the workflow's
+  // artifact step never looks.
   if (junitDir) {
-    const junitPath = path.join(junitDir, `${pkg}.xml`);
+    await Deno.mkdir(junitDir, { recursive: true });
+    const junitPath = path.resolve(junitDir, `${pkg}.xml`);
     env.INTEGRATION_TEST_FLAGS = `--junit-path=${junitPath}`;
   } else {
     // Pass through INTEGRATION_TEST_FLAGS if set in environment
@@ -687,6 +778,15 @@ async function main(): Promise<void> {
     Deno.exit(0);
   }
 
+  // This entry point owns the run for test recording when a personal key
+  // is present, joins the enclosing spool inside CI, and stays inert with
+  // neither. Producers in this process and its children find the spool
+  // through the environment.
+  const recording: RunRecording = await startRunRecording();
+  if (recording.mode === "own" && recordsDir() === undefined) {
+    Deno.env.set(RECORDS_DIR_VARIABLE, recording.spool.dir);
+  }
+
   // Parse flags
   let cliPortOffset: number | undefined;
   let junitDir: string | undefined;
@@ -813,7 +913,7 @@ async function main(): Promise<void> {
         // every offset, so it stops the run.
         const maxStartAttempts = 5;
         for (let attempt = 1; attempt <= maxStartAttempts; attempt++) {
-          portOffset = Math.floor(Math.random() * 901) + 100; // 100-1000
+          portOffset = chooseGeneratedPortOffset();
           apiUrl = `http://localhost:${ports.toolshed + portOffset}`;
           console.log(`PORT_OFFSET: ${portOffset}${offsetSource}`);
           console.log(`API_URL: ${apiUrl}`);
@@ -901,6 +1001,9 @@ async function main(): Promise<void> {
     Deno.removeSignalListener("SIGINT", onSignal);
     Deno.removeSignalListener("SIGTERM", onSignal);
     await cleanup();
+    // Ship before the exit call: Deno.exit runs no further finally blocks,
+    // and a failing run's records are the interesting ones.
+    await finishRunRecording(recording);
     Deno.exit(exitCode);
   }
 }

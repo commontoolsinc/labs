@@ -2461,7 +2461,7 @@ function loadMetaLinkedDoc(
   valueEntry: IMemorySpaceAttestation,
   meta: "cfc" | "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
-): MetaLinkedDoc[] {
+): IMemorySpaceAttestation[] {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
   if (!isObjectOrArray(targetObj) || !(meta in targetObj)) return [];
   const loaded = [];
@@ -2537,15 +2537,19 @@ function loadMetaLinkedDocFromLink(
   if (address === undefined) {
     return undefined;
   }
-  // This read only loads the linked metadata doc so traversal can inspect it.
-  // The schema-guided traversal below records the real scheduling reads.
+  // Track the target before reading it: the tracker entry is what makes
+  // the graph reactive to this document — a change or a later arrival
+  // dirties a tracked key — so an absent-at-evaluation target must be
+  // tracked too, or nothing would re-run this load when it arrives. The
+  // read itself is deliberately not a scheduling read: delivery
+  // reactivity rides the tracker, not the runner scheduler.
+  const docKey = getTrackerKey(address);
+  schemaTracker.add(docKey, REJECTING_SELECTOR);
   const result = tx.read(address, { meta: ignoreReadForScheduling });
   if (result.error) {
     return undefined;
   }
-  const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, REJECTING_SELECTOR);
-  return { address, value: result.ok.value, selector: REJECTING_SELECTOR };
+  return { address, value: result.ok.value };
 }
 
 /**
@@ -2676,53 +2680,10 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
   return undefined;
 }
 
-type MetaLinkedDoc = IMemorySpaceAttestation & {
-  selector: SchemaPathSelector;
-};
-
-function traverseMetaLinkedDoc(
-  tx: IExtendedStorageTransaction,
-  doc: MetaLinkedDoc,
-  context: TraversalContext,
-) {
-  if (
-    doc.selector.schema === undefined ||
-    ContextualFlowControl.isFalseSchema(doc.selector.schema)
-  ) {
-    return;
-  }
-  if (!isObjectOrArray(doc.value) || !("value" in doc.value)) {
-    return;
-  }
-
-  const docContext = createTraversalContext(
-    new CompoundCycleTracker<
-      FabricValue,
-      JSONSchema | undefined
-    >(),
-    context.schemaTracker,
-    context.includeMeta,
-    context.metaDocsVisited,
-    context.onMissingLinkTarget,
-    context.schemaDocsLoaded,
-    context.schemaDocsAvailable,
-  );
-  const traverser = new SchemaObjectTraverser(
-    tx,
-    doc.selector,
-    docContext,
-  );
-  const fullDoc = doc.value as Immutable<JSONObject>;
-  traverser.traverse({
-    address: {
-      ...doc.address,
-      path: ["value"],
-    },
-    value: fullDoc.value,
-  });
-}
-
-// Recursively load the meta linked docs from the doc
+// Recursively load the meta linked docs from the doc. Every loaded doc is
+// delivered whole — tracked under the rejecting selector — and never
+// schema-traversed; narrowing a meta document by schema is not a policy
+// this traversal has.
 export function loadMetaLinkedDocs(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
@@ -2760,7 +2721,6 @@ export function loadMetaLinkedDocs(
         const linkedDocKey = getTrackerKey(linkedDoc.address);
         if (context.metaDocsVisited.has(linkedDocKey)) continue;
         context.metaDocsVisited.add(linkedDocKey);
-        traverseMetaLinkedDoc(tx, linkedDoc, context);
         pendingDocs.push(linkedDoc);
       }
     }
