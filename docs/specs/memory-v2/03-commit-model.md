@@ -433,8 +433,12 @@ in the commit log.
 2. Resolve all pending reads within the logical session.
 3. Assign the next global `seq`.
 4. Append a `commit` row containing the original payload and resolution data.
-5. Append one `revision` row per operation in the transaction.
-6. Update `head` pointers for touched entities.
+5. Append one `revision` row per operation in the transaction — except an
+   operation proven to change nothing (an identical re-`set` of a
+   content-addressed document), which appends no revision and is reported
+   in the verdict's elided operation indexes.
+6. Update `head` pointers for touched entities (an elided operation touches
+   nothing).
 7. Materialize or refresh snapshots as needed.
 8. Mark the session-local pending commit as confirmed and enqueue session sync
    for interested sessions.
@@ -582,11 +586,16 @@ Commits are ordered by canonical `seq`.
 
 The server applies a transaction atomically:
 
-- either every operation produces its corresponding revision rows and head
-  updates
+- either every material state change lands — one revision row and head
+  update per operation that changes state
 - or none of them do
 
-There is no partial visibility of a committed transaction.
+An identical re-`set` of a content-addressed document is a semantic no-op
+the engine proves before applying: it produces no revision, no head update,
+and no dirty mark, while the commit row and the space sequence still
+advance and the verdict names the elided operation indexes. There is no
+partial visibility of a committed transaction — a no-op is exact by proof,
+not a torn apply.
 
 ## 3.11 Branch-Aware Commits
 

@@ -551,3 +551,89 @@ Deno.test("rejects a reference backed by a stored cid: document holding other co
     );
   });
 });
+
+Deno.test("applies an identical content-addressed re-set as a no-op", async () => {
+  await withEngine((engine) => {
+    const schema = { type: "string", title: "elided-re-set" } as const;
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [setOp("cid:fid1:elided", schema)],
+      }),
+    });
+    assertEquals(install.revisions.length, 1);
+    assertEquals(install.elidedOpIndexes, undefined);
+    const headSeq = engine.database.prepare(
+      `SELECT seq FROM head WHERE id = 'cid:fid1:elided'`,
+    ).get<{ seq: number }>()!.seq;
+
+    // The identical re-set is proven unchanged by the immutability
+    // comparison, so it applies as a no-op: no revision, no head advance —
+    // and therefore nothing for fan-out to deliver — while the commit
+    // itself still records and advances the space log.
+    const reSet = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, {
+        operations: [
+          setOp("cid:fid1:elided", schema),
+          setOp("cid:fid1:elided", schema),
+          setOp("of:elide-bystander", { n: 1 }),
+        ],
+      }),
+    });
+    assertEquals(reSet.seq > install.seq, true);
+    assertEquals(reSet.elidedOpIndexes, [0, 1]);
+    assertEquals(reSet.revisions.map((revision) => revision.id), [
+      "of:elide-bystander",
+    ]);
+    const after = engine.database.prepare(
+      `SELECT seq FROM head WHERE id = 'cid:fid1:elided'`,
+    ).get<{ seq: number }>()!.seq;
+    assertEquals(after, headSeq);
+
+    // A differing re-set still cannot slip through as an elision.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(3, {
+            operations: [
+              setOp("cid:fid1:elided", { type: "number", title: "changed" }),
+            ],
+          }),
+        }),
+      ProtocolError,
+      "cannot change content-addressed document",
+    );
+  });
+});
+
+Deno.test("a replayed eliding commit reports its elision again", async () => {
+  await withEngine((engine) => {
+    const schema = { type: "string", title: "replayed-elision" } as const;
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [setOp("cid:fid1:replayed", schema)],
+      }),
+    });
+    const elidingCommit = commit(2, {
+      operations: [setOp("cid:fid1:replayed", schema)],
+    });
+    const first = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: elidingCommit,
+    });
+    assertEquals(first.elidedOpIndexes, [0]);
+    // The replay returns the stored result — including the elision report,
+    // which persisted no revision and must be re-derived, or the accept
+    // path would classify the unchanged document as dirty.
+    const replayed = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: elidingCommit,
+    });
+    assertEquals(replayed.seq, first.seq);
+    assertEquals(replayed.elidedOpIndexes, [0]);
+    assertEquals(replayed.revisions, []);
+  });
+});
