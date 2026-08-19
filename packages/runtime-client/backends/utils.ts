@@ -1,4 +1,5 @@
 import {
+  FabricInstance,
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
@@ -16,7 +17,11 @@ import {
   redactCaveatSourcesForDisplay,
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
-import { isSigilLink, linkRefFrom } from "@commonfabric/runner/shared";
+import {
+  isSigilLink,
+  linkRefFrom,
+  refuseFabricInstance,
+} from "@commonfabric/runner/shared";
 
 import { isCellRef } from "../protocol/mod.ts";
 import { CellRef, PageRef } from "../protocol/types.ts";
@@ -57,19 +62,24 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
     // own properties a fabric class does not have, which would put `{}` here in
     // place of the value.
     return value;
+  } else if (value instanceof FabricInstance) {
+    // A `FabricInstance` is refused. Its codec contents can carry a link, and
+    // those contents are not reachable by property name -- so the record
+    // branch below would rebuild one from enumerable own properties it does
+    // not have, yielding `{}` and losing whatever it holds, and passing it
+    // through whole would leave any link inside it unmapped.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: no flag gates it. The two callers pass a value that
+    // arrived by structured cloning, which strips a fabric class, so one
+    // cannot reach them as an instance at all; what would reach this is a
+    // direct caller, and there is none. `CellHandle.serialize()` in
+    // `../cell-handle.ts` refuses a `FabricSpecialObject` earlier still.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal.
+    refuseFabricInstance(value, "when mapping cell refs to sigil links");
   } else if (typeof value === "object" && value) {
-    // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at
-    // which point this becomes a walk rather than a silent flattening. It is
-    // the one arm of the domain above not yet served: an instance reaching
-    // here meets a rebuild that reads enumerable own properties it does not
-    // have, and leaves as `{}`. Passing it through untouched is the other
-    // available disposition, and drops any link in its contents instead;
-    // neither is right, and which to take meanwhile is open. What keeps it
-    // from arising today is
-    // `CellHandle.serialize()` in `../cell-handle.ts`, which refuses a
-    // `FabricSpecialObject` before it can reach this walk; the marker on
-    // `WireCellValue` in `../protocol/types.ts` states the same gap at the
-    // type.
     return Object.entries(value).reduce(
       (acc: Record<string, FabricValue>, [k, v]) => {
         acc[k] = mapCellRefsToSigilLinks(v);

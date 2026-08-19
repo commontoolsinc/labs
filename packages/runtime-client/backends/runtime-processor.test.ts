@@ -2862,6 +2862,21 @@ describe("runtime-client CellRef conversion", () => {
       (mapCellRefsToSigilLinks({ b: bytes }) as { b: unknown }).b,
     ).toBe(bytes);
   });
+
+  it("refuses a `FabricInstance`, naming the class and the situation", () => {
+    // A tripwire, not a limitation to route around: an instance's codec
+    // contents can hold a link that this walk cannot reach, so refusing beats
+    // the `{}` the record branch would otherwise produce.
+    const error = FabricError.fromNativeError(new Error("boom"));
+    const message =
+      "Cannot yet handle `FabricError` (a `FabricInstance`) when mapping " +
+      "cell refs to sigil links.";
+
+    expect(() => mapCellRefsToSigilLinks(error)).toThrow(message);
+    // Nested too, the walk reaching it through the container rebuild.
+    expect(() => mapCellRefsToSigilLinks({ e: error })).toThrow(message);
+    expect(() => mapCellRefsToSigilLinks([error])).toThrow(message);
+  });
 });
 
 describe("RuntimeProcessor VDom event label-view ingress", () => {
