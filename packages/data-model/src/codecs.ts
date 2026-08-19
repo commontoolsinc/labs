@@ -167,14 +167,20 @@ const realmCodecEngine = newDefaultRealmCodecEngine();
  * loss. The result is `[marker, tree]`, and the tree inside shares whatever
  * structure of `value` needed no encoding.
  *
+ * If no live environment is given, {@link NULL_LIVE_ENVIRONMENT} is
+ * substituted, which throws if anything asks it for a cell.
+ *
  * Named for the `<target>From<Source>Value` family that
  * `fabricFromNativeValue()` and `nativeFromFabricValue()` establish. Both
  * sides being qualified is what keeps `realm` readable only as a modifier on
  * `value` -- a *realm value* is this transport form, as a *native value* is a
  * plain JavaScript one -- rather than as the boundary being crossed.
  */
-export function realmFromFabricValue(value: FabricValue): RealmEncodedValue {
-  return realmCodecEngine.encode(value);
+export function realmFromFabricValue(
+  value: FabricValue,
+  env?: LiveEnvironment,
+): RealmEncodedValue {
+  return realmCodecEngine.encode(value, env ?? NULL_LIVE_ENVIRONMENT);
 }
 
 /**
