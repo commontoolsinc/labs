@@ -106,8 +106,9 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   settle time EXPLICITLY (register OW38); the flip's performance BAR is
   an owner ruling.
 - **The design pass — report LANDED; ruling set ACCEPTED 2026-08-18
-  (owner, verbatim: "ruling set is accepted"); W0 is RUNNING (launched
-  2026-08-18 — see the ordered next actions below). Design (d)
+  (owner, verbatim: "ruling set is accepted"); W0 DONE 2026-08-19 —
+  PROCEED (d′) (the next bullet; the build train launched — see the
+  ordered next actions below). Design (d)
   SUPERSEDED by (d′) per owner direction 2026-08-18 (same day).** The
   reconciled design is
   [`server-execution-v2/stage-c-design.md`](server-execution-v2/stage-c-design.md)
@@ -151,11 +152,13 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   (d′)'s cheap experiment (expose the closure, delete the walk on a
   scratch branch, run chat/lunch/note: do the demanded derivations
   still land, does anything go dark, what is the settle — including
-  the one-push-late cycle and the 300 ms demand-wake grace); W1 is (d′)
+  the one-push-late cycle and the 300 ms demand-wake grace) — RAN
+  2026-08-19, PROCEED (d′) (next bullet); W1 is (d′)
   proper (memory-server exposure + push-growth `demandChanged`, the
   registry over the closure + the currency check, the demand-root
   bracket, deleting the walk, the pins) with the structural walk as the
-  fallback branch W1-F; recommended shape: a train of three stacked PRs
+  fallback branch W1-F (not taken); recommended shape: a train of three
+  stacked PRs
   ((d′) → (e) → (α)). The design's ruling set (its §5) is **ACCEPTED
   2026-08-18 in full** (owner, verbatim: "ruling set is accepted"):
   the FOUR already-RULED items stand (no lazy demand — RULED in
@@ -189,21 +192,43 @@ ordered gates (Phase 7 task 1), which no longer gate landing.
   load stays root-scoped (linked pieces visible now); demander
   resolution for linked pieces' writers; `#demandersFor`'s key scan;
   the monotone growth of `trackedIds`.
+- **W0 — (d′)'s refutation experiment — DONE 2026-08-19, verdict
+  PROCEED (d′)** (report
+  [`stage-c/w0-dprime-report.md`](../history/plans/server-execution-v2/stage-c/w0-dprime-report.md)
+  beside the closeout, cherry-picked onto this branch, raw series under
+  `stage-c/w0-dprime-raw/`; scratch
+  `origin/claude/server-exec-v2-w0-dprime-scratch` @ `81b190820`, off
+  `ed9e1cb2c`, no PR): no dark value; the closure OVER-demands, never
+  under-demands (it follows a piece root's `source`/process wiring — a
+  schema-narrowed watch still demands the piece's whole internal graph;
+  an owner-visible cost property, recommendation: accept the tracker's
+  set as the demand set, filtering by id class is a future row); server
+  settle value-only p50 15–35 ms, structural-growth p50 220–510 ms
+  (chat 220–253; ≤ 1.3 s p95) — the sub-second bar holds; chat n=20 ON
+  2/2 with cross-user steps 2–43 ms (trio tip 2.6–10 s); note
+  createToView unchanged 4.1 s (the (e) client term; slope 0.9 → 16 s);
+  lunch 1/3 green on the scratch tip — the two reds are the
+  DUPLICATE-CONSEQUENCE family ((α) double dispatch toggling a vote off;
+  a duplicate join rendered), not stale values → W3 (α) is on the lunch
+  gate's critical path. Three non-optional W1 obligations: the demand
+  pass runs on deltas / off the wave's settle race, never per-row reads;
+  keep the `#demandersFor` index; accumulate the demand-root counters
+  in stats. The fallback W1-F is NOT taken; the report's §4 flags 9–14
+  are additional W1 inputs.
 
 **Ordered next actions:** (1) #5991's ledger comment — DONE 2026-08-18
 (posted; the second review round's report recovered on-branch); (2) the
-design BUILD stage per the design's §6 work order — the §5 rulings are
-DONE (ruling set ACCEPTED 2026-08-18; the (d′) demand sentence landed) →
-**W0 is RUNNING (launched 2026-08-18)**: (d′)'s refutation experiment
-on a detached worktree off `ed9e1cb2c`, scratch branch
-`claude/server-exec-v2-w0-dprime-scratch` (no PR); its report lands at
-`docs/history/plans/server-execution-v2/stage-c/w0-dprime-report.md`
-(cherry-picked onto this branch when it lands; durable copy at
-`/Users/berni/labs-worktrees/w0-dprime-report.md`); (e)'s own W0 (the
-one-line-schema sink probe) is deliberately DEFERRED to be W2's first
-step, so it does not load the box during (d′)'s settle measurements →
-(d′) (or its fallback), (e), (α) as a train →
-re-benchmarked measuring server settle time; (3) the
+design BUILD stage per the design's §6 work order — the §5 rulings
+DONE (ruling set ACCEPTED 2026-08-18; the (d′) demand sentence landed),
+W0 DONE 2026-08-19 (PROCEED (d′), above) → **the build train LAUNCHED
+2026-08-19** — W1 (d′) proper on `claude/server-exec-v2-w1-dprime`
+(stacked on this branch) and W2 (e) on
+`claude/server-exec-v2-w2-intent-listener` (its first step is (e)'s
+own W0 gate — the one-line-schema sink probe, deferred so it did not
+load the box during (d′)'s settle measurements) in parallel; W3 (α)
+follows on W1's tip (root-causes the l3 duplicate join); each build →
+independent adversarial review → fixer → ledger; then W4 the
+settle-time re-benchmark, measuring server settle time; (3) the
 CONFIDENCE VERDICT to the owner; (4) on "no fundamental issue", land
 the train on main with the flag OFF (siblings stacked; default lanes
 OFF) and continue on main; (5) the flip's ordered gates as listed under
@@ -255,7 +280,12 @@ update it. that then creates new reads that trigger later updating" —
 adopted as the design premise (design §2.0), the structural walk
 demoted to fallback (§2F);
 (5) #5968's Flags (instantiation seat, `resolvedHash`, fetch-parity on
-live completion failure, `plainProgramOf`), UNRULED.
+live completion failure, `plainProgramOf`), UNRULED;
+(6) W0's flag 9 — the closure follows `source` wiring (a schema-narrowed
+root watch demands the piece's whole internal graph; over-demand, never
+under-demand — the W0 report's §2(b)/§4) — RECOMMENDATION on file
+(accept the tracker's set as the demand set; filtering by id class a
+future row), awaiting the owner.
 
 ## Phase 0 — Rulings and guardrails
 
@@ -1122,7 +1152,8 @@ Tasks:
       finishes every journey, `lease.lost` 0); latency remains
       design-class — the design pass RAN (report landed; its ruling
       set ACCEPTED 2026-08-18, the (d′) sentence in serving-loop.md
-      §1); the design BUILD, W0 first, is next*; (3)
+      §1); the design BUILD is under way — W0 RAN 2026-08-19 (PROCEED
+      (d′)), W1/W2 launched (the "Coordination state" block above)*; (3)
       OW28 — compile-and-run as an outbox effect kind + completion-class
       writeback — *DONE on #5968 (`463ea3887`, stage C; instantiation in
       the derivation, the completion re-arms — a recorded refinement;

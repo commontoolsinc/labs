@@ -2000,6 +2000,11 @@ so the register's coverage row for each lands with the sentence
 
 ## 6. The build-stage work order
 
+**W0 RAN 2026-08-19 — PROCEED (d′)** (report
+[`stage-c/w0-dprime-report.md`](../../history/plans/server-execution-v2/stage-c/w0-dprime-report.md));
+W1 proceeds; W1-F not taken; the report's §4 flags 9–14 are additional
+W1 inputs.
+
 Base: the stacked stage-C tip — the docs branch (`claude/server-exec-
 v2-stage-c-docs`, off the tuning trio's `b54bf5215`) or, once the three
 stage-C siblings are stacked, that stack's tip; rebase onto it, never
