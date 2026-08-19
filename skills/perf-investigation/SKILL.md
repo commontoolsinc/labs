@@ -88,6 +88,16 @@ profile inside the CDP message limit while still resolving a millisecond-scale
 action. Treat profiling as instrumentation: a capture that fails should report
 and let the phase run unprofiled, never fail the scenario.
 
+Copy that wiring rather than abstracting it.
+`packages/patterns/integration/default-app.test.ts` is the maintained example to
+lift from, and keeping it worth copying is exactly why its connect / wait /
+start / stop / write-both-artifacts sequence stays inline there instead of
+moving behind a helper. A perf harness is usually throwaway — built for one
+investigation, driven by environment knobs nobody else needs, and not committed.
+Thirty duplicated lines of setup per investigation cost less than a shared seam
+that every future scenario has to be bent through, and the duplication is
+visible where a reader is already looking.
+
 ## Count against average
 
 Every logger row carries `count`, `average`, `p95`, `max`, and `total`, and the
