@@ -17,6 +17,9 @@
 #
 #   API_URL=http://localhost:8000 CF_DRILL_STORE_DIR=cache/memory \
 #     packages/cli/integration/topics-restore-drill.sh
+#
+# CI runs it through integration.sh's `piece-call` section, which supplies the
+# store directory; `topics-drill` runs it alone.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,10 +53,13 @@ command -v jq > /dev/null || {
   echo "jq is required" >&2
   exit 1
 }
+# The inner directory holds the per-space files and is created with the first
+# space, so a fresh server has only the outer one — which is what to check,
+# since this script is about to create that first space itself.
 ENGINE_DIR="$STORE_DIR/engine-v3/engine-v3"
-[ -d "$ENGINE_DIR" ] || {
-  echo "no store at $ENGINE_DIR — point CF_DRILL_STORE_DIR at the serving" \
-    "toolshed's MEMORY_DIR (its default is <server cwd>/cache/memory)" >&2
+[ -d "$STORE_DIR/engine-v3" ] || {
+  echo "no store at $STORE_DIR/engine-v3 — point CF_DRILL_STORE_DIR at the" \
+    "serving toolshed's MEMORY_DIR (its default is <server cwd>/cache/memory)" >&2
   exit 1
 }
 
@@ -61,7 +67,7 @@ WORK="$(mktemp -d)"
 SPACE="topics-drill-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 
 step "deploy the topics board into a fresh space ($SPACE)"
-ls "$ENGINE_DIR" > "$WORK/dbs-before"
+ls "$ENGINE_DIR" 2> /dev/null > "$WORK/dbs-before" || true
 BOARD="$(
   $CF piece new "$REPO_ROOT/packages/patterns/topics/main.tsx" \
     --space "$SPACE" --api-url "$API_URL" 2> /dev/null |

@@ -50,6 +50,7 @@ import {
   cfJson,
   deepEqual,
   normalizeFid,
+  STRUCTURAL_LINK_SOURCES,
   type TopicsExport,
 } from "./topics-rehearsal-lib.ts";
 
@@ -146,51 +147,55 @@ for (const [field, wanted] of Object.entries(restoreDoc)) {
 }
 
 const boardFid = export_.board?.fid;
-const wantsMentionable = structural.includes("mentionable");
-const liveMentionable = await cfJson<unknown>([
-  "get",
-  "-q",
-  ...addr,
-  "--input",
-  "--select",
-  "mentionable@",
-]).catch(() => undefined);
-const mentionableMissing = wantsMentionable && liveMentionable === undefined;
+// A structural link the export recorded but the live piece has lost is a
+// reason to restore even when every content field already matches.
+const missingLinks: string[] = [];
+for (const field of structural) {
+  const live = await cfJson<unknown>([
+    "get",
+    "-q",
+    ...addr,
+    "--input",
+    "--select",
+    `${field}@`,
+  ]).catch(() => undefined);
+  if (live === undefined) missingLinks.push(field);
+}
 
-if (differing.length === 0 && !mentionableMissing) {
+if (differing.length === 0 && missingLinks.length === 0) {
   console.log("nothing to restore: every content field matches the export");
   Deno.exit(0);
 }
 for (const field of differing) console.log(`${field}: differs from export`);
-if (mentionableMissing) console.log("mentionable: board link absent");
+for (const field of missingLinks) console.log(`${field}: board link absent`);
 if (dryRun) {
   console.log(`dry run: ${differing.length} field(s) would be restored`);
   Deno.exit(0);
 }
 
 await cfApply(addr, restoreDoc);
-// The apply replaced the whole document, so a board link that was present a
-// moment ago is gone now — relink whenever the export says one belongs,
+// The apply replaced the whole document, so any board link that was present a
+// moment ago is gone now — relink every structural field the export recorded,
 // never on the pre-apply reading.
-if (wantsMentionable) {
+for (const field of structural) {
+  const source = STRUCTURAL_LINK_SOURCES[field];
   if (!boardFid) {
     console.error(
-      "mentionable was linked but the export records no board; " +
-        "re-link it by hand with `cf piece link <board>/topics " +
-        `${targetFid}/mentionable\``,
+      `${field} was linked but the export records no board; re-link it by ` +
+        `hand with \`cf piece link <board>/${source} ${targetFid}/${field}\``,
     );
-  } else {
-    await cf([
-      "piece",
-      "link",
-      "--space",
-      space,
-      "--api-url",
-      apiUrl,
-      `${normalizeFid(boardFid)}/topics`,
-      `${targetFid}/mentionable`,
-    ]);
+    continue;
   }
+  await cf([
+    "piece",
+    "link",
+    "--space",
+    space,
+    "--api-url",
+    apiUrl,
+    `${normalizeFid(boardFid)}/${source}`,
+    `${targetFid}/${field}`,
+  ]);
 }
 
 let failed = 0;
@@ -203,20 +208,20 @@ for (const field of Object.keys(restoreDoc)) {
     failed++;
   }
 }
-if (wantsMentionable) {
+for (const field of structural) {
   const after = await cfJson<unknown>([
     "get",
     "-q",
     ...addr,
     "--input",
     "--select",
-    "mentionable@",
+    `${field}@`,
   ]).catch(() => undefined);
   if (after === undefined) {
-    console.error("mentionable: board link NOT re-established");
+    console.error(`${field}: board link NOT re-established`);
     failed++;
   } else {
-    console.log("mentionable: board link present");
+    console.log(`${field}: board link present`);
   }
 }
 for (const field of legacy) {
