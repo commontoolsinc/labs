@@ -1621,4 +1621,455 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelChildDemand();
     cancelParentDemand();
   });
+
+  // ---------------------------------------------------------------------
+  // Stage C build W3 — (α): ONE durable entry, ONE completed run
+  // (events.md §4, RULED 2026-08-18; register OW35). The pins below drive
+  // RAW handlers on the serving runtime (the production chain from the
+  // emitting run's `send` through cell.ts's serving arm, the dispatch
+  // stamp, the SpaceServer's #stampRun, the wave's batch/fold, and the
+  // drain — only the handler bodies are test code, so their timing is
+  // controllable): a parent handler that spins past the flush deadline
+  // (the QUEUED leftover — #5969's Bob trace, the lunch gate's l1), an
+  // async child that is still RUNNING when the deadline closes its wave
+  // (the in-flight residue the purge cannot reach), and a DERIVATION
+  // emitter whose sidecar append the wave supersedes (the orphan).
+  // ---------------------------------------------------------------------
+
+  /** Bare stream + value docs for the (α) pins, created by the CLIENT
+   * (client commits land natively; the serving runtime's writes must
+   * ride stamped waves), plus the serving-side cells and links once the
+   * host is active. */
+  const w3Setup = async (
+    prefix: string,
+    policy: { flushDeadlineMs: number },
+  ) => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const mkStream = async (name: string) => {
+      const cell = clientRuntime.getCell<unknown>(space, name, undefined);
+      await cell.sync();
+      const tx = clientRuntime.edit();
+      cell.withTx(tx).setRaw({ $stream: true });
+      expect((await tx.commit()).error).toBeUndefined();
+      return cell;
+    };
+    const mkDoc = async (name: string) => {
+      const cell = clientRuntime.getCell<{ n?: number; seen?: string[] }>(
+        space,
+        name,
+        undefined,
+      );
+      await cell.sync();
+      const tx = clientRuntime.edit();
+      cell.withTx(tx).set({ n: 0, seen: [] });
+      expect((await tx.commit()).error).toBeUndefined();
+      return cell;
+    };
+    const s1 = await mkStream(`${prefix}-s1`);
+    const s2 = await mkStream(`${prefix}-s2`);
+    const counterP = await mkDoc(`${prefix}-counter-p`);
+    const counterC = await mkDoc(`${prefix}-counter-c`);
+    await clientRuntime.storageManager.synced();
+
+    host = newHost({ ...policy, idleParkMs: 600_000 });
+    {
+      const poke = clientRuntime.edit();
+      clientRuntime.getCell<number>(space, `${prefix}-activate`, undefined)
+        .withTx(poke).set(1);
+      expect((await poke.commit()).error).toBeUndefined();
+    }
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the space to activate",
+    );
+    // Let the boot cycle settle into wait-for-input before the pin acts
+    // (the C8d recipe): W chases AUTHORED inputs only, so a fresh poke's
+    // head seq is the probe W must claim — a pin that seals into a cycle
+    // already mid-settle would see its wave close under it.
+    {
+      const pokeCell = clientRuntime.getCell<number>(
+        space,
+        `${prefix}-settle-poke`,
+        undefined,
+      );
+      const poke = clientRuntime.edit();
+      pokeCell.withTx(poke).set(1);
+      expect((await poke.commit()).error).toBeUndefined();
+      await clientRuntime.storageManager.synced();
+      const pokeSeq = Engine.selectDocHead(engine, {
+        id: pokeCell.getAsNormalizedFullLink().id,
+        scopeKey: "space",
+      });
+      expect(pokeSeq).toBeGreaterThan(0);
+      await waitUntil(
+        () => readWatermarkSeq(engine) >= pokeSeq,
+        "the boot cycles to settle (W to cover the poke)",
+        30_000,
+      );
+    }
+    const serving = servingRuntime!;
+    const servingS1 = serving.getCell<unknown>(
+      space,
+      `${prefix}-s1`,
+      undefined,
+    );
+    const servingS2 = serving.getCell<unknown>(
+      space,
+      `${prefix}-s2`,
+      undefined,
+    );
+    const servingP = serving.getCell<{ n?: number }>(
+      space,
+      `${prefix}-counter-p`,
+      undefined,
+    );
+    const servingC = serving.getCell<{ n?: number }>(
+      space,
+      `${prefix}-counter-c`,
+      undefined,
+    );
+    await servingS1.sync();
+    await servingS2.sync();
+    await servingP.sync();
+    await servingC.sync();
+    const engineN = (cell: { getAsNormalizedFullLink(): { id: string } }) =>
+      (Engine.read(engine, { id: cell.getAsNormalizedFullLink().id })?.value as
+        | { n?: number }
+        | undefined)?.n;
+    const sidecarOf = (cell: { getAsNormalizedFullLink(): { id: string } }) =>
+      streamEntriesDocId({
+        id: cell.getAsNormalizedFullLink().id,
+        path: [],
+      } as never);
+    const entriesOf = (sidecarId: string) =>
+      ((Engine.read(engine, { id: sidecarId })?.value ??
+        {}) as StreamEventsDocValue).entries ?? [];
+    /** Derived commits whose consequenceOf names `eventId` — the
+     * store-side per-event completed-run count (events.md §4: per-event
+     * run counts are the signature; `processed == appended` is not). */
+    const consequenceCommitsOf = (eventId: string): number =>
+      (engine.database.prepare(
+        `SELECT consequence_of FROM "commit"
+         WHERE class = 'derived' AND consequence_of IS NOT NULL`,
+      ).all() as Array<{ consequence_of: string }>).filter((row) =>
+        row.consequence_of.includes(eventId)
+      ).length;
+    return {
+      engine,
+      serving,
+      s1,
+      s2,
+      counterP,
+      counterC,
+      servingS1,
+      servingS2,
+      servingP,
+      servingC,
+      engineN,
+      sidecarOf,
+      entriesOf,
+      consequenceCommitsOf,
+    };
+  };
+
+  it("(α1)+(α1b)+(α4) the QUEUED leftover and the in-flight one, side by side: a served parent emits TWO LT1 cascade children; the first is still RUNNING when the flush deadline fires (an async handler parked on a test gate), the second sits QUEUED behind it — the deadline decision PURGES the queued copy (no notice on its entry) and the running copy, completing after its wave closed, is REFUSED at the seal; the next drain delivers both entries ONCE each with a streamEntry; per-event: one consequence commit each, the child effect applied exactly twice in total (mutations: purge skipped → the queued copy runs after the close and is refused at the seal instead, `lt1LeftoversPurged` 0 / `lt1LateSealsRefused` 2; purge AND refusal skipped → the effect applied four times)", async () => {
+    const w = await w3Setup("w3-purge", { flushDeadlineMs: 100 });
+    const cancels: Array<() => void> = [];
+    const gate = Promise.withResolvers<void>();
+    const childRuns: string[] = [];
+    try {
+      // The PARENT: bumps its own counter and emits TWO cascade events on
+      // s2 — cell.ts's serving arm writes both durable entries INTO this
+      // tx and queues both in-process copies (served: {firedAt,
+      // parentEventId, lt1}), in send order.
+      cancels.push(w.serving.scheduler.addEventHandler(
+        (tx: IExtendedStorageTransaction, _event: unknown) => {
+          w.servingP.withTx(tx).set({
+            n: (w.servingP.withTx(tx).get()?.n ?? 0) + 1,
+          });
+          w.servingS2.withTx(tx).send({ tag: "c1" } as never);
+          w.servingS2.withTx(tx).send({ tag: "c2" } as never);
+        },
+        w.servingS1.getAsNormalizedFullLink(),
+      ));
+      // The CHILD handler (async — patterns may be): the FIRST child parks
+      // on the gate (in flight across the deadline); the second is a plain
+      // bump. The scheduler dispatches one event per pass, so while c1 is
+      // parked c2 stays QUEUED — exactly where the deadline finds it.
+      cancels.push(w.serving.scheduler.addEventHandler(
+        async (tx: IExtendedStorageTransaction, event: unknown) => {
+          const tag = (event as { tag?: string })?.tag ?? "?";
+          childRuns.push(tag);
+          if (tag === "c1") await gate.promise;
+          w.servingC.withTx(tx).set({
+            n: (w.servingC.withTx(tx).get()?.n ?? 0) + 1,
+          });
+        },
+        w.servingS2.getAsNormalizedFullLink(),
+      ));
+
+      w.s1.send({ tag: "root" } as never);
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+
+      const s2Sidecar = w.sidecarOf(w.s2);
+      // The deadline fired with c1 in flight and c2 queued: c2's copy was
+      // purged (counted), the appending wave committed both entries
+      // UNMARKED, and the next cycle's drain queued both streamEntry-bearing
+      // copies behind the still-parked c1 (processed: root + c1 + c2 = 3).
+      await waitUntil(
+        () =>
+          host!.stats().events.processed === 3 &&
+          w.entriesOf(s2Sidecar).length === 2 &&
+          w.entriesOf(s2Sidecar).every((entry) => entry.consequenced !== true),
+        "both entries to land unmarked and the drain to queue both copies",
+        20_000,
+      );
+      expect(childRuns).toEqual(["c1"]);
+      expect(host!.stats().events.lt1LeftoversPurged).toBe(1);
+      expect(host!.stats().events.lt1LateSealsRefused).toBe(0);
+
+      // Open the gate: c1's in-flight copy completes OUTSIDE its appending
+      // wave → refused at the seal; the drain's c1' and c2' then run (the
+      // gate is open) and complete WITH their marks.
+      gate.resolve();
+      await waitUntil(
+        () =>
+          w.entriesOf(s2Sidecar).every((entry) => entry.consequenced === true),
+        "the drain's copies to consequence both entries",
+        20_000,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await w.serving.idle();
+
+      const entries = w.entriesOf(s2Sidecar);
+      const stats = host!.stats();
+      // THE PIN: one purge (c2's queued copy), one refusal (c1's in-flight
+      // copy), the child body ran three times (c1 refused, c1', c2') but its
+      // effect landed exactly TWICE — one completed run per entry — and
+      // each child event is named by exactly one consequence commit. No
+      // notice landed on either entry.
+      expect(w.engineN(w.counterC)).toBe(2);
+      expect(w.engineN(w.counterP)).toBe(1);
+      expect(stats.events.lt1LeftoversPurged).toBe(1);
+      expect(stats.events.lt1LateSealsRefused).toBe(1);
+      expect(childRuns).toEqual(["c1", "c1", "c2"]);
+      for (const entry of entries) {
+        expect(w.consequenceCommitsOf(entry.eventId)).toBe(1);
+        expect(entry.status).toBeUndefined();
+        expect(entry.error).toBeUndefined();
+      }
+      // The root fire: one append, drained once; the two server-emitted
+      // entries each drained once (processed counts drain queues — 3 here
+      // — which is why `processed == appended` is NOT the pin).
+      expect(stats.events.appended).toBe(1);
+      expect(stats.events.processed).toBe(3);
+    } finally {
+      gate.resolve();
+      for (const cancel of cancels) cancel();
+    }
+  });
+
+  it("(α1b)+(α4) the IN-FLIGHT residue: an LT1 cascade copy still RUNNING when the deadline closes its appending wave seals into a LATER wave and is REFUSED at the seal destination (before it enters any wave — the drain's copy, running next, reads clean state); the drain's copy is the one completed run (mutation: refusal skipped → the copy's consequences commit unmarked beside the drain's marked copy, the child's effect applied twice — the lunch gate's vote-toggle double)", async () => {
+    const w = await w3Setup("w3-late", { flushDeadlineMs: 150 });
+    const cancels: Array<() => void> = [];
+    const childGate = Promise.withResolvers<void>();
+    let childRuns = 0;
+    try {
+      // The PARENT: a quick bump + the cascade emission.
+      cancels.push(w.serving.scheduler.addEventHandler(
+        (tx: IExtendedStorageTransaction, _event: unknown) => {
+          w.servingP.withTx(tx).set({
+            n: (w.servingP.withTx(tx).get()?.n ?? 0) + 1,
+          });
+          w.servingS2.withTx(tx).send({ tag: "child" } as never);
+        },
+        w.servingS1.getAsNormalizedFullLink(),
+      ));
+      // The CHILD: an ASYNC handler (patterns may be async — the gmail
+      // importer's fetch) that awaits a test-held gate before bumping.
+      // Its first dispatch — the LT1 in-process copy — starts inside the
+      // appending wave and is STILL RUNNING when the 150-ms deadline
+      // closes it; the copy seals only when the test opens the gate, by
+      // which time the entry has landed unmarked and the next cycle's
+      // drain has queued the streamEntry-bearing copy behind it.
+      cancels.push(w.serving.scheduler.addEventHandler(
+        async (tx: IExtendedStorageTransaction, _event: unknown) => {
+          childRuns += 1;
+          await childGate.promise;
+          w.servingC.withTx(tx).set({
+            n: (w.servingC.withTx(tx).get()?.n ?? 0) + 1,
+          });
+        },
+        w.servingS2.getAsNormalizedFullLink(),
+      ));
+
+      w.s1.send({ tag: "root" } as never);
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+
+      const s2Sidecar = w.sidecarOf(w.s2);
+      // The appending wave has committed (the child's entry is durable,
+      // unmarked) and the drain has re-queued it: processed reads 2 (the
+      // root fire + the child's entry) while the in-process copy is still
+      // parked on the gate — nothing consequenced yet.
+      await waitUntil(
+        () =>
+          host!.stats().events.processed === 2 &&
+          w.entriesOf(s2Sidecar).length === 1 &&
+          w.entriesOf(s2Sidecar)[0].consequenced !== true,
+        "the child's entry to land unmarked and the drain to queue its copy",
+        20_000,
+      );
+      expect(childRuns).toBe(1);
+      expect(host!.stats().events.lt1LateSealsRefused).toBe(0);
+
+      // Open the gate: the in-flight copy completes OUTSIDE its appending
+      // wave → refused at the seal; the drain's copy then runs (the gate
+      // is open) and completes WITH the mark.
+      childGate.resolve();
+      await waitUntil(
+        () => w.entriesOf(s2Sidecar)[0]?.consequenced === true,
+        "the drain's copy to consequence the entry",
+        20_000,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await w.serving.idle();
+
+      const childEntry = w.entriesOf(s2Sidecar)[0];
+      const stats = host!.stats();
+      // THE PIN: one refusal, zero purges (the copy was never queued at
+      // a deadline — it was in flight), the handler body ran twice (the
+      // refused copy + the drain's copy) but its effect landed ONCE, and
+      // one consequence commit names the event.
+      expect(w.engineN(w.counterC)).toBe(1);
+      expect(w.engineN(w.counterP)).toBe(1);
+      expect(stats.events.lt1LateSealsRefused).toBe(1);
+      expect(stats.events.lt1LeftoversPurged).toBe(0);
+      expect(childRuns).toBe(2);
+      expect(w.consequenceCommitsOf(childEntry.eventId)).toBe(1);
+      expect(childEntry.status).toBeUndefined();
+      expect(childEntry.error).toBeUndefined();
+    } finally {
+      childGate.resolve();
+      for (const cancel of cancels) cancel();
+    }
+  });
+
+  it("(α3) the ORPHAN refusal: a DERIVATION emitter's sidecar append that the wave supersedes (a rival append landed between the wave's basis and its commit — the per-doc drop, re-arms nothing) takes the durable entry with it, and the LT1 copy's run in that wave is REFUSED rather than committed with zero entries behind it; the rival's own entry is delivered once (mutation: the orphan arm removed → the copy's consequence commits for an event no sidecar holds)", async () => {
+    const w = await w3Setup("w3-orphan", { flushDeadlineMs: 30_000 });
+    const cancels: Array<() => void> = [];
+    const gate = Promise.withResolvers<void>();
+    try {
+      // The handler on s2 records every payload tag it handles — the
+      // consequence witness. (s1 is unused here.)
+      const servingSeen = w.servingC;
+      cancels.push(w.serving.scheduler.addEventHandler(
+        (tx: IExtendedStorageTransaction, event: unknown) => {
+          const tag = (event as { tag?: string })?.tag ?? "?";
+          const current = servingSeen.withTx(tx).get() as
+            | { seen?: string[] }
+            | undefined;
+          servingSeen.withTx(tx).set({
+            seen: [...(current?.seen ?? []), tag],
+          } as never);
+        },
+        w.servingS2.getAsNormalizedFullLink(),
+      ));
+      // The DERIVATION emitter: a registered action (kind `derivation` at
+      // the dispatch stamp — the LT6 precedent) that reads a trigger and
+      // emits on s2 through cell.ts's serving arm: the entry rides THIS
+      // run's tx; the in-process copy is queued for the same wave.
+      const trigger = w.serving.getCell<{ v?: number }>(
+        space,
+        "w3-orphan-trigger",
+        undefined,
+      );
+      await trigger.sync();
+      const emitter = (tx: IExtendedStorageTransaction): void => {
+        trigger.withTx(tx).get();
+        w.servingS2.withTx(tx).send({ tag: "ping" } as never);
+      };
+      // Serving-side view of the witness doc, synced before the gate.
+      const seenView = () =>
+        (w.servingC.get() as { seen?: string[] } | undefined)?.seen ?? [];
+      expect(seenView()).toEqual([]);
+
+      // Hold the wave open once the copy's run has SEALED into it
+      // (visible through the sealed overlay: seen includes "ping").
+      servingManager!.settleGate = gate.promise;
+      servingManager!.settleGateWhen = () => seenView().includes("ping");
+      let released = false;
+      try {
+        await w.serving.scheduler.run(emitter as never);
+        await waitUntil(
+          () => seenView().includes("ping"),
+          "the derivation's cascade copy to SEAL into the open wave",
+          20_000,
+        );
+        // The RIVAL: a client fire on the SAME stream lands a concurrent
+        // append on the sidecar — its head advances past the wave's
+        // basis, so the derivation's append is superseded at the
+        // per-doc CAS and dropped (serving-loop.md §3d).
+        w.s2.send({ tag: "rival" } as never);
+        await clientRuntime.idle();
+        await clientRuntime.storageManager.synced();
+        const s2Sidecar = w.sidecarOf(w.s2);
+        await waitUntil(
+          () =>
+            w.entriesOf(s2Sidecar).some((entry) =>
+              (entry.payload as { tag?: string } | undefined)?.tag === "rival"
+            ),
+          "the rival append to land",
+        );
+        gate.resolve();
+        released = true;
+      } finally {
+        if (!released) gate.resolve();
+        servingManager!.settleGate = undefined;
+        servingManager!.settleGateWhen = undefined;
+      }
+
+      const s2Sidecar = w.sidecarOf(w.s2);
+      // The rival's entry is delivered (once) by the drain.
+      await waitUntil(
+        () =>
+          w.entriesOf(s2Sidecar).length === 1 &&
+          w.entriesOf(s2Sidecar)[0].consequenced === true,
+        "the rival's entry to be the sidecar's only entry, consequenced",
+        20_000,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await w.serving.idle();
+
+      const stats = host!.stats();
+      const seen =
+        (Engine.read(w.engine, { id: w.counterC.getAsNormalizedFullLink().id })
+          ?.value as { seen?: string[] } | undefined)?.seen ?? [];
+      // THE PIN: the derivation's emitted entry never landed (the
+      // sidecar holds only the rival's), its copy's run was refused as an
+      // orphan (counted) — "ping" was never consequenced — and the
+      // rival's consequence landed once. Every consequenced eventId in
+      // the store has a durable entry behind it.
+      expect(seen).toEqual(["rival"]);
+      expect(stats.events.orphanDeliveriesRefused).toBe(1);
+      const consequenced = (w.engine.database.prepare(
+        `SELECT consequence_of FROM "commit"
+         WHERE class = 'derived' AND consequence_of IS NOT NULL`,
+      ).all() as Array<{ consequence_of: string }>).flatMap((row) =>
+        decodeMemoryBoundary(row.consequence_of) as unknown as string[]
+      );
+      const durableIds = new Set(
+        sidecarIdsIn(w.engine).flatMap((id) =>
+          w.entriesOf(id).map((entry) => entry.eventId)
+        ),
+      );
+      expect(consequenced.length).toBeGreaterThanOrEqual(1);
+      for (const id of consequenced) expect(durableIds.has(id)).toBe(true);
+    } finally {
+      gate.resolve();
+      for (const cancel of cancels) cancel();
+    }
+  });
 });
