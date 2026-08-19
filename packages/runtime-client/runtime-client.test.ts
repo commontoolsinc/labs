@@ -466,14 +466,19 @@ describe("RuntimeClient.uploadBlob", () => {
     })(conn, {});
     const body = new Uint8Array([1, 2, 3]);
 
-    const result = await client.uploadBlob({
+    const upload = client.uploadBlob({
       space: "did:key:z6Mk-runtime-client-blob" as never,
       contentType: "image/png",
       body,
       suffix: "png",
     });
+    // Mutated with nothing awaited in between, so that what passes here is the
+    // method's own copy rather than one some layer beneath it might take. The
+    // connection double holds what it was handed without copying, so a request
+    // that carried the caller's array would show this write.
+    body[0] = 0xff;
 
-    expect(result).toEqual({ id: "fid1:blob", url: "blobs/blob.png" });
+    expect(await upload).toEqual({ id: "fid1:blob", url: "blobs/blob.png" });
     expect(requests.length).toBe(1);
     const request = requests[0] as UploadBlobRequest;
     expect(request.type).toBe(RequestType.UploadBlob);
@@ -481,10 +486,6 @@ describe("RuntimeClient.uploadBlob", () => {
     expect(request.contentType).toBe("image/png");
     expect(request.suffix).toBe("png");
 
-    // Mutated before the request is read, so that what the decode reports is
-    // the value as passed rather than a view of an array the caller went on
-    // using.
-    body[0] = 0xff;
     const sent = fabricFromRealmValue(request.body);
     expect(sent).toBeInstanceOf(FabricBytes);
     expect((sent as FabricBytes).slice()).toEqual(new Uint8Array([1, 2, 3]));

@@ -739,9 +739,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Uploads a blob to the given space. `body` is not consumed -- its bytes are
-   * copied into the immutable value that crosses -- so the caller may keep
-   * using its array.
+   * Uploads a blob to the given space. `body` is copied into the immutable
+   * value that crosses, so the caller may keep using its array.
    */
   async uploadBlob(options: {
     space: DID;
