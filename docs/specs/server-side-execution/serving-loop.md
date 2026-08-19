@@ -1256,21 +1256,35 @@ entries; `demandedWriters`/`Max` the standing demand-root set (the
 whole life (they are held on the space's stats, not read from the
 current runtime's counters, which zero on a reactivation);
 `notCurrentRearms` the per-key not-current-for-pair re-arms (B7's clean
-bit); `demandPasses`/`demandPassMs` the pass's O(rows) reconcile cost
-(the pass does NO per-row engine read and runs on registry deltas — a
-per-row read here lands on the wave-latency critical path);
-`pushGrowthWakes` the NEW push-time `demandChanged` notify (a push pass
-that grew a session's tracked set — the structural-growth trigger) and
-`watchWakes` the pre-existing `session.watch.set`/`.add` notifies;
-`demandArrivals` (top-level) the root-level arrival re-arm's count. The
-`settle` block is SERVER SETTLE per authored input — admission (the
-feed's admitted-commit notice, the append's seq) to W COVERING it (the
-wave whose `derivedThrough` ≥ seq); each series entry carries `ms`,
-`waves`/`cycles` (the T2′/T3′ cycle count), and `class` (`value-only`
-vs `structural-growth` — a push-growth wake fired between admission and
-coverage), so W4's acceptance run reads p50/p95 straight off it.
-`undemandedNarrowingRuns` and `earlyEmitRefusals` are pre-existing
-top-level counters the earlier §7 list omitted (folded in here).
+bit); `demandRootEnters`/`Leaves` fold the delta SINCE THE LAST FOLD, so
+a transition the registration/unregistration hook fires BETWEEN passes is
+counted, not lost to a pass-start snapshot (W1 review MINOR-2);
+`demandPasses` the pass count and `demandPassMs` the pass's total WALL
+time — which INCLUDES the awaited structure-load segments
+(`ensurePieceRunning`) for first-demand/pending root keys, NOT only the
+O(rows) reconcile (the reconcile does no per-row engine read and runs on
+registry deltas; the label is wall time, review MINOR-3);
+`pushGrowthWakes`/`watchWakes` count NOTIFIES (the push-time
+`demandChanged` and the `session.watch.set`/`.add` notifies) BEFORE the
+300 ms-grace coalescing — a burst is several notifies but one demand pass,
+so these exceed the pass-wake count (review NIT-5); the service (loopback)
+session's notifies are DROPPED — its tracked-set growth is the serving
+graph's own reads, not client demand (review MINOR-4). `demandArrivals`
+(top-level) the root-level arrival re-arm's count. The `settle` block is
+SERVER SETTLE per authored input — admission (the feed's admitted-commit
+notice, the append's seq) to W COVERING it (the wave whose
+`derivedThrough` ≥ seq); each series entry carries `ms`, `waves`/`cycles`
+(the T2′/T3′ cycle count), and `class`, which is `value-only` at coverage
+and promoted to `structural-growth` by ADJACENCY — a push-growth wake
+that fires AFTER this input was covered (the most recently covered input),
+plus the next derived commit as its landing. It is NOT a wake "between
+admission and coverage" (such a wake does not change the class), and a
+growth from an unrelated later input can land on this row: the split is an
+attribution heuristic, not a causal proof (review MINOR-4). W4's
+acceptance run reads p50/p95 off it (with that caveat, and net of the
+now-dropped service-session growth). `undemandedNarrowingRuns` and
+`earlyEmitRefusals` are pre-existing top-level counters the earlier §7
+list omitted (folded in here).
 
 ## 8. Tripwires (grep-able FORBIDDEN list)
 

@@ -886,7 +886,7 @@ describe("stage G SpaceServer recovery seams", () => {
     const rootId = rootCell.getAsNormalizedFullLink().id;
 
     // Point the demand facade at it (swapped in via the server's
-    // observer seam: the SpaceServer reads watchedRootsForSpace on
+    // observer seam: the SpaceServer reads demandedInstancesForSpace on
     // every demand pass, so overriding the method on the shared server
     // object works mid-flight).
     const originalWatched = server.demandedInstancesForSpace.bind(server);

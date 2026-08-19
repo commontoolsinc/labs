@@ -155,13 +155,22 @@ export type ServingLoopStats = {
    * `demandedPairs` = total (key, demanding-pair) entries; the standing
    * demand-root set (`demandedWriters` current / max);
    * `demandRootEnters` / `demandRootLeaves` ACCUMULATED across the space's
-   * whole life (park and reactivation included — held here, not read from
-   * the current runtime's counters, which reset on a fresh runtime);
+   * whole life (park and reactivation included — folded from the current
+   * runtime's counters SINCE THE LAST FOLD, so a hook-driven transition
+   * between passes is not lost — W1 review MINOR-2 — and never read
+   * absolutely, since those counters reset on a fresh runtime);
    * `notCurrentRearms` (per-key not-current-for-pair re-arms, accumulated);
-   * `demandPasses` and `demandPassMs` (the pass's O(rows) reconcile cost —
-   * the pass must stay delta-cheap, W0 obligation (i)); `pushGrowthWakes`
-   * (the new push-time notify's count) and `watchWakes` (the pre-existing
-   * `session.watch.set` / `.add` notifies). `demandArrivals` is the
+   * `demandPasses` the pass count and `demandPassMs` the pass's total WALL
+   * time (NOT pure reconcile cost: it INCLUDES the awaited structure-load
+   * segments — `ensurePieceRunning` / `#confirmNoPatternMeta` — for
+   * first-demand and pending ROOT keys, which dominate the early passes;
+   * the reconcile itself is the O(rows) map work — W1 review MINOR-3);
+   * `pushGrowthWakes` / `watchWakes` count NOTIFIES (the push-time
+   * `demandChanged` and the `session.watch.set` / `.add` notifies) BEFORE
+   * the 300 ms-grace coalescing — a burst is several notifies but one
+   * pass, so these exceed the actual demand-pass wake count (W1 review
+   * NIT-5); the service (loopback) session's notifies are dropped (they
+   * are the serving graph's own reads, MINOR-4). `demandArrivals` is the
    * pre-existing top-level `servingLoop.demandArrivals` counter (the
    * root-level arrival re-arm's count), not duplicated here. */
   demand: {
@@ -182,11 +191,17 @@ export type ServingLoopStats = {
   /** SERVER SETTLE per authored input (serving-loop.md §7; stage-C design
    * §6 W4's metric): from the authored commit's ADMISSION on the server
    * (its seq, `enqueueCommit`) to W COVERING it (the wave commit whose
-   * `derivedThrough` ≥ seq). Bounded per-space series; `class` splits the
-   * VALUE-ONLY path from the STRUCTURAL-GROWTH path (a push-growth demand
-   * wake fired between admission and coverage). `waves` = committed
-   * waves between admission and coverage (the T2′/T3′ cycle count). W4's
-   * quiet acceptance run reads p50/p95 from this series. */
+   * `derivedThrough` ≥ seq). Bounded per-space series. `class` is
+   * VALUE-ONLY at coverage and is promoted to STRUCTURAL-GROWTH by
+   * ADJACENCY: a push-growth wake that fires AFTER this input was covered
+   * — the most recently covered input — plus the next derived commit
+   * (its landing) promotes this row. It is NOT a wake "between admission
+   * and coverage" (a wake in that window does not change the class), and a
+   * growth from an UNRELATED later input can land on this row; the split
+   * is an attribution heuristic, not a causal proof (W1 review MINOR-4).
+   * `waves` = committed waves between admission and coverage (the
+   * T2′/T3′ cycle count). W4's quiet acceptance run reads p50/p95 from
+   * this series. */
   settle: {
     series: Array<{
       space: string;
@@ -197,8 +212,25 @@ export type ServingLoopStats = {
       waves: number;
       cycles: number;
       growthWakes: number;
+      /** VALUE-ONLY at coverage; promoted to STRUCTURAL-GROWTH (by
+       * ADJACENCY — the most recently covered input) when a push-growth
+       * wake fires AFTER this input's coverage and a later derived commit
+       * lands (NIT-1: these growth fields are optional, present only on a
+       * promoted entry). */
       class: "value-only" | "structural-growth";
       eventAppend: boolean;
+      /** ms from admission to the structural-growth LANDING (the derived
+       * commit after the growth wake); present only when promoted. */
+      msGrowth?: number;
+      /** waves from admission through the growth landing; present only
+       * when promoted. */
+      growthWaves?: number;
+      /** ms from the growth WAKE to its landing (the demand-wake grace +
+       * derive); present only when promoted and a wake time was seen. */
+      graceMs?: number;
+      /** performance.now() of the growth landing; present only when
+       * promoted. */
+      growthLandedAt?: number;
     }>;
     dropped: number;
   };

@@ -4000,13 +4000,27 @@ export class Server {
             // (d′) — flag 2, the full-evaluation branch: the
             // set is REPLACED (this is where it can shrink — R-D's coarse
             // boundary); a key that entered or left is a demand change.
-            const previous = session.trackedIds;
-            let changed = previous.size !== evaluatedTrackedIds.size;
-            if (!changed) {
-              for (const key of evaluatedTrackedIds) {
-                if (!previous.has(key)) {
-                  changed = true;
-                  break;
+            // NIT-6: the notify's reason is `push-growth` even for a
+            // SHRINK (a departed key) — a benign misnomer: it only wakes a
+            // demand pass, which retires departed keys SOONER than the
+            // next input would. A distinct `push-shrink` reason would buy
+            // nothing the pass does not already handle.
+            // MINOR-8: the change detection is a Set-membership scan
+            // (O(tracked)); compute it ONLY when a demand observer is
+            // attached (the serving posture). OFF-arm — no observer — it
+            // is dead work, so skip it and commit the state directly.
+            const wantsDemandNotify =
+              this.#serverExecutionObserver?.demandChanged !== undefined;
+            let changed = false;
+            if (wantsDemandNotify) {
+              const previous = session.trackedIds;
+              changed = previous.size !== evaluatedTrackedIds.size;
+              if (!changed) {
+                for (const key of evaluatedTrackedIds) {
+                  if (!previous.has(key)) {
+                    changed = true;
+                    break;
+                  }
                 }
               }
             }
@@ -4145,6 +4159,13 @@ export class Server {
   }
 
   /**
+   * @deprecated (W1 review NIT-3) Production-DEAD since (d′): the
+   * SpaceServer's demand pass reads `demandedInstancesForSpace` (the
+   * tracked-ids closure), never this. Retained only as a witness in a few
+   * tests (`executor-serving-loop`, `instance-keyed-replica`, `fan-out`);
+   * migrate those to `demandedInstancesForSpace` and remove this, or keep
+   * it explicitly as the roots-only projection. No production caller.
+   *
    * The space's demanded roots (serving-loop.md §1: demand is
    * value-granular client pull — a subscription names what to serve).
    * Distinct (id, scope) pairs across every live session's watch specs;

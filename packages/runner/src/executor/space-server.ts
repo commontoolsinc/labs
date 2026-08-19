@@ -390,6 +390,16 @@ export class SpaceServer implements TransactionSealDestination {
    * changed (or a session opened) and the grace elapsed; consumed by the
    * next #waitForInput. */
   #pendingDemandWake = false;
+  // MINOR-1: a monotonic demand-note generation, bumped on every
+  // `noteDemandChanged` (watch OR push-growth). A pass snapshots it at its
+  // row read; if a note lands AFTER that snapshot but while the pass is
+  // still in flight (a straddling pass — the note's change is invisible to
+  // the rows this pass already read), the pass's `.finally` re-latches
+  // `#pendingDemandWake` so the NEXT wait runs a FRESH pass instead of
+  // sleeping out the idle window. Bounded: only a note arriving mid-pass
+  // costs one extra pass; steady state (no notes) never re-latches.
+  #demandNoteGeneration = 0;
+  #passDemandNoteGen = 0;
   /** The demand wake's grace timer (see noteDemandChanged). */
   #demandWakeTimer: ReturnType<typeof setTimeout> | undefined;
   // ---- (d′) — server-settle instrumentation (design §6 W4's
@@ -418,10 +428,16 @@ export class SpaceServer implements TransactionSealDestination {
     growthAtAdmit: number;
     eventAppend: boolean;
   }>();
+  // NIT-1: the internal growth bookkeeping (`growthWakeAt`,
+  // `wavesAtCoverage`) lives on this WRAPPER, not on the series entry, so
+  // it never leaks into the stats JSON; `entry` is the (clean) series row
+  // that `#recordGrowthLanding` promotes in place.
   #lastCovered:
-    | (ServingLoopStats["settle"]["series"][number] & {
+    | {
+      entry: ServingLoopStats["settle"]["series"][number];
       growthWakeAt?: number;
-    })
+      wavesAtCoverage: number;
+    }
     | undefined;
   #growthAwaitingLanding = false;
   /** Wave-bound seals CHAINED but not yet applied (the F4 fix, as a
@@ -455,8 +471,9 @@ export class SpaceServer implements TransactionSealDestination {
    * — scopes.md §2's mechanism sentence, RULED 2026-08-16: a
    * principal's demand at a broad address is demand for THAT principal's
    * instance of every node that narrows beneath it). Keyed by demand key
-   * (one per root INSTANCE the structure load and the demand walk
-   * address), valued with EVERY (principal, session) pair whose watch
+   * (one per root INSTANCE the structure load addresses — the demand
+   * walk that also keyed on this is DELETED), valued with EVERY
+   * (principal, session) pair whose watch
    * names that key — a space root demanded by two users holds both
    * pairs; a user-scoped root demanded by two sessions of one user holds
    * both sessions (a node beneath it may narrow to session for that
@@ -959,9 +976,10 @@ export class SpaceServer implements TransactionSealDestination {
         eventAppend: rec.eventAppend,
       };
       series.push(entry);
-      this.#lastCovered = Object.assign(entry, {
+      this.#lastCovered = {
+        entry,
         wavesAtCoverage: this.#wavesCommitted,
-      });
+      };
     }
     if (series.length > 4000) {
       this.#options.stats.settle.dropped += series.length - 4000;
@@ -987,21 +1005,14 @@ export class SpaceServer implements TransactionSealDestination {
     this.#growthAwaitingLanding = false;
     if (last === undefined) return;
     const now = performance.now();
-    const grown = last as typeof last & {
-      growthLandedAt?: number;
-      msGrowth?: number;
-      growthWaves?: number;
-      graceMs?: number;
-    };
-    grown.class = "structural-growth";
-    grown.growthLandedAt = now;
-    grown.msGrowth = now - last.admittedAt;
-    grown.growthWaves = last.waves +
-      (this.#wavesCommitted -
-        ((last as { wavesAtCoverage?: number }).wavesAtCoverage ??
-          this.#wavesCommitted));
+    const entry = last.entry;
+    entry.class = "structural-growth";
+    entry.growthLandedAt = now;
+    entry.msGrowth = now - entry.admittedAt;
+    entry.growthWaves = entry.waves +
+      (this.#wavesCommitted - last.wavesAtCoverage);
     if (last.growthWakeAt !== undefined) {
-      grown.graceMs = now - last.growthWakeAt;
+      entry.graceMs = now - last.growthWakeAt;
     }
   }
 
@@ -1020,6 +1031,9 @@ export class SpaceServer implements TransactionSealDestination {
    * recompute lands in a LATER derived commit; arrival is later demand).
    * Input-driven cycles are unaffected (they run their pass regardless). */
   noteDemandChanged(reason: "watch" | "push-growth" = "watch"): void {
+    // MINOR-1: a fresh demand note — bump the generation so a pass that
+    // already snapshotted its rows re-latches on completion.
+    this.#demandNoteGeneration += 1;
     // (d′) — flag 1/2 instrumentation: count the wake sources
     // (the push-growth notify is the NEW site) and remember that a growth
     // wake fired, so the settle series can class the inputs it covers.
@@ -2519,6 +2533,10 @@ export class SpaceServer implements TransactionSealDestination {
     // NO per-row engine read (W0 obligation (i): a per-row read here lands
     // on the wave-latency critical path — `#loadDemandedStructure` is
     // awaited before `runtime.idle()`).
+    // MINOR-1: snapshot the demand-note generation at the row read — a
+    // note landing after this point is invisible to `rows` and must
+    // re-latch a fresh pass (below, in the loadPass `.finally`).
+    this.#passDemandNoteGen = this.#demandNoteGeneration;
     const rows = this.#options.server.demandedInstancesForSpace(
       this.#options.space,
       // The serving session's own watches are its graph's reads, not
@@ -2553,7 +2571,8 @@ export class SpaceServer implements TransactionSealDestination {
       }
       pairs.set(demanderPairKey(identity), identity);
     }
-    const currentKeys = new Set(rowByKey.keys());
+    // NIT-4: `rowByKey` is already the current-key set (a Map with O(1)
+    // `has`); no separate `currentKeys` Set is needed.
     const addressOf = (key: string, row?: { id: string; scope?: string }) => {
       const sep = key.indexOf("\0");
       const scopeKey = key.slice(0, sep);
@@ -2568,7 +2587,7 @@ export class SpaceServer implements TransactionSealDestination {
     // more — coarse, RULED R-D): retire the registry entry, the load
     // state, and RELEASE the writers' root status (1→0, bracketed).
     for (const key of [...this.#demandersByKey.keys()]) {
-      if (currentKeys.has(key)) continue;
+      if (rowByKey.has(key)) continue;
       this.#demandersByKey.delete(key);
       this.#demandedRoots.delete(key);
       this.#unindexDemandKey(key);
@@ -2946,6 +2965,13 @@ export class SpaceServer implements TransactionSealDestination {
       })
       .finally(() => {
         this.#structureLoadPass = undefined;
+        // MINOR-1: a demand note that landed AFTER this pass snapshotted
+        // its rows (a straddling pass) did not reach the rows it read;
+        // re-latch so the next wait runs a FRESH pass rather than
+        // sleeping out the idle window.
+        if (this.#demandNoteGeneration !== this.#passDemandNoteGen) {
+          this.#pendingDemandWake = true;
+        }
         this.#feedArrived?.resolve();
       });
     let exhausted = false;
@@ -3473,6 +3499,14 @@ export class SpaceServer implements TransactionSealDestination {
     // runtime (and its counters) are disposed below, so a transition after
     // the final pass of this tenure is not lost.
     this.#foldDemandRootDelta();
+    // MINOR-7: the settle-attribution state is per-tenure — an input
+    // admitted in one tenure and covered in the next would otherwise
+    // record a `ms` spanning the park, and a growth wake right after
+    // reactivation would attribute to the pre-park input. Clear it so
+    // settle timings never cross a park boundary (stats honesty).
+    this.#pendingSettles.clear();
+    this.#lastCovered = undefined;
+    this.#growthAwaitingLanding = false;
     this.#pendingStructureLoads.clear();
     this.#terminalStructureLoads.clear();
     this.#rearmedAwaitingSettle.clear();

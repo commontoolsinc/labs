@@ -1150,8 +1150,7 @@ export class Scheduler {
 
   /** DIAGNOSTIC (tests): a node's fan-out record — the known-scope
    * ratchet and per-instance state — or undefined off the fan-out path.
-   * Takes the action or its id (the trace's `actionId`; a demand walk's
-   * is its name). */
+   * Takes the action or its id (the trace's `actionId`). */
   fanOutStateOf(action: Action | string): {
     narrowed: boolean;
     sessionPrincipals: string[];

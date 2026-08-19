@@ -145,7 +145,11 @@ export class ExecutorHost {
       events: { ...this.#stats.events },
       demand: { ...this.#stats.demand },
       settle: {
-        series: [...this.#stats.settle.series],
+        // NIT-1: deep-copy the entries — a series row stays live after it
+        // is pushed (`#recordGrowthLanding` promotes a value-only row to
+        // structural-growth in place), so a shallow array copy would let a
+        // snapshot's entries mutate after the snapshot was taken.
+        series: this.#stats.settle.series.map((entry) => ({ ...entry })),
         dropped: this.#stats.settle.dropped,
       },
       memo: { ...this.#stats.memo },
