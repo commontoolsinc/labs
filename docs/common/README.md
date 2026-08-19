@@ -92,8 +92,10 @@ on the Common Fabric runtime.
 ### verbs/ — driving a deployed piece through `cf`
 
 Read in this order: what a verb hands back, then a whole session using it,
-then where an author's words go.
+then where an author's words go. Arriving without a piece id, start with the
+agent's entry instead.
 
+- [verbs/agents-over-the-cli.md](verbs/agents-over-the-cli.md) — reaching a piece with no id in hand: the discovery surfaces and what bounds each, orienting on an unfamiliar piece, and the conclusions an empty answer does not support
 - [verbs/over-the-cli.md](verbs/over-the-cli.md) — what a verb hands back: declared results, piece references, idempotent retries, and a runnable walkthrough
 - [verbs/session-walkthrough.md](verbs/session-walkthrough.md) — a whole session driven through `cf`: discovery, help, completion, refusals, and carrying an address from one call into the next. Its companion script under `packages/cli/integration/` runs every step
 - [verbs/prose-over-the-cli.md](verbs/prose-over-the-cli.md) — how an author's doc comments reach a caller, and which of the two documents `cf` reads carries what

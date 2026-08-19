@@ -10,6 +10,9 @@ sequence of "mutate, then go looking for what happened" into a single
 exchange — and the thing a verb hands back can be a **piece**, so a create tells
 you where the thing it created lives.
 
+Every command here takes a `--piece` the caller already holds. Reaching one
+without an id in hand is [an agent over the CLI](agents-over-the-cli.md).
+
 For the authoring side, see [concepts/action.md](../concepts/action.md) and
 [concepts/handler.md](../concepts/handler.md); for the general CLI loop, see
 [workflows/development.md](../workflows/development.md).

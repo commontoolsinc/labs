@@ -153,7 +153,10 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Replayable call    | `deno task cf call --piece ID --invocation my-id-1 handlerName ...` (same pair retries settle on the original outcome)       |
 | Detached call      | `deno task cf call --piece ID --no-wait --invocation my-id-1 handlerName ...` (exits at commit with `receipt` address)       |
 | Collect a receipt  | `deno task cf get --piece <receipt> ...` (the envelope's `receipt` string, later, from any process)                          |
-| List pieces        | `deno task cf piece ls -i key -a url -s space`                                                                               |
+| List pieces        | `deno task cf piece ls -i key -a url -s space` (registry only — a piece created inside a handler is absent)                  |
+| Describe a piece   | `deno task cf piece describe --piece ID ...` (name, purpose, state, inputs, verbs; `--json`, `--all`)                        |
+| List slugs         | `deno task cf piece slugs ...`                                                                                               |
+| Search piece data  | `deno task cf piece search <query> ...` (registered pieces only)                                                             |
 | Visualize          | `deno task cf piece map ...`                                                                                                 |
 | Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)                                      |
 
@@ -466,6 +469,9 @@ mounts; auto-discovered spaces may appear writable but silently drop writes.
 
 ## References
 
+- `docs/common/verbs/agents-over-the-cli.md` - Reaching a piece with no id in
+  hand: what bounds each discovery surface, and what an empty answer does not
+  prove
 - `docs/common/verbs/over-the-cli.md` - The verb walkthrough: invocation ids and
   sessions, receipts, retries, and shaped reads, each step runnable
 - `packages/patterns/system/default-app.tsx` - System pieces (pieceRegistry
