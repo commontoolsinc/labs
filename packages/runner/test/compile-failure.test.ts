@@ -48,6 +48,7 @@ describe("markDeterministicCompileFailure", () => {
         throw new Error("no property access");
       },
     });
+    markDeterministicCompileFailure(throwingProxy);
     expect(isDeterministicCompileFailure(throwingProxy)).toBe(false);
   });
 

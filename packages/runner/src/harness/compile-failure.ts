@@ -14,9 +14,11 @@
 // Deliberately a module-private WeakSet rather than a marker property: outside
 // code must not be able to forge the classification, and set membership cannot
 // be faked the way a property read can — a lying proxy trap or an inherited
-// marker never answers for object identity. Frozen errors classify fine, since
-// membership never touches the object. A duplicated module graph can only
-// cause a missed classification, which safely fails toward retrying.
+// marker never answers for object identity. Membership never touches the
+// object: add/has run no proxy traps and cannot throw for any object, frozen
+// and revoked proxies included, so neither call needs a guard. A duplicated
+// module graph can only cause a missed classification, which safely fails
+// toward retrying.
 const deterministicCompileFailures = new WeakSet<object>();
 
 // An allocation failure is a function of heap pressure, not of the verified
@@ -44,22 +46,13 @@ export function markDeterministicCompileFailure<T>(error: T): T {
   if (
     typeof error === "object" && error !== null && !isAllocationFailure(error)
   ) {
-    try {
-      deterministicCompileFailures.add(error);
-    } catch {
-      // Revoked proxy or otherwise unweakable throwable: leave it retryable.
-    }
+    deterministicCompileFailures.add(error);
   }
   return error;
 }
 
 /** True only for throwables stamped by this module. */
 export function isDeterministicCompileFailure(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  try {
-    return deterministicCompileFailures.has(error);
-  } catch {
-    // Revoked proxy: fail toward retrying.
-    return false;
-  }
+  return typeof error === "object" && error !== null &&
+    deterministicCompileFailures.has(error);
 }
