@@ -269,6 +269,18 @@ const demanderPairKey = (identity: ScopeKeyIdentity): string =>
  * the creator's own setup commits. Well under the flush deadline. */
 const DEMAND_WAKE_GRACE_MS = 300;
 
+/** W0 (d′) SCRATCH: the flag-4 pass-end scan (an engine read per
+ * no-writer candidate row, every pass) is opt-in — `W0_FLAG4_SCAN=1` —
+ * so its cost can be ablated from the workload numbers. */
+const W0_FLAG4_SCAN: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      Deno.env.get("W0_FLAG4_SCAN") === "1";
+  } catch {
+    return false;
+  }
+})();
+
 const neverAPieceRootId = (id: string): boolean =>
   id === SERVER_EXECUTION_WATERMARK_DOC_ID ||
   // Phase 4: the effects doc is a session-scoped VALUE doc every
@@ -2709,7 +2721,7 @@ export class SpaceServer implements TransactionSealDestination {
     // carries `patternIdentity` meta (a piece reachable only through a
     // data link, not running here — parity with today; the walk never
     // started pieces either). Counted, never acted on.
-    {
+    if (W0_FLAG4_SCAN) {
       let noWriter = 0;
       let noWriterMeta = 0;
       for (const [key, row] of rowByKey) {
