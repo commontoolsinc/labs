@@ -95,169 +95,124 @@ round-trip correctly.
 > applies to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state
 > values, and to the `hash` field of `Hash@1` state.
 
-```typescript
-// Illustrative tag-to-format map. The canonical tag-string constants live
-// in `packages/data-model/src/codec-interface/codec-type-tags.ts`
-// (`CODEC_TYPE_TAGS`) and `codec-meta-tags.ts` (`CODEC_META_TAGS`).
+The JSON key for a tagged value is the tag with `/` prepended, per Section 2:
+a value under `Link@1` is written `{ "/Link@1": <state> }`. What follows
+specifies each built-in type's state. Which classes and codecs are registered
+under these tags is a separate question, specified in `1-fabric-values.md`
+Section 4.5.
 
-/**
- * Standard JSON encodings for all built-in special types.
- *
- * In each case, the tag string (e.g. `"Link@1"`) is passed to the engine's
- * internal `wrapTag()` method, which prepends `/` to produce the JSON key
- * (e.g. `"/Link@1"`).
- */
+These types need no rule beyond the shape of their state:
 
-// Cell references (links to other documents)
-// Tag: "Link@1"
-// { "/Link@1": { id: string, path: string[], space: string } }
+- `Link@1` — `{ id: string, path: string[], space: string }`.
+- `Error@1` — `{ type: string, name: string | null, message: string, stack?:
+  string, cause?: <any>, ... }`, where the trailing properties are the error's
+  own custom ones.
+- `Undefined@1` — `null`. The type is stateless (Section 5).
+- `Map@1` — `[[key, value], ...]`, entry pairs in insertion order.
+- `Set@1` — `[value, ...]`, values in insertion order.
+- `Bytes@1` — a base64url string, per the convention above.
+- `hole` — a positive integer giving the length of a run of array holes. This
+  is a structural meta-key rather than a type tag, and is valid only directly
+  inside an array; see the sparse-array note below.
 
-// Errors
-// Tag: "Error@1"
-// { "/Error@1": { type: string, name: string | null, message: string, stack?: string, cause?: ..., ... } }
+### `Hash@1` — content hashes
 
-// Undefined (stateless -- value is null)
-// Tag: "Undefined@1"
-// { "/Undefined@1": null }
+State is `{ tag: string, hash: string }`. `tag` is the algorithm tag (for
+example `fid1`), and `hash` is the hash bytes as an unpadded base64url string,
+per the convention above. On decoding, a state that is not an object, or whose
+fields are not strings, produces a `ProblematicValue`. See `1-fabric-values.md`
+Section 1.4.9.
 
-// Array holes (run-length encoded; value is a positive integer; only valid
-// inside arrays)
-// Tag: "hole"
-// { "/hole": <count> }   e.g. { "/hole": 1 }, { "/hole": 5 }
+### `RegExp@1` — regular expressions
 
-// Stream markers (stateless -- value is null)
-// Tag: "Stream@1"
-// { "/Stream@1": null }
+State is `{ source: string, flags: string, flavor: string }`. `source` is the
+pattern string and `flags` the flag string (for example `gi`). `flavor`
+identifies the regular-expression dialect, `es2025` being the default.
 
-// Maps (entry pairs preserve insertion order)
-// Tag: "Map@1"
-// { "/Map@1": [[key, value], ...] }
+On decoding, a state that is not an object produces a `ProblematicValue`, as
+does an `es2025` pattern that fails to construct. A pattern under any other
+flavor is stored faithfully and **not** validated, its dialect not being one
+this format can construct. See `1-fabric-values.md` Section 1.4.5.
 
-// Sets (values preserve insertion order)
-// Tag: "Set@1"
-// { "/Set@1": [value, ...] }
+### `BigInt@1` — arbitrary-precision integers
 
-// Binary data (base64url-encoded per the base64url convention above)
-// Tag: "Bytes@1"
-// { "/Bytes@1": string }
+State is the base64url encoding of the value's minimal two's-complement
+representation in big-endian byte order. The minimum length is one byte, so
+even `0n` encodes as a single `0x00`:
 
-// Content hashes (see `1-fabric-values.md` Section 1.4.9)
-// Tag: "Hash@1"
-// { "/Hash@1": { tag: string, hash: string } }
-//
-// `tag` is the algorithm tag (e.g. "fid1"); `hash` is the hash bytes as an
-// unpadded base64url string (per the convention above). On
-// decoding, a non-object state or non-string fields produce a
-// `ProblematicValue` (see `1-fabric-values.md` Section 3.5) per the
-// general codec-validation rule below.
+| Value | Bytes | State |
+|-------|-------|-------|
+| `0n` | `0x00` | `"AA"` |
+| `1n` | `0x01` | `"AQ"` |
+| `-1n` | `0xFF` | `"_w"` |
+| `128n` | `0x00 0x80` | `"AIA"` |
+| `-128n` | `0x80` | `"gA"` |
 
-// Regular expressions (see `1-fabric-values.md` Section 1.4.5)
-// Tag: "RegExp@1"
-// { "/RegExp@1": { source: string, flags: string, flavor: string } }
-//
-// `source` is the pattern string; `flags` is the flag string (e.g. "gi");
-// `flavor` identifies the regex dialect (e.g. "es2025", the default). On
-// decoding, a non-object state produces a `ProblematicValue`, as
-// does an `es2025` pattern that fails native `RegExp` construction;
-// non-`es2025` flavors are stored faithfully without syntax validation
-// (their dialects cannot be validated here).
+`128n` is the case that shows why the representation is two's complement rather
+than magnitude: `0x80` alone decodes as `-128`, so a leading zero byte is
+required to keep the value positive. This is the same encoding the hash byte
+format uses for bigint payloads (`2-hash-byte-format.md` Section 4.5).
 
-// Epoch nanoseconds (bigint, encoded per BigInt@1 conventions)
-// Tag: "EpochNsec@1"
-// { "/EpochNsec@1": string }
-//
-// The state is the base64url encoding of the bigint value's minimal two's
-// complement representation in big-endian byte order — the same encoding
-// as BigInt@1.
+### `EpochNsec@1` and `EpochDays@1` — epoch quantities
 
-// Epoch days (bigint, encoded per BigInt@1 conventions)
-// Tag: "EpochDays@1"
-// { "/EpochDays@1": string }
-//
-// Same encoding convention as EpochNsec@1 (base64url of two's complement
-// big-endian bytes).
+Both carry a bigint, and both encode it exactly as `BigInt@1` does: base64url
+of the minimal two's-complement big-endian bytes.
 
-// BigInts (base64url of two's complement big-endian bytes; see convention above)
-// Tag: "BigInt@1"
-// { "/BigInt@1": string }
-//
-// The state is the base64url encoding of the value's minimal two's complement
-// representation in big-endian byte order. The minimum byte length is 1 —
-// even `0n` produces a single `0x00` byte. Examples:
-//   - `0n`  → single byte 0x00 → "AA"
-//   - `1n`  → 0x01             → "AQ"
-//   - `-1n` → 0xFF             → "_w"
-//   - `128n` → 0x00 0x80       → "AIA"  (leading 0x00 needed: 0x80 alone would decode as -128)
-//   - `-128n` → 0x80           → "gA"
-// This matches the hash byte format (2-hash-byte-format.md), which already
-// uses two's complement big-endian for BigInt payloads.
+### `SpecialNumber@1` — numbers JSON cannot represent
 
-// Special numeric values that JSON cannot represent natively.
-// Tag: "SpecialNumber@1"
-// { "/SpecialNumber@1": string }
-//
-// The state is one of exactly four literal strings:
-//   - "-0"          → the negative-zero value
-//   - "NaN"         → Number.NaN (any input NaN bit pattern encodes as
-//                     this single literal and round-trips back to NaN)
-//   - "+Infinity"   → positive infinity
-//   - "-Infinity"   → negative infinity
-//
-// String state (rather than a JSON number) is used because JSON.stringify
-// emits `null` for NaN/±Infinity and drops the sign on -0; a numeric-state
-// form would be lossy through the JSON layer. On decoding, any state
-// other than these four literals — including a non-string state — produces
-// a `ProblematicValue` (see `1-fabric-values.md` Section 3.5) per the
-// general codec-validation rule below.
-//
-// Whether such values reach this encoder depends on the fabric-value
-// conversion gate; see `1-fabric-values.md` Section 4.9. The wire format
-// above is the encoder's contract regardless of how the values arrived.
+State is one of exactly four literal strings, and nothing else:
 
-// Registry-interned symbols (`Symbol.for(key)`).
-// Tag: "Symbol@1"
-// { "/Symbol@1": string }
-//
-// The state is the registry key — the JavaScript string returned by
-// `Symbol.keyFor(s)`. On decoding, `Symbol.for(state)` retrieves
-// (or creates) the registry symbol with the matching key, so the result
-// is `===` to any other `Symbol.for(state)` in the same realm.
-//
-// Unique symbols (`Symbol(desc)`, where `Symbol.keyFor(s)` returns
-// `undefined`) have no portable representation. The codec's
-// `canEncode()` returns `false` for them, which routes them to the
-// registry's "unhandled value" path rather than coercing them silently
-// to a registry key. On decoding, any state other than a string
-// yields a `ProblematicValue` (see `1-fabric-values.md` Section 3.5)
-// per the general codec-validation rule below.
-//
-// Whether a symbol value reaches this encoder depends on the fabric-value
-// conversion gate; see `1-fabric-values.md` Section 4.9. The wire format
-// above is the encoder's contract regardless of how the value arrived.
+- `"-0"` — negative zero.
+- `"NaN"` — any input NaN bit pattern encodes to this one literal, and decodes
+  back to `NaN`.
+- `"+Infinity"` — positive infinity.
+- `"-Infinity"` — negative infinity.
 
-// Preserved failures (see `1-fabric-values.md` Section 3.5)
-// Tag: "Problematic@1"
-// { "/Problematic@1": { tag: string, state: <any>, error: string } }
-//
-// `tag` is the tag the faulty data arrived under, `state` is what was at
-// fault, and `error` describes what is wrong with it. All three are
-// preserved, so a recorded failure survives a round trip as the account of
-// a failure rather than as an unremarkable value.
-//
-// Unlike every other entry above, the tag here is fixed rather than being
-// the tag of the value it stands in for. The preserved tag rides inside the
-// state because it need not be a well-formed tag at all -- reporting one
-// that is not is among the things this type is for, and such a value cannot
-// go back out under it. `UnknownValue` is the type that re-emits under its
-// preserved tag (Section 8), which it can because that tag is checked to be
-// a real one.
-//
-// On decoding, a non-object state, a non-string `tag` or `error`, or
-// an absent `state` property produces a `ProblematicValue` describing this
-// decode. `state` is checked for presence rather than type because every
-// `FabricValue` is a valid state, `undefined` among them, so filling in an
-// absent one would put a reshaped record back on the wire.
-```
+The state is a string rather than a JSON number because a numeric state would
+be lossy through the JSON layer: `JSON.stringify` emits `null` for `NaN` and
+the infinities, and drops the sign of `-0`. On decoding, any other state —
+including one that is not a string — produces a `ProblematicValue`.
+
+Whether such a value reaches the encoder at all depends on the fabric-value
+conversion gate (`1-fabric-values.md` Section 4.9). The encoding above is the
+encoder's contract however the value arrived.
+
+### `Symbol@1` — registry-interned symbols
+
+State is the registry key: the string `Symbol.keyFor()` returns for the symbol.
+On decoding, `Symbol.for(state)` retrieves or creates the registry symbol with
+that key, so the result is identical to any other symbol interned under it in
+the same realm.
+
+A symbol with no registry key has no portable representation, and the codec
+declines to encode one rather than coercing it to a key. On decoding, a state
+that is not a string produces a `ProblematicValue`.
+
+Whether such a value reaches the encoder at all depends on the fabric-value
+conversion gate (`1-fabric-values.md` Section 4.9). The encoding above is the
+encoder's contract however the value arrived.
+
+### `Problematic@1` — preserved failures
+
+State is `{ tag: string, state: <any>, error: string }`. `tag` is the tag the
+faulty data arrived under, `state` is what was at fault, and `error` describes
+what is wrong with it. All three are preserved, so a recorded failure survives
+a round trip as an account of a failure rather than as an unremarkable value.
+
+Alone among these types, the key here is a fixed tag rather than the tag of the
+value it stands in for. The preserved tag rides inside the state because it
+need not be a well-formed tag at all — reporting one that is not is among the
+things this type is for, and such a value could not go back out under it.
+`UnknownValue` is the type that re-emits under its preserved tag (Section 8),
+which it can because that tag is known to be a real one.
+
+On decoding, a state that is not an object, a `tag` or `error` that is not a
+string, or an absent `state` property produces a `ProblematicValue` describing
+that decode. `state` is checked for presence rather than for type, because
+every fabric value is a valid state, `undefined` among them; filling in an
+absent one would put a reshaped record back on the wire.
+
+See `1-fabric-values.md` Section 3.5.
 
 > **Decoding validation.** Decoding cannot assume type safety from
 > the wire. Each codec must validate the format of its state in `decode()`
@@ -302,6 +257,17 @@ built-in escape, or an encoding error.
 > keys via one of these escapes before they reach the wire, so bare
 > `/`-prefixed keys in the wire format are always encoding signals, never
 > literal user-data keys.
+
+> **JS implementation note.** "Any keys" is the format's rule and this
+> implementation does not yet meet it: a plain object carrying `__proto__` or
+> `constructor` is refused rather than encoded, on both sides of the wire and
+> in the inert check that decides what a fabric value is at all. Neither name
+> is reserved by the format, and neither is a limit of JavaScript. Both are
+> about copying: this implementation rebuilds a record by assignment, which for
+> `__proto__` reaches a prototype accessor instead of creating a property, and
+> other boundaries here already drop `constructor`. An implementation on a host
+> that does not route property assignment through a prototype chain reserves no
+> names at all, which is the behavior the format describes.
 
 The common case — a **tagged value** — is a single-key object whose sole key
 starts with `/`:
@@ -418,9 +384,8 @@ properties a decoder preserves regardless of which form it sees.
 
 ## 7. Codec Engine Responsibilities
 
-The JSON engine's internal `wrapTag()` / `#unwrapTag()` methods
-generate and parse `/<Type>@<Version>` keys. The engine is also responsible
-for:
+The JSON engine generates and parses `/<Type>@<Version>` keys. It is also
+responsible for:
 
 - Owning recursion and tag-wrapping around the shallow per-type codecs
   (see `1-fabric-values.md` Sections 2.4 and 4.5): tags come from
