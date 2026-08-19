@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-08-19
-archived: 2026-08-19
+created: 2026-08-18
+archived: 2026-08-18
 reason: "Decision record for the topics reference-graph contract break shipped in #5921 — the first accepted break in the pattern-update registries. Backfilled from the shipping change's own prose when the registries gained their record linkage."
 ---
 

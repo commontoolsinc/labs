@@ -39,7 +39,11 @@ import {
   DEFAULT_APP_PATTERN_SOURCE,
   HOME_PATTERN_SOURCE,
 } from "../packages/piece/src/system-pattern-url.ts";
-import { requiredPatternKeys } from "./pattern-vintage-lib.ts";
+import {
+  reportUnmappedUrls,
+  requiredPatternKeys,
+  unmappedPatternUrls,
+} from "./pattern-vintage-lib.ts";
 import {
   acceptedBreakKey,
   checkPattern,
@@ -71,13 +75,21 @@ async function main() {
     Deno.exit(2);
   }
 
+  // The required set comes from the runtime's own constants, the same seam
+  // `pattern-vintage` uses — and a constant that stops mapping to a patterns
+  // route would silently make this guard require nothing, so that is checked
+  // rather than absorbed.
+  const systemUrls = [HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE];
+  const unmappedUrls = unmappedPatternUrls(systemUrls);
+  if (unmappedUrls.length > 0) {
+    console.error(reportUnmappedUrls(unmappedUrls));
+    Deno.exit(1);
+  }
   // The registries are judged before any pattern is: an entry that names a
   // required pattern or points at no decision record is wrong regardless of
   // what this shard's findings turn out to be.
   const registryReport = reportBreakRegistryFindings({
-    requiredPatternKeys: new Set(
-      requiredPatternKeys([HOME_PATTERN_SOURCE, DEFAULT_APP_PATTERN_SOURCE]),
-    ),
+    requiredPatternKeys: new Set(requiredPatternKeys(systemUrls)),
     recordExists: (path) => {
       try {
         return Deno.statSync(path).isFile;

@@ -16,8 +16,11 @@
  * - **Every entry names its decision record, and the record exists.** The
  *   registry line is the declaration; the record under `docs/history/` is the
  *   deliberation — what broke, why it was accepted, and what happens to the
- *   pieces holding the old shape. `check-docs-history-index` keeps the record
- *   itself indexed; this guard keeps the entry pointing at one.
+ *   pieces holding the old shape. A record is a Markdown document of that
+ *   tree's own: the path may not step back out of it, and the tree's live
+ *   scaffolding (`README.md`, `INDEX.md`) does not qualify.
+ *   `check-docs-history-index` forces every other document under the tree to
+ *   be indexed, so this guard's shape-plus-existence check is membership.
  *
  * Pure and parameterized (entries, required set, existence probe) so the
  * rules are provable against synthetic registries in
@@ -45,6 +48,34 @@ export interface BreakRegistryFinding {
 }
 
 const RECORD_PREFIX = "docs/history/";
+
+/** The history tree's own live scaffolding — never a decision record. */
+const RECORD_SCAFFOLDING = new Set(["README.md", "INDEX.md"]);
+
+/**
+ * Why `record` cannot name a decision record, or `undefined` when its shape
+ * qualifies. Shape only — existence is the caller's probe, and it runs only
+ * on paths this has already passed, so the probe never resolves a traversal
+ * out of the tree.
+ */
+function recordPathProblem(record: string): string | undefined {
+  if (!record.startsWith(RECORD_PREFIX)) {
+    return `is not under ${RECORD_PREFIX} — the decision record lives in ` +
+      `the history tree`;
+  }
+  const segments = record.slice(RECORD_PREFIX.length).split("/");
+  if (segments.some((s) => s === ".." || s === "." || s === "")) {
+    return `steps back out of ${RECORD_PREFIX} — a dot or empty segment ` +
+      `defeats the prefix`;
+  }
+  if (!record.endsWith(".md")) {
+    return `is not a Markdown document — a decision record is one`;
+  }
+  if (RECORD_SCAFFOLDING.has(segments[segments.length - 1])) {
+    return `is the history tree's own scaffolding, not a decision record`;
+  }
+  return undefined;
+}
 
 /** Both shipped registries, flattened to the shape the guards judge. */
 export function collectBreakRegistryEntries(): BreakRegistryEntry[] {
@@ -77,12 +108,12 @@ export function guardBreakRegistryEntries(options: {
           `never eligible for an accepted break`,
       });
     }
-    if (!entry.record.startsWith(RECORD_PREFIX)) {
+    const pathProblem = recordPathProblem(entry.record);
+    if (pathProblem !== undefined) {
       findings.push({
         registry: entry.registry,
         pattern: entry.pattern,
-        detail: `record "${entry.record}" is not under ${RECORD_PREFIX} — ` +
-          `the decision record lives in the history tree`,
+        detail: `record "${entry.record}" ${pathProblem}`,
       });
     } else if (!options.recordExists(entry.record)) {
       findings.push({

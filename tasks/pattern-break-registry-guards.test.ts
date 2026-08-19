@@ -60,6 +60,43 @@ describe("pattern-break-registry-guards", () => {
     expect(findings[0].detail).toContain("does not exist");
   });
 
+  it("returns a finding for a record that steps back out of the tree", () => {
+    // The prefix alone would accept this, and the probe would then stat a
+    // file OUTSIDE the history tree — so the shape check refuses it before
+    // the probe ever sees it.
+    const findings = guardBreakRegistryEntries({
+      entries: [entry({ record: "docs/history/../../README.md" })],
+      requiredPatternKeys: new Set(),
+      recordExists: () => true,
+    });
+    expect(findings.length).toBe(1);
+    expect(findings[0].detail).toContain("steps back out");
+  });
+
+  it("returns a finding for a record that is not a Markdown document", () => {
+    const findings = guardBreakRegistryEntries({
+      entries: [entry({ record: "docs/history/evidence.sqlite" })],
+      requiredPatternKeys: new Set(),
+      recordExists: () => true,
+    });
+    expect(findings.length).toBe(1);
+    expect(findings[0].detail).toContain("Markdown");
+  });
+
+  it("returns a finding for the history tree's own scaffolding", () => {
+    // Both live files under the tree exist and end in .md, and neither is a
+    // decision record.
+    for (const record of ["docs/history/README.md", "docs/history/INDEX.md"]) {
+      const findings = guardBreakRegistryEntries({
+        entries: [entry({ record })],
+        requiredPatternKeys: new Set(),
+        recordExists: () => true,
+      });
+      expect(findings.length).toBe(1);
+      expect(findings[0].detail).toContain("scaffolding");
+    }
+  });
+
   it("reports every offending entry rather than the first", () => {
     const findings = guardBreakRegistryEntries({
       entries: [
