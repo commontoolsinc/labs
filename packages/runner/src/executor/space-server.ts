@@ -107,6 +107,7 @@ import type { ServingLoopStats } from "./stats.ts";
 import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
 import { markRendererTrustedEvent } from "../cfc/ui-contract.ts";
+import { LT1_LATE_SEAL_REFUSED } from "../scheduler/types.ts";
 import {
   type CellScope,
   identityOfScopeKey,
@@ -539,6 +540,22 @@ export class SpaceServer implements TransactionSealDestination {
    * deferSealedEffects (which runs after the seal resolved, when the
    * wave may already have rotated). */
   readonly #waveByTx = new WeakMap<object, WaveAccumulator>();
+  /** The APPENDING wave of each LT1 same-space in-process copy's run
+   * (stage C build W3, (α); events.md §4's RULED one-entry-one-
+   * completed-run sentence): tx of the copy's handler run → the wave
+   * its EMITTER sealed into (`#waveByTx` of `ServedEventDispatch.lt1
+   * .emitterTx`, resolved at the dispatch stamp — the emitter's commit
+   * reaches `seal()` synchronously, before its copy can dispatch, so
+   * the wave is known by then; `null` records an emitter whose seal was
+   * NOT found — refused fail-closed). The copy must seal into exactly
+   * that wave: its entry lands with the emitter's contribution and the
+   * batch marks it there (`survivedEventIds`); a copy sealing into any
+   * LATER wave (it was still running when the flush deadline closed
+   * its wave — the purge reaches only the QUEUED leftovers) would commit
+   * its consequences UNMARKED beside the drain's marked copy of the
+   * same entry, the lunch gate's vote-toggle double. `seal()` refuses
+   * it before it enters a wave (`events.lt1LateSealsRefused`). */
+  readonly #lt1AppendingWave = new WeakMap<object, WaveAccumulator | null>();
 
   constructor(options: SpaceServerOptions) {
     this.#options = options;
@@ -1069,6 +1086,41 @@ export class SpaceServer implements TransactionSealDestination {
       this.#sealChain = committed.then(() => undefined, () => undefined);
       return committed;
     }
+    // The LT1 late-seal REFUSAL (stage C build W3, (α1b); events.md §4:
+    // "an entry whose in-process run does not complete within its
+    // appending wave is dispatched by the drain alone"): an in-process
+    // copy sealing into any wave but the one its emitter sealed into —
+    // the deadline closed its wave while the copy was still running, or
+    // the copy dispatched after the close — is refused BEFORE it enters
+    // a wave (nothing of it reaches the replica overlay, so the drain's
+    // copy running next reads clean state). Its consequences are
+    // discarded; the durable entry, which landed with the emitter, is
+    // the one the drain re-runs WITH a streamEntry — the one completed
+    // run. Checked before #openWave(): a refused copy must not open an
+    // empty wave of its own.
+    const appending = this.#lt1AppendingWave.get(tx);
+    if (
+      appending !== undefined &&
+      (appending === null || appending !== this.#currentWave)
+    ) {
+      this.#options.stats.events.lt1LateSealsRefused += 1;
+      const context = waveRunContextOf(tx);
+      logger.debug?.("lt1-late-seal-refused", () => [
+        `space ${this.#options.space}: LT1 in-process copy of ` +
+        `${context?.eventId ?? "?"} sealed outside its appending wave; ` +
+        "refused — the drain delivers the durable entry (events.md §4)",
+      ]);
+      return Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted",
+          message: "LT1 in-process copy refused at the seal destination: it " +
+            "completed outside the wave that carries its durable entry; " +
+            "the drain delivers that entry exactly once (events.md §4, " +
+            "one durable entry = one completed run)",
+          reason: new Error(LT1_LATE_SEAL_REFUSED),
+        },
+      });
+    }
     const wave = this.#openWave();
     this.#waveByTx.set(tx, wave);
     const sealed = this.#sealChain.then(() => wave.seal(tx)).then(
@@ -1367,7 +1419,23 @@ export class SpaceServer implements TransactionSealDestination {
       ...(info.streamEntry !== undefined
         ? { streamEntry: info.streamEntry }
         : {}),
+      // The LT1 in-process copy marker (stage C build W3, (α3)): the
+      // wave's requeue closure refuses the copy as an orphan when no
+      // surviving contribution appends its entry.
+      ...(info.lt1 !== undefined ? { lt1: true as const } : {}),
     });
+    if (info.lt1 !== undefined) {
+      // The LT1 in-process copy's appending wave (stage C build W3,
+      // (α)): resolved HERE, at dispatch, from the emitter's sealed tx —
+      // see #lt1AppendingWave. Unknown (the emitter never sealed, or
+      // sealed nothing) records `null`: the copy's own seal is then
+      // refused, and the durable entry — if it ever lands — is the
+      // drain's to deliver.
+      this.#lt1AppendingWave.set(
+        tx,
+        this.#waveByTx.get(info.lt1.emitterTx) ?? null,
+      );
+    }
     if (info.streamEntry !== undefined) {
       // Phase 3 (events.md §4): the entry's `consequenced` mark rides
       // the handler's OWN transaction — sealed with its consequences,
@@ -2914,6 +2982,39 @@ export class SpaceServer implements TransactionSealDestination {
    * commit ONE derived transaction carrying the wave's writes, the
    * watermark doc write, and `derivedThrough`.
    */
+  /**
+   * The LT1 leftover PURGE (stage C build W3, (α1); events.md §4's RULED
+   * sentence: "the serving loop purges unrun in-process leftovers at the
+   * flush deadline"): synchronously at the deadline decision — before the
+   * scheduler's next turn — every scheduler-QUEUED event that is an LT1
+   * same-space in-process copy (`served !== undefined &&
+   * served.streamEntry === undefined`; a plain in-process event on the
+   * serving runtime carries no `served` and is never purged; the drain's
+   * copies carry a `streamEntry`) and has not started running is removed.
+   * No notice lands on its durable entry (the copy carries no failure
+   * hook and no commit callback — it could never mark), the entry stays
+   * pending in the store, and the next drain delivers it ONCE with a
+   * `streamEntry`. A copy already RUNNING at the deadline is out of the
+   * queue's reach; `seal()`'s late-seal refusal (α1b) catches it when it
+   * completes outside this wave. Counted `events.lt1LeftoversPurged`.
+   */
+  #purgeLt1Leftovers(runtime: Runtime): void {
+    const purged = runtime.scheduler.purgeQueuedEvents(
+      (event) =>
+        event.served !== undefined && event.served.streamEntry === undefined,
+      "LT1 in-process leftover purged at the flush deadline: its durable " +
+        "entry is the truth and the next drain delivers it with a " +
+        "streamEntry (events.md §4)",
+    );
+    if (purged > 0) {
+      this.#options.stats.events.lt1LeftoversPurged += purged;
+      logger.debug?.("lt1-leftovers-purged", () => [
+        `space ${this.#options.space}: purged ${purged} LT1 in-process ` +
+        "leftover(s) at the flush deadline; the drain delivers them",
+      ]);
+    }
+  }
+
   async #waveCycle(): Promise<void> {
     const runtime = this.#runtime;
     if (runtime === undefined || !this.#active) return;
@@ -3016,11 +3117,13 @@ export class SpaceServer implements TransactionSealDestination {
         ]);
         if (step === "deadline") {
           exhausted = true;
+          this.#purgeLt1Leftovers(runtime);
           break;
         }
         if (runtime.scheduler.isIdle()) break;
         if (Date.now() >= deadline) {
           exhausted = true;
+          this.#purgeLt1Leftovers(runtime);
           break;
         }
       }
@@ -3270,6 +3373,7 @@ export class SpaceServer implements TransactionSealDestination {
       ]);
     }
     stats.supersededWrites += outcome.supersededWrites;
+    stats.events.orphanDeliveriesRefused += outcome.orphanDeliveriesRefused;
     // Phase 3: a REQUEUED event's consequence contribution was rolled
     // back whole — its entry stays unconsequenced and durable, so the
     // next wave's scan re-finds and re-runs it (serving-loop.md §3d's

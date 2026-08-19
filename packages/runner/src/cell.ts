@@ -1795,7 +1795,16 @@ export class CellImpl<T extends FabricValue>
             // (review 2026-08-11 M2): the C8d fold keys on it, and
             // without the thread a cascade child COMMITTED while its
             // requeued parent re-emitted under a fresh id — the
-            // orphan-consequence double.
+            // orphan-consequence double. The EMITTER's transaction rides
+            // as `lt1.emitterTx` (stage C build W3, (α); events.md §4's
+            // RULED sentence): its seal chooses the wave that carries
+            // the entry, and this copy completes in THAT wave or not at
+            // all — a copy the flush deadline leaves queued is purged at
+            // the deadline, a copy still running at the deadline is
+            // refused at the seal (it would commit unmarked in the next
+            // wave beside the drain's marked copy — the lunch gate's
+            // vote-toggle double); either way the durable entry is the
+            // truth and the drain delivers it ONCE, with a streamEntry.
             this.runtime.scheduler.queueEvent(
               resolvedToValueLink,
               event,
@@ -1814,6 +1823,7 @@ export class CellImpl<T extends FabricValue>
                   ...(context.eventId !== undefined
                     ? { parentEventId: context.eventId }
                     : {}),
+                  lt1: { emitterTx: this.tx },
                 },
               },
             );

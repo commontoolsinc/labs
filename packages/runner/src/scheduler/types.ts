@@ -202,6 +202,14 @@ export interface TriggerTraceEntry {
   triggered: TriggerTraceActionRecord[];
 }
 
+/** The `reason.message` of the seal-destination refusal an LT1
+ * in-process copy receives when it seals OUTSIDE its appending wave
+ * (server-execution v2 stage C build W3, (α); events.md §4). The
+ * scheduler's event dispatch recognizes it to settle the copy QUIETLY:
+ * the refusal is the invariant working, not a failed commit — the
+ * durable entry is the truth and the drain delivers it. */
+export const LT1_LATE_SEAL_REFUSED = "lt1-late-seal-refused";
+
 /** The serving drain's per-event carriage (see QueuedEvent.served). */
 export type ServedEventDispatch = {
   firedAt?: { user?: string; session?: string };
@@ -216,6 +224,18 @@ export type ServedEventDispatch = {
    * eventId to fold on; a requeued derivation withdraws the entry
    * with its own contribution). */
   parentEventId?: string;
+  /** The LT1 same-space in-process copy's APPENDING-WAVE identity
+   * (server-execution v2 stage C build W3, (α); events.md §4's RULED
+   * one-entry-one-completed-run sentence): the EMITTING run's
+   * transaction. Its seal chose the wave that carries this event's
+   * durable entry, so the copy must COMPLETE (seal) into that same wave
+   * or not at all — the SpaceServer's seal destination refuses a copy
+   * sealing into any other wave (`events.lt1LateSealsRefused`), and
+   * the durable entry is then the truth the drain re-runs WITH a
+   * `streamEntry`. Present only on cell.ts's LT1 emission (a
+   * `streamEntry`-less served copy); absent on the drain's copies and
+   * everywhere client-side. */
+  lt1?: { emitterTx: IExtendedStorageTransaction };
   onFailure?: (
     outcome: {
       /** `error`: the handler THREW — the error is the consequence

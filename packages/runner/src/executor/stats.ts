@@ -251,6 +251,34 @@ export type ServingLoopStats = {
      * that grows without `processed` settling names a drain copy that
      * never completes. */
     drainInFlightSkips: number;
+    /** Stage C build W3, (α1) — events.md §4's RULED one-entry-one-
+     * completed-run sentence: LT1 same-space in-process copies (`served
+     * !== undefined && served.streamEntry === undefined`) the flush
+     * deadline found still QUEUED and purged synchronously at the
+     * deadline decision. No notice lands on the durable entry (the copy
+     * carries no failure hook); the entry stays pending and the next
+     * drain delivers it ONCE, with a `streamEntry`. Routine under short
+     * waves; grows with `wavesBudgetExhausted`. */
+    lt1LeftoversPurged: number;
+    /** Stage C build W3, (α1b) — the in-flight residue the purge cannot
+     * reach: LT1 in-process copies that were RUNNING at the deadline and
+     * sealed OUTSIDE their appending wave (the wave their emitter sealed
+     * into), refused at the seal destination before entering any wave.
+     * Their consequences never commit; the drain's copy of the same
+     * entry is the one completed run. A non-zero count is the sentence
+     * working (the lunch gate's vote-toggle double was exactly this copy
+     * committing unmarked beside the drain's); a count that grows
+     * without `processed` settling names a handler whose in-process
+     * copy keeps missing its wave. */
+    lt1LateSealsRefused: number;
+    /** Stage C build W3, (α3) — the orphan REFUSAL (events.md §4's third
+     * clause): event-handler runs of an LT1 cascade whose durable entry
+     * rode an emitter write the wave WITHDREW (a derivation's superseded
+     * per-doc drop, a dropped-whole or requeued emitter) — the entry
+     * never lands and nothing re-emits it, so the run's consequences are
+     * withdrawn rather than committed with zero durable entries behind
+     * them. Counted per refused contribution. */
+    orphanDeliveriesRefused: number;
   };
   memo: { hits: number; misses: number; inflight: number };
   outbox: {
@@ -311,6 +339,9 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     coalescedPerWaveMax: 0,
     skippedIdempotent: 0,
     drainInFlightSkips: 0,
+    lt1LeftoversPurged: 0,
+    lt1LateSealsRefused: 0,
+    orphanDeliveriesRefused: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
   outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },

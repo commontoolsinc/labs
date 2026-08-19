@@ -399,6 +399,13 @@ export type ServerRunInfo = {
    * same-transaction atomicity events.md §4 requires; a requeued
    * contribution takes its mark with it). */
   streamEntry?: { sidecarId: string; index: number; seq: number };
+  /** The LT1 same-space in-process copy's emitter transaction
+   * (ServedEventDispatch.lt1; stage C build W3, (α)): the SpaceServer's
+   * stamper resolves it to the copy's APPENDING wave (the wave the
+   * emitter sealed into) and refuses the copy's own seal into any
+   * other wave (events.md §4). Absent on the drain's
+   * `streamEntry`-bearing copies and on every client-side event. */
+  lt1?: { emitterTx: IExtendedStorageTransaction };
 };
 
 /**

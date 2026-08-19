@@ -2728,7 +2728,11 @@ export class Scheduler {
     this.queueExecution();
   }
 
-  private dropEvent(event: QueuedEvent, reason: string): void {
+  private dropEvent(
+    event: QueuedEvent,
+    reason: string,
+    options: { quiet?: boolean } = {},
+  ): void {
     if (this.headEventLoadPark?.eventId === event.id) {
       this.headEventLoadPark = null;
     }
@@ -2745,7 +2749,36 @@ export class Scheduler {
       },
       event,
       reason,
+      "dropped",
+      options,
     );
+  }
+
+  /**
+   * Remove every QUEUED event matching `predicate` — queued, held at the
+   * head for a load, or mid-presync at the head, never one whose
+   * dispatch has shifted it off the queue — through the pre-dispatch
+   * drop chokepoint (`dropQueuedEvent`: lineage released, the final-
+   * outcome guard honored, a head dispatch parked in presync bails when
+   * it finds itself no longer at the head). Returns how many were
+   * removed. Server-execution v2 stage C build W3, (α1): the serving
+   * loop calls this at its flush-deadline decision to purge the LT1
+   * in-process leftovers (`served !== undefined && served.streamEntry
+   * === undefined`) whose wave is closing — the durable entry is the
+   * truth and the next drain re-runs it WITH a `streamEntry`
+   * (events.md §4). Quiet: the purge is routine and counted
+   * (`events.lt1LeftoversPurged`), not a dropped-event warning. The OFF
+   * arm never calls it.
+   */
+  purgeQueuedEvents(
+    predicate: (event: QueuedEvent) => boolean,
+    reason: string,
+  ): number {
+    const matches = this.eventQueue.filter(predicate);
+    for (const event of matches) {
+      this.dropEvent(event, reason, { quiet: true });
+    }
+    return matches.length;
   }
 
   private isHeadEventLoadParked(event: QueuedEvent): boolean {

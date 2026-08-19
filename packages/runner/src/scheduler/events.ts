@@ -41,12 +41,13 @@ import {
   trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
 } from "./reactivity.ts";
-import type {
-  Action,
-  EventHandler,
-  EventPreflightTraceContext,
-  QueuedEvent,
-  ReactivityLog,
+import {
+  type Action,
+  type EventHandler,
+  type EventPreflightTraceContext,
+  LT1_LATE_SEAL_REFUSED,
+  type QueuedEvent,
+  type ReactivityLog,
 } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -169,8 +170,15 @@ function notifyEventDropped(
   },
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
+  options: { quiet?: boolean } = {},
 ): void {
-  logger.warn("scheduler", reason, { eventLink: args.eventLink });
+  if (options.quiet === true) {
+    // A routine, counted pre-dispatch removal (the serving loop's LT1
+    // leftover purge, stage C build W3): debug, not warn.
+    logger.debug("scheduler", () => [reason, { eventLink: args.eventLink }]);
+  } else {
+    logger.warn("scheduler", reason, { eventLink: args.eventLink });
+  }
   // The serving drain's terminal arms (events.md §5): `dropped` — no
   // runnable handler, the drain writes the dropped-event notice as the
   // event's consequence and advances the stream past it (non-wedging);
@@ -212,6 +220,7 @@ export function dropQueuedEvent(
   event: QueuedEvent,
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
+  options: { quiet?: boolean } = {},
 ): void {
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
@@ -220,7 +229,7 @@ export function dropQueuedEvent(
   }
   if (event.finalOutcomeNotified) return;
   event.finalOutcomeNotified = true;
-  notifyEventDropped(state, event, reason, servedKind);
+  notifyEventDropped(state, event, reason, servedKind, options);
 }
 
 function findEventHandler(
@@ -1218,6 +1227,10 @@ export async function dispatchQueuedEvent(state: {
     ...(served?.streamEntry !== undefined
       ? { streamEntry: served.streamEntry }
       : {}),
+    // The LT1 in-process copy's appending-wave identity (stage C build
+    // W3, (α)): the emitter's transaction, resolved by the SpaceServer's
+    // stamper to the wave that carries this event's durable entry.
+    ...(served?.lt1 !== undefined ? { lt1: served.lt1 } : {}),
   });
   if (queuedEvent.originTx !== undefined) {
     const originLocalSeq = state.getOriginLocalSeq(
@@ -1397,6 +1410,24 @@ export async function dispatchQueuedEvent(state: {
     // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
     // waits on without blocking the scheduler loop here.
     const handleCommitResult = (error: EventCommitError | undefined): void => {
+      if (
+        served !== undefined && error !== undefined &&
+        isLt1LateSealRefusal(error)
+      ) {
+        // The serving loop REFUSED this LT1 in-process copy's seal
+        // because it completed outside its appending wave (stage C
+        // build W3, (α); events.md §4's one-entry-one-completed-run
+        // sentence): the invariant working, not a failed commit — the
+        // durable entry is the truth and the drain delivers it with a
+        // streamEntry. Settle the copy quietly (no retry, no warn; the
+        // SpaceServer counted it — `events.lt1LateSealsRefused`).
+        logger.debug("lt1-late-seal-refused", () => [
+          `LT1 in-process copy of ${queuedEvent.id} sealed outside its ` +
+          "appending wave and was refused; the drain delivers the entry",
+        ]);
+        runFinalCommitCallback();
+        return;
+      }
       if (served !== undefined && error !== undefined) {
         logger.warn("served-event-commit-failed", () => [
           `served event ${queuedEvent.id} commit failed`,
@@ -1670,6 +1701,14 @@ type CommitDisposition =
  * way — a stale basis is bounded by the retry window, and a non-stale-basis
  * rejection drops on the first attempt.
  */
+/** Whether a served event's commit error is the serving loop's
+ * LT1-late-seal refusal (stage C build W3, (α)) — carried as the
+ * `reason` Error's message, the sentinel `LT1_LATE_SEAL_REFUSED`. */
+function isLt1LateSealRefusal(error: EventCommitError): boolean {
+  const reason = (error as { reason?: unknown }).reason;
+  return reason instanceof Error && reason.message === LT1_LATE_SEAL_REFUSED;
+}
+
 function classifyCommitDisposition(
   error: { name?: string } | undefined,
   queuedEvent: QueuedEvent,

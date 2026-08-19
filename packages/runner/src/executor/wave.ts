@@ -130,6 +130,16 @@ export interface WaveRunContext {
    * parent folds this contribution into the requeue set (§3d; the
    * model's C8d rollback closure). */
   parentEventId?: string;
+  /** This handler run is the LT1 same-space IN-PROCESS copy of an event
+   * some contribution of this wave emitted (cell.ts's serving-arm send;
+   * stage C build W3, (α3)): its durable entry rides the EMITTER's
+   * sealed write and the batch marks it there — so an LT1 copy whose
+   * emitter write this wave withdraws, or whose emitter never reached
+   * the wave at all (a refused or failed emitter seal), has NO durable
+   * entry behind it and is refused as an orphan (events.md §4's third
+   * clause). Never set on a drain copy (which carries a `streamEntry`)
+   * or a plain in-process event on the serving runtime. */
+  lt1?: true;
   /** The scope INSTANCE this run ran as, for basis rows'
    * action_scope_key. Typed as the shared `ScopeKey` vocabulary so a
    * caller cannot hand the basis index a scope NAME or a hand-rolled
@@ -563,11 +573,63 @@ export interface WaveCommitOutcome {
   requeuedEventIds: string[];
   /** Events whose consequences committed (the commit's `consequenceOf`). */
   committedEventIds: string[];
+  /** Event-handler contributions REFUSED as orphans (server-execution v2
+   * stage C build W3, (α3); events.md §4's third clause): runs of an
+   * LT1 same-wave cascade whose durable entry rode an emitter write
+   * this wave withdrew — a derivation's superseded per-doc drop (re-arms
+   * nothing), a dropped-whole or requeued emitter — so the entry never
+   * lands and nothing re-emits it. Withdrawn, disposition `dropped`,
+   * NOT reported as requeued (there is no entry to retry); the serving
+   * loop's `events.orphanDeliveriesRefused` feeds from this. */
+  orphanDeliveriesRefused: number;
   dispositions: ContributionDisposition[];
 }
 
 const docInstanceKey = (id: string, scopeKey: string): string =>
   `${id} ${scopeKey}`;
+
+/** The eventIds of the seq-LESS stream entries one sealed op appends —
+ * the NEW events a wave carries (an engine-stamped entry carries its
+ * seq; a rewrite of one needs no declaration). Mirrors the batch build's
+ * entry-list walk (a `set` of the whole doc; a `patch` appending,
+ * adding, or replacing `/value/entries`); read-only — it never clones
+ * or marks. */
+function seqLessStreamEntryEventIds(operation: Operation): string[] {
+  const lists: unknown[][] = [];
+  if (operation.op === "set") {
+    const inner = (operation.value as { value?: { entries?: unknown[] } })
+      ?.value;
+    if (Array.isArray(inner?.entries)) lists.push(inner.entries);
+  } else if (operation.op === "patch") {
+    for (const patch of operation.patches) {
+      if (
+        (patch.op === "append" || patch.op === "add-unique") &&
+        patch.path === "/value/entries" && Array.isArray(patch.values)
+      ) {
+        lists.push(patch.values as unknown[]);
+      } else if (
+        (patch.op === "add" || patch.op === "replace") &&
+        patch.path === "/value/entries" &&
+        Array.isArray((patch as unknown as { value?: unknown }).value)
+      ) {
+        lists.push((patch as unknown as { value: unknown[] }).value);
+      }
+    }
+  }
+  const ids: string[] = [];
+  for (const list of lists) {
+    for (const candidate of list) {
+      const entry = candidate as { eventId?: unknown; seq?: unknown } | null;
+      if (
+        entry !== null && typeof entry === "object" &&
+        typeof entry.eventId === "string" && entry.seq === undefined
+      ) {
+        ids.push(entry.eventId);
+      }
+    }
+  }
+  return ids;
+}
 
 interface PendingAssembly {
   /** Undefined until the post-seal emptiness check: a tx with writes and
@@ -1313,6 +1375,7 @@ export class WaveAccumulator
       dependencyDroppedWrites: 0,
       requeuedEventIds: [],
       committedEventIds: [],
+      orphanDeliveriesRefused: 0,
       dispositions: this.#contributions.map(() => ({ kind: "committed" })),
     };
 
@@ -1381,6 +1444,17 @@ export class WaveAccumulator
     const conflicted = new Set<string>();
     const requeued = new Set<number>();
     const droppedWhole = new Set<number>();
+    /** Event-handler contributions refused as ORPHANS (stage C build W3,
+     * (α3)) — a subset of `droppedWhole`, kept apart for the
+     * disposition message and the outcome count. */
+    const orphanRefused = new Set<number>();
+    /** eventId → the contribution (and its home sidecar doc-instance
+     * key) whose sealed ops APPEND that event's durable entry in THIS
+     * wave — the LT1 same-wave emitters (cell.ts's serving-arm send
+     * writes the entry into the emitting run's own tx). The orphan arm
+     * of the requeue closure keys on it: a cascade child whose emitter
+     * write is withdrawn has no durable entry behind it. */
+    const emitterOf = this.#lt1EmittersByEventId();
     /** per contribution: home doc-instance keys whose ops are dropped */
     const droppedDocs: Set<string>[] = this.#contributions.map(() => new Set());
     /** per contribution: conflicted docs whose non-re-derivable ops
@@ -1556,9 +1630,55 @@ export class WaveAccumulator
             byLocalSeq,
             readSawWithdrawnWrite,
           ) || readOnlyReadSawWithdrawal(contribution);
-          if (!parentRequeued && !eventRequeued && !readWithdrawn) continue;
+          // The ORPHAN arm (stage C build W3, (α3); events.md §4's third
+          // clause, RULED 2026-08-18): an event-handler run of an LT1
+          // same-wave cascade whose durable entry rode an emitter write
+          // this wave WITHDRAWS — a DERIVATION emitter's superseded
+          // per-doc drop (§3d: the drop re-arms nothing, so nothing ever
+          // re-emits the entry), a dropped-whole emitter, or a requeued
+          // emitter the parentEventId thread did not reach — has NO
+          // durable entry behind it. Delivering it would commit one
+          // consequence for zero entries: the invariant broken from the
+          // other side. REFUSED: withdrawn whole, disposition `dropped`,
+          // never reported as requeued (no entry exists to retry), and
+          // its own readers and cascade grandchildren fold through the
+          // same closure. (A requeued EVENT-HANDLER emitter reaches its
+          // children first through `parentRequeued` — C8d — and those
+          // children requeue with it; this arm covers the emitters C8d
+          // cannot name.)
+          const lt1Copy = contribution.context.kind === "event-handler" &&
+            contribution.context.lt1 === true &&
+            contribution.context.eventId !== undefined;
+          const emitter = lt1Copy
+            ? emitterOf.get(contribution.context.eventId!)
+            : undefined;
+          // Orphaned when the wave holds NO contribution appending its
+          // entry (the emitter's own seal was refused or failed — a late
+          // copy never reaches a wave, α1b) or when the emitter's
+          // contribution, or exactly its sidecar write, is withdrawn.
+          const emitterWithdrawn = lt1Copy &&
+            (emitter === undefined ||
+              (emitter.index !== idx &&
+                (requeued.has(emitter.index) ||
+                  droppedWhole.has(emitter.index) ||
+                  droppedDocs[emitter.index].has(emitter.docKey))));
+          if (
+            !parentRequeued && !eventRequeued && !readWithdrawn &&
+            !emitterWithdrawn
+          ) {
+            continue;
+          }
           if (contribution.context.kind === "event-handler") {
-            requeued.add(idx);
+            if (
+              emitterWithdrawn && !parentRequeued && !eventRequeued &&
+              !readWithdrawn
+            ) {
+              droppedWhole.add(idx);
+              orphanRefused.add(idx);
+              outcome.orphanDeliveriesRefused += 1;
+            } else {
+              requeued.add(idx);
+            }
           } else {
             droppedWhole.add(idx);
             outcome.dependencyDroppedWrites += this.#homeOpCount(
@@ -1696,6 +1816,7 @@ export class WaveAccumulator
           homeWrites,
           0,
           foreignSeqs,
+          orphanRefused,
         );
         return outcome;
       }
@@ -1731,6 +1852,7 @@ export class WaveAccumulator
           homeWrites,
           result.ok.seq,
           foreignSeqs,
+          orphanRefused,
         );
         outcome.seq = result.ok.seq;
         return outcome;
@@ -1933,6 +2055,35 @@ export class WaveAccumulator
       }
     }
     return true;
+  }
+
+  /** eventId → the contribution whose sealed HOME ops append that
+   * event's durable entry in this wave (a seq-LESS entry in a stream
+   * sidecar — the LT1 same-space emission, cell.ts's serving arm), with
+   * the sidecar's doc-instance key (the per-doc drop set's key). The
+   * same seq-less-entry detection the batch build uses to declare
+   * `eventAppends`; first writer wins (one entry, one emitter). Stage C
+   * build W3, (α3). */
+  #lt1EmittersByEventId(): Map<string, { index: number; docKey: string }> {
+    const emitters = new Map<string, { index: number; docKey: string }>();
+    for (const contribution of this.#contributions) {
+      const home = this.#homeSealed(contribution);
+      if (home === undefined) continue;
+      for (const operation of home.sealed.commit.operations) {
+        if (operation.op === "sqlite" || operation.op === "delete") continue;
+        if (!operation.id.startsWith(STREAM_ENTRIES_DOC_PREFIX)) continue;
+        const docKey = docInstanceKey(
+          operation.id,
+          this.#scopeKeyFor(operation.scope, contribution.context),
+        );
+        for (const eventId of seqLessStreamEntryEventIds(operation)) {
+          if (!emitters.has(eventId)) {
+            emitters.set(eventId, { index: contribution.index, docKey });
+          }
+        }
+      }
+    }
+    return emitters;
   }
 
   /** Whether this contribution READ a sealed write that is being
@@ -2474,6 +2625,7 @@ export class WaveAccumulator
     >,
     homeSeq: number,
     foreignSeqs: ReadonlyMap<string, number>,
+    orphanRefused: ReadonlySet<number> = new Set(),
   ): void {
     this.#reportRequeuedEvents(outcome, (idx) => requeued.has(idx));
     for (const contribution of this.#contributions) {
@@ -2496,9 +2648,14 @@ export class WaveAccumulator
         outcome.dispositions[idx] = { kind: "dropped" };
         this.#withdraw(
           contribution,
-          "pure derivation dropped: derived from a withdrawn contribution; " +
-            "its own reads re-run it when fresh state lands " +
-            "(serving-loop.md §3d)",
+          orphanRefused.has(idx)
+            ? "orphan delivery refused: the event's durable entry rode an " +
+              "emitter write this wave withdrew, so no entry exists behind " +
+              "this run and nothing re-emits it (events.md §4 — one " +
+              "durable entry, one completed run; stage C build W3, (α3))"
+            : "pure derivation dropped: derived from a withdrawn " +
+              "contribution; its own reads re-run it when fresh state " +
+              "lands (serving-loop.md §3d)",
         );
         continue;
       }
