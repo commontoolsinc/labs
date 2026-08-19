@@ -17,6 +17,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -91,10 +92,9 @@ export interface CustomFieldModuleInput {
   valueType: CustomFieldValueType | Default<"text">;
 }
 
-// Output interface with unknown for UI properties to prevent OOM (CT-1148)
 export interface CustomFieldModuleOutput {
-  [NAME]: unknown;
-  [UI]: unknown;
+  [NAME]: string;
+  [UI]: VNode;
   name: string;
   value: string;
   valueType: CustomFieldValueType;

@@ -169,12 +169,10 @@ export default pattern(() => {
 
   const assert_room_named_for_me = assert(() => room.myName === "Ada");
 
-  // Every remaining demo builds a tree. Two are checked for a tree rather than
-  // for text: bookmarks starts with an empty list and has no text of its own,
-  // and the mobile app demo declares its screen `unknown`, which reads back as
-  // an opaque reference rather than as the tree it holds.
+  // Every remaining demo builds a tree. Bookmarks is checked for a tree rather
+  // than for text: it starts with an empty list and has no text of its own.
   const assert_demos_render = assert(() =>
-    mobileApp[UI] != null &&
+    textContent(mobileApp[UI]).length > 0 &&
     textContent(chatbot[UI]).length > 0 &&
     textContent(cheeseboard[UI]).length > 0 &&
     textContent(aside[UI]).length > 0 &&
