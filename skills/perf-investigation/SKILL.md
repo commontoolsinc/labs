@@ -5,9 +5,12 @@ description: Investigate Common Fabric slowness end to end — measure it, attri
 
 # Performance Investigation
 
-For why we spend this time at all, and what we consider worth speeding up, read
-`docs/development/PERFORMANCE_PROGRAM.md`. This skill is the other half: how the
-investigation is actually run here, and what the answers have historically been.
+Two neighbours carry the halves this does not.
+`docs/development/PERFORMANCE_PROGRAM.md` is why we spend this time at all and
+what we consider worth speeding up. `docs/development/debugging/profiling.md` is
+the walkthrough — the steps in order, with the commands. This skill is the map
+they are read against: what each instrument reaches, what it is blind to, and
+what the answers here have historically turned out to be.
 
 ## A slow pattern is an instrument, not the defect
 
@@ -106,6 +109,56 @@ reading. A perf harness is otherwise throwaway — built for one investigation,
 driven by knobs nobody else needs, and not committed — so duplicating the parts
 that differ costs less than a seam every future scenario has to be bent through.
 
+## Narrowing, until a phase becomes a source
+
+A phase is a place to look, never an answer. "The seed phase costs four minutes"
+is where an investigation starts being useful, and stopping there produces a fix
+aimed at a symptom. Keep going until you can name the thing doing the work — a
+function, a read, a derivation that re-runs — and can say whether it is
+expensive or merely frequent.
+
+The instruments hand off to each other at each step down, and the handoff is the
+part worth knowing:
+
+- **Logger phases say which phase.** Hierarchical keys are what make this a
+  descent rather than a single reading: a phase that costs four minutes splits
+  into named subphases, and one of those is usually most of it.
+- **`performance.mark` and `performance.measure` say where that phase sits in
+  the profile.** A CPU profile is samples over a window; it has no idea what a
+  phase is. Bracketing a phase with marks gives you its exact interval, so the
+  profile can be read for that window instead of averaged over the whole run —
+  which is the difference between "resolveLink is 30% of the run" and
+  "resolveLink is 90% of the phase that regressed". `console.timeStamp` at the
+  same boundaries puts the marker on a DevTools timeline, where the zoom is a
+  drag rather than an arithmetic exercise.
+- **Subphases say where a call explosion begins.** A count that is too high is
+  visible at the top, but the caller that multiplies it is not. Splitting the
+  phase until the count changes shape between two adjacent levels locates the
+  multiplication — the level where a count goes from proportional to the work to
+  proportional to the work squared is the one that introduced it.
+
+`withPhase` in `packages/cli/lib/test-runner.ts` is the worked example of the
+whole shape: hierarchical keys, a logger timer around the body, a mark at each
+boundary, a measure across the pair, and a `console.timeStamp` at each. Copy it
+into whatever you are narrowing.
+
+A logger constructed with `enabled: false` is quiet, not inert, and the
+difference decides where an investigation starts. `timeStart`, `timeEnd` and
+`time` record into per-key statistics without consulting that flag, and the
+counts behind the logging methods increment before it is checked — only the log
+lines are suppressed. So the timings for anything already wrapped are
+accumulating right now, and the first move is reading them rather than turning
+anything on.
+
+**You are done narrowing when you can write a benchmark.** That is the honest
+test, and it is worth holding to: a source you understand can be provoked
+directly, and one you cannot provoke is still a hypothesis. Build the benchmark
+before the fix, confirm it moves with the real measurement rather than merely
+being fast, and keep it — a benchmark that correlates with the thing users feel
+is what defends the fix afterwards, and it often lands as part of it. Where a
+source genuinely cannot be isolated that way, say so rather than skipping the
+step quietly.
+
 ## Count against average
 
 Every logger row carries `count`, `average`, `p95`, `max`, and `total`, and the
@@ -114,6 +167,26 @@ is a different bug from one whose `average` grew, and they have disjoint fixes.
 Read them before forming a theory. Rows are ranked by `total` and truncated, so
 a row that measures set sizes rather than milliseconds will sort above real
 timings and evict them — read those by name instead of widening the summary.
+
+## Two ways to be slow, at every level
+
+A call costs what it costs and happens as often as it happens, so every finding
+has two fixes available: make the work cheaper, or ask for it less. They are not
+alternatives to choose between up front — which one is available is a fact about
+the code you have not read yet, and investigations that assume one skip the
+larger win about half the time.
+
+Both live at every level of the stack, and neither level is the natural home of
+this work. A leaf at the edge — resolving a link, walking a schema, hashing a
+value — can often be made cheaper for every caller at once, which is the widest
+possible fix and the one that closes a footgun rather than an instance. The
+caller can often stop asking: hoist the read, declare a narrower one, split a
+derivation so the half that cannot have changed does not re-run. A pattern
+usually surfaces the second; the first is usually a runtime change, and is the
+reason this work does not end at the pattern.
+
+Look for both before choosing. The cheapest real fix is frequently the one at
+the other end of the stack from where the symptom appeared.
 
 ## Where cost comes from in this runtime
 
