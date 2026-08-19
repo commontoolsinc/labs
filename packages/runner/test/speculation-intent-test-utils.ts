@@ -20,18 +20,23 @@ import type {
   StorageNotification,
 } from "../src/storage/interface.ts";
 
+/** The stub replica: the raw read the listener needs, plus whatever seal
+ * seam members the test passed in (`scriptedIntentManager({ replica })`). */
+export type ScriptedReplica = {
+  getDocument(
+    id: string,
+    scope?: string,
+  ): { value: StreamEventsDocValue } | undefined;
+  [member: string]: unknown;
+};
+
 export type ScriptedIntentManager = {
   /** The stub the overlay is constructed with (`runtime.storageManager`). */
   manager: {
     subscribe(subscription: IStorageNotification): void;
     unsubscribe(subscription: IStorageNotification): void;
     open(space: MemorySpace): {
-      replica: {
-        getDocument(
-          id: string,
-          scope?: string,
-        ): { value: StreamEventsDocValue } | undefined;
-      };
+      replica: ScriptedReplica;
       sync(id: string, selector: unknown, scope?: string): Promise<unknown>;
     };
   };
@@ -76,7 +81,14 @@ export type ScriptedIntentManager = {
   reset(space: MemorySpace): void;
 };
 
-export const scriptedIntentManager = (): ScriptedIntentManager => {
+export const scriptedIntentManager = (options: {
+  /** Extra members merged onto `open(space).replica` — the SEAL seam
+   * (`sealNative`, `speculationRetirementView`, `ackedSeqOf`, the
+   * observer fields) for pins that register overlay ENTRIES and then
+   * drive their retirement through the mark path (stage C W2.1's
+   * cascade-echo pins). Absent for the listener-only pins. */
+  replica?: Record<string, unknown>;
+} = {}): ScriptedIntentManager => {
   const subscribers = new Set<IStorageNotification>();
   const docs = new Map<string, { value: StreamEventsDocValue }>();
   const syncs: string[] = [];
@@ -84,6 +96,21 @@ export const scriptedIntentManager = (): ScriptedIntentManager => {
   let depth = 0;
   let nextSyncError: unknown = undefined;
   const key = (space: MemorySpace, id: string) => `${space}\0${id}`;
+  const replicas = new Map<MemorySpace, ScriptedReplica>();
+  const replicaFor = (space: MemorySpace): ScriptedReplica => {
+    let replica = replicas.get(space);
+    if (replica === undefined) {
+      replica = {
+        ...(options.replica ?? {}),
+        getDocument: (id: string, _scope?: string) => {
+          reads.push(key(space, id));
+          return docs.get(key(space, id));
+        },
+      };
+      replicas.set(space, replica);
+    }
+    return replica;
+  };
   const dispatch = (notification: StorageNotification) => {
     depth += 1;
     try {
@@ -108,12 +135,10 @@ export const scriptedIntentManager = (): ScriptedIntentManager => {
       subscribers.delete(subscription);
     },
     open: (space) => ({
-      replica: {
-        getDocument: (id: string, _scope?: string) => {
-          reads.push(key(space, id));
-          return docs.get(key(space, id));
-        },
-      },
+      // ONE replica object per space (cached): the overlay installs its
+      // observer wakes by assignment on the replica it opened, so a
+      // fresh object per `open` would swallow them.
+      replica: replicaFor(space),
       sync: (id: string, _selector: unknown, scope?: string) => {
         syncs.push(`${space}\0${id}\0${scope ?? ""}`);
         if (nextSyncError !== undefined) {

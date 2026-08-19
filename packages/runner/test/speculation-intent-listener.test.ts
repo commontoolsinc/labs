@@ -46,6 +46,12 @@
 //     (mutation: record only the first wanted change per notification);
 // MIN-4. the sidecar watch is re-kicked on every fire, so a transient
 //     first-sync failure heals (mutation: kick once per sidecar state).
+// W2.1 (the cascade-echo stranding, W0 l3's "duplicate join" as W3
+//     root-caused it): `retireIntent(P)` also retires P's CLIENT CASCADE
+//     descendants — pins W2.1-1…4 (scripted, the mark path; see the
+//     section header below) and the W2.1 e2e pin in the end-to-end
+//     describe (the lunch join shape through the real path: RED on the
+//     tip, the echo stands forever).
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -59,11 +65,15 @@ import {
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
+  IExtendedStorageTransaction,
   IStorageNotification,
   MemorySpace,
 } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
-import { SpeculationOverlayDestination } from "../src/speculation/overlay-destination.ts";
+import {
+  SpeculationOverlayDestination,
+  stampSpeculationRunContext,
+} from "../src/speculation/overlay-destination.ts";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import {
@@ -533,6 +543,348 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
   });
 });
 
+// ─── W2.1: the cascade-echo retirement (scripted; the MARK path) ────────
+//
+// W0 l3's "duplicate join", root-caused by W3 as a CLIENT cascade-echo
+// stranding (speculation.md §4 step 2's jobless-cascade consequence,
+// applied on ARRIVAL): the click handler's speculative run sends to the
+// join stream; that cascade child's echo seals under a client-minted id
+// (`mintEventId(link, originTx)`) the server's own LT1 mint never
+// equals, so no mark names it, and its frame-caused entity doc (`$event:
+// tx.dispatchedEventId`) is an id the server never writes, so the
+// sweep's arrival gate never passes — spec-Alice stood beside the
+// confirmed Alice forever. `retireIntent(P)` now ALSO retires every live
+// entry whose cascade thread (`parentEventId`, recorded at seal) reaches
+// P. Pins, red-first (each with the mutation that kills it):
+//  W2.1-1. a cascade child's echo is retired when P's consequence mark
+//          arrives (mutation: the cascade arm removed — `#cascadeReaches`
+//          always false → the child's entry stands);
+//  W2.1-2. an entry with an UNRELATED parent, a root echo of another
+//          intent, and a cascade of an untracked emitter are NOT retired
+//          by P's mark (mutation: the walk accepts any parented entry);
+//  W2.1-3. the late-echo rule still holds around it: a LATE child of P
+//          and a LATE grandchild of the retired child drop at seal, and a
+//          grandchild behind a SILENT child (one that wrote nothing — no
+//          entry of its own) is reached through the thread (mutation:
+//          the link is not recorded for a no-write child → the grandchild
+//          stands);
+//  W2.1-4. the FLICKER witness counts a cascade echo retired while no doc
+//          it wrote had moved past its basis, and not one whose written
+//          doc did (mutation: the witness reads `>=` → the unmoved doc
+//          counts as arrived);
+//  W2.1-5. OFF arm unchanged — pin 11's shape stands: the overlay does
+//          not exist OFF, and every W2.1 line lives inside it.
+
+const W21_SIDECAR = "of:stream-events:w21-click";
+
+/** A destination over the scripted seam WITH the seal seam: entries
+ * register through `sealNative`, the replica's retirement view reports
+ * per-doc confirmed seqs the test sets, and marks arrive as
+ * notifications (the production carrier). */
+const cascadeDestination = () => {
+  let nextLocalSeq = 10;
+  /** The confirmed read seq the NEXT seal reports (the entry's floor). */
+  let nextFloor = 40;
+  const confirmedSeqs = new Map<string, number>();
+  const verdicts = new Map<number, Promise<unknown>>();
+  const replica = {
+    sealNative: (
+      native: { operations: Array<Record<string, unknown>> },
+      _source: unknown,
+      verdict: Promise<unknown>,
+    ) => {
+      const localSeq = nextLocalSeq++;
+      verdicts.set(localSeq, verdict);
+      return {
+        localSeq,
+        commit: {
+          localSeq,
+          reads: {
+            confirmed: [{ id: "of:w21-basis", seq: nextFloor }],
+            pending: [],
+          },
+          operations: native.operations,
+        },
+        settled: verdict.then(() => undefined, () => undefined),
+      };
+    },
+    speculationRetirementView: (id: string) => ({
+      confirmedSeq: confirmedSeqs.get(id) ?? 0,
+      pendingLocalSeqs: [] as number[],
+    }),
+    ackedSeqOf: () => undefined,
+    speculationAckObserver: undefined as (() => void) | undefined,
+    speculationArrivalObserver: undefined,
+  };
+  const scripted = scriptedIntentManager({ replica });
+  const runtime = {
+    storageManager: scripted.manager,
+    edit: () => {
+      throw new Error("the intent path must not mint transactions");
+    },
+    getCellFromLink: () => ({ sink: () => () => {} }),
+  } as never;
+  const destination = new SpeculationOverlayDestination(runtime);
+  /** An event-handler echo's transaction: `writes` are whole-doc sets
+   * (the lunch shape: the list doc + the new user's entity doc); an
+   * empty list seals NOTHING (a child that only forwards). */
+  const echoOf = (
+    eventId: string,
+    options: { parentEventId?: string; writes: string[]; floor?: number },
+  ) => {
+    nextFloor = options.floor ?? 40;
+    const tx = {
+      tx: {
+        sourceAction: { name: "handler" },
+        sealInto: (collector: {
+          sealSpaceCommit: (
+            space: MemorySpace,
+            native: unknown,
+            source: unknown,
+          ) => Promise<unknown>;
+        }) =>
+          options.writes.length === 0
+            ? Promise.resolve({ ok: {} })
+            : collector.sealSpaceCommit(
+              SPACE,
+              {
+                operations: options.writes.map((id) => ({
+                  op: "set",
+                  id,
+                  scope: "space",
+                  value: { v: eventId },
+                })),
+                preconditions: [],
+              },
+              { sourceAction: { name: "handler" } },
+            ).then(() => ({ ok: {} })),
+      },
+    } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(tx, {
+      actionId: "handler",
+      kind: "event-handler",
+      eventId,
+      ...(options.parentEventId !== undefined
+        ? { parentEventId: options.parentEventId }
+        : {}),
+    });
+    return tx;
+  };
+  /** Land P's append, then its consequenced mark, as two notifications;
+   * `landed` sets the confirmed seqs the mark's frame carries (the
+   * server's cascade child landing in the same wave, or not). */
+  const seedAppend = (eventIds: string[]) => {
+    scripted.seed(SPACE, W21_SIDECAR, {
+      entries: eventIds.map((eventId, index) => ({
+        eventId,
+        stream: { id: "s", path: [] },
+        seq: index + 1,
+      })),
+    });
+  };
+  const markConsequenced = (index: number, landed: Record<string, number>) => {
+    for (const [id, seq] of Object.entries(landed)) confirmedSeqs.set(id, seq);
+    scripted.deliver(SPACE, W21_SIDECAR, (value) => {
+      value.entries![index].consequenced = true;
+    }, [["value", "entries", String(index), "consequenced"]]);
+  };
+  const verdictOf = async (localSeq: number) => {
+    const verdict = verdicts.get(localSeq);
+    return verdict === undefined ? undefined : await verdict;
+  };
+  return {
+    scripted,
+    destination,
+    echoOf,
+    seedAppend,
+    markConsequenced,
+    confirmedSeqs,
+    verdictOf,
+  };
+};
+
+describe("intent listener — W2.1 cascade-echo retirement (scripted; the jobless-cascade consequence on ARRIVAL)", () => {
+  it("W2.1-1: a cascade child's echo (client-minted id, parentEventId = P) is retired when P's consequence MARK arrives — the same `retireIntent` the mark reaches; P's own tracked intent resolves as before; the child's verdict is a superseded withdrawal; counted (mutation: the cascade arm removed → the child's entry stands forever)", async () => {
+    const {
+      destination,
+      echoOf,
+      seedAppend,
+      markConsequenced,
+      verdictOf,
+    } = cascadeDestination();
+    seedAppend(["evt-click"]);
+    destination.trackIntent(SPACE, W21_SIDECAR, "evt-click");
+    // The click's own run writes nothing (it only sends): no entry. Its
+    // cascade child — joinAs's echo — seals under a client-minted id with
+    // the click as its parent, writing the list doc AND the new user's
+    // entity doc (an id the server's run never writes).
+    expect(
+      (await destination.seal(echoOf("evt:client-key:0:of:join", {
+        parentEventId: "evt-click",
+        writes: ["of:users", "of:alice-client-entity"],
+      }))).ok,
+    ).toBeDefined();
+    expect(destination.entryCount(SPACE)).toBe(1);
+    expect(destination.pendingIntentCount).toBe(1);
+    // The click's consequence lands: its mark arrives in the frame that
+    // also carries the server's join (the list doc moved to seq 42 > the
+    // echo's basis 40).
+    markConsequenced(0, { "of:users": 42 });
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(0);
+    // The cascade echo is GONE — retired by its ancestor's consequence,
+    // not by any mark of its own (none exists) and not by arrival (the
+    // entity doc never arrives).
+    expect(destination.entryCount(SPACE)).toBe(0);
+    expect(destination.cascadeEchoRetirementCount).toBe(1);
+    expect(destination.cascadeEchoRetirementUnarrivedCount).toBe(0);
+    const verdict = await verdictOf(10) as {
+      withdrawn?: { superseded?: boolean };
+    };
+    expect(verdict?.withdrawn?.superseded).toBe(true);
+    destination.close();
+  });
+
+  it("W2.1-2: P's mark retires ONLY P's cascade — an entry with an unrelated parent, another intent's root echo, and a cascade of an untracked emitter all stand; the other intent's own mark then retires its own cascade (mutation: the walk accepts any parented entry → the unrelated cascade goes with P)", async () => {
+    const { destination, echoOf, seedAppend, markConsequenced } =
+      cascadeDestination();
+    seedAppend(["evt-p", "evt-q"]);
+    destination.trackIntent(SPACE, W21_SIDECAR, "evt-p");
+    destination.trackIntent(SPACE, W21_SIDECAR, "evt-q");
+    // P's cascade child; Q's root echo (Q's run wrote something itself);
+    // Q's cascade child; a cascade of an emitter nobody tracks (a
+    // derivation-sent event's handler echo — W0's "cascade-minted" case).
+    await destination.seal(echoOf("evt:c:0:p-child", {
+      parentEventId: "evt-p",
+      writes: ["of:p-list", "of:p-entity"],
+    }));
+    await destination.seal(echoOf("evt-q", { writes: ["of:q-own"] }));
+    await destination.seal(echoOf("evt:c:0:q-child", {
+      parentEventId: "evt-q",
+      writes: ["of:q-list", "of:q-entity"],
+    }));
+    await destination.seal(echoOf("evt:c:0:orphan-child", {
+      parentEventId: "evt:c:9:nobody",
+      writes: ["of:o-list"],
+    }));
+    expect(destination.entryCount(SPACE)).toBe(4);
+    markConsequenced(0, { "of:p-list": 42 });
+    await flushMicrotasks();
+    // Exactly P's cascade child went.
+    expect(destination.entryCount(SPACE)).toBe(3);
+    expect(destination.cascadeEchoRetirementCount).toBe(1);
+    expect(destination.pendingIntentCount).toBe(1);
+    // Q's mark: Q's own echo AND Q's cascade child go; the orphan stands.
+    markConsequenced(1, { "of:q-own": 43, "of:q-list": 43 });
+    await flushMicrotasks();
+    expect(destination.entryCount(SPACE)).toBe(1);
+    expect(destination.cascadeEchoRetirementCount).toBe(2);
+    expect(destination.pendingIntentCount).toBe(0);
+    destination.close();
+  });
+
+  it("W2.1-3: the late-echo rule holds around the arrival arm — a LATE child of P (sealing after P's mark) and a LATE grandchild of the retired child drop at seal; a grandchild behind a SILENT child (no writes → no entry) is reached through the thread recorded at the silent child's seal (mutation: the thread not recorded for a no-write child → the grandchild stands)", async () => {
+    const { destination, echoOf, seedAppend, markConsequenced } =
+      cascadeDestination();
+    seedAppend(["evt-p"]);
+    destination.trackIntent(SPACE, W21_SIDECAR, "evt-p");
+    // A SILENT child: forwards only, writes nothing — no entry, but the
+    // thread records child → P at its seal.
+    expect(
+      (await destination.seal(echoOf("evt:c:0:silent", {
+        parentEventId: "evt-p",
+        writes: [],
+      }))).ok,
+    ).toBeDefined();
+    expect(destination.entryCount(SPACE)).toBe(0);
+    // Its grandchild writes (the join), threaded to the silent child.
+    await destination.seal(echoOf("evt:c:0:grandchild", {
+      parentEventId: "evt:c:0:silent",
+      writes: ["of:g-list", "of:g-entity"],
+    }));
+    // And a direct child of P that wrote.
+    await destination.seal(echoOf("evt:c:1:child", {
+      parentEventId: "evt-p",
+      writes: ["of:c-list"],
+    }));
+    expect(destination.entryCount(SPACE)).toBe(2);
+    markConsequenced(0, { "of:g-list": 42, "of:c-list": 42 });
+    await flushMicrotasks();
+    // Both went: the direct child by its parentEventId, the grandchild
+    // through the silent link.
+    expect(destination.entryCount(SPACE)).toBe(0);
+    expect(destination.cascadeEchoRetirementCount).toBe(2);
+    // LATE echoes now: a child of P sealing after P is terminal drops at
+    // seal (the T2 rule), and so does a grandchild of the RETIRED child —
+    // the retired child's id joined the jobless set.
+    const dropsBefore = destination.lateEchoDropCount;
+    await destination.seal(echoOf("evt:c:2:late-child", {
+      parentEventId: "evt-p",
+      writes: ["of:late-list"],
+    }));
+    await destination.seal(echoOf("evt:c:0:late-grandchild", {
+      parentEventId: "evt:c:1:child",
+      writes: ["of:late-g-list"],
+    }));
+    expect(destination.lateEchoDropCount).toBe(dropsBefore + 2);
+    expect(destination.entryCount(SPACE)).toBe(0);
+    // And a fresh intent's cascade still registers (nothing over-broad).
+    seedAppend(["evt-p", "evt-r"]);
+    destination.trackIntent(SPACE, W21_SIDECAR, "evt-r");
+    await destination.seal(echoOf("evt:c:0:r-child", {
+      parentEventId: "evt-r",
+      writes: ["of:r-list"],
+    }));
+    expect(destination.entryCount(SPACE)).toBe(1);
+    destination.close();
+  });
+
+  it("W2.1-4: the FLICKER witness — a cascade echo retired while NO doc it wrote had moved past its basis counts `unarrived` (the purged-LT1-leftover shape: the server's child lands a wave after its parent's consequence); one whose written doc moved does not (mutation: the witness reads `>=` → the unmoved doc reads as arrived)", async () => {
+    const {
+      destination,
+      echoOf,
+      seedAppend,
+      markConsequenced,
+      confirmedSeqs,
+    } = cascadeDestination();
+    seedAppend(["evt-p1", "evt-p2"]);
+    destination.trackIntent(SPACE, W21_SIDECAR, "evt-p1");
+    destination.trackIntent(SPACE, W21_SIDECAR, "evt-p2");
+    // Both children read their list doc at seq 40 (the basis) and wrote
+    // it plus an entity doc.
+    confirmedSeqs.set("of:list-1", 40);
+    confirmedSeqs.set("of:list-2", 40);
+    await destination.seal(echoOf("evt:c:0:child-1", {
+      parentEventId: "evt-p1",
+      writes: ["of:list-1", "of:entity-1"],
+      floor: 40,
+    }));
+    await destination.seal(echoOf("evt:c:0:child-2", {
+      parentEventId: "evt-p2",
+      writes: ["of:list-2", "of:entity-2"],
+      floor: 40,
+    }));
+    expect(destination.entryCount(SPACE)).toBe(2);
+    // P1's mark arrives while list-1 is STILL at 40: the server's join
+    // has not landed here (its LT1 child was purged at the deadline and
+    // will be drained next wave) — the echo goes anyway (the known cost
+    // of the arrival-time retirement), and the witness counts it.
+    markConsequenced(0, {});
+    await flushMicrotasks();
+    expect(destination.entryCount(SPACE)).toBe(1);
+    expect(destination.cascadeEchoRetirementCount).toBe(1);
+    expect(destination.cascadeEchoRetirementUnarrivedCount).toBe(1);
+    // P2's mark arrives WITH its join (list-2 moved to 42 in the same
+    // frame): retired, not counted as unarrived.
+    markConsequenced(1, { "of:list-2": 42 });
+    await flushMicrotasks();
+    expect(destination.entryCount(SPACE)).toBe(0);
+    expect(destination.cascadeEchoRetirementCount).toBe(2);
+    expect(destination.cascadeEchoRetirementUnarrivedCount).toBe(1);
+    destination.close();
+  });
+});
+
 // ─── e2e: the real replica, the real relay, a real serving side ─────────
 
 const spaceSigner = await Identity.fromPassphrase("intent listener space");
@@ -549,6 +901,36 @@ const BUMP_PATTERN = [
   "  { value: Writable<number> },",
   "  { value: number; bump: Stream<unknown> }",
   ">(({ value }) => ({ value, bump: bump({ value }) }));",
+].join("\n");
+
+/** The lunch "join" shape (W0 l3; W3's root cause): a CLICK handler that
+ * only forwards to a second stream, whose handler CELLIFIES a new object
+ * into a list — the new entity doc's id derives from the handler frame's
+ * cause (`$event: tx.dispatchedEventId`), so the client's speculative
+ * cascade child (client-minted id) writes an entity doc the server's own
+ * cascade child (its own LT1 id) never writes. */
+const JOIN_CASCADE_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "type User = { name: string };",
+  "const joinAs = handler<unknown, { users: Writable<User[]> }>(",
+  "  (_ev, { users }) => {",
+  "    users.set([...(users.get() ?? []), { name: 'Alice' }]);",
+  "  },",
+  ");",
+  "const join = handler<unknown, { joinAs: Stream<unknown> }>(",
+  "  (_ev, { joinAs }) => { joinAs.send({}); },",
+  ");",
+  "export default pattern<",
+  "  { users: Writable<User[]> },",
+  "  { users: User[]; join: Stream<unknown>; joinAs: Stream<unknown> }",
+  ">(({ users }) => {",
+  "  const joinAsStream = joinAs({ users });",
+  "  return {",
+  "    users,",
+  "    join: join({ joinAs: joinAsStream }),",
+  "    joinAs: joinAsStream,",
+  "  };",
+  "});",
 ].join("\n");
 
 const waitUntil = async (
@@ -604,12 +986,19 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     return { manager, runtime };
   };
 
-  const standUp = async (runtime: Runtime, prefix: string) => {
+  const standUp = async (
+    runtime: Runtime,
+    prefix: string,
+    options: { source?: string; seed?: Record<string, unknown> } = {},
+  ) => {
     const compiled = await runtime.patternManager.compilePattern({
       main: "/main.tsx",
-      files: [{ name: "/main.tsx", contents: BUMP_PATTERN }],
+      files: [{
+        name: "/main.tsx",
+        contents: options.source ?? BUMP_PATTERN,
+      }],
     }, { space });
-    const argument = runtime.getCell<{ value: number }>(
+    const argument = runtime.getCell<Record<string, unknown>>(
       space,
       `${prefix}-arg`,
       undefined,
@@ -623,7 +1012,7 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     await result.sync();
     {
       const seed = runtime.edit();
-      argument.withTx(seed).set({ value: 0 });
+      argument.withTx(seed).set(options.seed ?? { value: 0 });
       expect((await seed.commit()).error).toBeUndefined();
     }
     {
@@ -633,6 +1022,35 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     }
     return { argument, result };
   };
+
+  const newServingHost = () =>
+    new ExecutorHost({
+      server,
+      serviceIdentity: serviceSigner.did(),
+      // deno-lint-ignore require-await
+      createRuntime: async () => {
+        const servingManager = EmulatedStorageManager.connectTo(server, {
+          as: serviceSigner,
+        });
+        const servingRuntime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: servingManager,
+          servingPosture: true,
+          experimental: {
+            serverExecution: true,
+            systemPatternAutoUpdate: false,
+          },
+        });
+        return {
+          runtime: servingRuntime,
+          dispose: async () => {
+            await servingRuntime.dispose();
+            await servingManager.close();
+          },
+        };
+      },
+      policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
+    });
 
   const streamEventsSinkNodes = (runtime: Runtime) =>
     runtime.scheduler.getGraphSnapshot().nodes.filter((node) =>
@@ -703,33 +1121,7 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     await runtime.idle();
     await manager.synced();
 
-    host = new ExecutorHost({
-      server,
-      serviceIdentity: serviceSigner.did(),
-      // deno-lint-ignore require-await
-      createRuntime: async () => {
-        const servingManager = EmulatedStorageManager.connectTo(server, {
-          as: serviceSigner,
-        });
-        const servingRuntime = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager: servingManager,
-          servingPosture: true,
-          experimental: {
-            serverExecution: true,
-            systemPatternAutoUpdate: false,
-          },
-        });
-        return {
-          runtime: servingRuntime,
-          dispose: async () => {
-            await servingRuntime.dispose();
-            await servingManager.close();
-          },
-        };
-      },
-      policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
-    });
+    host = newServingHost();
 
     let ackStatus: string | undefined;
     (result.key("bump") as unknown as {
@@ -822,6 +1214,92 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
     );
     await waitUntil(() => ackStatus !== undefined, "the durable ack");
     expect(ackStatus).not.toBe("error");
+    cancelDemand();
+  });
+
+  it("W2.1 e2e (the lunch join shape, W0 l3): a click whose handler only forwards to a second stream whose handler cellifies a NEW object into a list — the client's cascade-child echo (client-minted id; an entity doc the server never writes) retires when the click's consequence mark arrives, the rendered list holds exactly the server's one entry, and the counter reads 1 (on the tip: the echo stands forever — spec-Alice beside the confirmed Alice)", async () => {
+    const { manager, runtime } = openClient({ serverExecution: true });
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(runtime, "w21", {
+      source: JOIN_CASCADE_PATTERN,
+      seed: { users: [] },
+    });
+    const cancelDemand = result.sink(() => {});
+    await runtime.idle();
+    await manager.synced();
+    host = newServingHost();
+
+    (result.key("join") as unknown as { send(value: unknown): unknown })
+      .send({});
+    const overlay = runtime.speculationOverlay!;
+    // The click is the ONE tracked intent; its speculative run forwards
+    // to joinAs, whose echo seals as a CASCADE entry (client-minted id,
+    // parentEventId = the click's id) writing the list + a new entity.
+    expect(overlay.pendingIntentCount).toBe(1);
+    await runtime.idle();
+    await waitUntil(
+      () => overlay.entryCount(space) >= 1,
+      "the cascade child's echo to register",
+    );
+    const echoUsers = argument.key("users").get() as
+      | Array<{ name?: string }>
+      | undefined;
+    expect(echoUsers?.length).toBe(1);
+    expect(echoUsers?.[0]?.name).toBe("Alice");
+
+    // The serving side: TWO sidecars (the click's stream and joinAs's —
+    // the served click emitted the join as an LT1 same-space cascade),
+    // every entry consequenced.
+    await waitUntil(
+      () => {
+        const ids = sidecarIdsIn(engine);
+        if (ids.length < 2) return false;
+        return ids.every((id) => {
+          const value = Engine.read(engine, { id })?.value as
+            | StreamEventsDocValue
+            | undefined;
+          const entries = value?.entries ?? [];
+          return entries.length > 0 &&
+            entries.every((entry) => entry.consequenced === true);
+        });
+      },
+      "both streams' entries to consequence",
+      30_000,
+    );
+    // The click's intent resolved by its mark.
+    await waitUntil(
+      () => overlay.pendingIntentCount === 0,
+      "the click's intent to resolve",
+    );
+    // THE PIN: the cascade child's echo is GONE — no mark of its own
+    // ever names its client-minted id and its entity doc never arrives,
+    // so only the click's consequence can retire it (on the tip this
+    // times out: the entry stands forever).
+    await waitUntil(
+      () => overlay.entryCount(space) === 0,
+      "the cascade child's echo to retire on the click's consequence",
+      10_000,
+    );
+    expect(overlay.cascadeEchoRetirementCount).toBe(1);
+    // The child landed in the click's own wave (flushDeadlineMs 5 s, no
+    // purge): the witness does not count a flicker.
+    expect(overlay.cascadeEchoRetirementUnarrivedCount).toBe(0);
+    // The rendered list is the SERVER's one Alice — not spec-Alice beside
+    // the confirmed one.
+    await waitUntil(
+      () => {
+        const users = argument.key("users").get() as
+          | Array<{ name?: string }>
+          | undefined;
+        return users?.length === 1 && users[0]?.name === "Alice";
+      },
+      "the authoritative list to render",
+    );
+    // And it STAYS one through a settle beat (no re-speculation).
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const users = argument.key("users").get() as Array<{ name?: string }>;
+    expect(users.length).toBe(1);
+    expect(overlay.entryCount(space)).toBe(0);
     cancelDemand();
   });
 

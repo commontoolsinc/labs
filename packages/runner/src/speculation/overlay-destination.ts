@@ -215,6 +215,17 @@ type OverlayEntry = {
    * notice) arrive (speculation.md §4 step 2); the watermark sweep
    * stays the backstop. */
   eventId?: string;
+  /** The emitting run's event id for a CLIENT CASCADE child's echo (the
+   * speculation run context's `parentEventId`, threaded by cell.ts's
+   * plain `queueEvent` for a send from within a speculation-stamped
+   * handler run — stage C W2.1). Such an entry's own `eventId` is a
+   * client-minted cascade id (`mintEventId(link, originTx)`) that no
+   * durable stream entry ever carries — the server's own run of the
+   * parent mints its OWN id for the same cascade — so no consequence
+   * mark, no watermark, and no arrival can ever name it: `retireIntent`
+   * of an ancestor is the one signal that retires it. Undefined on a
+   * root fire's echo (a tracked intent) and on derivation echoes. */
+  parentEventId?: string;
 };
 
 /**
@@ -249,6 +260,20 @@ export class SpeculationOverlayDestination
    * (speculation.md §4 step 2) — and is not registered. */
   readonly #terminalIntents = new Set<string>();
   static readonly #MAX_TERMINAL_INTENTS = 4096;
+  /** The client cascade THREAD (stage C W2.1): cascade child eventId →
+   * its emitter's eventId, recorded at the seal of every event-handler
+   * echo that carries a `parentEventId` — with or without writes, so a
+   * "router" child that only forwards (no entry of its own) still links
+   * its grandchildren to the root intent. Process-local, bounded and
+   * insertion-ordered like `#terminalIntents` (oldest pruned); never
+   * persisted, never sent, never a dependency on history: it is read
+   * only at `retireIntent` to walk a live entry's ancestry to the intent
+   * whose terminal consequence just arrived. A link is needed only for
+   * the round trip between a cascade's seal and its root's consequence. */
+  readonly #cascadeParents = new Map<string, string>();
+  /** Walk cap for the ancestry walk — ids are fresh per attempt, so no
+   * cycle exists; the cap only bounds a pathological depth. */
+  static readonly #MAX_CASCADE_DEPTH = 64;
   /** Transactions dropped as late echoes: `deferSealedEffects` owns and
    * DROPS their enactable effects too (the closed-overlay arm's shape) —
    * an optimistic navigation for a run whose writes were discarded must
@@ -257,6 +282,13 @@ export class SpeculationOverlayDestination
   /** DIAGNOSTIC counters (tests). */
   #arrivalSweeps = 0;
   #lateEchoDrops = 0;
+  /** Stage C W2.1: cascade-child echoes retired because an ANCESTOR
+   * intent's terminal consequence arrived (`retireIntent` walked the
+   * cascade thread to them), and the subset retired while NO doc they
+   * wrote had yet moved past their read basis in the replica — the
+   * flicker witness (see `retireIntent`). */
+  #cascadeEchoRetirements = 0;
+  #cascadeEchoRetirementsUnarrived = 0;
   /** space -> last observed watermark (for registration-time sweeps). */
   readonly #watermarks = new Map<MemorySpace, number>();
   /** Fired-intent notice watch (events.md §5, speculation.md §4 step 2,
@@ -349,6 +381,25 @@ export class SpeculationOverlayDestination
     return this.#lateEchoDrops;
   }
 
+  /** DIAGNOSTIC (tests): client cascade-child echoes retired by an
+   * ANCESTOR intent's terminal consequence (stage C W2.1 — the cascade
+   * arm of `retireIntent`). */
+  get cascadeEchoRetirementCount(): number {
+    return this.#cascadeEchoRetirements;
+  }
+
+  /** DIAGNOSTIC (tests): the subset of `cascadeEchoRetirementCount`
+   * retired while NO doc the echo wrote held a confirmed value past the
+   * echo's read basis — the FLICKER witness: the server's cascade child
+   * had not landed at this client when its echo went (the purged-LT1-
+   * leftover shape, W3's α1: the child is drained a wave after its
+   * parent's consequence). A heuristic, stated: an unchanged
+   * authoritative value (equality cutoff — no seq move) reads as
+   * unarrived; a foreign write to a written doc reads as arrived. */
+  get cascadeEchoRetirementUnarrivedCount(): number {
+    return this.#cascadeEchoRetirementsUnarrived;
+  }
+
   /** DIAGNOSTIC (tests): intents outstanding across every space — the
    * `pendingIntents` gauge (design (e) §3.3 point 7). */
   get pendingIntentCount(): number {
@@ -434,6 +485,17 @@ export class SpeculationOverlayDestination
           reason: new Error("speculation-event-handler-without-event"),
         },
       };
+    }
+    // The cascade THREAD (stage C W2.1): link a cascade child's id to its
+    // emitter's BEFORE any arm below decides its fate — a child that
+    // writes nothing (no entry) or is dropped late still threads its own
+    // children to the root intent, so `retireIntent` of that root walks
+    // through it.
+    if (
+      context?.kind === "event-handler" && context.eventId !== undefined &&
+      context.parentEventId !== undefined
+    ) {
+      this.#noteCascadeParent(context.eventId, context.parentEventId);
     }
     // The LATE-ECHO rule (stage C tuning T2; speculation.md §4 step 2
     // read as the state it names): an event-handler echo whose intent's
@@ -585,7 +647,12 @@ export class SpeculationOverlayDestination
           settled: sealed.settled.catch(() => undefined),
           ...(context?.kind === "event-handler" &&
               context.eventId !== undefined
-            ? { eventId: context.eventId }
+            ? {
+              eventId: context.eventId,
+              ...(context.parentEventId !== undefined
+                ? { parentEventId: context.parentEventId }
+                : {}),
+            }
             : {}),
         };
         sealedSpaces.push({ space, entry });
@@ -1130,6 +1197,39 @@ export class SpeculationOverlayDestination
     }
   }
 
+  /** Record a cascade child → emitter link (stage C W2.1; see
+   * `#cascadeParents`). Bounded like the jobless set (oldest pruned). */
+  #noteCascadeParent(eventId: string, parentEventId: string): void {
+    if (this.#cascadeParents.has(eventId)) return;
+    this.#cascadeParents.set(eventId, parentEventId);
+    if (
+      this.#cascadeParents.size >
+        SpeculationOverlayDestination.#MAX_TERMINAL_INTENTS
+    ) {
+      const oldest = this.#cascadeParents.keys().next();
+      if (!oldest.done) this.#cascadeParents.delete(oldest.value);
+    }
+  }
+
+  /** Whether a live entry is a client cascade DESCENDANT of `ancestor`:
+   * its own `parentEventId` is the ancestor, or the thread recorded at
+   * seal leads there through intermediate cascade ids (a child that
+   * wrote nothing has no entry to hang the walk on — the thread does
+   * not need one). */
+  #cascadeReaches(entry: OverlayEntry, ancestor: string): boolean {
+    let id = entry.parentEventId;
+    let hops = 0;
+    while (
+      id !== undefined &&
+      hops < SpeculationOverlayDestination.#MAX_CASCADE_DEPTH
+    ) {
+      if (id === ancestor) return true;
+      id = this.#cascadeParents.get(id);
+      hops += 1;
+    }
+    return false;
+  }
+
   #notifyIntentOutcome(outcome: EventIntentOutcome): void {
     for (const subscriber of [...this.#intentOutcomeSubscribers]) {
       try {
@@ -1238,17 +1338,108 @@ export class SpeculationOverlayDestination
    * guarantee: consequences ride the FIRST flush even when W lags to
    * quiescence); the watermark sweep remains the backstop for entries
    * this never reaches.
+   *
+   * AND every entry that is a client CASCADE DESCENDANT of that intent
+   * (stage C W2.1 — the late-echo rule's jobless-cascade consequence,
+   * applied on arrival): the intent's speculative run sent events whose
+   * echoes sealed under client-minted cascade ids (`parentEventId` names
+   * the thread). The server's authoritative run of the intent produced
+   * the durable cascade under its OWN ids, so nothing will ever name the
+   * client's: no mark (no tracked entry), no arrival (a cascade handler
+   * that cellifies a new object writes an entity doc whose id derives
+   * from the handler frame's cause — `$event: tx.dispatchedEventId`,
+   * runner.ts — so the client's entity id is not the server's and the
+   * sweep's arrival gate never passes). The intent's terminal consequence
+   * — consequenced, errored, dropped, refused: every arm reaches here —
+   * is the one signal that makes the whole cascade jobless, exactly as
+   * the late-echo rule treats a cascade sealed AFTER it (W0 l3's
+   * "duplicate join": spec-Alice standing beside the confirmed Alice
+   * forever). Scope, precisely: ONLY entries whose thread reaches the
+   * intent — client-minted cascade children of its speculative run,
+   * never a durable entry of its own (a root fire's echo carries no
+   * `parentEventId`; an unrelated intent's cascade does not reach it).
+   * The retired child's id joins the jobless set so a LATE grandchild
+   * (sealing after this) drops at seal like a late child does.
+   *
+   * The known cost (W2.1, flagged — the reason the owner-level
+   * alternative exists): when the server's LT1 child was PURGED at the
+   * flush deadline (W3's α1) and the drain delivers it a wave later, the
+   * cascade echo goes at the parent's consequence while the child's own
+   * consequence is still a wave away — the echo's value disappears until
+   * that wave lands, a visible flicker. Counted: `cascade-echo-retired`
+   * per retired cascade echo, and `cascade-echo-retired-unarrived` when,
+   * at retirement, NO doc the echo wrote holds a confirmed value past the
+   * echo's read basis (the child's consequences had not landed here —
+   * the heuristic witness of that flicker; its two misreadings are
+   * stated on the getter). Keeping the echo until the child's own
+   * delivery is covered by W is NOT done: the durable child entry carries
+   * no parent reference and this client does not watch the child's
+   * stream, so there is nothing to match the echo against (the
+   * owner-level shape is deterministic cascade ids on both sides).
    */
   retireIntent(space: MemorySpace, eventId: string): void {
     const entries = this.#entries.get(space);
     if (entries === undefined) return;
+    let view:
+      | ((
+        id: URI,
+        scope?: CellScope,
+      ) => { confirmedSeq: number; pendingLocalSeqs: number[] })
+      | null
+      | undefined;
     for (const entry of [...entries.values()]) {
-      if (entry.eventId !== eventId) continue;
+      const own = entry.eventId === eventId;
+      if (!own && !this.#cascadeReaches(entry, eventId)) continue;
       entries.delete(entry.localSeq);
+      if (!own) {
+        // A cascade descendant: jobless by its ancestor's consequence.
+        this.#cascadeEchoRetirements += 1;
+        if (entry.eventId !== undefined) this.#noteJoblessIntent(entry.eventId);
+        if (view === undefined) {
+          try {
+            const replica = this.#runtime.storageManager.open(space).replica;
+            view = replica.speculationRetirementView?.bind(replica) ?? null;
+          } catch {
+            view = null;
+          }
+        }
+        // The flicker witness: did ANY doc this echo wrote already move
+        // past the echo's read basis (the server's cascade child landed
+        // here, in the parent's wave or before)?
+        let arrived = false;
+        if (view !== null && entry.writtenDocs.length > 0) {
+          for (const doc of entry.writtenDocs) {
+            try {
+              if (view(doc.id, doc.scope).confirmedSeq > entry.confirmedFloor) {
+                arrived = true;
+                break;
+              }
+            } catch {
+              // a replica mid-teardown: no witness, not a failure
+            }
+          }
+        }
+        if (!arrived) this.#cascadeEchoRetirementsUnarrived += 1;
+        logger.debug("cascade-echo-retired", () => [
+          `cascade echo ${entry.eventId} retired: its ancestor intent ` +
+          `${eventId} reached a terminal consequence (speculation.md §4 ` +
+          "step 2, the jobless-cascade consequence)",
+        ]);
+        if (!arrived) {
+          logger.debug("cascade-echo-retired-unarrived", () => [
+            `cascade echo ${entry.eventId} retired before any doc it wrote ` +
+            "moved past its basis — the server's cascade child has not " +
+            "landed here yet (the W2.1 flicker)",
+          ]);
+        }
+      }
       entry.resolveVerdict({
         withdrawn: {
-          message: "event echo retired: the authoritative consequences " +
-            "(or the dropped-event notice) arrived (speculation.md §4)",
+          message: own
+            ? "event echo retired: the authoritative consequences " +
+              "(or the dropped-event notice) arrived (speculation.md §4)"
+            : "cascade echo retired: its ancestor intent's authoritative " +
+              "consequences (or notice) arrived (speculation.md §4 step 2)",
           superseded: true,
         },
       });
@@ -1621,5 +1812,6 @@ export class SpeculationOverlayDestination
     }
     this.#arrivalObserverReleases.clear();
     this.#terminalIntents.clear();
+    this.#cascadeParents.clear();
   }
 }
